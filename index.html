@@ -3637,7 +3637,8 @@
         }
 
         function addToWatchlist(item) {
-            if (!watchlist.find(w => w.stix_id === item.stix_id)) {
+            var _wKey = item.stix_id || item.id;
+            if (!watchlist.find(w => (w.stix_id || w.id) === _wKey)) {
                 watchlist.push(item);
                 saveWatchlist();
                 renderWatchlistItems();
@@ -4028,7 +4029,11 @@
              // 🔥 TOP 10 ENGINE (SAFE CALL)
             renderTopThreats(data);
             // Populate threat registry for XSS-safe modal dispatch
-            data.forEach(item => { if (item.stix_id) threatRegistry.set(item.stix_id, item); });
+            // v102.0: register by stix_id (preferred) OR id (v74 schema compat)
+            data.forEach(item => {
+                var regKey = item.stix_id || item.id;
+                if (regKey) threatRegistry.set(regKey, item);
+            });
 
             const grid = document.getElementById('threat-grid');
             if (!data.length) {
@@ -4429,7 +4434,7 @@
                 const _actorHtml = (item.actor_tag && item.actor_tag !== 'UNC-CDB-99' && _actorType) ? `<div class="cdb-actor"><div class="cdb-actor-av">\u{1F3AD}</div><div><span class="cdb-actor-nm">${item.actor_tag}</span><span class="cdb-actor-tp">${_actorType}</span></div></div>` : '';
 
                 const _hasExpand = !!(_tlHtml || _iocHtml || _actorHtml);
-                const _xid = 'cdbx' + (item.stix_id||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,12) + Math.random().toString(36).slice(2,5);
+                const _xid = 'cdbx' + (item.stix_id||item.id||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,12) + Math.random().toString(36).slice(2,5);
 
                 return `
                 <div class="intel-card sev-${sev.toLowerCase()}${_threatActive}" data-severity="${sev}" data-score="${item.risk_score}" data-time="${item.timestamp || ''}" data-idx="${manifestData.indexOf ? manifestData.indexOf(item) : ''}">
@@ -4448,8 +4453,8 @@
                         ${supplyBadge}
                         ${ts ? `<span style="margin-left:auto;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">${ts}</span>` : ''}
                     </div>
-                    <div class="card-stix" style="cursor:pointer;" onclick="copyToClipboard('${item.stix_id||''}', this)" title="Click to copy STIX ID">STIX: ${item.stix_id ? item.stix_id.slice(0, 36) : '\u2014'} \u2022 ${actor} <i class="fas fa-copy" style="font-size:9px;opacity:0.5;margin-left:4px;"></i></div>
-                    <h3 class="card-title js-open-modal" style="cursor:pointer;" data-stix-id="${item.stix_id||''}">${_cdbEsc(item.title)}</h3>
+                    <div class="card-stix" style="cursor:pointer;" onclick="copyToClipboard('${item.stix_id||item.id||''}', this)" title="Click to copy STIX ID">STIX: ${(item.stix_id||item.id) ? (item.stix_id||item.id).slice(0, 36) : '\u2014'} \u2022 ${actor} <i class="fas fa-copy" style="font-size:9px;opacity:0.5;margin-left:4px;"></i></div>
+                    <h3 class="card-title js-open-modal" style="cursor:pointer;" data-stix-id="${item.stix_id||item.id||''}">${_cdbEsc(item.title)}</h3>
                     <div class="cdb-scan-bar">${_scanExploit}${_scanPrio}${_scanImpact}</div>
                     <div class="cdb-summary"><div class="cdb-summary-ico">\u{1F9E0}</div><div class="cdb-summary-txt">${_sumText}</div></div>
                     <div class="cdb-body">
@@ -4527,7 +4532,7 @@
                         <span class="card-score" style="color:${sevColor};">\u25c6 ${item.risk_score}/10</span>
                         <div style="display:flex;gap:12px;align-items:center;">
                             ${nvdLink}
-                            <button class="js-open-modal" data-stix-id="${item.stix_id||''}"
+                            <button class="js-open-modal" data-stix-id="${item.stix_id||item.id||''}"
                                     style="background:none;border:none;padding:0;cursor:pointer;font-family:var(--font-mono);font-size:10px;color:var(--accent);letter-spacing:0.5px;">
                                 <i class="fas fa-expand-alt"></i> DETAILS
                             </button>
@@ -4624,7 +4629,7 @@
                 const ts = d.timestamp ? new Date(d.timestamp).toLocaleDateString() : '';
                 return `<div class="trend-bar" style="height:${pct}%;background:${color};opacity:0.75;cursor:pointer;"
                              title="${label}&#10;Risk: ${d.risk_score}/10 · ${sev}&#10;${ts}"
-                             class="js-open-modal" data-stix-id="${d.stix_id||''}"></div>`;
+                             class="js-open-modal" data-stix-id="${d.stix_id||d.id||''}"></div>`;
             }).join('');
 
             const avgEl = document.getElementById('trend-avg-label');
@@ -4876,8 +4881,8 @@
                         <div class="modal-field">
                             <div class="modal-field-label">STIX Bundle ID</div>
                             <div class="modal-field-val" style="font-family:var(--font-mono);font-size:11px;">
-                                ${item.stix_id || '—'}
-                                ${item.stix_id ? `<span class="copy-chip" onclick="copyToClipboard('${item.stix_id}',this)" style="margin-left:8px;"><i class="fas fa-copy"></i> Copy</span>` : ''}
+                                ${(item.stix_id||item.id) || '—'}
+                                ${(item.stix_id||item.id) ? `<span class="copy-chip" onclick="copyToClipboard('${item.stix_id||item.id}',this)" style="margin-left:8px;"><i class="fas fa-copy"></i> Copy</span>` : ''}
                             </div>
                         </div>
                         <div class="modal-field">
@@ -5545,6 +5550,36 @@ function renderTopThreats(data) {
                     var entries = Array.isArray(data) ? data
                                   : (data.data || data.items || data.entries || data.advisories || []);
                     if (!entries.length) throw new Error('Empty manifest');
+
+                    // ── v102.0 SCHEMA NORMALIZATION ──────────────────────────────────────
+                    // v74 manifest enricher writes items with 'id' (STIX object ID) instead
+                    // of 'stix_id'. ALL AI features — threatRegistry, injectAnalyzeButtons,
+                    // cdbOpenAgent — require stix_id. This normalization pass ensures 100%
+                    // field compatibility regardless of which backend script wrote the JSON.
+                    entries = entries.map(function(item) {
+                        // Map STIX object id → stix_id (primary AI key)
+                        if (!item.stix_id && item.id) item.stix_id = item.id;
+                        // Map v74 ttps array → mitre_techniques for MITRE panel
+                        if (!item.mitre_techniques && item.ttps) {
+                            item.mitre_techniques = Array.isArray(item.ttps) ? item.ttps
+                                : (typeof item.ttps === 'string'
+                                   ? (function(s){try{return JSON.parse(s.replace(/'/g,'"'));}catch(e){return [s];}})(item.ttps)
+                                   : []);
+                        }
+                        // Map v74 iocs string → array
+                        if (item.iocs && typeof item.iocs === 'string') {
+                            try { item.iocs = JSON.parse(item.iocs.replace(/'/g, '"')); } catch(e) {}
+                        }
+                        // Map v74 confidence (0–100 numeric) → confidence_score (0.0–1.0)
+                        if (item.confidence_score == null && item.confidence != null) {
+                            var cv = parseFloat(item.confidence);
+                            item.confidence_score = cv > 1 ? cv / 100 : cv;
+                        }
+                        // Map v74 risk_score string → numeric
+                        if (item.risk_score != null) item.risk_score = parseFloat(item.risk_score) || 0;
+                        return item;
+                    });
+                    // ── END SCHEMA NORMALIZATION ──────────────────────────────────────────
 
                     var liveNewest = Math.max.apply(null, entries.map(function(i){
                         return new Date(i.timestamp || 0).getTime();
