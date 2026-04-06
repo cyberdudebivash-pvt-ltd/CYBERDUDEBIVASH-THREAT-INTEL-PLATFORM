@@ -5504,7 +5504,11 @@ function renderTopThreats(data) {
             // 2. raw.githubusercontent.com + cache-bust
             // 3. raw.githubusercontent.com plain fallback
             // REMOVED: jsDelivr (24h CDN cache — permanent sync killer)
+            // v101.1 LIVE SYNC: api/feed.json is the authoritative same-domain source.
+            // Updated every pipeline run — always reflects latest workflow output.
+            // Falls back to STIX manifest, then raw.github, then EMBEDDED_INTEL.
             var MANIFEST_URLS = [
+                'api/feed.json?t=' + Date.now(),
                 'https://cyberdudebivash.github.io/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/data/stix/feed_manifest.json' + cb,
                 RAW_MANIFEST + cb,
                 RAW_MANIFEST,
@@ -5521,6 +5525,8 @@ function renderTopThreats(data) {
             var lastError = null;
             for (var mIdx = 0; mIdx < MANIFEST_URLS.length; mIdx++) {
                 var manifestUrl = MANIFEST_URLS[mIdx];
+                // isApiSource: same-domain /api/feed.json is authoritative — bypass staleness gates
+                var isApiSource = manifestUrl.startsWith('api/feed.json');
                 try {
                     var ctrl = new AbortController();
                     var tid  = setTimeout(function(){ ctrl.abort(); }, 8000);
@@ -5535,8 +5541,9 @@ function renderTopThreats(data) {
                     clearTimeout(tid);
                     if (!resp.ok) throw new Error('HTTP ' + resp.status);
                     var data    = await resp.json();
+                    // api/feed.json uses 'items'; STIX manifest uses 'entries'/'advisories'
                     var entries = Array.isArray(data) ? data
-                                  : (data.entries || data.advisories || data.items || []);
+                                  : (data.data || data.items || data.entries || data.advisories || []);
                     if (!entries.length) throw new Error('Empty manifest');
 
                     var liveNewest = Math.max.apply(null, entries.map(function(i){
@@ -5544,7 +5551,8 @@ function renderTopThreats(data) {
                     }));
 
                     // FRESHEST-WINS: if live data is older, keep EMBEDDED_INTEL (still show LIVE)
-                    if (liveNewest < embeddedNewest && EMBEDDED_INTEL && EMBEDDED_INTEL.length) {
+                    // BYPASS for same-domain api/feed.json — always authoritative regardless of timestamps
+                    if (!isApiSource && liveNewest < embeddedNewest && EMBEDDED_INTEL && EMBEDDED_INTEL.length) {
                         console.log('[GOC v77.4] Keeping EMBEDDED_INTEL (it is newer than live fetch). Embedded:',
                             new Date(embeddedNewest).toISOString().slice(0,19),
                             'Live:', new Date(liveNewest).toISOString().slice(0,19));
@@ -5563,15 +5571,27 @@ function renderTopThreats(data) {
                         return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
                     });
                     _liveDataLoaded = true;
+                    // v101.1 API COUNT SYNC: total advisory count from authoritative source
+                    // NOTE: version display comes from api/status.json (bootFromEmbeddedCache)
+                    // data.count = v74 enricher field; data.total_count = bootstrap field
+                    try {
+                        if (data && (data.count || data.total_count)) {
+                            var _tcVal = data.count || data.total_count || manifestData.length;
+                            var _tcEl  = document.getElementById('m-total');
+                            if (_tcEl && isApiSource) _tcEl.textContent = _tcVal.toLocaleString();
+                        }
+                    } catch(_me) {}
                     try { computeMetrics(manifestData); } catch(e) {}
                     try { renderTrendChart(manifestData); } catch(e) {}
                     try { applyView(); } catch(e) {}
                     if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--accent);animation:new-glow 1.5s ease-in-out infinite alternate;">&#x26A1; LIVE</span>';
                     if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge integrity-ok"><i class="fas fa-shield-check"></i> MANIFEST VERIFIED</span>';
-                    if (lastLoadedEl) lastLoadedEl.textContent = 'SYNCED: ' + new Date().toLocaleTimeString() + ' \u00b7 ' + entries.length + ' advisories';
+                    var _displayCount = (data && (data.total_count || data.count)) || entries.length;
+                    var _srcLabel = isApiSource ? 'API LIVE' : 'MANIFEST';
+                    if (lastLoadedEl) lastLoadedEl.textContent = 'SYNCED: ' + new Date().toLocaleTimeString() + ' \u00b7 ' + _displayCount + ' advisories \u00b7 ' + _srcLabel;
                     document.querySelectorAll('.metric-card').forEach(function(c){ c.classList.remove('syncing'); });
                     if (aiPulse) aiPulse.style.display = 'none';
-                    console.log('[GOC v77.4] Live manifest loaded:', entries.length, 'items from', manifestUrl.substring(0, 60));
+                    console.log('[GOC v101.1] Live data loaded:', _displayCount, 'items | source:', isApiSource ? 'api/feed.json' : manifestUrl.substring(0, 60));
                     try { _cdbUpdateTabCounts(); } catch(e) {}
                     return;
 
