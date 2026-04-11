@@ -3357,8 +3357,17 @@
             </div>
 
             <!-- ═══ AI EXECUTION LAYER ═══ -->
-            <div style="margin-top:20px;text-align:center;">
-                <button id="analyze-live-btn" onclick="triggerAIAnalysis()" style="background:linear-gradient(135deg,#7c3aed,#ec4899);color:#fff;border:none;border-radius:4px;padding:12px 36px;font-family:var(--font-mono);font-size:11px;letter-spacing:3px;font-weight:900;cursor:pointer;box-shadow:0 0 20px rgba(124,58,237,0.4);transition:all 0.3s;">
+            <div style="margin-top:20px;text-align:center;position:relative;z-index:100;">
+                <button id="analyze-live-btn"
+                    onclick="(window.triggerAIAnalysis||function(){console.warn('AI fn not ready')})()"
+                    type="button"
+                    style="background:linear-gradient(135deg,#7c3aed,#ec4899);
+                           color:#fff;border:none;border-radius:4px;padding:12px 36px;
+                           font-family:var(--font-mono);font-size:11px;letter-spacing:3px;
+                           font-weight:900;cursor:pointer !important;
+                           box-shadow:0 0 20px rgba(124,58,237,0.4);transition:all 0.3s;
+                           pointer-events:auto !important;position:relative;z-index:9999;
+                           user-select:none;-webkit-user-select:none;">
                     🤖 ANALYZE LIVE
                 </button>
                 <span id="analyze-status" style="display:none;font-family:var(--font-mono);font-size:9px;color:#a855f7;margin-left:12px;letter-spacing:2px;">PROCESSING...</span>
@@ -4909,9 +4918,12 @@
                         try {
                             const hasFlat = item.detect || item.analyze || item.respond || item.mitigation;
                             if (!hasFlat) return '';
-                            const pri = item.priority || 'P4';
+                            // ISSUE 2 FIX: use computePriority() — single source of truth
+                            const pri = (window.computePriority && window.computePriority(item)) || item.priority || 'P4';
                             const priClass = pri.toLowerCase();
-                            const priColors = {p1:'#ff6b6b',p2:'#fb923c',p3:'#fbbf24',p4:'#4ade80'};
+                            const priColors = (window.PRIORITY_COLORS)
+                                ? {p1:window.PRIORITY_COLORS.P1,p2:window.PRIORITY_COLORS.P2,p3:window.PRIORITY_COLORS.P3,p4:window.PRIORITY_COLORS.P4}
+                                : {p1:'#ef4444',p2:'#f97316',p3:'#fbbf24',p4:'#4ade80'};
                             const priColor = priColors[priClass] || '#4ade80';
                             const kev = item.kev_present ? '<span style="font-family:var(--font-mono);font-size:9px;color:#ff3b3b;background:rgba(255,59,59,0.1);border:1px solid rgba(255,59,59,0.3);padding:1px 6px;border-radius:2px;margin-left:6px;">⚡ KEV ACTIVE</span>' : '';
                             const recs = Array.isArray(item.recommendations) ? item.recommendations : [];
@@ -8050,20 +8062,22 @@ function renderTopThreats(data) {
                         ).join('');
                     }
 
-                    // ── Top threats ──
+                    // ── Top threats — ISSUE 2 FIX: use computePriority() ──
                     const tt = document.getElementById('ai-top-threats');
                     if (tt && analyze && analyze.top_threats) {
                         tt.innerHTML = analyze.top_threats.slice(0, 8).map(t => {
-                            const sev = t.severity || 'MEDIUM';
-                            const sevColor = sev === 'CRITICAL' ? '#ef4444' : sev === 'HIGH' ? '#f97316' : '#f59e0b';
-                            const kevBadge = t.kev ? ' <span style="background:#ef444422;color:#ef4444;font-size:7px;padding:1px 4px;border-radius:2px;">KEV</span>' : '';
+                            // SINGLE SOURCE OF TRUTH: computePriority determines priority
+                            const pri = (window.computePriority && window.computePriority(t)) || t.priority || 'P4';
+                            const priColor = (window.PRIORITY_COLORS && window.PRIORITY_COLORS[pri]) ||
+                                (pri==='P1'?'#ef4444':pri==='P2'?'#f97316':pri==='P3'?'#fbbf24':'#4ade80');
+                            const kevBadge = t.kev ? ' <span style="background:#ef444422;color:#ef4444;font-size:7px;padding:1px 4px;border-radius:2px;">⚡ KEV</span>' : '';
                             return `<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;">
-                                <span style="color:${sevColor};font-weight:900;font-size:10px;min-width:32px;">${t.risk_score}</span>
+                                <span style="color:${priColor};font-weight:900;font-size:10px;min-width:32px;">${t.risk_score}</span>
                                 <div style="flex:1;">
                                     <div style="color:var(--white);font-size:10px;">${(t.title||'').substring(0,90)}${kevBadge}</div>
                                     <div style="color:var(--text-muted);font-size:8px;margin-top:2px;">
-                                        ${t.actor !== 'UNKNOWN' ? '<span style="color:#8b5cf6;">'+t.actor+'</span> · ' : ''}
-                                        ${t.priority || sev}
+                                        ${t.actor && t.actor !== 'UNKNOWN' ? '<span style="color:#8b5cf6;">'+t.actor+'</span> · ' : ''}
+                                        <span style="color:${priColor};font-weight:700;">${pri}</span>
                                         ${t.ttps && t.ttps.length ? ' · ' + t.ttps.slice(0,3).join(' ') : ''}
                                     </div>
                                 </div>
@@ -8071,18 +8085,21 @@ function renderTopThreats(data) {
                         }).join('');
                     }
 
-                    // ── SOAR response queue ──
+                    // ── SOAR response queue — ISSUE 2 FIX: use computePriority() ──
                     const rq = document.getElementById('ai-response-queue');
                     if (rq && respond && respond.response_queue) {
                         rq.innerHTML = respond.response_queue.slice(0, 6).map(a => {
-                            const pColor = a.priority === 'P1' ? '#ef4444' : a.priority === 'P2' ? '#f97316' : '#f59e0b';
+                            // Use computePriority if available, else fall back to stored priority
+                            const pri = (window.computePriority && window.computePriority(a)) || a.priority || 'P4';
+                            const pColor = (window.PRIORITY_COLORS && window.PRIORITY_COLORS[pri]) ||
+                                (pri==='P1'?'#ef4444':pri==='P2'?'#f97316':'#fbbf24');
                             return `<div style="padding:6px;margin-bottom:4px;background:rgba(249,115,22,0.06);border:1px solid rgba(249,115,22,0.12);border-radius:3px;">
                                 <div style="display:flex;justify-content:space-between;align-items:center;">
-                                    <span style="color:${pColor};font-weight:900;font-size:9px;">${a.priority}</span>
-                                    <span style="color:var(--text-muted);font-size:8px;">SLA: ${a.sla_hours}h</span>
+                                    <span style="color:${pColor};font-weight:900;font-size:9px;">${pri}</span>
+                                    <span style="color:var(--text-muted);font-size:8px;">SLA: ${a.sla_hours||24}h</span>
                                 </div>
                                 <div style="color:var(--white);font-size:10px;margin-top:2px;">${(a.incident_title||'').substring(0,80)}</div>
-                                <div style="color:var(--text-muted);font-size:8px;margin-top:2px;">▶ ${a.playbook}</div>
+                                <div style="color:var(--text-muted);font-size:8px;margin-top:2px;">▶ ${a.playbook||'GENERAL RESPONSE'}</div>
                             </div>`;
                         }).join('');
                     }
@@ -8181,8 +8198,62 @@ function renderTopThreats(data) {
                 setTimeout(safeLoadAllEngines, 800);
             }
 
+            // ── ISSUE 1 FIX: Expose AI functions to global scope ─────────────
+            // triggerAIAnalysis() and renderAIAnalysis() are defined inside this
+            // IIFE — onclick="triggerAIAnalysis()" in HTML attributes calls global
+            // scope only. Expose via window.* to make button fully functional.
+            window.triggerAIAnalysis = triggerAIAnalysis;
+            window.renderAIAnalysis  = renderAIAnalysis;
+            console.log('[APEX v103] triggerAIAnalysis registered on window ✓');
+
+            // Belt-and-suspenders: also bind via addEventListener after DOM ready
+            // so even if onclick attribute is stripped, the button still works.
+            (function bindAnalyzeBtn() {
+                var btn = document.getElementById('analyze-live-btn');
+                if (btn) {
+                    // Remove any stale handlers by cloning
+                    var fresh = btn.cloneNode(true);
+                    btn.parentNode.replaceChild(fresh, btn);
+                    fresh.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('[APEX v103] ANALYZE LIVE clicked ✓');
+                        triggerAIAnalysis();
+                    });
+                    // Ensure button is fully interactive — override any CSS interference
+                    fresh.style.pointerEvents = 'auto';
+                    fresh.style.cursor        = 'pointer';
+                    fresh.style.position      = 'relative';
+                    fresh.style.zIndex        = '9999';
+                    console.log('[APEX v103] ANALYZE LIVE button event listener bound ✓');
+                } else {
+                    // DOM not ready — retry after render
+                    setTimeout(bindAnalyzeBtn, 500);
+                }
+            })();
+
         })();
 
+
+        // ══════════════════════════════════════════════════════════════════
+        // ISSUE 2 FIX: computePriority() — SINGLE SOURCE OF TRUTH
+        // Used by: threat card renderer, APEX AI block, AI endpoint rendering.
+        // Rule: KEV always P1. Then risk_score thresholds. No other logic.
+        // ══════════════════════════════════════════════════════════════════
+        window.computePriority = function computePriority(item) {
+            if (!item) return 'P4';
+            // KEV (Known Exploited Vulnerability) = always P1
+            if (item.kev === true || item.kev_present === true) return 'P1';
+            var r = parseFloat(item.risk_score) || 0;
+            if (r >= 8) return 'P1';
+            if (r >= 6) return 'P2';
+            if (r >= 4) return 'P3';
+            return 'P4';
+        };
+        // Priority color map — single truth, shared by all renderers
+        window.PRIORITY_COLORS = { P1: '#ef4444', P2: '#f97316', P3: '#fbbf24', P4: '#4ade80' };
+        window.PRIORITY_LABELS = { P1: 'IMMEDIATE', P2: 'HIGH', P3: 'MEDIUM', P4: 'LOW' };
+        console.log('[APEX v103] computePriority() registered on window ✓');
 
         // ── Service Worker Registration v78.0 — Stable update (no reload loop) ──
         // v78.0 FIX: Removed aggressive controllerchange → window.location.reload()
