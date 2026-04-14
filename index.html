@@ -3355,6 +3355,46 @@
                     <div id="genesis-actors" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">Loading...</div>
                 </div>
             </div>
+
+            <!-- ═══ AI EXECUTION LAYER ═══ -->
+            <div style="margin-top:20px;text-align:center;position:relative;z-index:100;">
+                <button id="analyze-live-btn"
+                    onclick="(window.triggerAIAnalysis||function(){console.warn('AI fn not ready')})()"
+                    type="button"
+                    style="background:linear-gradient(135deg,#7c3aed,#ec4899);
+                           color:#fff;border:none;border-radius:4px;padding:12px 36px;
+                           font-family:var(--font-mono);font-size:11px;letter-spacing:3px;
+                           font-weight:900;cursor:pointer !important;
+                           box-shadow:0 0 20px rgba(124,58,237,0.4);transition:all 0.3s;
+                           pointer-events:auto !important;position:relative;z-index:9999;
+                           user-select:none;-webkit-user-select:none;">
+                    🤖 ANALYZE LIVE
+                </button>
+                <span id="analyze-status" style="display:none;font-family:var(--font-mono);font-size:9px;color:#a855f7;margin-left:12px;letter-spacing:2px;">PROCESSING...</span>
+            </div>
+            <div id="ai-analysis-panel" style="display:none;margin-top:16px;background:linear-gradient(135deg,rgba(124,58,237,0.08),rgba(236,72,153,0.05));border:1px solid rgba(124,58,237,0.35);border-radius:4px;padding:20px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <p style="font-family:var(--font-mono);font-size:8px;letter-spacing:3px;color:#a855f7;margin:0;">🤖 SENTINEL APEX AI — LIVE ANALYSIS</p>
+                    <span id="ai-model-badge" style="font-family:var(--font-mono);font-size:8px;color:#7c3aed;background:rgba(124,58,237,0.15);padding:2px 8px;border-radius:3px;letter-spacing:1px;">MODEL v103</span>
+                </div>
+                <!-- Summary row -->
+                <div id="ai-summary-grid" style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px;"></div>
+                <!-- Top threats -->
+                <div style="margin-bottom:14px;">
+                    <p style="font-family:var(--font-mono);font-size:8px;letter-spacing:2px;color:#ec4899;margin:0 0 8px 0;">🔴 PRIORITY THREAT QUEUE</p>
+                    <div id="ai-top-threats" style="font-family:var(--font-mono);font-size:10px;"></div>
+                </div>
+                <!-- Response queue -->
+                <div style="margin-bottom:14px;">
+                    <p style="font-family:var(--font-mono);font-size:8px;letter-spacing:2px;color:#f97316;margin:0 0 8px 0;">⚡ SOAR RESPONSE QUEUE</p>
+                    <div id="ai-response-queue" style="font-family:var(--font-mono);font-size:10px;"></div>
+                </div>
+                <!-- Correlation summary -->
+                <div>
+                    <p style="font-family:var(--font-mono);font-size:8px;letter-spacing:2px;color:#3b82f6;margin:0 0 8px 0;">🔗 THREAT CORRELATION ENGINE</p>
+                    <div id="ai-correlate-summary" style="font-family:var(--font-mono);font-size:10px;"></div>
+                </div>
+            </div>
         </section>
 
         <!-- ═══ ECOSYSTEM ═══ -->
@@ -4878,9 +4918,12 @@
                         try {
                             const hasFlat = item.detect || item.analyze || item.respond || item.mitigation;
                             if (!hasFlat) return '';
-                            const pri = item.priority || 'P4';
+                            // ISSUE 2 FIX: use computePriority() — single source of truth
+                            const pri = (window.computePriority && window.computePriority(item)) || item.priority || 'P4';
                             const priClass = pri.toLowerCase();
-                            const priColors = {p1:'#ff6b6b',p2:'#fb923c',p3:'#fbbf24',p4:'#4ade80'};
+                            const priColors = (window.PRIORITY_COLORS)
+                                ? {p1:window.PRIORITY_COLORS.P1,p2:window.PRIORITY_COLORS.P2,p3:window.PRIORITY_COLORS.P3,p4:window.PRIORITY_COLORS.P4}
+                                : {p1:'#ef4444',p2:'#f97316',p3:'#fbbf24',p4:'#4ade80'};
                             const priColor = priColors[priClass] || '#4ade80';
                             const kev = item.kev_present ? '<span style="font-family:var(--font-mono);font-size:9px;color:#ff3b3b;background:rgba(255,59,59,0.1);border:1px solid rgba(255,59,59,0.3);padding:1px 6px;border-radius:2px;margin-left:6px;">⚡ KEV ACTIVE</span>' : '';
                             const recs = Array.isArray(item.recommendations) ? item.recommendations : [];
@@ -7578,6 +7621,11 @@ function renderTopThreats(data) {
             // ── GENESIS RENDERER ────────────────────────────────────────────
             function renderGenesisEngine(data) {
                 try {
+                    // Null guard: if data missing or engines empty, show degraded state (never '?')
+                    if (!data || typeof data !== 'object') {
+                        console.warn('[GENESIS ENGINE] No data received');
+                        return;
+                    }
                     const engines = data.engines || {};
                     const engineDefs = [
                         {key:'G01_SensorNetwork',  id:'G01', name:'Sensor Network',  icon:'📡', color:'#3b82f6',
@@ -7615,10 +7663,14 @@ function renderTopThreats(data) {
                             const eng = engines[def.key] || {};
                             const summary = eng.summary || {};
                             const status = eng.status || 'OK';
+                            const hasData = Object.keys(summary).length > 0;
                             const statusColor = status === 'OK' ? def.color : '#6b7280';
-                            let val = '—', desc = 'Initializing...';
-                            try { val = def.valFn(summary); } catch(e) {}
-                            try { desc = def.descFn(summary); } catch(e) {}
+                            // Null guard: show '0' not '?' when field is absent but summary exists
+                            let val = hasData ? '0' : 'SYNC', desc = hasData ? 'processing...' : 'awaiting data...';
+                            try { val = def.valFn(summary); } catch(e) { val = hasData ? '0' : 'SYNC'; }
+                            try { desc = def.descFn(summary); } catch(e) { desc = 'syncing...'; }
+                            // Final guard: replace any residual '?' with '0'
+                            val = String(val).replace(/^\?/, '0');
                             return `<div style="background:var(--bg-card);border:1px solid ${statusColor}22;border-radius:4px;padding:12px;text-align:center;position:relative;">
                                 <div style="position:absolute;top:6px;right:6px;width:5px;height:5px;border-radius:50%;background:${statusColor};${status==='OK'?'box-shadow:0 0 4px '+statusColor:''}"></div>
                                 <div style="font-size:18px;margin-bottom:4px;">${def.icon}</div>
@@ -7629,35 +7681,35 @@ function renderTopThreats(data) {
                         }).join('');
                     }
 
-                    // Actor Registry Detail
+                    // Actor Registry Detail — always render (no "Loading..." hang)
                     const actorsEl = document.getElementById('genesis-actors');
                     const actorEng = engines['G04_ActorRegistry'] || {};
                     const actorSum = actorEng.summary || {};
-                    if (actorsEl && (actorSum.total_actors || actorSum.actors)) {
+                    if (actorsEl) {
                         actorsEl.innerHTML = `<div style="padding:4px 0;display:flex;justify-content:space-between;border-bottom:1px solid var(--border);">
-                            <span style="color:var(--text);">Total Tracked</span><span style="color:#8b5cf6;font-weight:700;">${actorSum.total_actors||'?'} actors</span>
+                            <span style="color:var(--text);">Total Tracked</span><span style="color:#8b5cf6;font-weight:700;">${actorSum.total_actors||0} actors</span>
                         </div>
                         <div style="padding:4px 0;display:flex;justify-content:space-between;border-bottom:1px solid var(--border);">
-                            <span style="color:var(--text);">Known APT Groups</span><span style="color:#3b82f6;font-weight:700;">${actorSum.known_actors||'?'}</span>
+                            <span style="color:var(--text);">Known APT Groups</span><span style="color:#3b82f6;font-weight:700;">${actorSum.known_actors||0}</span>
                         </div>
                         <div style="padding:4px 0;display:flex;justify-content:space-between;">
-                            <span style="color:var(--text);">Newly Discovered</span><span style="color:#ef4444;font-weight:700;">${actorSum.discovered_actors||'?'}</span>
+                            <span style="color:var(--text);">Newly Discovered</span><span style="color:#ef4444;font-weight:700;">${actorSum.discovered_actors||0}</span>
                         </div>`;
                     }
 
-                    // Attack Map flows
+                    // Attack Map flows — always render (no "Computing..." hang)
                     const flowsEl = document.getElementById('genesis-attack-flows');
                     const mapEng = engines['G11_GlobalAttackMap'] || engines['G11_AttackMap'] || {};
                     const mapSum = mapEng.summary || {};
-                    if (flowsEl && (mapSum.total_flows != null || mapSum.attack_count != null)) {
+                    if (flowsEl) {
                         flowsEl.innerHTML = `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
-                            <span>Total Attack Flows</span><span style="color:#e11d48;font-weight:700;">${mapSum.total_flows||mapSum.attack_count||0}</span>
+                            <span>Total Attack Flows</span><span style="color:#e11d48;font-weight:700;">${(mapSum.total_flows||mapSum.attack_count||0).toLocaleString()}</span>
                         </div>
                         <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
-                            <span>Regions Active</span><span style="color:#f59e0b;font-weight:700;">${mapSum.active_corridors||mapSum.origin_countries||mapSum.regions_active||'—'}</span>
+                            <span>Regions Active</span><span style="color:#f59e0b;font-weight:700;">${mapSum.active_corridors||mapSum.origin_countries||mapSum.regions_active||0}</span>
                         </div>
                         <div style="display:flex;justify-content:space-between;padding:4px 0;">
-                            <span>Critical Incidents</span><span style="color:#ef4444;font-weight:700;">${mapSum.critical_attacks||mapSum.critical||'—'}</span>
+                            <span>Critical Incidents</span><span style="color:#ef4444;font-weight:700;">${mapSum.critical_attacks||mapSum.critical||0}</span>
                         </div>`;
                     }
 
@@ -7941,36 +7993,198 @@ function renderTopThreats(data) {
                 } catch(e) { console.warn('[HUNT ENGINE]', e); }
             }
 
+            // ── AI EXECUTION LAYER v103 ─────────────────────────────────────
+            // Fetches /api/ai/analyze.json, /api/ai/respond.json, /api/ai/correlate.json
+            // Renders into the ANALYZE LIVE panel in the GENESIS section.
+            const AI_BASE = atob('aHR0cHM6Ly9pbnRlbC5jeWJlcmR1ZGViaXZhc2guY29tL2FwaS9haS8=');
+            // Decoded: https://intel.cyberdudebivash.com/api/ai/
+
+            async function triggerAIAnalysis() {
+                const btn    = document.getElementById('analyze-live-btn');
+                const status = document.getElementById('analyze-status');
+                const panel  = document.getElementById('ai-analysis-panel');
+                if (!btn) return;
+
+                // Loading state
+                btn.disabled = true;
+                btn.style.opacity = '0.6';
+                btn.textContent = '⏳ ANALYZING...';
+                if (status) { status.style.display = 'inline'; status.textContent = 'PROCESSING...'; }
+
+                try {
+                    const [analyzeRes, respondRes, correlateRes] = await Promise.allSettled([
+                        fetch(AI_BASE + 'analyze.json',   { cache: 'no-cache' }).then(r => r.ok ? r.json() : null),
+                        fetch(AI_BASE + 'respond.json',   { cache: 'no-cache' }).then(r => r.ok ? r.json() : null),
+                        fetch(AI_BASE + 'correlate.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : null),
+                    ]);
+
+                    const analyze   = analyzeRes.status   === 'fulfilled' ? analyzeRes.value   : null;
+                    const respond   = respondRes.status   === 'fulfilled' ? respondRes.value   : null;
+                    const correlate = correlateRes.status === 'fulfilled' ? correlateRes.value : null;
+
+                    if (analyze || respond || correlate) {
+                        renderAIAnalysis(analyze, respond, correlate);
+                        if (panel) panel.style.display = 'block';
+                        if (status) { status.textContent = '✅ COMPLETE'; status.style.color = '#00d4aa'; }
+                    } else {
+                        if (status) { status.textContent = '⚠️ FETCH FAILED'; status.style.color = '#ef4444'; }
+                    }
+                } catch(e) {
+                    console.warn('[AI LAYER]', e);
+                    if (status) { status.textContent = '⚠️ ERROR'; status.style.color = '#ef4444'; }
+                } finally {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.textContent = '🤖 REFRESH ANALYSIS';
+                    setTimeout(() => { if (status) status.style.display = 'none'; }, 4000);
+                }
+            }
+
+            function renderAIAnalysis(analyze, respond, correlate) {
+                try {
+                    // ── Summary grid ──
+                    const sg = document.getElementById('ai-summary-grid');
+                    if (sg && analyze && analyze.summary) {
+                        const s = analyze.summary;
+                        const cells = [
+                            { label: 'ANALYZED',  val: (s.total_analyzed||0).toLocaleString(), color: '#a855f7' },
+                            { label: 'CRITICAL',  val: s.critical_count||0,  color: '#ef4444' },
+                            { label: 'HIGH',      val: s.high_count||0,      color: '#f97316' },
+                            { label: 'KEV LIVE',  val: s.kev_active||0,      color: '#ef4444' },
+                            { label: 'ACTORS',    val: s.unique_actors||0,   color: '#8b5cf6' },
+                            { label: 'AVG RISK',  val: (s.avg_risk_score||0).toFixed(1), color: '#f59e0b' },
+                        ];
+                        sg.innerHTML = cells.map(c =>
+                            `<div style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.06);border-radius:4px;padding:10px;text-align:center;">
+                                <div style="font-size:18px;font-weight:900;color:${c.color};font-family:var(--font-mono);">${c.val}</div>
+                                <div style="font-size:7px;color:var(--text-muted);letter-spacing:1.5px;margin-top:2px;">${c.label}</div>
+                            </div>`
+                        ).join('');
+                    }
+
+                    // ── Top threats — ISSUE 2 FIX: use computePriority() ──
+                    const tt = document.getElementById('ai-top-threats');
+                    if (tt && analyze && analyze.top_threats) {
+                        tt.innerHTML = analyze.top_threats.slice(0, 8).map(t => {
+                            // SINGLE SOURCE OF TRUTH: computePriority determines priority
+                            const pri = (window.computePriority && window.computePriority(t)) || t.priority || 'P4';
+                            const priColor = (window.PRIORITY_COLORS && window.PRIORITY_COLORS[pri]) ||
+                                (pri==='P1'?'#ef4444':pri==='P2'?'#f97316':pri==='P3'?'#fbbf24':'#4ade80');
+                            const kevBadge = t.kev ? ' <span style="background:#ef444422;color:#ef4444;font-size:7px;padding:1px 4px;border-radius:2px;">⚡ KEV</span>' : '';
+                            return `<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;">
+                                <span style="color:${priColor};font-weight:900;font-size:10px;min-width:32px;">${t.risk_score}</span>
+                                <div style="flex:1;">
+                                    <div style="color:var(--white);font-size:10px;">${(t.title||'').substring(0,90)}${kevBadge}</div>
+                                    <div style="color:var(--text-muted);font-size:8px;margin-top:2px;">
+                                        ${t.actor && t.actor !== 'UNKNOWN' ? '<span style="color:#8b5cf6;">'+t.actor+'</span> · ' : ''}
+                                        <span style="color:${priColor};font-weight:700;">${pri}</span>
+                                        ${t.ttps && t.ttps.length ? ' · ' + t.ttps.slice(0,3).join(' ') : ''}
+                                    </div>
+                                </div>
+                            </div>`;
+                        }).join('');
+                    }
+
+                    // ── SOAR response queue — ISSUE 2 FIX: use computePriority() ──
+                    const rq = document.getElementById('ai-response-queue');
+                    if (rq && respond && respond.response_queue) {
+                        rq.innerHTML = respond.response_queue.slice(0, 6).map(a => {
+                            // Use computePriority if available, else fall back to stored priority
+                            const pri = (window.computePriority && window.computePriority(a)) || a.priority || 'P4';
+                            const pColor = (window.PRIORITY_COLORS && window.PRIORITY_COLORS[pri]) ||
+                                (pri==='P1'?'#ef4444':pri==='P2'?'#f97316':'#fbbf24');
+                            return `<div style="padding:6px;margin-bottom:4px;background:rgba(249,115,22,0.06);border:1px solid rgba(249,115,22,0.12);border-radius:3px;">
+                                <div style="display:flex;justify-content:space-between;align-items:center;">
+                                    <span style="color:${pColor};font-weight:900;font-size:9px;">${pri}</span>
+                                    <span style="color:var(--text-muted);font-size:8px;">SLA: ${a.sla_hours||24}h</span>
+                                </div>
+                                <div style="color:var(--white);font-size:10px;margin-top:2px;">${(a.incident_title||'').substring(0,80)}</div>
+                                <div style="color:var(--text-muted);font-size:8px;margin-top:2px;">▶ ${a.playbook||'GENERAL RESPONSE'}</div>
+                            </div>`;
+                        }).join('');
+                    }
+
+                    // ── Correlation summary ──
+                    const cs = document.getElementById('ai-correlate-summary');
+                    if (cs && correlate && correlate.summary) {
+                        const s = correlate.summary;
+                        cs.innerHTML = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+                            ${[
+                                ['CLUSTERS', s.threat_clusters||0, '#3b82f6'],
+                                ['ACTORS',   s.unique_actors||0,   '#8b5cf6'],
+                                ['TTPs',     s.unique_ttps||0,     '#ec4899'],
+                                ['CVEs SHARED', s.shared_cves||0, '#ef4444'],
+                            ].map(([l,v,c]) => `<div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:3px;padding:8px;text-align:center;">
+                                <div style="font-size:16px;font-weight:900;color:${c};font-family:var(--font-mono);">${v}</div>
+                                <div style="font-size:7px;color:var(--text-muted);letter-spacing:1px;">${l}</div>
+                            </div>`).join('')}
+                        </div>
+                        ${correlate.threat_clusters && correlate.threat_clusters.length ? `<div style="margin-top:10px;">` +
+                            correlate.threat_clusters.slice(0,4).map(c =>
+                                `<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;gap:8px;">
+                                    <span style="color:#8b5cf6;font-weight:700;font-size:10px;min-width:100px;">${c.actor}</span>
+                                    <span style="color:#ef4444;font-size:9px;">${c.incident_count} incidents</span>
+                                    <span style="color:#f59e0b;font-size:9px;">risk ${c.avg_risk}</span>
+                                    <span style="color:var(--text-muted);font-size:8px;">${(c.ttps||[]).slice(0,3).join(' ')}</span>
+                                </div>`
+                            ).join('') + `</div>` : ''}`;
+                    }
+                } catch(e) { console.warn('[AI RENDER]', e); }
+            }
+
             // ── ORCHESTRATOR ────────────────────────────────────────────────
+            // v103: Retry-on-fail (2 attempts, 1s backoff) + per-engine error boundary
+            async function _fetchWithRetry(url, retries = 2, delayMs = 1000) {
+                for (let attempt = 1; attempt <= retries; attempt++) {
+                    try {
+                        const resp = await fetch(url, { cache: 'no-cache' });
+                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                        return await resp.json();
+                    } catch(err) {
+                        if (attempt === retries) throw err;
+                        await new Promise(res => setTimeout(res, delayMs * attempt));
+                    }
+                }
+            }
+
             async function loadAllEngines() {
                 const results = {};
                 const fetches = Object.entries(ENGINE_URLS).map(async ([name, url]) => {
                     try {
-                        const resp = await fetch(url, { cache: 'no-cache' });
-                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                        results[name] = await resp.json();
+                        results[name] = await _fetchWithRetry(url, 2, 800);
                         console.log('[APEX ENGINE] Loaded:', name, '✓');
                     } catch(err) {
-                        console.warn('[APEX ENGINE] Failed:', name, err.message);
+                        console.warn('[APEX ENGINE] Failed (2 attempts):', name, err.message);
                     }
                 });
 
                 await Promise.allSettled(fetches);
 
-                // Route each engine output to its renderer
-                if (results.nexus)    renderNexusEngine(results.nexus);
-                if (results.genesis)  renderGenesisEngine(results.genesis);
-                if (results.cortex)   renderCortexEngine(results.cortex);
-                if (results.quantum)  renderQuantumEngine(results.quantum);
-                if (results.sovereign) renderSovereignEngine(results.sovereign);
-                if (results.bughunter) renderBugHunterEngine(results.bughunter);
-                if (results.incidents) renderIncidentEngine(results.incidents);
-                if (results.responses) renderResponseEngine(results.responses);
-                if (results.hunts) renderHuntEngine(results.hunts);
+                // Route each engine output to its renderer — individual error boundaries
+                const route = (name, fn) => { try { if (results[name]) fn(results[name]); } catch(e) { console.warn('[APEX ENGINE] Render error:', name, e); } };
+                route('nexus',     renderNexusEngine);
+                route('genesis',   renderGenesisEngine);
+                route('cortex',    renderCortexEngine);
+                route('quantum',   renderQuantumEngine);
+                route('sovereign', renderSovereignEngine);
+                route('bughunter', renderBugHunterEngine);
+                route('incidents', renderIncidentEngine);
+                route('responses', renderResponseEngine);
+                route('hunts',     renderHuntEngine);
 
-                // Log activation summary
+                // Update platform health counters if genesis loaded
+                if (results.genesis && results.genesis.metrics) {
+                    const m = results.genesis.metrics;
+                    const upd = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.textContent = v; };
+                    upd('genesis-total-advisories', (m.total_advisories||0).toLocaleString());
+                    upd('genesis-actors-count',     m.actors_tracked||0);
+                    upd('genesis-iocs-count',       (m.iocs_total||0).toLocaleString());
+                    upd('genesis-rules-count',      (m.detection_rules||0).toLocaleString());
+                }
+
                 const loaded = Object.keys(results).length;
                 console.log('[APEX ENGINE] Activation complete:', loaded + '/9 engines live');
+                return loaded;
             }
 
             // Trigger after DOM is ready — with error boundary
@@ -7984,8 +8198,62 @@ function renderTopThreats(data) {
                 setTimeout(safeLoadAllEngines, 800);
             }
 
+            // ── ISSUE 1 FIX: Expose AI functions to global scope ─────────────
+            // triggerAIAnalysis() and renderAIAnalysis() are defined inside this
+            // IIFE — onclick="triggerAIAnalysis()" in HTML attributes calls global
+            // scope only. Expose via window.* to make button fully functional.
+            window.triggerAIAnalysis = triggerAIAnalysis;
+            window.renderAIAnalysis  = renderAIAnalysis;
+            console.log('[APEX v103] triggerAIAnalysis registered on window ✓');
+
+            // Belt-and-suspenders: also bind via addEventListener after DOM ready
+            // so even if onclick attribute is stripped, the button still works.
+            (function bindAnalyzeBtn() {
+                var btn = document.getElementById('analyze-live-btn');
+                if (btn) {
+                    // Remove any stale handlers by cloning
+                    var fresh = btn.cloneNode(true);
+                    btn.parentNode.replaceChild(fresh, btn);
+                    fresh.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('[APEX v103] ANALYZE LIVE clicked ✓');
+                        triggerAIAnalysis();
+                    });
+                    // Ensure button is fully interactive — override any CSS interference
+                    fresh.style.pointerEvents = 'auto';
+                    fresh.style.cursor        = 'pointer';
+                    fresh.style.position      = 'relative';
+                    fresh.style.zIndex        = '9999';
+                    console.log('[APEX v103] ANALYZE LIVE button event listener bound ✓');
+                } else {
+                    // DOM not ready — retry after render
+                    setTimeout(bindAnalyzeBtn, 500);
+                }
+            })();
+
         })();
 
+
+        // ══════════════════════════════════════════════════════════════════
+        // ISSUE 2 FIX: computePriority() — SINGLE SOURCE OF TRUTH
+        // Used by: threat card renderer, APEX AI block, AI endpoint rendering.
+        // Rule: KEV always P1. Then risk_score thresholds. No other logic.
+        // ══════════════════════════════════════════════════════════════════
+        window.computePriority = function computePriority(item) {
+            if (!item) return 'P4';
+            // KEV (Known Exploited Vulnerability) = always P1
+            if (item.kev === true || item.kev_present === true) return 'P1';
+            var r = parseFloat(item.risk_score) || 0;
+            if (r >= 8) return 'P1';
+            if (r >= 6) return 'P2';
+            if (r >= 4) return 'P3';
+            return 'P4';
+        };
+        // Priority color map — single truth, shared by all renderers
+        window.PRIORITY_COLORS = { P1: '#ef4444', P2: '#f97316', P3: '#fbbf24', P4: '#4ade80' };
+        window.PRIORITY_LABELS = { P1: 'IMMEDIATE', P2: 'HIGH', P3: 'MEDIUM', P4: 'LOW' };
+        console.log('[APEX v103] computePriority() registered on window ✓');
 
         // ── Service Worker Registration v78.0 — Stable update (no reload loop) ──
         // v78.0 FIX: Removed aggressive controllerchange → window.location.reload()
