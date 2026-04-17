@@ -4461,7 +4461,13 @@
                 const sevColor = getSevColor(sev);
                 const tlp = getTlpLabel(item);
                 const tlpColor = getTlpColor(tlp);
-                const conf = item.confidence_score != null ? Math.round(item.confidence_score) : null;
+                // v112.1 FIX-5: confidence_score may be 0-1 fraction or 0-100 integer.
+                // When 0 or null (Bootstrap STIX entries with no pipeline enrichment),
+                // apply severity-calibrated default: CRITICAL=85, HIGH=72, MEDIUM=60, LOW=45.
+                const _rawConf = item.confidence_score != null ? parseFloat(item.confidence_score) : null;
+                const conf = (_rawConf != null && _rawConf > 0)
+                    ? Math.round(_rawConf <= 1 ? _rawConf * 100 : _rawConf)
+                    : (sev === 'CRITICAL' ? 85 : sev === 'HIGH' ? 72 : sev === 'MEDIUM' ? 60 : 45);
                 const actor = (item.actor_tag && item.actor_tag !== 'UNC-CDB-99' && item.actor_tag !== 'UNC-UNKNOWN')
                     ? item.actor_tag : 'UNATTRIBUTED';
                 const ts = item.timestamp ? timeSince(item.timestamp) : '';
@@ -6038,29 +6044,38 @@ function renderTopThreats(data) {
                         return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
                     });
                     _liveDataLoaded = true;
-                    // v112.0 API COUNT SYNC: total advisory count from authoritative source
-                    // Priority: total_in_feed (Worker /api/preview) > count (v74 enricher) > total_count (bootstrap)
-                    try {
-                        if (data && (data.total_in_feed || data.count || data.total_count)) {
-                            var _tcVal = data.total_in_feed || data.count || data.total_count || manifestData.length;
-                            var _tcEl  = document.getElementById('m-total');
-                            if (_tcEl && isApiSource) _tcEl.textContent = _tcVal.toLocaleString();
-                        }
-                    } catch(_me) {}
-                    // v112.0 LAST SYNC FIX: use generated_at from Worker response (not item timestamp)
-                    // Worker /api/preview returns top-level generated_at = when R2 manifest was written
-                    try {
-                        if (data && data.generated_at && isApiSource) {
-                            var _lsEl = document.getElementById('m-last-sync');
-                            if (_lsEl) _lsEl.textContent = timeSince(data.generated_at);
-                        }
-                    } catch(_lse) {}
+                    // v112.1 FIX: computeMetrics FIRST — then override m-total/m-last-sync with authoritative API values
+                    // computeMetrics(manifestData) sets m-total = preview items (10); overrides below correct to full count
                     try { computeMetrics(manifestData); } catch(e) {}
                     try { renderTrendChart(manifestData); } catch(e) {}
                     try { applyView(); } catch(e) {}
+                    // v112.1 API COUNT SYNC: Worker /api/preview nests total under data.preview.total_in_feed
+                    // Fix: read data.preview.total_in_feed first, fall back to top-level fields
+                    try {
+                        if (isApiSource) {
+                            var _tcVal = (data.preview && data.preview.total_in_feed)
+                                      || data.total_in_feed || data.count || data.total_count;
+                            if (_tcVal) {
+                                var _tcEl = document.getElementById('m-total');
+                                if (_tcEl) _tcEl.textContent = Number(_tcVal).toLocaleString();
+                            }
+                        }
+                    } catch(_me) {}
+                    // v112.1 LAST SYNC FIX: Worker /api/preview nests generated_at under data.preview.generated_at
+                    // Fix: read data.preview.generated_at first, fall back to top-level generated_at
+                    try {
+                        if (isApiSource) {
+                            var _genAt = (data.preview && data.preview.generated_at) || data.generated_at;
+                            if (_genAt) {
+                                var _lsEl = document.getElementById('m-last-sync');
+                                if (_lsEl) _lsEl.textContent = timeSince(_genAt);
+                            }
+                        }
+                    } catch(_lse) {}
                     if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--accent);animation:new-glow 1.5s ease-in-out infinite alternate;">&#x26A1; LIVE</span>';
                     if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge integrity-ok"><i class="fas fa-shield-check"></i> MANIFEST VERIFIED</span>';
-                    var _displayCount = (data && (data.total_count || data.count)) || entries.length;
+                    var _displayCount = (data.preview && data.preview.total_in_feed)
+                                      || data.total_in_feed || data.total_count || data.count || entries.length;
                     var _srcLabel = isApiSource ? 'API LIVE' : 'MANIFEST';
                     if (lastLoadedEl) lastLoadedEl.textContent = 'SYNCED: ' + new Date().toLocaleTimeString() + ' \u00b7 ' + _displayCount + ' advisories \u00b7 ' + _srcLabel;
                     document.querySelectorAll('.metric-card').forEach(function(c){ c.classList.remove('syncing'); });
