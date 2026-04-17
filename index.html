@@ -4962,10 +4962,14 @@
                                     style="background:none;border:none;padding:0;cursor:pointer;font-family:var(--font-mono);font-size:10px;color:var(--accent);letter-spacing:0.5px;">
                                 <i class="fas fa-expand-alt"></i> DETAILS
                             </button>
-                            ${item.blog_url
-                                ? `<a href="${item.blog_url}" target="_blank" rel="noopener" class="card-link">View Tactical Dossier &#x2192;</a>`
-                                : `<a href="https://cyberbivash.blogspot.com/search?q=${encodeURIComponent((item.title||'').substring(0,80))}" target="_blank" rel="noopener" class="card-link" title="Find full report on Sentinel APEX Blog">View Tactical Dossier &#x2192;</a>`
-                            }
+                            ${(()=>{
+                                // v112.2 P0 FIX: blogger permanently disabled.
+                                // Priority: source_url (original article) > blog_url (old blogger) > hide
+                                const dossierUrl = item.source_url || item.url || item.blog_url || '';
+                                return dossierUrl
+                                    ? `<a href="${dossierUrl}" target="_blank" rel="noopener" class="card-link">View Tactical Dossier &#x2192;</a>`
+                                    : '';
+                            })()}
                             ${item.gumroad_url ? `<a href="${item.gumroad_url}" target="_blank" rel="noopener" class="cta-gumroad" title="Get premium STIX bundle + IOC pack">\u26a1 PREMIUM</a>` : ''}
                         </div>
                     </div>
@@ -5370,7 +5374,7 @@
                 <div class="modal-section">
                     <div class="modal-section-title">Links & Resources</div>
                     <div style="display:flex;flex-direction:column;gap:10px;">
-                        ${item.blog_url ? `<a href="${item.blog_url}" target="_blank" rel="noopener" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);border-bottom:1px solid rgba(0,212,170,0.3);width:fit-content;"><i class="fas fa-external-link-alt"></i> View Full Tactical Dossier</a>` : ''}
+                        ${(()=>{ const u=item.source_url||item.url||item.blog_url||''; return u ? `<a href="${u}" target="_blank" rel="noopener" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);border-bottom:1px solid rgba(0,212,170,0.3);width:fit-content;"><i class="fas fa-external-link-alt"></i> View Full Tactical Dossier</a>` : ''; })()}
                         ${item.nvd_url ? `<a href="${item.nvd_url}" target="_blank" rel="noopener" style="font-family:var(--font-mono);font-size:11px;color:var(--blue);border-bottom:1px solid rgba(59,130,246,0.3);width:fit-content;"><i class="fas fa-database"></i> NVD Entry</a>` : ''}
                         ${item.stix_file ? `<span onclick="openStixPaywall()" style="font-family:var(--font-mono);font-size:11px;color:var(--purple);border-bottom:1px solid rgba(139,92,246,0.3);width:fit-content;cursor:pointer;" title="Pro subscribers only"><i class="fas fa-lock" style="font-size:9px;margin-right:4px;"></i> STIX Bundle (Subscribers Only)</span>` : ''}
                         ${item.gumroad_url ? `<a href="${item.gumroad_url}" target="_blank" rel="noopener" class="cta-premium-report"><i class="fas fa-star"></i> GET PREMIUM REPORT + IOC PACK</a>` : ''}
@@ -5378,7 +5382,7 @@
                 </div>
 
                 <div style="border-top:1px solid var(--border);padding-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
-                    <a href="${item.blog_url}" target="_blank" rel="noopener"
+                    <a href="${item.source_url||item.url||item.blog_url||'#'}" target="_blank" rel="noopener"
                        style="padding:10px 20px;background:var(--accent);color:var(--bg);border-radius:3px;font-family:var(--font-mono);font-size:11px;font-weight:900;text-decoration:none;">
                         VIEW DOSSIER →
                     </a>
