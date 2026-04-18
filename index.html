@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CYBERDUDEBIVASH® CYBERDUDEBIVASH SENTINEL APEX v110.1 | AI-Powered Global Threat Intelligence</title>
-    <meta name="description" content="CyberDudeBivash SENTINEL APEX v110.1 — AI-Powered Threat Intelligence Platform. Real-time IOC feeds, STIX 2.1 exports, dynamic risk scoring, MITRE ATT&CK mapping, EPSS enrichment, MISP export, threat modals, watchlist, AI engine transparency.">
+    <title>CYBERDUDEBIVASH® CYBERDUDEBIVASH SENTINEL APEX v116.2.0 | AI-Powered Global Threat Intelligence</title>
+    <meta name="description" content="CyberDudeBivash SENTINEL APEX v116.2.0 — AI-Powered Threat Intelligence Platform. Real-time IOC feeds, STIX 2.1 exports, dynamic risk scoring, MITRE ATT&CK mapping, EPSS enrichment, MISP export, threat modals, watchlist, AI engine transparency.">
     <!-- ── Cache Control (v81.9) — Forces CDN/browser to fetch fresh HTML ── -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -20,7 +20,7 @@
 
     <!-- ── Open Graph / LinkedIn Preview ── -->
     <meta property="og:type" content="website">
-    <meta property="og:title" content="CYBERDUDEBIVASH® CYBERDUDEBIVASH SENTINEL APEX v110.1 | AI-Powered Global Threat Intelligence">
+    <meta property="og:title" content="CYBERDUDEBIVASH® CYBERDUDEBIVASH SENTINEL APEX v116.2.0 | AI-Powered Global Threat Intelligence">
     <meta property="og:description" content="Real-time IOC feeds, STIX 2.1 exports, dynamic risk scoring, MITRE ATT&CK mapping — Enterprise-Grade Threat Intelligence Platform.">
     <meta property="og:url" content="https://intel.cyberdudebivash.com/">
     <meta property="og:image" content="https://intel.cyberdudebivash.com/assets/sentinel-apex-thumbnail.jpg">
@@ -43,7 +43,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@cyberbivash">
     <meta name="twitter:creator" content="@cyberbivash">
-    <meta name="twitter:title" content="CYBERDUDEBIVASH® SENTINEL APEX v110.1">
+    <meta name="twitter:title" content="CYBERDUDEBIVASH® SENTINEL APEX v116.2.0">
     <meta name="twitter:description" content="AI-Powered Global Threat Intelligence Dashboard — Real-time IOC, STIX 2.1, MITRE ATT&CK">
     <meta name="twitter:image" content="https://intel.cyberdudebivash.com/assets/sentinel-apex-thumbnail.jpg">
 
@@ -54,7 +54,7 @@
       "@graph": [
         {
           "@type": "WebApplication",
-          "name": "CYBERDUDEBIVASH® SENTINEL APEX v110.1",
+          "name": "CYBERDUDEBIVASH® SENTINEL APEX v116.2.0",
           "url": "https://intel.cyberdudebivash.com/",
           "description": "AI-Powered Global Threat Intelligence Platform — Real-time IOC feeds, STIX 2.1 exports, MITRE ATT&CK mapping, EPSS enrichment.",
           "applicationCategory": "SecurityApplication",
@@ -3982,7 +3982,7 @@
                 <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:2px;text-transform:uppercase;line-height:1.8;">
                     <span style="color:var(--white);font-weight:700;">CYBERDUDEBIVASH PVT LTD</span>
                     <span style="color:var(--border);margin:0 10px;">///</span>
-                    CYBERDUDEBIVASH SENTINEL APEX v110.1
+                    CYBERDUDEBIVASH SENTINEL APEX v116.2.0
                     <span style="color:var(--border);margin:0 10px;">///</span>
                     AI-POWERED GLOBAL CYBERSECURITY INTELLIGENCE PLATFORM
                     <span style="color:var(--border);margin:0 10px;">///</span>
@@ -5936,21 +5936,20 @@ function renderTopThreats(data) {
             // Cache-bust timestamp
             var cb = '?nc=' + Date.now();
 
-            // Priority order:
-            // 1. gh-pages manifest (same domain — fastest, no CORS, always fresh)
-            // 2. raw.githubusercontent.com + cache-bust
-            // 3. raw.githubusercontent.com plain fallback
+            // Priority order (v116.2.0):
+            // 1. Worker API /api/preview (PRIMARY — R2-backed, always fresh)
+            // 2. api/feed.json (same-domain fallback — updated each pipeline run)
+            // 3. raw.githubusercontent.com + cache-bust
+            // 4. raw.githubusercontent.com plain fallback
             // REMOVED: jsDelivr (24h CDN cache — permanent sync killer)
-            // v101.1 LIVE SYNC: api/feed.json is the authoritative same-domain source.
-            // Updated every pipeline run — always reflects latest workflow output.
-            // Falls back to STIX manifest, then raw.github, then EMBEDDED_INTEL.
-            // v110.1: Worker API is PRIMARY — R2-backed, deduplicated, brand-filtered
+            // REMOVED: cyberdudebivash.github.io/...feed_manifest.json (deprecated — intel
+            //          data is no longer stored in the public GitHub Pages repo. Manifest
+            //          lives exclusively in Cloudflare R2; serving via Worker is authoritative.)
             // ARCHITECTURE: Worker(/api/preview) → api/feed.json → raw fallbacks → EMBEDDED_INTEL
             var WORKER_PREVIEW_URL = 'https://intel.cyberdudebivash.com/api/preview';
             var MANIFEST_URLS = [
                 WORKER_PREVIEW_URL,
                 'api/feed.json?t=' + Date.now(),
-                'https://cyberdudebivash.github.io/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/data/stix/feed_manifest.json' + cb,
                 RAW_MANIFEST + cb,
                 RAW_MANIFEST,
             ];
