@@ -4012,12 +4012,17 @@
                 .then(v => {
                     if (!v) return;
                     const el = document.getElementById('platform-version');
-                    if (el) el.textContent = 'V' + (v.version || '117.0.0');
+                    if (el) el.textContent = 'V' + (v.version || '118.0.0');
                     // Store tiers for use by subscription badge renderer
-                    window.APEX_TIERS = v.subscription_tiers || {};
-                    window.APEX_VERSION = v.version || '117.0.0';
+                    window.APEX_TIERS    = v.subscription_tiers || {};
+                    window.APEX_VERSION  = v.version || '118.0.0';
+                    // v118.0.0: _platformTiers — runtime tier state (current = detected from JWT/API response)
+                    window._platformTiers = window._platformTiers || { current: 'free' };
+                    // Inject tier badge next to version if element exists
+                    const tierEl = document.getElementById('platform-tier-badge');
+                    if (tierEl) tierEl.innerHTML = tierBadge(window._platformTiers.current);
                 })
-                .catch(() => { window.APEX_VERSION = '117.0.0'; });
+                .catch(() => { window.APEX_VERSION = '118.0.0'; window._platformTiers = { current: 'free' }; });
         })();
 
         // ── v117.0.0: Subscription tier badge helper ──────────────────────────
@@ -4135,7 +4140,7 @@
                     <div class="watchlist-item-meta">
                         <span class="badge badge-${sev.toLowerCase()}">${sev}</span>
                         <span style="font-family:var(--font-mono);font-size:9px;color:${sevColor};">RISK ${item.risk_score}/10</span>
-                        ${(item.report_url||item.source_url) ? `<a href="${item.report_url||item.source_url}" target="_blank" style="font-family:var(--font-mono);font-size:9px;color:var(--accent);">VIEW →</a>` : ''}
+                        ${(()=>{ const ru=(item.report_url||'').replace('https://reports.cyberdudebivash.com','https://intel.cyberdudebivash.com'); const hasR=ru&&item.validation_status!=='quality_fail'&&item.validation_status!=='write_error'; const u=hasR?ru:(item.source_url||''); return u?`<a href="${u}" target="_blank" style="font-family:var(--font-mono);font-size:9px;color:var(--accent);">${hasR?'DOSSIER →':'SOURCE →'}</a>`:''; })()}
                         <button class="watchlist-remove" onclick="removeFromWatchlist('${item.stix_id}')">REMOVE</button>
                     </div>
                 </div>`;
@@ -4873,6 +4878,16 @@
                         ${blastBadge}
                         ${supplyBadge}
                         ${ts ? `<span style="margin-left:auto;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">${ts}</span>` : ''}
+                        ${(()=>{
+                            // v118.0.0: Tier badge — shows access level available for this intel
+                            const userTier = (window._platformTiers && window._platformTiers.current) || 'free';
+                            const vs = item.validation_status || '';
+                            const hasFullReport = item.report_url && !vs.includes('fail') && !vs.includes('error');
+                            if (!hasFullReport) {
+                                return '<span title="Full dossier not yet deployed" style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:1px 6px;border-radius:2px;margin-left:4px;">⚠ NO DOSSIER</span>';
+                            }
+                            return '';
+                        })()}
                     </div>
                     <div class="card-stix" style="cursor:pointer;" onclick="copyToClipboard('${item.stix_id||item.id||''}', this)" title="Click to copy STIX ID">STIX: ${(item.stix_id||item.id) ? (item.stix_id||item.id).slice(0, 36) : '\u2014'} \u2022 ${actor} <i class="fas fa-copy" style="font-size:9px;opacity:0.5;margin-left:4px;"></i></div>
                     <h3 class="card-title js-open-modal" style="cursor:pointer;" data-stix-id="${item.stix_id||item.id||''}">${_cdbEsc(item.title)}</h3>
