@@ -3724,6 +3724,253 @@
         }
         .cdb-gadget-upgrade-btn:hover { box-shadow: 0 0 28px rgba(245,158,11,0.7); transform: scale(1.04); }
 
+        /* ═══════════════════════════════════════════════════════════════════
+           P0 FIX: MOBILE RESPONSIVE HARDENING
+           Breakpoints: mobile <768px | tablet <1024px
+           Contract: single column, stacked cards, touch-friendly buttons
+           Zero regression: all rules use !important only where cascade demands
+           ═══════════════════════════════════════════════════════════════════ */
+
+        /* ── Tablet breakpoint: <1024px ──────────────────────────────────── */
+        @media (max-width: 1024px) {
+            /* Layout */
+            .apex-header {
+                flex-direction: column;
+                gap: 12px;
+                padding: 12px 16px;
+            }
+            .header-right {
+                align-items: flex-start;
+                width: 100%;
+            }
+            /* Nav */
+            .nav-hub {
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            /* Panels side-by-side → stack on tablet */
+            .ai-panels-grid {
+                grid-template-columns: 1fr !important;
+            }
+            /* Metric strip: 3 cols on tablet */
+            .metrics-strip {
+                grid-template-columns: repeat(3, 1fr) !important;
+            }
+            /* Threat grid: single column on tablet */
+            #threat-grid {
+                grid-template-columns: 1fr !important;
+            }
+            /* Modal rows */
+            .modal-row {
+                grid-template-columns: 1fr !important;
+                gap: 12px;
+            }
+            /* Filter bar: wrap on tablet */
+            .filter-bar {
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            /* SOC grid */
+            .cdb-soc-grid {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+        }
+
+        /* ── Mobile breakpoint: <768px ───────────────────────────────────── */
+        @media (max-width: 768px) {
+            /* Root font scaling */
+            html { font-size: 14px; }
+
+            /* Header: full-width stacked */
+            .apex-header {
+                flex-direction: column !important;
+                align-items: flex-start !important;
+                padding: 10px 12px !important;
+                gap: 10px !important;
+            }
+            .header-right {
+                align-items: flex-start !important;
+                width: 100% !important;
+                gap: 6px !important;
+            }
+            .apex-brand {
+                font-size: 14px !important;
+            }
+
+            /* Navigation: horizontal scroll on mobile */
+            .nav-hub {
+                flex-wrap: nowrap !important;
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+                gap: 4px !important;
+                padding-bottom: 4px;
+                width: 100%;
+            }
+            .nav-hub::-webkit-scrollbar { display: none; }
+            .nav-btn, .nav-hub a, .nav-hub button {
+                white-space: nowrap;
+                flex-shrink: 0;
+                min-height: 36px !important;
+                padding: 6px 10px !important;
+                font-size: 10px !important;
+            }
+
+            /* Status strip: wrap */
+            .status-strip {
+                flex-wrap: wrap !important;
+                justify-content: flex-start !important;
+                gap: 4px !important;
+                font-size: 10px !important;
+            }
+
+            /* Metrics strip: 2 cols on mobile */
+            .metrics-strip {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 6px !important;
+            }
+            .metric-card, .metrics-strip > div {
+                padding: 8px 10px !important;
+                min-height: 60px;
+            }
+            .metric-value { font-size: 18px !important; }
+            .metric-label { font-size: 9px !important; }
+
+            /* Threat grid: SINGLE COLUMN on mobile */
+            #threat-grid {
+                grid-template-columns: 1fr !important;
+                gap: 10px !important;
+            }
+
+            /* Intel cards: full-width, reduced padding */
+            .intel-card {
+                padding: 14px 12px !important;
+                border-radius: 8px !important;
+            }
+            .intel-card .card-title {
+                font-size: 13px !important;
+                line-height: 1.4 !important;
+            }
+            .intel-card .card-meta {
+                font-size: 10px !important;
+                flex-wrap: wrap;
+                gap: 4px;
+            }
+
+            /* Filter bar: full width, stacked */
+            .filter-bar {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                gap: 6px !important;
+                padding: 8px 12px !important;
+            }
+            .filter-bar input, .filter-bar select, .filter-bar button {
+                width: 100% !important;
+                min-height: 40px !important;
+                font-size: 13px !important;
+                box-sizing: border-box;
+            }
+
+            /* Buttons: touch target >= 44px */
+            button, .btn, .cta-btn, .upgrade-btn, .action-btn {
+                min-height: 44px !important;
+                min-width: 44px !important;
+                padding: 10px 16px !important;
+                font-size: 12px !important;
+                touch-action: manipulation;
+            }
+
+            /* Modal: full screen */
+            .modal-overlay, .modal-content, #intel-modal .modal-inner {
+                padding: 12px !important;
+                margin: 0 !important;
+                border-radius: 0 !important;
+                width: 100% !important;
+                max-width: 100vw !important;
+                box-sizing: border-box;
+            }
+            .modal-row {
+                grid-template-columns: 1fr !important;
+                gap: 10px !important;
+            }
+
+            /* APEX AI block: stack vertically */
+            .cdb-body {
+                flex-direction: column !important;
+                gap: 10px !important;
+            }
+            .cdb-ring-col {
+                flex-direction: row !important;
+                min-width: unset !important;
+                gap: 12px;
+                align-items: center;
+            }
+            .cdb-signals {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 4px !important;
+            }
+            .cdb-decision {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 4px !important;
+            }
+            .cdb-scan-bar { flex-direction: column !important; gap: 4px !important; }
+            .cdb-scan-pill { white-space: normal !important; font-size: 10px !important; }
+
+            /* SOC grid: single column */
+            .cdb-soc-grid {
+                grid-template-columns: 1fr !important;
+                gap: 8px !important;
+            }
+
+            /* Panels: collapse to single column */
+            .ai-panels-grid, .panels-grid, .dashboard-grid {
+                grid-template-columns: 1fr !important;
+                gap: 10px !important;
+            }
+
+            /* Typography density reduction */
+            h1 { font-size: 18px !important; }
+            h2 { font-size: 16px !important; }
+            h3 { font-size: 14px !important; }
+            p, li, td, th { font-size: 12px !important; }
+
+            /* Ticker: reduce font */
+            .threat-ticker-content { font-size: 10px !important; }
+
+            /* Table: horizontal scroll */
+            table {
+                display: block !important;
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Enrich strip: smaller */
+            .enrich-strip { padding: 6px 8px !important; gap: 4px !important; }
+            .enrich-strip span { font-size: 9px !important; }
+
+            /* IOC paywall notice: full width */
+            .ioc-paywall, .paywall-notice { width: 100% !important; box-sizing: border-box; }
+        }
+
+        /* ── Smallest phones: <480px ─────────────────────────────────────── */
+        @media (max-width: 480px) {
+            html { font-size: 13px; }
+            .apex-header { padding: 8px 10px !important; }
+            .metrics-strip { grid-template-columns: 1fr 1fr !important; }
+            .intel-card { padding: 12px 10px !important; }
+            .metric-value { font-size: 16px !important; }
+            /* Collapse enrich strip on smallest screens */
+            .enrich-strip .enrich-item:nth-child(n+4) { display: none !important; }
+            /* Bigger touch targets */
+            button, .btn, a[role="button"] {
+                min-height: 48px !important;
+                font-size: 13px !important;
+            }
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           END P0 MOBILE RESPONSIVE HARDENING
+           ═══════════════════════════════════════════════════════════════════ */
+
         </style>
 </head>
 <body>
