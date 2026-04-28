@@ -7735,7 +7735,7 @@
                             // v122.0.0: Tier badge — FREE/PRO/ENTERPRISE access indicator
                             const userTier = (window._platformTiers && window._platformTiers.current) || 'free';
                             const vs = item.validation_status || '';
-                            const hasFullReport = item.report_url && !vs.includes('fail') && !vs.includes('error');
+                            const hasFullReport = item.report_url && !vs.includes('fail') && !vs.includes('error') && vs !== 'file_missing' && vs !== 'brand_skip';
                             const tierLabel = userTier === 'enterprise' ? 'ENT'
                                            : userTier === 'premium'    ? 'PRO'
                                            :                              'FREE';
@@ -8576,7 +8576,7 @@
                             // v116.3.0: fallback chain + rewrite stale domain
                             let ru = (item.report_url||'').replace('https://reports.cyberdudebivash.com','https://intel.cyberdudebivash.com');
                             const su = item.source_url||'';
-                            const hasReport = ru && item.validation_status !== 'quality_fail' && item.validation_status !== 'write_error';
+                            const hasReport = ru && item.validation_status !== 'quality_fail' && item.validation_status !== 'write_error' && item.validation_status !== 'file_missing' && item.validation_status !== 'brand_skip';
                             const u = hasReport ? ru : su;
                             const lbl = hasReport ? 'View Full Tactical Dossier' : 'View Source Article';
                             return u ? `<a href="${u}" target="_blank" rel="noopener" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);border-bottom:1px solid rgba(0,212,170,0.3);width:fit-content;"><i class="fas fa-external-link-alt"></i> ${lbl}</a>` : '';
@@ -13074,5 +13074,110 @@ function renderTopThreats(data) {
 })();
 </script>
 <!-- /CDB-AI-BRAIN-INIT-v134 -->
+
+<!-- CDB-PHASE10-UI-FAILSAFE v141.7.0 -->
+<script>
+(function(){
+  'use strict';
+  /* =========================================================
+   * SENTINEL APEX v141.7.0 — Phase 10 UI Fail-Safe
+   * Hides any report link / CTA that returns a 404 at runtime.
+   * Works as a last-defense after manifest guards.
+   * ========================================================= */
+
+  const FAILSAFE_VERSION = '141.7.0';
+  const REPORTS_ORIGIN   = 'https://intel.cyberdudebivash.com';
+  const CHECKED          = new Set();
+  const BROKEN           = new Set();
+
+  /* HEAD-check a single URL. Returns true if reachable (2xx/3xx). */
+  async function isReachable(url) {
+    if (!url || !url.startsWith('http')) return true; // non-HTTP links not checked
+    if (CHECKED.has(url)) return !BROKEN.has(url);
+    CHECKED.add(url);
+    try {
+      const r = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(5000) });
+      if (r.status === 404) { BROKEN.add(url); return false; }
+      return true;
+    } catch (e) {
+      // Network error / CORS — don't hide (might be valid cross-origin)
+      return true;
+    }
+  }
+
+  /* Hide element and show fallback text if provided */
+  function hideLink(el) {
+    const parent = el.closest('[data-report-cta]') || el.parentElement;
+    if (parent) {
+      parent.style.display = 'none';
+    } else {
+      el.style.display = 'none';
+    }
+    el.dataset.cdbBroken = '404';
+  }
+
+  /* Audit all anchor tags pointing at /reports/ paths */
+  async function auditReportLinks() {
+    const links = Array.from(document.querySelectorAll('a[href*="/reports/"]'));
+    const checked = links.filter(a => !a.dataset.cdbBroken && !CHECKED.has(a.href));
+    if (checked.length === 0) return;
+
+    // Batch: check up to 20 links per audit pass to avoid flooding
+    const batch = checked.slice(0, 20);
+    await Promise.all(batch.map(async (a) => {
+      const ok = await isReachable(a.href);
+      if (!ok) {
+        hideLink(a);
+        console.warn('[CDB-FAILSAFE] 404 hidden:', a.href);
+      }
+    }));
+  }
+
+  /* Also guard CTA unlock buttons that have data-report-url */
+  async function auditCtaButtons() {
+    const ctas = Array.from(document.querySelectorAll('[data-report-url]:not([data-cdb-broken])'));
+    await Promise.all(ctas.slice(0, 10).map(async (el) => {
+      const url = el.dataset.reportUrl;
+      if (!url) return;
+      const ok = await isReachable(url);
+      if (!ok) {
+        el.style.display = 'none';
+        el.dataset.cdbBroken = '404';
+      }
+    }));
+  }
+
+  /* Run audit after initial render, then observe for dynamic content */
+  function scheduleAudit() {
+    // Initial pass after 3s (let dashboard populate)
+    setTimeout(async () => {
+      await auditReportLinks();
+      await auditCtaButtons();
+    }, 3000);
+
+    // Observe DOM mutations: re-audit when new cards are injected
+    if (window.MutationObserver) {
+      const obs = new MutationObserver((_mutations) => {
+        clearTimeout(obs._debounce);
+        obs._debounce = setTimeout(async () => {
+          await auditReportLinks();
+          await auditCtaButtons();
+        }, 1500);
+      });
+      obs.observe(document.body, { childList: true, subtree: true });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', scheduleAudit);
+  } else {
+    scheduleAudit();
+  }
+
+  // Expose for manual trigger
+  window.CDB_FAILSAFE = { audit: auditReportLinks, broken: BROKEN, version: FAILSAFE_VERSION };
+})();
+</script>
+<!-- /CDB-PHASE10-UI-FAILSAFE -->
 </body>
 </html>
