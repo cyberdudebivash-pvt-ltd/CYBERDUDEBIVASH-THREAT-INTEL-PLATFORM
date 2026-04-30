@@ -9322,6 +9322,7 @@
         async function manualRefresh() {
             document.getElementById('sync-val').innerHTML = 'SYNC: <span style="color:#ff9d00;">REFRESHING...</span>';
             const prevCount = manifestData.length;
+            window.__DATA_LOADED__ = false; window.__INTEL_RENDERED__ = false; // P6: manual refresh reset
             await loadGOCIntel();
             document.getElementById('last-loaded').textContent = 'LAST SYNC: ' + new Date().toLocaleTimeString();
             if (prevCount > 0 && manifestData.length > prevCount) {
@@ -10323,7 +10324,8 @@ function renderTopThreats(data) {
         // Eliminates stuck "SYNCING GOC NEURAL CORE..." state entirely.
 
         let _liveDataLoaded = false;
-        window.RENDER_LOCK = false; // v142.3.0: single-source render guard — only ONE render pass per load
+        window.__INTEL_RENDERED__ = false; // APEX FINAL: single render execution guard
+        window.__DATA_LOADED__    = false; // APEX FINAL: single data load guard
 
         function bootFromEmbeddedCache() {
             // Instant render from embedded cache — zero network dependency
@@ -10405,6 +10407,12 @@ function renderTopThreats(data) {
         }
 
         async function loadGOCIntel() {
+            // APEX FINAL P2: single data load guard
+            if (window.__DATA_LOADED__) {
+                console.warn('[BLOCK] Duplicate data load prevented');
+                return;
+            }
+            window.__DATA_LOADED__ = true;
             // ================================================================
             // v77.4 PERMANENT FIX — Definitive Sync Architecture
             // FIXES:
@@ -10533,13 +10541,16 @@ function renderTopThreats(data) {
                         if (lastLoadedEl) lastLoadedEl.textContent = 'SYNCED: ' + new Date().toLocaleTimeString() + ' \u00b7 EMBEDDED LIVE';
                         document.querySelectorAll('.metric-card').forEach(function(c){ c.classList.remove('syncing'); });
                         if (aiPulse) aiPulse.style.display = 'none';
-                        // v142.3.0: single-source render — embedded wins freshness gate
-                        if (!window.RENDER_LOCK) {
-                            window.RENDER_LOCK = true;
+                        // APEX FINAL: single-source render — embedded wins freshness gate
+                        if (!window.__INTEL_RENDERED__) {
+                            window.__INTEL_RENDERED__ = true;
+                            var _fd = (manifestData && manifestData.length > 0) ? manifestData : (EMBEDDED_INTEL ? EMBEDDED_INTEL.slice() : []);
+                            var _fds = new Set();
+                            _fd = _fd.filter(function(item) { var k=item.stix_id||item.id||''; if(!k||_fds.has(k)){return !k;} _fds.add(k); return true; });
+                            manifestData = _fd;
                             var _fg = document.getElementById('threat-grid');
                             if (_fg) _fg.innerHTML = '';
-                            var _fd = (manifestData && manifestData.length > 0) ? manifestData : (EMBEDDED_INTEL ? EMBEDDED_INTEL.slice() : []);
-                            manifestData = _fd;
+                            console.log('[RENDER] Executed at', new Date().toISOString(), '| items:', _fd.length);
                             try { applyView(); } catch(e) {}
                         }
                         try { _cdbUpdateTabCounts(); } catch(e) {}
@@ -10557,14 +10568,21 @@ function renderTopThreats(data) {
                     // computeMetrics(manifestData) sets m-total = preview items (10); overrides below correct to full count
                     try { computeMetrics(manifestData); } catch(e) {}
                     try { renderTrendChart(manifestData); } catch(e) {}
-                    // v142.3.0: single-source render — live data wins, one pass only
-                    window.RENDER_LOCK = false; // reset: live data supersedes any cached render
-                    if (!window.RENDER_LOCK) {
-                        window.RENDER_LOCK = true;
+                    // APEX FINAL P4+5+7+8: single-source, hard reset, safeData dedup, trace
+                    window.__INTEL_RENDERED__ = false; // reset — live data supersedes cached render
+                    if (!window.__INTEL_RENDERED__) {
+                        window.__INTEL_RENDERED__ = true;
+                        // P4: single source of truth
+                        var _ld = (manifestData && manifestData.length > 0) ? manifestData : (EMBEDDED_INTEL ? EMBEDDED_INTEL.slice() : []);
+                        // P7: UI-level safeData dedup
+                        var _seen = new Set();
+                        _ld = _ld.filter(function(item) { var k = item.stix_id||item.id||''; if(!k||_seen.has(k)){return !k;} _seen.add(k); return true; });
+                        manifestData = _ld;
+                        // P5: hard UI reset
                         var _lg = document.getElementById('threat-grid');
                         if (_lg) _lg.innerHTML = '';
-                        var _ld = (manifestData && manifestData.length > 0) ? manifestData : (EMBEDDED_INTEL ? EMBEDDED_INTEL.slice() : []);
-                        manifestData = _ld;
+                        // P8: debug trace — must log ONCE per load
+                        console.log('[RENDER] Executed at', new Date().toISOString(), '| items:', _ld.length);
                         try { applyView(); } catch(e) {}
                     }
                     // v112.1 API COUNT SYNC: Worker /api/preview nests total under data.preview.total_in_feed
@@ -10624,11 +10642,14 @@ function renderTopThreats(data) {
                     });
                     try { computeMetrics(manifestData); } catch(e) {}
                     try { renderTrendChart(manifestData); } catch(e) {}
-                    // v142.3.0: single-source render — embedded fallback (all network failed)
-                    if (!window.RENDER_LOCK) {
-                        window.RENDER_LOCK = true;
+                    // APEX FINAL: single-source render — embedded fallback (all network failed)
+                    if (!window.__INTEL_RENDERED__) {
+                        window.__INTEL_RENDERED__ = true;
+                        var _efds = new Set();
+                        manifestData = manifestData.filter(function(item) { var k=item.stix_id||item.id||''; if(!k||_efds.has(k)){return !k;} _efds.add(k); return true; });
                         var _efg = document.getElementById('threat-grid');
                         if (_efg) _efg.innerHTML = '';
+                        console.log('[RENDER] Executed at', new Date().toISOString(), '| items:', manifestData.length);
                         try { applyView(); } catch(e) {}
                     }
                 }
@@ -10688,14 +10709,14 @@ function renderTopThreats(data) {
         function scheduleAutoRefresh() {
             setInterval(() => {
                 const autoRefresh = document.getElementById('auto-refresh-toggle');
-                if (autoRefresh && autoRefresh.checked) loadGOCIntel();
+                if (autoRefresh && autoRefresh.checked) { window.__DATA_LOADED__ = false; window.__INTEL_RENDERED__ = false; loadGOCIntel(); }
             }, 6 * 60 * 60 * 1000);
         }
 
         // ── Keyboard Shortcuts ──
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-            if (e.key === 'r' || e.key === 'R') loadGOCIntel();
+            if (e.key === 'r' || e.key === 'R') { window.__DATA_LOADED__ = false; window.__INTEL_RENDERED__ = false; loadGOCIntel(); }
             if (e.key === 's' || e.key === 'S') exportSTIX();
             if (e.key === 'Escape') {
                 closeStixPaywall();
@@ -11591,6 +11612,11 @@ function renderTopThreats(data) {
         // If script runs after DOM is ready (cached page, fast CDN),
         // we must call boot functions directly — not wait for an event that already fired.
         function _cdbBootSequence() {
+            // APEX FINAL P1: boot-sequence execution guard
+            if (window.__INTEL_RENDERED__) {
+                console.warn('[BLOCK] Duplicate boot sequence prevented');
+                return;
+            }
             // PHASE 1: Instant render from embedded cache (< 50ms, zero network)
             try { bootFromEmbeddedCache(); } catch(e) { console.warn('[BOOT] Embedded cache error:', e); }
             // PHASE 2: Upgrade to live data in background
