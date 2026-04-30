@@ -9126,7 +9126,7 @@
             });
             // v117.0.0 FRESHNESS FIX: sort by processed_at DESC so stats show newest processed intel
             let sortedData = [...data].sort((a, b) =>
-                new Date(b.processed_at||b.timestamp||0) - new Date(a.processed_at||a.timestamp||0)
+                new Date(b.published_at||b.timestamp||b.processed_at||0) - new Date(a.published_at||a.timestamp||a.processed_at||0)
              );
             const lastTs = sortedData.length ? timeSince(sortedData[0].processed_at||sortedData[0].timestamp) : '—';
 
@@ -9170,7 +9170,7 @@
             const barsEl = document.getElementById('trend-bars');
             if (!data.length || !barsEl) return;
 
-            const sorted = [...data].sort((a,b) => new Date(a.processed_at||a.timestamp||0) - new Date(b.processed_at||b.timestamp||0));  // v117.0.0
+            const sorted = [...data].sort((a,b) => new Date(a.published_at||a.timestamp||a.processed_at||0) - new Date(b.published_at||b.timestamp||b.processed_at||0));  // v142.2.0 FIX
             const n = trendRange === 50 ? sorted.length : Math.min(trendRange, sorted.length);
             const recent = sorted.slice(-n);
             const maxScore = Math.max(...recent.map(d => d.risk_score), 1);
@@ -9235,7 +9235,7 @@
                     const days = ranges[currentTimeRange] || 7;
                     const cutoff = now - (days * 24 * 60 * 60 * 1000);
                     const timeFiltered = filtered.filter(d => {
-                        const ts = d.processed_at || d.timestamp || d.published || d.created;  // v117.0.0 FRESHNESS FIX
+                        const ts = d.published_at || d.processed_at || d.timestamp || d.published || d.created;  // v142.2.0 FIX: published_at is real source date
                         if (!ts) return true;  // Keep items without timestamps (safety)
                         return new Date(ts).getTime() >= cutoff;
                     });
@@ -9254,12 +9254,20 @@
             }
             filtered.sort((a, b) => {
                 switch (currentSort) {
-                    case 'newest': return new Date(b.processed_at||b.timestamp||0) - new Date(a.processed_at||a.timestamp||0);  // v117.0.0
-                    case 'oldest': return new Date(a.processed_at||a.timestamp||0) - new Date(b.processed_at||b.timestamp||0);  // v117.0.0
+                    case 'newest': return new Date(b.published_at||b.timestamp||b.processed_at||0) - new Date(a.published_at||a.timestamp||a.processed_at||0);  // v142.2.0 FIX: sort by published_at (real source date)
+                    case 'oldest': return new Date(a.published_at||a.timestamp||a.processed_at||0) - new Date(b.published_at||b.timestamp||b.processed_at||0);  // v142.2.0 FIX
                     case 'risk-high': return b.risk_score - a.risk_score;
                     case 'risk-low': return a.risk_score - b.risk_score;
                     default: return 0;
                 }
+            });
+            // v142.2.0 FIX: UI-level dedup by stix_id before render (belt-and-suspenders)
+            var _dedup = new Set();
+            filtered = filtered.filter(function(item) {
+                var key = item.stix_id || item.id || item.cve_id || '';
+                if (!key) return true;
+                if (_dedup.has(key)) return false;
+                _dedup.add(key); return true;
             });
             renderCards(filtered);
         }
@@ -10450,7 +10458,7 @@ function renderTopThreats(data) {
             // v117.0.0 FRESHNESS FIX: Use processed_at (pipeline time) for FRESHEST-WINS comparison
             var embeddedNewest = (EMBEDDED_INTEL && EMBEDDED_INTEL.length)
                 ? Math.max.apply(null, EMBEDDED_INTEL.map(function(i){
-                    return new Date(i.processed_at || i.timestamp || 0).getTime();
+                    return new Date(i.published_at || i.timestamp || i.processed_at || 0).getTime();
                   }))
                 : 0;
 
@@ -10509,7 +10517,7 @@ function renderTopThreats(data) {
                     // ── END SCHEMA NORMALIZATION ──────────────────────────────────────────
 
                     var liveNewest = Math.max.apply(null, entries.map(function(i){
-                        return new Date(i.processed_at || i.timestamp || 0).getTime();  // v117.0.0
+                        return new Date(i.published_at || i.timestamp || i.processed_at || 0).getTime();  // v117.0.0
                     }));
 
                     // FRESHEST-WINS: if live data is older, keep EMBEDDED_INTEL (still show LIVE)
@@ -10530,7 +10538,7 @@ function renderTopThreats(data) {
 
                     // Live data is fresher — use it and show LIVE
                     manifestData = entries.slice().sort(function(a, b){
-                        return new Date(b.processed_at||b.timestamp||0) - new Date(a.processed_at||a.timestamp||0);  // v117.0.0
+                        return new Date(b.published_at||b.timestamp||b.processed_at||0) - new Date(a.published_at||a.timestamp||a.processed_at||0);  // v142.2.0 FIX
                     });
                     // v138 FIX: restore apex_ai for items loaded from feed.json (which strips apex_ai)
                     try { manifestData = _mergeApexAI(manifestData); } catch(e) {}
@@ -10593,7 +10601,7 @@ function renderTopThreats(data) {
             if (EMBEDDED_INTEL && EMBEDDED_INTEL.length) {
                 if (!_liveDataLoaded) {
                     manifestData = EMBEDDED_INTEL.slice().sort(function(a, b){
-                        return new Date(b.processed_at||b.timestamp||0) - new Date(a.processed_at||a.timestamp||0);  // v117.0.0
+                        return new Date(b.published_at||b.timestamp||b.processed_at||0) - new Date(a.published_at||a.timestamp||a.processed_at||0);  // v142.2.0 FIX
                     });
                     try { computeMetrics(manifestData); } catch(e) {}
                     try { renderTrendChart(manifestData); } catch(e) {}
