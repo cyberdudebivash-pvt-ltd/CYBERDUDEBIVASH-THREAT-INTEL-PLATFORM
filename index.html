@@ -10779,7 +10779,18 @@ function renderTopThreats(data) {
                 manifestData = [...EMBEDDED_INTEL].reverse();
                 try { computeMetrics(manifestData); } catch(e) { console.warn('[BOOT] computeMetrics error:', e); }
                 try { renderTrendChart(manifestData); } catch(e) { console.warn('[BOOT] renderTrendChart error:', e); }
-                // v142.3.0: applyView() removed — grid render is single-source via loadGOCIntel()
+                // v148.0 FIX: Restore instant render — EMBEDDED_INTEL must show cards immediately on boot
+                // ROOT CAUSE: v142.3.0 removed applyView() here causing "SYNCING GOC NEURAL CORE..." to persist
+                // until network fetch completes. With EMBEDDED_INTEL populated, cards MUST render at boot.
+                try {
+                    var _bg = document.getElementById('threat-grid');
+                    if (_bg) _bg.innerHTML = '';
+                    window.__INTEL_RENDERED__ = false; // allow render
+                    window.RENDER_IN_PROGRESS = false;
+                    applyView();
+                    window.__INTEL_RENDERED__ = true;
+                    console.log('[BOOT v148] Instant render from EMBEDDED_INTEL:', manifestData.length, 'items');
+                } catch(e) { console.warn('[BOOT] applyView error:', e); }
             } catch(e) {
                 console.warn('[BOOT] Data setup error:', e);
             }
@@ -10890,7 +10901,7 @@ function renderTopThreats(data) {
             //          data is no longer stored in the public GitHub Pages repo. Manifest
             //          lives exclusively in Cloudflare R2; serving via Worker is authoritative.)
             // ARCHITECTURE: Worker(/api/preview) → api/feed.json → raw fallbacks → EMBEDDED_INTEL
-            var WORKER_PREVIEW_URL = 'https://intel.cyberdudebivash.com/api/preview';
+            var WORKER_PREVIEW_URL = 'https://intel.cyberdudebivash.com/api/preview/'; // v148.0: trailing slash — matches Worker route exactly
             // v147.0 P0 FIX -- 3-LAYER FALLBACK ARCHITECTURE:
             //   PRIMARY  : Worker API  -- intel.cyberdudebivash.com/api/preview  (R2-backed, always fresh)
             //   FALLBACK1: api/feed.json -- same-domain, Worker now handles this route from R2
@@ -12107,18 +12118,19 @@ function renderTopThreats(data) {
             _cdbBootSequence();
         }
 
-        // v147.0 P0 SAFETY TIMER: catches ALL stuck-grid scenarios after 12s:
-        //   1. Spinner still visible   → all fetches failed silently (CORS abort, etc.)
-        //   2. Grid is empty (no cards) → data loaded but renderCards() silently dropped items
-        // Force-reset guards and retry once. Final backstop for the 3-layer fallback chain.
+        // v148.0 P0 SAFETY TIMER: catches ALL stuck-grid scenarios after 12s:
+        //   1. Spinner still visible   → boot render or fetch failed silently
+        //   2. Grid is empty / no cards → renderCards() silently produced nothing
+        // v148.0 FIX: removed !__INTEL_RENDERED__ dependency — flag can be true even when cards are absent
+        // Retry is triggered purely on VISIBLE state: spinner present OR no actual intel-cards in DOM
         setTimeout(function() {
             var _stg = document.getElementById('threat-grid');
             if (!_stg) return;
             var _hasSpinner = !!_stg.querySelector('.loading-spinner');
             var _hasCards   = !!_stg.querySelector('.intel-card, .threat-card, [data-id]');
             var _isEmpty    = _stg.children.length === 0;
-            // Trigger retry if: spinner present OR grid is completely empty OR no cards rendered
-            if (_hasSpinner || _isEmpty || (!_hasCards && !window.__INTEL_RENDERED__)) {
+            // v148.0: retry if spinner OR no cards visible (removed __INTEL_RENDERED__ blind-spot)
+            if (_hasSpinner || _isEmpty || !_hasCards) {
                 console.warn('[SENTINEL-APEX] P0-SAFETY: Grid stuck/empty after 12s (spinner=' + _hasSpinner + ', empty=' + _isEmpty + ', rendered=' + window.__INTEL_RENDERED__ + ') — force retry');
                 window.__DATA_LOADED__    = false;
                 window.__INTEL_RENDERED__ = false;
