@@ -10892,10 +10892,11 @@ function renderTopThreats(data) {
             // ARCHITECTURE: Worker(/api/preview) → api/feed.json → raw fallbacks → EMBEDDED_INTEL
             var WORKER_PREVIEW_URL = 'https://intel.cyberdudebivash.com/api/preview';
             var MANIFEST_URLS = [
-                // v145.0: API-ONLY — Worker is single source of truth
-                // feed.json / api/feed.json / RAW_MANIFEST REMOVED — prevent contract mismatch
-                // Dashboard reads EXCLUSIVELY from Worker API (data.preview.items)
+                // v146.0 P0 FIX: Worker API primary + same-domain fallback
+                // api/feed.json is same-origin — zero CORS risk, updated every pipeline run
+                // Parser handles both: data.preview.items (Worker) → plain Array (feed.json)
                 WORKER_PREVIEW_URL,
+                'api/feed.json',   // P0 FALLBACK: same-domain, no CORS, always accessible
             ];
 
 
@@ -11137,6 +11138,10 @@ function renderTopThreats(data) {
             if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge" style="color:var(--medium);">&#x26A1; NO DATA</span>';
             document.querySelectorAll('.metric-card').forEach(function(c){ c.classList.remove('syncing'); });
             if (aiPulse) aiPulse.style.display = 'none';
+            // v146.0 P0 FIX: #threat-grid MUST never stay stuck at initial spinner
+            // Root cause: all prior paths returned early; terminal path never touched the grid
+            var _dg = document.getElementById('threat-grid');
+            if (_dg) _dg.innerHTML = '<div class="loading-state" style="color:#888;">&#9888; Feed temporarily unavailable &mdash; <a href="javascript:void(0)" onclick="window.__DATA_LOADED__=false;window.__INTEL_RENDERED__=false;loadGOCIntel();" style="color:var(--accent,#00d4aa);text-decoration:none;font-weight:700;">retry</a></div>';
         }
         // v64.2 FIX: Freshest-wins sync time
         async function fetchPipelineSyncTime() {
@@ -12097,6 +12102,26 @@ function renderTopThreats(data) {
             // DOM already ready (cached/fast load) — call immediately
             _cdbBootSequence();
         }
+
+        // v146.0 P0 SAFETY TIMER: if #threat-grid still shows initial spinner after 12s,
+        // the promise chain silently failed (CORS abort, unhandled rejection, etc.).
+        // Force-reset guards and retry once. Final backstop — catches ALL silent failures.
+        setTimeout(function() {
+            var _stg = document.getElementById('threat-grid');
+            if (_stg && _stg.querySelector('.loading-spinner')) {
+                console.warn('[SENTINEL-APEX] P0-SAFETY: Grid stuck after 12s — force retry');
+                window.__DATA_LOADED__    = false;
+                window.__INTEL_RENDERED__ = false;
+                window.RENDER_IN_PROGRESS = false;
+                loadGOCIntel().catch(function() {
+                    // retry itself failed — render actionable error state
+                    var _stg2 = document.getElementById('threat-grid');
+                    if (_stg2 && _stg2.querySelector('.loading-spinner')) {
+                        _stg2.innerHTML = '<div class="loading-state" style="color:#888;">&#9888; Feed sync failed &mdash; <a href="javascript:void(0)" onclick="window.__DATA_LOADED__=false;window.__INTEL_RENDERED__=false;window.RENDER_IN_PROGRESS=false;loadGOCIntel();" style="color:var(--accent,#00d4aa);text-decoration:none;font-weight:700;">retry now</a></div>';
+                    }
+                });
+            }
+        }, 12000);
 
         // ═══════════════════════════════════════════════════════
         // v46.0 NEXUS INTELLIGENCE — Client-Side Analytics Engine
