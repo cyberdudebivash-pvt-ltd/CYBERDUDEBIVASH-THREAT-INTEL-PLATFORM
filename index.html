@@ -8238,6 +8238,20 @@
                       }
 
         // â”€â”€ Render Cards â”€â”€
+        // v145.0: cleanText — strip non-ASCII junk characters before render (encoding fix)
+        // Prevents mojibake / “’‘ style corruption in card titles and metadata
+        function cleanText(str) {
+            if (!str) return "";
+            // Normalize Unicode, then strip control chars (keep printable ASCII + common Unicode)
+            try {
+                return String(str)
+                    .normalize("NFC")
+                    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "") // strip control chars
+                    .replace(/\uFFFD/g, "") // strip replacement char (UTF-8 decode errors)
+                    .trim();
+            } catch(e) { return String(str); }
+        }
+
         function renderCards(data) {
             const originalLength = data.length;
 
@@ -10447,14 +10461,10 @@ function renderTopThreats(data) {
             // ARCHITECTURE: Worker(/api/preview) â†’ api/feed.json â†’ raw fallbacks â†’ EMBEDDED_INTEL
             var WORKER_PREVIEW_URL = 'https://intel.cyberdudebivash.com/api/preview';
             var MANIFEST_URLS = [
-                // v137 FIX: feed.json FIRST â€” plain array 348KB (vs api/feed.json dict 937KB)
-                // api/feed.json was timing out in 8s â†’ fell to Worker (no CRITICAL) â†’ Critical=0 bug
-                // feed.json = same 310 items + 2 CRITICAL, same-domain, ~3x faster parse
-                'feed.json?t=' + Date.now(),
-                'api/feed.json?t=' + Date.now(),
+                // v145.0: API-ONLY — Worker is single source of truth
+                // feed.json / api/feed.json / RAW_MANIFEST REMOVED — prevent contract mismatch
+                // Dashboard reads EXCLUSIVELY from Worker API (data.preview.items)
                 WORKER_PREVIEW_URL,
-                RAW_MANIFEST + cb,
-                RAW_MANIFEST,
             ];
 
 
@@ -10475,7 +10485,8 @@ function renderTopThreats(data) {
             for (var mIdx = 0; mIdx < MANIFEST_URLS.length; mIdx++) {
                 var manifestUrl = MANIFEST_URLS[mIdx];
                 // isApiSource: same-domain /api/feed.json is authoritative â€” bypass staleness gates
-                var isApiSource = manifestUrl.startsWith('feed.json') || manifestUrl.startsWith('api/feed.json') || manifestUrl.startsWith('https://intel.cyberdudebivash.com/api/');
+                // v145.0: All remaining sources are Worker API — isApiSource always true
+                var isApiSource = true; // WORKER_PREVIEW_URL is the only source (v145.0 API-only arch)
                 try {
                     var ctrl = new AbortController();
                     var tid  = setTimeout(function(){ ctrl.abort(); }, 8000);
@@ -10490,10 +10501,17 @@ function renderTopThreats(data) {
                     clearTimeout(tid);
                     if (!resp.ok) throw new Error('HTTP ' + resp.status);
                     var data    = await resp.json();
-                    // api/feed.json uses 'items'; STIX manifest uses 'entries'/'advisories'
-                    var entries = Array.isArray(data) ? data
-                                  : ((data.preview && data.preview.items) || data.data || data.items || data.entries || data.advisories || []);
-                    if (!entries.length) throw new Error('Empty manifest');
+                    // v145.0: API-ONLY parse — Worker returns { preview: { items: [...] } }
+                    // feed.json / api/feed.json removed from MANIFEST_URLS — API is sole source
+                    // Safe access: data?.preview?.items with Array fallback for plain arrays
+                    var items = (data && data.preview && data.preview.items) ? data.preview.items
+                                : (Array.isArray(data) ? data : []);
+                    var entries = items;
+                    if (!entries.length) {
+                        console.error('[SENTINEL-APEX] NO DATA FROM API — preview.items empty or absent');
+                        throw new Error('API returned 0 items');
+                    }
+                    console.log('[SENTINEL-APEX] API items:', entries.length);
 
                     // â”€â”€ v102.0 SCHEMA NORMALIZATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                     // v74 manifest enricher writes items with 'id' (STIX object ID) instead
