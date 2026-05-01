@@ -4586,7 +4586,7 @@
                 The CDB AI Risk Engine uses a multi-factor weighted correlation model combining CVSSv3 base scores, real-time EPSS exploitation probability, CISA KEV confirmation, MITRE ATT&CK technique complexity, source feed trust weights, and analyst confidence signals to produce a normalized risk score (0â€“10).
             </p>
             <div class="ai-formula-block">
-                <span style="color:var(--accent);">Risk Score</span> = <span style="color:var(--purple);">w1</span>Ã—CVSS + <span style="color:var(--purple);">w2</span>Ã—EPSS + <span style="color:var(--purple);">w3</span>Ã—KEV_Bonus + <span style="color:var(--purple);">w4</span>Ã—MITRE_Depth + <span style="color:var(--purple);">w5</span>Ã—Source_Trust + <span style="color:var(--purple);">w6</span>Ã—Confidence<br>
+                <span style="color:var(--accent);">Risk Score</span> = <span style="color:var(--purple);">w1</span>×CVSS + <span style="color:var(--purple);">w2</span>×EPSS + <span style="color:var(--purple);">w3</span>×KEV_Bonus + <span style="color:var(--purple);">w4</span>×MITRE_Depth + <span style="color:var(--purple);">w5</span>×Source_Trust + <span style="color:var(--purple);">w6</span>×Confidence<br>
                 <span style="color:var(--text-muted);font-size:10px;">â†’ Normalized to [0, 10] scale · Updated per advisory on ingest</span>
             </div>
             <p style="font-family:var(--font-mono);font-size:8px;letter-spacing:3px;color:var(--accent);text-transform:uppercase;margin:0 0 12px 0;">Scoring Factor Weights</p>
@@ -5791,7 +5791,7 @@
            P0 HARDENED: Instant static fallback + exponential retry (max 3)
            GUARANTEE: Content is ALWAYS visible â€” never shows empty state.
            Flow: 1) Render STATIC_FALLBACK immediately on init
-                 2) Fetch live feeds in background (retry Ã—3 w/ backoff)
+                 2) Fetch live feeds in background (retry ×3 w/ backoff)
                  3) Replace with live data if successful
            â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
         (function initLiveCyberNews() {
@@ -9243,6 +9243,136 @@
             applyView();
         }
 
+
+        // ═══════════════════════════════════════════════════════════════
+        // GOD MODE RENDERER v1.0 — bulletproof fallback card renderer
+        // Activated when applyView() throws or produces a blank grid.
+        // Does NOT depend on any helper that could be failing.
+        // ═══════════════════════════════════════════════════════════════
+        function cdbGodModeRender(data) {
+            try {
+                var grid = document.getElementById('threat-grid');
+                if (!grid) { console.error('[GOD MODE] #threat-grid not found'); return; }
+                if (!data || !data.length) {
+                    grid.innerHTML = '<div class="loading-state">No intel data available.</div>';
+                    return;
+                }
+                var _sc = function(s) {
+                    s = (s || '').toUpperCase();
+                    return s === 'CRITICAL' ? '#ff4444' : s === 'HIGH' ? '#ff7700' : s === 'MEDIUM' ? '#ffcc00' : s === 'LOW' ? '#00d4aa' : '#888';
+                };
+                var _sv = function(rs, item) {
+                    var r = parseFloat(rs || 0);
+                    if (r >= 9.0 || (item && item.severity === 'CRITICAL')) return 'CRITICAL';
+                    if (r >= 7.0 || (item && item.severity === 'HIGH')) return 'HIGH';
+                    if (r >= 4.0 || (item && item.severity === 'MEDIUM')) return 'MEDIUM';
+                    return 'LOW';
+                };
+                var _es = function(s) {
+                    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                };
+                var html = data.map(function(item) {
+                    try {
+                        var sev = _sv(item.risk_score, item);
+                        var sc  = _sc(sev);
+                        var rs  = parseFloat(item.risk_score || 0).toFixed(1);
+                        var title  = _es(item.title || 'Untitled Advisory');
+                        var actor  = _es((item.actor_tag && item.actor_tag !== 'UNC-UNKNOWN' && item.actor_tag !== 'UNC-CDB-99') ? item.actor_tag : 'UNATTRIBUTED');
+                        var source = _es((item.feed_source || item.source_url || '').replace(/https?:\/\/(www\.)?/,'').split('/')[0] || 'UNKNOWN');
+                        var ts     = item.timestamp ? new Date(item.timestamp).toLocaleDateString() : '';
+                        var stixId = _es((item.stix_id || item.id || '').slice(0, 36));
+                        var rawConf = item.confidence_score != null ? parseFloat(item.confidence_score) : null;
+                        var conf = (rawConf != null && rawConf > 0) ? Math.round(rawConf <= 1 ? rawConf * 100 : rawConf) : (sev === 'CRITICAL' ? 85 : sev === 'HIGH' ? 72 : sev === 'MEDIUM' ? 60 : 45);
+                        var iocCount = item.ioc_count || 0;
+                        var reportUrl = _es(item.report_url || item.source_url || '#');
+
+                        // MITRE tactic chips
+                        var tactics = Array.isArray(item.mitre_tactics) ? item.mitre_tactics.slice(0, 5) : [];
+                        var mitreChips = tactics.map(function(t) {
+                            var tid = typeof t === 'string' ? t : (t.technique_id || t.id || '');
+                            if (!tid) return '';
+                            return '<a href="https://attack.mitre.org/techniques/' + _es(tid.replace('.', '/')) + '/" target="_blank" rel="noopener" class="mitre-chip">' + _es(tid) + '</a>';
+                        }).filter(Boolean).join('');
+
+                        // TTP tags
+                        var ttps = Array.isArray(item.ttps) ? item.ttps.slice(0, 3) : [];
+                        var ttpHtml = ttps.map(function(t) {
+                            return '<span class="apex-tag">' + _es(typeof t === 'string' ? t : (t.name || '')) + '</span>';
+                        }).join('');
+
+                        // APEX AI summary
+                        var apexSummary = '';
+                        var _ai = item.apex_ai || item.apex || {};
+                        if (_ai.summary) apexSummary = _es(_ai.summary.slice(0, 240)) + (_ai.summary.length > 240 ? '…' : '');
+
+                        // Enrichment strip
+                        var enrichParts = [];
+                        if (item.cvss_score != null) {
+                            var cvssColor = item.cvss_score >= 9 ? '#ff4444' : item.cvss_score >= 7 ? '#ff7700' : item.cvss_score >= 4 ? '#ffcc00' : '#00d4aa';
+                            enrichParts.push('<span class="enrich-item">CVSS <span class="e-val" style="color:' + cvssColor + ';">' + parseFloat(item.cvss_score).toFixed(1) + '</span></span>');
+                        }
+                        if (item.epss_score != null) {
+                            var epssColor = item.epss_score >= 70 ? '#ff4444' : item.epss_score >= 40 ? '#ff7700' : '#888';
+                            enrichParts.push('<span class="enrich-item">EPSS <span class="e-val" style="color:' + epssColor + ';">' + item.epss_score + '%</span></span>');
+                        }
+                        enrichParts.push('<span class="enrich-item">CONF <span class="e-val">' + conf + '%</span></span>');
+                        if (source) enrichParts.push('<span class="enrich-item" style="margin-left:auto;">SRC: <span class="e-val">' + source + '</span></span>');
+
+                        // Badges
+                        var badges = '';
+                        if (item.kev_present) badges += '<span class="badge badge-kev">&#9889; CISA KEV</span> ';
+                        if (item.exploit_available) badges += '<span class="badge badge-exploit">&#9889; EXPLOIT AVAIL</span> ';
+                        if (item.zero_day) badges += '<span class="badge badge-zerod">&#9679; 0-DAY</span> ';
+
+                        return '<div class="intel-card cdb-fade-in" style="border-top:3px solid ' + sc + ';background:var(--card-bg,#0d0d1a);border-radius:8px;padding:18px 20px;position:relative;box-shadow:0 2px 24px rgba(0,0,0,0.4);">' +
+                            // Header row
+                            '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px;">' +
+                                '<div style="flex:1;min-width:0;">' +
+                                    '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:6px;">' +
+                                        '<span style="background:' + sc + '22;color:' + sc + ';border:1px solid ' + sc + '55;padding:2px 10px;border-radius:4px;font-size:10px;font-weight:800;letter-spacing:1px;font-family:var(--font-mono,monospace);">' + sev + '</span>' +
+                                        (stixId ? '<span style="font-size:9px;color:#555;font-family:var(--font-mono,monospace);">' + stixId + '</span>' : '') +
+                                        (ts ? '<span style="font-size:9px;color:#555;margin-left:auto;">' + ts + '</span>' : '') +
+                                    '</div>' +
+                                    '<div style="font-size:14px;font-weight:700;color:var(--text-primary,#e0e0e0);line-height:1.4;word-break:break-word;">' + title + '</div>' +
+                                '</div>' +
+                                '<div style="text-align:right;flex-shrink:0;padding-left:8px;">' +
+                                    '<div style="font-size:28px;font-weight:900;color:' + sc + ';line-height:1;font-family:var(--font-mono,monospace);">' + rs + '</div>' +
+                                    '<div style="font-size:8px;color:#666;letter-spacing:0.5px;text-transform:uppercase;">Risk Score</div>' +
+                                    '<div style="font-size:9px;color:#555;margin-top:2px;">' + conf + '% CONF</div>' +
+                                '</div>' +
+                            '</div>' +
+                            // MITRE chips
+                            (mitreChips ? '<div class="mitre-strip" style="margin-bottom:8px;">' + mitreChips + '</div>' : '') +
+                            // TTP tags
+                            (ttpHtml ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">' + ttpHtml + '</div>' : '') +
+                            // APEX AI summary
+                            (apexSummary ? '<div style="background:rgba(0,212,170,0.05);border-left:2px solid var(--accent,#00d4aa);padding:8px 12px;border-radius:4px;font-size:11px;color:#aaa;line-height:1.6;margin-bottom:10px;"><span style="color:var(--accent,#00d4aa);font-size:8px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;display:block;margin-bottom:4px;">&#11041; APEX AI ANALYSIS</span>' + apexSummary + '</div>' : '') +
+                            // Enrich strip
+                            '<div class="enrich-strip" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;">' +
+                                '<span class="enrich-item">ACTOR <span class="e-val" style="color:var(--accent,#00d4aa);">' + actor + '</span></span>' +
+                                (iocCount > 0 ? '<span class="enrich-item">IOCs <span class="e-val" style="color:#ff7700;">' + iocCount + '</span></span>' : '') +
+                                enrichParts.join('') +
+                            '</div>' +
+                            // Footer row: badges + report link
+                            '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">' +
+                                badges +
+                                '<a href="' + reportUrl + '" target="_blank" rel="noopener" style="margin-left:auto;background:linear-gradient(135deg,rgba(0,212,170,0.14),rgba(0,212,170,0.05));border:1px solid var(--accent,#00d4aa);color:var(--accent,#00d4aa);padding:6px 16px;border-radius:5px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono,monospace);" title="View Full Intel Report">&#128196; VIEW REPORT &#8599;</a>' +
+                            '</div>' +
+                        '</div>';
+                    } catch(itemErr) {
+                        console.warn('[GOD MODE] Card render error:', item && (item.stix_id || item.id), itemErr.message);
+                        return '<div class="intel-card" style="border-top:3px solid #333;background:var(--card-bg,#0d0d1a);border-radius:8px;padding:16px;"><div style="color:#555;font-size:11px;">&#9888; Advisory unavailable: ' + _es(item && item.title ? item.title.slice(0, 80) : 'Unknown') + '</div></div>';
+                    }
+                });
+                grid.innerHTML = html.join('');
+                console.log('[GOD MODE] Successfully rendered', data.length, 'intel cards');
+            } catch(e) {
+                console.error('[GOD MODE] Critical render failure:', e);
+                var g2 = document.getElementById('threat-grid');
+                if (g2) g2.innerHTML = '<div class="loading-state" style="color:#ff4444;">&#9888; Dashboard render error — please refresh the page.</div>';
+            }
+        }
+
         function applyView() {
             // v145.1: RENDER_IN_PROGRESS lock — prevent concurrent/duplicate render calls
             if (window.RENDER_IN_PROGRESS) {
@@ -9703,7 +9833,7 @@
                     const url = `https://attack.mitre.org/techniques/${tid.replace('.','/') }/`;
                     return `<a href="${url}" target="_blank" rel="noopener" class="hm-cell" data-tooltip="${tid} · ${count} hit${count>1?'s':''}" style="background:${color};color:${textColor};border:1px solid rgba(255,255,255,0.06);" title="${tid} â€” ${count} threat(s) · Click to open ATT&CK">
                         <span class="hm-id">${tid}</span>
-                        <span class="hm-count">Ã—${count}</span>
+                        <span class="hm-count">×${count}</span>
                     </a>`;
                 }).join('');
                 return `<div class="heatmap-tactic-group">
@@ -10603,7 +10733,11 @@ function renderTopThreats(data) {
                             var _fg = document.getElementById('threat-grid');
                             if (_fg) _fg.innerHTML = '';
                             console.log('[RENDER] Executed at', new Date().toISOString(), '| items:', _fd.length);
-                            try { applyView(); } catch(e) {}
+                            try {
+                        applyView();
+                        // GOD MODE safety net: verify grid populated after render
+                        try { var _grv = document.getElementById('threat-grid'); if (_grv && _grv.children.length === 0 && _ld.length > 0) { console.warn('[SENTINEL-APEX] Empty grid after applyView — GOD MODE activating'); cdbGodModeRender(_ld); } } catch(_gne) {}
+                    } catch(e) { console.error('[SENTINEL-APEX] applyView FAILED:', e); try { cdbGodModeRender(_ld); } catch(_ge) {} }
                         }
                         try { _cdbUpdateTabCounts(); } catch(e) {}
                         return;
@@ -10638,7 +10772,10 @@ function renderTopThreats(data) {
                     if (_lg) _lg.innerHTML = '';
                     // P8: debug trace -- logs ONCE per live-data load
                     console.log('[RENDER] Executed at', new Date().toISOString(), '| items:', _ld.length);
-                    try { applyView(); } catch(e) {}
+                    try {
+                        applyView();
+                        try { var _grv3 = document.getElementById('threat-grid'); if (_grv3 && _grv3.children.length === 0 && _ld.length > 0) { console.warn('[SENTINEL-APEX] Empty grid — GOD MODE'); cdbGodModeRender(_ld); } } catch(_gne3) {}
+                    } catch(e) { console.error('[SENTINEL-APEX] applyView FAILED (path-ld):', e); try { cdbGodModeRender(_ld); } catch(_ge3) {} }
                     // v112.1 API COUNT SYNC: Worker /api/preview nests total under data.preview.total_in_feed
                     // Fix: read data.preview.total_in_feed first, fall back to top-level fields
                     try {
@@ -10704,7 +10841,10 @@ function renderTopThreats(data) {
                         var _efg = document.getElementById('threat-grid');
                         if (_efg) _efg.innerHTML = '';
                         console.log('[RENDER] Executed at', new Date().toISOString(), '| items:', manifestData.length);
-                        try { applyView(); } catch(e) {}
+                        try {
+                            applyView();
+                            try { var _grv4 = document.getElementById('threat-grid'); if (_grv4 && _grv4.children.length === 0 && manifestData.length > 0) { cdbGodModeRender(manifestData); } } catch(_gne4) {}
+                        } catch(e) { console.error('[SENTINEL-APEX] applyView FAILED (emb2):', e); try { cdbGodModeRender(manifestData); } catch(_ge4) {} }
                     }
                 }
                 _liveDataLoaded = true;
