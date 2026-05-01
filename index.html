@@ -10563,6 +10563,9 @@ function renderTopThreats(data) {
                     });
                     // v138 FIX: restore apex_ai for items loaded from feed.json (which strips apex_ai)
                     try { manifestData = _mergeApexAI(manifestData); } catch(e) {}
+                    // v143.5.0 FIX: publish live data for AI Brain (EMBEDDED_INTEL is [] in R2-only arch)
+                    window.__GOC_LIVE_INTEL = manifestData;
+                    try { if (window.CDB_AI && window.CDB_AI.runBrain) window.CDB_AI.runBrain(); } catch(_aie) {}
                     _liveDataLoaded = true;
                     // v112.1 FIX: computeMetrics FIRST â€” then override m-total/m-last-sync with authoritative API values
                     // computeMetrics(manifestData) sets m-total = preview items (10); overrides below correct to full count
@@ -14244,9 +14247,11 @@ function renderTopThreats(data) {
 
   /* ================================================================
      AI CYBER BRAIN - uses window.EMBEDDED_INTEL baked by pipeline
+     v143.5.0 FIX: falls back to window.__GOC_LIVE_INTEL (set by loadGOCIntel)
+     when EMBEDDED_INTEL is empty (R2-only architecture since v112.0)
      ================================================================ */
   function runAIBrain(){
-    var intel=window.EMBEDDED_INTEL||[];
+    var intel=window.EMBEDDED_INTEL||(window.__GOC_LIVE_INTEL)||[];
     if(!intel.length){
       set('ai-campaigns-body','<p style="color:#94a3b8;text-align:center;padding:20px">No intel data loaded.</p>');
       set('ai-anomaly-body',  '<p style="color:#94a3b8;text-align:center;padding:20px">No anomaly data.</p>');
@@ -14397,6 +14402,18 @@ function renderTopThreats(data) {
   /* ── Boot sequence ── */
   function boot(){
     runAIBrain();
+    /* v143.5.0 FIX: If EMBEDDED_INTEL empty (R2-only arch), retry AI Brain once
+       live data has been loaded into window.__GOC_LIVE_INTEL by loadGOCIntel() */
+    if(!(window.EMBEDDED_INTEL&&window.EMBEDDED_INTEL.length)){
+      var _brainTries=0;
+      var _brainPoll=setInterval(function(){
+        if(window.__GOC_LIVE_INTEL&&window.__GOC_LIVE_INTEL.length){
+          clearInterval(_brainPoll);
+          runAIBrain();
+        }
+        if(++_brainTries>120) clearInterval(_brainPoll); /* 60s max */
+      },500);
+    }
     if(GRID){
       GRID.innerHTML=CACHE.map(function(a){return card(a,false);}).join('');
       if(LU) LU.textContent='Cache loaded | Fetching live feed...';
@@ -14496,6 +14513,8 @@ function renderTopThreats(data) {
 
   /* Expose for manual refresh buttons */
   window.CDB_NEWS={refresh:refreshNews};
+  /* v143.5.0: expose runAIBrain so loadGOCIntel can trigger it after live data loads */
+  window.CDB_AI={runBrain:runAIBrain};
 })();
 </script>
 <!-- /CDB-AI-BRAIN-INIT-v134 -->
