@@ -8286,6 +8286,11 @@
             });
 
             const grid = document.getElementById('threat-grid');
+            // v145.1: DOM validation — hard guard before any innerHTML access
+            if (!grid) {
+                console.error('[SENTINEL-APEX] renderCards: #threat-grid container not found in DOM — aborting render');
+                return;
+            }
             if (!data.length) {
                 grid.innerHTML = '<div class="loading-state">No advisories match the current filter.</div>';
                 document.getElementById('search-count').textContent = '';
@@ -9239,6 +9244,13 @@
         }
 
         function applyView() {
+            // v145.1: RENDER_IN_PROGRESS lock — prevent concurrent/duplicate render calls
+            if (window.RENDER_IN_PROGRESS) {
+                console.warn('[SENTINEL-APEX] applyView() skipped — render already in progress');
+                return;
+            }
+            window.RENDER_IN_PROGRESS = true;
+            try {
             let filtered = [...manifestData];
 
             // v73.1: Time-range filter (SAFE â€” falls back to full dataset on failure)
@@ -9284,6 +9296,9 @@
                 _dedup.add(key); return true;
             });
             renderCards(filtered);
+            } finally {
+                window.RENDER_IN_PROGRESS = false;
+            }
         }
 
         // â”€â”€ Search (v21.0) â”€â”€
@@ -9806,7 +9821,7 @@
                 const sev = getSeverity(d.risk_score, d);
                 const col = sevColors[sev] || '#5a6578';
                 const cves = extractCVEs(d.title);
-                const id = cves[0] || d.title.slice(0, 30) + 'â€¦';
+                const id = cves[0] || cleanText(d.title).slice(0, 30) + 'â€¦';
                 return `<span class="ticker-item" onclick="window.open('${d.report_url||d.source_url||''}','_blank')">
                     <span class="ticker-sev" style="background:${col}22;color:${col};">${sev}</span>
                     ${id} â€” RISK ${d.risk_score}/10
@@ -10340,6 +10355,19 @@ function renderTopThreats(data) {
         let _liveDataLoaded = false;
         window.__INTEL_RENDERED__ = false; // APEX FINAL: single render execution guard
         window.__DATA_LOADED__    = false; // APEX FINAL: single data load guard
+        window.RENDER_IN_PROGRESS = false; // v145.1: concurrent render lock init
+
+        // v145.1: GLOBAL ERROR HANDLER — catch and log all unhandled JS errors
+        window.onerror = function(msg, src, line, col, err) {
+            console.error('🚨 [SENTINEL-APEX] GLOBAL ERROR:', msg, '| Source:', src, '| Line:', line, '| Error:', err);
+            // Reset render lock on fatal error so recovery is possible
+            window.RENDER_IN_PROGRESS = false;
+            return false; // Do not suppress default error handling
+        };
+        window.onunhandledrejection = function(event) {
+            console.error('🚨 [SENTINEL-APEX] UNHANDLED PROMISE REJECTION:', event.reason);
+            window.RENDER_IN_PROGRESS = false;
+        };
 
         function bootFromEmbeddedCache() {
             // Instant render from embedded cache â€” zero network dependency
@@ -10501,14 +10529,20 @@ function renderTopThreats(data) {
                     clearTimeout(tid);
                     if (!resp.ok) throw new Error('HTTP ' + resp.status);
                     var data    = await resp.json();
-                    // v145.0: API-ONLY parse — Worker returns { preview: { items: [...] } }
-                    // feed.json / api/feed.json removed from MANIFEST_URLS — API is sole source
-                    // Safe access: data?.preview?.items with Array fallback for plain arrays
-                    var items = (data && data.preview && data.preview.items) ? data.preview.items
+                    // v145.1: MULTI-SCHEMA SAFE PARSER
+                    // Priority: data.preview.items (Worker) > data.items > data.data.items > plain Array
+                    console.log('[SENTINEL-APEX] API RAW:', JSON.stringify(data).slice(0, 200));
+                    var items = (data && data.preview && data.preview.items && Array.isArray(data.preview.items) && data.preview.items.length > 0)
+                                ? data.preview.items
+                                : (data && data.items && Array.isArray(data.items) && data.items.length > 0)
+                                ? data.items
+                                : (data && data.data && data.data.items && Array.isArray(data.data.items) && data.data.items.length > 0)
+                                ? data.data.items
                                 : (Array.isArray(data) ? data : []);
                     var entries = items;
+                    console.log('[SENTINEL-APEX] ITEM COUNT:', entries.length);
                     if (!entries.length) {
-                        console.error('[SENTINEL-APEX] NO DATA FROM API — preview.items empty or absent');
+                        console.error('[SENTINEL-APEX] NO DATA FROM API — all parse paths returned 0 items');
                         throw new Error('API returned 0 items');
                     }
                     console.log('[SENTINEL-APEX] API items:', entries.length);
@@ -5034060,3 +5034094,4 @@ function renderTopThreats(data) {
 
 
 
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
