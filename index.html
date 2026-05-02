@@ -9275,7 +9275,7 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                                 const _eid = item.stix_id || item.id || '';
                                 const _sUrl = item.source_url || '';
                                 const _vs = item.validation_status || '';
-                                const _isFail = _vs === 'quality_fail' || _vs === 'write_error';
+                                const _isFail = _vs === 'quality_fail' || _vs === 'write_error';  // 'pending' is NOT a fail -- links are valid
 
                                 // Build internal URL \u2014 prefer internal_report_url, then report_url if it is internal
                                 let _iru = (item.internal_report_url || '').trim();
@@ -9292,16 +9292,16 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                                 // Canonical internal URL: prefer explicit internal_report_url field
                                 const _internalUrl = _iru
                                     || (_ruIsInternal ? _ru : '')
-                                    || (_eid ? `/reports/${_eid}.html` : '');
+                                    || (_eid ? (() => { const _d=(item.published_at||item.processed_at||'').slice(0,7); const _ym=_d?_d.replace('-','/'):''; return _ym?`/reports/${_ym}/${_eid}.html`:`/reports/${_eid}.html`; })() : '');
 
                                 const _hasInternal = !!_internalUrl && !_isFail;
 
                                 if (_hasInternal) {
-                                    return `<a href="${_internalUrl}" target="_blank" rel="noopener" class="card-link">View Tactical Dossier &#x2192;</a>`;
+                                    return `<a href="${_internalUrl}" target="_blank" rel="noopener" class="card-link">SENTINEL APEX INTEL REPORT &#x2192;</a>`;
                                 }
                                 // Fallback 1: inline modal (never shows external as "dossier")
                                 if (_eid) {
-                                    return `<button class="js-open-modal card-link" data-stix-id="${_eid}" style="border:none;background:none;padding:0;cursor:pointer;">View Tactical Dossier &#x2192;</button>`;
+                                    return `<button class="js-open-modal card-link" data-stix-id="${_eid}" style="border:none;background:none;padding:0;cursor:pointer;">SENTINEL APEX INTEL REPORT &#x2192;</button>`;
                                 }
                                 // Fallback 2: source URL \u2014 labelled as SOURCE, never as Dossier
                                 if (_sUrl) {
