@@ -15110,6 +15110,1128 @@ function renderTopThreats(data) {
   window.CDB_NEWS={refresh:refreshNews};
 })();
 </script>
+
+
+<style id="apex-god-css">
+/* ═══════════════════════════════════════════════════════════
+   APEX AI GOD ENGINE — Card Decoration + Analysis Panel CSS
+   v143.0.0 GOD-MODE
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Card God-Mode Decoration ── */
+.intel-card {
+  position: relative;
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+.intel-card:hover {
+  transform: translateY(-2px) !important;
+}
+.intel-card.agod-processed {
+  border-bottom: 2px solid transparent;
+}
+.intel-card.sev-critical.agod-processed { border-bottom-color: var(--critical, #dc2626); }
+.intel-card.sev-high.agod-processed     { border-bottom-color: var(--high, #ea580c); }
+.intel-card.sev-medium.agod-processed   { border-bottom-color: var(--medium, #d97706); }
+.intel-card.sev-low.agod-processed      { border-bottom-color: var(--low, #16a34a); }
+
+/* ── AGOD Trigger Button ── */
+.agod-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 5px 12px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+  border: 1px solid rgba(139,92,246,0.5);
+  border-radius: 4px;
+  color: #a78bfa;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  justify-content: center;
+}
+.agod-trigger:hover {
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+  border-color: rgba(139,92,246,0.9);
+  color: #c4b5fd;
+  box-shadow: 0 0 12px rgba(139,92,246,0.3);
+}
+.agod-trigger .agod-icon {
+  font-size: 12px;
+}
+.agod-trigger[data-open="true"] {
+  background: linear-gradient(135deg, #312e81 0%, #4c1d95 100%);
+  border-color: #7c3aed;
+  color: #ede9fe;
+}
+
+/* ── AGOD Panel Container ── */
+.agod-panel {
+  display: none;
+  margin-top: 12px;
+  border: 1px solid rgba(139,92,246,0.3);
+  border-radius: 6px;
+  background: rgba(15,23,42,0.95);
+  overflow: hidden;
+  animation: agodSlideIn 0.25s ease;
+}
+.agod-panel.agod-open {
+  display: block;
+}
+@keyframes agodSlideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Panel Header ── */
+.agod-panel-hdr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: linear-gradient(90deg, rgba(109,40,217,0.2) 0%, rgba(15,23,42,0) 100%);
+  border-bottom: 1px solid rgba(139,92,246,0.2);
+}
+.agod-panel-hdr .agod-hdr-title {
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #a78bfa;
+  flex: 1;
+}
+.agod-panel-hdr .agod-risk-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 2px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+.agod-risk-badge.risk-critical { background: rgba(220,38,38,0.25); color: #fca5a5; border: 1px solid rgba(220,38,38,0.4); }
+.agod-risk-badge.risk-high     { background: rgba(234,88,12,0.25);  color: #fdba74; border: 1px solid rgba(234,88,12,0.4); }
+.agod-risk-badge.risk-medium   { background: rgba(217,119,6,0.25);  color: #fde68a; border: 1px solid rgba(217,119,6,0.4); }
+.agod-risk-badge.risk-low      { background: rgba(22,163,74,0.25);  color: #86efac; border: 1px solid rgba(22,163,74,0.4); }
+
+/* ── Tab Bar ── */
+.agod-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(139,92,246,0.15);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.agod-tabs::-webkit-scrollbar { display: none; }
+.agod-tab {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  font-family: var(--font-mono, monospace);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #64748b;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.agod-tab:hover { color: #94a3b8; background: rgba(139,92,246,0.05); }
+.agod-tab.active { color: #a78bfa; border-bottom-color: #7c3aed; background: rgba(139,92,246,0.08); }
+.agod-tab.locked { color: #374151; cursor: not-allowed; }
+.agod-tab.locked::after { content: " 🔒"; font-size: 7px; }
+
+/* ── Tab Content Panels ── */
+.agod-tab-content { display: none; padding: 10px 12px; }
+.agod-tab-content.active { display: block; }
+
+/* ── Risk Matrix ── */
+.agod-risk-matrix {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.agod-risk-factor {
+  background: rgba(15,23,42,0.8);
+  border: 1px solid rgba(51,65,85,0.6);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+.agod-risk-factor .rf-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 7.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+.agod-risk-factor .rf-bar-wrap {
+  height: 4px;
+  background: rgba(51,65,85,0.5);
+  border-radius: 2px;
+  margin-bottom: 4px;
+  overflow: hidden;
+}
+.agod-risk-factor .rf-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+.rf-bar.c-critical { background: linear-gradient(90deg, #dc2626, #ef4444); }
+.rf-bar.c-high     { background: linear-gradient(90deg, #ea580c, #f97316); }
+.rf-bar.c-medium   { background: linear-gradient(90deg, #d97706, #f59e0b); }
+.rf-bar.c-low      { background: linear-gradient(90deg, #16a34a, #22c55e); }
+.agod-risk-factor .rf-val {
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+.agod-composite-score {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(109,40,217,0.1);
+  border: 1px solid rgba(139,92,246,0.25);
+  border-radius: 4px;
+  margin-top: 4px;
+}
+.agod-composite-score .cs-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #a78bfa;
+}
+.agod-composite-score .cs-score {
+  font-family: var(--font-mono, monospace);
+  font-size: 18px;
+  font-weight: 900;
+  color: #ede9fe;
+}
+.agod-composite-score .cs-verdict {
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  border-radius: 3px;
+}
+
+/* ── Mitigation Steps ── */
+.agod-miti-list { list-style: none; padding: 0; margin: 0; }
+.agod-miti-step {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(51,65,85,0.3);
+}
+.agod-miti-step:last-child { border-bottom: none; }
+.agod-miti-step .ms-num {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(109,40,217,0.3);
+  border: 1px solid rgba(139,92,246,0.4);
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  font-weight: 700;
+  color: #a78bfa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.agod-miti-step .ms-text {
+  font-size: 10px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+.agod-miti-step .ms-priority {
+  flex-shrink: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 7px;
+  letter-spacing: 1px;
+  padding: 2px 5px;
+  border-radius: 2px;
+  text-transform: uppercase;
+}
+.ms-priority.p-immediate { background: rgba(220,38,38,0.2); color: #fca5a5; }
+.ms-priority.p-short     { background: rgba(234,88,12,0.2);  color: #fdba74; }
+.ms-priority.p-medium    { background: rgba(217,119,6,0.2);  color: #fde68a; }
+
+/* ── Predictions ── */
+.agod-pred-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.agod-pred-card {
+  background: rgba(15,23,42,0.8);
+  border: 1px solid rgba(51,65,85,0.5);
+  border-radius: 4px;
+  padding: 7px 9px;
+  text-align: center;
+}
+.agod-pred-card .pc-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 7px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+.agod-pred-card .pc-value {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  font-weight: 800;
+  color: #e2e8f0;
+}
+.agod-pred-card .pc-unit {
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+.agod-timeline {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(15,23,42,0.6);
+  border: 1px solid rgba(51,65,85,0.4);
+  border-radius: 4px;
+}
+.agod-timeline .tl-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 7.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+.agod-tl-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(51,65,85,0.5);
+  margin-bottom: 4px;
+}
+.agod-tl-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s ease;
+}
+.agod-tl-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono, monospace);
+  font-size: 7px;
+  color: #475569;
+}
+
+/* ── Recommendations ── */
+.agod-rec-tier {
+  margin-bottom: 8px;
+}
+.agod-rec-tier-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(51,65,85,0.3);
+}
+.agod-rec-tier-hdr .rt-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  text-transform: uppercase;
+}
+.rt-badge.immediate { background: rgba(220,38,38,0.2); color: #fca5a5; border: 1px solid rgba(220,38,38,0.3); }
+.rt-badge.week      { background: rgba(234,88,12,0.2);  color: #fdba74; border: 1px solid rgba(234,88,12,0.3); }
+.rt-badge.month     { background: rgba(22,163,74,0.2);  color: #86efac; border: 1px solid rgba(22,163,74,0.3); }
+.agod-rec-tier-hdr .rt-timeframe {
+  font-family: var(--font-mono, monospace);
+  font-size: 7.5px;
+  color: #475569;
+}
+.agod-rec-item {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 4px 0;
+}
+.agod-rec-item .ri-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  margin-top: 4px;
+}
+.ri-dot.c-immediate { background: #f87171; }
+.ri-dot.c-week      { background: #fb923c; }
+.ri-dot.c-month     { background: #4ade80; }
+.agod-rec-item .ri-text {
+  font-size: 10px;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+/* ── Impact Assessment ── */
+.agod-impact-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.agod-impact-card {
+  background: rgba(15,23,42,0.8);
+  border: 1px solid rgba(51,65,85,0.5);
+  border-radius: 4px;
+  padding: 8px;
+}
+.agod-impact-card .ic-hdr {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 5px;
+}
+.agod-impact-card .ic-icon { font-size: 12px; }
+.agod-impact-card .ic-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 7.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.agod-impact-card .ic-level {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.ic-level.L-CRITICAL { color: #fca5a5; }
+.ic-level.L-HIGH     { color: #fdba74; }
+.ic-level.L-MEDIUM   { color: #fde68a; }
+.ic-level.L-LOW      { color: #86efac; }
+.agod-impact-card .ic-detail {
+  font-size: 9px;
+  color: #475569;
+  line-height: 1.4;
+}
+
+/* ── Detection Rules (Enterprise) ── */
+.agod-detect-item {
+  margin-bottom: 8px;
+  border: 1px solid rgba(51,65,85,0.4);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.agod-detect-item .di-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: rgba(15,23,42,0.9);
+  border-bottom: 1px solid rgba(51,65,85,0.3);
+}
+.agod-detect-item .di-type {
+  font-family: var(--font-mono, monospace);
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  text-transform: uppercase;
+}
+.di-type.sigma   { background: rgba(59,130,246,0.2); color: #93c5fd; }
+.di-type.yara    { background: rgba(16,185,129,0.2); color: #6ee7b7; }
+.di-type.suricata { background: rgba(245,158,11,0.2); color: #fde68a; }
+.agod-detect-item .di-name {
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  color: #94a3b8;
+  flex: 1;
+}
+.agod-detect-item pre {
+  margin: 0;
+  padding: 8px;
+  background: rgba(2,6,23,0.8);
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  color: #7dd3fc;
+  line-height: 1.5;
+  overflow-x: auto;
+  max-height: 120px;
+}
+
+/* ── Paywall Banner ── */
+.agod-paywall {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 12px;
+  background: linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(30,27,75,0.95) 100%);
+  border: 1px dashed rgba(139,92,246,0.4);
+  border-radius: 4px;
+  text-align: center;
+}
+.agod-paywall .pw-icon { font-size: 22px; }
+.agod-paywall .pw-title {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #c4b5fd;
+}
+.agod-paywall .pw-desc {
+  font-size: 10px;
+  color: #64748b;
+  max-width: 220px;
+  line-height: 1.5;
+}
+.agod-paywall .pw-cta {
+  display: inline-block;
+  padding: 6px 16px;
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #ede9fe;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+.agod-paywall .pw-cta:hover {
+  background: linear-gradient(135deg, #6d28d9, #5b21b6);
+  box-shadow: 0 0 12px rgba(124,58,237,0.4);
+}
+
+/* ── Scrollbar inside panel ── */
+.agod-tab-content::-webkit-scrollbar { width: 3px; }
+.agod-tab-content::-webkit-scrollbar-track { background: transparent; }
+.agod-tab-content::-webkit-scrollbar-thumb { background: rgba(139,92,246,0.3); border-radius: 2px; }
+</style>
+
+
+<script id="apex-god-engine">
+/* ═══════════════════════════════════════════════════════════
+   APEX AI GOD ENGINE v143.0.0
+   Client-side deterministic threat intelligence analysis
+   Zero-dependency, tier-gated, card-injected
+   ═══════════════════════════════════════════════════════════ */
+(function() {
+  'use strict';
+
+  /* ── Tier Detection ── */
+  function getUserTier() {
+    try {
+      var jwt = localStorage.getItem('cdb_jwt') || localStorage.getItem('sentinel_jwt');
+      if (jwt) {
+        var parts = jwt.split('.');
+        if (parts.length === 3) {
+          var payload = JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/')));
+          var t = (payload.tier||payload.plan||'').toLowerCase();
+          if (t === 'enterprise') return 'enterprise';
+          if (t === 'pro') return 'pro';
+        }
+      }
+      var apiKey = localStorage.getItem('cdb_api_key') || localStorage.getItem('sentinel_api_key') || '';
+      if (/^ENT-/.test(apiKey)) return 'enterprise';
+      if (/^PRO-/.test(apiKey)) return 'pro';
+    } catch(e) {}
+    return 'free';
+  }
+
+  /* ── Knowledge Base ── */
+  var KB = {
+    MITIGATIONS: {
+      ransomware: [
+        { text: 'Immediately isolate infected hosts from network segments', priority: 'immediate' },
+        { text: 'Disable SMB and RDP on all non-essential systems', priority: 'immediate' },
+        { text: 'Restore from verified offline backups — do not pay ransom', priority: 'immediate' },
+        { text: 'Deploy honeypot files in critical directories to detect lateral movement', priority: 'short' },
+        { text: 'Enforce application allowlisting via AppLocker or WDAC', priority: 'short' },
+        { text: 'Implement tiered backup strategy (3-2-1 rule) with immutable storage', priority: 'medium' }
+      ],
+      phishing: [
+        { text: 'Reset credentials for all potentially compromised accounts immediately', priority: 'immediate' },
+        { text: 'Block identified malicious sender domains at email gateway', priority: 'immediate' },
+        { text: 'Enable MFA on all privileged accounts using phishing-resistant methods (FIDO2)', priority: 'immediate' },
+        { text: 'Deploy DMARC/DKIM/SPF enforcement with reject policy', priority: 'short' },
+        { text: 'Run phishing simulation and targeted security awareness training', priority: 'medium' },
+        { text: 'Implement email sandboxing for all attachments and links', priority: 'medium' }
+      ],
+      exploit: [
+        { text: 'Apply vendor security patch immediately — prioritize internet-facing systems', priority: 'immediate' },
+        { text: 'Enable virtual patching via WAF/IPS with CVE-specific signatures', priority: 'immediate' },
+        { text: 'Restrict vulnerable service exposure to minimum required IPs', priority: 'immediate' },
+        { text: 'Monitor exploit attempts using EDR behavioral detection', priority: 'short' },
+        { text: 'Audit all systems for vulnerable software versions', priority: 'short' },
+        { text: 'Implement automated patch management with SLA-based deployment windows', priority: 'medium' }
+      ],
+      malware: [
+        { text: 'Kill malicious processes and quarantine infected binaries immediately', priority: 'immediate' },
+        { text: 'Block identified C2 domains and IPs at perimeter firewall', priority: 'immediate' },
+        { text: 'Collect memory dumps before remediation for forensic analysis', priority: 'immediate' },
+        { text: 'Deploy YARA rules to hunt for related IOCs across fleet', priority: 'short' },
+        { text: 'Review and harden PowerShell execution policy (Constrained Language Mode)', priority: 'short' },
+        { text: 'Implement EDR with memory scanning and behavioral analytics', priority: 'medium' }
+      ],
+      apt: [
+        { text: 'Activate IR retainer — APT activity requires immediate expert engagement', priority: 'immediate' },
+        { text: 'Audit privileged accounts for unauthorized access and lateral movement', priority: 'immediate' },
+        { text: 'Revoke and reissue all service account credentials', priority: 'immediate' },
+        { text: 'Deploy deception technology (honeytokens, honeyaccounts)', priority: 'short' },
+        { text: 'Implement Zero Trust Network Access — eliminate implicit trust zones', priority: 'short' },
+        { text: 'Establish threat hunting program with MITRE ATT&CK coverage mapping', priority: 'medium' }
+      ],
+      vulnerability: [
+        { text: 'Prioritize patch by CVSS + EPSS + KEV status for critical systems', priority: 'immediate' },
+        { text: 'Enable temporary compensating controls (disable feature, restrict access)', priority: 'immediate' },
+        { text: 'Scan all assets for vulnerability exposure using authenticated scanning', priority: 'short' },
+        { text: 'Implement continuous vulnerability management program', priority: 'medium' },
+        { text: 'Establish 30-day SLA for critical patches, 90-day for high', priority: 'medium' },
+        { text: 'Deploy SBOM tracking for third-party component vulnerability monitoring', priority: 'medium' }
+      ],
+      generic: [
+        { text: 'Activate incident response procedures and notify security team', priority: 'immediate' },
+        { text: 'Collect and preserve all relevant logs before any remediation', priority: 'immediate' },
+        { text: 'Block identified IOCs (IPs, domains, hashes) across all controls', priority: 'immediate' },
+        { text: 'Conduct network segmentation audit to limit blast radius', priority: 'short' },
+        { text: 'Review and update detection rules based on TTPs observed', priority: 'short' },
+        { text: 'Document incident timeline and update threat model accordingly', priority: 'medium' }
+      ]
+    },
+
+    DETECTIONS: {
+      ransomware: {
+        sigma: 'title: Ransomware File Extension Encryption\nstatus: experimental\ndescription: Detects mass file renaming indicative of ransomware\nlogsource:\n  category: file_event\ndetection:\n  selection:\n    TargetFilename|endswith:\n      - .locked\n      - .encrypted\n      - .enc\n      - .crypt\n  condition: selection | count() by ComputerName > 100\n  timeframe: 5m\nlevel: critical',
+        yara: 'rule Ransomware_Generic {\n  meta:\n    description = "Generic ransomware behavior"\n    severity = "critical"\n  strings:\n    $enc1 = "CryptEncrypt" ascii\n    $enc2 = "BCryptEncrypt" ascii\n    $note = "YOUR FILES" ascii nocase\n    $note2 = "decrypt" ascii nocase\n  condition:\n    2 of ($enc*) and 1 of ($note*)\n}',
+        suricata: 'alert smb any any -> $HOME_NET any (msg:"ET RANSOMWARE SMB Lateral Movement"; flow:established,to_server; content:"|FF|SMB"; depth:4; sid:9000001; rev:1;)'
+      },
+      phishing: {
+        sigma: 'title: Suspicious Email Attachment Execution\nstatus: stable\ndescription: Detects execution of attachment from email client\nlogsource:\n  category: process_creation\ndetection:\n  selection:\n    ParentImage|endswith:\n      - \\outlook.exe\n      - \\thunderbird.exe\n    Image|endswith:\n      - \\cmd.exe\n      - \\powershell.exe\n      - \\wscript.exe\n  condition: selection\nlevel: high',
+        yara: 'rule Phishing_Document {\n  meta:\n    description = "Macro-enabled phishing document"\n  strings:\n    $macro = "AutoOpen" ascii\n    $vba = "Shell(" ascii\n    $url = "http" ascii wide\n  condition:\n    $macro and ($vba or $url)\n}',
+        suricata: 'alert http $HOME_NET any -> $EXTERNAL_NET any (msg:"ET PHISHING Credential Harvester"; content:"POST"; http_method; content:"password="; http_client_body; sid:9000002; rev:1;)'
+      },
+      exploit: {
+        sigma: 'title: Web Application Exploit Attempt\nstatus: experimental\ndescription: Detects common web exploit patterns\nlogsource:\n  category: webserver\ndetection:\n  selection:\n    cs-uri-query|contains:\n      - "../"\n      - "UNION SELECT"\n      - "<scr\' + \'ipt>"\n      - "eval("\n  condition: selection\nlevel: high',
+        yara: 'rule Exploit_Shellcode {\n  meta:\n    description = "Generic shellcode pattern"\n  strings:\n    $nop = { 90 90 90 90 90 }\n    $int3 = { CC CC CC CC }\n    $sc = { 31 C0 50 68 }\n  condition:\n    any of them\n}',
+        suricata: 'alert http any any -> $HTTP_SERVERS any (msg:"ET EXPLOIT Generic RCE Attempt"; content:"cmd.exe"; nocase; http_uri; sid:9000003; rev:1;)'
+      },
+      generic: {
+        sigma: 'title: Generic Threat IOC Match\nstatus: experimental\ndescription: Detects known threat actor TTPs\nlogsource:\n  product: windows\n  category: process_creation\ndetection:\n  selection:\n    CommandLine|contains:\n      - "powershell -enc"\n      - "mshta http"\n      - "regsvr32 /s /n /u /i:http"\n  condition: selection\nlevel: medium',
+        yara: 'rule Threat_Generic_IOC {\n  meta:\n    description = "Generic threat IOC pattern"\n  strings:\n    $s1 = "CreateRemoteThread" ascii\n    $s2 = "VirtualAllocEx" ascii\n    $s3 = "WriteProcessMemory" ascii\n  condition:\n    all of them\n}',
+        suricata: 'alert dns any any -> any 53 (msg:"ET THREAT DNS Beacon Pattern"; dns_query; content:".xyz"; endswith; threshold:type both,track by_src,count 20,seconds 60; sid:9000004; rev:1;)'
+      }
+    },
+
+    IMPACT_MATRIX: {
+      critical: {
+        financial:     { level: 'CRITICAL', detail: 'Potential loss >$1M. Business operations at immediate risk. Regulatory fines likely.' },
+        operational:   { level: 'CRITICAL', detail: 'Full system compromise possible. All business processes at risk. Immediate shutdown may be required.' },
+        reputational:  { level: 'HIGH',     detail: 'Customer trust severely impacted. Media coverage likely. Executive notification required.' },
+        compliance:    { level: 'CRITICAL', detail: 'Breach notification obligations triggered. GDPR/HIPAA/PCI-DSS penalties applicable.' }
+      },
+      high: {
+        financial:     { level: 'HIGH',   detail: 'Estimated loss $100K-$1M. Recovery costs significant. Cyber insurance claim advised.' },
+        operational:   { level: 'HIGH',   detail: 'Critical systems degraded. Incident response resources required. SLA breach likely.' },
+        reputational:  { level: 'MEDIUM', detail: 'Internal escalation required. Customer communication needed within 72 hours.' },
+        compliance:    { level: 'HIGH',   detail: 'Regulatory reporting may be required. Legal team consultation advised.' }
+      },
+      medium: {
+        financial:     { level: 'MEDIUM', detail: 'Estimated loss $10K-$100K. Productivity impact. IT remediation costs.' },
+        operational:   { level: 'MEDIUM', detail: 'Partial service disruption. Non-critical systems affected. Remediation within 48-72 hours.' },
+        reputational:  { level: 'LOW',    detail: 'Internal impact only. Monitor for escalation. Standard communication protocols.' },
+        compliance:    { level: 'MEDIUM', detail: 'Document incident for audit trail. Review controls against framework requirements.' }
+      },
+      low: {
+        financial:     { level: 'LOW', detail: 'Minimal financial impact. Standard IT remediation costs.' },
+        operational:   { level: 'LOW', detail: 'Minor system impact. Normal change management process adequate.' },
+        reputational:  { level: 'LOW', detail: 'No external impact anticipated. Internal note sufficient.' },
+        compliance:    { level: 'LOW', detail: 'No immediate regulatory action required. Document in risk register.' }
+      }
+    }
+  };
+
+  /* ── Threat Type Classifier ── */
+  function getThreatType(item) {
+    var text = [
+      item.title||'', item.description||'', item.threat_type||'',
+      (item.tags||[]).join(' '), (item.labels||[]).join(' '),
+      (item.actor||item.threat_actor||'')
+    ].join(' ').toLowerCase();
+    if (/ransomware|ransom|encrypt/.test(text)) return 'ransomware';
+    if (/phish|credential|harvest|spear/.test(text)) return 'phishing';
+    if (/apt|nation.state|state.sponsor|advanced.persist/.test(text)) return 'apt';
+    if (/cve-|exploit|remote.code|rce|buffer.overflow|zero.day|0day/.test(text)) return 'exploit';
+    if (/malware|trojan|backdoor|rat|stealer|infostealer|botnet/.test(text)) return 'malware';
+    if (/vulnerab|patch|advisory|exposure/.test(text)) return 'vulnerability';
+    return 'generic';
+  }
+
+  /* ── Risk Matrix Computation ── */
+  function computeRiskMatrix(item) {
+    var sev = (item.severity||item.risk_level||'medium').toLowerCase();
+    var score = parseFloat(item.risk_score) || 5;
+
+    // CVSS score (28% weight) — normalize to 0-10
+    var cvss = parseFloat(item.cvss_score || item.cvss || 0);
+    if (!cvss && sev === 'critical') cvss = 9.0;
+    else if (!cvss && sev === 'high') cvss = 7.5;
+    else if (!cvss && sev === 'medium') cvss = 5.5;
+    else if (!cvss) cvss = 3.0;
+    var cvssNorm = (cvss / 10) * 10;
+
+    // EPSS probability (20% weight) — 0-10
+    var epss = parseFloat(item.epss_score || item.epss || 0);
+    if (!epss) epss = sev === 'critical' ? 0.65 : sev === 'high' ? 0.35 : sev === 'medium' ? 0.15 : 0.05;
+    var epssNorm = epss * 10;
+
+    // KEV status (18% weight) — binary 0 or 10, scaled
+    var kev = (item.kev === true || item.in_kev === true || item.kev_status === 'yes' ||
+               String(item.kev||'').toLowerCase() === 'true') ? 10 : 0;
+
+    // IOC Density (14% weight)
+    var iocCount = 0;
+    if (item.iocs) {
+      var iocs = item.iocs;
+      iocCount = (iocs.ips||[]).length + (iocs.domains||[]).length +
+                 (iocs.hashes||[]).length + (iocs.urls||[]).length +
+                 (iocs.emails||[]).length;
+    }
+    var iocNorm = Math.min(iocCount / 20 * 10, 10);
+
+    // TTP Coverage (12% weight)
+    var ttps = item.mitre_techniques || item.ttp_ids || item.techniques || [];
+    if (!Array.isArray(ttps)) ttps = [];
+    var ttpNorm = Math.min(ttps.length / 8 * 10, 10);
+
+    // Actor Sophistication (8% weight)
+    var actorText = (item.actor||item.threat_actor||item.attribution||'').toLowerCase();
+    var actorScore = /apt|nation|state|lazarus|cozy|fancy|equation|sandworm/.test(actorText) ? 10 :
+                     /criminal|ransomware.group|darkside|lockbit|revil/.test(actorText) ? 7 :
+                     actorText.length > 3 ? 5 : 3;
+
+    var composite = (
+      cvssNorm  * 0.28 +
+      epssNorm  * 0.20 +
+      kev       * 0.18 +
+      iocNorm   * 0.14 +
+      ttpNorm   * 0.12 +
+      actorScore* 0.08
+    );
+    composite = Math.min(Math.round(composite * 10) / 10, 10);
+
+    return {
+      cvss: { label: 'CVSS', value: cvssNorm, raw: cvss.toFixed(1), weight: '28%' },
+      epss: { label: 'EPSS', value: epssNorm, raw: (epss*100).toFixed(1)+'%', weight: '20%' },
+      kev:  { label: 'KEV',  value: kev,      raw: kev === 10 ? 'YES' : 'NO', weight: '18%' },
+      ioc:  { label: 'IOC DENSITY', value: iocNorm, raw: iocCount+' IOCs', weight: '14%' },
+      ttp:  { label: 'TTP COVERAGE', value: ttpNorm, raw: ttps.length+' TTPs', weight: '12%' },
+      actor:{ label: 'ACTOR', value: actorScore, raw: actorText.length>3?actorText.slice(0,12).toUpperCase():'UNKNOWN', weight: '8%' },
+      composite: composite,
+      verdict: composite >= 8 ? 'CRITICAL THREAT' : composite >= 6 ? 'HIGH THREAT' :
+               composite >= 4 ? 'MEDIUM THREAT' : 'LOW THREAT'
+    };
+  }
+
+  /* ── Predictions ── */
+  function computePredictions(item) {
+    var sev = (item.severity||item.risk_level||'medium').toLowerCase();
+    var kev = (item.kev === true || item.in_kev === true || String(item.kev||'').toLowerCase() === 'true');
+    var epss = parseFloat(item.epss_score || item.epss || 0);
+
+    var exploitDays = kev ? '0-3' : (sev==='critical' ? '3-14' : sev==='high' ? '14-30' : '30-90');
+    var exploitProb = kev ? 98 : (sev==='critical' ? Math.round(70+epss*20) : sev==='high' ? Math.round(40+epss*20) : Math.round(15+epss*10));
+    exploitProb = Math.min(exploitProb, 99);
+    var patchDays = sev==='critical' ? 1 : sev==='high' ? 7 : 30;
+    var spreadProb = sev==='critical' ? 82 : sev==='high' ? 61 : sev==='medium' ? 35 : 15;
+
+    return { exploitDays: exploitDays, exploitProb: exploitProb, patchDays: patchDays, spreadProb: spreadProb, kev: kev };
+  }
+
+  /* ── Recommendations ── */
+  function computeRecommendations(item) {
+    var sev = (item.severity||item.risk_level||'medium').toLowerCase();
+    var type = getThreatType(item);
+    var kev = (item.kev === true || item.in_kev === true || String(item.kev||'').toLowerCase() === 'true');
+
+    var immediate = [];
+    var week = [];
+    var month = [];
+
+    if (sev === 'critical' || kev) {
+      immediate.push('Escalate to CISO and executive team — critical threat requires immediate board-level awareness');
+      immediate.push('Activate incident response retainer and war room protocols');
+    }
+    immediate.push('Block all identified IOCs across SIEM, firewall, EDR, and proxy');
+    if (type === 'exploit' || type === 'vulnerability') {
+      immediate.push('Apply emergency patch or enable WAF/IPS virtual patching immediately');
+    }
+
+    week.push('Conduct threat hunt across all endpoints using provided TTPs and IOCs');
+    week.push('Update detection rules and threat intelligence feeds with new indicators');
+    week.push('Review access controls on systems in affected technology stack');
+    if (type === 'apt') week.push('Engage external threat intelligence firm for attribution and scope analysis');
+
+    month.push('Conduct tabletop exercise simulating this attack scenario');
+    month.push('Review and update IR playbook with lessons from this threat advisory');
+    month.push('Assess security architecture gaps exposed by this threat vector');
+    month.push('Update third-party vendor risk assessments if applicable');
+
+    return { immediate: immediate, week: week, month: month };
+  }
+
+  /* ── HTML Builders ── */
+  function colorClass(val) {
+    if (val >= 8) return 'c-critical';
+    if (val >= 6) return 'c-high';
+    if (val >= 4) return 'c-medium';
+    return 'c-low';
+  }
+
+  function buildRiskTab(rm) {
+    var factors = ['cvss','epss','kev','ioc','ttp','actor'];
+    var rows = factors.map(function(k) {
+      var f = rm[k];
+      var pct = Math.round(f.value * 10);
+      var cc = colorClass(f.value);
+      return '<div class="agod-risk-factor">' +
+        '<div class="rf-label">' + f.label + ' <span style="color:#475569;font-size:7px;">(' + f.weight + ')</span></div>' +
+        '<div class="rf-bar-wrap"><div class="rf-bar ' + cc + '" style="width:' + pct + '%"></div></div>' +
+        '<div class="rf-val">' + f.raw + '</div>' +
+        '</div>';
+    }).join('');
+
+    var verdictClass = rm.composite >= 8 ? 'risk-critical' : rm.composite >= 6 ? 'risk-high' : rm.composite >= 4 ? 'risk-medium' : 'risk-low';
+    var verdictColor = rm.composite >= 8 ? '#fca5a5' : rm.composite >= 6 ? '#fdba74' : rm.composite >= 4 ? '#fde68a' : '#86efac';
+
+    return '<div class="agod-risk-matrix">' + rows + '</div>' +
+      '<div class="agod-composite-score">' +
+        '<span class="cs-label">COMPOSITE RISK SCORE</span>' +
+        '<span class="cs-score" style="color:' + verdictColor + '">' + rm.composite.toFixed(1) + '</span>' +
+        '<span class="cs-verdict ' + verdictClass + '">' + rm.verdict + '</span>' +
+      '</div>';
+  }
+
+  function buildMitiTab(item, tier) {
+    var type = getThreatType(item);
+    var steps = KB.MITIGATIONS[type] || KB.MITIGATIONS.generic;
+    var visible = tier === 'free' ? steps.slice(0,2) : steps;
+    var html = '<ul class="agod-miti-list">';
+    visible.forEach(function(s, i) {
+      html += '<li class="agod-miti-step">' +
+        '<span class="ms-num">' + (i+1) + '</span>' +
+        '<span class="ms-text">' + s.text + '</span>' +
+        '<span class="ms-priority p-' + s.priority + '">' + s.priority + '</span>' +
+        '</li>';
+    });
+    html += '</ul>';
+    if (tier === 'free') {
+      html += '<div class="agod-paywall" style="margin-top:8px;">' +
+        '<span class="pw-icon">&#128274;</span>' +
+        '<div class="pw-title">Pro Required</div>' +
+        '<div class="pw-desc">' + (steps.length - 2) + ' additional mitigation steps available with Pro tier</div>' +
+        '<a href="/upgrade.html?plan=pro&ref=agod-miti" class="pw-cta">&#128640; UPGRADE TO PRO</a>' +
+        '</div>';
+    }
+    return html;
+  }
+
+  function buildPredTab(pred) {
+    var probColor = pred.exploitProb >= 80 ? '#fca5a5' : pred.exploitProb >= 50 ? '#fdba74' : '#fde68a';
+    var kevHtml = pred.kev ? '<div class="agod-pred-card" style="border-color:rgba(220,38,38,0.5);"><div class="pc-label">KEV STATUS</div><div class="pc-value" style="color:#fca5a5;">ACTIVE</div><div class="pc-unit">Exploited in wild</div></div>' :
+      '<div class="agod-pred-card"><div class="pc-label">KEV STATUS</div><div class="pc-value" style="color:#4ade80;">CLEAN</div><div class="pc-unit">Not in KEV catalog</div></div>';
+    return '<div class="agod-pred-grid">' +
+      '<div class="agod-pred-card"><div class="pc-label">EXPLOIT WINDOW</div><div class="pc-value" style="color:' + probColor + '">' + pred.exploitDays + '</div><div class="pc-unit">days estimated</div></div>' +
+      '<div class="agod-pred-card"><div class="pc-label">EXPLOIT PROB.</div><div class="pc-value" style="color:' + probColor + '">' + pred.exploitProb + '%</div><div class="pc-unit">within 30 days</div></div>' +
+      '<div class="agod-pred-card"><div class="pc-label">PATCH URGENCY</div><div class="pc-value" style="color:#a78bfa">' + pred.patchDays + 'd</div><div class="pc-unit">recommended SLA</div></div>' +
+      kevHtml +
+      '</div>' +
+      '<div class="agod-timeline">' +
+        '<div class="tl-label">THREAT SPREAD PROBABILITY OVER TIME</div>' +
+        '<div class="agod-tl-bar"><div class="agod-tl-fill ' + colorClass(pred.spreadProb/10) + '" style="width:' + pred.spreadProb + '%;background:linear-gradient(90deg,#7c3aed,' + probColor + ');"></div></div>' +
+        '<div class="agod-tl-labels"><span>NOW</span><span>7D</span><span>30D</span><span>90D</span></div>' +
+      '</div>';
+  }
+
+  function buildRecTab(item, tier) {
+    var recs = computeRecommendations(item);
+    var html = '';
+    var tiers = [
+      { key: 'immediate', label: 'IMMEDIATE', badgeClass: 'immediate', timeframe: 'Within 24 hours', dotClass: 'c-immediate' },
+      { key: 'week', label: '7-DAY', badgeClass: 'week', timeframe: 'Within 7 days', dotClass: 'c-week' },
+      { key: 'month', label: '30-DAY', badgeClass: 'month', timeframe: 'Within 30 days', dotClass: 'c-month' }
+    ];
+    var allRecs = tier === 'free' ? [tiers[0]] : tiers;
+    allRecs.forEach(function(t) {
+      html += '<div class="agod-rec-tier">' +
+        '<div class="agod-rec-tier-hdr">' +
+          '<span class="rt-badge ' + t.badgeClass + '">' + t.label + '</span>' +
+          '<span class="rt-timeframe">' + t.timeframe + '</span>' +
+        '</div>';
+      recs[t.key].forEach(function(r) {
+        html += '<div class="agod-rec-item"><div class="ri-dot ' + t.dotClass + '"></div><div class="ri-text">' + r + '</div></div>';
+      });
+      html += '</div>';
+    });
+    if (tier === 'free') {
+      html += '<div class="agod-paywall">' +
+        '<span class="pw-icon">&#128274;</span>' +
+        '<div class="pw-title">7-Day & 30-Day Plans</div>' +
+        '<div class="pw-desc">Full strategic roadmap with Pro subscription</div>' +
+        '<a href="/upgrade.html?plan=pro&ref=agod-rec" class="pw-cta">&#128640; UPGRADE TO PRO</a>' +
+        '</div>';
+    }
+    return html;
+  }
+
+  function buildImpactTab(item) {
+    var sev = (item.severity||item.risk_level||'medium').toLowerCase();
+    if (!['critical','high','medium','low'].includes(sev)) sev = 'medium';
+    var matrix = KB.IMPACT_MATRIX[sev];
+    var icons = { financial: '&#128181;', operational: '&#9881;', reputational: '&#127942;', compliance: '&#128220;' };
+    var labels = { financial: 'FINANCIAL', operational: 'OPERATIONAL', reputational: 'REPUTATIONAL', compliance: 'COMPLIANCE' };
+    var html = '<div class="agod-impact-grid">';
+    ['financial','operational','reputational','compliance'].forEach(function(k) {
+      var m = matrix[k];
+      html += '<div class="agod-impact-card">' +
+        '<div class="ic-hdr"><span class="ic-icon">' + icons[k] + '</span><span class="ic-label">' + labels[k] + '</span></div>' +
+        '<div class="ic-level L-' + m.level + '">' + m.level + '</div>' +
+        '<div class="ic-detail">' + m.detail + '</div>' +
+        '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function buildDetectTab(item, tier) {
+    if (tier !== 'enterprise') {
+      return '<div class="agod-paywall">' +
+        '<span class="pw-icon">&#128737;</span>' +
+        '<div class="pw-title">Enterprise Required</div>' +
+        '<div class="pw-desc">SIGMA, YARA, and Suricata rules are exclusive to Enterprise subscribers</div>' +
+        '<a href="/upgrade.html?plan=enterprise&ref=agod-detect" class="pw-cta">&#128081; UPGRADE TO ENTERPRISE</a>' +
+        '</div>';
+    }
+    var type = getThreatType(item);
+    var rules = KB.DETECTIONS[type] || KB.DETECTIONS.generic;
+    return [
+      { type: 'sigma',    label: 'SIGMA Rule', code: rules.sigma,    cls: 'sigma' },
+      { type: 'yara',     label: 'YARA Rule',  code: rules.yara,     cls: 'yara' },
+      { type: 'suricata', label: 'Suricata',   code: rules.suricata, cls: 'suricata' }
+    ].map(function(r) {
+      return '<div class="agod-detect-item">' +
+        '<div class="di-hdr"><span class="di-type ' + r.cls + '">' + r.type.toUpperCase() + '</span><span class="di-name">' + r.label + '</span></div>' +
+        '<pre>' + r.code.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre>' +
+        '</div>';
+    }).join('');
+  }
+
+  /* ── Full Panel Renderer ── */
+  function renderPanel(cardEl, item) {
+    var tier = getUserTier();
+    var rm = computeRiskMatrix(item);
+    var pred = computePredictions(item);
+    var sev = (item.severity||item.risk_level||'medium').toLowerCase();
+    var verdictColor = rm.composite >= 8 ? '#fca5a5' : rm.composite >= 6 ? '#fdba74' : rm.composite >= 4 ? '#fde68a' : '#86efac';
+    var badgeClass = rm.composite >= 8 ? 'risk-critical' : rm.composite >= 6 ? 'risk-high' : rm.composite >= 4 ? 'risk-medium' : 'risk-low';
+
+    // Tab definitions
+    var tabs = [
+      { id: 'risk',   label: '&#9650; RISK',      locked: false },
+      { id: 'miti',   label: '&#128737; MITIGATE', locked: false },
+      { id: 'pred',   label: '&#128200; PREDICT',  locked: false },
+      { id: 'rec',    label: '&#9745; RECOMMEND',  locked: false },
+      { id: 'impact', label: '&#128269; IMPACT',   locked: false },
+      { id: 'detect', label: '&#128265; DETECT',   locked: tier !== 'enterprise' }
+    ];
+
+    var uid = 'agod-' + (item.stix_id || item.id || Math.random().toString(36).slice(2));
+
+    var tabHtml = tabs.map(function(t) {
+      return '<div class="agod-tab' + (t.locked?' locked':'') + '" data-tab="' + t.id + '" data-uid="' + uid + '" onclick="agodTab(this)">' + t.label + '</div>';
+    }).join('');
+
+    var panelHtml =
+      '<div class="agod-panel" id="' + uid + '">' +
+        '<div class="agod-panel-hdr">' +
+          '<span class="agod-hdr-title">&#129302; APEX AI ANALYSIS</span>' +
+          '<span class="agod-risk-badge ' + badgeClass + '" style="color:' + verdictColor + '">' + rm.composite.toFixed(1) + '/10</span>' +
+        '</div>' +
+        '<div class="agod-tabs" data-uid="' + uid + '">' + tabHtml + '</div>' +
+        '<div class="agod-tab-content active" id="' + uid + '-risk">'   + buildRiskTab(rm)              + '</div>' +
+        '<div class="agod-tab-content"        id="' + uid + '-miti">'   + buildMitiTab(item, tier)      + '</div>' +
+        '<div class="agod-tab-content"        id="' + uid + '-pred">'   + buildPredTab(pred)            + '</div>' +
+        '<div class="agod-tab-content"        id="' + uid + '-rec">'    + buildRecTab(item, tier)       + '</div>' +
+        '<div class="agod-tab-content"        id="' + uid + '-impact">' + buildImpactTab(item)          + '</div>' +
+        '<div class="agod-tab-content"        id="' + uid + '-detect">' + buildDetectTab(item, tier)    + '</div>' +
+      '</div>';
+
+    // Build trigger button
+    var triggerHtml =
+      '<button class="agod-trigger" id="' + uid + '-btn" data-uid="' + uid + '" onclick="agodToggle(this)">' +
+        '<span class="agod-icon">&#129302;</span> APEX AI ANALYSIS' +
+      '</button>';
+
+    // Find card-footer and insert before it
+    var footer = cardEl.querySelector('.card-footer');
+    if (footer) {
+      var wrapper = document.createElement('div');
+      wrapper.innerHTML = triggerHtml + panelHtml;
+      footer.parentNode.insertBefore(wrapper, footer);
+    } else {
+      var wrapper2 = document.createElement('div');
+      wrapper2.innerHTML = triggerHtml + panelHtml;
+      cardEl.appendChild(wrapper2);
+    }
+
+    cardEl.classList.add('agod-processed');
+
+    // Activate first tab
+    var firstTab = cardEl.querySelector('.agod-tab');
+    if (firstTab) firstTab.classList.add('active');
+  }
+
+  /* ── Global Event Handlers ── */
+  window.agodToggle = function(btn) {
+    var uid = btn.getAttribute('data-uid');
+    var panel = document.getElementById(uid);
+    if (!panel) return;
+    var isOpen = panel.classList.contains('agod-open');
+    panel.classList.toggle('agod-open', !isOpen);
+    btn.setAttribute('data-open', String(!isOpen));
+  };
+
+  window.agodTab = function(tabEl) {
+    var uid = tabEl.getAttribute('data-uid');
+    if (tabEl.classList.contains('locked')) {
+      var cta = tabEl.getAttribute('data-tab');
+      window.location.href = '/upgrade.html?plan=enterprise&ref=agod-tab-' + cta;
+      return;
+    }
+    var tabId = tabEl.getAttribute('data-tab');
+    var panel = document.getElementById(uid);
+    if (!panel) return;
+    // Deactivate all tabs in this panel's tab bar
+    var tabBar = panel.previousElementSibling ? panel.previousElementSibling.closest('.agod-panel') : null;
+    // Find the tabs container within the panel
+    panel.querySelectorAll('.agod-tab').forEach(function(t) { t.classList.remove('active'); });
+    panel.querySelectorAll('.agod-tab-content').forEach(function(c) { c.classList.remove('active'); });
+    tabEl.classList.add('active');
+    var content = document.getElementById(uid + '-' + tabId);
+    if (content) content.classList.add('active');
+  };
+
+  /* ── Manifest Capture via Fetch Interceptor ── */
+  window.__AGOD_MANIFEST = window.__AGOD_MANIFEST || {};
+  var _origFetch = window.fetch;
+  window.fetch = function() {
+    return _origFetch.apply(this, arguments).then(function(resp) {
+      try {
+        var url = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0] && arguments[0].url) || '';
+        if (/feed|manifest|intel|advisory/i.test(url) && resp.ok) {
+          resp.clone().json().then(function(data) {
+            var items = Array.isArray(data) ? data : (data.objects||data.items||data.advisories||data.data||[]);
+            items.forEach(function(item) {
+              var key = item.stix_id || item.id;
+              if (key) window.__AGOD_MANIFEST[key] = item;
+            });
+          }).catch(function(){});
+        }
+      } catch(e){}
+      return resp;
+    });
+  };
+
+  /* ── Card Processor ── */
+  function processCard(cardEl) {
+    if (cardEl.classList.contains('agod-processed')) return;
+    var title = cardEl.querySelector('.card-title');
+    var stixId = (title && (title.getAttribute('data-stix-id') || title.dataset.stixId)) ||
+                 cardEl.getAttribute('data-stix-id') || cardEl.dataset.stixId;
+
+    var item = stixId ? window.__AGOD_MANIFEST[stixId] : null;
+
+    if (!item) {
+      // Construct minimal item from card attributes
+      var sev = cardEl.getAttribute('data-severity') || cardEl.dataset.severity || 'medium';
+      var score = cardEl.getAttribute('data-score') || cardEl.dataset.score || '5';
+      var titleText = title ? title.textContent.trim() : 'Unknown Advisory';
+      item = { stix_id: stixId, title: titleText, severity: sev, risk_score: parseFloat(score), description: titleText };
+    }
+
+    try {
+      renderPanel(cardEl, item);
+    } catch(e) {
+      console.warn('[AGOD] Error rendering panel for card:', e);
+    }
+  }
+
+  /* ── MutationObserver ── */
+  function startObserver() {
+    var grid = document.getElementById('threat-grid');
+    if (!grid) return;
+
+    // Process existing cards
+    grid.querySelectorAll('.intel-card').forEach(processCard);
+
+    // Watch for new cards
+    var obs = new MutationObserver(function(mutations) {
+      mutations.forEach(function(m) {
+        m.addedNodes.forEach(function(node) {
+          if (node.nodeType !== 1) return;
+          if (node.classList && node.classList.contains('intel-card')) {
+            setTimeout(function() { processCard(node); }, 50);
+          } else if (node.querySelectorAll) {
+            node.querySelectorAll('.intel-card').forEach(function(card) {
+              setTimeout(function() { processCard(card); }, 50);
+            });
+          }
+        });
+      });
+    });
+    obs.observe(grid, { childList: true, subtree: true });
+  }
+
+  /* ── Init ── */
+  function init() {
+    startObserver();
+    // Re-run after short delay to catch async renders
+    setTimeout(startObserver, 1500);
+    setTimeout(startObserver, 4000);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+  window.addEventListener('load', function() { setTimeout(startObserver, 500); });
+
+  // Expose for external triggering (e.g., after filter/search rerenders)
+  window.AGOD = { reprocess: startObserver, version: '143.0.0' };
+
+})();
+</script>
+
 <!-- /CDB-AI-BRAIN-INIT-v134 -->
 </body>
 </html>
