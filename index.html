@@ -10916,7 +10916,7 @@ function renderTopThreats(data) {
             // Parser handles both schemas: data.preview.items (Worker) -> plain Array (feed.json)
             var MANIFEST_URLS = [
                 WORKER_PREVIEW_URL,       // PRIMARY:   Worker API -- R2-backed, always fresh
-                'api/feed.json',          // FALLBACK1: same-domain, no CORS risk
+                'api/feed.json',          // P0 FALLBACK: same-domain, no CORS -- FALLBACK1: same-domain, no CORS risk
                 'https://raw.githubusercontent.com/cyberdudebivash/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/main/api/feed.json', // FALLBACK2: cross-origin bypass
             ];
 
@@ -12124,7 +12124,7 @@ function renderTopThreats(data) {
             _cdbBootSequence();
         }
 
-        // v148.0 P0 SAFETY TIMER: catches ALL stuck-grid scenarios after 12s:
+        // v146.0 P0 SAFETY TIMER / v148.0 P0 SAFETY TIMER: catches ALL stuck-grid scenarios after 12s:
         //   1. Spinner still visible   → boot render or fetch failed silently
         //   2. Grid is empty / no cards → renderCards() silently produced nothing
         // v148.0 FIX: removed !__INTEL_RENDERED__ dependency \u2014 flag can be true even when cards are absent
@@ -12137,7 +12137,7 @@ function renderTopThreats(data) {
             var _isEmpty    = _stg.children.length === 0;
             // v148.0: retry if spinner OR no cards visible (removed __INTEL_RENDERED__ blind-spot)
             if (_hasSpinner || _isEmpty || !_hasCards) {
-                console.warn('[SENTINEL-APEX] P0-SAFETY: Grid stuck/empty after 12s (spinner=' + _hasSpinner + ', empty=' + _isEmpty + ', rendered=' + window.__INTEL_RENDERED__ + ') \u2014 force retry');
+                console.warn('[SENTINEL-APEX] P0-SAFETY: Grid stuck after 12s (spinner=' + _hasSpinner + ', empty=' + _isEmpty + ', rendered=' + window.__INTEL_RENDERED__ + ') \u2014 force retry');
                 window.__DATA_LOADED__    = false;
                 window.__INTEL_RENDERED__ = false;
                 window.RENDER_IN_PROGRESS = false;
