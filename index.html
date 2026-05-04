@@ -9407,7 +9407,7 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
             const medium = data.filter(d => { const s=parseFloat(d.risk_score||0); return (s>=4.0&&s<7.0)||(d.severity==='MEDIUM'&&s<7.0); }).length;
             const low = data.filter(d => { const s=parseFloat(d.risk_score||0); return s<4.0&&d.severity!=='CRITICAL'&&d.severity!=='HIGH'&&d.severity!=='MEDIUM'; }).length;
             const kev = data.filter(d => d.kev_present).length;
-            const avgRisk = total ? (data.reduce((s, d) => s + d.risk_score, 0) / total).toFixed(1) : '\u2014';
+            const avgRisk = total ? (data.reduce((s, d) => s + (parseFloat(d.risk_score) || 0), 0) / total).toFixed(1) : '\u2014';
             let totalIOCs = 0;
             data.forEach(d => {
                 if (d.ioc_counts) {
@@ -10224,7 +10224,12 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
             if (!inner || !data.length) return;
 
             const sevColors = { CRITICAL:'#dc2626', HIGH:'#ea580c', MEDIUM:'#d97706', LOW:'#16a34a' };
-            const recent = [...data].sort((a,b) => new Date(b.processed_at||b.timestamp||0) - new Date(a.processed_at||a.timestamp||0)).slice(0, 40);  // v34.0: 40 items ensures both ticker copies never simultaneously visible
+            // v143.5 FIX: Use all available items (up to 50) sorted by recency.
+            // Previous slice(0,40) assumed ≥40 items to keep both ticker copies off-screen
+            // simultaneously. With only 10–24 items, both copies were visible at once on
+            // wide displays. Fix: calculate the minimum copy count needed so that one copy
+            // is always wider than the viewport, ensuring seamless loop at any screen width.
+            const recent = [...data].sort((a,b) => new Date(b.processed_at||b.timestamp||0) - new Date(a.processed_at||a.timestamp||0)).slice(0, 50);
 
             const itemsHtml = recent.map(d => {
                 const sev = getSeverity(d.risk_score, d);
@@ -10237,8 +10242,24 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                 </span><span class="ticker-sep">◆</span>`;
             }).join('');
 
-            // Duplicate for seamless loop
-            inner.innerHTML = itemsHtml + itemsHtml;
+            // v143.5 FIX: Duplicate enough copies so that ONE copy is always wider than
+            // the widest expected viewport (5120px / ultra-wide). Each item ≈ 280px.
+            // minCopies = max(2, ceil(5120 / estimatedOneCopyWidth)).
+            // This prevents both copies appearing simultaneously on wide displays.
+            const estimatedItemWidth = 280;
+            const estimatedCopyWidth = recent.length * estimatedItemWidth;
+            const ULTRA_WIDE = 5120;
+            const minCopies = Math.max(2, Math.ceil(ULTRA_WIDE / Math.max(estimatedCopyWidth, 1)));
+            let loopHtml = '';
+            for (let i = 0; i < minCopies; i++) loopHtml += itemsHtml;
+
+            inner.innerHTML = loopHtml;
+            // Adjust animation: translateX(-1/minCopies * 100%) to scroll exactly one copy
+            const pct = (100 / minCopies).toFixed(4);
+            const styleId = 'cdb-ticker-keyframe-override';
+            let styleEl = document.getElementById(styleId);
+            if (!styleEl) { styleEl = document.createElement('style'); styleEl.id = styleId; document.head.appendChild(styleEl); }
+            styleEl.textContent = `@keyframes ticker-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-${pct}%); } }`;
             outer.style.display = 'block';
         }
 
