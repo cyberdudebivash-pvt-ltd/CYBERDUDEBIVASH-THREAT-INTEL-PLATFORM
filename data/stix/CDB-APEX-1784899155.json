@@ -1,0 +1,152 @@
+{
+  "type": "bundle",
+  "id": "bundle--8b0b58b8-dfff-4bd5-9e3d-f1dec5ae5f60",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "name": "CyberDudeBivash SENTINEL APEX",
+      "description": "CyberDudeBivash Pvt. Ltd. - Global Cybersecurity Intelligence Infrastructure",
+      "identity_class": "organization",
+      "sectors": [
+        "technology"
+      ],
+      "contact_information": "enterprise@cyberdudebivash.com",
+      "created": "2024-01-01T00:00:00Z",
+      "modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "type": "marking-definition",
+      "spec_version": "2.1",
+      "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+      "created": "2017-01-20T00:00:00.000Z",
+      "definition_type": "tlp",
+      "definition": {
+        "tlp": "amber"
+      }
+    },
+    {
+      "type": "intrusion-set",
+      "spec_version": "2.1",
+      "id": "intrusion-set--a576d9d5-622c-4f32-b8db-8cc0240ce70b",
+      "name": "CDB-UNATTR-PHI Campaign",
+      "description": "UAC-0099 Is Now Hiding Malware Inside a Fake Notepad++ Plugin to Target Ukrainian Organizations",
+      "created": "2026-07-24T13:19:15Z",
+      "modified": "2026-07-24T13:19:15Z",
+      "confidence": 70,
+      "aliases": [
+        "CDB-UNATTR-PHI"
+      ],
+      "extensions": {
+        "x-cdb-apex-1": {
+          "predictive_score": 7.5,
+          "campaign_id": "UNCLASSIFIED",
+          "campaign_confidence": 7.5,
+          "threat_category": "Phishing",
+          "behavioral_tags": [
+            "data_staging",
+            "anti_analysis"
+          ],
+          "ai_summary": "Initial access via phishing → execution chain: initial access → persistence → lateral movement → malware behaviors: data staging, anti analysis",
+          "risk_factors": [
+            "EPSS_score",
+            "CISA_KEV",
+            "IOC_density",
+            "MITRE_coverage"
+          ],
+          "soc_priority": "P2",
+          "threat_level": "HIGH",
+          "recommended_action": "Risk 7.5/10 — CISA KEV-confirmed active exploitation; 10 IOCs extracted",
+          "x_cdb_published_at": "2026-07-24T09:54:53Z"
+        }
+      },
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "vulnerability",
+      "spec_version": "2.1",
+      "id": "vulnerability--41a75028-7b33-49fc-8a15-fd52898115ce",
+      "name": "CVE-2025-66376",
+      "created": "2026-07-24T13:19:15Z",
+      "modified": "2026-07-24T13:19:15Z",
+      "external_references": [
+        {
+          "source_name": "cve",
+          "external_id": "CVE-2025-66376",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-66376"
+        }
+      ],
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "x_cdb_epss_score": 12.01,
+      "x_cdb_kev_confirmed": true
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--8d9fa2f5-12e0-4bba-8aa5-f918e5c46697",
+      "relationship_type": "exploits",
+      "source_ref": "intrusion-set--a576d9d5-622c-4f32-b8db-8cc0240ce70b",
+      "target_ref": "vulnerability--41a75028-7b33-49fc-8a15-fd52898115ce",
+      "created": "2026-07-24T13:19:15Z",
+      "modified": "2026-07-24T13:19:15Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--df658a77-a161-4e95-a347-fa268830b454",
+      "name": "Phishing",
+      "created": "2026-07-24T13:19:15Z",
+      "modified": "2026-07-24T13:19:15Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1566",
+          "url": "https://attack.mitre.org/techniques/T1566/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--b8d237d5-1da3-4f18-a25e-614c30a16f4d",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--a576d9d5-622c-4f32-b8db-8cc0240ce70b",
+      "target_ref": "attack-pattern--df658a77-a161-4e95-a347-fa268830b454",
+      "created": "2026-07-24T13:19:15Z",
+      "modified": "2026-07-24T13:19:15Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "course-of-action",
+      "spec_version": "2.1",
+      "id": "course-of-action--0f790ba1-138a-459b-9d8b-efc6521c1e29",
+      "name": "Remediation: CRITICAL - Patch immediately",
+      "description": "Remediation guidance for: UAC-0099 Is Now Hiding Malware Inside a Fake Notepad++ Plugin to Target Ukrainian Organizations\nPriority: CRITICAL - Patch immediately\nCISA KEV confirmed - treat as immediate emergency.\nNVD Reference: https://nvd.nist.gov/vuln/detail/CVE-2025-66376",
+      "created": "2026-07-24T13:19:15Z",
+      "modified": "2026-07-24T13:19:15Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    }
+  ]
+}
