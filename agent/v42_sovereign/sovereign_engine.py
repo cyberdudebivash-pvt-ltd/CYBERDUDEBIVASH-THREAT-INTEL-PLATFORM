@@ -356,30 +356,48 @@ class BillingEngine:
         }
 
     def get_stripe_config(self) -> Dict:
-        """Generate Stripe integration configuration."""
+        """Generate Stripe integration configuration.
+
+        mode and stripe_price_id are derived from the same STRIPE_SECRET_KEY /
+        STRIPE_PRICE_* env vars api/monetization.py's real /billing/checkout
+        endpoint reads (see STRIPE_PRICE_IDS + the "sk_" check there) — never
+        hardcoded — so this report can't claim "live" with fabricated price
+        IDs while the actual checkout endpoint is still serving its
+        stripe_not_configured fallback.
+        """
+        secret_key = os.getenv("STRIPE_SECRET_KEY", "")
+        is_live = secret_key.startswith("sk_")
+        price_ids = {
+            "pro_monthly": os.getenv("STRIPE_PRICE_PRO_MONTHLY", "price_pro_monthly"),
+            "enterprise_monthly": os.getenv("STRIPE_PRICE_ENT_MONTHLY", "price_ent_monthly"),
+            "mssp_monthly": os.getenv("STRIPE_PRICE_MSSP_MONTHLY", "price_mssp_monthly"),
+        }
         return {
             "stripe_integration": {
-                "mode": "live",
+                "mode": "live" if is_live else "not_configured",
                 "products": {
                     "pro_monthly": {
                         "name": "Sentinel APEX Pro",
                         "price_usd": 49,
                         "interval": "month",
-                        "stripe_price_id": "price_sentinel_pro_monthly",
+                        "stripe_price_id": price_ids["pro_monthly"],
+                        "is_real_stripe_price_id": is_live,
                         "features": self._get_tier_features("pro"),
                     },
                     "enterprise_monthly": {
                         "name": "Sentinel APEX Enterprise",
                         "price_usd": 499,
                         "interval": "month",
-                        "stripe_price_id": "price_sentinel_enterprise_monthly",
+                        "stripe_price_id": price_ids["enterprise_monthly"],
+                        "is_real_stripe_price_id": is_live,
                         "features": self._get_tier_features("enterprise"),
                     },
                     "mssp_monthly": {
                         "name": "Sentinel APEX MSSP",
                         "price_usd": 1999,
                         "interval": "month",
-                        "stripe_price_id": "price_sentinel_mssp_monthly",
+                        "stripe_price_id": price_ids["mssp_monthly"],
+                        "is_real_stripe_price_id": is_live,
                         "features": ["All Enterprise features", "White-label", "100 sub-tenants", "Custom domain"],
                     },
                 },
