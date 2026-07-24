@@ -240,7 +240,7 @@ async function verifyJWT(token, secret) {
   } catch (_) { return null; }
 }
 
-// Constant-time string comparison — prevents timing side-channel attacks on
+// Constant-time string comparison  -  prevents timing side-channel attacks on
 // shared-secret checks (admin key, Gumroad webhook token) that aren't HMAC
 // signatures and so can't use crypto.subtle.verify like Razorpay/JWT do.
 // Always walks the full length of the longer input; never short-circuits.
