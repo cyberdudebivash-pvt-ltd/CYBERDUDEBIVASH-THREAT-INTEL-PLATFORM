@@ -10,8 +10,10 @@ Output:
   data/reports/daily_brief_<YYYY-MM-DD>.pdf   -- archived by date
   api/v1/intel/daily_brief_latest.pdf         -- always current (published to R2)
 
-Designed to be listed as a Gumroad product ($9.99/month subscription):
-  https://cyberdudebivash.gumroad.com/l/sentinel-apex-daily-brief
+Designed to be listed as a Gumroad product ($9.99/month subscription) --
+NOT YET CREATED on Gumroad (verified against the live v2 API, 2026-07-24).
+Until it exists, the footer and metadata below point to the live store
+instead of a dead product slug: https://intel.cyberdudebivash.com/store.html
 
 Usage:
   python3 scripts/daily_brief_generator.py [--date YYYY-MM-DD] [--dry-run] [--upload]
@@ -458,7 +460,7 @@ def build_footer(styles, report_date: str, generated_at: str) -> list:
     footer_text = (
         f"SENTINEL APEX Daily Brief  |  {report_date}  |  Generated: {generated_at}  |  "
         f"intel.cyberdudebivash.com  |  TLP:WHITE  |  GSTIN: 21ARKPN8270G1ZP  |  "
-        f"Subscribe: cyberdudebivash.gumroad.com/l/sentinel-apex-daily-brief"
+        f"Explore products: intel.cyberdudebivash.com/store.html"
     )
     elems.append(Paragraph(footer_text, styles["Footer"]))
     return elems
@@ -578,7 +580,7 @@ def main() -> None:
         "version":       "148.0.0",
         "size_bytes":    API_DEST.stat().st_size,
         "download_url":  f"https://intel.cyberdudebivash.com/{R2_KEY}",
-        "subscribe_url": "https://cyberdudebivash.gumroad.com/l/sentinel-apex-daily-brief",
+        "subscribe_url": "https://intel.cyberdudebivash.com/store.html",  # no Gumroad product exists yet for this brief (verified 2026-07-24) -- see module docstring
         "price_monthly": 9.99,
         "currency":      "USD",
         "description":   "Daily AI-powered executive threat intelligence brief. Includes top 10 threats, active campaigns, zero-day anomalies, CISA KEV digest, and 7-day sector risk forecast.",
@@ -594,7 +596,7 @@ def main() -> None:
 
     print("=" * 65)
     print(f"  COMPLETE — {API_DEST.stat().st_size // 1024} KB brief ready")
-    print(f"  Subscribe: cyberdudebivash.gumroad.com/l/sentinel-apex-daily-brief")
+    print(f"  Explore products: intel.cyberdudebivash.com/store.html")
     print("=" * 65)
 
 

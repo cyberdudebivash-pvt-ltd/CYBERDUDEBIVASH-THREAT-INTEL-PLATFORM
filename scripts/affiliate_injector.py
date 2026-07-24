@@ -174,7 +174,15 @@ INTERNAL_CTAs: Dict[str, Dict] = {
         "text": "Detection Packs — Sigma + YARA + KQL rules for today's top threats.",
     },
     "monthly_report": {
-        "url":  "https://cyberdudebivash.gumroad.com/l/sentinel-monthly-report?utm_source=sentinel_apex&utm_medium=affiliate&utm_campaign=report",
+        # No Gumroad product named "sentinel-monthly-report" exists (verified
+        # live against the Gumroad v2 API, 2026-07-24) -- this 404'd for every
+        # customer who clicked it. Routed to the store's live reports section
+        # instead of a specific dead slug, since no single real product is
+        # confirmed to be this exact "$99/month" offering; the store's Weekly
+        # SOC Intelligence Brief is the closest real match by price. Text
+        # below is unchanged -- confirm/update it against whichever real
+        # report this should represent.
+        "url":  "https://intel.cyberdudebivash.com/store.html?utm_source=sentinel_apex&utm_medium=affiliate&utm_campaign=report#reports",
         "text": "Monthly Threat Intelligence Report — C-suite ready PDF. $99/month.",
     },
 }
