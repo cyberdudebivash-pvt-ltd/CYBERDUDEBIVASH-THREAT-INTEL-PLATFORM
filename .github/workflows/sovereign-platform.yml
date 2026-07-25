@@ -79,6 +79,16 @@ jobs:
           git config user.email "bivash@cyberdudebivash.com"
           git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
           git add data/nexus/ data/cortex/ data/quantum/ data/sovereign/ -f
+          # SEC-2026-07-25 fast-follow to #61: data/sovereign/tenants.json holds
+          # real customer API keys in plaintext. execute_full_cycle() rewrites
+          # the whole file every run, so the -f add above would keep re-leaking
+          # it to this PUBLIC repo on every 6h cycle even after #61 stopped
+          # revenue-orchestrator.yml from doing the same. Unstage it here --
+          # this workflow has no KV wiring like revenue-orchestrator.yml, so
+          # never committing the file from this workflow is the safe fix
+          # (adding KV sync here would instead pollute the KV-backed registry
+          # with this step's re-provisioned demo tenants every cycle).
+          git restore --staged data/sovereign/tenants.json 2>/dev/null || git reset -q data/sovereign/tenants.json 2>/dev/null || true
           git diff --cached --quiet || git commit -m " SOVEREIGN v184.0: Full platform cycle $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
           # FIX v184.0 BUG-B+C: stash-safe 5-attempt push retry
           git stash --include-untracked --quiet 2>/dev/null || true
