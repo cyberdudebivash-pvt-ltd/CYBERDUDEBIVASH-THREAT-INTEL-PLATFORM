@@ -19,6 +19,15 @@ credentials.json
 # secret material — must never be tracked. See incident fix commit for
 # details on the leaked key this closes.
 data/auth/
+# SEC-2026-07-25: same class of issue as data/auth/ above. tenants.json held
+# real plaintext customer keys, force-committed on every purchase by
+# revenue-orchestrator.yml (now fixed to sync via Cloudflare KV instead —
+# see that workflow's SEC-2026-07-25 comment). marketplace_state.json holds
+# a similar plaintext-key pattern with no active re-commit workflow found;
+# flagged for the same rotation/removal treatment. Gitignored so neither can
+# be re-added without an explicit `git add -f` override.
+data/sovereign/tenants.json
+data/marketplace/marketplace_state.json
 
 # --- ENTERPRISE SELLABLE ASSETS (protect revenue, upload via Gumroad engine) ---
 data/rule_packs/

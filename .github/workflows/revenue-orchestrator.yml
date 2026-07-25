@@ -43,29 +43,64 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # SEC-2026-07-25: data/sovereign/tenants.json holds real customer API
+      # keys in plaintext. It used to be force-committed to this PUBLIC repo
+      # by the step below on every purchase (git add -f ...), so every
+      # tenant's key was pushed to the public internet the moment they paid.
+      # Fixed by moving the durable copy to the Cloudflare KV namespace
+      # (REVENUE_CRM_KV) this repo's own revenue-engine Worker already owns,
+      # reusing the CF_API_TOKEN/CF_ACCOUNT_ID secrets deploy-revenue-engine.yml
+      # already has — no git commit of this file, ever, from this workflow.
+      # This restore step seeds the local file each run so
+      # agent.subscription_manager / agent.license_validator (unchanged, still
+      # plain `open("data/sovereign/tenants.json")`) keep working exactly as
+      # before. NOTE: the file still tracked in this repo's history/tree today
+      # carries the already-leaked keys — those are being rotated separately
+      # (founder decision, not this workflow) and the tracked copy will be
+      # stripped in a fast-follow once a KV write from a real run is confirmed
+      # to succeed (this session has no live CF_API_TOKEN to verify with).
+      - name: Restore Sovereign Registry from Cloudflare KV
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          mkdir -p data/sovereign
+          HTTP_CODE=$(curl -s -o /tmp/kv_tenants.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/1740d5dba5e74c3aafff1c683588395b/values/legacy_sovereign_tenants_snapshot")
+          if [ "$HTTP_CODE" = "200" ] && python3 -c "import json; json.load(open('/tmp/kv_tenants.json'))" 2>/dev/null; then
+            cp /tmp/kv_tenants.json data/sovereign/tenants.json
+            echo "Restored data/sovereign/tenants.json from Cloudflare KV (REVENUE_CRM_KV)."
+          else
+            echo "No valid snapshot in KV yet (HTTP ${HTTP_CODE}) -- leaving local bootstrap to agent.license_validator's existing _initialize_registry()."
+          fi
+
       - name: Provision Enterprise License
         env:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
           PURCHASE_PAYLOAD: ${{ toJson(github.event.client_payload) }}
         run: python -m agent.subscription_manager --webhook-event
 
-      - name: Sync Sovereign Registry
+      - name: Persist Sovereign Registry to Cloudflare KV
         env:
-          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
-          git config --local user.name "CYBERDUDEBIVASH"
-          git config --local user.email "bivash@cyberdudebivash.com"
-          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
-          git add -f data/sovereign/tenants.json || true
-          if git diff --staged --quiet; then
-            echo "No tenant changes"
+          if [ -f data/sovereign/tenants.json ]; then
+            HTTP_CODE=$(curl -s -o /tmp/kv_put_resp.json -w "%{http_code}" -X PUT \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data-binary @data/sovereign/tenants.json \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/1740d5dba5e74c3aafff1c683588395b/values/legacy_sovereign_tenants_snapshot")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Persisted data/sovereign/tenants.json to Cloudflare KV (REVENUE_CRM_KV)."
+            else
+              echo "::error::Failed to persist tenants.json to Cloudflare KV (HTTP ${HTTP_CODE}). The key just provisioned was NOT durably saved anywhere -- investigate CF_API_TOKEN permissions before the next purchase event."
+              cat /tmp/kv_put_resp.json
+              exit 1
+            fi
           else
-            git commit -m " v44 Auto-Provision Enterprise License [skip ci]"
-            git stash --include-untracked --quiet 2>/dev/null || true
-            git fetch origin main --quiet 2>/dev/null || true
-            git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null || true; git merge origin/main -X ours --no-edit --quiet 2>/dev/null || true; }
-            git stash pop --quiet 2>/dev/null || true
-            git push origin main || echo '::warning::Push deferred — will sync next run.'
+            echo "No local data/sovereign/tenants.json to persist."
           fi
 
   ceo-financial-briefing:

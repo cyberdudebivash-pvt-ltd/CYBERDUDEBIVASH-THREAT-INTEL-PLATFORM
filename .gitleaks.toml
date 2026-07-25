@@ -24,6 +24,17 @@ title = "SENTINEL APEX Gitleaks Config"
     '''quick_.*\.py''',
     '''final_check\.py''',
     '''oneshot\.py''',
+
+    # SEC-2026-07-25: these two files carry real, already-leaked plaintext
+    # customer keys committed before the gitleaks gate was made blocking
+    # (see revenue-orchestrator.yml and platform-build-deploy.yml same-date
+    # comments). Allowlisted ONLY so turning this gate blocking doesn't fail
+    # every future build on a known, already-being-rotated issue -- this is
+    # not a statement that the content is safe. Remove this entry the moment
+    # data/sovereign/tenants.json is stripped of real data (tracked as a
+    # fast-follow) and data/marketplace/marketplace_state.json is rotated.
+    '''data/sovereign/tenants\.json''',
+    '''data/marketplace/marketplace_state\.json''',
   ]
 
   # Suppress generic token patterns in CI helper scripts

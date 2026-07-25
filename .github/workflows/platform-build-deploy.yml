@@ -107,7 +107,15 @@ jobs:
         # during "Set up job" and requires GITLEAKS_LICENSE. Without the secret the
         # entire job fails at init before any user step runs — continue-on-error
         # cannot rescue a pre-step failure. Replace with CLI install so we own the
-        # error boundary and the non-blocking behaviour is reliably enforced.
+        # error boundary.
+        # SEC-2026-07-25: a real customer-API-key leak (data/sovereign/tenants.json,
+        # committed on every purchase by revenue-orchestrator.yml) sat undetected
+        # because a real "secrets found" result was reduced to a non-blocking
+        # warning below. Download/tooling failure still doesn't block (an
+        # infra hiccup isn't a security finding), but an actual detection now
+        # fails the build. The two already-known, already-being-rotated files
+        # are allowlisted in .gitleaks.toml so this doesn't fail every build
+        # immediately -- see that file's SEC-2026-07-25 comment.
         run: |
           curl -sSfL \
             "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz" \
@@ -117,8 +125,12 @@ jobs:
             --config .gitleaks.toml \
             --source . \
             --log-level warn \
-            --redact \
-            || echo "::warning::gitleaks found potential secrets — review output above (non-blocking)"
+            --redact
+          GITLEAKS_EXIT=$?
+          if [ "$GITLEAKS_EXIT" -ne 0 ]; then
+            echo "::error::gitleaks found potential secrets — see output above. Build blocked (this gate was non-blocking until a real customer-API-key leak was found in data/sovereign/tenants.json)."
+            exit "$GITLEAKS_EXIT"
+          fi
 
   # ─────────────────────────────────────────────
   # 3. BUILD MICROSERVICES
