@@ -116,14 +116,38 @@ jobs:
         # fails the build. The two already-known, already-being-rotated files
         # are allowlisted in .gitleaks.toml so this doesn't fail every build
         # immediately -- see that file's SEC-2026-07-25 comment.
+        # PERF-2026-07-25 fast-follow: with the checkout above at fetch-depth: 0,
+        # a plain `gitleaks detect --source .` walks this repo's FULL commit
+        # history on every run. Confirmed via run 30140449938: the step printed
+        # gitleaks' banner and then produced no further output for the rest of
+        # its 15min job budget before being cancelled -- every run of this gate
+        # since it went blocking (this one and the one before it) has been
+        # cancelled the same way. A gate that can never finish can never block
+        # anything. Scope the scan to just the commits this push introduces --
+        # the actual question a blocking pre-deploy gate needs answered is "did
+        # this push add a secret," not "re-walk all of history every time" (the
+        # latter is a separate, already-tracked, one-time problem -- see
+        # .gitleaks.toml's SEC-2026-07-25 comment on the two known-leaked
+        # files). Verified locally: a --log-opts-scoped scan over a 5-commit
+        # range of this repo's real history completed in ~3s (vs. never, for
+        # the full-history scan), and still caught a synthetic cdb_-style
+        # api_key leak in an isolated test repo -- same detection, bounded time.
         run: |
           curl -sSfL \
             "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz" \
             | tar -xz -C /tmp gitleaks 2>/dev/null \
             || { echo "gitleaks download failed — skipping secret scan"; exit 0; }
+          BEFORE_SHA="${{ github.event.before }}"
+          if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            echo "No usable pre-push commit (new branch, or history doesn't contain it) -- scanning only the pushed HEAD commit."
+            LOG_OPTS="-1"
+          else
+            LOG_OPTS="${BEFORE_SHA}..${{ github.event.after }}"
+          fi
           /tmp/gitleaks detect \
             --config .gitleaks.toml \
             --source . \
+            --log-opts "$LOG_OPTS" \
             --log-level warn \
             --redact
           GITLEAKS_EXIT=$?
