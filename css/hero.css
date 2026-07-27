@@ -11,6 +11,18 @@
  * file cannot affect anything outside the hero section it targets.
  * ============================================================== */
 
+/* Box-sizing reset (PR-5) -- see css/components.css's identical rule
+   for the full rationale (a real, Playwright-confirmed mobile
+   viewport-overflow defect). Duplicated here, not just left to
+   components.css, so hero.css stays independently correct when
+   loaded without components.css -- e.g. via
+   scripts/patch_landing_hero.py, which links tokens.css + hero.css
+   only. */
+[class^="sapx-"],
+[class*=" sapx-"] {
+  box-sizing: border-box;
+}
+
 .sapx-hero {
   background: var(--sapx-color-bg-surface);
   border-bottom: 1px solid var(--sapx-color-border);
@@ -82,7 +94,14 @@
 
 .sapx-btn-primary {
   background: var(--sapx-color-brand-teal);
-  color: var(--sapx-color-text-inverse);
+  /* PR-5: was --sapx-color-text-inverse (1.71:1 in light theme, WCAG AA
+     fail) -- switched to --sapx-color-text-on-bright (11.80:1) per the
+     fix already recommended in docs/component-system-guide.md §4/§7 and
+     css/tokens.css's PR-4 comment. Same value as before in dark theme
+     (#05070d both ways); light theme only gets more correct. This also
+     removes the disclosed hero.css/components.css cascade conflict now
+     that both files are loaded together for the first time (PR-5). */
+  color: var(--sapx-color-text-on-bright);
 }
 .sapx-btn-primary:hover {
   opacity: 0.9;
