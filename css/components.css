@@ -41,6 +41,27 @@
  * ============================================================== */
 
 /* ===================================================================
+ * BOX-SIZING RESET (PR-5)
+ * .sapx-container/-card/-btn (mobile) etc. combine padding/border
+ * with an explicit or grid/flex-stretched width. Without border-box,
+ * content-box (the browser default) adds that padding/border ON TOP
+ * of the width, overflowing the viewport -- confirmed via a real
+ * Playwright viewport-overflow check while building enterprise-
+ * homepage.html (PR-5), the first page to render this file's layout
+ * primitives at real, full-page responsive widths end-to-end; every
+ * prior verification of this file rendered one component in
+ * isolation, too narrow for a full-container overflow to appear.
+ * Scoped to elements carrying an sapx-prefixed class (never a bare
+ * `*` reset) so a page migrating incrementally (§3 of
+ * docs/component-system-guide.md) never has its own, not-yet-
+ * migrated content's box model changed by adopting this file.
+ * =================================================================== */
+[class^="sapx-"],
+[class*=" sapx-"] {
+  box-sizing: border-box;
+}
+
+/* ===================================================================
  * ACCESSIBILITY: SKIP LINK
  * =================================================================== */
 .sapx-skip-link {
@@ -716,6 +737,31 @@
     background: var(--sapx-color-bg-surface);
     border-bottom: 1px solid var(--sapx-color-border);
     padding: var(--sapx-space-4) var(--sapx-space-5);
+  }
+}
+
+/* Below 900px the nav collapses behind the toggle (above), but brand +
+   both header CTAs + toggle together still don't fit a narrow phone
+   viewport (confirmed via a real Playwright overflow check at 375px
+   while building enterprise-homepage.html, PR-5). Hiding the
+   secondary/ghost CTA at the same 560px "mobile" breakpoint already
+   used throughout this file (.sapx-grid-*, .sapx-hero-*) keeps the one
+   highest-priority action (.sapx-btn-primary) plus the nav toggle,
+   which fit. Scoped to .sapx-header-ctas specifically so it does not
+   hide ghost buttons used elsewhere on a page (e.g. a CTA banner's
+   secondary actions, which already wrap via flex-wrap instead). */
+@media (max-width: 560px) {
+  .sapx-header-ctas .sapx-btn-ghost {
+    display: none;
+  }
+  /* Brand + remaining header CTA (primary button + nav toggle) still
+     don't both fit one row under ~360px even after the ghost button
+     is hidden (confirmed via the same Playwright check). Wrapping to
+     a clean two-row header (brand, then CTA row) is the standard
+     pattern here, rather than shrinking button padding/type size
+     below their already-token-driven values. */
+  .sapx-site-header-inner {
+    flex-wrap: wrap;
   }
 }
 
