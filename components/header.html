@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Component Reference: Site Header — SENTINEL APEX</title>
+<link rel="stylesheet" href="../css/tokens.css">
+<link rel="stylesheet" href="../css/components.css">
+<!--
+  SENTINEL APEX — Component Reference: Site Header + Skip Link (PR-4)
+  ==================================================================
+  Standalone, previewable reference markup for .sapx-site-header (the
+  sticky enterprise header: brand, primary nav, header CTAs, and a
+  mobile nav toggle) plus .sapx-skip-link, the WCAG 2.4.1 "bypass
+  blocks" skip-to-content link. The skip link is included here rather
+  than as its own file because it is always the first element in
+  <body>, immediately preceding the header it lets keyboard/screen-
+  reader users bypass.
+
+  ESSENTIAL JAVASCRIPT: the mobile nav toggle below is the one piece
+  of JS this component system ships (css/components.css itself stays
+  pure CSS with zero JS dependency). It mirrors this repo's existing
+  onclick-handler pattern (see index.html's cdbMobileNavOpen()) rather
+  than introducing a new JS convention, and does nothing but flip
+  aria-expanded + a data attribute that CSS already keys off
+  (.sapx-site-header[data-nav-open="true"] .sapx-nav in
+  css/components.css).
+
+  This file is NOT included or imported by any page automatically —
+  copy the fragment(s) below into a page and adjust nav links/hrefs,
+  brand name, and CTAs to match that page.
+
+  Requires, in this order:
+    <link rel="stylesheet" href="/css/tokens.css">
+    <link rel="stylesheet" href="/css/components.css">
+-->
+<style>
+  body { background: var(--sapx-color-bg-base); margin: 0; font-family: var(--sapx-font-sans); }
+  /* Preview-only main content so the skip link has somewhere real to
+     land and so the sticky header's overlap behavior is visible. */
+  .preview-main { padding: var(--sapx-space-8) var(--sapx-space-5); color: var(--sapx-color-text-secondary); max-width: 1200px; margin: 0 auto; }
+</style>
+</head>
+<body>
+
+<!-- Skip link: must be the first focusable element in the page. -->
+<a class="sapx-skip-link" href="#main-content">Skip to main content</a>
+
+<header class="sapx-site-header" data-nav-open="false">
+  <div class="sapx-site-header-inner">
+    <a class="sapx-brand" href="/index.html">
+      <span aria-hidden="true">&#128737;</span>
+      SENTINEL APEX
+    </a>
+
+    <nav aria-label="Primary">
+      <ul class="sapx-nav" id="sapx-primary-nav">
+        <li><a href="/products.html">Products</a></li>
+        <li><a href="/index.html#threat-intelligence" aria-current="page">Threat Intelligence</a></li>
+        <li><a href="/api.html">API</a></li>
+        <li><a href="/docs.html">Documentation</a></li>
+        <li><a href="/research.html">Research</a></li>
+        <li><a href="/pricing.html">Pricing</a></li>
+        <li><a href="/enterprise.html">Enterprise</a></li>
+        <li><a href="/blog/">Blog</a></li>
+        <li><a href="/contact.html">Contact</a></li>
+      </ul>
+    </nav>
+
+    <div class="sapx-header-ctas">
+      <a class="sapx-btn sapx-btn-ghost" href="/demo.html?utm_source=header&amp;utm_medium=cta">Book a Demo</a>
+      <a class="sapx-btn sapx-btn-primary" href="/upgrade.html?plan=free&amp;utm_source=header&amp;utm_medium=cta">Start Free Trial</a>
+      <button type="button" class="sapx-nav-toggle" aria-expanded="false" aria-controls="sapx-primary-nav" aria-label="Toggle navigation menu" onclick="sapxToggleNav(this)">&#9776;</button>
+    </div>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <div class="preview-main">
+    <p><strong>Preview only</strong> — page content starts here. The skip link above targets this landmark; resize the viewport below 900px to see the nav collapse behind the toggle button.</p>
+  </div>
+</main>
+
+<script>
+  // Essential JS: toggles the mobile nav open/closed and keeps
+  // aria-expanded in sync. Mirrors this repo's existing onclick-
+  // handler convention rather than introducing a new JS pattern.
+  function sapxToggleNav(button) {
+    var header = button.closest('.sapx-site-header');
+    var expanded = button.getAttribute('aria-expanded') === 'true';
+    button.setAttribute('aria-expanded', String(!expanded));
+    header.setAttribute('data-nav-open', String(!expanded));
+  }
+</script>
+
+</body>
+</html>
