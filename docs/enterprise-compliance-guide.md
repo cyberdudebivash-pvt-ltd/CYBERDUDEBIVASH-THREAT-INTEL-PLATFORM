@@ -217,6 +217,17 @@ Verified in real headless Chromium via Playwright
 
 ## 6. Known Limitations
 
+- **`.md` files render as raw source on this site, not formatted
+  documents.** This repository has a root `.nojekyll` file, so GitHub
+  Pages serves every file as-is with no Markdown-to-HTML conversion.
+  Found during a post-build stability audit: the Privacy section's
+  link to `docs/DPA_TEMPLATE.md` would otherwise open to unrendered
+  plain text (literal `#`/`**` markers) despite being a real, accurate
+  link. Fixed by labeling it "(plain text)" so the expectation is set
+  correctly rather than implying a polished document view. The same
+  convention does not apply to `.well-known/security.txt`, which is
+  plain text by standard (RFC 9116) and expected to read that way.
+
 - **No automated cross-file consistency test for every figure** (unlike
   PR-6's pricing-figure guard). The figures here span multiple source
   documents in different formats (Markdown tables, HTML compliance
