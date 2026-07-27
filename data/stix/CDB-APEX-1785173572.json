@@ -1,0 +1,231 @@
+{
+  "type": "bundle",
+  "id": "bundle--570c3152-465b-47e9-b4bf-6b9b1d08e373",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "name": "CyberDudeBivash SENTINEL APEX",
+      "description": "CyberDudeBivash Pvt. Ltd. - Global Cybersecurity Intelligence Infrastructure",
+      "identity_class": "organization",
+      "sectors": [
+        "technology"
+      ],
+      "contact_information": "enterprise@cyberdudebivash.com",
+      "created": "2024-01-01T00:00:00Z",
+      "modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "type": "marking-definition",
+      "spec_version": "2.1",
+      "id": "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a",
+      "created": "2017-01-20T00:00:00.000Z",
+      "definition_type": "tlp",
+      "definition": {
+        "tlp": "green"
+      }
+    },
+    {
+      "type": "intrusion-set",
+      "spec_version": "2.1",
+      "id": "intrusion-set--fe125ada-6276-4973-9111-cd53bc1e7a5a",
+      "name": "CDB-FIN-07 Campaign",
+      "description": "A Fake Teams Update Can Give Hackers Two Separate Ways to Control Your PC",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "confidence": 54,
+      "aliases": [
+        "CDB-FIN-07"
+      ],
+      "extensions": {
+        "x-cdb-apex-1": {
+          "predictive_score": 5.5,
+          "campaign_id": "UNCLASSIFIED",
+          "campaign_confidence": 5.5,
+          "threat_category": "Phishing",
+          "behavioral_tags": [],
+          "ai_summary": "Initial access via phishing → execution chain: initial access → execution → impact",
+          "risk_factors": [
+            "IOC_density",
+            "MITRE_coverage"
+          ],
+          "soc_priority": "P3",
+          "threat_level": "MEDIUM",
+          "recommended_action": "Medium severity threat (score 5.5/10) — limited technical indicators in source data",
+          "x_cdb_published_at": "2026-07-27T15:05:05Z"
+        }
+      },
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--c4840679-429c-464f-8262-6b7c67cba344",
+      "name": "Malicious Artifact: supportdev.exe",
+      "pattern": "[file:name = 'supportdev.exe']",
+      "pattern_type": "stix",
+      "valid_from": "2026-07-27T17:32:52Z",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "confidence": 54,
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--733af4eb-d5fe-487e-b7d6-0b8f6ff39c0e",
+      "relationship_type": "indicates",
+      "source_ref": "indicator--c4840679-429c-464f-8262-6b7c67cba344",
+      "target_ref": "intrusion-set--fe125ada-6276-4973-9111-cd53bc1e7a5a",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--464cf2ab-c390-4599-acd2-1b34aa0e385c",
+      "name": "Phishing",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1566",
+          "url": "https://attack.mitre.org/techniques/T1566/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--44f507b4-4137-4c57-aee8-978e77223318",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--fe125ada-6276-4973-9111-cd53bc1e7a5a",
+      "target_ref": "attack-pattern--464cf2ab-c390-4599-acd2-1b34aa0e385c",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--35df607d-4727-4620-bfaf-688c34796787",
+      "name": "Command and Scripting Interpreter",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1059",
+          "url": "https://attack.mitre.org/techniques/T1059/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--fe526249-4fde-460d-89db-2e682f021f1f",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--fe125ada-6276-4973-9111-cd53bc1e7a5a",
+      "target_ref": "attack-pattern--35df607d-4727-4620-bfaf-688c34796787",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--b98f94e6-2cfc-4f7e-ad32-b062d886085f",
+      "name": "PowerShell",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1059.001",
+          "url": "https://attack.mitre.org/techniques/T1059/001/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--8b4cb199-a1c9-4e2c-b568-160229d426e1",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--fe125ada-6276-4973-9111-cd53bc1e7a5a",
+      "target_ref": "attack-pattern--b98f94e6-2cfc-4f7e-ad32-b062d886085f",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--1d62493d-5587-4c2d-9a1a-027ef47286ec",
+      "name": "Valid Accounts",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1078",
+          "url": "https://attack.mitre.org/techniques/T1078/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--865a2b94-1a65-404c-8efb-8ef7e32a1437",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--fe125ada-6276-4973-9111-cd53bc1e7a5a",
+      "target_ref": "attack-pattern--1d62493d-5587-4c2d-9a1a-027ef47286ec",
+      "created": "2026-07-27T17:32:52Z",
+      "modified": "2026-07-27T17:32:52Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    }
+  ]
+}
