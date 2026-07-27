@@ -1,0 +1,198 @@
+{
+  "type": "bundle",
+  "id": "bundle--33b03956-4d48-4521-93a1-de8dd9fba864",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "name": "CyberDudeBivash SENTINEL APEX",
+      "description": "CyberDudeBivash Pvt. Ltd. - Global Cybersecurity Intelligence Infrastructure",
+      "identity_class": "organization",
+      "sectors": [
+        "technology"
+      ],
+      "contact_information": "enterprise@cyberdudebivash.com",
+      "created": "2024-01-01T00:00:00Z",
+      "modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "type": "marking-definition",
+      "spec_version": "2.1",
+      "id": "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a",
+      "created": "2017-01-20T00:00:00.000Z",
+      "definition_type": "tlp",
+      "definition": {
+        "tlp": "green"
+      }
+    },
+    {
+      "type": "intrusion-set",
+      "spec_version": "2.1",
+      "id": "intrusion-set--299458cf-b7ef-4214-861f-926565c5ec6f",
+      "name": "CDB-FIN-07 Campaign",
+      "description": "Critical vBulletin Flaw Lets Unauthenticated Attackers Execute PHP Code Remotely",
+      "created": "2026-07-27T17:32:41Z",
+      "modified": "2026-07-27T17:32:41Z",
+      "confidence": 47,
+      "aliases": [
+        "CDB-FIN-07"
+      ],
+      "extensions": {
+        "x-cdb-apex-1": {
+          "predictive_score": 5.5,
+          "campaign_id": "UNCLASSIFIED",
+          "campaign_confidence": 5.5,
+          "threat_category": "Remote Code Execution",
+          "behavioral_tags": [],
+          "ai_summary": "Initial access via rce → execution chain: credential access → lateral movement → exfiltration → impact",
+          "risk_factors": [
+            "IOC_density",
+            "MITRE_coverage"
+          ],
+          "soc_priority": "P3",
+          "threat_level": "MEDIUM",
+          "recommended_action": "Medium severity threat (score 5.5/10) — limited technical indicators in source data",
+          "x_cdb_published_at": "2026-07-27T15:49:36Z"
+        }
+      },
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "vulnerability",
+      "spec_version": "2.1",
+      "id": "vulnerability--7b9b24a1-f7f6-4edb-962f-1541a47aa765",
+      "name": "CVE-2026-61511",
+      "created": "2026-07-27T17:32:41Z",
+      "modified": "2026-07-27T17:32:41Z",
+      "external_references": [
+        {
+          "source_name": "cve",
+          "external_id": "CVE-2026-61511",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-61511"
+        }
+      ],
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--460535f2-0bf9-4636-812f-c6c08c4e7548",
+      "relationship_type": "exploits",
+      "source_ref": "intrusion-set--299458cf-b7ef-4214-861f-926565c5ec6f",
+      "target_ref": "vulnerability--7b9b24a1-f7f6-4edb-962f-1541a47aa765",
+      "created": "2026-07-27T17:32:41Z",
+      "modified": "2026-07-27T17:32:41Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--696de18e-2454-47fd-bb99-d753a809ee87",
+      "name": "Command and Scripting Interpreter",
+      "created": "2026-07-27T17:32:41Z",
+      "modified": "2026-07-27T17:32:41Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1059",
+          "url": "https://attack.mitre.org/techniques/T1059/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--5fa8e3cc-8878-43e0-9dfe-54b7cbbfa4a5",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--299458cf-b7ef-4214-861f-926565c5ec6f",
+      "target_ref": "attack-pattern--696de18e-2454-47fd-bb99-d753a809ee87",
+      "created": "2026-07-27T17:32:41Z",
+      "modified": "2026-07-27T17:32:41Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--19dacb1b-d605-4537-a77c-cb3c68071c8c",
+      "name": "Exploit Public-Facing Application",
+      "created": "2026-07-27T17:32:41Z",
+      "modified": "2026-07-27T17:32:41Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1190",
+          "url": "https://attack.mitre.org/techniques/T1190/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--8c72bed4-7f8e-4a51-bf04-f9c414f2f5a6",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--299458cf-b7ef-4214-861f-926565c5ec6f",
+      "target_ref": "attack-pattern--19dacb1b-d605-4537-a77c-cb3c68071c8c",
+      "created": "2026-07-27T17:32:41Z",
+      "modified": "2026-07-27T17:32:41Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--3aba0352-4dce-4251-9277-92d46b3c91a8",
+      "name": "Exploitation of Remote Services",
+      "created": "2026-07-27T17:32:41Z",
+      "modified": "2026-07-27T17:32:41Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1210",
+          "url": "https://attack.mitre.org/techniques/T1210/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--c37b96d3-85c2-4a06-b6a1-7351c4e5e0ce",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--299458cf-b7ef-4214-861f-926565c5ec6f",
+      "target_ref": "attack-pattern--3aba0352-4dce-4251-9277-92d46b3c91a8",
+      "created": "2026-07-27T17:32:41Z",
+      "modified": "2026-07-27T17:32:41Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    }
+  ]
+}
