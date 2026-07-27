@@ -1843,6 +1843,11 @@ def build_report_sections(item: dict) -> str:
             "</div>"
         )
     else:
+        # v184.0 P0 FIX: 'ai_conf' was referenced but never defined (pyflakes undefined-name
+        # NameError — GATE 1 hard-fail). Reuses the same ioc_confidence -> High/Medium/Low
+        # label convention already established in render_report() (avoids a raw, meaningless %).
+        _ai_conf_pct = min(int(item.get("ioc_confidence") or 75), 100)
+        ai_conf = "High" if _ai_conf_pct >= 70 else "Medium" if _ai_conf_pct >= 40 else "Low"
         _s15_body = (
             "<p>APEX's autonomous AI analyst layer has correlated this advisory against "
             "12 months of threat intelligence, actor infrastructure history, and global telemetry. "
