@@ -3853,7 +3853,11 @@ async function handleRequest(request, env, ctx) {
     if (!auth.jwt) {
       return jsonResp({ error: "Authentication required. POST Authorization: Bearer <token>." }, 401);
     }
-    if (auth.tier === "FREE" || auth.tier === "PUBLIC") {
+    // SAEEP Phase 10 Stage 5: removed a dead "|| auth.tier === 'PUBLIC'"
+    // disjunct -- TIERS (line 312) has no PUBLIC value, so auth.tier can
+    // never equal that literal; the condition below is unchanged in every
+    // reachable case.
+    if (auth.tier === "FREE") {
       return jsonResp({ error: "PRO or ENTERPRISE tier required for /api/ingest", upgrade: "POST /auth/login with a PRO/ENTERPRISE API key" }, 403);
     }
     let body = {};
