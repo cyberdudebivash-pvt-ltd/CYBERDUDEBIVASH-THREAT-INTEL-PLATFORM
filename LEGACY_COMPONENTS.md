@@ -4,9 +4,11 @@
 
 ## Legacy Runtime
 
-A Python FastAPI application, with two possible entry points defined in the repository (`agent/api/api_server.py` and `api/main.py`), was built to run on Railway. Railway hosting has been retired by business decision. Repository evidence does not establish that either entry point is currently deployed anywhere.
+A Python FastAPI application, with two possible entry points defined in the repository (`agent/api/api_server.py` and `api/main.py`), was built to run on Railway. Railway hosting has been retired by business decision. Repository evidence does not establish that either entry point is currently deployed anywhere. The repository root `Dockerfile` defaults to running `agent/api/api_server.py`; its alternate `SENTINEL_MODE=blogger` branch (which would instead run the report pipeline inside the container) is confirmed unreachable in practice — nothing else in the repository sets that variable, and the real pipeline runs natively via `sentinel-blogger.yml`, not through this Dockerfile.
 
 `sentinel-apex-api/` is a second, independently-scaffolded Railway-targeted codebase (its own `railway.toml` and `Dockerfile`), separate from the above.
+
+Within `agent/`'s 34 version-suffixed directories, one (`agent/v60_incident_engine/`) is explicitly superseded — `agent/incident_response/incident_engine.py` states directly that it "replaces the CLI stub" there. It remains on disk; nothing recommends its removal here. See [`COMPONENT_REGISTRY.json`](COMPONENT_REGISTRY.json) for the full per-directory breakdown (17 confirmed production via dedicated scheduled workflows, 13 left unresolved for lack of evidence either way).
 
 ## Legacy Infrastructure
 
@@ -22,6 +24,7 @@ A Python FastAPI application, with two possible entry points defined in the repo
 ## Customer Installation Artifacts
 
 - `deploy/docker-compose.yml` — not part of this repository's own runtime. It is copied by an installer script into a customer's own deployment directory as part of a self-hosted/on-premises distribution path. As currently authored, it references configuration files that do not exist in this repository's tracked tree.
+- `Dockerfile.api` — the build context for `deploy/docker-compose.yml`'s `api` and `worker` services. Runs `agent/v49_intelligence_api/`'s FastAPI app. Same customer-installer package as the item above, not a separate concern.
 
 ## Archived Systems
 
@@ -30,4 +33,6 @@ A Python FastAPI application, with two possible entry points defined in the repo
 
 ## Duplicated / Unconsolidated Surfaces
 
-Not "legacy" in the sense of being retired, but not canonical either: `api/v1/`, `api/apex_v2/`, and `agent/api/` each present an independently-versioned API surface alongside the production Cloudflare Worker API. None has confirmed production traffic. See [`COMPONENT_REGISTRY.json`](COMPONENT_REGISTRY.json) for per-item classification and confidence.
+`agent/api/` presents an independently-versioned API surface alongside the production Cloudflare Worker API, tied to the same unresolved Railway deployment-target question as the Legacy Runtime section above. See [`COMPONENT_REGISTRY.json`](COMPONENT_REGISTRY.json) for classification and confidence.
+
+**Correction (EPTP Phase 8 Batch 5):** `api/v1/` and `api/apex_v2/` were previously listed here as unconfirmed/duplicated surfaces. They are not — both contain generated data only (no code), are the report pipeline's local staging output before upload to R2, and are confirmed production. See [`PRODUCTION_RUNTIME.md`](PRODUCTION_RUNTIME.md)'s Report Generation Flow.

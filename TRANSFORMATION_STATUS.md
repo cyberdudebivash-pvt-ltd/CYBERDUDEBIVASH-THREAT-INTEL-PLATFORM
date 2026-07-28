@@ -7,7 +7,10 @@
 - Repository-wide legacy and dead-code identification, with evidence-based classification (production / legacy / experimental / customer artifact / archived / unknown).
 - Business-decision reconciliation: confirmed which repository artifacts correspond to retired infrastructure (Railway hosting, Blogger publishing) versus active systems.
 - **Batch 1** (EPTP Phase 8): removed a confirmed-orphaned cluster of Blogger-publishing code and its two unused dependencies; removed four stale, unreferenced `index.html` backup files; added a Cloudflare KV restore script to pair with the existing backup automation.
-- **Batch 2** (EPTP Phase 8, this phase): introduced this canonical documentation set (`production_manifest.yaml`, `REPOSITORY_STATUS.md`, `PRODUCTION_RUNTIME.md`, `LEGACY_COMPONENTS.md`, `TRANSFORMATION_STATUS.md`, `COMPONENT_REGISTRY.json`, `ARCHITECTURE_DECISIONS.md`).
+- **Batch 2**: introduced this canonical documentation set (`production_manifest.yaml`, `REPOSITORY_STATUS.md`, `PRODUCTION_RUNTIME.md`, `LEGACY_COMPONENTS.md`, `TRANSFORMATION_STATUS.md`, `COMPONENT_REGISTRY.json`, `ARCHITECTURE_DECISIONS.md`).
+- **Batch 3**: cross-checked Batch 2's documentation against the repository directly and fixed 5 factual inconsistencies, including a second production deployment pipeline (`deploy-revenue-engine.yml`) that had been missed entirely.
+- **Batch 4**: added automated validation (`scripts/validate_canonical_docs.py`, `scripts/detect_repository_drift.py`) and a dedicated, non-blocking CI workflow (`repository-integrity-check.yml`) so this documentation set can no longer silently drift from the repository without detection.
+- **Batch 5** (this phase): resolved every open drift-detection finding and the two largest remaining low-confidence areas. `api/v1/` and `api/apex_v2/` reclassified from unknown to confirmed production (they're the report pipeline's local staging output, not competing API code). All 34 version-suffixed `agent/` directories individually evidenced: 17 confirmed production via dedicated scheduled workflows, 1 confirmed superseded (`v60_incident_engine`), 13 left honestly unknown for lack of evidence either way. `scripts/`'s 410 files given a quantified aggregate signal (49.5% referenced by at least one workflow) rather than remaining a bare guess.
 
 ## In Progress
 
@@ -21,9 +24,10 @@
 ## Deferred
 
 - Three additional dead-code files discovered while validating Batch 1 (`publisher.py`, `agent/publisher.py`, `agent/v56_publish_guard/publisher.py`) were confirmed orphaned but intentionally left out of Batch 1's scope; carried forward as a candidate for a future batch.
-- A full live/dead inventory of `scripts/` (412 files) and the older version-suffixed directories under `agent/` has not yet been performed at the individual-file level.
+- 13 `agent/` directories remain classified `unknown` after Batch 5's investigation (see `COMPONENT_REGISTRY.json`'s `agent-version-generations-unresolved` entry) — evidence was insufficient either way, not a placeholder for future work so much as an honest ceiling on what static analysis alone can establish.
+- `scripts/`'s ~207 workflow-unreferenced files have not been individually classified — Batch 5 established an aggregate signal, not a per-file audit.
 
 ## Future
 
-- Consolidating the multiple parallel API surfaces (`api/v1/`, `api/apex_v2/`, `agent/api/`, `sentinel-apex-api/`) once their respective live/dead status is established.
+- Consolidating `agent/api/` and `sentinel-apex-api/` once the underlying Railway deployment-target question (see Blocked, above) is resolved.
 - Reorganizing root-level historical documentation (versioned changelogs, point-in-time audit reports) into a dedicated archive location, reducing repository-root clutter.
