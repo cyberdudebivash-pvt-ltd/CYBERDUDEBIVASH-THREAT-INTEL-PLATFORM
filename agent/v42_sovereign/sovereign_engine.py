@@ -191,7 +191,29 @@ class TenantManager:
 
     def create_tenant(self, org_name: str, tier: str = "free",
                       admin_email: str = "") -> Dict:
-        """Provision a new tenant with isolated configuration."""
+        """Provision a new tenant with isolated configuration.
+
+        Idempotent on admin_email: this is the only call site in this module
+        (the demo/seed tenant list run on every scheduled cycle), and without
+        this check each 6-hourly run minted 5 brand-new tenants with fresh
+        random IDs for the exact same 5 organizations -- silently inflating
+        the platform's own "active tenants" metric (453 accumulated runs x 5
+        = 2265 reported tenants, with zero corresponding real usage) rather
+        than reflecting genuinely new provisioning.
+        """
+        if admin_email:
+            for existing in self.tenants.values():
+                existing_email = existing.admin_email if hasattr(existing, "admin_email") else existing.get("admin_email")
+                if existing_email == admin_email:
+                    existing_id = existing.tenant_id if hasattr(existing, "tenant_id") else existing.get("tenant_id")
+                    return {
+                        "tenant_id": existing_id,
+                        "org_name": org_name,
+                        "tier": tier,
+                        "api_key": existing.api_key if hasattr(existing, "api_key") else existing.get("api_key"),
+                        "limits": self.TIER_LIMITS.get(tier, self.TIER_LIMITS["free"]),
+                        "status": "already_provisioned",
+                    }
         tenant_id = f"tenant-{uuid.uuid4().hex[:12]}"
         tenant = Tenant(
             tenant_id=tenant_id,
