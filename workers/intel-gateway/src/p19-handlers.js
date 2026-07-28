@@ -21,6 +21,7 @@
 "use strict";
 
 import { buildEvidenceAttribution, computeTransparentConfidence, validateReportQuality } from './p18-handlers.js';
+import { normalizeTier } from './api-extensions.js';
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -109,7 +110,19 @@ export function computeCertificationLevel(qualityScore, validationResult) {
 export function normalizeTierForEE(tier) {
   // enterprise-endpoints.js uses lowercase: "enterprise", "pro", "premium"
   // index.js TIERS uses uppercase: "ENTERPRISE", "PRO", "FREE", "MSSP"
-  return (tier || "free").toLowerCase();
+  //
+  // SAEEP Phase 10 Stage 5: this used to be a bare .toLowerCase(), which
+  // handled the casing gap but not the pro/premium spelling gap -- for a
+  // real PRO customer it produced "pro", never "premium". That was
+  // harmless here only because every enterprise-endpoints.js call site
+  // that cares about the paid mid-tier (requireProOrEnterprise) already
+  // defensively checks for *both* spellings -- but it was still a second,
+  // independent, partial reimplementation of the same normalization
+  // api-extensions.js's normalizeTier() already does completely. Delegating
+  // to it removes the duplicate logic; behavior for every existing
+  // enterprise-endpoints.js call site is unchanged, since all of them
+  // already tolerate whichever of "pro"/"premium" they're given.
+  return normalizeTier(tier);
 }
 
 // ---------------------------------------------------------------------------
