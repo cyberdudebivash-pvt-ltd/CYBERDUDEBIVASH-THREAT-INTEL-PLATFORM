@@ -399,7 +399,7 @@ export function buildP27MultiAudienceBlock(item) {
  */
 export function buildP27IntelBenchmarkBlock(item) {
   const p20   = computeP20QualityScore(item);
-  const p21   = getP21CertificationLevel(item);
+  const p21   = getP21CertificationLevel(p20.total);
   const p23   = computeActionabilityScore(item);
   const p25   = computeEnterpriseTrustScore(item);
   const p26   = computeP26Grade(item);
