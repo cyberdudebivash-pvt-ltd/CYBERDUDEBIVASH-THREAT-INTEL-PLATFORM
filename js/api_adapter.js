@@ -570,27 +570,43 @@
   }
 
   /* ── BATCH RESPONSE NORMALIZER ─────────────────────────────────────────── */
+  /* v186.0 P0 FIX: multi-schema safe parser -- was hardcoded to the
+   * /api/preview envelope (data.preview.items) only, silently returning
+   * zero items for any other shape. This is now the same priority chain
+   * the primary dashboard renderer already uses and has proven correct
+   * (index.html, loadGOCIntel(): "data.preview.items (Worker) > data.items
+   * > data.data.items > plain Array") -- reused verbatim, not reinvented,
+   * so this adapter can serve as a genuine single feed adapter for BOTH
+   * /api/preview and /api/feed.json shaped responses. */
   function normalizeApexResponse(data) {
     if (!data || typeof data !== "object") {
       return { status:"error", items:[], total_in_feed:0, generated_at:"", stats:{ total:0, by_severity:{}, total_iocs:0, high_priority:0 } };
     }
     const preview  = _obj(data.preview);
-    const rawItems = _arr(preview.items);
-    const items    = rawItems.map(function(item, i) { return normalizeIntelItem(item, i); });
+    const dataData = _obj(data.data);
+    const rawItems =
+      (Array.isArray(preview.items)  && preview.items.length  > 0) ? preview.items  :
+      (Array.isArray(data.items)     && data.items.length     > 0) ? data.items     :
+      (Array.isArray(dataData.items) && dataData.items.length > 0) ? dataData.items :
+      (Array.isArray(data) ? data : []);
+    const items = rawItems.map(function(item, i) { return normalizeIntelItem(item, i); });
     const bySev = {}; let totalIocs = 0, highPri = 0;
     items.forEach(function(item) {
       bySev[item.severity] = (bySev[item.severity] || 0) + 1;
       totalIocs += item.ioc_count;
       if (item.is_high_priority) highPri++;
     });
-    const genAt = _str(preview.generated_at, "");
+    // Metadata may live on the envelope root (/api/feed.json) or under
+    // .preview (/api/preview) -- prefer whichever side actually matched.
+    const meta = (rawItems === preview.items) ? preview : data;
+    const genAt = _str(meta.generated_at, _str(data.generated_at, ""));
     return {
       status:        _str(data.status, "ok"),
       gateway:       _str(data.gateway, ""),
       request_id:    _str(data.request_id, ""),
       items:         items,
-      total_in_feed: _int(preview.total_in_feed, items.length),
-      total_preview: _int(preview.total_preview, items.length),
+      total_in_feed: _int(meta.total_in_feed, items.length),
+      total_preview: _int(meta.total_preview, items.length),
       generated_at:  genAt,
       generated_at_fmt: genAt ? formatTimestamp(genAt) : "—",
       stats: { total:items.length, by_severity:bySev, total_iocs:totalIocs, high_priority:highPri },

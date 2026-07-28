@@ -20,6 +20,15 @@
  * fail (which is inherently non-deterministic) -- it verifies the fix at
  * the actual site of the regression: the link-building contract itself.
  *
+ * Also covers the second, independent card-rendering system
+ * (js/card_renderer.js + js/card_renderer_integration.js + js/api_adapter.js,
+ * rendering into #sapx-card-grid): confirms api_adapter.js now parses
+ * /api/feed.json's plain-items envelope (not only /api/preview's
+ * data.preview.items shape), and that card_renderer.js's report link
+ * reuses the same cdbBuildReportUrl() helper instead of only trusting
+ * item.report_url, so this second system can no longer show a card with
+ * no path to the report either.
+ *
  * Self-contained: starts a local static file server rooted at the repo
  * root (so root-relative hrefs resolve exactly as they do in production),
  * intercepts /api/* and cross-origin requests so the page's real bootstrap
@@ -241,6 +250,58 @@ async function main() {
         'renderTopThreats() still shows the documented ranks #4-10 teaser banner (unrelated leaderboard-gate pattern, not this P0)',
         /HIGH-RISK THREATS LOCKED/.test(topThreatsResult.text || ''),
         'banner text present: ' + /HIGH-RISK THREATS LOCKED/.test(topThreatsResult.text || '')
+      );
+    }
+
+    // --- 4. #sapx-card-grid system (card_renderer.js / card_renderer_integration.js
+    // / api_adapter.js) -- a second, independent card-rendering system that used
+    // to hardcode /api/preview (always free-tier-masked by Worker design, per
+    // its own doc comment) with no report-link fallback, guaranteeing a
+    // dead-end paywall for 100% of visitors. Now: (a) api_adapter.js parses
+    // /api/feed.json's plain-array/plain-items envelope, not only /api/preview's
+    // data.preview.items shape; (b) card_renderer.js's report link reuses the
+    // same cdbBuildReportUrl() helper instead of only trusting item.report_url.
+    const sapxAdapterResult = await page.evaluate(() => {
+      try {
+        if (typeof window.SentinelApexAdapter !== 'object') return { ok: false, error: 'SentinelApexAdapter is not defined on window' };
+        // Shape as returned by /api/feed.json: plain { items: [...] }, NOT
+        // wrapped in { preview: { items: [...] } } like /api/preview.
+        const feedJsonShape = { items: [{ stix_id: 'intel--feedjson-shape-test', title: 'Feed JSON shape test', severity: 'HIGH', risk_score: 7.5 }], generated_at: '2026-07-28T00:00:00Z' };
+        const normalized = window.SentinelApexAdapter.normalizeApiResponse(feedJsonShape);
+        return { ok: true, itemCount: normalized.items.length, firstId: normalized.items[0] && normalized.items[0].stix_id };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    });
+    record(
+      'api_adapter.js normalizeApexResponse() correctly parses /api/feed.json\'s plain-items envelope (not just /api/preview\'s data.preview.items)',
+      sapxAdapterResult.ok && sapxAdapterResult.itemCount === 1 && sapxAdapterResult.firstId === 'intel--feedjson-shape-test',
+      JSON.stringify(sapxAdapterResult)
+    );
+
+    const sapxRendererResult = await page.evaluate((item) => {
+      try {
+        if (typeof window.SentinelApexCardRenderer !== 'object') return { ok: false, error: 'SentinelApexCardRenderer is not defined on window' };
+        if (typeof window.SentinelApexAdapter !== 'object') return { ok: false, error: 'SentinelApexAdapter is not defined on window' };
+        const container = document.getElementById('sapx-card-grid');
+        if (!container) return { ok: false, error: '#sapx-card-grid not found in DOM' };
+        // Free-tier-shaped item: no report_url (as applyTierGateV2 leaves it,
+        // or as a not-yet-fully-processed item would have it) but a valid
+        // stix_id + published_at, exactly like MOCK_ITEM.
+        const normalizedItem = window.SentinelApexAdapter.normalizeIntelItem(item, 0);
+        container.innerHTML = '';
+        window.SentinelApexCardRenderer.renderGrid(container, [normalizedItem], { maxCards: 5 });
+        return { ok: true, html: container.innerHTML };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    }, MOCK_ITEM);
+
+    if (!sapxRendererResult.ok) {
+      record('SentinelApexCardRenderer.renderGrid() (#sapx-card-grid) renders without throwing', false, sapxRendererResult.error);
+    } else {
+      const hrefs = collectHrefs(sapxRendererResult.html);
+      const hitsReport = hrefs.some((h) => h.startsWith('/reports/'));
+      record(
+        '#sapx-card-grid card gets a working "VIEW REPORT" link even when report_url is empty',
+        hitsReport,
+        `hrefs found: ${JSON.stringify(hrefs)}`
       );
     }
 
