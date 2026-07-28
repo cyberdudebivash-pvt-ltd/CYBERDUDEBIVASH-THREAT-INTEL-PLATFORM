@@ -580,6 +580,10 @@ def main() -> int:
         "sitemap.xml", "favicon.ico", "favicon.png",
         "service-worker.js",   # v158.0.2: PWA cache governance (was 404)
         "version.json",        # v158.0.2: platform version API (was 404)
+        "apex_openapi_v3.yaml", # SAEEP Phase 10 Stage 2: same 404 class as the
+                                # two fixes above -- enterprise-knowledge-center.html
+                                # links to /apex_openapi_v3.yaml but this file was
+                                # never in include_singles, so the link 404'd.
     ]
     for fname in include_singles:
         src = REPO_ROOT / fname

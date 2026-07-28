@@ -27,6 +27,7 @@ import { computeP20QualityScore }     from './p20-handlers.js';
 import { getP21CertificationLevel }   from './p21-handlers.js';
 import { computeActionabilityScore }  from './p23-handlers.js';
 import { computeEnterpriseTrustScore} from './p25-handlers.js';
+import { _detectContradictions }      from './p22-handlers.js';
 
 export const P26_VERSION = "P26.0";
 
@@ -91,9 +92,11 @@ export function computeP26Grade(item) {
   const p20pct = p20.total;                               // 0-100
 
   // P21 certification (BELOW_MINIMUM=0, INTERNAL_DRAFT=50, ENTERPRISE_READY=75, PREMIUM_CERTIFIED=100)
-  const p21    = getP21CertificationLevel(item);
+  // getP21CertificationLevel() takes the numeric P20 score, not the item --
+  // reuse p20 computed above rather than passing the item object itself.
+  const p21    = getP21CertificationLevel(p20pct);
   const p21map = { PREMIUM_CERTIFIED: 100, ENTERPRISE_READY: 75, INTERNAL_DRAFT: 50, BELOW_MINIMUM: 0 };
-  const p21pct = p21map[p21.level] ?? 0;
+  const p21pct = p21map[p21.id] ?? 0;                     // CERT_LEVELS entries key by "id", not "level"
 
   // P23 actionability (0-100)
   const p23    = computeActionabilityScore(item);
@@ -104,15 +107,11 @@ export function computeP26Grade(item) {
   const p25pct = p25.pct;                                 // 0-100
 
   // P22 contradiction penalty (0-100  -  subtract 25 per error contradiction)
-  // Read from _score_details or compute inline: check for obvious contradictions
-  const sd      = item._score_details || {};
-  const cvss    = parseFloat(sd.cvss || item.cvss_score || item.risk_score || 0);
-  const kev     = !!(sd.kev || item.kev_present || item.kev);
-  const severity = String(item.severity || "").toUpperCase();
-  const SBAND   = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
-  let contradictions = 0;
-  if (cvss >= 9 && SBAND[severity] !== undefined && SBAND[severity] <= 1) contradictions++;
-  if (kev && (severity === "LOW" || severity === "INFO"))                   contradictions++;
+  // Reuses the real P22 engine (this module's own header promises "ZERO
+  // DUPLICATION -- P20-P25 engines reused via imports; P26 aggregates, not
+  // recomputes") instead of a separately-maintained, narrower reimplementation.
+  const contradictionList = _detectContradictions(item);
+  const contradictions    = contradictionList.filter(c => c.level === "error").length;
   const p22pct  = Math.max(0, 100 - contradictions * 25);                  // 100/75/50...
 
   // Weighted composite
@@ -196,7 +195,7 @@ function _computeCertFlags(item, composite, contradictions, p20, p21) {
   }
 
   // P21 certification minimum
-  if (p21.level === "BELOW_MINIMUM") {
+  if (p21.id === "BELOW_MINIMUM") {
     flags.push({ code: "C-P21", level: "BLOCKER", msg: "P21 certification BELOW_MINIMUM  -  item does not meet enterprise release standard" });
   }
 
@@ -439,7 +438,7 @@ export function buildP26CertificationBlock(item) {
     </div>
     ${_row("P26 Composite Score", g.composite + "/100", g.gradeColor)}
     ${_row("P26 Grade",           g.grade + "  -  " + g.gradeLabel, g.gradeColor)}
-    ${_row("P21 Cert Level",      g.p21detail.level, g.p21detail.level === "PREMIUM_CERTIFIED" ? "#22c55e" : g.p21detail.level === "ENTERPRISE_READY" ? "#3b82f6" : "#6b7280")}
+    ${_row("P21 Cert Level",      g.p21detail.id, g.p21detail.id === "PREMIUM_CERTIFIED" ? "#22c55e" : g.p21detail.id === "ENTERPRISE_READY" ? "#3b82f6" : "#6b7280")}
     ${_row("P25 Trust Tier",      g.p25detail.tier, g.p25detail.tierColor)}
     <div style="margin-top:12px;color:#8b949e;font-size:10px;text-transform:uppercase;letter-spacing:.1em;">Certification Findings</div>
     ${flagRows}`;

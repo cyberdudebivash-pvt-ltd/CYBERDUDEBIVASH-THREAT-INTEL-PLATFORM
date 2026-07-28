@@ -1863,6 +1863,24 @@ async function handleApiKeyRotate(request, env, rid) {
   await env.REVENUE_CRM_KV.put(`apikey:${newKey}`, JSON.stringify(newRecord));
   await env.REVENUE_CRM_KV.put(`apikeys:${cleanEmail}`, JSON.stringify([newRecord]));
 
+  // Entitlement sync -- mirrors provisionCustomer()'s existing API_KEYS_KV
+  // write (see its comment above): REVENUE_CRM_KV is not what intel-gateway's
+  // resolveAuth() reads on each request, so a rotation that only updated
+  // REVENUE_CRM_KV left the old key fully live against the production
+  // gateway and the new key unable to authenticate at all. Guarded the same
+  // way provisionCustomer() is, so this stays a no-op wherever the binding
+  // isn't configured.
+  if (env.API_KEYS_KV) {
+    for (const ok of oldKeys) {
+      await env.API_KEYS_KV.delete(ok.key);
+    }
+    await env.API_KEYS_KV.put(newKey, JSON.stringify({
+      key: newKey, tier: cust.tier, customer_id: cust.id, email: cleanEmail,
+      source: "revenue_engine_rotation",
+      created_at: now, expires_at: cust.current_period_end,
+    }));
+  }
+
   await appendAuditLog(env, { action:"key_rotated", email:cleanEmail, new_key_prefix:newKey.substring(0,16), ts:now });
   await queueEmail(env, { to:cleanEmail, template:"key_rotated", vars:{ new_key:newKey, tier:cust.tier } });
 
@@ -1882,6 +1900,17 @@ async function handleApiKeyRevoke(request, env, rid) {
   await env.REVENUE_CRM_KV.put(`apikeys:${cleanEmail}`, JSON.stringify(keys.map(k => ({...k, status:"revoked"}))));
   const cust = await env.REVENUE_CRM_KV.get(`customer:${cleanEmail}`, "json");
   if (cust) await env.REVENUE_CRM_KV.put(`customer:${cleanEmail}`, JSON.stringify({...cust, status:"suspended", suspended_at:now}));
+
+  // Entitlement sync -- see the matching comment in handleApiKeyRotate above:
+  // without this, a "revoked" key kept authenticating against the live
+  // gateway (API_KEYS_KV) until it naturally expired, regardless of what
+  // REVENUE_CRM_KV said. Guarded the same way provisionCustomer() is.
+  if (env.API_KEYS_KV) {
+    for (const k of keys) {
+      await env.API_KEYS_KV.delete(k.key);
+    }
+  }
+
   await appendAuditLog(env, { action:"key_revoked", email:cleanEmail, reason:reason||"admin_action", ts:now });
   return json({ success:true, keys_revoked:keys.length, email:cleanEmail });
 }
