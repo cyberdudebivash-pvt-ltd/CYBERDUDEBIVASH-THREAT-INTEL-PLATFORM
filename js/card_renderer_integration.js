@@ -20,6 +20,19 @@
  *      (injected by pipeline STAGE 3.93) -- zero network dependency
  *    - fetchAndNormalize() added to api_adapter.js public API
  *    - Cards are ALWAYS visible immediately on page load
+ *
+ *  P0 FIX (v186.0):
+ *    - Primary source is now /api/feed.json -- the same canonical,
+ *      tier-aware feed the main #threat-grid renderer treats as primary.
+ *      /api/preview is documented Worker-side as "Always the FREE/teaser
+ *      view regardless of caller tier (unauthenticated by design)" and was
+ *      never meant to be a full dashboard feed source; it remains as a
+ *      fallback for when /api/feed.json is unavailable. This does not
+ *      change what a given visitor sees (neither this page nor the main
+ *      renderer ever sends an auth header, so both already show the same
+ *      free-tier-masked view for anonymous visitors) -- it fixes the
+ *      wrong endpoint choice and the resulting duplicate, drifted data
+ *      source, not a tier/auth gap.
  * =============================================================================
  */
 
@@ -31,10 +44,10 @@
    *  CONFIGURATION
    * ---------------------------------------------------------------------- */
   var CONFIG = {
-    API_URL:       "https://intel.cyberdudebivash.com/api/preview/",
+    API_URL:       "/api/feed.json",
     FALLBACK_URLS: [
+      "https://intel.cyberdudebivash.com/api/preview/",
       "https://intel.cyberdudebivash.com/api/preview",
-      "/api/feed.json",
     ],
     CONTAINER_SELECTORS: [
       "#sapx-card-grid",
