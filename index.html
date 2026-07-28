@@ -9153,12 +9153,13 @@
                         window.cdbAuth.setSession(data);
                         return { ok: true, user: data };
                     } catch(e) {
-                        // Offline/dev fallback \u2014 preserve partial session
-                        if (email && password.length >= 8) {
-                            window.cdbAuth.setSession({ token: btoa(email+':'+Date.now()), email, tier:'free', expires_in: 3600 });
-                            return { ok: true, offline: true };
-                        }
-                        return { ok: false, error: e.message };
+                        // The real backend (/auth/login) authenticates by API key, not
+                        // email+password, so this call always fails today. Previously
+                        // this silently fabricated a local session on any 8+ char
+                        // password, making a customer believe they were signed in when
+                        // nothing had actually authenticated. Fail honestly instead and
+                        // point at the real, working provisioning path.
+                        return { ok: false, error: 'Email/password sign-in isn\u2019t available yet \u2014 API keys are issued on request. Use "Get API Key" below to request one.' };
                     }
                 },
 
