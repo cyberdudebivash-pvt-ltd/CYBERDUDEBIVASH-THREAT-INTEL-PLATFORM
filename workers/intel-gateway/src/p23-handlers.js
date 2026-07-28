@@ -537,7 +537,7 @@ export function computeActionabilityScore(item) {
   if (!item || typeof item !== 'object') return { total: 0, label: "N/A", color: "#4b5563", dims: [] };
 
   const { total: p20total } = computeP20QualityScore(item);
-  const p21level = getP21CertificationLevel(item);
+  const p21level = getP21CertificationLevel(p20total);
   const iocs      = item.iocs || [];
   const detects   = item.detection_bundle || item.apex?.sigma_rules || item.apex?.detections || [];
   const mitres    = item.mitre_techniques || item.apex?.mitre_techniques || [];
@@ -667,7 +667,7 @@ export function buildOperationalReadinessGateBlock(item) {
   const hasGuid  = iocs.some(i => i.response_guidance || i.detection_guidance);
   const ec       = item.evidence_chain;
   const p20score = computeP20QualityScore(item).total;
-  const p21cert  = getP21CertificationLevel(item);
+  const p21cert  = getP21CertificationLevel(p20score);
   const cvss     = parseFloat(item.cvss_score || 0);
   const kev      = !!(item.kev_present || item.kev);
 
@@ -681,7 +681,7 @@ export function buildOperationalReadinessGateBlock(item) {
     { name: "Compliance Mapping",      pass: true,                  desc: "Multi-framework compliance mapping generated" },
     { name: "Patch Priority",         pass: cvss > 0 || kev,        desc: cvss > 0 ? `CVSS ${cvss.toFixed(1)}  -  risk score available` : kev ? "KEV-confirmed  -  immediate action" : "No CVSS data available" },
     { name: "Evidence Chain",          pass: !!(ec && ec.source_reliability), desc: ec ? `Evidence from ${ec.source_name || 'verified source'}` : "No formal evidence chain" },
-    { name: "P21 Certification",       pass: p21cert.level !== "BELOW_MINIMUM", desc: `${p21cert.level}  -  score ${p21cert.score}/100` },
+    { name: "P21 Certification",       pass: p21cert.id !== "BELOW_MINIMUM", desc: `${p21cert.id}  -  score ${p20score}/100` },
   ];
 
   const passed  = gates.filter(g => g.pass).length;
@@ -743,7 +743,8 @@ export async function handleP23Actionability(request, env) {
     const as      = computeActionabilityScore(item);
     const patch   = _computePatchPriority(item);
     const cov     = _computeDetectionCoverage(item);
-    const p21     = getP21CertificationLevel(item);
+    const p20     = computeP20QualityScore(item);
+    const p21     = getP21CertificationLevel(p20.total);
 
     return new Response(JSON.stringify({
       version: P23_VERSION,
@@ -752,7 +753,7 @@ export async function handleP23Actionability(request, env) {
       actionability: as,
       patch_priority: { priority: patch.priority, timeframe: patch.timeframe, score: patch.score, reasons: patch.reasons },
       detection_coverage: { pct: cov.pct, label: cov.label, blind_spots: cov.dims.filter(d => !d.covered).map(d => d.missing) },
-      p21_certification: { level: p21.level, score: p21.score },
+      p21_certification: { level: p21.id, score: p20.total },
       generated_at: new Date().toISOString(),
     }, null, 2), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
   }
@@ -813,7 +814,8 @@ export async function handleP23OperationalReadiness(request, env) {
     const ec      = item.evidence_chain;
     const cvss    = parseFloat(item.cvss_score || 0);
     const kev     = !!(item.kev_present || item.kev);
-    const p21     = getP21CertificationLevel(item);
+    const p20     = computeP20QualityScore(item);
+    const p21     = getP21CertificationLevel(p20.total);
 
     const gates = [
       { gate: "G1_EXECUTIVE",    pass: !!(item.apex?.ai_summary || item.description) },
@@ -825,7 +827,7 @@ export async function handleP23OperationalReadiness(request, env) {
       { gate: "G7_COMPLIANCE",  pass: true },
       { gate: "G8_PATCH",       pass: cvss > 0 || kev },
       { gate: "G9_EVIDENCE",    pass: !!(ec && ec.source_reliability) },
-      { gate: "G10_P21_CERT",   pass: p21.level !== "BELOW_MINIMUM" },
+      { gate: "G10_P21_CERT",   pass: p21.id !== "BELOW_MINIMUM" },
     ];
 
     const passed = gates.filter(g => g.pass).length;
@@ -857,7 +859,7 @@ export async function handleP23OperationalReadiness(request, env) {
       true,
       cvss > 0 || kev,
       !!(item.evidence_chain?.source_reliability),
-      getP21CertificationLevel(item).level !== "BELOW_MINIMUM",
+      getP21CertificationLevel(computeP20QualityScore(item).total).id !== "BELOW_MINIMUM",
     ];
     const passed = gates.filter(Boolean).length;
     return { id: item.stix_id || item.id, passed, total: 10, publish_eligible: passed >= 8 };

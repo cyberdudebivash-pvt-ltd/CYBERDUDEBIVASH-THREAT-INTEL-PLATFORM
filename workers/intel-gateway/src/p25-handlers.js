@@ -337,7 +337,12 @@ export function computeEnterpriseTrustScore(item) {
   const sd        = item._score_details  || {};
   const apexAi    = item.apex_ai         || item.apex || {};
   const cvss      = parseFloat(sd.cvss   || item.cvss_score || item.risk_score || 0);
-  const epss      = parseFloat(sd.epss   || item.epss_score || 0);
+  // epss_score is stored 0-1 (FIRST.org native scale); normalize to a 0-100
+  // percentage here, matching p20-handlers.js's convention -- previously this
+  // was compared directly against 0-100 thresholds below (D5), so it could
+  // never award more than the lowest non-zero tier for any real EPSS value.
+  const epssRaw   = parseFloat(sd.epss   || item.epss_score || 0);
+  const epss      = epssRaw > 1 ? epssRaw : epssRaw * 100;
   const kev       = !!(sd.kev            || item.kev_present || item.kev);
   const exploit   = !!(sd.active_exploit || item.active_exploit);
   const zeroday   = !!(sd.zero_day       || item.zero_day);
@@ -495,7 +500,7 @@ export async function handleP25TrustScore(request, env) {
 
     const trust    = computeEnterpriseTrustScore(item);
     const p20      = computeP20QualityScore(item);
-    const p21      = getP21CertificationLevel(item);
+    const p21      = getP21CertificationLevel(p20.total);
 
     return new Response(JSON.stringify({
       version:           P25_VERSION,
@@ -506,7 +511,7 @@ export async function handleP25TrustScore(request, env) {
       p25_trust_tier:    trust.tier,
       p25_dimensions:    trust.dims.map(d => ({ name: d.name, earned: d.earned, max: d.max, pct: Math.round((d.earned / d.max) * 100), rationale: d.rationale })),
       p20_quality_score: p20.total,
-      p21_cert_level:    p21.level,
+      p21_cert_level:    p21.id,
     }, null, 2), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e), version: P25_VERSION }), {

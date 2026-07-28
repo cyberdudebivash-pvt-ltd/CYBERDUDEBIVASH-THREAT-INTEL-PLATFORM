@@ -57,6 +57,16 @@ export const TIER_DEFAULT_SCOPES = {
                "export:misp","export:csv","export:stix:full","admin:webhooks",
                "read:ai:predict","read:ai:campaigns","read:ai:anomalies",
                "read:intel:graph","read:intel:graph:full"],
+  // MSSP is the highest tier (index.js TIERS/RATE_LIMITS rank it above
+  // enterprise) and is treated as >= enterprise everywhere else in the
+  // codebase (e.g. TAXII KEV collection, Brand Protection, Vendor Risk bulk).
+  // Without this entry, "mssp" matched no key here and silently fell back to
+  // the free scope set -- the same failure mode the pro/premium alias below
+  // already documents, just for the top-paying tier instead of the mid tier.
+  mssp: ["read:intel","read:stix","read:stix:full","read:actors","read:cves",
+         "export:misp","export:csv","export:stix:full","admin:webhooks",
+         "read:ai:predict","read:ai:campaigns","read:ai:anomalies",
+         "read:intel:graph","read:intel:graph:full"],
 };
 
 // index.js's TIERS constant emits "PRO" (index.js:297) but this table's
@@ -66,14 +76,58 @@ export const TIER_DEFAULT_SCOPES = {
 // out of every scope-gated endpoint in this file.
 const TIER_KEY_ALIASES = { pro: "premium" };
 
-export function buildScopeSet(tier, explicitScopes) {
+// SAEEP Phase 10 Stage 4 -- Canonical tier-key normalizer.
+//
+// resolveAuth() (index.js:319-373) always returns auth.tier as one of the
+// literal UPPERCASE strings "FREE"/"PRO"/"ENTERPRISE"/"MSSP" (index.js's
+// TIERS constant, index.js:312) -- that is this platform's one canonical
+// wire format, confirmed at every API_KEYS_KV record producer. This
+// function is the canonical, reusable way to turn ANY spelling of a tier
+// this platform has ever produced (that uppercase wire format, or a
+// legacy/dormant-module lowercase guess) into the lowercase, alias-
+// resolved key this file's own TIER_DEFAULT_SCOPES (and several other
+// tier-keyed tables elsewhere in the codebase) are keyed by.
+//
+// Extracted from buildScopeSet()'s existing inline logic -- behavior for
+// every existing caller of buildScopeSet() is unchanged; this only makes
+// the same normalization independently reusable, so it stops being
+// reinvented (inconsistently, and in several confirmed-broken ways) by
+// every new module that needs a tier comparison.
+export function normalizeTier(tier) {
   const key = (tier || "free").toLowerCase();
-  const defaults = TIER_DEFAULT_SCOPES[TIER_KEY_ALIASES[key] || key] || TIER_DEFAULT_SCOPES.free;
+  return TIER_KEY_ALIASES[key] || key;
+}
+
+export function buildScopeSet(tier, explicitScopes) {
+  const key = normalizeTier(tier);
+  const defaults = TIER_DEFAULT_SCOPES[key] || TIER_DEFAULT_SCOPES.free;
   if (Array.isArray(explicitScopes) && explicitScopes.length) {
     // Explicit scopes cannot exceed tier defaults -- intersect
     return explicitScopes.filter(s => defaults.includes(s));
   }
   return defaults;
+}
+
+// SAEEP Phase 10 Stage 4 -- Canonical ownership check.
+//
+// auth.sub (never auth.key_id or auth.email -- neither exists on the real
+// auth object resolveAuth() produces) is the one identity field this
+// platform's authentication actually populates: the JWT's own subject on
+// the JWT path, or the API-key record's customer_id (falling back to a
+// key prefix) on the API-key path. Any code comparing a resource's
+// recorded owner against a caller's identity should go through this
+// function rather than inventing its own field name -- exactly the defect
+// class found in this program's Stage 3/4 audit (ownership checks written
+// against auth.key_id/auth.email, which silently never match anything).
+//
+// There is no separate per-customer "is_admin" concept in this platform's
+// auth object -- admin access is a wholly distinct mechanism (a shared
+// operator secret checked against X-Admin-Secret/ADMIN_SECRET on the
+// /api/admin/* route family, evaluated before customer auth is even
+// relevant), so this helper deliberately does not accept an "is admin"
+// bypass parameter for a concept the real system doesn't have.
+export function ownsResource(auth, resourceOwnerId) {
+  return !!(auth && auth.sub && resourceOwnerId && auth.sub === resourceOwnerId);
 }
 
 //  Scope enforcement middleware 
@@ -465,7 +519,14 @@ export async function handleCVEs(request, env, auth, rid) {
     const paged  = cves.slice(offset, offset + limit).map(c => {
       const { _priority, ...clean } = c;
       // Pro-gate: full IOC correlation
-      if (auth.tier === "free") {
+      // SAEEP Phase 10 Stage 4 fix: auth.tier is always the uppercase wire
+      // value ("FREE"), which this comparison's literal "free" could never
+      // match -- this gate has never actually fired, so every caller
+      // (including fully unauthenticated ones) has been receiving the full,
+      // untruncated CVE report list with a real ioc_count and no upgrade
+      // prompt. normalizeTier() is the canonical fix (see its definition
+      // above): it correctly resolves any real tier value to "free" here.
+      if (normalizeTier(auth.tier) === "free") {
         clean.reports = clean.reports.slice(0, 2);
         clean.ioc_count = null;
         clean.locked = true;

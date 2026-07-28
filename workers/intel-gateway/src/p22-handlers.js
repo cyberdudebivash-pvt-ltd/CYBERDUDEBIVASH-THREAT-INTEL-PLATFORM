@@ -80,12 +80,16 @@ function _validateDetectionRules(item) {
 
 // -- P22.3: Per-Item Contradiction Check --------------------------------------
 
-function _detectContradictions(item) {
+export function _detectContradictions(item) {
   const contradictions = [];
   const cvss     = parseFloat(item.cvss_score || item.cvss) || 0;
   const severity = (item.severity || "").toUpperCase();
   const kev      = !!(item.kev_present || item.kev);
-  const epss     = parseFloat(item.epss_score) || 0;
+  // epss_score is stored 0-1 (FIRST.org native scale); normalize to a 0-100
+  // percentage here so the >=50 threshold below can ever actually fire --
+  // previously this compared a 0-1 value against a 0-100 threshold, so C4
+  // never triggered for any real EPSS score.
+  const epss     = (parseFloat(item.epss_score) || 0) * 100;
 
   // C1: CVSS vs Severity
   if (cvss > 0 && severity && !["UNKNOWN", "INFO", ""].includes(severity)) {
