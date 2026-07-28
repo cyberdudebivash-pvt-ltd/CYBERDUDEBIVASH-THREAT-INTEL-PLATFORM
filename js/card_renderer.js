@@ -561,11 +561,23 @@
                    📦 STIX Bundle
                  </a>`
               : ""}
-          ${item.report_url
-            ? `<a href="${esc(item.report_url)}" target="_blank" rel="noopener" class="sapx-report-cta">
-                 📄 VIEW REPORT ↗
-               </a>`
-            : ""}
+          ${(function() {
+            // v186.0 P0 FIX: reuse the same canonical report-URL builder the
+            // main dashboard renderer uses (window.cdbBuildReportUrl, defined
+            // in index.html) instead of only trusting item.report_url, which
+            // is frequently empty (pipeline timing, not just tier masking).
+            // Falls back to the prior report_url-only check if the host page
+            // hasn't loaded that helper (this module has no hard dependency
+            // on it, only a soft, single-source-of-truth preference).
+            var url = (typeof window !== "undefined" && typeof window.cdbBuildReportUrl === "function")
+              ? window.cdbBuildReportUrl(item)
+              : (item.report_url || "");
+            return url
+              ? `<a href="${esc(url)}" target="_blank" rel="noopener" class="sapx-report-cta">
+                   📄 VIEW REPORT ↗
+                 </a>`
+              : "";
+          })()}
         </div>
       </div>
     </div>`;

@@ -9766,6 +9766,53 @@
             } catch(e) { return String(str); }
         }
 
+        // v186.0 P0 FIX — CANONICAL INTEL REPORT URL BUILDER
+        // ═══════════════════════════════════════════════════════════════
+        // Single source of truth for "where does this card's report link
+        // go" — replaces three independently-duplicated implementations
+        // that had drifted apart (renderCards' inline IIFE, renderTopThreats'
+        // intelUrl, and cdbGodModeRender's tier-gated CTA).
+        //
+        // Root cause of the P0 "fully locked card" regression: cdbGodModeRender
+        // (the bulletproof fallback renderer, activated whenever renderCards()
+        // throws or leaves #threat-grid empty) built its own report link and
+        // gated the LINK ITSELF by client-side tier state — sending free-tier
+        // users straight to /upgrade.html instead of to the report page.
+        // This was unnecessary: /reports/** is a public, always-reachable,
+        // server-masked surface (see workers/intel-gateway/src/index.js —
+        // generateIntelReport() + applyTierGateV2(item,"free",null)) that
+        // already renders the correct public/locked-section split for EVERY
+        // visitor regardless of tier. No caller needs to gate the link itself.
+        //
+        // Tier-agnostic by design: every caller (free or paid) gets the same
+        // report URL. Access to premium sections is enforced server-side,
+        // inside the report page — never by withholding the link.
+        function cdbBuildReportUrl(item) {
+            try {
+                const _eid = item.stix_id || item.id || '';
+                const _isFail = item.validation_status === 'quality_fail' || item.validation_status === 'write_error';
+
+                const _iru = (item.internal_report_url || '').trim();
+                const _ru  = (item.report_url || '').trim()
+                    .replace('https://reports.cyberdudebivash.com', 'https://intel.cyberdudebivash.com');
+                const _ruIsInternal = _ru && (
+                    _ru.startsWith('/reports/') ||
+                    _ru.includes('intel.cyberdudebivash.com') ||
+                    _ru.includes('cyberdudebivash.com/reports')
+                );
+
+                const _internalUrl = _iru
+                    || (_ruIsInternal ? _ru : '')
+                    || (_eid ? (() => {
+                        const _d = (item.published_at || item.processed_at || '').slice(0, 7);
+                        const _ym = _d ? _d.replace('-', '/') : '';
+                        return _ym ? `/reports/${_ym}/${_eid}.html` : `/reports/${_eid}.html`;
+                    })() : '');
+
+                return (_internalUrl && !_isFail) ? _internalUrl : '';
+            } catch (e) { return ''; }
+        }
+
         function renderCards(data) {
             const originalLength = data.length;
 
@@ -10717,41 +10764,21 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                                 <i class="fas fa-expand-alt"></i> DETAILS
                             </button>
                             ${(()=>{
-                                // v133.0 P0 FIX: Smart dossier link \u2014 INTERNAL URL PRIORITY CHAIN
-                                // Priority: internal_report_url → report_url (if internal) → /reports/{stix_id}.html → source_url (last resort only)
-                                // NEVER opens an external source as "Tactical Dossier".
+                                // v186.0 P0 FIX: report link now built by the single canonical
+                                // cdbBuildReportUrl() helper (was: inline duplicate of the same
+                                // priority chain -- see helper's doc comment for why this was unified).
+                                const _internalUrl = cdbBuildReportUrl(item);
                                 const _eid = item.stix_id || item.id || '';
                                 const _sUrl = item.source_url || '';
-                                const _vs = item.validation_status || '';
-                                const _isFail = _vs === 'quality_fail' || _vs === 'write_error';  // 'pending' is NOT a fail -- links are valid
 
-                                // Build internal URL \u2014 prefer internal_report_url, then report_url if it is internal
-                                let _iru = (item.internal_report_url || '').trim();
-                                let _ru = (item.report_url || '').trim()
-                                    .replace('https://reports.cyberdudebivash.com', 'https://intel.cyberdudebivash.com');
-
-                                // report_url is "internal" if it is a relative /reports/ path OR an intel.cyberdudebivash.com URL
-                                const _ruIsInternal = _ru && (
-                                    _ru.startsWith('/reports/') ||
-                                    _ru.includes('intel.cyberdudebivash.com') ||
-                                    _ru.includes('cyberdudebivash.com/reports')
-                                );
-
-                                // Canonical internal URL: prefer explicit internal_report_url field
-                                const _internalUrl = _iru
-                                    || (_ruIsInternal ? _ru : '')
-                                    || (_eid ? (() => { const _d=(item.published_at||item.processed_at||'').slice(0,7); const _ym=_d?_d.replace('-','/'):''; return _ym?`/reports/${_ym}/${_eid}.html`:`/reports/${_eid}.html`; })() : '');
-
-                                const _hasInternal = !!_internalUrl && !_isFail;
-
-                                if (_hasInternal) {
+                                if (_internalUrl) {
                                     return `<a href="${_internalUrl}" target="_blank" rel="noopener" class="card-link">SENTINEL APEX INTEL REPORT &#x2192;</a>`;
                                 }
                                 // Fallback 1: inline modal (never shows external as "dossier")
                                 if (_eid) {
                                     return `<button class="js-open-modal card-link" data-stix-id="${_eid}" style="border:none;background:none;padding:0;cursor:pointer;">SENTINEL APEX INTEL REPORT &#x2192;</button>`;
                                 }
-                                // Fallback 2: source URL \u2014 labelled as SOURCE, never as Dossier
+                                // Fallback 2: source URL -- labelled as SOURCE, never as Dossier
                                 if (_sUrl) {
                                     return `<a href="${_sUrl}" target="_blank" rel="noopener" class="card-link">View Source &#x2192;</a>`;
                                 }
@@ -11076,11 +11103,13 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                         var rawConf = item.confidence_score != null ? parseFloat(item.confidence_score) : null;
                         var conf = (rawConf != null && rawConf > 0) ? Math.round(rawConf <= 1 ? rawConf * 100 : rawConf) : (sev === 'CRITICAL' ? 85 : sev === 'HIGH' ? 72 : sev === 'MEDIUM' ? 60 : 45);
                         var iocCount = item.ioc_count || 0;
-                        // ACCESS GOVERNANCE v184.0 — MODEL_B DISABLED
-                        // report_url is only resolved for PRO+ tiers.
-                        // For PUBLIC/free tier, report_url is NOT available from the API
-                        // (stripped by access_control_policy in public_api.py).
-                        // We gate it here as well for defence-in-depth.
+                        // v186.0 P0 FIX: report link now built by the single canonical
+                        // cdbBuildReportUrl() helper -- tier-agnostic by design (see helper's
+                        // doc comment above renderCards()). Premium fields (full IOC list,
+                        // actor attribution, AI analysis) are still masked server-side for
+                        // free tier by applyTierGateV2() in workers/intel-gateway/src/index.js;
+                        // the LINK itself is never withheld. _hasProAccess is retained below
+                        // only to choose CTA styling/label, not to gate the destination URL.
                         var _currentTierLvl = (function(){
                             var t = (window._platformTiers && window._platformTiers.current) || 'free';
                             if (t==='mssp'||t==='MSSP') return 3;
@@ -11089,10 +11118,7 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                             return 0; // free / public
                         })();
                         var _hasProAccess = _currentTierLvl >= 1;
-                        // For PRO+: use report_url. For PUBLIC: fall back to source_url only.
-                        var reportUrl = _hasProAccess
-                            ? _es(item.report_url || item.internal_report_url || item.source_url || '#')
-                            : _es(item.source_url || '#');
+                        var reportUrl = _es(cdbBuildReportUrl(item) || item.source_url || '#');
 
                         // MITRE tactic chips
                         var tactics = Array.isArray(item.mitre_tactics) ? item.mitre_tactics.slice(0, 5) : [];
@@ -11174,9 +11200,18 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                                     + (_hasCve    ? '<span style="font-family:var(--font-mono,monospace);font-size:8px;color:#f59e0b;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);padding:3px 8px;border-radius:4px;letter-spacing:0.5px;font-weight:700;">&#9650; ' + (item.cve_id||(item.cve_ids||[])[0]||'CVE') + '</span>' : '')
                                     + (_srcTrust  ? '<span style="font-family:var(--font-mono,monospace);font-size:8px;color:#34d399;background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.15);padding:3px 8px;border-radius:4px;margin-left:auto;">' + _srcTrust + '</span>' : '')
                                     + '</div>' : '';
-                                const _ctaReport = (_hasProAccess && reportUrl !== '#')
+                                // v186.0 P0 FIX: link is now ALWAYS the real report page
+                                // (reportUrl, built by the tier-agnostic cdbBuildReportUrl()
+                                // helper) -- never /upgrade.html directly. The report page
+                                // itself already shows public sections + a locked-section
+                                // upgrade CTA for free tier (see generateIntelReport() /
+                                // applyTierGateV2 in workers/intel-gateway/src/index.js).
+                                // Styling still signals tier -- PRO sees "VIEW DOSSIER", free
+                                // sees the upgrade-styled "UNLOCK FULL INTEL" -- but both
+                                // now open the same real report, never a bare paywall.
+                                const _ctaReport = (reportUrl === '#') ? '' : (_hasProAccess
                                     ? '<a href="' + reportUrl + '" target="_blank" rel="noopener" class="cdb-report-link" style="margin-left:auto;background:linear-gradient(135deg,rgba(0,212,170,0.18),rgba(0,212,170,0.07));border:1px solid rgba(0,212,170,0.4);color:#00d4aa;padding:9px 18px;border-radius:6px;font-size:10.5px;font-weight:800;letter-spacing:0.8px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono,monospace);box-shadow:0 0 16px rgba(0,212,170,0.12);transition:all 0.2s;" title="View Full Intel Dossier — 20 sections, STIX 2.1, IOC data">&#128196; VIEW DOSSIER &rarr;</a>'
-                                    : '<a href="/upgrade.html?plan=pro&utm_source=reports-tab-gate&ref=' + encodeURIComponent(item.stix_id||'') + '" target="_blank" rel="noopener" style="margin-left:auto;background:linear-gradient(135deg,rgba(220,38,38,0.2),rgba(185,28,28,0.12));border:1px solid rgba(220,38,38,0.38);color:#f87171;padding:9px 18px;border-radius:6px;font-size:10px;font-weight:900;letter-spacing:1px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono,monospace);box-shadow:0 0 18px rgba(220,38,38,0.18);transition:all 0.2s;" title="Upgrade to PRO — unlock full 20-section dossier">&#128274; UNLOCK FULL INTEL</a>';
+                                    : '<a href="' + reportUrl + '" target="_blank" rel="noopener" style="margin-left:auto;background:linear-gradient(135deg,rgba(220,38,38,0.2),rgba(185,28,28,0.12));border:1px solid rgba(220,38,38,0.38);color:#f87171;padding:9px 18px;border-radius:6px;font-size:10px;font-weight:900;letter-spacing:1px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono,monospace);box-shadow:0 0 18px rgba(220,38,38,0.18);transition:all 0.2s;" title="View report — premium sections unlock with PRO">&#128274; UNLOCK FULL INTEL</a>');
                                 const _srcBadge = _srcName ? '<span style="font-family:var(--font-mono,monospace);font-size:8px;color:#3d5060;letter-spacing:0.3px;padding:2px 0;">SRC: ' + _srcName.slice(0,28) + '</span>' : '';
                                 return _statsRow +
                                     '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);">'
@@ -12157,15 +12192,12 @@ function renderTopThreats(data) {
         const prC = prioColor(pr);
         const isTop3 = idx < 3;
         const iocCount = item.ioc_count || (item.ioc_counts ? Object.values(item.ioc_counts).reduce((a,b)=>a+b,0) : 0);
-        // v135.0: Build internal intel report URL \u2014 reports/{year}/{month}/{stix_id}.html
-        const _its = item.processed_at || item.timestamp || '';
-        const _iDate = _its ? new Date(_its) : null;
-        const _iyr = _iDate ? _iDate.getFullYear() : '';
-        const _imo = _iDate ? String(_iDate.getMonth()+1).padStart(2,'0') : '';
-        const _isid = item.stix_id || item.id || '';
-        const intelUrl = (_isid && _iyr && _imo)
-            ? 'reports/' + _iyr + '/' + _imo + '/' + _isid + '.html'
-            : (item.source_url || 'https://intel.cyberdudebivash.com');
+        // v186.0 P0 FIX: report link now built by the single canonical
+        // cdbBuildReportUrl() helper (was: inline duplicate that only ever
+        // constructed reports/{y}/{m}/{id}.html and ignored a more specific
+        // internal_report_url/report_url when present -- also fixes a latent
+        // relative-path bug: this used to omit the leading "/").
+        const intelUrl = cdbBuildReportUrl(item) || (item.source_url || 'https://intel.cyberdudebivash.com');
 
         // Severity heatmap bar width
         const barW = Math.min(sc * 10, 100);
