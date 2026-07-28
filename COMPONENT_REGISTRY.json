@@ -162,6 +162,24 @@
       "note": "Copied into customer install directories by install_v29.sh. Currently references missing config files."
     },
     {
+      "name": "dockerfile-api",
+      "path": "Dockerfile.api",
+      "owner": "Platform Engineering",
+      "classification": "customer_artifact",
+      "confidence": "high",
+      "last_verified_phase": "EPTP Phase 8 Batch 5",
+      "note": "Resolved a Batch 4 drift-detection finding. Build context for deploy/docker-compose.yml's 'api' and 'worker' services (dockerfile: Dockerfile.api). Runs agent.v49_intelligence_api.api_server:app -- see agent-v49-intelligence-api above. Same customer-installer cluster as deploy-docker-compose, not separate."
+    },
+    {
+      "name": "root-dockerfile",
+      "path": "Dockerfile",
+      "owner": "Platform Engineering",
+      "classification": "legacy",
+      "confidence": "high",
+      "last_verified_phase": "EPTP Phase 8 Batch 5",
+      "note": "Resolved a Batch 4 drift-detection finding. Default CMD runs agent.api.api_server:app (already-registered as agent-api-railway-app, legacy). Its SENTINEL_MODE=blogger alternate branch runs agent/sentinel_blogger.py inside the container, but SENTINEL_MODE is not set anywhere else in the repository -- confirmed via repo-wide grep -- so that branch is unreachable in practice. The real report pipeline runs natively via sentinel-blogger.yml on the GitHub Actions runner, not through this Dockerfile."
+    },
+    {
       "name": "blogger-publish-cluster",
       "path": "agent/blogger_client.py, agent/blogger_auth.py, agent/sentinel_weekly.py, agent/publishers/cve_deep_dive_publisher.py, agent/dashboard.py",
       "owner": "Platform Engineering",
@@ -183,28 +201,28 @@
       "name": "api-v1",
       "path": "api/v1/",
       "owner": "Platform Engineering",
-      "classification": "unknown",
-      "confidence": "low",
-      "last_verified_phase": "Production Rationalization Phase 6",
-      "note": "Coexists with api/apex_v2/. No confirmed production consumer identified."
+      "classification": "production",
+      "confidence": "high",
+      "last_verified_phase": "EPTP Phase 8 Batch 5",
+      "note": "RECLASSIFIED this batch from unknown/low -- this directory contains no code at all, only generated JSON/PDF (latest.json, apex.json, manifest.json, ai_summary.json, top10.json, latest_pro.json, daily_brief_latest.pdf). scripts/r2_upload.py (confirmed production) reads these exact files by literal path and uploads each to the R2 bucket the live gateway serves from. Directory was last modified by the pipeline's own run within the last day of this check. Not a competing API implementation -- it's the report pipeline's local staging output."
     },
     {
       "name": "api-apex-v2",
       "path": "api/apex_v2/",
       "owner": "Platform Engineering",
-      "classification": "unknown",
-      "confidence": "low",
-      "last_verified_phase": "Production Rationalization Phase 6",
-      "note": "Coexists with api/v1/. No confirmed production consumer identified."
+      "classification": "production",
+      "confidence": "high",
+      "last_verified_phase": "EPTP Phase 8 Batch 5",
+      "note": "RECLASSIFIED this batch from unknown/low -- same pattern as api-v1: no code, only generated JSON (timeline.json, actors.json, critical.json, priority.json, dashboard_intel.json, trending.json). sentinel-blogger.yml documents generating priority.json/critical.json via scripts/build_apex_v2.py as a required pipeline stage ('MUST RUN... before Stage 3.5 (R2)'), and scripts/r2_upload.py explicitly globs api/apex_v2/*.json and uploads each to R2. Directory modified within the last day of this check."
     },
     {
       "name": "scripts-directory",
       "path": "scripts/",
       "owner": "Platform Engineering",
       "classification": "unknown",
-      "confidence": "low",
-      "last_verified_phase": "Production Rationalization Phase 6",
-      "note": "412 files, flat structure. Only backup_kv_to_r2.py and restore_kv_from_r2.py individually confirmed production; the rest not yet inventoried file-by-file."
+      "confidence": "medium",
+      "last_verified_phase": "EPTP Phase 8 Batch 5",
+      "note": "410 .py files (406 in scripts/, 4 in scripts/growth/). Aggregate evidence this batch: 203 of 410 (49.5%) are named in at least one .github/workflows/*.yml file across 32 distinct workflows -- a real, quantified signal, not a guess, but still short of a per-file classification. backup_kv_to_r2.py, r2_upload.py, validate_canonical_docs.py, and detect_repository_drift.py are separately confirmed production. restore_kv_from_r2.py is NOT named in any workflow -- expected, since it is designed for deliberate manual/on-demand invocation during an actual restore, not scheduled automation. The remaining ~207 unreferenced files are not yet individually classified; this was a proxy signal, not an exhaustive per-file audit (static-text grep only -- misses dynamically-constructed invocations)."
     },
     {
       "name": "agent-version-generations",
@@ -212,8 +230,44 @@
       "owner": "Platform Engineering",
       "classification": "unknown",
       "confidence": "low",
-      "last_verified_phase": "EPTP Phase 8 Batch 4",
-      "note": "Represents 33 sequential version-suffixed directories within agent/ (v26_* through v70_apex_upgrade/). Specific known-live modules (license_validator.py, subscription_manager.py, v42_sovereign/sovereign_engine.py) are separately confirmed production; the remainder not yet inventoried. Path field corrected Batch 4 to a checkable directory -- validate_canonical_docs.py caught a glob-style description where a real path belonged."
+      "last_verified_phase": "EPTP Phase 8 Batch 5",
+      "note": "Index entry only -- see agent-scheduled-version-modules, agent-v49-intelligence-api, agent-version-generations-unresolved, and agent-v60-incident-engine below for the evidence-based breakdown completed this batch. Directory listing corrected this batch: 34 version-suffixed directories exist (v26 through v70_apex_upgrade), not 33 -- v42_sovereign is separately confirmed production and excluded from the 33 investigated here. agent/vendor_risk/ also matches a v*/ glob by coincidence (starts with 'v') but is unrelated to this version sequence -- not investigated, flagged for awareness only."
+    },
+    {
+      "name": "agent-scheduled-version-modules",
+      "path": "agent/v30_apex/, agent/v34_predictive/, agent/v35_zerodayhunter/, agent/v36_omnishield/, agent/v37_analyst/, agent/v37_convergence/, agent/v38_arsenal/, agent/v39_nexus/, agent/v40_cortex/, agent/v41_quantum/, agent/v43_genesis/, agent/v46_vanguard/, agent/v49_bughunter_fix/, agent/v51_detection_engine/, agent/v52_report_engine/, agent/v54_bughunter_resilience/, agent/v70_apex_upgrade/",
+      "owner": "Platform Engineering",
+      "classification": "production",
+      "confidence": "high",
+      "last_verified_phase": "EPTP Phase 8 Batch 5",
+      "note": "17 directories, each with direct evidence: 16 are invoked by a dedicated GitHub Actions workflow via 'python -m agent.vNN_x...' (e.g. syndicate.yml, precognition-engine.yml, zerodayhunter.yml, omnishield.yml, ai-threat-analyst.yml, convergence.yml, arsenal.yml, nexus-intelligence.yml, sovereign-platform.yml, genesis-powerhouse.yml, bughunter-recon.yml, detection-engine.yml, report-engine.yml, bughunter-resilient.yml) or a direct subprocess call (scripts/run_pipeline.py for v70_apex_upgrade). v46_vanguard is the exception -- directly imported (unguarded, not in a try/except) by agent/sentinel_blogger.py:174, the confirmed-production report pipeline itself."
+    },
+    {
+      "name": "agent-v49-intelligence-api",
+      "path": "agent/v49_intelligence_api/",
+      "owner": "Platform Engineering",
+      "classification": "customer_artifact",
+      "confidence": "high",
+      "last_verified_phase": "EPTP Phase 8 Batch 5",
+      "note": "Dockerfile.api:48 runs 'uvicorn agent.v49_intelligence_api.api_server:app' as its container CMD -- this is the actual application code the customer-installer bundle (deploy/docker-compose.yml + Dockerfile.api) packages and runs. Same cluster as deploy-docker-compose and dockerfile-api below, not separate legacy cruft."
+    },
+    {
+      "name": "agent-version-generations-unresolved",
+      "path": "agent/v26/, agent/v27/, agent/v29/, agent/v33_fusion/, agent/v44_threat_graph/, agent/v45_bughunter/, agent/v47_integrity/, agent/v48_pipeline_hardening/, agent/v50_attack_surface/, agent/v53_subscription/, agent/v61_playbook_engine/, agent/v62_response_engine/, agent/v63_threathunter/",
+      "owner": "Platform Engineering",
+      "classification": "unknown",
+      "confidence": "low",
+      "last_verified_phase": "EPTP Phase 8 Batch 5",
+      "note": "13 directories where evidence was insufficient for a confident classification, left unknown per this batch's explicit rule rather than guessed: v26/v27/v29/v45_bughunter are imported only by test files, no workflow or production-code invocation found; v33_fusion/v44_threat_graph/v50_attack_surface have zero incoming references found anywhere; v61_playbook_engine/v62_response_engine/v63_threathunter each contain only a substantial __init__.py (6-11KB of real code) with zero incoming references found; v47_integrity and v48_pipeline_hardening form an ambiguous chain -- the only external reference to v48_pipeline_hardening is agent/sentinel_blogger.py:1746 importing a kev_checker.py that does not exist in that directory, wrapped in try/except so it fails silently at runtime, while v48_pipeline_hardening's own pipeline_hardener.py imports v47_integrity but no caller of pipeline_hardener.py itself was found; v53_subscription's sole importer (agent/monetization/quota_manager.py) is itself already confirmed dead code (RSIRP Phase 5B)."
+    },
+    {
+      "name": "agent-v60-incident-engine",
+      "path": "agent/v60_incident_engine/",
+      "owner": "Platform Engineering",
+      "classification": "legacy",
+      "confidence": "high",
+      "last_verified_phase": "EPTP Phase 8 Batch 5",
+      "note": "Still present on disk (__init__.py + incident_engine.py), but agent/incident_response/incident_engine.py:5 explicitly states it 'Replaces the CLI stub at agent/v60_incident_engine/' -- direct, positive evidence of supersession, stronger than a mere absence-of-reference finding."
     },
     {
       "name": "docs",
