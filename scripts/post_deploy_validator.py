@@ -32,7 +32,13 @@ from datetime import datetime, timezone
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKER_BASE = "https://intel.cyberdudebivash.com"
-MIN_ADVISORY_COUNT = 50
+# Aligned with GATE C's threshold in post-deploy-validation.yml (v184.0 fix).
+# R2 is synced by r2-data-sync.yml on its own schedule, independent of the
+# Worker deploy, so a fresh deploy can briefly show fewer items than the repo.
+# 10 confirms the feed is non-empty and substantive without false-failing on
+# that lag. Do not raise above 10 without first confirming r2-data-sync runs
+# and populates R2 before this validator does.
+MIN_ADVISORY_COUNT = 10
 MAX_MANIFEST_AGE_HOURS = 6
 
 HARD_FAIL_GATES = {"A", "B", "E"}   # these block a deployment green state

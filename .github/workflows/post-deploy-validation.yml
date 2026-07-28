@@ -12,6 +12,43 @@ on:
     workflows: ["deploy-worker"]
     types:
       - completed
+  workflow_dispatch:
+    # Manual re-validation entry point. workflow_run alone only sees deploys
+    # that go through deploy-worker.yml -- it cannot see a Wrangler CLI
+    # deploy, a Cloudflare dashboard deploy/rollback, or a secret rotation,
+    # since none of those produce a GitHub Actions event to chain off of.
+    # This input lets an operator re-run the full gate suite after any of
+    # those out-of-band changes without waiting for or faking a commit.
+    inputs:
+      reason:
+        description: "Why is this validation being run manually?"
+        required: false
+        default: "Manual re-validation"
+        type: choice
+        options:
+          - "Manual re-validation"
+          - "Wrangler CLI deployment"
+          - "Cloudflare dashboard deployment"
+          - "Secret rotation"
+          - "Emergency hotfix"
+          - "Rollback"
+          - "Other"
+      deployment_type:
+        description: "What kind of production change (if any) prompted this run?"
+        required: false
+        default: "unspecified"
+        type: choice
+        options:
+          - "unspecified"
+          - "worker-code"
+          - "secret"
+          - "binding"
+          - "rollback"
+          - "none"
+      operator_notes:
+        description: "Optional context (commit SHA, ticket link, incident ref, etc.)"
+        required: false
+        type: string
 
 # Must not overlap with master orchestrator during the same deploy window
 concurrency:
@@ -32,7 +69,9 @@ jobs:
     name: "Post-Deploy Validation"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event.workflow_run.conclusion == 'success'
+    # workflow_run: only proceed if the deploy it's chained to actually succeeded.
+    # workflow_dispatch: no workflow_run conclusion exists to check -- always proceed.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: "Checkout"
@@ -214,8 +253,12 @@ jobs:
           echo "============================================================"
           echo "SENTINEL APEX -- DEPLOYMENT CERTIFICATION"
           echo "============================================================"
-          echo "Deploy Run:   ${{ github.event.workflow_run.id }}"
-          echo "Commit SHA:   ${{ github.event.workflow_run.head_sha }}"
+          echo "Trigger:      ${{ github.event_name }}"
+          echo "Deploy Run:   ${{ github.event.workflow_run.id || 'N/A (manual trigger)' }}"
+          echo "Commit SHA:   ${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "Reason:       ${{ github.event.inputs.reason || 'N/A (automatic trigger)' }}"
+          echo "Deploy Type:  ${{ github.event.inputs.deployment_type || 'N/A (automatic trigger)' }}"
+          echo "Notes:        ${{ github.event.inputs.operator_notes || 'N/A' }}"
           echo "Validated At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "Status:       CERTIFIED OPERATIONAL"
           echo "============================================================"
