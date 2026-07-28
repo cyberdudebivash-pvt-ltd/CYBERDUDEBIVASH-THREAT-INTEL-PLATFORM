@@ -8,12 +8,12 @@ A Python FastAPI application, with two possible entry points defined in the repo
 
 `sentinel-apex-api/` is a second, independently-scaffolded Railway-targeted codebase (its own `railway.toml` and `Dockerfile`), separate from the above.
 
-Within `agent/`'s 34 version-suffixed directories, one (`agent/v60_incident_engine/`) is explicitly superseded — `agent/incident_response/incident_engine.py` states directly that it "replaces the CLI stub" there. It remains on disk; nothing recommends its removal here. See [`COMPONENT_REGISTRY.json`](COMPONENT_REGISTRY.json) for the full per-directory breakdown (17 confirmed production via dedicated scheduled workflows, 13 left unresolved for lack of evidence either way).
+Within `agent/`'s 34 version-suffixed directories, one (`agent/v60_incident_engine/`) was explicitly superseded — `agent/incident_response/incident_engine.py` states directly that it "replaces the CLI stub" there — and was removed in EPTP Phase 9, Batch 1 (see Retired Components, below). See [`COMPONENT_REGISTRY.json`](COMPONENT_REGISTRY.json) for the full per-directory breakdown of the remaining 33 (17 confirmed production via dedicated scheduled workflows, 13 left unresolved for lack of evidence either way).
 
 ## Legacy Infrastructure
 
 - `railway.json`, `Dockerfile.railway`, `Procfile` — Railway deployment configuration, retired alongside the hosting platform.
-- Root-level `docker-compose.yml` / `docker-compose.prod.yml` — a Redis/Prometheus/Grafana/Loki development stack; its production variant's own configuration sources secrets "from Railway."
+- Root-level `docker-compose.yml` / `docker-compose.prod.yml` — a Redis/Prometheus/Grafana/Loki development stack; its production variant's own configuration sourced secrets "from Railway." **Removed in EPTP Phase 9, Batch 1** (see Retired Components, below).
 
 ## Experimental Infrastructure
 
@@ -29,7 +29,14 @@ Within `agent/`'s 34 version-suffixed directories, one (`agent/v60_incident_engi
 ## Archived Systems
 
 - A cluster of Blogger-publishing modules (`agent/blogger_client.py`, `agent/blogger_auth.py`, and their callers) was confirmed to have zero remaining references anywhere in the repository and was removed in EPTP Phase 8, Batch 1. This is noted here for continuity rather than as an outstanding item.
-- `publisher.py` (repository root), `agent/publisher.py`, and `agent/v56_publish_guard/publisher.py` define a `resilient_publish()` function intended (per their own docstrings) to be called from the report pipeline. The current report pipeline does not call any of them. Not yet removed; documented as a known finding for a future batch.
+
+## Retired Components (EPTP Phase 9, Batch 1)
+
+Each retired only after re-verification immediately before removal found no new dependency. Individually revertible — see `COMPONENT_REGISTRY.json`'s `rollback_commit` field per entry.
+
+- **`publisher.py`, `agent/publisher.py`, `agent/v56_publish_guard/publisher.py`** — the `resilient_publish()` cluster the current report pipeline never called. `agent/v56_publish_guard/__init__.py` was left untouched.
+- **`agent/v60_incident_engine/`** — the superseded incident-response stub.
+- **`docker-compose.yml`, `docker-compose.prod.yml`** (root) — the unused dev stack noted above.
 
 ## Duplicated / Unconsolidated Surfaces
 
@@ -41,6 +48,6 @@ Within `agent/`'s 34 version-suffixed directories, one (`agent/v60_incident_engi
 
 Every component above was checked for hidden dependencies (governance rules, compliance tooling, cascading callers) before any retirement-readiness judgment. **This is classification only — nothing above has been removed or scheduled for removal.** Full detail, including specific blockers, is in [`COMPONENT_REGISTRY.json`](COMPONENT_REGISTRY.json)'s `retirement_readiness` field per component.
 
-- **READY** (no functional or governance dependency found): the archived Blogger cluster (already removed), the `publisher.py`/`resilient_publish` cluster, `agent/v60_incident_engine/`, the root dev `docker-compose.yml`/`docker-compose.prod.yml` pair.
+- **RETIRED (EPTP Phase 9, Batch 1)**: the `publisher.py`/`resilient_publish` cluster, `agent/v60_incident_engine/`, and the root dev `docker-compose.yml`/`docker-compose.prod.yml` pair — all 3 were `READY`, re-verified immediately before removal, and are now gone. See Retired Components, above.
 - **NEEDS VALIDATION**: `sentinel-apex-api/` — several whole-repo maintenance scripts reference it, likely as generic iteration rather than a real dependency, but not individually confirmed.
 - **BLOCKED**: the Railway cluster (`agent/api/api_server.py`, `api/main.py`, `sentinel-apex-api/`'s own Railway targeting, `railway.json`/`Dockerfile.railway`/`Procfile`, the root `Dockerfile`) — two newly-found hidden dependencies (a rollback-governance workflow's "critical files" list, and a SOC2 compliance script that checks for `api/main.py`'s existence as control evidence) plus the still-open question of whether Railway-dependent frontend pages still function. The customer-installer cluster (`deploy/docker-compose.yml`, `Dockerfile.api`, `agent/v49_intelligence_api/`) — blocked on a business decision (is self-hosted installation still offered), not a technical blocker.
