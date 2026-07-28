@@ -36,3 +36,11 @@ Within `agent/`'s 34 version-suffixed directories, one (`agent/v60_incident_engi
 `agent/api/` presents an independently-versioned API surface alongside the production Cloudflare Worker API, tied to the same unresolved Railway deployment-target question as the Legacy Runtime section above. See [`COMPONENT_REGISTRY.json`](COMPONENT_REGISTRY.json) for classification and confidence.
 
 **Correction (EPTP Phase 8 Batch 5):** `api/v1/` and `api/apex_v2/` were previously listed here as unconfirmed/duplicated surfaces. They are not — both contain generated data only (no code), are the report pipeline's local staging output before upload to R2, and are confirmed production. See [`PRODUCTION_RUNTIME.md`](PRODUCTION_RUNTIME.md)'s Report Generation Flow.
+
+## Retirement Readiness (EPTP Phase 8 Batch 6)
+
+Every component above was checked for hidden dependencies (governance rules, compliance tooling, cascading callers) before any retirement-readiness judgment. **This is classification only — nothing above has been removed or scheduled for removal.** Full detail, including specific blockers, is in [`COMPONENT_REGISTRY.json`](COMPONENT_REGISTRY.json)'s `retirement_readiness` field per component.
+
+- **READY** (no functional or governance dependency found): the archived Blogger cluster (already removed), the `publisher.py`/`resilient_publish` cluster, `agent/v60_incident_engine/`, the root dev `docker-compose.yml`/`docker-compose.prod.yml` pair.
+- **NEEDS VALIDATION**: `sentinel-apex-api/` — several whole-repo maintenance scripts reference it, likely as generic iteration rather than a real dependency, but not individually confirmed.
+- **BLOCKED**: the Railway cluster (`agent/api/api_server.py`, `api/main.py`, `sentinel-apex-api/`'s own Railway targeting, `railway.json`/`Dockerfile.railway`/`Procfile`, the root `Dockerfile`) — two newly-found hidden dependencies (a rollback-governance workflow's "critical files" list, and a SOC2 compliance script that checks for `api/main.py`'s existence as control evidence) plus the still-open question of whether Railway-dependent frontend pages still function. The customer-installer cluster (`deploy/docker-compose.yml`, `Dockerfile.api`, `agent/v49_intelligence_api/`) — blocked on a business decision (is self-hosted installation still offered), not a technical blocker.
