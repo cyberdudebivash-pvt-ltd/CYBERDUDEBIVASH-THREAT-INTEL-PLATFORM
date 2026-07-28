@@ -125,11 +125,14 @@
       "name": "root-dev-docker-compose",
       "path": "docker-compose.yml, docker-compose.prod.yml",
       "owner": "Platform Engineering",
-      "classification": "legacy",
+      "classification": "archived",
       "confidence": "high",
-      "last_verified_phase": "EPTP Phase 8 Batch 6",
-      "note": "Redis/Prometheus/Grafana/Loki dev stack; production variant sources secrets from the now-retired Railway. Batch 6 checked inbound references: only monitoring/prometheus/prometheus.yml (a documentation comment on how to run it) and historical docs (a blueprint doc, README_v29.md) -- no CI workflow or script invokes either file.",
-      "retirement_readiness": "READY"
+      "last_verified_phase": "EPTP Phase 9 Batch 1",
+      "note": "Redis/Prometheus/Grafana/Loki dev stack; production variant sourced secrets from the now-retired Railway. Re-verified immediately before removal: only monitoring/prometheus/prometheus.yml (a documentation comment) and historical docs referenced either file -- no CI workflow or script invoked them.",
+      "retirement_readiness": "RETIRED",
+      "retired_date": "2026-07-28",
+      "retired_batch": "EPTP Phase 9 Batch 1",
+      "rollback_commit": "eec7f8e6914a261e6068854f0adcf29512c203c7"
     },
     {
       "name": "infrastructure-scaffolds",
@@ -204,11 +207,14 @@
       "name": "publisher-resilient-publish-cluster",
       "path": "publisher.py, agent/publisher.py, agent/v56_publish_guard/publisher.py",
       "owner": "Platform Engineering",
-      "classification": "legacy",
+      "classification": "archived",
       "confidence": "high",
-      "last_verified_phase": "EPTP Phase 8 Batch 1",
-      "note": "Confirmed zero live callers; not yet removed, deferred to a future batch.",
-      "retirement_readiness": "READY"
+      "last_verified_phase": "EPTP Phase 9 Batch 1",
+      "note": "Confirmed zero live callers (Batch 1, Batch 5, re-verified immediately before removal in Batch 9.1). agent/v56_publish_guard/__init__.py was left untouched -- only publisher.py within it was in scope.",
+      "retirement_readiness": "RETIRED",
+      "retired_date": "2026-07-28",
+      "retired_batch": "EPTP Phase 9 Batch 1",
+      "rollback_commit": "c12ba35e1bc42433c6174f74295f66bef7c36171"
     },
     {
       "name": "api-v1",
@@ -279,11 +285,14 @@
       "name": "agent-v60-incident-engine",
       "path": "agent/v60_incident_engine/",
       "owner": "Platform Engineering",
-      "classification": "legacy",
+      "classification": "archived",
       "confidence": "high",
-      "last_verified_phase": "EPTP Phase 8 Batch 6",
-      "note": "Still present on disk (__init__.py + incident_engine.py), but agent/incident_response/incident_engine.py:5 explicitly states it 'Replaces the CLI stub at agent/v60_incident_engine/' -- direct, positive evidence of supersession, stronger than a mere absence-of-reference finding. Batch 6: the only import found is internal (incident_engine.py imports its own package's __init__.py) -- no external caller found anywhere.",
-      "retirement_readiness": "READY"
+      "last_verified_phase": "EPTP Phase 9 Batch 1",
+      "note": "agent/incident_response/incident_engine.py:5 explicitly stated it 'Replaces the CLI stub at agent/v60_incident_engine/' -- direct, positive evidence of supersession. Re-verified immediately before removal: only references were agent/incident_response/incident_engine.py's own comment and a data-label string in scripts/regenerate_engine_data.py, neither a functional caller.",
+      "retirement_readiness": "RETIRED",
+      "retired_date": "2026-07-28",
+      "retired_batch": "EPTP Phase 9 Batch 1",
+      "rollback_commit": "0be7c3124325008b7457327910c81fe80640b186"
     },
     {
       "name": "docs",
