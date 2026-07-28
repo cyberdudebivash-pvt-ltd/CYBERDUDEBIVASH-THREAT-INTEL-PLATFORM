@@ -576,6 +576,7 @@ function generateIntelReport(item, reqPath, items = []) {
   const commercialGateBanner = buildCommercialGateBanner(certLevel);
 
   return `<!DOCTYPE html>
+<!-- CDB-REPORT-ENGINE: worker-fallback-synthesis v${PLATFORM_VERSION} -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
