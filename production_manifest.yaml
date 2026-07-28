@@ -1,0 +1,128 @@
+# CYBERDUDEBIVASH SENTINEL APEX - Production Manifest
+# Machine-readable definition of the canonical production surface.
+# Only components with direct repository evidence are listed here.
+# Introduced by EPTP Phase 8, Batch 2 (Production Canonicalization).
+schema_version: "1.0"
+generated_by: "EPTP Phase 8 Batch 2"
+last_updated: "2026-07-28"
+
+production_runtime:
+  platform: "Cloudflare Workers"
+  gateway_version: "184.0"
+
+production_workers:
+  - name: intel-gateway
+    path: workers/intel-gateway/
+    responsibilities:
+      - "Public API gateway (/api/v1/*, /reports/*, /auth/*)"
+      - "Credential resolution (resolveAuth: API key + JWT)"
+      - "Admin key issuance/revocation (/api/admin/keys)"
+    entrypoint: workers/intel-gateway/src/index.js
+  - name: revenue-engine
+    path: workers/revenue-engine/
+    responsibilities:
+      - "Billing/subscription webhook handling (Razorpay)"
+      - "Customer provisioning into the shared credential store"
+    entrypoint: workers/revenue-engine/src/index.js
+  - name: intel-retention-engine
+    path: workers/intel-retention-engine/
+    responsibilities:
+      - "Data retention / lifecycle management"
+
+production_deployment_pipeline:
+  - workflow: .github/workflows/deploy-worker.yml
+    deploys: [intel-gateway]
+    trigger: [push, workflow_dispatch]
+  - workflow: .github/workflows/deploy-revenue-engine.yml
+    deploys: [revenue-engine]
+    trigger: [push (paths filtered to workers/revenue-engine/**), workflow_dispatch]
+    note: >
+      Added to this manifest Batch 3 -- missed in Batch 2. Uses the same
+      CF_API_TOKEN/CF_ACCOUNT_ID as deploy-worker.yml. Created specifically
+      because revenue-engine previously had no CI deploy path at all.
+  # intel-retention-engine has no dedicated deploy workflow found in this
+  # repository as of this manifest's last update -- its production status
+  # rests on Phase 3's evidence, not on a confirmed CI/CD path. See
+  # COMPONENT_REGISTRY.json.
+
+production_storage:
+  kv_namespaces:
+    - name: API_KEYS_KV
+      id: ca786702c6df47b7a95d9777536c7cfb
+      role: "Sole credential authority for the live gateway"
+    - name: RATE_LIMIT_KV
+      id: 647efdda28dc4a2db91378931cfa02dc
+    - name: ANALYTICS_KV
+      id: baa66e510f7247d4b268af943bfb7213
+    - name: SECURITY_HUB_KV
+      id: 95faae90943f43afa26d552b8385d339
+      role: "Audit log, JWT revocation blocklist"
+    - name: REVENUE_CRM_KV
+      id: 1740d5dba5e74c3aafff1c683588395b
+      worker: revenue-engine
+    - name: EMAIL_QUEUE_KV
+      id: 769edd785fbe4c67b878c113d46ff895
+      worker: revenue-engine
+  r2_buckets:
+    - name: sentinel-apex-data
+      binding: INTEL_R2
+      workers: [intel-gateway, intel-retention-engine]
+    - name: sentinel-apex-reports
+      binding: REPORTS_R2
+      workers: [intel-gateway]
+  d1_databases:
+    - name: sentinel-crm
+      id: 76bd245d-3c30-4e7f-b33d-9f643c0c3fa5
+      worker: revenue-engine
+
+production_workflows:
+  - .github/workflows/deploy-worker.yml
+  - .github/workflows/automated-backup.yml
+  - .github/workflows/access-governance-gate.yml
+  - .github/workflows/platform-build-deploy.yml
+  - .github/workflows/report-generator-regression-gate.yml
+  - .github/workflows/sast-security-scan.yml
+  - .github/workflows/sentinel-blogger.yml   # job id: generate-and-sync -- report/enrichment pipeline, name predates a 2026 architecture pivot
+  - .github/workflows/deploy-revenue-engine.yml   # added Batch 3
+
+production_documentation:
+  general_docs_path: docs/          # 17 pre-existing docs, unrelated to this manifest
+  canonical_files_path: "."         # corrected Batch 3 -- these live at repo root, not docs/
+  canonical_files:
+    - REPOSITORY_STATUS.md
+    - PRODUCTION_RUNTIME.md
+    - LEGACY_COMPONENTS.md
+    - TRANSFORMATION_STATUS.md
+    - ARCHITECTURE_DECISIONS.md
+    - COMPONENT_REGISTRY.json
+
+production_scripts:
+  - path: scripts/backup_kv_to_r2.py
+    role: "Daily KV -> R2 snapshot backup"
+    invoked_by: .github/workflows/automated-backup.yml
+  - path: scripts/restore_kv_from_r2.py
+    role: "KV restore counterpart to the above (added EPTP Phase 8 Batch 1)"
+  - path: scripts/r2_upload.py
+    role: "Report artifact upload to R2 -- reads api/v1/*.json and api/apex_v2/*.json by literal path"
+    invoked_by: .github/workflows/sentinel-blogger.yml
+  - path: scripts/build_apex_v2.py
+    role: "Generates api/apex_v2/*.json"
+    invoked_by: .github/workflows/sentinel-blogger.yml
+  - path: scripts/validate_canonical_docs.py
+    role: "Enforcing check that this manifest and COMPONENT_REGISTRY.json match the repository (added Batch 4)"
+    invoked_by: .github/workflows/repository-integrity-check.yml
+  - path: scripts/detect_repository_drift.py
+    role: "Informational drift report against this manifest and registry (added Batch 4)"
+    invoked_by: .github/workflows/repository-integrity-check.yml
+
+production_apis:
+  base: "Cloudflare Worker HTTP API (workers/intel-gateway)"
+  local_staging:
+    - path: api/v1/
+      note: "Generated JSON/PDF only, no code -- report pipeline's local output before R2 upload (reclassified production, Batch 5)"
+    - path: api/apex_v2/
+      note: "Generated JSON only, no code -- same pattern as api/v1/ (reclassified production, Batch 5)"
+  note: >
+    agent/api/ and sentinel-apex-api/ are NOT included here -- neither
+    has confirmed production deployment evidence as of this manifest's
+    last update. See LEGACY_COMPONENTS.md and COMPONENT_REGISTRY.json.

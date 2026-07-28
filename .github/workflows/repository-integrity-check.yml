@@ -1,0 +1,73 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX -- Repository Integrity Check
+# =============================================================================
+# Non-blocking, informational check that the canonical production
+# documentation (production_manifest.yaml, COMPONENT_REGISTRY.json, and the
+# 5 canonical markdown docs -- see GOVERNANCE.md) still matches the actual
+# repository, and that no new production-shaped component has appeared
+# without being documented.
+#
+# This workflow is deliberately isolated from every existing deployment
+# pipeline: it does not build, test, or deploy anything, it has no
+# `needs:` relationship with deploy-worker.yml or deploy-revenue-engine.yml,
+# and it is not registered as a required status check anywhere. A failure
+# here means the documentation has drifted from reality -- it does not mean
+# production is broken, and it must never be wired to block a deploy.
+#
+# validate_canonical_docs.py enforces (non-zero exit on failure): every
+# documented path/workflow/Worker actually exists, no duplicate registry
+# entries, all internal markdown links resolve.
+#
+# detect_repository_drift.py reports only (always exits 0): production-shaped
+# components found in the repository that aren't yet in the canonical docs.
+# Findings here are not auto-classified -- they're a prompt for a human to
+# look, in a future batch, with evidence.
+# =============================================================================
+
+name: repository-integrity-check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'production_manifest.yaml'
+      - 'COMPONENT_REGISTRY.json'
+      - 'REPOSITORY_STATUS.md'
+      - 'PRODUCTION_RUNTIME.md'
+      - 'LEGACY_COMPONENTS.md'
+      - 'TRANSFORMATION_STATUS.md'
+      - 'ARCHITECTURE_DECISIONS.md'
+      - 'workers/**/wrangler.toml'
+      - '.github/workflows/**'
+      - 'scripts/validate_canonical_docs.py'
+      - 'scripts/detect_repository_drift.py'
+  workflow_dispatch: {}
+  schedule:
+    - cron: '17 6 * * 1'  # weekly safety net, catches drift not tied to one of the paths above
+
+permissions:
+  contents: read
+
+jobs:
+  validate-canonical-docs:
+    name: Validate canonical documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pyyaml
+      - run: python3 scripts/validate_canonical_docs.py
+
+  detect-repository-drift:
+    name: Detect repository drift (informational)
+    runs-on: ubuntu-latest
+    needs: []  # deliberately independent of the job above -- a validation failure should not hide the drift report
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pyyaml
+      - run: python3 scripts/detect_repository_drift.py
