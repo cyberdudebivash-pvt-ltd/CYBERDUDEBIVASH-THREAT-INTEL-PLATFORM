@@ -103,17 +103,25 @@ def find_undocumented_bindings(root, manifest, findings):
             findings.append(f"Binding '{b}' in {w['path']}wrangler.toml not recognized against production_manifest.yaml's documented storage")
 
 
+def _is_covered(rel, documented):
+    # Exact match, or nested inside a documented directory path (which always
+    # ends in "/" in this registry's convention).
+    if rel in documented:
+        return True
+    return any(p.endswith("/") and rel.startswith(p) for p in documented)
+
+
 def find_undocumented_deploy_assets(root, registry, findings):
     documented = registry_paths(registry)
     for pattern in DEPLOY_ASSET_GLOBS:
         for f in sorted(root.glob(pattern)):
             rel = f.name
-            if not any(rel in p for p in documented):
+            if not _is_covered(rel, documented):
                 findings.append(f"Deployment-shaped file at repo root not referenced in COMPONENT_REGISTRY.json: {rel}")
         # Also check one level down, since some assets (e.g. deploy/docker-compose.yml) are nested.
         for f in sorted(root.glob(f"*/{pattern}")):
             rel = f"{f.parent.name}/{f.name}"
-            if not any(rel in p for p in documented):
+            if not _is_covered(rel, documented):
                 findings.append(f"Deployment-shaped file not referenced in COMPONENT_REGISTRY.json: {rel}")
 
 
