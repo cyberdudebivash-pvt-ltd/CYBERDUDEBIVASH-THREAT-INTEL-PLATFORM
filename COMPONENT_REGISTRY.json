@@ -86,8 +86,9 @@
       "owner": "Platform Engineering",
       "classification": "legacy",
       "confidence": "medium",
-      "last_verified_phase": "RSIRP Phase 5B",
-      "note": "Targets Railway (retired). Deployment status unconfirmed."
+      "last_verified_phase": "EPTP Phase 8 Batch 6",
+      "note": "Targets Railway (retired). Deployment status unconfirmed. HIDDEN DEPENDENCY found Batch 6: .github/workflows/enterprise-rollback-governance.yml lists this exact path in a 'critical_patterns' list that flags changes to it for extra rollback scrutiny -- a governance dependency, not a runtime one, but it means this workflow needs updating in the same change if this file is ever retired, or it will keep flagging an already-removed path indefinitely. Also calls scripts/payment_abstraction_layer.py (per that file's own comment) -- retiring api_server.py would leave payment_abstraction_layer.py's liveness an open question too unless it has other callers, not yet checked.",
+      "retirement_readiness": "BLOCKED"
     },
     {
       "name": "api-main-railway-app",
@@ -95,8 +96,9 @@
       "owner": "Platform Engineering",
       "classification": "legacy",
       "confidence": "medium",
-      "last_verified_phase": "RSIRP Phase 5B",
-      "note": "Alternate entry point referenced by railway.json/Procfile. Deployment status unconfirmed."
+      "last_verified_phase": "EPTP Phase 8 Batch 6",
+      "note": "Alternate entry point referenced by railway.json/Procfile. Deployment status unconfirmed. HIDDEN DEPENDENCY found Batch 6: scripts/soc2_compliance_engine.py checks for api/main.py's existence and content as evidence that SOC2 controls CC6.1 (API auth) and CC6.3 (RBAC) are satisfied -- a compliance-tooling dependency, not a runtime one. Retiring this file would need that compliance script updated first, or it will report a failed control. Several other scripts (commercial_readiness_auditor.py, business_readiness_certifier.py, self_improve_actions.py, api_snapshot_server.py) also reference api/main.py by path; not individually verified this batch, but the pattern strongly resembles the same compliance/audit-evidence usage as soc2_compliance_engine.py rather than a functional dependency (INFERENCE, not verified per-file).",
+      "retirement_readiness": "BLOCKED"
     },
     {
       "name": "sentinel-apex-api",
@@ -104,8 +106,9 @@
       "owner": "Platform Engineering",
       "classification": "legacy",
       "confidence": "medium",
-      "last_verified_phase": "Production Rationalization Phase 6",
-      "note": "Second, independent Railway-targeted codebase. Its own CI automation is inert."
+      "last_verified_phase": "EPTP Phase 8 Batch 6",
+      "note": "Second, independent Railway-targeted codebase. Its own CI automation is inert. Batch 6 checked for inbound references outside its own directory: a Grafana dashboard (monitoring/grafana/dashboards/api-performance.json) and several whole-repo maintenance/audit scripts (build_dist_artifact.py, production_health_check.py, python_syntax_guard.py, unify_version_strings.py, validate_phase4.py) reference it -- consistent with generic repo-wide tooling that iterates every directory, not a special functional dependency, but not individually confirmed for each script. platform/services/api-gateway/main.py's apparent match was a false positive (its own OpenTelemetry service name happens to contain the same substring, unrelated).",
+      "retirement_readiness": "NEEDS VALIDATION"
     },
     {
       "name": "railway-deployment-config",
@@ -114,7 +117,9 @@
       "classification": "legacy",
       "confidence": "high",
       "last_verified_phase": "EPTP Phase 8 Batch 3",
-      "note": "Added to registry this batch -- was documented in LEGACY_COMPONENTS.md but missing here. Railway retired by business decision."
+      "note": "Added to registry this batch -- was documented in LEGACY_COMPONENTS.md but missing here. Railway retired by business decision. These files are read by Railway's own platform via filename convention, not referenced by anything else in this repository internally.",
+      "retirement_readiness": "BLOCKED",
+      "retirement_blocker": "Gated on EPTP Phase 7's still-open T-01 (confirming whether Railway-URL-dependent frontend pages still function) -- unresolved as of this batch."
     },
     {
       "name": "root-dev-docker-compose",
@@ -122,8 +127,9 @@
       "owner": "Platform Engineering",
       "classification": "legacy",
       "confidence": "high",
-      "last_verified_phase": "EPTP Phase 8 Batch 3",
-      "note": "Added to registry this batch -- was documented in LEGACY_COMPONENTS.md but missing here. Redis/Prometheus/Grafana/Loki dev stack; production variant sources secrets from the now-retired Railway."
+      "last_verified_phase": "EPTP Phase 8 Batch 6",
+      "note": "Redis/Prometheus/Grafana/Loki dev stack; production variant sources secrets from the now-retired Railway. Batch 6 checked inbound references: only monitoring/prometheus/prometheus.yml (a documentation comment on how to run it) and historical docs (a blueprint doc, README_v29.md) -- no CI workflow or script invokes either file.",
+      "retirement_readiness": "READY"
     },
     {
       "name": "infrastructure-scaffolds",
@@ -159,7 +165,9 @@
       "classification": "customer_artifact",
       "confidence": "high",
       "last_verified_phase": "Production Rationalization Phase 6",
-      "note": "Copied into customer install directories by install_v29.sh. Currently references missing config files."
+      "note": "Copied into customer install directories by install_v29.sh. Currently references missing config files.",
+      "retirement_readiness": "BLOCKED",
+      "retirement_blocker": "Business decision required: is self-hosted/on-prem installation still an offered product SKU? This is a functioning distribution mechanism (actively copied by install_v29.sh), not dead code -- retiring it is a product decision, not a cleanup."
     },
     {
       "name": "dockerfile-api",
@@ -168,7 +176,9 @@
       "classification": "customer_artifact",
       "confidence": "high",
       "last_verified_phase": "EPTP Phase 8 Batch 5",
-      "note": "Resolved a Batch 4 drift-detection finding. Build context for deploy/docker-compose.yml's 'api' and 'worker' services (dockerfile: Dockerfile.api). Runs agent.v49_intelligence_api.api_server:app -- see agent-v49-intelligence-api above. Same customer-installer cluster as deploy-docker-compose, not separate."
+      "note": "Resolved a Batch 4 drift-detection finding. Build context for deploy/docker-compose.yml's 'api' and 'worker' services (dockerfile: Dockerfile.api). Runs agent.v49_intelligence_api.api_server:app -- see agent-v49-intelligence-api above. Same customer-installer cluster as deploy-docker-compose, not separate.",
+      "retirement_readiness": "BLOCKED",
+      "retirement_blocker": "Same business decision as deploy-docker-compose -- these two are one cluster and should be decided together."
     },
     {
       "name": "root-dockerfile",
@@ -177,7 +187,9 @@
       "classification": "legacy",
       "confidence": "high",
       "last_verified_phase": "EPTP Phase 8 Batch 5",
-      "note": "Resolved a Batch 4 drift-detection finding. Default CMD runs agent.api.api_server:app (already-registered as agent-api-railway-app, legacy). Its SENTINEL_MODE=blogger alternate branch runs agent/sentinel_blogger.py inside the container, but SENTINEL_MODE is not set anywhere else in the repository -- confirmed via repo-wide grep -- so that branch is unreachable in practice. The real report pipeline runs natively via sentinel-blogger.yml on the GitHub Actions runner, not through this Dockerfile."
+      "note": "Resolved a Batch 4 drift-detection finding. Default CMD runs agent.api.api_server:app (already-registered as agent-api-railway-app, legacy). Its SENTINEL_MODE=blogger alternate branch runs agent/sentinel_blogger.py inside the container, but SENTINEL_MODE is not set anywhere else in the repository -- confirmed via repo-wide grep -- so that branch is unreachable in practice. The real report pipeline runs natively via sentinel-blogger.yml on the GitHub Actions runner, not through this Dockerfile.",
+      "retirement_readiness": "BLOCKED",
+      "retirement_blocker": "Tied to agent-api-railway-app's blockers (enterprise-rollback-governance.yml's critical-file list, unresolved deployment-target question) -- can't cleanly retire the Dockerfile while the app it builds is still an open question."
     },
     {
       "name": "blogger-publish-cluster",
@@ -195,7 +207,8 @@
       "classification": "legacy",
       "confidence": "high",
       "last_verified_phase": "EPTP Phase 8 Batch 1",
-      "note": "Confirmed zero live callers; not yet removed, deferred to a future batch."
+      "note": "Confirmed zero live callers; not yet removed, deferred to a future batch.",
+      "retirement_readiness": "READY"
     },
     {
       "name": "api-v1",
@@ -249,7 +262,9 @@
       "classification": "customer_artifact",
       "confidence": "high",
       "last_verified_phase": "EPTP Phase 8 Batch 5",
-      "note": "Dockerfile.api:48 runs 'uvicorn agent.v49_intelligence_api.api_server:app' as its container CMD -- this is the actual application code the customer-installer bundle (deploy/docker-compose.yml + Dockerfile.api) packages and runs. Same cluster as deploy-docker-compose and dockerfile-api below, not separate legacy cruft."
+      "note": "Dockerfile.api:48 runs 'uvicorn agent.v49_intelligence_api.api_server:app' as its container CMD -- this is the actual application code the customer-installer bundle (deploy/docker-compose.yml + Dockerfile.api) packages and runs. Same cluster as deploy-docker-compose and dockerfile-api below, not separate legacy cruft.",
+      "retirement_readiness": "BLOCKED",
+      "retirement_blocker": "Same business decision as deploy-docker-compose and dockerfile-api -- one cluster, one decision."
     },
     {
       "name": "agent-version-generations-unresolved",
@@ -266,8 +281,9 @@
       "owner": "Platform Engineering",
       "classification": "legacy",
       "confidence": "high",
-      "last_verified_phase": "EPTP Phase 8 Batch 5",
-      "note": "Still present on disk (__init__.py + incident_engine.py), but agent/incident_response/incident_engine.py:5 explicitly states it 'Replaces the CLI stub at agent/v60_incident_engine/' -- direct, positive evidence of supersession, stronger than a mere absence-of-reference finding."
+      "last_verified_phase": "EPTP Phase 8 Batch 6",
+      "note": "Still present on disk (__init__.py + incident_engine.py), but agent/incident_response/incident_engine.py:5 explicitly states it 'Replaces the CLI stub at agent/v60_incident_engine/' -- direct, positive evidence of supersession, stronger than a mere absence-of-reference finding. Batch 6: the only import found is internal (incident_engine.py imports its own package's __init__.py) -- no external caller found anywhere.",
+      "retirement_readiness": "READY"
     },
     {
       "name": "docs",
