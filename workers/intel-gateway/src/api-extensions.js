@@ -57,6 +57,16 @@ export const TIER_DEFAULT_SCOPES = {
                "export:misp","export:csv","export:stix:full","admin:webhooks",
                "read:ai:predict","read:ai:campaigns","read:ai:anomalies",
                "read:intel:graph","read:intel:graph:full"],
+  // MSSP is the highest tier (index.js TIERS/RATE_LIMITS rank it above
+  // enterprise) and is treated as >= enterprise everywhere else in the
+  // codebase (e.g. TAXII KEV collection, Brand Protection, Vendor Risk bulk).
+  // Without this entry, "mssp" matched no key here and silently fell back to
+  // the free scope set -- the same failure mode the pro/premium alias below
+  // already documents, just for the top-paying tier instead of the mid tier.
+  mssp: ["read:intel","read:stix","read:stix:full","read:actors","read:cves",
+         "export:misp","export:csv","export:stix:full","admin:webhooks",
+         "read:ai:predict","read:ai:campaigns","read:ai:anomalies",
+         "read:intel:graph","read:intel:graph:full"],
 };
 
 // index.js's TIERS constant emits "PRO" (index.js:297) but this table's
