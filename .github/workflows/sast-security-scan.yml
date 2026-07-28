@@ -41,6 +41,24 @@
 #         Fix D: Increase job timeout-minutes: 20 -> 30 as safety buffer.
 # ============================================================================
 
+#   v47.5 -- Private-repo Code Scanning compatibility layer.
+#         ROOT CAUSE: GitHub Code Scanning (the API upload-sarif@v3 posts to)
+#         requires GitHub Advanced Security on private repositories -- it's
+#         free on public ones. This repo went private and GHAS is not
+#         currently enabled, so both upload-sarif steps below started failing
+#         with "Code scanning is not enabled for this repository", which in
+#         turn failed the bandit/semgrep jobs outright and (as an unintended
+#         side effect) skipped Bandit's real "Fail on HIGH severity findings"
+#         step, since a job only runs its later steps if every prior step
+#         succeeded.
+#         FIX: continue-on-error on both upload-sarif steps. The real scanners
+#         and Bandit's actual HIGH/HIGH fail-check are completely unaffected --
+#         only whether results additionally get mirrored into the Security tab
+#         is now allowed to fail without taking the job down with it. Each
+#         upload step still genuinely attempts the upload every run, so if
+#         GHAS is enabled later this starts succeeding again with zero further
+#         code changes. Findings remain reviewable either way via the existing
+#         (Bandit) / newly added (Semgrep) artifact upload.
 name: SAST Security Scan -- Bandit + Safety + Semgrep
 
 on:
@@ -122,11 +140,22 @@ jobs:
           cat bandit-summary.txt
 
       - name: Upload Bandit SARIF to GitHub Security
+        id: upload-bandit-sarif
         uses: github/codeql-action/upload-sarif@v3
         if: always()
+        continue-on-error: true  # v47.5: don't fail the job if Code Scanning/GHAS is unavailable -- see header
         with:
           sarif_file: bandit-results.sarif
           category: bandit
+
+      - name: Note SARIF upload status
+        if: always()
+        run: |
+          if [ "${{ steps.upload-bandit-sarif.outcome }}" = "success" ]; then
+            echo "Bandit SARIF uploaded to the Security tab." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Bandit SARIF was not uploaded to the Security tab (Code Scanning/GHAS unavailable on this repository) -- findings remain in the bandit-report artifact below." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload Bandit summary artifact
         uses: actions/upload-artifact@v4
@@ -307,11 +336,33 @@ jobs:
           echo "Final semgrep.sarif: $(wc -c < semgrep.sarif) bytes, runs=$(jq '.runs | length' semgrep.sarif)"
 
       - name: Upload Semgrep SARIF
+        id: upload-semgrep-sarif
         uses: github/codeql-action/upload-sarif@v3
         if: always()
+        continue-on-error: true  # v47.5: don't fail the job if Code Scanning/GHAS is unavailable -- see header
         with:
           sarif_file: semgrep.sarif
           category: semgrep
+
+      - name: Note SARIF upload status
+        if: always()
+        run: |
+          if [ "${{ steps.upload-semgrep-sarif.outcome }}" = "success" ]; then
+            echo "Semgrep SARIF uploaded to the Security tab." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Semgrep SARIF was not uploaded to the Security tab (Code Scanning/GHAS unavailable on this repository) -- findings remain in the semgrep-report artifact below." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # v47.5: Semgrep had no artifact fallback at all (unlike Bandit, which
+      # already uploads its SARIF+summary as an artifact) -- added so findings
+      # stay reviewable even when the Security-tab upload above is unavailable.
+      - name: Upload Semgrep summary artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: semgrep-report-${{ github.run_id }}
+          path: semgrep.sarif
+          retention-days: 30
 
   # --------------------------------------------------------------------------
   # TruffleHog: Secret Scanning
