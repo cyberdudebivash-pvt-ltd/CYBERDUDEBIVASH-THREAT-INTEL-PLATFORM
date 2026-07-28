@@ -33,14 +33,14 @@ Each Worker has its own `wrangler.toml` defining its bindings; there is no share
 ```
 push to main (or workflow_dispatch)
         |
-        v
-.github/workflows/deploy-worker.yml
+        +-- touches workers/intel-gateway/**  --> deploy-worker.yml         --> intel-gateway
         |
-        v
-wrangler deploy  ->  workers/intel-gateway  ->  Cloudflare edge
+        +-- touches workers/revenue-engine/** --> deploy-revenue-engine.yml --> revenue-engine
 ```
 
-`revenue-engine` and `intel-retention-engine` are deployed independently (each has its own `wrangler.toml`); this repository's automated CI currently drives `deploy-worker.yml` for `intel-gateway` specifically.
+Both workflows use the same Cloudflare account credentials (`CF_API_TOKEN`, `CF_ACCOUNT_ID`) and run `wrangler deploy`. `deploy-revenue-engine.yml` was added specifically because `revenue-engine` previously had no CI deploy path at all — before it existed, that Worker could only reach production via a manual `wrangler deploy` from an operator's machine.
+
+`intel-retention-engine` has no dedicated deploy workflow found in this repository (verified directly, EPTP Phase 8 Batch 3). It is documented as production based on Phase 3's evidence, but — unlike the other two Workers — has no confirmed automated deployment path today.
 
 ## Authentication Flow
 
