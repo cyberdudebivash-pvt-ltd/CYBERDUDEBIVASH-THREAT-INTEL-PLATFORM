@@ -56,7 +56,8 @@ Both workflows use the same Cloudflare account credentials (`CF_API_TOKEN`, `CF_
 .github/workflows/sentinel-blogger.yml  (job: generate-and-sync)
         |  multi-stage enrichment (CVSS/EPSS/KEV/MITRE, STIX)
         v
-HTML + PDF report rendering
+HTML + PDF report rendering, plus JSON output written locally to
+api/v1/intel/*.json and (via scripts/build_apex_v2.py) api/apex_v2/*.json
         |
         v
 scripts/r2_upload.py  -->  sentinel-apex-data / sentinel-apex-reports (R2)
@@ -64,5 +65,7 @@ scripts/r2_upload.py  -->  sentinel-apex-data / sentinel-apex-reports (R2)
         v
 intel-gateway serves /reports/* and /api/v1/intel/* from R2
 ```
+
+`api/v1/` and `api/apex_v2/` are not application code — both contain only generated JSON/PDF, refreshed by every pipeline run, and exist solely as the local staging area `r2_upload.py` reads from before pushing to R2.
 
 Despite its filename, `sentinel-blogger.yml` and its underlying `agent/sentinel_blogger.py` do not publish to any external blogging platform — that capability was removed from this pipeline in an earlier version, and the pipeline has been R2-native since. The name is retained; the function is the platform's core report pipeline.

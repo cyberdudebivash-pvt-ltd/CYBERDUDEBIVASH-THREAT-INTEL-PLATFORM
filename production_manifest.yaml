@@ -103,13 +103,26 @@ production_scripts:
   - path: scripts/restore_kv_from_r2.py
     role: "KV restore counterpart to the above (added EPTP Phase 8 Batch 1)"
   - path: scripts/r2_upload.py
-    role: "Report artifact upload to R2"
+    role: "Report artifact upload to R2 -- reads api/v1/*.json and api/apex_v2/*.json by literal path"
     invoked_by: .github/workflows/sentinel-blogger.yml
+  - path: scripts/build_apex_v2.py
+    role: "Generates api/apex_v2/*.json"
+    invoked_by: .github/workflows/sentinel-blogger.yml
+  - path: scripts/validate_canonical_docs.py
+    role: "Enforcing check that this manifest and COMPONENT_REGISTRY.json match the repository (added Batch 4)"
+    invoked_by: .github/workflows/repository-integrity-check.yml
+  - path: scripts/detect_repository_drift.py
+    role: "Informational drift report against this manifest and registry (added Batch 4)"
+    invoked_by: .github/workflows/repository-integrity-check.yml
 
 production_apis:
   base: "Cloudflare Worker HTTP API (workers/intel-gateway)"
+  local_staging:
+    - path: api/v1/
+      note: "Generated JSON/PDF only, no code -- report pipeline's local output before R2 upload (reclassified production, Batch 5)"
+    - path: api/apex_v2/
+      note: "Generated JSON only, no code -- same pattern as api/v1/ (reclassified production, Batch 5)"
   note: >
-    api/v1/, api/apex_v2/, agent/api/, and sentinel-apex-api/ are NOT
-    included here -- none have confirmed production deployment evidence
-    as of this manifest's last update. See LEGACY_COMPONENTS.md and
-    COMPONENT_REGISTRY.json.
+    agent/api/ and sentinel-apex-api/ are NOT included here -- neither
+    has confirmed production deployment evidence as of this manifest's
+    last update. See LEGACY_COMPONENTS.md and COMPONENT_REGISTRY.json.
