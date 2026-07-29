@@ -1,8 +1,18 @@
 name: CDB NEXUS Intelligence Engine v39.0
 
 on:
-  schedule:
-    - cron: '30 */6 * * *'    # Every 6 hours (offset from blogger)
+  # EMERGENCY PAUSE (2026-07-29): schedule trigger disabled to conserve GitHub
+  # Actions minutes ahead of the Aug 1 quota reset. Dependency-verified: not
+  # referenced by workflow_call/workflow_run anywhere in this repo, no
+  # deployment/API/report dependency (audit evidence). Also a confirmed
+  # architectural duplicate: sovereign-platform.yml already executes this
+  # same nexus_engine module as step 1 of its own 4-part cycle, so this
+  # workflow's runs were redundant compute even before the quota crisis.
+  # Rollback: uncomment the schedule block below (but see the duplication
+  # finding above before doing so — consider whether sovereign-platform.yml
+  # alone is sufficient instead).
+  # schedule:
+  #   - cron: '30 */6 * * *'    # Every 6 hours (offset from blogger)
   workflow_dispatch:
     inputs:
       full_cycle:
