@@ -84,6 +84,16 @@ STATIC_PAGES = [
     {"url": "/onboarding.html",    "priority": "0.7", "changefreq": "monthly"},
     {"url": "/trust-center.html",  "priority": "0.7", "changefreq": "monthly"},
     {"url": "/upgrade.html",       "priority": "0.8", "changefreq": "weekly"},
+    # GCPE-WS1 FIX: enterprise-family pages (PR-5..PR-10, see
+    # docs/enterprise-certification-report.md Drift Register items 5-6)
+    # were never added here, so this generator has never emitted them
+    # into sitemap.xml even though the pages have shipped in production.
+    {"url": "/enterprise-homepage.html",         "priority": "0.9", "changefreq": "weekly"},
+    {"url": "/enterprise-pricing.html",          "priority": "0.9", "changefreq": "weekly"},
+    {"url": "/developer-portal.html",            "priority": "0.8", "changefreq": "weekly"},
+    {"url": "/api-docs.html",                    "priority": "0.8", "changefreq": "weekly"},
+    {"url": "/enterprise-compliance.html",       "priority": "0.7", "changefreq": "monthly"},
+    {"url": "/enterprise-knowledge-center.html", "priority": "0.7", "changefreq": "monthly"},
 ]
 
 # ─── MITRE TACTIC → KEYWORD EXPANSION ────────────────────────────────────────
@@ -454,7 +464,6 @@ Disallow: /scripts/
 
 # Sitemap
 Sitemap: {PLATFORM['domain']}/sitemap.xml
-Sitemap: {PLATFORM['domain']}/blog/sitemap.xml
 
 # Crawl-delay (be polite to bots)
 Crawl-delay: 1
