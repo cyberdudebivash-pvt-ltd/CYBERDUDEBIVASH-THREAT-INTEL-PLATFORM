@@ -1,8 +1,16 @@
 name: APEX Phase 5-10 — Telemetry & Intelligence Infrastructure Pipeline
 
 on:
-  schedule:
-    - cron: '15 */4 * * *'   # Every 4 hours (offset from main pipeline)
+  # EMERGENCY PAUSE (2026-07-29): schedule trigger disabled to conserve GitHub
+  # Actions minutes ahead of the Aug 1 quota reset. Dependency-verified: not
+  # referenced by workflow_call/workflow_run anywhere in this repo, no
+  # deployment/API/report dependency (audit evidence). ~42 min/day observed
+  # cost, structurally inflated by a 7-job fan-out where each phase does <1
+  # min of real work but still bills a full minute per job. Internal
+  # telemetry only, no production/customer impact.
+  # Rollback: uncomment the schedule block below.
+  # schedule:
+  #   - cron: '15 */4 * * *'   # Every 4 hours (offset from main pipeline)
   workflow_dispatch:
     inputs:
       phase:

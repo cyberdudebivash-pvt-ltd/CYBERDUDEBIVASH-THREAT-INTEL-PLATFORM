@@ -62,10 +62,32 @@
 name: SAST Security Scan -- Bandit + Safety + Semgrep
 
 on:
+  # EMERGENCY OPTIMIZATION (2026-07-29): path filters added to push/pull_request
+  # only, ahead of the Aug 1 Actions quota reset. Evidence: of the last 58
+  # commits to this repo, only 1 (1.7%) touched anything under these paths --
+  # the other 57 were bot-generated data/report/feed commits that were
+  # triggering a full SAST run for no reason (no path filter existed before
+  # this change). Scoped to match what Bandit/Semgrep actually scan (agent/,
+  # api/) restricted to real source (.py) so generated JSON/data commits
+  # under api/ no longer trigger a scan. schedule and workflow_dispatch are
+  # deliberately NOT path-filtered -- the daily full scan and manual runs are
+  # unaffected and still scan everything. Concurrency (cancel-in-progress)
+  # and branch restriction below were already correctly configured and are
+  # unchanged. Rollback: remove the `paths:` blocks below.
   push:
     branches: [main, develop, "release/**"]
+    paths:
+      - "agent/**"
+      - "api/**.py"
+      - "requirements.txt"
+      - ".github/workflows/sast-security-scan.yml"
   pull_request:
     branches: [main, develop]
+    paths:
+      - "agent/**"
+      - "api/**.py"
+      - "requirements.txt"
+      - ".github/workflows/sast-security-scan.yml"
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
@@ -283,6 +305,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
+
+      # EMERGENCY OPTIMIZATION (2026-07-29): adds pip caching, matching the
+      # pattern already used by the bandit/safety jobs above. Semgrep's own
+      # scan config/rulesets/output are unchanged.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
 
       - name: Run Semgrep (SARIF)
         run: |
