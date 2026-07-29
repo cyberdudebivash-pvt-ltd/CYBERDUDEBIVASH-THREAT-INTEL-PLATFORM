@@ -434,7 +434,7 @@ function buildCommercialGateBanner(certLevel) {
 <div style="background:rgba(220,38,38,.1);border-bottom:2px solid #dc2626;padding:14px 20px;">
   <div style="max-width:1100px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
     <div style="font-family:monospace;font-size:11px;font-weight:900;color:#dc2626;letter-spacing:1px;white-space:nowrap;">
-      ⚠ PRELIMINARY ANALYSIS -- NOT YET A CERTIFIED CUSTOMER DELIVERABLE
+      ? PRELIMINARY ANALYSIS -- NOT YET A CERTIFIED CUSTOMER DELIVERABLE
     </div>
     <div style="font-size:12px;color:#f3b4b4;line-height:1.5;flex:1;min-width:240px;">
       This report is at certification level "${certLevel.certification_label}" (quality score ${certLevel.quality_score}/100) and has not
