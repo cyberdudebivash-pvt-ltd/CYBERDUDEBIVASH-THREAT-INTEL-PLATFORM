@@ -69,8 +69,8 @@
 // --- Constants ----------------------------------------------------------------
 import { handleP16Workflows, handleP16Assets, handleP16Health, handleP16Analytics, handleP16Automation, handleP16Observability, buildSubsystems } from './p16-handlers.js';
 import { handleP17Orchestrator, handleP17DigitalTwin, handleP17CampaignForecast, handleP17ExecutiveCenter, handleP17Policies, handleP17Playbooks, handleP17AiOps } from './p17-handlers.js';
-import { handleP18Correlation, handleP18TrustIndicators, handleP18Validate, handleP18QualityScore, handleP18IOCEnriched, handleP18ConfidenceMethod, buildTrustIndicatorBlock } from './p18-handlers.js';
-import { buildSOCBlock, buildIOCDetailBlock, buildDetectionBlock, buildMitreTechBlock, buildExecutiveBlock, buildAnalystBlock, handleP19Certify, handleP19Scorecard, normalizeTierForEE } from './p19-handlers.js';
+import { handleP18Correlation, handleP18TrustIndicators, handleP18Validate, handleP18QualityScore, handleP18IOCEnriched, handleP18ConfidenceMethod, buildTrustIndicatorBlock, buildEvidenceAttribution, computeTransparentConfidence, validateReportQuality } from './p18-handlers.js';
+import { buildSOCBlock, buildIOCDetailBlock, buildDetectionBlock, buildMitreTechBlock, buildExecutiveBlock, buildAnalystBlock, handleP19Certify, handleP19Scorecard, normalizeTierForEE, computeCertificationLevel } from './p19-handlers.js';
 import { stripMarkdown, filterBehavioralTags, formatConfidenceForHeader, buildEvidenceChainBlock, buildIOCQualityBlock, buildAttributionRationaleBlock, buildP20ExecutiveBlock, buildP20QualityGateBlock, buildBenchmarkBlock, handleP20QualityReport, handleP20FeedAudit } from './p20-handlers.js';
 import { buildP21CertificationBlock, buildP21ScorecardComparison, handleP21Certify, handleP21FeedCertify, handleP21Dashboard, handleP21Observability } from './p21-handlers.js';
 import { buildP22ValidationStatusBlock, buildP22ContradictionBlock, buildP22DetectionVerificationBlock, buildSOCAnalystBlock, buildConfidenceExplanationBlock, buildP22CommercialGateBlock, handleP22Validate, handleP22ContradictionReport, handleP22Observability } from './p22-handlers.js';
@@ -416,6 +416,36 @@ async function loadFeedItems(env) {
 }
 
 // =============================================================================
+// COMMERCIAL GATE BANNER (P0 fix  -  report/publication-state consistency)
+// Report generation is intentionally unconditional (every processed item gets
+// a reachable report so links never 404), but until now the certification
+// verdict already computed by P19's computeCertificationLevel() (reusing the
+// existing P18 evidence/confidence/validation chain -- no new scoring logic)
+// was only ever rendered as buried text inside buildAnalystBlock(). A report
+// could say "Customer deliverable: NO" 600 lines down while still looking and
+// behaving like a normal premium deliverable at first glance. This banner
+// surfaces that SAME existing verdict, unmissably, at the very top of the
+// page. It reuses certLevel fields only -- it does not recompute anything.
+// =============================================================================
+
+function buildCommercialGateBanner(certLevel) {
+  if (certLevel.customer_deliverable) return "";
+  return `
+<div style="background:rgba(220,38,38,.1);border-bottom:2px solid #dc2626;padding:14px 20px;">
+  <div style="max-width:1100px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <div style="font-family:monospace;font-size:11px;font-weight:900;color:#dc2626;letter-spacing:1px;white-space:nowrap;">
+      ⚠ PRELIMINARY ANALYSIS -- NOT YET A CERTIFIED CUSTOMER DELIVERABLE
+    </div>
+    <div style="font-size:12px;color:#f3b4b4;line-height:1.5;flex:1;min-width:240px;">
+      This report is at certification level "${certLevel.certification_label}" (quality score ${certLevel.quality_score}/100) and has not
+      passed the enterprise quality gates required for commercial release. Treat the contents below as an automated,
+      unverified working draft pending analyst review -- not a finished intelligence product.
+    </div>
+  </div>
+</div>`;
+}
+
+// =============================================================================
 // REPORT SYNTHESIS ENGINE (v183.0  -  permanent 24/7 availability fix)
 // When a report HTML isn't in R2, look up item data from feed and synthesize
 // a full HTML intel report on-the-fly, then cache it back to R2.
@@ -536,7 +566,17 @@ function generateIntelReport(item, reqPath, items = []) {
   if (risk < 7 && !kev)  remSteps.push({ c:"#3b82f6", bg:"rgba(59,130,246,.05)", icon:"?", label:"STANDARD REMEDIATION", text:"Schedule remediation in next planned maintenance window. Verify patch applicability to your environment. Monitor vendor advisories for updated severity assessments." });
   remSteps.push({ c:"#64748b", bg:"rgba(255,255,255,.02)", icon:"*", label:"DEFENSE IN DEPTH", text:"Apply least-privilege access controls * Enable enhanced EDR telemetry on affected hosts * Block known-bad IOCs at perimeter * Conduct threat hunting using MITRE ATT&amp;CK techniques listed above * Update detection rules." });
 
+  // Commercial gate verdict -- reuses the existing P18/P19 evidence -> confidence ->
+  // validation -> certification chain (the same one buildAnalystBlock already runs)
+  // solely to read customer_deliverable. No new scoring logic is introduced here.
+  const _gateEvidence   = buildEvidenceAttribution(item);
+  const _gateConfidence = computeTransparentConfidence(item);
+  const _gateValidation = validateReportQuality(item, _gateEvidence, _gateConfidence);
+  const certLevel       = computeCertificationLevel(_gateValidation.quality_score, _gateValidation);
+  const commercialGateBanner = buildCommercialGateBanner(certLevel);
+
   return `<!DOCTYPE html>
+<!-- CDB-REPORT-ENGINE: worker-fallback-synthesis v${PLATFORM_VERSION} -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -643,7 +683,7 @@ a:hover{text-decoration:underline}
 </style>
 </head>
 <body>
-
+${commercialGateBanner}
 <!-- Classification bar -->
 <div class="cls-bar">
   ${kev ? "? CISA KNOWN EXPLOITED VULNERABILITY  -  IMMEDIATE REMEDIATION MANDATORY" : "SENTINEL APEX * THREAT INTELLIGENCE PLATFORM * " + tlp}
@@ -961,8 +1001,8 @@ ${buildP28RoleGuidanceBlock(item)}
 <!-- P28.10: Operational Metrics -->
 ${buildP28MetricsBlock(item)}
 
-<!-- P28.9: Customer Feedback -->
-${buildP28FeedbackBlock(item)}
+<!-- P28.9: Customer Feedback (suppressed on non-deliverable reports -- see commercialGateBanner) -->
+${certLevel.customer_deliverable ? buildP28FeedbackBlock(item) : ''}
 
 <!-- P29.1: Enterprise Intelligence Network -->
 ${buildP29EINBlock(item)}

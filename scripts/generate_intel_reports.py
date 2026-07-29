@@ -2097,6 +2097,7 @@ def render_report(item: dict, public_prefix: str) -> str:
     )
 
     return f"""<!doctype html>
+<!-- CDB-REPORT-ENGINE: generate_intel_reports.py v{PLATFORM_VERSION} -->
 <html lang='en'>
 <head>
 <meta charset='utf-8'>

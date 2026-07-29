@@ -1468,6 +1468,21 @@ jobs:
         run: python3 scripts/r2_upload_verifier.py
 
       # -----------------------------------------------------------------------
+      # STAGE 3.6.5: REPORT ENGINE CONSISTENCY GATE (NEW v1.0 -- observability)
+      # generate_intel_reports.py, report_generator.py, and the Worker's
+      # generateIntelReport() fallback all write into the same reports/
+      # keyspace with no shared ownership model (see the Report Pipeline
+      # Architecture Audit). Each now stamps its own HTML comment marker;
+      # this gate makes engine distribution and cross-run ownership changes
+      # observable for the first time. Non-blocking by design -- exit 0
+      # always, unless --enforce is explicitly added after a bake-in period.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.6.5 - Report Engine Consistency Gate (NEW v1.0 -- observability)"
+        timeout-minutes: 3
+        if: always()
+        run: python3 scripts/report_engine_consistency_gate.py || true
+
+      # -----------------------------------------------------------------------
       # STAGE 3.7: BUST WORKER KV CACHE -- ALWAYS RUNS
       # Safe to run even if R2 upload had issues. Exit 0 guaranteed.
       # -----------------------------------------------------------------------
