@@ -335,6 +335,12 @@ def main() -> None:
         "data/health/guardian_report.json",
         "data/health/apex_engine_report.json",
         "data/health/apex_v2_audit.json",
+        # GAP-001 FIX: report_engine_consistency_gate.py (STAGE 3.6.5) writes this
+        # ledger every run, but it was never in this list -- the gate has run in
+        # production and succeeded, yet its output evaporated every single time
+        # because nothing ever staged it. Same category as the other data/health
+        # and data/status observability artifacts above; staged the same way.
+        "data/quality/report_engine_ledger.json",
         "data/apex_v2_manifest.json",
         "data/apex_v2_strategic_report.json",
         "data/apex_intelligence_report.json",

@@ -330,7 +330,6 @@ def build_business_impact_section(item: Dict) -> str:
     # v142.1: guard — business_impact may be a string in older manifest entries
     if not isinstance(biz_impact, dict):
         biz_impact = {}
-    cost_str     = biz_impact.get("estimated_cost","4.5M average breach cost")
     regulatory   = biz_impact.get("regulatory_risk", ["ISO 27001","GDPR"])
     op_risk      = biz_impact.get("operational_risk","HIGH")
 
