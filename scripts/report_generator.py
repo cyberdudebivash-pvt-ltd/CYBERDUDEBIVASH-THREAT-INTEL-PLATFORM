@@ -1446,6 +1446,7 @@ def _build_html(
     # ── Final HTML assembly ───────────────────────────────────────────────
     parts = [
         "<!DOCTYPE html>",
+        "<!-- CDB-REPORT-ENGINE: report_generator.py v161.x -->",
         '<html lang="en">',
         "<head>",
         '  <meta charset="UTF-8"/>',
