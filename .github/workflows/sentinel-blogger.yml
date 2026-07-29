@@ -71,8 +71,25 @@ on:
       - '.github/workflows/generate-and-sync.yml'
       - 'index.html'
       - 'feed_manifest.json'
+  # EMERGENCY CONSERVATION WINDOW (2026-07-29 -> Aug 1 quota reset): cron
+  # cadence temporarily reduced from every 4 hours to a deterministic 3x/day
+  # schedule (00:00, 08:00, 16:00 UTC) at the founder's explicit direction,
+  # to conserve GitHub Actions minutes. ONLY this schedule trigger changes --
+  # push, workflow_dispatch, and all publishing/deployment/data-processing
+  # logic in this file are unchanged.
+  #
+  # Original cadence (restore after Aug 1 by reverting this line):
+  #   - cron: '0 */4 * * *'
+  #
+  # Expected savings: cuts scheduled runs from 6/day to 3/day (-3 runs/day).
+  # At this workflow's measured real cost of ~44 billable minutes/run, that
+  # is an estimated ~132 min/day reduction from the schedule side alone.
+  # Push-triggered runs (real commit activity) are untouched.
+  #
+  # RESTORATION TASK: revert to '0 */4 * * *' once the Aug 1 quota resets --
+  # tracked in the PR description for this change.
   schedule:
-    - cron: '0 */4 * * *'
+    - cron: '0 0,8,16 * * *'
     - cron: '0 0 1 * *'
   workflow_dispatch:
     inputs:
