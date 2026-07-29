@@ -387,7 +387,7 @@ You operate as:
 
 This platform is a **Cloudflare Workers ESM backend** built on a strictly additive P-layer architecture.
 
-### P-Layer Stack (P16 → P33)
+### P-Layer Stack (P16 → P38)
 
 Each P-layer is additive only — it imports from lower layers and NEVER re-implements their logic.
 
@@ -410,6 +410,13 @@ Each P-layer is additive only — it imports from lower layers and NEVER re-impl
 | P31 | p31-handlers.js | Knowledge graph, entity normalization, campaign |
 | P32 | p32-handlers.js | Operational lifecycle, strategic decisions, maturity |
 | P33 | p33-handlers.js | ECIOS — cross-feed aggregation, SOC mission, MITRE matrix |
+| P34 | p34-handlers.js | Engineering assurance API surface — platform health, security posture, SBOM, compliance |
+| P35 | p35-handlers.js | Intelligence quality engineering, freshness/confidence/diversity, platform hardening |
+| P36 | p36-handlers.js | Intelligence excellence, maturity assessment, customer value, competitive advantage |
+| P37 | p37-handlers.js | Platform hardening, source diversity, enrichment excellence, confidence calibration |
+| P38 | p38-handlers.js | Platform governance, schema/feed governance, permanent stabilization |
+
+All five (P34–P38) are additive, compose from existing P20/P25/P26 engines, and are live-imported in `workers/intel-gateway/src/index.js`.
 
 ### Core Engine Functions (NEVER RE-IMPLEMENT)
 
@@ -561,7 +568,7 @@ git push origin main:claude/p16-production-verification-0h8kog --force
 | STAGE 3.98 | P33 |
 | STAGE 4 | GIT SYNC (never modify) |
 
-Next available: **STAGE 3.99** (for future P34+)
+P34–P38 are already live (see P-Layer Stack table above); this table's CI stage mapping for them was not located in `sentinel-blogger.yml`/`ci_stats_extract.py` at time of writing. Next available: **STAGE 3.99** (for future P39+, pending confirmation of P34–P38's actual stage assignment)
 
 ---
 
