@@ -1,9 +1,9 @@
 {
-  "total_experiments": 3,
+  "total_experiments": 5,
   "experiments": [
     {
-      "experiment_id": "abtest--670d545a3a2a",
-      "name": "Detection Optimization: CVE-2026-66028 - Ekushey Project Manager CRM 5.0 M",
+      "experiment_id": "abtest--8080981c3cef",
+      "name": "Detection Optimization: CVE-2026-58150 - Apache Traffic Server: HTTP/2 req",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -30,17 +30,17 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "CVE-2026-66028 - Ekushey Project Manager CRM 5.0 Missing Uniqueness Constraint v",
-        "risk_score": 7.0,
+        "title": "CVE-2026-58150 - Apache Traffic Server: HTTP/2 requests with Transfer-Encoding a",
+        "risk_score": 8.5,
         "cves": [
-          "CVE-2026-66028"
+          "CVE-2026-58150"
         ],
         "techniques": []
       }
     },
     {
-      "experiment_id": "abtest--0238a8ee6cdf",
-      "name": "Detection Optimization: CVE-2026-55579 - Pheditor: Hardcoded default passw",
+      "experiment_id": "abtest--b7f2afc487f9",
+      "name": "Detection Optimization: CVE-2026-57834 - Apache Traffic Server: Malformed ",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -67,17 +67,17 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "CVE-2026-55579 - Pheditor: Hardcoded default password 'admin' with no forced cha",
-        "risk_score": 7.0,
+        "title": "CVE-2026-57834 - Apache Traffic Server: Malformed chunked message body allows re",
+        "risk_score": 8.5,
         "cves": [
-          "CVE-2026-55579"
+          "CVE-2026-57834"
         ],
         "techniques": []
       }
     },
     {
-      "experiment_id": "abtest--91b519e91444",
-      "name": "Detection Optimization: CVE-2026-55578 - Pheditor: Incomplete command sani",
+      "experiment_id": "abtest--feb4a1995c1b",
+      "name": "Detection Optimization: CVE-2026-24033 - Apache Traffic Server: Request sm",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -104,10 +104,84 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "CVE-2026-55578 - Pheditor: Incomplete command sanitization in terminal feature a",
+        "title": "CVE-2026-24033 - Apache Traffic Server: Request smuggling via chunked extension ",
         "risk_score": 7.0,
         "cves": [
-          "CVE-2026-55578"
+          "CVE-2026-24033"
+        ],
+        "techniques": []
+      }
+    },
+    {
+      "experiment_id": "abtest--7caac8bc0d6a",
+      "name": "Detection Optimization: CVE-2026-33267 - Apache Traffic Server: Untrusted ",
+      "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
+      "variant_a": {
+        "name": "Broad Detection",
+        "description": "Matches any related IOC or technique indicator",
+        "expected_recall": 0.95,
+        "expected_precision": 0.6,
+        "rule_type": "sigma",
+        "detection_logic": "selection: any technique OR any CVE mention"
+      },
+      "variant_b": {
+        "name": "Precise Detection",
+        "description": "Requires multiple correlated indicators",
+        "expected_recall": 0.75,
+        "expected_precision": 0.9,
+        "rule_type": "sigma",
+        "detection_logic": "selection: (technique AND CVE) OR (IOC AND actor_tag)"
+      },
+      "metrics": [
+        "true_positive_rate",
+        "false_positive_rate",
+        "mean_time_to_detect",
+        "analyst_triage_time"
+      ],
+      "duration_days": 14,
+      "status": "PROPOSED",
+      "advisory_context": {
+        "title": "CVE-2026-33267 - Apache Traffic Server: Untrusted @ headers can spoof ATS intern",
+        "risk_score": 8.5,
+        "cves": [
+          "CVE-2026-33267"
+        ],
+        "techniques": []
+      }
+    },
+    {
+      "experiment_id": "abtest--d53f7fcf5a96",
+      "name": "Detection Optimization: CVE-2026-22068 - Apache Traffic Server: Regex mapp",
+      "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
+      "variant_a": {
+        "name": "Broad Detection",
+        "description": "Matches any related IOC or technique indicator",
+        "expected_recall": 0.95,
+        "expected_precision": 0.6,
+        "rule_type": "sigma",
+        "detection_logic": "selection: any technique OR any CVE mention"
+      },
+      "variant_b": {
+        "name": "Precise Detection",
+        "description": "Requires multiple correlated indicators",
+        "expected_recall": 0.75,
+        "expected_precision": 0.9,
+        "rule_type": "sigma",
+        "detection_logic": "selection: (technique AND CVE) OR (IOC AND actor_tag)"
+      },
+      "metrics": [
+        "true_positive_rate",
+        "false_positive_rate",
+        "mean_time_to_detect",
+        "analyst_triage_time"
+      ],
+      "duration_days": 14,
+      "status": "PROPOSED",
+      "advisory_context": {
+        "title": "CVE-2026-22068 - Apache Traffic Server: Regex mappings match with malicious doma",
+        "risk_score": 7.0,
+        "cves": [
+          "CVE-2026-22068"
         ],
         "techniques": []
       }
@@ -119,5 +193,5 @@
     "statistical_test": "chi_squared",
     "rollout_strategy": "gradual"
   },
-  "generated_at": "2026-07-27T19:55:10.550447+00:00"
+  "generated_at": "2026-07-29T09:09:14.401506+00:00"
 }
