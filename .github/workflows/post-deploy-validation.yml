@@ -203,7 +203,16 @@ jobs:
         run: |
           echo "[GATE D] Checking JWT/auth system..."
           HEALTH=$(curl -sf --max-time 10 "${{ env.WORKER_BASE }}/api/health" || echo '{}')
-          JWT=$(echo "$HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('jwt_configured','false'))" 2>/dev/null || echo "false")
+          # v184.1 FIX: jwt_configured lives under the "checks" object in the
+          # Worker's /api/health response (workers/intel-gateway/src/index.js:
+          # checks: { ..., jwt_configured: !!(env.CDB_JWT_SECRET), ... }), not
+          # at the top level. Reading it at the top level always fell through
+          # to the "false" default below regardless of the real secret state --
+          # confirmed by 4 other validators in this repo (post_deploy_validator.py,
+          # commercial_saas_validator.py, self_healing_engine.py, deploy-worker.yml)
+          # already reading the same nested path correctly. Aligning to that
+          # existing, proven pattern rather than introducing a new one.
+          JWT=$(echo "$HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('checks',{}).get('jwt_configured','false'))" 2>/dev/null || echo "false")
           echo "[GATE D] JWT configured: $JWT"
           if [ "$JWT" != "true" ] && [ "$JWT" != "True" ]; then
             echo "[GATE D] FAIL: JWT auth not confirmed operational"
