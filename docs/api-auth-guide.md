@@ -2,7 +2,7 @@
 
 **Version:** v1.0.0  
 **Status:** Production  
-**Base URL:** `https://cyberdudebivash.github.io/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM`
+**Base URL:** `https://intel.cyberdudebivash.com`
 
 ---
 
@@ -15,13 +15,13 @@ SENTINEL APEX provides a threat intelligence feed API accessible to subscribers.
 ## Public Endpoint (No Auth Required)
 
 ```bash
-GET https://cyberdudebivash.github.io/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/api/feed.json
+GET https://intel.cyberdudebivash.com/api/feed.json
 ```
 
 Returns the latest 25 curated threat intelligence items. No API key required.
 
 ```bash
-curl -s https://cyberdudebivash.github.io/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/api/feed.json | python3 -m json.tool
+curl -s https://intel.cyberdudebivash.com/api/feed.json | python3 -m json.tool
 ```
 
 ---
@@ -133,7 +133,7 @@ import (
     "net/http"
 )
 
-const feedURL = "https://cyberdudebivash.github.io/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/api/feed.json"
+const feedURL = "https://intel.cyberdudebivash.com/api/feed.json"
 
 type FeedItem struct {
     ID        string  `json:"id"`
@@ -181,7 +181,7 @@ func main() {
 ## JavaScript / Node.js SDK (Minimal Example)
 
 ```javascript
-const FEED_URL = 'https://cyberdudebivash.github.io/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/api/feed.json';
+const FEED_URL = 'https://intel.cyberdudebivash.com/api/feed.json';
 
 async function fetchFeed(apiKey = '') {
   const headers = { 'User-Agent': 'SentinelApexJSSDK/1.0.0' };
