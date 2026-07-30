@@ -20,8 +20,8 @@
       "T1059"
     ],
     "generated_at": "2026-07-29T18:01:45Z",
-    "confidence_score": 25,
-    "confidence": 0.25,
+    "confidence_score": 19,
+    "confidence": 0.19,
     "tlp_label": "TLP:GREEN",
     "ioc_counts": {},
     "actor_tag": null,
@@ -139,7 +139,7 @@
     "_enriched_at": "2026-07-29T18:15:25.763256+00:00",
     "_enriched_by": "enrich_cvss_epss_batch.py v185.0",
     "blog_url": "https://intel.cyberdudebivash.com/reports/intel--d88daaf16dad2bc518ff8e4c/",
-    "_quality_hardened_at": "2026-07-30T10:58:18.652286+00:00",
+    "_quality_hardened_at": "2026-07-30T16:20:47.073029+00:00",
     "_quality_version": "184.0",
     "mitre_group_name": "Unattributed CVE Exploiter",
     "mitre_group_aliases": [],
@@ -195,9 +195,9 @@
         "mapping_reason": ""
       }
     ],
-    "confidence_label": "HIGH_CONFIDENCE",
-    "confidence_score_v2": 42,
-    "confidence_rationale": "High confidence based on: CVSS score 9.8 (Critical); EPSS score 0.457 (elevated exploitation probability)",
+    "confidence_label": "MEDIUM_CONFIDENCE",
+    "confidence_score_v2": 32,
+    "confidence_rationale": "Medium confidence — CVSS score 9.8 (Critical)",
     "confidence_factors": [
       {
         "factor": "cvss_critical",
@@ -205,24 +205,14 @@
         "signal": "CVSS score 9.8 (Critical)"
       },
       {
-        "factor": "epss_high",
-        "weight": 6,
-        "signal": "EPSS score 0.457 (elevated exploitation probability)"
+        "factor": "epss_very_high",
+        "weight": 12,
+        "signal": "EPSS score 45.700 (very high exploitation probability)"
       },
       {
         "factor": "cve_referenced",
         "weight": 5,
         "signal": "CVE(s) referenced: CVE-2026-64391"
-      },
-      {
-        "factor": "iocs_5plus",
-        "weight": 8,
-        "signal": "7 IOCs extracted and verified"
-      },
-      {
-        "factor": "ttps_5plus",
-        "weight": 8,
-        "signal": "5 MITRE ATT&CK TTPs mapped"
       }
     ],
     "sources_reporting": 1,
@@ -230,10 +220,10 @@
     "revenue_opportunities": [
       "VULNERABILITY_ASSESSMENT"
     ],
-    "sla_priority": "P4",
-    "action_deadline_hours": 720,
-    "recommended_sla_action": "MONITOR — Assess in next vulnerability review cycle",
-    "confidence_enriched_at": "2026-07-29T18:17:16Z",
+    "sla_priority": "P1",
+    "action_deadline_hours": 72,
+    "recommended_sla_action": "URGENT PATCH — Critical severity, deploy fix within 72 hours",
+    "confidence_enriched_at": "2026-07-30T10:59:21Z",
     "confidence_engine_version": "1.0.1",
     "apex_ai_summary": "[P4] Remote Code Execution - low severity (Risk 1.16/10). MITRE ATT&CK mapped: T1078, T1548, T1190, T1210 (5 techniques). 7 indicators detected - upgrade to Pro for full IOC access. Actor attribution: CDB-UNATTR-CVE. AI confidence: LOW (35%) - limited source data available.",
     "apex_ai_score": 1.3,
@@ -286,8 +276,8 @@
       "ledger_generated": true
     },
     "confidence_reason": [
-      "5 ATT&CK technique(s) mapped",
-      "EPSS 45.7% exploitation probability"
+      "1 ATT&CK technique(s) mapped",
+      "EPSS 4570.0% exploitation probability"
     ],
     "cti_tier": "FREE_INFORMATIONAL",
     "verification_status": "UNVERIFIED",
@@ -320,7 +310,7 @@
       "Partial verification: EPSS 45.7%, CVSS 9.8"
     ],
     "grade_engine_version": "v2.0.0",
-    "graded_at": "2026-07-30T10:59:20.995425+00:00",
+    "graded_at": "2026-07-30T16:21:29.291980+00:00",
     "epss_normalized": true,
     "attck_tactics": [],
     "allowed_content_tier": "enterprise_dossier",
@@ -328,9 +318,9 @@
     "enterprise_eligible": true,
     "mssp_eligible": true,
     "governor_version": "1.0.0",
-    "governed_at": "2026-07-30T10:59:21.537923+00:00",
+    "governed_at": "2026-07-30T16:21:30.203525+00:00",
     "governor_audit_log": [
-      "M3: attck_technique_ids cleared — verification='NOT_VERIFIED' (no evidence)",
+      "M3: attck_technique_ids cleared — verification='NOT_MAPPED' (no evidence)",
       "M4: risk_score raised 5.3→8.5 [severity=CRITICAL → floor 8.5; CVSS=9.8 ≥ 9.0 → floor 8.5]"
     ],
     "actor_confidence_label": "NONE",
@@ -355,7 +345,8 @@
     "grade_notes_v2": [
       "Grade B: CVE verified; CVSS=9.8; 3 sources; evidence-based ATT&CK; corroboration=70"
     ],
-    "graded_at_v2": "2026-07-30T10:59:21.465128+00:00"
+    "graded_at_v2": "2026-07-30T16:21:30.066292+00:00",
+    "_risk_micro_adj": 0.05954
   },
   {
     "id": "intel--a53f63859f229b009e7952e3",
@@ -364,7 +355,7 @@
     "description": "### Summary\n\nThe Fluentd configuration renderer in Logging operator writes strings from CRDs such as `Flow` directly into `fluent.conf` without escaping them. As a result, a user who can create `Flow` resources can inject Fluentd configuration by providing values that contain newlines.\n\nIn the confirmed path, a value in `record_transformer.records` can close the current `<record>` / `<filter>` block and add a new `<match **>` block. By specifying Fluentd's core `@type exec` plugin in that injected block, an attacker can execute arbitrary commands inside the Fluentd aggregator.\n\n### Details\n\nThe issue is in `FluentRender` in `pkg/sdk/logging/model/render/fluent.go`.\n\nhttps://github.com/kube-logging/logging-operator/blob/98275d2984aa8d731c4c975b8006aa433fc7bafa/pkg/sdk/logging/model/render/fluent.go#L60-L87\n\nEach parameter is rendered as `key value`, but values are not quoted, and newlines or characters such as `<` and `>` are not rejected. In addition, `indentedf` builds the string with",
     "severity": "CRITICAL",
     "risk_score": 8.5,
-    "confidence": 0.12,
+    "confidence": 0.14,
     "source": "GitHub Security Advisories",
     "feed_source": "GitHub Security Advisories",
     "tlp": "TLP:AMBER",
@@ -436,7 +427,7 @@
     "sla_priority": "P1",
     "action_deadline_hours": 72,
     "recommended_sla_action": "URGENT PATCH — Critical severity, deploy fix within 72 hours",
-    "confidence_enriched_at": "2026-07-29T18:17:16Z",
+    "confidence_enriched_at": "2026-07-30T10:59:21Z",
     "confidence_engine_version": "1.0.1",
     "pdf_url": "/reports/pdf/intel--a53f63859f229b009e7952e3.pdf",
     "pdf_available": true,
@@ -446,7 +437,7 @@
     "apex_ai_score": 9.0,
     "status": "active",
     "schema_version": "stable-v1.0-apex",
-    "_risk_micro_adj": 0.037718,
+    "_risk_micro_adj": 0.049518,
     "evidence_chain": {
       "evidence_id": "EVD-A53F63859F22",
       "source_url": "https://github.com/advisories/GHSA-mjqf-28ph-426h",
@@ -486,7 +477,7 @@
     "actor_code": "Unattributed",
     "actor_type": "UNATTRIBUTED",
     "actor_region": "Unknown",
-    "_quality_hardened_at": "2026-07-30T10:58:18.652364+00:00",
+    "_quality_hardened_at": "2026-07-30T16:20:47.073090+00:00",
     "_quality_version": "184.0",
     "evidence_ledger": {
       "source_count": 1,
@@ -498,9 +489,9 @@
       "evidence_strength": "LOW",
       "ledger_generated": true
     },
-    "confidence_score": 12,
+    "confidence_score": 14,
     "confidence_reason": [
-      "Single unverified source — low evidence base"
+      "1 ATT&CK technique(s) mapped"
     ],
     "cti_tier": "FREE_INFORMATIONAL",
     "verification_status": "UNVERIFIED",
@@ -530,7 +521,7 @@
       "Partial verification: CVSS 9.9"
     ],
     "grade_engine_version": "v2.0.0",
-    "graded_at": "2026-07-30T10:59:20.995549+00:00",
+    "graded_at": "2026-07-30T16:21:29.292083+00:00",
     "actor_tag": null,
     "actor_name": null,
     "allowed_content_tier": "enterprise_dossier",
@@ -538,9 +529,9 @@
     "enterprise_eligible": true,
     "mssp_eligible": true,
     "governor_version": "1.0.0",
-    "governed_at": "2026-07-30T10:59:21.537955+00:00",
+    "governed_at": "2026-07-30T16:21:30.203580+00:00",
     "governor_audit_log": [
-      "M2: Banned actor 'Unattributed Threat Actor' nulled — attribution_status=NONE",
+      "M3: attck_technique_ids cleared — verification='NOT_MAPPED' (no evidence)",
       "M4: risk_score raised 4.0→8.5 [severity=CRITICAL → floor 8.5; CVSS=9.9 ≥ 9.0 → floor 8.5; KEV=true → floor 7.0]"
     ],
     "actor_confidence_label": "NONE",
@@ -581,7 +572,8 @@
     "grade_notes_v2": [
       "Grade B: CVE verified; CVSS=9.9; 2 sources; evidence-based ATT&CK; corroboration=40"
     ],
-    "graded_at_v2": "2026-07-30T10:59:21.465161+00:00"
+    "graded_at_v2": "2026-07-30T16:21:30.066353+00:00",
+    "attck_tactics": []
   },
   {
     "id": "intel--9dd2c45085b1dd00e2980329",
@@ -590,7 +582,7 @@
     "description": "## Affected Component\n\n- **Package:** proot-distro\n- **Affected command:** `restore`\n- **Attack surface:** Host-side Termux CLI processing a user-supplied backup archive\n- **Vulnerability type:** Container Isolation Bypass / Cross-Container Read and Write\n\n---\n\n## Affected Versions\n\n| Component | Version |\n|---|---|\n| proot-distro | 5.1.5 (confirmed affected) |\n| Test distro | Alpine Linux |\n| Architecture | aarch64 |\n| Device | Samsung Galaxy A23 |\n| Package source | https://packages-cf.termux.dev/apt/termux-main stable/main aarch64 |\n\n---\n\n## Summary\n\nWhen restoring a crafted backup archive, `proot-distro restore` accepts hardlink entries whose source path references a different installed container.\n\nThe restore logic resolves the hardlink source from the archive's `linkname` field and copies the referenced file into the container identified by the archive entry.\n\nAlthough path traversal protections correctly keep the source path inside the proot-distro containers directory, no valid",
     "severity": "HIGH",
     "risk_score": 7.0,
-    "confidence": 0.12,
+    "confidence": 0.14,
     "source": "GitHub Security Advisories",
     "feed_source": "GitHub Security Advisories",
     "tlp": "TLP:AMBER",
@@ -663,7 +655,7 @@
     "sla_priority": "P3",
     "action_deadline_hours": 336,
     "recommended_sla_action": "SCHEDULED PATCH — Apply in next maintenance window",
-    "confidence_enriched_at": "2026-07-29T18:17:16Z",
+    "confidence_enriched_at": "2026-07-30T10:59:21Z",
     "confidence_engine_version": "1.0.1",
     "pdf_url": "/reports/pdf/intel--9dd2c45085b1dd00e2980329.pdf",
     "pdf_available": true,
@@ -673,7 +665,7 @@
     "apex_ai_score": 7.6,
     "status": "active",
     "schema_version": "stable-v1.0-apex",
-    "_risk_micro_adj": 0.039607,
+    "_risk_micro_adj": 0.051407,
     "evidence_chain": {
       "evidence_id": "EVD-9DD2C45085B1",
       "source_url": "https://github.com/advisories/GHSA-7h3g-4w2f-fj2f",
@@ -713,7 +705,7 @@
     "actor_code": "Unattributed",
     "actor_type": "UNATTRIBUTED",
     "actor_region": "Unknown",
-    "_quality_hardened_at": "2026-07-30T10:58:18.652412+00:00",
+    "_quality_hardened_at": "2026-07-30T16:20:47.073121+00:00",
     "_quality_version": "184.0",
     "evidence_ledger": {
       "source_count": 1,
@@ -725,9 +717,9 @@
       "evidence_strength": "LOW",
       "ledger_generated": true
     },
-    "confidence_score": 12,
+    "confidence_score": 14,
     "confidence_reason": [
-      "Single unverified source — low evidence base"
+      "1 ATT&CK technique(s) mapped"
     ],
     "cti_tier": "FREE_INFORMATIONAL",
     "verification_status": "UNVERIFIED",
@@ -757,7 +749,7 @@
       "Partial verification: CVSS 8.2"
     ],
     "grade_engine_version": "v2.0.0",
-    "graded_at": "2026-07-30T10:59:20.995605+00:00",
+    "graded_at": "2026-07-30T16:21:29.292130+00:00",
     "actor_tag": null,
     "actor_name": null,
     "allowed_content_tier": "enterprise_dossier",
@@ -765,9 +757,9 @@
     "enterprise_eligible": true,
     "mssp_eligible": true,
     "governor_version": "1.0.0",
-    "governed_at": "2026-07-30T10:59:21.537974+00:00",
+    "governed_at": "2026-07-30T16:21:30.203613+00:00",
     "governor_audit_log": [
-      "M2: Banned actor 'Unattributed Threat Actor' nulled — attribution_status=NONE",
+      "M3: attck_technique_ids cleared — verification='NOT_MAPPED' (no evidence)",
       "M4: risk_score raised 3.3→7.0 [severity=HIGH → floor 7.0; CVSS=8.2 ≥ 7.0 → floor 7.0; KEV=true → floor 7.0]"
     ],
     "actor_confidence_label": "NONE",
@@ -808,7 +800,8 @@
     "grade_notes_v2": [
       "Grade B: CVE verified; CVSS=8.2; 2 sources; evidence-based ATT&CK; corroboration=40"
     ],
-    "graded_at_v2": "2026-07-30T10:59:21.465176+00:00"
+    "graded_at_v2": "2026-07-30T16:21:30.066384+00:00",
+    "attck_tactics": []
   },
   {
     "id": "intel--9525a59fb030aff52f1507d0",
@@ -817,7 +810,7 @@
     "description": "A critical security flaw in the open-source AI orchestration platform Ruflo has been disclosed, allowing unauthenticated attackers to execute arbitrary commands and fully compromise AI agent environments. Assigned a maximum CVSS base score of 10.0, the vulnerability (tracked as CVE-2026-59726) was discovered by Noma Labs and affects Ruflo’s Model Context Protocol (MCP) Bridge, a core [&#8230;] \n The post  Critical Ruflo MCP Bridge Flaw Lets Attackers Execute Commands and Hijack AI Agents  appeared first",
     "severity": "CRITICAL",
     "risk_score": 8.5,
-    "confidence": 0.17,
+    "confidence": 0.19,
     "source": "CyberSecurityNews",
     "feed_source": "CyberSecurityNews",
     "tlp": "TLP:AMBER",
@@ -869,7 +862,7 @@
     },
     "intelligence_age_days": 0.1,
     "confidence_label": "MEDIUM_CONFIDENCE",
-    "confidence_score_v2": 26,
+    "confidence_score_v2": 32,
     "confidence_rationale": "Medium confidence — CVSS score 9.8 (Critical)",
     "confidence_factors": [
       {
@@ -878,9 +871,9 @@
         "signal": "CVSS score 9.8 (Critical)"
       },
       {
-        "factor": "epss_high",
-        "weight": 6,
-        "signal": "EPSS score 0.440 (elevated exploitation probability)"
+        "factor": "epss_very_high",
+        "weight": 12,
+        "signal": "EPSS score 44.000 (very high exploitation probability)"
       },
       {
         "factor": "cve_referenced",
@@ -896,7 +889,7 @@
     "sla_priority": "P1",
     "action_deadline_hours": 72,
     "recommended_sla_action": "URGENT PATCH — Critical severity, deploy fix within 72 hours",
-    "confidence_enriched_at": "2026-07-29T18:17:16Z",
+    "confidence_enriched_at": "2026-07-30T10:59:21Z",
     "confidence_engine_version": "1.0.1",
     "pdf_url": "/reports/pdf/intel--9525a59fb030aff52f1507d0.pdf",
     "pdf_available": true,
@@ -906,7 +899,7 @@
     "apex_ai_score": 9.0,
     "status": "active",
     "schema_version": "stable-v1.0-apex",
-    "_risk_micro_adj": 0.040034,
+    "_risk_micro_adj": 0.056584,
     "evidence_chain": {
       "evidence_id": "EVD-9525A59FB030",
       "source_url": "https://cybersecuritynews.com/critical-ruflo-mcp-bridge-vulnerability/",
@@ -951,7 +944,7 @@
       "ip_address",
       "domain"
     ],
-    "_quality_hardened_at": "2026-07-30T10:58:18.652547+00:00",
+    "_quality_hardened_at": "2026-07-30T16:20:47.073291+00:00",
     "_quality_version": "184.0",
     "evidence_ledger": {
       "source_count": 1,
@@ -963,9 +956,10 @@
       "evidence_strength": "LOW",
       "ledger_generated": true
     },
-    "confidence_score": 17,
+    "confidence_score": 19,
     "confidence_reason": [
-      "EPSS 44.0% exploitation probability"
+      "1 ATT&CK technique(s) mapped",
+      "EPSS 4400.0% exploitation probability"
     ],
     "cti_tier": "FREE_INFORMATIONAL",
     "verification_status": "UNVERIFIED",
@@ -995,7 +989,7 @@
       "Partial verification: EPSS 44.0%, CVSS 9.8"
     ],
     "grade_engine_version": "v2.0.0",
-    "graded_at": "2026-07-30T10:59:20.995995+00:00",
+    "graded_at": "2026-07-30T16:21:29.292750+00:00",
     "epss_normalized": true,
     "actor_tag": null,
     "actor_name": null,
@@ -1004,9 +998,9 @@
     "enterprise_eligible": true,
     "mssp_eligible": true,
     "governor_version": "1.0.0",
-    "governed_at": "2026-07-30T10:59:21.538158+00:00",
+    "governed_at": "2026-07-30T16:21:30.203944+00:00",
     "governor_audit_log": [
-      "M2: Banned actor 'Unattributed Threat Actor' nulled — attribution_status=NONE",
+      "M3: attck_technique_ids cleared — verification='NOT_MAPPED' (no evidence)",
       "M4: risk_score raised 5.2→8.5 [severity=CRITICAL → floor 8.5; CVSS=9.8 ≥ 9.0 → floor 8.5; KEV=true → floor 7.0]"
     ],
     "actor_confidence_label": "NONE",
@@ -1048,7 +1042,8 @@
     "grade_notes_v2": [
       "Grade B: CVE verified; CVSS=9.8; 3 sources; evidence-based ATT&CK; corroboration=70"
     ],
-    "graded_at_v2": "2026-07-30T10:59:21.465248+00:00"
+    "graded_at_v2": "2026-07-30T16:21:30.066529+00:00",
+    "attck_tactics": []
   },
   {
     "id": "intel--03eed12336286188e245977c",
@@ -1119,7 +1114,7 @@
       {
         "factor": "epss_very_high",
         "weight": 12,
-        "signal": "EPSS score 0.650 (very high exploitation probability)"
+        "signal": "EPSS score 65.000 (very high exploitation probability)"
       },
       {
         "factor": "cve_referenced",
@@ -1135,7 +1130,7 @@
     "sla_priority": "P1",
     "action_deadline_hours": 72,
     "recommended_sla_action": "URGENT PATCH — Critical severity, deploy fix within 72 hours",
-    "confidence_enriched_at": "2026-07-29T18:17:16Z",
+    "confidence_enriched_at": "2026-07-30T10:59:21Z",
     "confidence_engine_version": "1.0.1",
     "pdf_url": "/reports/pdf/intel--03eed12336286188e245977c.pdf",
     "pdf_available": true,
@@ -1145,7 +1140,7 @@
     "apex_ai_score": 9.0,
     "status": "active",
     "schema_version": "stable-v1.0-apex",
-    "_risk_micro_adj": 0.002096,
+    "_risk_micro_adj": 0.018596,
     "evidence_chain": {
       "evidence_id": "EVD-03EED1233628",
       "source_url": "https://securityaffairs.com/196169/security/jetbrains-patches-cvss-9-8-teamcity-flaw-allowing-server-takeover.html",
@@ -1189,7 +1184,7 @@
       "ip_address",
       "domain"
     ],
-    "_quality_hardened_at": "2026-07-30T10:58:18.652653+00:00",
+    "_quality_hardened_at": "2026-07-30T16:20:47.073321+00:00",
     "_quality_version": "184.0",
     "evidence_ledger": {
       "source_count": 1,
@@ -1203,7 +1198,7 @@
     },
     "confidence_score": 17,
     "confidence_reason": [
-      "EPSS 65.0% exploitation probability"
+      "EPSS 6500.0% exploitation probability"
     ],
     "cti_tier": "FREE_INFORMATIONAL",
     "verification_status": "UNVERIFIED",
@@ -1231,7 +1226,7 @@
       "Partial verification: EPSS 65.0%, CVSS 9.8"
     ],
     "grade_engine_version": "v2.0.0",
-    "graded_at": "2026-07-30T10:59:20.996152+00:00",
+    "graded_at": "2026-07-30T16:21:29.292820+00:00",
     "epss_normalized": true,
     "actor_tag": null,
     "actor_name": null,
@@ -1240,9 +1235,8 @@
     "enterprise_eligible": true,
     "mssp_eligible": true,
     "governor_version": "1.0.0",
-    "governed_at": "2026-07-30T10:59:21.538175+00:00",
+    "governed_at": "2026-07-30T16:21:30.203976+00:00",
     "governor_audit_log": [
-      "M2: Banned actor 'Unattributed Threat Actor' nulled — attribution_status=NONE",
       "M4: risk_score raised 5.9→8.5 [severity=CRITICAL → floor 8.5; CVSS=9.8 ≥ 9.0 → floor 8.5; KEV=true → floor 7.0]"
     ],
     "actor_confidence_label": "NONE",
@@ -1267,6 +1261,6 @@
     "grade_notes_v2": [
       "Grade B: CVE verified; CVSS=9.8; 3 sources; exploit evidence; corroboration=70"
     ],
-    "graded_at_v2": "2026-07-30T10:59:21.465262+00:00"
+    "graded_at_v2": "2026-07-30T16:21:30.066554+00:00"
   }
 ]
