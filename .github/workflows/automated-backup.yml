@@ -4,8 +4,6 @@ on:
   schedule:
     # Full backup: daily at 01:00 UTC
     - cron: "0 1 * * *"
-    # Incremental backup: every 6 hours
-    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       backup_type:
@@ -50,13 +48,8 @@ jobs:
             exit 0
           fi
 
-          # Schedule: cron "0 1 * * *" (01:00) = full, others = incremental
-          HOUR=$(date -u +%H)
-          if [[ "$HOUR" == "01" ]]; then
-            echo "backup_type=full" >> $GITHUB_OUTPUT
-          else
-            echo "backup_type=incremental" >> $GITHUB_OUTPUT
-          fi
+          # Schedule: cron "0 1 * * *" (01:00) = full only
+          echo "backup_type=full" >> $GITHUB_OUTPUT
 
   # ── Full Backup ───────────────────────────────────────────────────────────
   full-backup:
@@ -118,56 +111,6 @@ jobs:
           # curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
           #   -H 'Content-type: application/json' \
           #   --data '{"text":"🚨 SENTINEL APEX: Full backup FAILED! Run ID: ${{ github.run_id }}"}'
-
-  # ── Incremental Backup ────────────────────────────────────────────────────
-  incremental-backup:
-    name: Incremental Encrypted Backup
-    needs: setup
-    runs-on: ubuntu-latest
-    if: needs.setup.outputs.backup_type == 'incremental'
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install cryptography boto3 --quiet
-
-      - name: Run incremental backup
-        env:
-          CDB_BACKUP_ENABLED:          "true"
-          CDB_BACKUP_DESTINATION:      ${{ vars.CDB_BACKUP_DESTINATION || 'local' }}
-          CDB_BACKUP_ENCRYPTION_KEY:   ${{ secrets.CDB_BACKUP_ENCRYPTION_KEY }}
-          CDB_BACKUP_S3_BUCKET:        ${{ secrets.CDB_BACKUP_S3_BUCKET }}
-          CDB_BACKUP_R2_ENDPOINT:      ${{ secrets.CDB_BACKUP_R2_ENDPOINT }}
-          CDB_BACKUP_R2_BUCKET:        ${{ secrets.CDB_BACKUP_R2_BUCKET }}
-          CDB_BACKUP_LOCAL_PATH:       "data/backups"
-          AWS_ACCESS_KEY_ID:           ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY:       ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          PLATFORM_VERSION:            ${{ vars.PLATFORM_VERSION || '184.0' }}
-        run: |
-          python -m agent.backup.backup_engine --incremental | tee backup-manifest.json
-          STATUS=$(python3 -c "import json; d=json.load(open('backup-manifest.json')); print(d.get('status','unknown'))")
-          echo "Backup status: $STATUS"
-          # "skipped" is valid for incremental (no changes)
-          if [[ "$STATUS" != "success" && "$STATUS" != "skipped" ]]; then
-            echo "::error::Incremental backup failed: $STATUS"
-            exit 1
-          fi
-
-      - name: Upload incremental manifest
-        uses: actions/upload-artifact@v4
-        with:
-          name: backup-manifest-incremental-${{ github.run_id }}
-          path: backup-manifest.json
-          retention-days: 30
 
   # ── Cloudflare KV + R2 Data Backup (v184.0 - enterprise hardening) ─────────
   cf-data-backup:
