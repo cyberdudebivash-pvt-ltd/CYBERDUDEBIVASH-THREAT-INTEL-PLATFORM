@@ -2,28 +2,30 @@
   "platform": "CYBERDUDEBIVASH SENTINEL APEX",
   "module": "v51_detection_engine",
   "version": "51.0.0",
-  "batch_id": "59fba5608107",
-  "generated_at": "2026-06-28T05:05:28.000377+00:00",
-  "ioc_count": 13,
+  "batch_id": "2f1b70fe5482",
+  "generated_at": "2026-07-30T14:41:42.137913+00:00",
+  "ioc_count": 101,
   "ioc_type_breakdown": {
+    "cve": 67,
+    "domain": 8,
+    "url": 17,
     "ipv4": 7,
-    "url": 3,
-    "cve": 1,
-    "domain": 2
+    "sha1": 1,
+    "email": 1
   },
   "rules_generated": {
-    "sigma": 1,
+    "sigma": 3,
     "yara": 1,
     "suricata": 1,
-    "total": 3
+    "total": 5
   },
   "rules": [
     {
-      "rule_id": "cdb-net-59fba5608107",
+      "rule_id": "cdb-net-2f1b70fe5482",
       "rule_type": "sigma",
-      "title": "Network IOC Detection [59fba5608107]",
-      "content": "title: CDB SENTINEL APEX - Network Threat Intel [59fba5608107]\nid: cdb-net-59fba5608107\nstatus: production\ndescription: >\n    Auto-generated detection rule for 7 malicious IPs and 2 malicious domains\n    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-06-28\nmodified: 2026-06-28\ntags:\n    - attack.command_and_control\n    - attack.t1071\n    - attack.t1090\nlogsource:\n    category: firewall\n    product: any\ndetection:\n    selection:\n        DestinationIp:\n            - '4.0.4.1'\n            - '1.0.0.41'\n            - '1.0.9.4'\n            - '1.3.4.3'\n            - '169.254.169.254'\n            - '2.7.9.8'\n            - '0.0.0.0'\n        DestinationHostname|contains:\n            - 'kubevirt.io'\n            - 'evil.com'\n    condition: selection\nlevel: medium\nfalsepositives:\n    - Shared hosting infrastructure\n    - CDN/cloud provider IP overlap\nreferences:\n    - https://intel.cyberdudebivash.com\n    - https://cyberdudebivash.com/threat-intel",
-      "ioc_count": 9,
+      "title": "Network IOC Detection [2f1b70fe5482]",
+      "content": "title: CDB SENTINEL APEX - Network Threat Intel [2f1b70fe5482]\nid: cdb-net-2f1b70fe5482\nstatus: production\ndescription: >\n    Auto-generated detection rule for 7 malicious IPs and 8 malicious domains\n    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-07-30\nmodified: 2026-07-30\ntags:\n    - attack.command_and_control\n    - attack.t1071\n    - attack.t1090\nlogsource:\n    category: firewall\n    product: any\ndetection:\n    selection:\n        DestinationIp:\n            - '0.0.0.0'\n            - '169.254.169.254'\n            - '6.2.0.0'\n            - '6.2.0.6'\n            - '6.2.1.0'\n            - '6.2.2.0'\n            - '7.9.9.1'\n        DestinationHostname|contains:\n            - 'ci.eclipse.org'\n            - 'nodejs.org'\n            - 'lore.kernel.org'\n            - 'www.cve.org'\n            - 'harwal.net'\n            - 'socket.io'\n            - 'joomdle.com'\n            - 'balbooa.com'\n    condition: selection\nlevel: medium\nfalsepositives:\n    - Shared hosting infrastructure\n    - CDN/cloud provider IP overlap\nreferences:\n    - https://intel.cyberdudebivash.com\n    - https://cyberdudebivash.com/threat-intel",
+      "ioc_count": 15,
       "ioc_types": [
         "ipv4",
         "domain"
@@ -33,26 +35,68 @@
         "T1071",
         "T1090"
       ],
-      "generated_at": "2026-06-28T05:05:28.065051+00:00",
+      "generated_at": "2026-07-30T14:41:42.234328+00:00",
       "source_advisories": [
-        "CVE-2026-13325: A flaw was found in KubeVirt's migration proxy. When spec.configuration.migrations.disableTLS is set to true on the Kube",
-        "CVE-2025-68052: Unauthenticated Cross Site Request Forgery (CSRF) in Eagle Booking <= 1.3.4.3 versions.",
-        "CVE-2026-57620: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting') vulnerability in Tim Strifler Exclu",
-        "CVE-2026-40080: Cacti is an open source performance and fault management framework. Versions 1.2.30 and prior are vulnerable to Open Red",
-        "CVE-2026-57940: HTMLy 3.1.1 contains a Server-Side Request Forgery (SSRF) vulnerability in the RSS feed import functionality. The functi",
-        "CVE-2026-13318: A server-side request forgery (SSRF) flaw was found in KubeVirt's virt-api port-forward handler. When processing a port-",
-        "CVE-2026-54820: Unauthenticated SQL Injection in JetBooking <= 4.0.4.1 versions.",
-        "CVE-2025-68074: Contributor Cross Site Scripting (XSS) in Image Carousel <= 1.0.0.41 versions.",
-        "CVE-2025-68064: Contributor Local File Inclusion in Goya Core < 1.0.9.4 versions."
+        "Backports available - cBPF JIT spray hardening",
+        "CVE-2026-7775: IBM Sterling B2B Integrator 6.2.0.0 through 6.2.0.6, 6.2.1.0 through 6.2.1.1_2, and 6.2.2.0 through 6.2.2.0_1 and IBM St",
+        "CVE-2026-18353 - Unauthenticated SSRF in PIA via OIDC issuer allowlist bypass",
+        "Fwd: [CVE-2026-13346] pip absolute path traversal during download from malicious package indexes",
+        "CVE-2026-65880: Joomla Extension - balbooa.com - Unauthenticated remote code execution in Balbooa Forms < 2.4.3 - An insecure form proce",
+        "CVE-2026-66749: Let's Chat 0.4.0 through 0.4.8 contains a null dereference vulnerability that allows authenticated attackers to crash th",
+        "netfoil: Incorrect block responses could lead to localhost traffic",
+        "CVE-2026-65882: Joomla Extension - joomdle.com - Reflected XSS vulnerability in Joomdle < 3.1.1 - The goto url parameter of the moodle w",
+        "[RANSOMWARE] Unknown: harwal.net",
+        "Re: Fwd: Node.js security updates for all active release lines, June 2026"
       ],
-      "filename": "cdb_network_ioc_59fba5608107.yml"
+      "filename": "cdb_network_ioc_2f1b70fe5482.yml"
     },
     {
-      "rule_id": "yara-net-59fba5608107",
+      "rule_id": "cdb-hash-2f1b70fe5482",
+      "rule_type": "sigma",
+      "title": "File Hash Detection [2f1b70fe5482]",
+      "content": "title: CDB SENTINEL APEX - Malicious File Hash Detection [2f1b70fe5482]\nid: cdb-hash-2f1b70fe5482\nstatus: production\ndescription: >\n    Auto-generated detection rule for 1 malicious file hashes\n    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-07-30\ntags:\n    - attack.execution\n    - attack.t1204\n    - attack.defense_evasion\nlogsource:\n    category: file_event\n    product: any\ndetection:\n    selection:\n        Hashes|contains:\n            - '98275d2984aa8d731c4c975b8006aa433fc7bafa'\n    condition: selection\nlevel: critical\nfalsepositives:\n    - Hash collision (negligible probability)\nreferences:\n    - https://intel.cyberdudebivash.com",
+      "ioc_count": 1,
+      "ioc_types": [
+        "sha256",
+        "sha1",
+        "md5"
+      ],
+      "severity": "critical",
+      "mitre_techniques": [
+        "T1204",
+        "T1059"
+      ],
+      "generated_at": "2026-07-30T14:41:42.234358+00:00",
+      "source_advisories": [
+        "Logging operator has Fluentd configuration injection that allows remote code execution"
+      ],
+      "filename": "cdb_file_hash_2f1b70fe5482.yml"
+    },
+    {
+      "rule_id": "cdb-phish-2f1b70fe5482",
+      "rule_type": "sigma",
+      "title": "Phishing Detection [2f1b70fe5482]",
+      "content": "title: CDB SENTINEL APEX - Phishing Sender Detection [2f1b70fe5482]\nid: cdb-phish-2f1b70fe5482\nstatus: production\ndescription: Detects emails from known malicious senders\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-07-30\ntags:\n    - attack.initial_access\n    - attack.t1566\nlogsource:\n    category: email\n    product: any\ndetection:\n    selection:\n        SenderAddress:\n            - 'misp.example@attacker.example'\n    condition: selection\nlevel: high\nfalsepositives:\n    - Spoofed sender addresses\nreferences:\n    - https://intel.cyberdudebivash.com",
+      "ioc_count": 1,
+      "ioc_types": [
+        "email"
+      ],
+      "severity": "high",
+      "mitre_techniques": [
+        "T1566"
+      ],
+      "generated_at": "2026-07-30T14:41:42.234369+00:00",
+      "source_advisories": [
+        "CVE-2026-67178: MISP installation scripts generated an Apache HTTP virtual-host configuration containing an incorrectly formatted HTTP-t"
+      ],
+      "filename": "cdb_phishing_2f1b70fe5482.yml"
+    },
+    {
+      "rule_id": "yara-net-2f1b70fe5482",
       "rule_type": "yara",
-      "title": "Network Intel YARA [59fba5608107]",
-      "content": "rule CDB_SENTINEL_Network_Intel_59fba5608107\n{\n    meta:\n        author = \"CyberDudeBivash SENTINEL APEX v51\"\n        description = \"Detects network IOCs from threat intelligence feeds\"\n        date = \"2026-06-28\"\n        severity = \"high\"\n        reference = \"https://intel.cyberdudebivash.com\"\n        batch_id = \"59fba5608107\"\n        ioc_count = 9\n\n    strings:\n        $ip_0 = \"4.0.4.1\" ascii wide nocase\n        $ip_1 = \"1.0.0.41\" ascii wide nocase\n        $ip_2 = \"1.0.9.4\" ascii wide nocase\n        $ip_3 = \"1.3.4.3\" ascii wide nocase\n        $ip_4 = \"169.254.169.254\" ascii wide nocase\n        $ip_5 = \"2.7.9.8\" ascii wide nocase\n        $ip_6 = \"0.0.0.0\" ascii wide nocase\n        $dom_7 = \"kubevirt.io\" ascii wide nocase\n        $dom_8 = \"evil.com\" ascii wide nocase\n\n    condition:\n        filesize < 100MB and any of them\n}",
-      "ioc_count": 9,
+      "title": "Network Intel YARA [2f1b70fe5482]",
+      "content": "rule CDB_SENTINEL_Network_Intel_2f1b70fe5482\n{\n    meta:\n        author = \"CyberDudeBivash SENTINEL APEX v51\"\n        description = \"Detects network IOCs from threat intelligence feeds\"\n        date = \"2026-07-30\"\n        severity = \"high\"\n        reference = \"https://intel.cyberdudebivash.com\"\n        batch_id = \"2f1b70fe5482\"\n        ioc_count = 15\n\n    strings:\n        $ip_0 = \"0.0.0.0\" ascii wide nocase\n        $ip_1 = \"169.254.169.254\" ascii wide nocase\n        $ip_2 = \"6.2.0.0\" ascii wide nocase\n        $ip_3 = \"6.2.0.6\" ascii wide nocase\n        $ip_4 = \"6.2.1.0\" ascii wide nocase\n        $ip_5 = \"6.2.2.0\" ascii wide nocase\n        $ip_6 = \"7.9.9.1\" ascii wide nocase\n        $dom_7 = \"ci.eclipse.org\" ascii wide nocase\n        $dom_8 = \"nodejs.org\" ascii wide nocase\n        $dom_9 = \"lore.kernel.org\" ascii wide nocase\n        $dom_10 = \"www.cve.org\" ascii wide nocase\n        $dom_11 = \"harwal.net\" ascii wide nocase\n        $dom_12 = \"socket.io\" ascii wide nocase\n        $dom_13 = \"joomdle.com\" ascii wide nocase\n        $dom_14 = \"balbooa.com\" ascii wide nocase\n\n    condition:\n        filesize < 100MB and any of them\n}",
+      "ioc_count": 15,
       "ioc_types": [
         "ipv4",
         "domain"
@@ -62,31 +106,34 @@
         "T1071",
         "T1090"
       ],
-      "generated_at": "2026-06-28T05:05:28.065351+00:00",
+      "generated_at": "2026-07-30T14:41:42.234802+00:00",
       "source_advisories": [
-        "CVE-2026-13325: A flaw was found in KubeVirt's migration proxy. When spec.configuration.migrations.disableTLS is set to true on the Kube",
-        "CVE-2025-68052: Unauthenticated Cross Site Request Forgery (CSRF) in Eagle Booking <= 1.3.4.3 versions.",
-        "CVE-2026-57620: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting') vulnerability in Tim Strifler Exclu",
-        "CVE-2026-40080: Cacti is an open source performance and fault management framework. Versions 1.2.30 and prior are vulnerable to Open Red",
-        "CVE-2026-57940: HTMLy 3.1.1 contains a Server-Side Request Forgery (SSRF) vulnerability in the RSS feed import functionality. The functi",
-        "CVE-2026-13318: A server-side request forgery (SSRF) flaw was found in KubeVirt's virt-api port-forward handler. When processing a port-",
-        "CVE-2026-54820: Unauthenticated SQL Injection in JetBooking <= 4.0.4.1 versions.",
-        "CVE-2025-68074: Contributor Cross Site Scripting (XSS) in Image Carousel <= 1.0.0.41 versions.",
-        "CVE-2025-68064: Contributor Local File Inclusion in Goya Core < 1.0.9.4 versions."
+        "Backports available - cBPF JIT spray hardening",
+        "CVE-2026-7775: IBM Sterling B2B Integrator 6.2.0.0 through 6.2.0.6, 6.2.1.0 through 6.2.1.1_2, and 6.2.2.0 through 6.2.2.0_1 and IBM St",
+        "CVE-2026-18353 - Unauthenticated SSRF in PIA via OIDC issuer allowlist bypass",
+        "Fwd: [CVE-2026-13346] pip absolute path traversal during download from malicious package indexes",
+        "CVE-2026-65880: Joomla Extension - balbooa.com - Unauthenticated remote code execution in Balbooa Forms < 2.4.3 - An insecure form proce",
+        "CVE-2026-66749: Let's Chat 0.4.0 through 0.4.8 contains a null dereference vulnerability that allows authenticated attackers to crash th",
+        "netfoil: Incorrect block responses could lead to localhost traffic",
+        "CVE-2026-65882: Joomla Extension - joomdle.com - Reflected XSS vulnerability in Joomdle < 3.1.1 - The goto url parameter of the moodle w",
+        "[RANSOMWARE] Unknown: harwal.net",
+        "Re: Fwd: Node.js security updates for all active release lines, June 2026"
       ],
-      "filename": "cdb_network_intel_59fba5608107.yar"
+      "filename": "cdb_network_intel_2f1b70fe5482.yar"
     },
     {
-      "rule_id": "suricata-59fba5608107",
+      "rule_id": "suricata-2f1b70fe5482",
       "rule_type": "suricata",
-      "title": "Suricata Threat Intel [59fba5608107]",
-      "content": "# CDB SENTINEL APEX v51 - Auto-Generated Suricata Rules\n# Batch: 59fba5608107 | Generated: 2026-06-28\n# IOC Count: 13\n# Source: https://intel.cyberdudebivash.com\n\nalert ip any any -> 4.0.4.1 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 4.0.4.1\"; sid:9891205; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 1.0.0.41 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 1.0.0.41\"; sid:9891206; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 1.0.9.4 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 1.0.9.4\"; sid:9891207; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 1.3.4.3 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 1.3.4.3\"; sid:9891208; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 169.254.169.254 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 169.254.169.254\"; sid:9891209; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 2.7.9.8 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 2.7.9.8\"; sid:9891210; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 0.0.0.0 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 0.0.0.0\"; sid:9891211; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: kubevirt.io\"; dns.query; content:\"kubevirt.io\"; nocase; sid:9892205; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: evil.com\"; dns.query; content:\"evil.com\"; nocase; sid:9892206; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, severity high, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"dnslog.example.com,\"; nocase; sid:9893205; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"169.254.169.254\"; nocase; sid:9893206; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"cacti/.\"; nocase; sid:9893207; rev:1; classtype:trojan-activity; metadata:created_at 2026-06-28, source CDB_SENTINEL_APEX_v51;)",
-      "ioc_count": 12,
+      "title": "Suricata Threat Intel [2f1b70fe5482]",
+      "content": "# CDB SENTINEL APEX v51 - Auto-Generated Suricata Rules\n# Batch: 2f1b70fe5482 | Generated: 2026-07-30\n# IOC Count: 101\n# Source: https://intel.cyberdudebivash.com\n\nalert ip any any -> 0.0.0.0 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 0.0.0.0\"; sid:9194610; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 169.254.169.254 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 169.254.169.254\"; sid:9194611; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 6.2.0.0 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 6.2.0.0\"; sid:9194612; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 6.2.0.6 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 6.2.0.6\"; sid:9194613; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 6.2.1.0 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 6.2.1.0\"; sid:9194614; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 6.2.2.0 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 6.2.2.0\"; sid:9194615; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 7.9.9.1 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 7.9.9.1\"; sid:9194616; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: ci.eclipse.org\"; dns.query; content:\"ci.eclipse.org\"; nocase; sid:9195610; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: nodejs.org\"; dns.query; content:\"nodejs.org\"; nocase; sid:9195611; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: lore.kernel.org\"; dns.query; content:\"lore.kernel.org\"; nocase; sid:9195612; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: www.cve.org\"; dns.query; content:\"www.cve.org\"; nocase; sid:9195613; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: harwal.net\"; dns.query; content:\"harwal.net\"; nocase; sid:9195614; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: socket.io\"; dns.query; content:\"socket.io\"; nocase; sid:9195615; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: joomdle.com\"; dns.query; content:\"joomdle.com\"; nocase; sid:9195616; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: balbooa.com\"; dns.query; content:\"balbooa.com\"; nocase; sid:9195617; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, severity high, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"`)\"; nocase; sid:9196610; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"isc.sans.edu\"; nocase; sid:9196611; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"en/blog/vulnerability/july-2026-security-releases\"; nocase; sid:9196612; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"rails/rails/security/advisories/GHSA-xr9x-r78c-5hrm\"; nocase; sid:9196613; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"all/20260727-cbpf-jit-spray-hardening-6-1-y-v1-0-eb80dcf1eb6e\"; nocase; sid:9196614; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"all/20260717-cbpf-jit-spray-hardening-6-6-y-v1-0-e04f1b2893de\"; nocase; sid:9196615; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"CVERecord?id=CVE-2026-13346\"; nocase; sid:9196616; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"kube-logging/logging-operator/blob/98275d2984aa8d731c4c975b8006aa433fc7bafa/pkg/sdk/logging/model/render/f\"; nocase; sid:9196617; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"zitadel/zitadel/security/advisories/GHSA-282g-fhmx-xf54)\"; nocase; sid:9196618; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"apt/termux-main\"; nocase; sid:9196619; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"en/blog/vulnerability/june-2026-security-releases\"; nocase; sid:9196620; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"8go/matrix-commander/issues/204#issuecomment-3523986979),\"; nocase; sid:9196621; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"git\"; nocase; sid:9196622; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"prebid/prebid-server/releases/tag/v4.4.0)\"; nocase; sid:9196623; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"misp.example\"; nocase; sid:9196624; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"@attacker.example/\"; nocase; sid:9196625; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9196626; rev:1; classtype:trojan-activity; metadata:created_at 2026-07-30, source CDB_SENTINEL_APEX_v51;)",
+      "ioc_count": 32,
       "ioc_types": [
-        "ipv4",
-        "url",
         "cve",
-        "domain"
+        "domain",
+        "url",
+        "ipv4",
+        "sha1",
+        "email"
       ],
       "severity": "high",
       "mitre_techniques": [
@@ -94,20 +141,20 @@
         "T1090",
         "T1568"
       ],
-      "generated_at": "2026-06-28T05:05:28.065634+00:00",
+      "generated_at": "2026-07-30T14:41:42.235045+00:00",
       "source_advisories": [
-        "CVE-2026-13325: A flaw was found in KubeVirt's migration proxy. When spec.configuration.migrations.disableTLS is set to true on the Kube",
-        "CVE-2025-68052: Unauthenticated Cross Site Request Forgery (CSRF) in Eagle Booking <= 1.3.4.3 versions.",
-        "CVE-2026-57620: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting') vulnerability in Tim Strifler Exclu",
-        "CVE-2026-50741: Bypass to the fix for CVE-2026-34916. Variants of such vectors have been also reported by phucrio and offsetmd. The fix",
-        "CVE-2026-40080: Cacti is an open source performance and fault management framework. Versions 1.2.30 and prior are vulnerable to Open Red",
-        "CVE-2026-57940: HTMLy 3.1.1 contains a Server-Side Request Forgery (SSRF) vulnerability in the RSS feed import functionality. The functi",
-        "CVE-2026-13318: A server-side request forgery (SSRF) flaw was found in KubeVirt's virt-api port-forward handler. When processing a port-",
-        "CVE-2026-54820: Unauthenticated SQL Injection in JetBooking <= 4.0.4.1 versions.",
-        "CVE-2025-68074: Contributor Cross Site Scripting (XSS) in Image Carousel <= 1.0.0.41 versions.",
-        "CVE-2025-68064: Contributor Local File Inclusion in Goya Core < 1.0.9.4 versions."
+        "CVE-2026-65880: Joomla Extension - balbooa.com - Unauthenticated remote code execution in Balbooa Forms < 2.4.3 - An insecure form proce",
+        "ZDI-26-499: WatchGuard FireWare OS cli Token Parser Stack-based Buffer Overflow Remote Code Execution Vulnerability",
+        "CVE-2026-64559 - s390/pkey: Check length in PKEY_VERIFYPROTK ioctl",
+        "CVE-2026-59920 - Netty: STOMP CONNECT Frame Header Injection",
+        "CVE-2026-18360 - DFIR-IRIS Stored XSS in Custom Attributes",
+        "ZDI-26-496: Trend AI Cleaner One Pro Link Following Arbitrary File Deletion Vulnerability",
+        "ISC Stormcast For Thursday, July 30th, 2026 https://isc.sans.edu/podcastdetail/10030, (Thu, Jul 30th)",
+        "NVIDIA BlueField Vulnerability Enables Code Execution Attacks",
+        "ZDI-26-500: WatchGuard FireWare OS networkd network_wireless_kick_off_user_cb Stack-based Buffer Overflow Remote Code Execution Vulnerability",
+        "Public PoC Released for Exploited Check Point SmartConsole Authentication Bypass"
       ],
-      "filename": "cdb_threat_intel_59fba5608107.rules"
+      "filename": "cdb_threat_intel_2f1b70fe5482.rules"
     }
   ]
 }
