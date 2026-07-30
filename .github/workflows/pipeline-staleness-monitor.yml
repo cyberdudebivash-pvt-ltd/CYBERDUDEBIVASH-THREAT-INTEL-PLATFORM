@@ -1,13 +1,13 @@
 name: Pipeline Staleness Monitor
 
 # CYBERDUDEBIVASH(R) SENTINEL APEX v184.0
-# Checks critical workflows for staleness every 2 hours.
+# Checks critical workflows for staleness 4x daily.
 # Sends Telegram alert if sentinel-blogger or generate-and-sync
 # haven't succeeded within their expected cadence.
 
 on:
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "0 0,6,12,18 * * *"  # 4x daily every 6 hours (80 min/day quota savings)
   workflow_dispatch:
     inputs:
       threshold_hours:
