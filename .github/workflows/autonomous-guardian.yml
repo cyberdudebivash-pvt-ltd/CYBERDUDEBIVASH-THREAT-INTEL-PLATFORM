@@ -2,30 +2,29 @@
 # CYBERDUDEBIVASH(R) SENTINEL APEX v184.0 - AUTONOMOUS GUARDIAN AGENT
 # Version: v184.0 - unified platform version
 # NOTE: sync-dashboard.yml DISABLED in v184.0 - removed from workflow_run list.
-#       Guardian still triggers on sentinel-blogger completion + hourly schedule.
+#       Guardian still triggers on sentinel-blogger completion + 2x daily schedule.
 #
-# HARDENING (v184.0 - DUAL TRIGGER DESIGN):
+# HARDENING (v184.0 - OPTIMIZED DUAL TRIGGER DESIGN):
 #   This workflow has TWO triggers by design:
 #     1. workflow_run (sentinel-blogger completed) - fires immediately after blogger
-#     2. schedule cron '30 * * * *' - hourly fallback catches ALL other workflow failures
+#     2. schedule cron '30 0,12 * * *' - 2x daily at 00:30 and 12:30 UTC
 #
 #   CONCURRENCY: cancel-in-progress: true
 #     Guardian runs are idempotent health checks - they read state and write a report.
-#     If sentinel-blogger completes at :00 and the cron fires at :30, the :30 run
-#     is just a fallback sweep. If a previous guardian run is still in-flight when
-#     the next one queues, the older one is cancelled - the latest sweep is what matters.
+#     If sentinel-blogger completes, the post-run guardian fires immediately.
+#     The 2x daily schedule provides fallback coverage.
 #     This prevents guardian queue buildup during high-frequency pipeline runs.
 # =============================================================================
 name: Autonomous Guardian Agent v184.0
 
 on:
   workflow_run:
-    # v184.0: sync-dashboard removed " it is DISABLED (merged into sentinel-blogger).
+    # v184.0: sync-dashboard removed - it is DISABLED (merged into sentinel-blogger).
     # Only sentinel-blogger triggers guardian post-run checks.
     workflows: ["sentinel-blogger"]
     types: [completed]
   schedule:
-    - cron: '30 * * * *'   # Hourly at :30 " catches ALL workflow failures
+    - cron: '30 0,12 * * *'   # 2x daily: 00:30 UTC + 12:30 UTC (128 min/day savings)
   workflow_dispatch:
     inputs:
       lookback_hours:
@@ -99,7 +98,7 @@ jobs:
           rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
 
           git add -f data/health/ 2>/dev/null || true
-          # STRICT: do NOT stage feed_manifest.json " sentinel-blogger owns it
+          # STRICT: do NOT stage feed_manifest.json - sentinel-blogger owns it
           git restore --staged data/stix/feed_manifest.json 2>/dev/null || true
 
           if git diff --staged --quiet; then
@@ -123,4 +122,3 @@ jobs:
           [ -f data/health/guardian_report.json ] && \
             python3 -c "import json; d=json.load(open('data/health/guardian_report.json')); print(f'Guardian: {d.get(\"status\",\"N/A\")} | Failures: {d.get(\"failures_detected\",0)} | Fixes: {d.get(\"fixes_applied\",0)}')" || \
             echo "No guardian report."
-
