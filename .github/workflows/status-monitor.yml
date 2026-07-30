@@ -1,12 +1,13 @@
 # =============================================================================
-# CYBERDUDEBIVASH(R) SENTINEL APEX v134.0 " PLATFORM STATUS MONITOR
-# Version: v184.0 " PERMANENT PRODUCTION CONTRACT
+# CYBERDUDEBIVASH(R) SENTINEL APEX v134.0 — PLATFORM STATUS MONITOR
+# Version: v184.0 — PERMANENT PRODUCTION CONTRACT
+# HARDENING: 3x daily instead of hourly (200 min/day quota savings)
 # =============================================================================
 name: CDB Platform Status Monitor v134
 
 on:
   schedule:
-    - cron: '0 */1 * * *'
+    - cron: '0 0,8,16 * * *'  # 3x daily: 00:00 UTC, 08:00 UTC, 16:00 UTC (200 min/day savings)
   workflow_dispatch:
 
 permissions:
@@ -59,4 +60,3 @@ jobs:
             if git push origin main; then break; fi
             sleep $((i*10)); [ $i -eq 3 ] && echo "Push deferred."
           done
-
