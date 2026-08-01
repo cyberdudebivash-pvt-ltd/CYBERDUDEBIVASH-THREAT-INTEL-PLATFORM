@@ -1,9 +1,9 @@
 {
-  "total_experiments": 2,
+  "total_experiments": 4,
   "experiments": [
     {
-      "experiment_id": "abtest--cd203ae21ef4",
-      "name": "Detection Optimization: Exploit for CVE-2026-13152 exploit",
+      "experiment_id": "abtest--4e1fef3cb04b",
+      "name": "Detection Optimization: Exploit for CVE-2026-13157 exploit",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -30,17 +30,17 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "Exploit for CVE-2026-13152 exploit",
+        "title": "Exploit for CVE-2026-13157 exploit",
         "risk_score": 7.0,
         "cves": [
-          "CVE-2026-13152"
+          "CVE-2026-13157"
         ],
         "techniques": []
       }
     },
     {
-      "experiment_id": "abtest--f010f4948a6f",
-      "name": "Detection Optimization: CVE-2026-15414 - Subscriptions for WooCommerce <= ",
+      "experiment_id": "abtest--5448b51d987c",
+      "name": "Detection Optimization: CVE-2026-18059 - PixelYourSite <= 11.2.1 - Unauthe",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -67,10 +67,84 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "CVE-2026-15414 - Subscriptions for WooCommerce <= 2.0.0 - Authenticated (Contrib",
+        "title": "CVE-2026-18059 - PixelYourSite <= 11.2.1 - Unauthenticated Sensitive Information",
         "risk_score": 7.0,
         "cves": [
-          "CVE-2026-15414"
+          "CVE-2026-18059"
+        ],
+        "techniques": []
+      }
+    },
+    {
+      "experiment_id": "abtest--b7ffc8834259",
+      "name": "Detection Optimization: Exploit for CVE-2025-15001 exploit",
+      "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
+      "variant_a": {
+        "name": "Broad Detection",
+        "description": "Matches any related IOC or technique indicator",
+        "expected_recall": 0.95,
+        "expected_precision": 0.6,
+        "rule_type": "sigma",
+        "detection_logic": "selection: any technique OR any CVE mention"
+      },
+      "variant_b": {
+        "name": "Precise Detection",
+        "description": "Requires multiple correlated indicators",
+        "expected_recall": 0.75,
+        "expected_precision": 0.9,
+        "rule_type": "sigma",
+        "detection_logic": "selection: (technique AND CVE) OR (IOC AND actor_tag)"
+      },
+      "metrics": [
+        "true_positive_rate",
+        "false_positive_rate",
+        "mean_time_to_detect",
+        "analyst_triage_time"
+      ],
+      "duration_days": 14,
+      "status": "PROPOSED",
+      "advisory_context": {
+        "title": "Exploit for CVE-2025-15001 exploit",
+        "risk_score": 7.0,
+        "cves": [
+          "CVE-2025-15001"
+        ],
+        "techniques": []
+      }
+    },
+    {
+      "experiment_id": "abtest--d60d20fe6657",
+      "name": "Detection Optimization: Exploit for CVE-2025-7384 exploit",
+      "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
+      "variant_a": {
+        "name": "Broad Detection",
+        "description": "Matches any related IOC or technique indicator",
+        "expected_recall": 0.95,
+        "expected_precision": 0.6,
+        "rule_type": "sigma",
+        "detection_logic": "selection: any technique OR any CVE mention"
+      },
+      "variant_b": {
+        "name": "Precise Detection",
+        "description": "Requires multiple correlated indicators",
+        "expected_recall": 0.75,
+        "expected_precision": 0.9,
+        "rule_type": "sigma",
+        "detection_logic": "selection: (technique AND CVE) OR (IOC AND actor_tag)"
+      },
+      "metrics": [
+        "true_positive_rate",
+        "false_positive_rate",
+        "mean_time_to_detect",
+        "analyst_triage_time"
+      ],
+      "duration_days": 14,
+      "status": "PROPOSED",
+      "advisory_context": {
+        "title": "Exploit for CVE-2025-7384 exploit",
+        "risk_score": 7.0,
+        "cves": [
+          "CVE-2025-7384"
         ],
         "techniques": []
       }
@@ -82,5 +156,5 @@
     "statistical_test": "chi_squared",
     "rollout_strategy": "gradual"
   },
-  "generated_at": "2026-08-01T08:34:18.391506+00:00"
+  "generated_at": "2026-08-01T13:56:13.083716+00:00"
 }
