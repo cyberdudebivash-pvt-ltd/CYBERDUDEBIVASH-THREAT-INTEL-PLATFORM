@@ -1,0 +1,34 @@
+title: CDB SENTINEL APEX - Network Threat Intel [40a1f4b94b33]
+id: cdb-net-40a1f4b94b33
+status: production
+description: >
+    Auto-generated detection rule for 5 malicious IPs and 1 malicious domains
+    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.
+author: CyberDudeBivash SENTINEL APEX v51
+date: 2026-08-02
+modified: 2026-08-02
+tags:
+    - attack.command_and_control
+    - attack.t1071
+    - attack.t1090
+logsource:
+    category: firewall
+    product: any
+detection:
+    selection:
+        DestinationIp:
+            - '2.7.9.8'
+            - '1.6.12.6'
+            - '5.9.9.8'
+            - '1.0.0.4'
+            - '0.0.0.0'
+        DestinationHostname|contains:
+            - 'VPS.org'
+    condition: selection
+level: medium
+falsepositives:
+    - Shared hosting infrastructure
+    - CDN/cloud provider IP overlap
+references:
+    - https://intel.cyberdudebivash.com
+    - https://cyberdudebivash.com/threat-intel
