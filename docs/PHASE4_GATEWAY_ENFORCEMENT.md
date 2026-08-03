@@ -131,3 +131,11 @@ Negligible and unchanged from Phase 3 — `resolveEntitlement` adds one string c
 - Pricing consolidation (5-way conflict, unchanged since Phase 3) — needs a business decision, not code.
 - Trial Engine reconciliation — unchanged since Phase 3.
 - Per Phase 5+ of the roadmap: Subscription Automation, Commercial Platform, Platform Hardening, Enterprise Scale.
+
+## 15. Rollout log
+
+Updated in place as each resource is enabled — this is the running record of §3's runbook, not a new document.
+
+| Date | Action | Resources enforced | Result |
+|---|---|---|---|
+| 2026-08-03 | `ENTITLEMENT_ENFORCEMENT_ENABLED="true"`, `ENTITLEMENT_ENFORCEMENT_RESOURCES="cve_detail_full"` | `cve_detail_full` | Deployed; monitoring `entitlement_enforced_override` events. First resource of 11 — chosen per §3's recommendation (read-only, high-traffic, exact mirror of the ad-hoc check per Phase 3/4 discovery). |
