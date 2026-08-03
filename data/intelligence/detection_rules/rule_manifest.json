@@ -2,13 +2,12 @@
   "platform": "CYBERDUDEBIVASH SENTINEL APEX",
   "module": "v51_detection_engine",
   "version": "51.0.0",
-  "batch_id": "40a1f4b94b33",
-  "generated_at": "2026-08-02T14:08:00.048366+00:00",
+  "batch_id": "f324a176f853",
+  "generated_at": "2026-08-03T15:25:01.013006+00:00",
   "ioc_count": 21,
   "ioc_type_breakdown": {
-    "ipv4": 5,
-    "cve": 15,
-    "domain": 1
+    "cve": 19,
+    "ipv4": 2
   },
   "rules_generated": {
     "sigma": 1,
@@ -18,11 +17,11 @@
   },
   "rules": [
     {
-      "rule_id": "cdb-net-40a1f4b94b33",
+      "rule_id": "cdb-net-f324a176f853",
       "rule_type": "sigma",
-      "title": "Network IOC Detection [40a1f4b94b33]",
-      "content": "title: CDB SENTINEL APEX - Network Threat Intel [40a1f4b94b33]\nid: cdb-net-40a1f4b94b33\nstatus: production\ndescription: >\n    Auto-generated detection rule for 5 malicious IPs and 1 malicious domains\n    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-08-02\nmodified: 2026-08-02\ntags:\n    - attack.command_and_control\n    - attack.t1071\n    - attack.t1090\nlogsource:\n    category: firewall\n    product: any\ndetection:\n    selection:\n        DestinationIp:\n            - '2.7.9.8'\n            - '1.6.12.6'\n            - '5.9.9.8'\n            - '1.0.0.4'\n            - '0.0.0.0'\n        DestinationHostname|contains:\n            - 'VPS.org'\n    condition: selection\nlevel: medium\nfalsepositives:\n    - Shared hosting infrastructure\n    - CDN/cloud provider IP overlap\nreferences:\n    - https://intel.cyberdudebivash.com\n    - https://cyberdudebivash.com/threat-intel",
-      "ioc_count": 6,
+      "title": "Network IOC Detection [f324a176f853]",
+      "content": "title: CDB SENTINEL APEX - Network Threat Intel [f324a176f853]\nid: cdb-net-f324a176f853\nstatus: production\ndescription: >\n    Auto-generated detection rule for 2 malicious IPs and 0 malicious domains\n    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-08-03\nmodified: 2026-08-03\ntags:\n    - attack.command_and_control\n    - attack.t1071\n    - attack.t1090\nlogsource:\n    category: firewall\n    product: any\ndetection:\n    selection:\n        DestinationIp:\n            - '1.8.5.3'\n            - '0.0.0.0'\n    condition: selection\nlevel: medium\nfalsepositives:\n    - Shared hosting infrastructure\n    - CDN/cloud provider IP overlap\nreferences:\n    - https://intel.cyberdudebivash.com\n    - https://cyberdudebivash.com/threat-intel",
+      "ioc_count": 2,
       "ioc_types": [
         "ipv4",
         "domain"
@@ -32,23 +31,19 @@
         "T1071",
         "T1090"
       ],
-      "generated_at": "2026-08-02T14:08:00.128503+00:00",
+      "generated_at": "2026-08-03T15:25:01.089036+00:00",
       "source_advisories": [
-        "CVE-2026-67822: Tenda W6-S 1.0.0.4(510) contains a stack-based buffer overflow vulnerability in the /goform/wifiSSIDset endpoint. The fu",
-        "CVE-2026-12231 - Exclusive Addons for Elementor <= 2.7.9.8 - Authenticated (Contributor+) Stored Cross-Site Scripting via 'exad_infobox_image'",
-        "CVE-2026-16503: Deployment of the VPS.org one-click Supabase template deploys a PostgreSQL instance that is published on all interfaces",
-        "CVE-2026-16540 - Simply Schedule Appointments < 1.6.12.6 - Unauthenticated Appointment Data Disclosure and Mass Deletion via purge Endpoint",
-        "CVE-2026-16291 - ProfileGrid < 5.9.9.8 - Subscriber+ Arbitrary Notification Deletion via IDOR",
-        "CVE-2026-16504: Deployment of the VPS.org one-click Zulip template deploys a hardcoded application signing key, a default database passw"
+        "CVE-2025-15675: The Charitable  WordPress plugin before 1.8.5.3 does not sanitise and escape one of its campaign image text fields befor",
+        "CVE-2026-67315: axios versions 0.31.0 before 0.33.0 and 1.15.0 before 1.18.0 fail to recognize 0.0.0.0 as a loopback address in shouldBy"
       ],
-      "filename": "cdb_network_ioc_40a1f4b94b33.yml"
+      "filename": "cdb_network_ioc_f324a176f853.yml"
     },
     {
-      "rule_id": "yara-net-40a1f4b94b33",
+      "rule_id": "yara-net-f324a176f853",
       "rule_type": "yara",
-      "title": "Network Intel YARA [40a1f4b94b33]",
-      "content": "rule CDB_SENTINEL_Network_Intel_40a1f4b94b33\n{\n    meta:\n        author = \"CyberDudeBivash SENTINEL APEX v51\"\n        description = \"Detects network IOCs from threat intelligence feeds\"\n        date = \"2026-08-02\"\n        severity = \"high\"\n        reference = \"https://intel.cyberdudebivash.com\"\n        batch_id = \"40a1f4b94b33\"\n        ioc_count = 6\n\n    strings:\n        $ip_0 = \"2.7.9.8\" ascii wide nocase\n        $ip_1 = \"1.6.12.6\" ascii wide nocase\n        $ip_2 = \"5.9.9.8\" ascii wide nocase\n        $ip_3 = \"1.0.0.4\" ascii wide nocase\n        $ip_4 = \"0.0.0.0\" ascii wide nocase\n        $dom_5 = \"VPS.org\" ascii wide nocase\n\n    condition:\n        filesize < 100MB and any of them\n}",
-      "ioc_count": 6,
+      "title": "Network Intel YARA [f324a176f853]",
+      "content": "rule CDB_SENTINEL_Network_Intel_f324a176f853\n{\n    meta:\n        author = \"CyberDudeBivash SENTINEL APEX v51\"\n        description = \"Detects network IOCs from threat intelligence feeds\"\n        date = \"2026-08-03\"\n        severity = \"high\"\n        reference = \"https://intel.cyberdudebivash.com\"\n        batch_id = \"f324a176f853\"\n        ioc_count = 2\n\n    strings:\n        $ip_0 = \"1.8.5.3\" ascii wide nocase\n        $ip_1 = \"0.0.0.0\" ascii wide nocase\n\n    condition:\n        filesize < 100MB and any of them\n}",
+      "ioc_count": 2,
       "ioc_types": [
         "ipv4",
         "domain"
@@ -58,27 +53,22 @@
         "T1071",
         "T1090"
       ],
-      "generated_at": "2026-08-02T14:08:00.128809+00:00",
+      "generated_at": "2026-08-03T15:25:01.089331+00:00",
       "source_advisories": [
-        "CVE-2026-67822: Tenda W6-S 1.0.0.4(510) contains a stack-based buffer overflow vulnerability in the /goform/wifiSSIDset endpoint. The fu",
-        "CVE-2026-12231 - Exclusive Addons for Elementor <= 2.7.9.8 - Authenticated (Contributor+) Stored Cross-Site Scripting via 'exad_infobox_image'",
-        "CVE-2026-16503: Deployment of the VPS.org one-click Supabase template deploys a PostgreSQL instance that is published on all interfaces",
-        "CVE-2026-16540 - Simply Schedule Appointments < 1.6.12.6 - Unauthenticated Appointment Data Disclosure and Mass Deletion via purge Endpoint",
-        "CVE-2026-16291 - ProfileGrid < 5.9.9.8 - Subscriber+ Arbitrary Notification Deletion via IDOR",
-        "CVE-2026-16504: Deployment of the VPS.org one-click Zulip template deploys a hardcoded application signing key, a default database passw"
+        "CVE-2025-15675: The Charitable  WordPress plugin before 1.8.5.3 does not sanitise and escape one of its campaign image text fields befor",
+        "CVE-2026-67315: axios versions 0.31.0 before 0.33.0 and 1.15.0 before 1.18.0 fail to recognize 0.0.0.0 as a loopback address in shouldBy"
       ],
-      "filename": "cdb_network_intel_40a1f4b94b33.yar"
+      "filename": "cdb_network_intel_f324a176f853.yar"
     },
     {
-      "rule_id": "suricata-40a1f4b94b33",
+      "rule_id": "suricata-f324a176f853",
       "rule_type": "suricata",
-      "title": "Suricata Threat Intel [40a1f4b94b33]",
-      "content": "# CDB SENTINEL APEX v51 - Auto-Generated Suricata Rules\n# Batch: 40a1f4b94b33 | Generated: 2026-08-02\n# IOC Count: 21\n# Source: https://intel.cyberdudebivash.com\n\nalert ip any any -> 2.7.9.8 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 2.7.9.8\"; sid:9504991; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-02, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 1.6.12.6 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 1.6.12.6\"; sid:9504992; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-02, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 5.9.9.8 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 5.9.9.8\"; sid:9504993; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-02, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 1.0.0.4 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 1.0.0.4\"; sid:9504994; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-02, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 0.0.0.0 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 0.0.0.0\"; sid:9504995; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-02, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: VPS.org\"; dns.query; content:\"VPS.org\"; nocase; sid:9505991; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-02, severity high, source CDB_SENTINEL_APEX_v51;)",
-      "ioc_count": 6,
+      "title": "Suricata Threat Intel [f324a176f853]",
+      "content": "# CDB SENTINEL APEX v51 - Auto-Generated Suricata Rules\n# Batch: f324a176f853 | Generated: 2026-08-03\n# IOC Count: 21\n# Source: https://intel.cyberdudebivash.com\n\nalert ip any any -> 1.8.5.3 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 1.8.5.3\"; sid:9035095; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-03, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 0.0.0.0 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 0.0.0.0\"; sid:9035096; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-03, severity high, source CDB_SENTINEL_APEX_v51;)",
+      "ioc_count": 2,
       "ioc_types": [
-        "ipv4",
         "cve",
-        "domain"
+        "ipv4"
       ],
       "severity": "high",
       "mitre_techniques": [
@@ -86,20 +76,20 @@
         "T1090",
         "T1568"
       ],
-      "generated_at": "2026-08-02T14:08:00.129129+00:00",
+      "generated_at": "2026-08-03T15:25:01.089634+00:00",
       "source_advisories": [
-        "CVE-2026-18571 - Keycloak-services: keycloak-services: fgap v2 group assignment bypass during user creation",
-        "CVE-2026-16292 - Frontend File Manager Plugin <= 23.6 - File Metadata Update via CSRF",
-        "CVE-2026-67822: Tenda W6-S 1.0.0.4(510) contains a stack-based buffer overflow vulnerability in the /goform/wifiSSIDset endpoint. The fu",
-        "CVE-2026-12231 - Exclusive Addons for Elementor <= 2.7.9.8 - Authenticated (Contributor+) Stored Cross-Site Scripting via 'exad_infobox_image'",
-        "CVE-2026-62391: The security fix for CVE-2025-66518 is incomplete.\u00a0Any client who can access to Apache Kyuubi Server via Kyuubi frontend",
-        "CVE-2026-16273 - Narrative Publisher <= 1.0.7 - Contributor+ Stored XSS via narrative_post_script Post Meta",
-        "CVE-2026-16503: Deployment of the VPS.org one-click Supabase template deploys a PostgreSQL instance that is published on all interfaces",
-        "CVE-2026-16540 - Simply Schedule Appointments < 1.6.12.6 - Unauthenticated Appointment Data Disclosure and Mass Deletion via purge Endpoint",
-        "CVE-2026-18570 - Keycloak-services: keycloak-services: full-scope-disabled client policy validation bypass via omitted fullscopeallowed",
-        "CVE-2026-16285 - WooCommerce Product Attachment < 2.3.3 - Unauthenticated Arbitrary Media Download"
+        "CVE-2025-15675: The Charitable  WordPress plugin before 1.8.5.3 does not sanitise and escape one of its campaign image text fields befor",
+        "Exploit for Type Confusion in Handlebarsjs Handlebars",
+        "Exploit for SQL Injection in Wordpress",
+        "CVE-2026-69079 - Unauthenticated Denial of Service via Unbounded Activity-Timeline Range in CTI-Transmute",
+        "CVE-2026-62416 - Sharp Corporation Network Scanner Tool Unauthenticated Arbitrary File Upload and Denial of Service Vulnerability",
+        "KindaRails2Shell threatens Ruby on Rails apps (CVE-2026-66066)",
+        "Exploit for CVE-2026-17583",
+        "exploitarium",
+        "CVE-2026-69075 - Stored Cross-Site Scripting via Vue Template Injection in FlowIntel",
+        "CVE-2026-69078 - Server-Side Request Forgery and Local File Disclosure in CTI-Transmute Evaluation PDF Rendering"
       ],
-      "filename": "cdb_threat_intel_40a1f4b94b33.rules"
+      "filename": "cdb_threat_intel_f324a176f853.rules"
     }
   ]
 }
