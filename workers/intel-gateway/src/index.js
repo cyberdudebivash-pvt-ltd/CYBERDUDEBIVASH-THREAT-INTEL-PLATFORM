@@ -2325,18 +2325,39 @@ async function handleCopilot(request, env, auth, method, path) {
 // was previously hardcoded here; see pricing-data.json's "_note" before
 // changing any figure.
 
-async function provisionApiKey(env, ctx, tier, email, source, metadata) {
+// P2.7-001: shadow-mode expiry. Every key provisioned here previously hardcoded
+// expires_at: null -- a single one-time Razorpay Order or Gumroad sale granted
+// permanent access, regardless of the monthly/annual price the customer paid.
+// resolveAuth() (this file, ~line 355) already correctly checks expires_at and
+// downgrades to FREE when it's past -- that gate needed zero changes. The only
+// gap was this function never giving it real data.
+//
+// Gated behind SUBSCRIPTION_EXPIRY_ENABLED (wrangler.toml var, default
+// "false") so this ships with zero behavior change until explicitly enabled.
+// While disabled, the real expiry is still computed and audit-logged
+// (shadow mode) so the correct values are observable before enforcement
+// flips on -- toggle the var to enable, no redeploy of logic required.
+async function provisionApiKey(env, ctx, tier, email, source, metadata, billingCycle = "monthly") {
   const validTier = ["PRO", "ENTERPRISE", "MSSP"].includes(tier) ? tier : "PRO";
   const prefix = validTier === "ENTERPRISE" ? "cdb_ent" : validTier === "MSSP" ? "cdb_mssp" : "cdb_pro";
   const rand   = Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => b.toString(16).padStart(2, "0")).join("");
   const apiKey = `${prefix}_${rand}`;
+
+  const cycleDays      = billingCycle === "annual" ? 365 : 30;
+  const shadowExpiresAt = new Date(Date.now() + cycleDays * 86400000).toISOString();
+  const enforceExpiry   = env.SUBSCRIPTION_EXPIRY_ENABLED === "true";
+
   const record = {
     key: apiKey, tier: validTier, customer_id: email, label: email,
-    source, created_at: now(), expires_at: null,
+    source, created_at: now(), expires_at: enforceExpiry ? shadowExpiresAt : null,
+    billing_cycle: billingCycle,
     payment_metadata: metadata || {},
   };
   await env.API_KEYS_KV.put(apiKey, JSON.stringify(record));
-  auditLog(ctx, env, { action: "key_auto_provisioned", email, tier: validTier, source });
+  auditLog(ctx, env, {
+    action: "key_auto_provisioned", email, tier: validTier, source,
+    billing_cycle: billingCycle, expiry_enforced: enforceExpiry, shadow_expires_at: shadowExpiresAt,
+  });
   return apiKey;
 }
 
@@ -2469,7 +2490,7 @@ async function handleRazorpayVerify(request, env, ctx, method) {
   if (method !== "POST") return jsonResp({ error: "POST required" }, 405);
   let body = {};
   try { body = await request.json(); } catch (_) {}
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, tier = "PRO", email } = body;
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, tier = "PRO", email, billing = "monthly" } = body;
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     return jsonResp({ error: "razorpay_order_id, razorpay_payment_id, razorpay_signature required" }, 400);
   }
@@ -2499,7 +2520,7 @@ async function handleRazorpayVerify(request, env, ctx, method) {
   const tierUp = (tier || "PRO").toUpperCase();
   const apiKey = await provisionApiKey(env, ctx, tierUp, email, "razorpay_checkout", {
     order_id: razorpay_order_id, payment_id: razorpay_payment_id,
-  });
+  }, billing === "annual" ? "annual" : "monthly");
   // P2.6.1-001: Write unified idempotency key (1 year TTL)  -  prevents double-provision from webhook path
   await env.SECURITY_HUB_KV.put(unifiedIdempKey, JSON.stringify({ email, tier: tierUp, ts: now(), source: "razorpay_checkout" }), { expirationTtl: 86400 * 365 });
   // Mark payment_id as consumed via per-path key (backward compat  -  1 year TTL)
@@ -2568,7 +2589,7 @@ async function handleWebhookRazorpay(request, env, ctx) {
 
     const apiKey = await provisionApiKey(env, ctx, tier, email, "razorpay_webhook", {
       payment_id: pid, amount, event,
-    });
+    }, notes.billing === "annual" ? "annual" : "monthly");
     // P2.6.1-001: Write unified idempotency key (1 year TTL)  -  prevents double-provision from blog bridge path
     await env.SECURITY_HUB_KV.put(unifiedIdempKey, JSON.stringify({ email, tier, ts: now(), source: "razorpay_webhook" }), { expirationTtl: 86400 * 365 });
     // Backward-compat per-path key (1 year TTL)
@@ -2643,7 +2664,7 @@ async function handleWebhookGumroad(request, env, ctx) {
 
   const apiKey = await provisionApiKey(env, ctx, tier, email, "gumroad_webhook", {
     sale_id, product_name, price, variants,
-  });
+  }, pnl.includes("annual") ? "annual" : "monthly");
 
   await env.SECURITY_HUB_KV.put(
     idempKey,

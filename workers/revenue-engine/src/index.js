@@ -8,7 +8,7 @@
 // Phase 2 (foundational pass): Razorpay Subscriptions -- subscription
 // creation, webhook lifecycle, entitlement sync. See subscription-engine.js
 // for scope notes (refunds/upgrades/downgrades/checkout-cutover deferred).
-import { handleBillingSubscriptionCreate, handleBillingWebhook } from "./subscription-engine.js";
+import { handleBillingSubscriptionCreate, handleBillingWebhook, patchApiKeyEntitlement } from "./subscription-engine.js";
 
 const ENGINE = {
   VERSION:  "183.0",
@@ -2034,10 +2034,16 @@ async function handleSubExpireCheck(request, env, rid) {
       const updatedRec = { ...rec, status:SUB_STATUS.EXPIRED, expired_at:now.toISOString() };
       await env.REVENUE_CRM_KV.put(`sub:${s.id}`, JSON.stringify(updatedRec));
       await env.REVENUE_CRM_KV.put(`sub:email:${rec.email}`, JSON.stringify(updatedRec));
-      // Suspend API key
+      // Suspend API key. The REVENUE_CRM_KV write above is this Worker's own
+      // bookkeeping copy -- kept as-is. It does NOT reach intel-gateway's
+      // resolveAuth(), which reads API_KEYS_KV and checks `expires_at`, not a
+      // `status` field, so it never actually enforced anything. Added the
+      // missing patchApiKeyEntitlement() call (already correct, already used
+      // by the Subscriptions webhook path) to close that gap.
       const keys = await env.REVENUE_CRM_KV.get(`apikeys:${rec.email}`, "json") || [];
       for (const k of keys) {
         await env.REVENUE_CRM_KV.put(`apikey:${k.key}`, JSON.stringify({...k, status:"expired"}));
+        try { await patchApiKeyEntitlement(env, k.key, { expires_at: now.toISOString() }); } catch {}
       }
       await queueEmail(env, { to:rec.email, template:"subscription_expired", vars:{ tier:rec.tier, renew_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html?renew="+rec.id } });
       await updateMRR(env, rec.tier, rec.billing_cycle, "remove");
