@@ -1,9 +1,9 @@
 {
-  "total_experiments": 4,
+  "total_experiments": 7,
   "experiments": [
     {
-      "experiment_id": "abtest--e56d7a8fc64a",
-      "name": "Detection Optimization: CVE-2026-10848 - Out-of-bounds read in Zephyr OCPP",
+      "experiment_id": "abtest--c99097c22d46",
+      "name": "Detection Optimization: Exploit for CVE-2026-52887",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -30,17 +30,17 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "CVE-2026-10848 - Out-of-bounds read in Zephyr OCPP 1.6 RPC message parser (parse",
+        "title": "Exploit for CVE-2026-52887",
         "risk_score": 7.0,
         "cves": [
-          "CVE-2026-10848"
+          "CVE-2026-52887"
         ],
         "techniques": []
       }
     },
     {
-      "experiment_id": "abtest--a834f102cac5",
-      "name": "Detection Optimization: CVE-2026-9856 - Path Traversal in huggingface/tran",
+      "experiment_id": "abtest--862dbc4dc309",
+      "name": "Detection Optimization: Exploit for CVE-2026-63223",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -67,17 +67,17 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "CVE-2026-9856 - Path Traversal in huggingface/transformers",
+        "title": "Exploit for CVE-2026-63223",
         "risk_score": 7.0,
         "cves": [
-          "CVE-2026-9856"
+          "CVE-2026-63223"
         ],
         "techniques": []
       }
     },
     {
-      "experiment_id": "abtest--e353dd8f2c7b",
-      "name": "Detection Optimization: CVE-2026-65321 - PyAthena 3.35.4 SQL Injection via",
+      "experiment_id": "abtest--1b9677417b11",
+      "name": "Detection Optimization: CVE-2026-58062 - Stapled OCSP response accepted wi",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -104,17 +104,17 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "CVE-2026-65321 - PyAthena 3.35.4 SQL Injection via DefaultParameterFormatter DEL",
-        "risk_score": 7.0,
+        "title": "CVE-2026-58062 - Stapled OCSP response accepted without binding to the checked c",
+        "risk_score": 8.5,
         "cves": [
-          "CVE-2026-65321"
+          "CVE-2026-58062"
         ],
         "techniques": []
       }
     },
     {
-      "experiment_id": "abtest--d763538d8253",
-      "name": "Detection Optimization: CVE-2026-10774 - PSA key-slot leak in Bluetooth Me",
+      "experiment_id": "abtest--d5c1f82cba9e",
+      "name": "Detection Optimization: CVE-2026-58061 - CCM-family modes write plaintext ",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -141,10 +141,121 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "CVE-2026-10774 - PSA key-slot leak in Bluetooth Mesh subnet deletion leading to ",
+        "title": "CVE-2026-58061 - CCM-family modes write plaintext to caller buffer before tag ch",
         "risk_score": 7.0,
         "cves": [
-          "CVE-2026-10774"
+          "CVE-2026-58061"
+        ],
+        "techniques": []
+      }
+    },
+    {
+      "experiment_id": "abtest--432051558687",
+      "name": "Detection Optimization: CVE-2026-58060 - HSS public-key level count unboun",
+      "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
+      "variant_a": {
+        "name": "Broad Detection",
+        "description": "Matches any related IOC or technique indicator",
+        "expected_recall": 0.95,
+        "expected_precision": 0.6,
+        "rule_type": "sigma",
+        "detection_logic": "selection: any technique OR any CVE mention"
+      },
+      "variant_b": {
+        "name": "Precise Detection",
+        "description": "Requires multiple correlated indicators",
+        "expected_recall": 0.75,
+        "expected_precision": 0.9,
+        "rule_type": "sigma",
+        "detection_logic": "selection: (technique AND CVE) OR (IOC AND actor_tag)"
+      },
+      "metrics": [
+        "true_positive_rate",
+        "false_positive_rate",
+        "mean_time_to_detect",
+        "analyst_triage_time"
+      ],
+      "duration_days": 14,
+      "status": "PROPOSED",
+      "advisory_context": {
+        "title": "CVE-2026-58060 - HSS public-key level count unbounded, enabling huge allocation ",
+        "risk_score": 7.0,
+        "cves": [
+          "CVE-2026-58060"
+        ],
+        "techniques": []
+      }
+    },
+    {
+      "experiment_id": "abtest--f5a5cf4e154b",
+      "name": "Detection Optimization: CVE-2026-58059 - Quadratic-time escaping when stri",
+      "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
+      "variant_a": {
+        "name": "Broad Detection",
+        "description": "Matches any related IOC or technique indicator",
+        "expected_recall": 0.95,
+        "expected_precision": 0.6,
+        "rule_type": "sigma",
+        "detection_logic": "selection: any technique OR any CVE mention"
+      },
+      "variant_b": {
+        "name": "Precise Detection",
+        "description": "Requires multiple correlated indicators",
+        "expected_recall": 0.75,
+        "expected_precision": 0.9,
+        "rule_type": "sigma",
+        "detection_logic": "selection: (technique AND CVE) OR (IOC AND actor_tag)"
+      },
+      "metrics": [
+        "true_positive_rate",
+        "false_positive_rate",
+        "mean_time_to_detect",
+        "analyst_triage_time"
+      ],
+      "duration_days": 14,
+      "status": "PROPOSED",
+      "advisory_context": {
+        "title": "CVE-2026-58059 - Quadratic-time escaping when stringifying X.500 distinguished n",
+        "risk_score": 7.0,
+        "cves": [
+          "CVE-2026-58059"
+        ],
+        "techniques": []
+      }
+    },
+    {
+      "experiment_id": "abtest--85a817ff21a9",
+      "name": "Detection Optimization: CVE-2026-20498 - Geniezone Privilege Escalation Vu",
+      "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
+      "variant_a": {
+        "name": "Broad Detection",
+        "description": "Matches any related IOC or technique indicator",
+        "expected_recall": 0.95,
+        "expected_precision": 0.6,
+        "rule_type": "sigma",
+        "detection_logic": "selection: any technique OR any CVE mention"
+      },
+      "variant_b": {
+        "name": "Precise Detection",
+        "description": "Requires multiple correlated indicators",
+        "expected_recall": 0.75,
+        "expected_precision": 0.9,
+        "rule_type": "sigma",
+        "detection_logic": "selection: (technique AND CVE) OR (IOC AND actor_tag)"
+      },
+      "metrics": [
+        "true_positive_rate",
+        "false_positive_rate",
+        "mean_time_to_detect",
+        "analyst_triage_time"
+      ],
+      "duration_days": 14,
+      "status": "PROPOSED",
+      "advisory_context": {
+        "title": "CVE-2026-20498 - Geniezone Privilege Escalation Vulnerability",
+        "risk_score": 7.0,
+        "cves": [
+          "CVE-2026-20498"
         ],
         "techniques": []
       }
@@ -156,5 +267,5 @@
     "statistical_test": "chi_squared",
     "rollout_strategy": "gradual"
   },
-  "generated_at": "2026-08-02T19:35:26.182860+00:00"
+  "generated_at": "2026-08-03T10:06:17.846886+00:00"
 }
