@@ -426,6 +426,42 @@ function shadowCheckEntitlement(ctx, env, resource, auth, currentlyAllowed) {
 }
 
 // =============================================================================
+// PHASE 4: GATEWAY ENFORCEMENT (feature-flagged, per-resource, gradual)
+// Composes shadowCheckEntitlement() above (unmodified -- the shadow-mismatch
+// log it writes keeps firing exactly as it did in Phase 3) with a per-resource
+// enforcement switch. Both flags default off, so deploying this changes zero
+// production behavior: every call site keeps returning its own ad-hoc decision
+// until a resource is explicitly named in ENTITLEMENT_ENFORCEMENT_RESOURCES
+// with ENTITLEMENT_ENFORCEMENT_ENABLED="true". When enforcement IS on for a
+// resource and the engine's decision differs from the ad-hoc one, the engine
+// wins -- logged as a distinct, higher-signal "entitlement_enforced_override"
+// event (separate from the passive shadow-mismatch log) so a rollout can be
+// watched with precision, resource by resource.
+// =============================================================================
+function isEntitlementEnforced(env, resource) {
+  if (String(env.ENTITLEMENT_ENFORCEMENT_ENABLED || "false").toLowerCase() !== "true") return false;
+  const list = String(env.ENTITLEMENT_ENFORCEMENT_RESOURCES || "")
+    .split(",").map(s => s.trim()).filter(Boolean);
+  return list.includes(resource);
+}
+
+function resolveEntitlement(ctx, env, resource, auth, adHocAllowed) {
+  const decision = shadowCheckEntitlement(ctx, env, resource, auth, adHocAllowed);
+  if (!isEntitlementEnforced(env, resource)) return { allowed: adHocAllowed, enforced: false };
+  if (decision.allowed !== adHocAllowed) {
+    auditLog(ctx, env, {
+      action:         "entitlement_enforced_override",
+      resource,
+      tier:           auth?.tier || "FREE",
+      ad_hoc_allowed: adHocAllowed,
+      engine_allowed: decision.allowed,
+      engine_reason:  decision.reason || null,
+    });
+  }
+  return { allowed: decision.allowed, enforced: true };
+}
+
+// =============================================================================
 // R2 READER
 // =============================================================================
 
@@ -1792,15 +1828,15 @@ async function handleTAXII(request, env, ctx, path, auth) {
   }
 
   // All other TAXII endpoints require PRO or ENTERPRISE
-  shadowCheckEntitlement(ctx, env, "taxii_access", auth, !(!auth || auth.tier === TIERS.FREE));
-  if (!auth || auth.tier === TIERS.FREE) {
+  const taxiiAccessAllowed = !(!auth || auth.tier === TIERS.FREE);
+  if (!resolveEntitlement(ctx, env, "taxii_access", auth, taxiiAccessAllowed).allowed) {
     return taxiiResp({ title: "Unauthorized", description: "TAXII data endpoints require PRO or ENTERPRISE tier. POST api_key to /auth/login for a JWT." }, 401);
   }
 
   // Collections list
   if (path === "/taxii/collections/" || path === "/taxii/collections") {
-    const canReadKev = auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
-    shadowCheckEntitlement(ctx, env, "taxii_kev", auth, canReadKev);
+    const canReadKevAdHoc = auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
+    const canReadKev = resolveEntitlement(ctx, env, "taxii_kev", auth, canReadKevAdHoc).allowed;
     return taxiiResp({
       collections: [
         {
@@ -1823,8 +1859,9 @@ async function handleTAXII(request, env, ctx, path, auth) {
   const objMatch = path.match(/^\/taxii\/collections\/([^/]+)\/objects\/?$/);
   if (objMatch) {
     const collId = objMatch[1];
-    const kevAllowed = auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
-    if (collId === TAXII_KEV_COLL) shadowCheckEntitlement(ctx, env, "taxii_kev", auth, kevAllowed);
+    const kevAllowedAdHoc = auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
+    let kevAllowed = kevAllowedAdHoc;
+    if (collId === TAXII_KEV_COLL) kevAllowed = resolveEntitlement(ctx, env, "taxii_kev", auth, kevAllowedAdHoc).allowed;
     if (collId === TAXII_KEV_COLL && !kevAllowed) {
       return taxiiResp({ title: "Forbidden", description: "KEV collection requires ENTERPRISE tier" }, 403);
     }
@@ -2851,8 +2888,8 @@ function scoreDomainRisk(variant, original) {
 }
 
 async function handleBrandProtection(request, env, auth, method, path, url, ctx) {
-  shadowCheckEntitlement(ctx, env, "brand_protection", auth, !(!auth || auth.tier === TIERS.FREE));
-  if (!auth || auth.tier === TIERS.FREE) {
+  const brandProtectionAllowed = !(!auth || auth.tier === TIERS.FREE);
+  if (!resolveEntitlement(ctx, env, "brand_protection", auth, brandProtectionAllowed).allowed) {
     return jsonResp({ error: "Brand Protection requires PRO or ENTERPRISE tier", upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html" }, 403);
   }
   if (path === "/api/v1/brand/health") {
@@ -2959,8 +2996,8 @@ function fairAssess(data) {
 }
 
 async function handleVendorRisk(request, env, auth, method, path, ctx) {
-  shadowCheckEntitlement(ctx, env, "vendor_risk", auth, !(!auth || auth.tier === TIERS.FREE));
-  if (!auth || auth.tier === TIERS.FREE) {
+  const vendorRiskAllowed = !(!auth || auth.tier === TIERS.FREE);
+  if (!resolveEntitlement(ctx, env, "vendor_risk", auth, vendorRiskAllowed).allowed) {
     return jsonResp({ error: "Vendor Risk Assessment requires PRO or ENTERPRISE tier", upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html" }, 403);
   }
   if (path === "/api/v1/vendor-risk/health") {
@@ -2976,8 +3013,8 @@ async function handleVendorRisk(request, env, auth, method, path, ctx) {
   }
 
   if (path === "/api/v1/vendor-risk/bulk" && method === "POST") {
-    shadowCheckEntitlement(ctx, env, "vendor_risk_bulk", auth, auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP);
-    if (auth.tier !== TIERS.ENTERPRISE && auth.tier !== TIERS.MSSP) return jsonResp({ error: "Bulk vendor assessment requires ENTERPRISE tier" }, 403);
+    const vendorRiskBulkAllowed = auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
+    if (!resolveEntitlement(ctx, env, "vendor_risk_bulk", auth, vendorRiskBulkAllowed).allowed) return jsonResp({ error: "Bulk vendor assessment requires ENTERPRISE tier" }, 403);
     let body = {};
     try { body = await request.json(); } catch (_) {}
     const vendors = body.vendors || [];
@@ -3055,8 +3092,8 @@ function buildGeoRecs(code, data) {
 }
 
 async function handleGeopolitical(request, env, auth, method, path, url, ctx) {
-  shadowCheckEntitlement(ctx, env, "geopolitical_risk", auth, !(!auth || auth.tier === TIERS.FREE));
-  if (!auth || auth.tier === TIERS.FREE) {
+  const geopoliticalRiskAllowed = !(!auth || auth.tier === TIERS.FREE);
+  if (!resolveEntitlement(ctx, env, "geopolitical_risk", auth, geopoliticalRiskAllowed).allowed) {
     return jsonResp({ error: "Geopolitical Risk requires PRO or ENTERPRISE tier", upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html" }, 403);
   }
 
@@ -3196,8 +3233,8 @@ function nlqFilter(items, f) {
 }
 
 async function handleNLQ(request, env, auth, method, path, url, ctx) {
-  shadowCheckEntitlement(ctx, env, "nlq", auth, !(!auth || auth.tier === TIERS.FREE));
-  if (!auth || auth.tier === TIERS.FREE) {
+  const nlqAllowed = !(!auth || auth.tier === TIERS.FREE);
+  if (!resolveEntitlement(ctx, env, "nlq", auth, nlqAllowed).allowed) {
     return jsonResp({ error: "Natural Language Query requires PRO or ENTERPRISE tier", upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html" }, 403);
   }
   if (path === "/api/v1/nlq/health") {
@@ -3248,8 +3285,8 @@ const IR_PHASES = ["PREPARATION","DETECTION","ANALYSIS","CONTAINMENT","ERADICATI
 const IR_SEV    = ["LOW","MEDIUM","HIGH","CRITICAL"];
 
 async function handleIncidentResponse(request, env, auth, method, path, url, ctx) {
-  shadowCheckEntitlement(ctx, env, "incident_response", auth, !(!auth || auth.tier === TIERS.FREE));
-  if (!auth || auth.tier === TIERS.FREE) {
+  const incidentResponseAllowed = !(!auth || auth.tier === TIERS.FREE);
+  if (!resolveEntitlement(ctx, env, "incident_response", auth, incidentResponseAllowed).allowed) {
     return jsonResp({ error: "Incident Response requires PRO or ENTERPRISE tier", upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html" }, 403);
   }
 
@@ -3326,8 +3363,8 @@ async function handleIncidentResponse(request, env, auth, method, path, url, ctx
     }
 
     if (method === "DELETE" && !subPath) {
-      shadowCheckEntitlement(ctx, env, "incident_delete", auth, auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP);
-      if (auth.tier !== TIERS.ENTERPRISE && auth.tier !== TIERS.MSSP) return jsonResp({ error: "ENTERPRISE tier required to delete incidents" }, 403);
+      const incidentDeleteAllowed = auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
+      if (!resolveEntitlement(ctx, env, "incident_delete", auth, incidentDeleteAllowed).allowed) return jsonResp({ error: "ENTERPRISE tier required to delete incidents" }, 403);
       await env.SECURITY_HUB_KV.delete(kvKey);
       auditLog(ctx, env, { action: "incident_deleted", id: incId, sub: auth.sub });
       return jsonResp({ status: "deleted", id: incId });
@@ -3480,8 +3517,8 @@ async function handleRequest(request, env, ctx) {
   // PRO/ENTERPRISE: full PRO manifest including report_url, pdf_url
   if (path === "/api/v1/intel/latest.json") {
     let data;
-    const manifestFullAllowed = auth.tier === TIERS.PRO || auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
-    shadowCheckEntitlement(ctx, env, "intel_manifest_full", auth, manifestFullAllowed);
+    const manifestFullAllowedAdHoc = auth.tier === TIERS.PRO || auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
+    const manifestFullAllowed = resolveEntitlement(ctx, env, "intel_manifest_full", auth, manifestFullAllowedAdHoc).allowed;
     if (manifestFullAllowed) {
       // Try PRO manifest first; gracefully fall back to public if not yet generated
       data = await r2Get(env, LATEST_PRO_JSON_KEY);
@@ -3947,8 +3984,8 @@ async function handleRequest(request, env, ctx) {
     if (!detail) return jsonResp({ error: "CVE not found", id: cveId }, 404);
 
     // PRO+ gets full details; FREE gets summary
-    shadowCheckEntitlement(ctx, env, "cve_detail_full", auth, auth.tier !== TIERS.FREE);
-    if (auth.tier === TIERS.FREE) {
+    const cveDetailFullAllowed = resolveEntitlement(ctx, env, "cve_detail_full", auth, auth.tier !== TIERS.FREE).allowed;
+    if (!cveDetailFullAllowed) {
       return jsonResp({
         id: detail.id, severity: detail.severity, cvss_score: detail.cvss_score,
         published: detail.published, last_modified: detail.last_modified,

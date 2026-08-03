@@ -48,6 +48,18 @@ RAZORPAY_KEY_ID = "rzp_live_T006RdZV7opnrY"
 # flipping this value back -- no code change needed either direction.
 SUBSCRIPTION_EXPIRY_ENABLED = "false"
 
+# Phase 4 gateway enforcement (docs/PHASE4_GATEWAY_ENFORCEMENT.md). Master
+# switch: "false" = zero behavior change (every one of the 11 Phase 3 gates
+# keeps deciding access exactly as it does today; only the passive shadow
+# log runs). Set to "true" to let ENTITLEMENT_ENFORCEMENT_RESOURCES start
+# taking effect. Reversible by flipping back -- no code change either way.
+ENTITLEMENT_ENFORCEMENT_ENABLED = "false"
+# Comma-separated allowlist of resource names (e.g. "cve_detail_full,nlq")
+# actually switched over to enforceTierGate's decision when the master
+# switch above is "true". Empty = nothing enforced even if the switch is on
+# -- this is the per-resource dial for a gradual, one-at-a-time rollout.
+ENTITLEMENT_ENFORCEMENT_RESOURCES = ""
+
 # -- KV Namespaces --
 # Deployed KV IDs -- verified live on intel.cyberdudebivash.com (v142.3.1)
 # To add new namespace: npx wrangler kv namespace create "<NAME>"
@@ -128,6 +140,8 @@ name = "sentinel-apex-gateway"
 GATEWAY_VERSION = "184.0"
 RAZORPAY_KEY_ID = "rzp_live_T006RdZV7opnrY"
 SUBSCRIPTION_EXPIRY_ENABLED = "false"
+ENTITLEMENT_ENFORCEMENT_ENABLED = "false"
+ENTITLEMENT_ENFORCEMENT_RESOURCES = ""
 
 [[env.production.kv_namespaces]]
 binding = "API_KEYS_KV"
