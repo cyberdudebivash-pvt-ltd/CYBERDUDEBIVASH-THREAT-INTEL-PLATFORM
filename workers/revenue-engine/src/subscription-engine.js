@@ -31,6 +31,7 @@
 import {
   json, sanitizeEmail, genId, TIERS, SUB_STATUS, provisionCustomer, trackEvent,
 } from "./index.js";
+import { Subscription } from "./subscription-domain.js";
 
 const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
 
@@ -77,21 +78,58 @@ function unixToIso(sec) {
 // exact pattern for `sub:{id}` / `sub:email:{email}` records) -- not a new
 // pattern, just one more instance of the existing one.
 
-async function getProviderLink(env, providerSubId) {
+export async function getProviderLink(env, providerSubId) {
   return await env.REVENUE_CRM_KV.get(`razorpay_sub:${providerSubId}`, "json");
 }
 
-async function putProviderLink(env, providerSubId, record) {
+export async function putProviderLink(env, providerSubId, record) {
   await env.REVENUE_CRM_KV.put(`razorpay_sub:${providerSubId}`, JSON.stringify(record));
 }
 
-async function patchInternalSub(env, internalSubId, patch) {
+export async function patchInternalSub(env, internalSubId, patch) {
   const rec = await env.REVENUE_CRM_KV.get(`sub:${internalSubId}`, "json");
   if (!rec) return null;
   const updated = { ...rec, ...patch, updated_at: new Date().toISOString() };
   await env.REVENUE_CRM_KV.put(`sub:${internalSubId}`, JSON.stringify(updated));
   await env.REVENUE_CRM_KV.put(`sub:email:${rec.email}`, JSON.stringify(updated));
+  // Phase 2: keep subscriptions:index in sync. Previously this list's
+  // `status`/`current_period_end` fields went stale forever after any patch
+  // -- nothing re-saved the index after individual sub:{id}/sub:email:{email}
+  // updates. revenueDashboard() and handleSubExpireCheck() both filter/count
+  // directly off this index, so a stale entry silently mis-reported
+  // dashboard counts (e.g. a cancelled subscription still counted as active)
+  // with no error anywhere. Best-effort: a failure here doesn't invalidate
+  // the write to the two records above, which remain the source of truth.
+  try {
+    const idx = await env.REVENUE_CRM_KV.get("subscriptions:index", "json") || [];
+    const i = idx.findIndex(s => s.id === internalSubId);
+    if (i >= 0) {
+      idx[i] = { ...idx[i], status: updated.status, current_period_end: updated.current_period_end };
+      await env.REVENUE_CRM_KV.put("subscriptions:index", JSON.stringify(idx));
+    }
+  } catch (_) {}
   return updated;
+}
+
+/**
+ * Phase 2: validates a lifecycle transition against SUBSCRIPTION_TRANSITIONS
+ * (subscription-domain.js) before applying it, instead of patchInternalSub's
+ * previous blind accept-any-patch behavior. On an invalid transition (e.g. a
+ * late/out-of-order "charged" webhook arriving after we've already recorded
+ * a cancellation), logs the anomaly and leaves the existing, more-authoritative
+ * record untouched rather than overwriting it -- fail-safe, not fail-open.
+ */
+export async function tryTransition(env, internalSubId, newStatus, extraPatch, rid) {
+  const rec = await env.REVENUE_CRM_KV.get(`sub:${internalSubId}`, "json");
+  if (!rec) return null;
+  const sub = new Subscription(rec);
+  if (!sub.canTransitionTo(newStatus)) {
+    await trackEvent(env, "subscription_invalid_transition", {
+      internal_sub_id: internalSubId, from_status: sub.status, to_status: newStatus, rid,
+    }).catch(() => {});
+    return null;
+  }
+  return await patchInternalSub(env, internalSubId, { ...extraPatch, status: newStatus });
 }
 
 export async function patchApiKeyEntitlement(env, apiKey, patch) {
@@ -105,10 +143,10 @@ export async function patchApiKeyEntitlement(env, apiKey, patch) {
 // event may be redelivered. Uses REVENUE_CRM_KV (already bound in this
 // Worker) rather than intel-gateway's SECURITY_HUB_KV (not bound here, and
 // binding it would be a wider change than this fix needs).
-async function alreadyProcessed(env, idempKey) {
+export async function alreadyProcessed(env, idempKey) {
   return !!(await env.REVENUE_CRM_KV.get(`rzp_sub_event:${idempKey}`));
 }
-async function markProcessed(env, idempKey, meta) {
+export async function markProcessed(env, idempKey, meta) {
   await env.REVENUE_CRM_KV.put(`rzp_sub_event:${idempKey}`, JSON.stringify(meta), { expirationTtl: 86400 * 365 });
 }
 
@@ -216,7 +254,11 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
   // subscription.activated) previously saw alreadyProcessed()===false too
   // and could double-provision the same customer. Unclaimed on failure below
   // so a genuine retry after a transient error isn't blocked forever.
-  await markProcessed(env, idempKey, { event, providerId, ts: Date.now() });
+  // Phase 2: persist the raw payload alongside the marker (previously only
+  // {event, providerId, ts} was kept) -- the idempotency key already exists
+  // and already has a 1-year TTL; this makes it double as a real webhook
+  // audit/replay record instead of adding a second storage mechanism.
+  await markProcessed(env, idempKey, { event, providerId, ts: Date.now(), payload });
 
   const link  = providerId ? await getProviderLink(env, providerId) : null;
   const email = sanitizeEmail(link?.email || notes.email);
@@ -263,13 +305,12 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
         break;
       }
       const periodEnd = unixToIso(subEntity?.current_end);
-      await patchInternalSub(env, link.internal_sub_id, {
-        status: SUB_STATUS.ACTIVE,
+      await tryTransition(env, link.internal_sub_id, SUB_STATUS.ACTIVE, {
         current_period_start: unixToIso(subEntity?.current_start),
         current_period_end: periodEnd || link.current_period_end,
         renewal_reminder_sent: false,
         renewal_count: (link.renewal_count || 0) + 1,
-      });
+      }, rid);
       await patchApiKeyEntitlement(env, link.api_key, { expires_at: periodEnd || link.current_period_end });
       await putProviderLink(env, providerId, { ...link, status: "active", current_period_end: periodEnd || link.current_period_end, renewal_count: (link.renewal_count || 0) + 1 });
       await trackEvent(env, "subscription_renewed", { email: link.email, tier: link.tier, razorpay_subscription_id: providerId, rid });
@@ -278,7 +319,7 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
 
     case "subscription.pending": {
       if (link?.internal_sub_id) {
-        await patchInternalSub(env, link.internal_sub_id, { status: SUB_STATUS.PAST_DUE });
+        await tryTransition(env, link.internal_sub_id, SUB_STATUS.PAST_DUE, {}, rid);
         await putProviderLink(env, providerId, { ...link, status: "pending" });
       }
       await trackEvent(env, "subscription_payment_pending", { email: link?.email, tier: link?.tier, razorpay_subscription_id: providerId, rid });
@@ -287,7 +328,7 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
 
     case "subscription.halted": {
       if (link?.internal_sub_id) {
-        await patchInternalSub(env, link.internal_sub_id, { status: SUB_STATUS.SUSPENDED });
+        await tryTransition(env, link.internal_sub_id, SUB_STATUS.SUSPENDED, {}, rid);
         await patchApiKeyEntitlement(env, link.api_key, { expires_at: new Date().toISOString() });
         await putProviderLink(env, providerId, { ...link, status: "halted" });
       }
@@ -298,7 +339,7 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
     case "subscription.cancelled":
     case "subscription.completed": {
       if (link?.internal_sub_id) {
-        await patchInternalSub(env, link.internal_sub_id, { status: SUB_STATUS.CANCELLED, cancelled_at: new Date().toISOString() });
+        await tryTransition(env, link.internal_sub_id, SUB_STATUS.CANCELLED, { cancelled_at: new Date().toISOString() }, rid);
         await patchApiKeyEntitlement(env, link.api_key, { expires_at: new Date().toISOString() });
         await putProviderLink(env, providerId, { ...link, status: "cancelled" });
       }
