@@ -153,8 +153,8 @@ jobs:
         timeout-minutes: 3
         run: |
           echo "[GATE 1] Validating frontend integrity..."
-          python3 scripts/frontend_integrity.py --verify 2>&1 | head -30 || true
-          RESULT=$(python3 scripts/frontend_integrity.py --verify 2>&1 | grep -E "^(PASS|FAIL|OK)" | head -1 || echo "OK")
+          python3 scripts/frontend_integrity.py verify 2>&1 | head -30 || true
+          RESULT=$(python3 scripts/frontend_integrity.py verify 2>&1 | grep -E "^(PASS|FAIL|OK)" | head -1 || echo "OK")
           echo "[GATE 1] Integrity check: $RESULT"
           echo "ok=true" >> $GITHUB_OUTPUT
           echo "[GATE 1] Integrity gate PASSED"

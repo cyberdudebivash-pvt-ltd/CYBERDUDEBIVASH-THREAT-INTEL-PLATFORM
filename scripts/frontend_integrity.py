@@ -7,10 +7,10 @@ Phase 3: Frontend Immutability Governance
 Computes SHA-256 checksums for all protected frontend assets and
 manages the immutable registry at config/frontend_checksums.json.
 
-Modes:
-  --generate  : Compute checksums from current files, write registry (CI: baseline commit only)
-  --verify    : Compare current files against registry, fail if any mismatch
-  --report    : Print full integrity status without failing
+Modes (positional subcommands, not flags -- e.g. `frontend_integrity.py verify`):
+  generate  : Compute checksums from current files, write registry (CI: baseline commit only)
+  verify    : Compare current files against registry, fail if any mismatch
+  report    : Print full integrity status without failing
 
 Protected assets (TIER 3 -- deployment authority write-only):
   index.html
