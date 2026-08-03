@@ -13,15 +13,33 @@
 // 
 export const REVENUE_CONFIG = {
   VERSION: "141.0.0",  // v141.0.0  synced with platform version
+  // Phase 3: tier identifiers now match index.js's live TIERS constant
+  // exactly (TIERS = { FREE:"FREE", PRO:"PRO", ENTERPRISE:"ENTERPRISE",
+  // MSSP:"MSSP" }) instead of a separate lowercase/"premium" vocabulary.
+  // That mismatch is why enforceTierGate() was never callable with a real
+  // auth.tier value -- (tier||"free").toLowerCase() on the real string "PRO"
+  // produced "pro", which matched neither "premium" (this file's old PRO
+  // key) nor anything else, so every real PRO/ENTERPRISE/MSSP caller was
+  // silently treated as free. The only two call sites that existed
+  // (index.js's campaigns_paywall/anomalies_paywall) sidestepped this by
+  // hardcoding the literal "free" tier -- correct for what they do (they
+  // build the free-tier-masked view unconditionally), not a workaround for
+  // this bug, but it meant the bug never surfaced.
   TIERS: {
-    FREE:       "free",
-    PRO:        "premium",      // internal name kept as "premium" for compat
-    ENTERPRISE: "enterprise",
+    FREE:       "FREE",
+    PRO:        "PRO",
+    ENTERPRISE: "ENTERPRISE",
+    MSSP:       "MSSP",
   },
   LIMITS: {
-    free:       { items: 20,   rpm: 60,   api_calls_day: 100,  stix: false, ioc: false,  ai_full: false },
-    premium:    { items: 500,  rpm: 500,  api_calls_day: 5000, stix: "meta", ioc: true,  ai_full: true  },
-    enterprise: { items: 2000, rpm: 2000, api_calls_day: -1,   stix: true,  ioc: true,  ai_full: true  },
+    FREE:       { items: 20,   rpm: 60,   api_calls_day: 100,  stix: false, ioc: false,  ai_full: false },
+    PRO:        { items: 500,  rpm: 500,  api_calls_day: 5000, stix: "meta", ioc: true,  ai_full: true  },
+    ENTERPRISE: { items: 2000, rpm: 2000, api_calls_day: -1,   stix: true,  ioc: true,  ai_full: true  },
+    // MSSP evidenced as >= ENTERPRISE everywhere else in this codebase
+    // (every ad-hoc `auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP`
+    // check in index.js treats them identically) -- unlimited here for the
+    // same reason, not a new policy invented for this pass.
+    MSSP:       { items: -1,   rpm: -1,   api_calls_day: -1,   stix: true,  ioc: true,  ai_full: true  },
   },
   PRICING: {
     free:       { monthly_inr: 0,       monthly_usd: 0     },
@@ -38,7 +56,12 @@ export const REVENUE_CONFIG = {
   },
   TRIAL: {
     duration_days:  7,
-    tier:           "premium",
+    tier:           "PRO", // was "premium" -- same vocabulary fix as LIMITS/TIERS above.
+                            // Only consumed by handleTrialIssuance(), confirmed dead code
+                            // (not imported/called anywhere in index.js) -- fixed for
+                            // consistency in case it's ever wired up, not because it's
+                            // reachable today. See Phase 3 doc for the separate,
+                            // unrelated key-storage bug in that same function.
     auto_key:       true,
   },
   USAGE_KV_TTL: 86400,          // 24h rolling usage window
@@ -51,11 +74,13 @@ export const REVENUE_CONFIG = {
 // Returns { allowed: bool, reason: string, upgrade: object|null }
 // 
 export function enforceTierGate(resource, tier) {
-  const t    = (tier || "free").toLowerCase();
-  const cfg  = REVENUE_CONFIG.LIMITS[t] || REVENUE_CONFIG.LIMITS.free;
-  const isFree = t === "free";
-  const isPro  = t === "premium";
-  const isEnt  = t === "enterprise";
+  const t    = (tier || "FREE").toUpperCase();
+  const cfg  = REVENUE_CONFIG.LIMITS[t] || REVENUE_CONFIG.LIMITS.FREE;
+  const isFree = t === "FREE";
+  const isPro  = t === "PRO";
+  // MSSP inherits ENTERPRISE-level access throughout this file -- evidenced,
+  // not invented (see LIMITS.MSSP comment above).
+  const isEnt  = t === "ENTERPRISE" || t === "MSSP";
 
   switch (resource) {
 
@@ -255,6 +280,131 @@ export function enforceTierGate(resource, tier) {
       };
       return { allowed: true };
 
+    //  Phase 3: resource cases for modules that gated tier access inline in
+    //  index.js with no shared policy (each message/threshold below matches
+    //  exactly what that inline check already enforces -- not a new rule).
+
+    // TAXII 2.1 data endpoints  -  Free: BLOCKED, Pro+: ALLOWED
+    case "taxii_access":
+      if (isFree) return {
+        allowed: false,
+        resource,
+        reason:  "pro_required",
+        message: "TAXII data endpoints require PRO or ENTERPRISE tier.",
+        upgrade: buildUpgradeTrigger("taxii", t),
+      };
+      return { allowed: true };
+
+    // TAXII CISA KEV collection  -  Enterprise/MSSP only
+    case "taxii_kev":
+      if (!isEnt) return {
+        allowed: false,
+        resource,
+        reason:  "enterprise_only",
+        message: "KEV collection (CISA Known Exploited Vulnerabilities, confirmed) requires ENTERPRISE tier.",
+        upgrade: buildUpgradeTrigger("taxii_kev", t),
+      };
+      return { allowed: true };
+
+    // Brand Protection (typosquatting/homograph scanning)  -  Free: BLOCKED, Pro+: ALLOWED
+    case "brand_protection":
+      if (isFree) return {
+        allowed: false,
+        resource,
+        reason:  "pro_required",
+        message: "Brand Protection requires PRO or ENTERPRISE tier.",
+        upgrade: buildUpgradeTrigger("brand", t),
+      };
+      return { allowed: true };
+
+    // Vendor Risk Assessment (FAIR model)  -  Free: BLOCKED, Pro+: ALLOWED
+    case "vendor_risk":
+      if (isFree) return {
+        allowed: false,
+        resource,
+        reason:  "pro_required",
+        message: "Vendor Risk Assessment requires PRO or ENTERPRISE tier.",
+        upgrade: buildUpgradeTrigger("vendor_risk", t),
+      };
+      return { allowed: true };
+
+    // Bulk vendor risk assessment (up to 50 vendors/request)  -  Enterprise/MSSP only
+    case "vendor_risk_bulk":
+      if (!isEnt) return {
+        allowed: false,
+        resource,
+        reason:  "enterprise_only",
+        message: "Bulk vendor assessment requires ENTERPRISE tier.",
+        upgrade: buildUpgradeTrigger("vendor_risk_bulk", t),
+      };
+      return { allowed: true };
+
+    // Geopolitical Risk Intelligence (country/sanctions/landscape)  -  Free: BLOCKED, Pro+: ALLOWED
+    case "geopolitical_risk":
+      if (isFree) return {
+        allowed: false,
+        resource,
+        reason:  "pro_required",
+        message: "Geopolitical Risk Intelligence requires PRO or ENTERPRISE tier.",
+        upgrade: buildUpgradeTrigger("geopolitical", t),
+      };
+      return { allowed: true };
+
+    // Natural Language Query on the live intel feed  -  Free: BLOCKED, Pro+: ALLOWED
+    case "nlq":
+      if (isFree) return {
+        allowed: false,
+        resource,
+        reason:  "pro_required",
+        message: "Natural Language Query requires PRO or ENTERPRISE tier.",
+        upgrade: buildUpgradeTrigger("nlq", t),
+      };
+      return { allowed: true };
+
+    // Incident Response CRUD (NIST SP 800-61r3 lifecycle)  -  Free: BLOCKED, Pro+: ALLOWED
+    case "incident_response":
+      if (isFree) return {
+        allowed: false,
+        resource,
+        reason:  "pro_required",
+        message: "Incident Response requires PRO or ENTERPRISE tier.",
+        upgrade: buildUpgradeTrigger("incident_response", t),
+      };
+      return { allowed: true };
+
+    // Incident deletion  -  Enterprise/MSSP only
+    case "incident_delete":
+      if (!isEnt) return {
+        allowed: false,
+        resource,
+        reason:  "enterprise_only",
+        message: "ENTERPRISE tier required to delete incidents.",
+        upgrade: buildUpgradeTrigger("incident_delete", t),
+      };
+      return { allowed: true };
+
+    // /api/v1/intel/latest.json full manifest (report_url, pdf_url)  -  Free: sanitized, Pro+: full
+    case "intel_manifest_full":
+      if (isFree) return {
+        allowed: false,
+        resource,
+        reason:  "pro_required",
+        message: "Full manifest (report_url, pdf_url, premium fields) requires PRO or ENTERPRISE tier.",
+        upgrade: buildUpgradeTrigger("intel_manifest", t),
+      };
+      return { allowed: true };
+
+    // CVE detail lookup  -  Free: truncated summary, Pro+: full detail
+    case "cve_detail_full":
+      if (isFree) return {
+        allowed: false,
+        resource,
+        reason:  "pro_required",
+        message: "Full CVE detail requires PRO or ENTERPRISE tier.",
+        upgrade: buildUpgradeTrigger("cve_detail", t),
+      };
+      return { allowed: true };
+
     default:
       return { allowed: true };
   }
@@ -268,9 +418,9 @@ export function enforceTierGate(resource, tier) {
 export async function trackUsageAndEnforce(env, keyId, tier) {
   if (!env?.SECURITY_HUB_KV || !keyId) return { allowed: true, count: 0 };
 
-  const t      = (tier || "free").toLowerCase();
+  const t      = (tier || "FREE").toUpperCase();
   const limit  = REVENUE_CONFIG.LIMITS[t]?.api_calls_day ?? 100;
-  if (limit === -1) return { allowed: true, unlimited: true }; // enterprise
+  if (limit === -1) return { allowed: true, unlimited: true }; // enterprise/mssp
 
   const day    = new Date().toISOString().slice(0, 10);
   const kvKey  = `usage:${keyId}:${day}`;
@@ -289,7 +439,7 @@ export async function trackUsageAndEnforce(env, keyId, tier) {
         used:     next,
         limit,
         upgrade:  buildUpgradeTrigger("usage_limit", t),
-        message:  `Daily API limit reached (${limit} calls). ${t === "free" ? "Upgrade to Pro for 5,000 calls/day." : "Upgrade to Enterprise for unlimited."}`,
+        message:  `Daily API limit reached (${limit} calls). ${t === "FREE" ? "Upgrade to Pro for 5,000 calls/day." : "Upgrade to Enterprise for unlimited."}`,
         reset_at: `${day}T23:59:59Z`,
       };
     }
@@ -313,9 +463,9 @@ export async function trackUsageAndEnforce(env, keyId, tier) {
 // Generates consistent upgrade trigger objects for API responses
 // 
 export function buildUpgradeTrigger(context, currentTier) {
-  const t = (currentTier || "free").toLowerCase();
-  const targetTier = t === "free" ? "pro" : "enterprise";
-  const url = t === "free"
+  const t = (currentTier || "FREE").toUpperCase();
+  const targetTier = t === "FREE" ? "pro" : "enterprise";
+  const url = t === "FREE"
     ? REVENUE_CONFIG.UPGRADE_URLS.free_to_pro
     : REVENUE_CONFIG.UPGRADE_URLS.pro_to_enterprise;
 
@@ -328,7 +478,7 @@ export function buildUpgradeTrigger(context, currentTier) {
     siem:             { title: "Enterprise SIEM Push",           body: "Auto-push threats to Splunk, Sentinel, or QRadar in real-time." },
     alerts:           { title: "Real-Time Threat Alerts",        body: "Get notified instantly when critical threats emerge. Actor TTPs included." },
     api:              { title: "More API Keys",                  body: "Create multiple API keys for your team and CI/CD pipelines." },
-    usage_limit:      { title: "Daily Limit Reached",            body: t === "free" ? "You've used all 100 free API calls today. Upgrade to Pro for 5,000/day." : "Upgrade to Enterprise for unlimited calls." },
+    usage_limit:      { title: "Daily Limit Reached",            body: t === "FREE" ? "You've used all 100 free API calls today. Upgrade to Pro for 5,000/day." : "Upgrade to Enterprise for unlimited calls." },
     approaching_limit:{ title: "80% of Daily Limit Used",        body: "You're close to your daily API limit. Upgrade now to avoid disruption." },
     detection_rules:  { title: "Unlock Sigma / KQL / Suricata",  body: "Deploy production-ready detection rules directly to Splunk, Sentinel, and your NIDS." },
     actor_attribution:{ title: "Unlock Threat Actor Attribution", body: "See who's behind the threat: aliases, TTPs, sectors, and motivation." },
@@ -505,8 +655,8 @@ export async function handleTrialIssuance(request, env, rid) {
       expires_at:  expiresAt,
       is_trial:    true,
       status:      "active",
-      rate_limit:  REVENUE_CONFIG.LIMITS.premium.rpm,
-      daily_limit: REVENUE_CONFIG.LIMITS.premium.api_calls_day,
+      rate_limit:  REVENUE_CONFIG.LIMITS.PRO.rpm,
+      daily_limit: REVENUE_CONFIG.LIMITS.PRO.api_calls_day,
     };
     await env.API_KEYS_KV.put(`key:${keyHash}`, JSON.stringify(keyRecord), { expirationTtl: expTtl + 3600 });
 
@@ -560,10 +710,10 @@ export async function handleTrialIssuance(request, env, rid) {
 // Harder enforcement: blocks more fields, injects stronger upgrade triggers
 // 
 export function applyTierGateV2(item, tier, usageState) {
-  const t      = (tier || "free").toLowerCase();
-  const isFree = t === "free";
-  const isPro  = t === "premium";
-  const isEnt  = t === "enterprise";
+  const t      = (tier || "FREE").toUpperCase();
+  const isFree = t === "FREE";
+  const isPro  = t === "PRO";
+  const isEnt  = t === "ENTERPRISE" || t === "MSSP";
 
   const gated = { ...item };
 
@@ -672,7 +822,7 @@ export function applyTierGateV2(item, tier, usageState) {
 
 // Minimal computeApexAIGated  mirrors existing but enforces AI gate
 function computeApexAIGated(item, tier) {
-  const isFree = !tier || tier === "free";
+  const isFree = !tier || String(tier).toUpperCase() === "FREE";
   const base = {
     predictive_risk: typeof item.risk_score === "number" ? Math.min(10, item.risk_score) : 0,
     ai_confidence:   typeof item.confidence === "number" ? Math.min(100, item.confidence * 100) : 50,
