@@ -8,7 +8,7 @@
 // Phase 2 (foundational pass): Razorpay Subscriptions -- subscription
 // creation, webhook lifecycle, entitlement sync. See subscription-engine.js
 // for scope notes (refunds/upgrades/downgrades/checkout-cutover deferred).
-import { handleBillingSubscriptionCreate, handleBillingWebhook, patchApiKeyEntitlement } from "./subscription-engine.js";
+import { handleBillingSubscriptionCreate, handleBillingWebhook, patchApiKeyEntitlement, patchInternalSub, tryTransition } from "./subscription-engine.js";
 
 const ENGINE = {
   VERSION:  "183.0",
@@ -2023,7 +2023,11 @@ async function handleSubExpireCheck(request, env, rid) {
     const daysLeft = Math.ceil((new Date(rec.current_period_end) - now) / 86400000);
     if (daysLeft === 7 && !rec.renewal_reminder_sent) {
       await queueEmail(env, { to:rec.email, template:"renewal_reminder_7d", vars:{ tier:rec.tier, days:7, renew_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html?renew="+rec.id } });
-      await env.REVENUE_CRM_KV.put(`sub:${s.id}`, JSON.stringify({...rec, renewal_reminder_sent:true, reminder_sent_at:now.toISOString()}));
+      // Phase 2: patchInternalSub (subscription-engine.js) keeps sub:{id},
+      // sub:email:{email}, and subscriptions:index consistent -- the direct
+      // REVENUE_CRM_KV.put this replaces only ever updated sub:{id}, leaving
+      // sub:email:{email}-based reads (and the index) permanently stale.
+      await patchInternalSub(env, s.id, { renewal_reminder_sent:true, reminder_sent_at:now.toISOString() });
       reminded++;
     }
     if (daysLeft === 3) {
@@ -2031,9 +2035,13 @@ async function handleSubExpireCheck(request, env, rid) {
       reminded++;
     }
     if (daysLeft <= 0 && rec.status === SUB_STATUS.ACTIVE) {
-      const updatedRec = { ...rec, status:SUB_STATUS.EXPIRED, expired_at:now.toISOString() };
-      await env.REVENUE_CRM_KV.put(`sub:${s.id}`, JSON.stringify(updatedRec));
-      await env.REVENUE_CRM_KV.put(`sub:email:${rec.email}`, JSON.stringify(updatedRec));
+      // Phase 2: tryTransition (subscription-engine.js) validates ACTIVE ->
+      // EXPIRED against the evidence-based transition graph before applying
+      // it, and patchInternalSub keeps sub:{id}/sub:email:{email}/
+      // subscriptions:index consistent -- replacing the direct REVENUE_CRM_KV
+      // writes this loop used to do inline (which never touched the index,
+      // so it silently went stale after every expiry).
+      await tryTransition(env, s.id, SUB_STATUS.EXPIRED, { expired_at: now.toISOString() }, rid);
       // Suspend API key. The REVENUE_CRM_KV write above is this Worker's own
       // bookkeeping copy -- kept as-is. It does NOT reach intel-gateway's
       // resolveAuth(), which reads API_KEYS_KV and checks `expires_at`, not a
