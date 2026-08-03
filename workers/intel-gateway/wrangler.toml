@@ -41,6 +41,13 @@ GATEWAY_VERSION = "184.0"
 # handleRazorpayCreateOrder's `!env.RAZORPAY_KEY_ID` guard regardless of the secret.
 RAZORPAY_KEY_ID = "rzp_live_T006RdZV7opnrY"
 
+# Phase 1 revenue-leak fix (docs/BILLING_ENTITLEMENT_ARCHITECTURE_AUDIT.md).
+# "false" = zero behavior change (current production state, expires_at stays
+# null, shadow-computed expiry only audit-logged). Set to "true" to start
+# actually enforcing real expiry on newly-provisioned keys. Reversible by
+# flipping this value back -- no code change needed either direction.
+SUBSCRIPTION_EXPIRY_ENABLED = "false"
+
 # -- KV Namespaces --
 # Deployed KV IDs -- verified live on intel.cyberdudebivash.com (v142.3.1)
 # To add new namespace: npx wrangler kv namespace create "<NAME>"
@@ -120,6 +127,7 @@ name = "sentinel-apex-gateway"
 [env.production.vars]
 GATEWAY_VERSION = "184.0"
 RAZORPAY_KEY_ID = "rzp_live_T006RdZV7opnrY"
+SUBSCRIPTION_EXPIRY_ENABLED = "false"
 
 [[env.production.kv_namespaces]]
 binding = "API_KEYS_KV"
