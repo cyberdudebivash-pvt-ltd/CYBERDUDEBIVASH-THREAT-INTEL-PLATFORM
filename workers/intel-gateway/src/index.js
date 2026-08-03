@@ -3391,6 +3391,10 @@ async function handleRequest(request, env, ctx) {
         feed_index: `live:${stats.total}_items`,
         jwt_configured: !!(env.CDB_JWT_SECRET),
         admin_configured: !!(env.ADMIN_SECRET),
+        // Additive: surfaces the exact outage verified live on 2026-08-03 -- create-order
+        // 503s with "Razorpay not configured on server" whenever either secret is unset,
+        // silently blocking 100% of checkouts with no prior signal in /api/health.
+        razorpay_configured: !!(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET),
       },
       security: {
         auth: "JWT_HS256+KV",
