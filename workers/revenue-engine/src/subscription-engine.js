@@ -94,7 +94,7 @@ async function patchInternalSub(env, internalSubId, patch) {
   return updated;
 }
 
-async function patchApiKeyEntitlement(env, apiKey, patch) {
+export async function patchApiKeyEntitlement(env, apiKey, patch) {
   if (!env.API_KEYS_KV || !apiKey) return;
   const rec = await env.API_KEYS_KV.get(apiKey, "json");
   if (!rec) return;
