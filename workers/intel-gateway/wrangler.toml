@@ -36,9 +36,10 @@ crons = ["*/15 * * * *"]
 [vars]
 GATEWAY_VERSION = "184.0"
 # Public-facing Razorpay Key ID (NOT secret — safe in vars)
-# Get from: Razorpay Dashboard -> Settings -> API Keys
-# Format: rzp_live_XXXXXXXXXXXX
-RAZORPAY_KEY_ID = ""
+# Set live 2026-08-03 (matches the key_id RAZORPAY_KEY_SECRET was paired with via
+# `wrangler secret put`) -- was blank here, which 503'd every checkout via
+# handleRazorpayCreateOrder's `!env.RAZORPAY_KEY_ID` guard regardless of the secret.
+RAZORPAY_KEY_ID = "rzp_live_T006RdZV7opnrY"
 
 # -- KV Namespaces --
 # Deployed KV IDs -- verified live on intel.cyberdudebivash.com (v142.3.1)
@@ -118,7 +119,7 @@ name = "sentinel-apex-gateway"
 
 [env.production.vars]
 GATEWAY_VERSION = "184.0"
-RAZORPAY_KEY_ID = ""
+RAZORPAY_KEY_ID = "rzp_live_T006RdZV7opnrY"
 
 [[env.production.kv_namespaces]]
 binding = "API_KEYS_KV"
