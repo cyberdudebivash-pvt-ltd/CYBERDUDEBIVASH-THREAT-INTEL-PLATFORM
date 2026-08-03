@@ -53,12 +53,16 @@ SUBSCRIPTION_EXPIRY_ENABLED = "false"
 # keeps deciding access exactly as it does today; only the passive shadow
 # log runs). Set to "true" to let ENTITLEMENT_ENFORCEMENT_RESOURCES start
 # taking effect. Reversible by flipping back -- no code change either way.
-ENTITLEMENT_ENFORCEMENT_ENABLED = "false"
+# Step 1 of the gradual rollout (2026-08-03): enabled for cve_detail_full
+# only -- read-only, high-traffic, and an exact mirror of the ad-hoc check
+# per Phase 3/4 discovery, so zero behavior change is expected. Watch
+# SECURITY_HUB_KV for "entitlement_enforced_override" before adding more.
+ENTITLEMENT_ENFORCEMENT_ENABLED = "true"
 # Comma-separated allowlist of resource names (e.g. "cve_detail_full,nlq")
 # actually switched over to enforceTierGate's decision when the master
 # switch above is "true". Empty = nothing enforced even if the switch is on
 # -- this is the per-resource dial for a gradual, one-at-a-time rollout.
-ENTITLEMENT_ENFORCEMENT_RESOURCES = ""
+ENTITLEMENT_ENFORCEMENT_RESOURCES = "cve_detail_full"
 
 # -- KV Namespaces --
 # Deployed KV IDs -- verified live on intel.cyberdudebivash.com (v142.3.1)
@@ -140,8 +144,8 @@ name = "sentinel-apex-gateway"
 GATEWAY_VERSION = "184.0"
 RAZORPAY_KEY_ID = "rzp_live_T006RdZV7opnrY"
 SUBSCRIPTION_EXPIRY_ENABLED = "false"
-ENTITLEMENT_ENFORCEMENT_ENABLED = "false"
-ENTITLEMENT_ENFORCEMENT_RESOURCES = ""
+ENTITLEMENT_ENFORCEMENT_ENABLED = "true"
+ENTITLEMENT_ENFORCEMENT_RESOURCES = "cve_detail_full"
 
 [[env.production.kv_namespaces]]
 binding = "API_KEYS_KV"
