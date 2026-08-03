@@ -1,0 +1,10 @@
+{
+  "threat_id": "thr-bece5f340c1c",
+  "title": "CVE-2026-0392 - eParakst\u012bt\u0101js 3.0 for Windows \u2013 remote code execution via unauth",
+  "scripts": [
+    {
+      "type": "hardening_bash",
+      "content": "#!/bin/bash\n# CDB APEX v37.0 - Emergency Hardening Script\n# Threat: CVE-2026-0392 - eParakst\u012bt\u0101js 3.0 for Windows \u2013 remote code \n# Generated: 2026-08-03T18:18:28.527152+00:00\n\necho \"[*] Updating system packages...\"\napt-get update && apt-get upgrade -y 2>/dev/null || yum update -y 2>/dev/null\n\necho \"[*] Enabling firewall...\"\nufw enable 2>/dev/null || firewall-cmd --set-default-zone=drop 2>/dev/null\n\necho \"[*] Disabling unnecessary services...\"\nsystemctl disable --now telnet.socket 2>/dev/null\nsystemctl disable --now rsh.socket 2>/dev/null\n\necho \"[*] Setting secure SSH configuration...\"\nsed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config\nsed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config\nsystemctl restart sshd\n\necho \"[+] Hardening complete for threat: thr-bece5f340c1c\"\n"
+    }
+  ]
+}
