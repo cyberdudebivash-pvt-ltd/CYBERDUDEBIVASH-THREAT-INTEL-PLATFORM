@@ -409,6 +409,7 @@ jobs:
     name: Attach SBOM to Release
     needs: [sbom-python, sbom-docker]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event_name == 'release'
 
     steps:
@@ -443,6 +444,7 @@ jobs:
     name: SBOM Gate
     needs: [sbom-python]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: always()
 
     steps:
