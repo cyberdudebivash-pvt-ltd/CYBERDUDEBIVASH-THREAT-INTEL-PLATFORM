@@ -53,9 +53,21 @@ on:
         type: choice
         options: ["true", "false"]
 
-  schedule:
-    # Every Sunday at 02:00 UTC - weekly full hardening pass
-    - cron: "0 2 * * 0"
+  # Actions cost audit (2026-08-04): schedule disabled -- confirmed byte-for-
+  # byte redundant, not inferred. This workflow's 4 scripts
+  # (v149_published_field_fixer.py, v149_intelligence_hardening.py,
+  # v149_frontend_dedup_patch.py, v149_siem_webhook_provisioner.py) are the
+  # exact same 4 scripts sentinel-blogger.yml already invokes on every one of
+  # its 3x/day runs (21x/week) -- this file's own header already documents
+  # its purpose as "Standalone execution... for On-demand P0 emergency
+  # ingestion recovery" etc., not routine scheduled maintenance. The weekly
+  # cron added zero coverage beyond what already happens 21x more often.
+  # Same pattern already applied to nexus-intelligence.yml (confirmed
+  # duplicate of sovereign-platform.yml) earlier the same day.
+  # Rollback: uncomment the schedule block below.
+  # schedule:
+  #   # Every Sunday at 02:00 UTC - weekly full hardening pass
+  #   - cron: "0 2 * * 0"
 
 permissions:
   contents: write
