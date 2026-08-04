@@ -52,6 +52,10 @@ jobs:
   validate-canonical-docs:
     name: Validate canonical documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: repository-integrity-validate-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -63,6 +67,10 @@ jobs:
   detect-repository-drift:
     name: Detect repository drift (informational)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: repository-integrity-drift-${{ github.ref }}
+      cancel-in-progress: true
     needs: []  # deliberately independent of the job above -- a validation failure should not hide the drift report
     steps:
       - uses: actions/checkout@v4
