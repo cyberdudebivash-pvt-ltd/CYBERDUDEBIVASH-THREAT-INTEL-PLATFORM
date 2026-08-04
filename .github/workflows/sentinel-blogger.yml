@@ -71,23 +71,26 @@ on:
       - '.github/workflows/generate-and-sync.yml'
       - 'index.html'
       - 'feed_manifest.json'
-  # EMERGENCY CONSERVATION WINDOW (2026-07-29 -> Aug 1 quota reset): cron
-  # cadence temporarily reduced from every 4 hours to a deterministic 3x/day
-  # schedule (00:00, 08:00, 16:00 UTC) at the founder's explicit direction,
-  # to conserve GitHub Actions minutes. ONLY this schedule trigger changes --
-  # push, workflow_dispatch, and all publishing/deployment/data-processing
-  # logic in this file are unchanged.
+  # SCHEDULE CADENCE -- MADE PERMANENT 2026-08-04 (GitHub Actions cost audit):
+  # Originally ran every 4 hours (6x/day). Cut to a deterministic 3x/day
+  # schedule (00:00, 08:00, 16:00 UTC) on 2026-07-29 at the founder's explicit
+  # direction, as an "emergency conservation window" originally intended to
+  # revert on the Aug 1 2026 quota reset (see prior revision of this comment).
   #
-  # Original cadence (restore after Aug 1 by reverting this line):
-  #   - cron: '0 */4 * * *'
+  # That reset came and went with no revert. On 2026-08-04 the org hit
+  # 2,755/3,000 monthly Actions minutes in ~3-4 days (SEV-1 cost audit),
+  # driven mainly by cron sprawl across this repo. Reverting to every-4-hours
+  # now would add back ~3 runs/day at this workflow's measured real cost of
+  # ~44 billable min/run (~132 min/day) -- the platform cannot currently
+  # afford that, so this is no longer a temporary measure.
   #
-  # Expected savings: cuts scheduled runs from 6/day to 3/day (-3 runs/day).
-  # At this workflow's measured real cost of ~44 billable minutes/run, that
-  # is an estimated ~132 min/day reduction from the schedule side alone.
-  # Push-triggered runs (real commit activity) are untouched.
+  # DECISION: 3x/day is the standing cadence going forward. ONLY this
+  # schedule trigger is affected -- push, workflow_dispatch, and all
+  # publishing/deployment/data-processing logic in this file are unchanged.
   #
-  # RESTORATION TASK: revert to '0 */4 * * *' once the Aug 1 quota resets --
-  # tracked in the PR description for this change.
+  # Tightening this cadence again in the future requires a deliberate
+  # decision backed by confirmed Actions-minutes headroom (check current org
+  # usage first) -- not a mechanical revert of this comment.
   schedule:
     - cron: '0 0,8,16 * * *'
     - cron: '0 0 1 * *'
