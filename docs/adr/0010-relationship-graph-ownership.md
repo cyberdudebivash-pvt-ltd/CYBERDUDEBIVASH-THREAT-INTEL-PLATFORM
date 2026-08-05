@@ -253,6 +253,79 @@ argument for converging faster, not for choosing differently.
 
 ---
 
+## Revision 3 — 2026-08-05, Stage 9 Phase 1 (corrects Revision 2, adds R6/R7)
+
+Stage 9's graph-discovery continuation traced R3's producer by reading actual execution paths
+(imports and instantiation sites, not comments), per that stage's own charter. This revision
+documents two things: a factual correction to Revision 2, and two newly-discovered
+implementations neither prior stage catalogued. Full trace in
+`TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md` (Task 4/6); summarized here.
+
+**Correction to Revision 2.** Revision 2 states R3 "reads a separately-generated
+`data/ai/intel_graph.json` snapshot from R2" — using "R2" to mean this ADR's own label for the
+blog's `knowledge_graph.py`. **That is incorrect.** The actual chain is:
+`core/intelligence/enrichment_graph.py` (a same-repository, intel-platform-native Python module,
+newly catalogued below as R6) → `core/orchestrator.py`'s `R2AIExportStage` → written via boto3
+to **Cloudflare R2 object storage** (bucket `sentinel-apex-intel`, key
+`data/ai/intel_graph.json`) → read by R3. "R2" in `core/pipeline/stages.py`'s own comments
+("R2 Export Snapshot," "R2 AI exports") refers to Cloudflare's storage product, not to this
+ADR's R2 graph-implementation ID — a genuine terminology collision between this program's
+vocabulary and Cloudflare's product name. R3 has no relationship to the blog's `KnowledgeGraph`
+at all. This is a correction, not an addendum: Revision 2's producer claim was factually wrong,
+apparently written without reading `core/pipeline/stages.py`'s body. Per this program's
+discipline, the error is documented here rather than silently edited out of Revision 2 above.
+
+**New: R6 — `core/intelligence/enrichment_graph.py` (`IOCEnrichmentGraph`), intel-platform,
+Python.** A real, substantial graph engine: thread-safe in-memory adjacency graph, JSON
+persistence (`save`/`load`), 6-source OSINT enrichment, PageRank-like authority scoring, BFS
+traversal, campaign correlation, actor attribution, STIX 2.1 export. **On functional merit this
+is the most capable implementation in the full inventory (R1-R7)** — more complete than R1 (no
+persistence), and same-repository as R1 (no cross-repo negotiation required, unlike R2/R4).
+Its production execution trigger is unconfirmed: no `.github/workflows/*.yml` file invokes
+`core/orchestrator.py` (the only in-repo caller of R6's export stage). The confirmed-live master
+pipeline (`scripts/run_pipeline.py`) does not import it either. This does not mean R6 never
+runs — only that no in-repo scheduling evidence was found, the same evidentiary posture
+`TITAN_TECH_DEBT_REGISTER.md`'s DEBT-015 already established for monitoring infrastructure.
+
+**New: R7 — `sentinel-apex-api/app/api/v1/endpoints/intel_graph.py`, intel-platform, Python
+(FastAPI).** A fourth independent graph computation, in a third backend stack entirely (FastAPI
+on Railway/Render + Supabase — neither the Cloudflare Worker nor the Python ingestion pipeline),
+with its own separate authentication system. Reads `data/graph/graph_relationships.stix.json`
+plus a Supabase fallback query. No confirmed live deployment: its Railway-deploy CI workflow is
+misplaced (`sentinel-apex-api/.github/workflows/sentinel-apex-api`, nested inside the
+subdirectory and missing the `.yml` extension — GitHub Actions only discovers workflows under
+the repository root's `.github/workflows/`, so this can never have triggered), and the domain
+its own CORS config names (`app.cyberdudebivash.com`) failed to connect in a direct HTTPS probe
+run alongside clean 200s for both platform's known-live domains. Full assessment in
+`TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md` Task 3.
+
+**R2's runtime characterization also needs qualification** (not a change to this ADR's
+Decision, which concerns ownership, not deprecation timing per se, but relevant to migration
+urgency): this stage confirmed, via `platform/open-issues.md` Issue 9's own language and direct
+repository tracing, that `KnowledgeGraph()` is constructed only through manual `cli.py run`/
+`score` invocation and the blog's own test suite — no blog workflow invokes it as scheduled
+automation. R2 remains real, correct, tested code; it is not, on current evidence, a live
+production pipeline in the sense "Report generation pipeline" (this ADR's own Existing
+Implementations table) implies.
+
+**Effect on this ADR's Decision.** The original Decision (R1 target-canonical, contingent on
+persistence) is **not withdrawn** — nothing found this stage makes R1 a worse choice than
+before. But DEBT-000B's practical reconciliation target changes: it is now **R1-vs-R6**, not
+R1-vs-R3 (R3 is a thin, non-computing reader over R6's output, not an independent
+implementation). R6's same-repository location and functional completeness make it, if
+anything, a stronger persistence-layer donor candidate for R1 than R2 ever was — with the
+now-open question of whether R6's execution-trigger gap should be closed by scheduling it, or
+whether that gap is itself evidence it should be superseded rather than adopted. **Neither this
+ADR nor Stage 9 Phase 1 decides that question.** R7's disposition is even less settled — it may
+not be in this ADR's scope at all, pending a human product decision on whether it represents
+live intent.
+
+**This ADR should not be Accepted from the pre-Revision-3 text.** Any reviewer beginning
+Acceptance review should review against this revision, not Revision 2, given the corrected
+factual basis.
+
+---
+
 ## Approval
 
 **Proposed**, not Accepted. Required sign-offs, with the persistence precondition specifically

@@ -69,3 +69,21 @@ Same discipline this program has applied since Stage 6: track whether the number
 major one (the Vercel routing-behavior correction) and resolved it with more rigor than Stage 7
 had available (external verification vs. static analysis) — a good sign for the program's own
 trajectory, worth continuing to measure, not just claim.
+
+---
+
+## Update, Stage 9 Phase 1 (2026-08-05)
+
+Stage 9 began. Phase 1 (Graph Discovery Validation) found the graph-implementation inventory
+materially larger than this document's preconditions anticipated: two new same-repository
+implementations (R6, R7 — the latter an entire uncatalogued FastAPI/Supabase backend), a
+16-file long tail under `agent/`/`scripts/` (9 confirmed production), and a "zombie pipeline"
+finding (scheduled, CI-green jobs whose data flow has never observably persisted). None of
+this document's three preconditions have been satisfied — ADR Acceptance is still nobody's
+completed action item, and DEBT-000B's scoping question changed shape (R1-vs-R6, not
+R1-vs-R3) rather than closing. Full findings: `TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md`.
+This document's own trajectory note above did not hold this round — the "trending down" metric
+moved the wrong way this stage, documented rather than smoothed over, per this program's
+standing practice. Phase 4 (and this document's original candidate-scope list) remains not
+begun; see the discovery report's Task 7 for the full BLOCKED determination and required
+preconditions.
