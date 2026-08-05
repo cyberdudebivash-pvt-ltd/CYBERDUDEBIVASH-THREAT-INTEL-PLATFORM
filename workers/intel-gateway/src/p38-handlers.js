@@ -94,51 +94,11 @@ function _detectFeedType(items) {
 }
 
 function _schemaDrift(items) {
-  const KNOWN_FIELDS = new Set([
-    'id','title','severity','description','source','feed_source','source_url',
-    'published_at','timestamp','processed_at','schema_version','status','is_published','is_new',
-    'cve_id','cve_ids','cves','cvss_score','cvss_vector','cvss_source','cvss_estimated',
-    'epss','epss_score','epss_normalized','kev','kev_confirmed','kev_date','kev_due',
-    'kev_name','kev_action','kev_product','kev_present','nvd_status','nvd_checked_at',
-    'nvd_disclosure','vuln_class','exploit_maturity','exploit_count','exploit_refs',
-    'poc_github_count','metasploit_available','attack_vector','affected_products',
-    'actor_tag','actor','actor_name','actor_display_name','actor_aliases','actor_code',
-    'actor_type','actor_country','actor_region','actor_motivation','actor_sectors',
-    'actor_threat_level','actor_ttps','actor_malware','actor_mitre_id',
-    'actor_confidence_label','verified_actor','attribution_status','attribution_assessment',
-    'confidence','confidence_score','confidence_score_v2','confidence_label',
-    'confidence_rationale','confidence_reason','confidence_factors',
-    'confidence_engine_version','confidence_enriched_at','source_trust_score',
-    'source_reliability','source_quality','corroboration_score','corroboration_strength',
-    'corroboration_count','corroborating_sources','corroboration_sources','ioc_confidence',
-    'iocs','iocs_by_type','ioc_types','ioc_count','ioc_counts','real_ioc_count',
-    'indicator_count','ioc_quality','ioc_quality_label','ioc_quality_score',
-    'ioc_threat_level','ioc_fp_removed','ioc_note','ioc_paywall','ioc_extraction_meta',
-    'ttps','ttp_count','ttp_quality','mitre_tactics','attck_techniques','attck_technique_ids',
-    'attck_notes','attck_verification','kill_chain_phase','kill_chain_phases',
-    'sigma_rule','suricata_rule','kql_query','detection_generated_at',
-    'detection_production_ready','detection_quality_status',
-    'detection_rules_production_ready','detection_rules_total',
-    'intelligence_grade','iq_score','iq_breakdown','enrichment_score','report_quality',
-    'grade_notes','grade_notes_v2','graded_at','graded_at_v2','grade_engine_version',
-    'validation_status','verification_status','analyst_verdict','publication_decision',
-    'risk_score','risk_score_reasoning','threat_level','threat_priority',
-    'threat_category','threat_type','sla_priority','recommended_sla_action',
-    'action_deadline_hours','evidence_chain','evidence_count','evidence_ledger',
-    'sources_reporting','allowed_content_tier','cti_tier','premium_eligible',
-    'enterprise_eligible','mssp_eligible','revenue_opportunities','pdf_available',
-    'pdf_url','report_url','blog_url','internal_report_url',
-    '_enriched_at','_enriched_by','_governance_rules','_kev_marked_at','_kev_source',
-    '_quality_hardened_at','_quality_version','_risk_micro_adj','_score_details',
-    'governed_at','governor_audit_log','governor_version',
-    'campaign_id','campaign_name','campaign_status','tags','tlp','stix_id',
-    'research_based','intelligence_age_days',
-    'apex','apex_ai','apex_ai_score','apex_ai_summary',
-  ]);
-  const DEPRECATED = new Set([
-    'cves','epss_score','actor','corroboration_sources','confidence_score',
-    'ioc_quality_score','grade_notes',
-  ]);
+  // Both sets are derived from SCHEMA_REGISTRY (single source within this
+  // file) rather than hand-typed, so the drift detector cannot itself drift
+  // from the registry it is checking against.
+  const KNOWN_FIELDS = new Set(Object.keys(SCHEMA_REGISTRY));
+  const DEPRECATED = new Set(SCHEMA_DEPRECATED_FIELDS);
   const observed = new Set();
   for (const item of items.slice(0, 50)) {
     Object.keys(item).forEach(k => observed.add(k));
@@ -226,6 +186,214 @@ const FEED_REGISTRY = {
 };
 
 // ---------------------------------------------------------------------------
+// SCHEMA REGISTRY  -  mirrors Python SCHEMA_REGISTRY for JS/Worker consumption
+// (Workers have no Python runtime, so this cannot import the source directly.)
+// Generated field-for-field from scripts/p38_shared_validators.py:SCHEMA_REGISTRY
+// by scripts/p38_schema_mirror_check.py, which also CI-checks the two stay in
+// sync. Regenerate via that script rather than hand-editing on schema changes.
+// ---------------------------------------------------------------------------
+const SCHEMA_REGISTRY = {
+  // -- identity ----------------------------------------------------
+  "id": { required: true, type: "str", domain: "identity", nullable: false, version_introduced: "v1.0" },
+  "title": { required: true, type: "str", domain: "identity", nullable: false, version_introduced: "v1.0" },
+  "severity": { required: true, type: "str", domain: "identity", nullable: false, version_introduced: "v1.0" },
+  "description": { required: false, type: "str", domain: "identity", nullable: true, version_introduced: "v1.0" },
+  "source": { required: false, type: "str", domain: "identity", nullable: true, version_introduced: "v1.0" },
+  "feed_source": { required: false, type: "str", domain: "identity", nullable: true, version_introduced: "v2.0" },
+  "source_url": { required: false, type: "str", domain: "identity", nullable: true, version_introduced: "v1.0" },
+  "published_at": { required: false, type: "str", domain: "identity", nullable: true, version_introduced: "v1.0" },
+  "timestamp": { required: false, type: "str", domain: "identity", nullable: true, version_introduced: "v1.0" },
+  "processed_at": { required: false, type: "str", domain: "identity", nullable: true, version_introduced: "v2.0" },
+  "schema_version": { required: false, type: "str", domain: "identity", nullable: true, version_introduced: "v3.0" },
+  "status": { required: false, type: "str", domain: "identity", nullable: true, version_introduced: "v2.0" },
+  "is_published": { required: false, type: "bool", domain: "identity", nullable: true, version_introduced: "v2.0" },
+  "is_new": { required: false, type: "bool", domain: "identity", nullable: true, version_introduced: "v2.0" },
+  // -- vulnerability -----------------------------------------------
+  "cve_id": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v1.0" },
+  "cve_ids": { required: false, type: "list", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  "cves": { required: false, type: "list", domain: "vulnerability", nullable: true, version_introduced: "v2.0", deprecated: true, replacement: "cve_ids" },
+  "cvss_score": { required: false, type: "float", domain: "vulnerability", nullable: true, version_introduced: "v1.0" },
+  "cvss_vector": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  "cvss_source": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  "cvss_estimated": { required: false, type: "bool", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "epss": { required: false, type: "float", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  "epss_score": { required: false, type: "float", domain: "vulnerability", nullable: true, version_introduced: "v3.0", deprecated: true, replacement: "epss" },
+  "epss_normalized": { required: false, type: "float", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "kev": { required: false, type: "bool", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  "kev_confirmed": { required: false, type: "bool", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "kev_date": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "kev_due": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "kev_name": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "kev_action": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "kev_product": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "kev_present": { required: false, type: "bool", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "nvd_status": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "nvd_checked_at": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "nvd_disclosure": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "vuln_class": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  "exploit_maturity": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  "exploit_count": { required: false, type: "int", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  "exploit_refs": { required: false, type: "list", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  "poc_github_count": { required: false, type: "int", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "metasploit_available": { required: false, type: "bool", domain: "vulnerability", nullable: true, version_introduced: "v3.0" },
+  "attack_vector": { required: false, type: "str", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  "affected_products": { required: false, type: "list", domain: "vulnerability", nullable: true, version_introduced: "v2.0" },
+  // -- actor -------------------------------------------------------
+  "actor_tag": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v2.0", note: "canonical actor field" },
+  "actor": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v1.0", deprecated: true, replacement: "actor_tag" },
+  "actor_name": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v2.0" },
+  "actor_display_name": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  "actor_aliases": { required: false, type: "list", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  "actor_code": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v2.0" },
+  "actor_type": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v2.0" },
+  "actor_country": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v2.0" },
+  "actor_region": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  "actor_motivation": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v2.0" },
+  "actor_sectors": { required: false, type: "list", domain: "actor", nullable: true, version_introduced: "v2.0" },
+  "actor_threat_level": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  "actor_ttps": { required: false, type: "list", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  "actor_malware": { required: false, type: "list", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  "actor_mitre_id": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  "actor_confidence_label": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  "verified_actor": { required: false, type: "bool", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  "attribution_status": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  "attribution_assessment": { required: false, type: "dict", domain: "actor", nullable: true, version_introduced: "v3.0" },
+  // -- confidence --------------------------------------------------
+  "confidence": { required: false, type: "float", domain: "confidence", nullable: true, version_introduced: "v1.0" },
+  "confidence_score": { required: false, type: "float", domain: "confidence", nullable: true, version_introduced: "v2.0", deprecated: true, replacement: "confidence" },
+  "confidence_score_v2": { required: false, type: "float", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "confidence_label": { required: false, type: "str", domain: "confidence", nullable: true, version_introduced: "v2.0" },
+  "confidence_rationale": { required: false, type: "str", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "confidence_reason": { required: false, type: "str", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "confidence_factors": { required: false, type: "dict", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "confidence_engine_version": { required: false, type: "str", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "confidence_enriched_at": { required: false, type: "str", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "source_trust_score": { required: false, type: "float", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "source_reliability": { required: false, type: "str", domain: "confidence", nullable: true, version_introduced: "v2.0" },
+  "source_quality": { required: false, type: "str", domain: "confidence", nullable: true, version_introduced: "v2.0" },
+  "corroboration_score": { required: false, type: "float", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "corroboration_strength": { required: false, type: "str", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "corroboration_count": { required: false, type: "int", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "corroborating_sources": { required: false, type: "list", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  "corroboration_sources": { required: false, type: "list", domain: "confidence", nullable: true, version_introduced: "v3.0", deprecated: true, replacement: "corroborating_sources" },
+  "ioc_confidence": { required: false, type: "float", domain: "confidence", nullable: true, version_introduced: "v3.0" },
+  // -- ioc ---------------------------------------------------------
+  "iocs": { required: false, type: "list", domain: "ioc", nullable: true, version_introduced: "v1.0" },
+  "iocs_by_type": { required: false, type: "dict", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  "ioc_types": { required: false, type: "list", domain: "ioc", nullable: true, version_introduced: "v2.0" },
+  "ioc_count": { required: false, type: "int", domain: "ioc", nullable: true, version_introduced: "v2.0" },
+  "ioc_counts": { required: false, type: "dict", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  "real_ioc_count": { required: false, type: "int", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  "indicator_count": { required: false, type: "int", domain: "ioc", nullable: true, version_introduced: "v2.0" },
+  "ioc_quality": { required: false, type: "str", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  "ioc_quality_label": { required: false, type: "str", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  "ioc_quality_score": { required: false, type: "float", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  "ioc_threat_level": { required: false, type: "str", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  "ioc_fp_removed": { required: false, type: "int", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  "ioc_note": { required: false, type: "str", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  "ioc_paywall": { required: false, type: "bool", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  "ioc_extraction_meta": { required: false, type: "dict", domain: "ioc", nullable: true, version_introduced: "v3.0" },
+  // -- detection ---------------------------------------------------
+  "ttps": { required: false, type: "list", domain: "detection", nullable: true, version_introduced: "v1.0" },
+  "ttp_count": { required: false, type: "int", domain: "detection", nullable: true, version_introduced: "v2.0" },
+  "ttp_quality": { required: false, type: "str", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  "mitre_tactics": { required: false, type: "list", domain: "detection", nullable: true, version_introduced: "v2.0" },
+  "attck_techniques": { required: false, type: "list", domain: "detection", nullable: true, version_introduced: "v2.0" },
+  "attck_technique_ids": { required: false, type: "list", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  "attck_notes": { required: false, type: "str", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  "attck_verification": { required: false, type: "str", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  "kill_chain_phase": { required: false, type: "str", domain: "detection", nullable: true, version_introduced: "v2.0" },
+  "kill_chain_phases": { required: false, type: "list", domain: "detection", nullable: true, version_introduced: "v2.0" },
+  "sigma_rule": { required: false, type: "str", domain: "detection", nullable: true, version_introduced: "v2.0" },
+  "suricata_rule": { required: false, type: "str", domain: "detection", nullable: true, version_introduced: "v2.0" },
+  "kql_query": { required: false, type: "str", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  "detection_generated_at": { required: false, type: "str", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  "detection_production_ready": { required: false, type: "bool", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  "detection_quality_status": { required: false, type: "str", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  "detection_rules_production_ready": { required: false, type: "bool", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  "detection_rules_total": { required: false, type: "int", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  // -- quality -----------------------------------------------------
+  "intelligence_grade": { required: false, type: "str", domain: "quality", nullable: true, version_introduced: "v2.0" },
+  "iq_score": { required: false, type: "float", domain: "quality", nullable: true, version_introduced: "v3.0" },
+  "iq_breakdown": { required: false, type: "dict", domain: "quality", nullable: true, version_introduced: "v3.0" },
+  "enrichment_score": { required: false, type: "float", domain: "quality", nullable: true, version_introduced: "v3.0" },
+  "report_quality": { required: false, type: "str", domain: "quality", nullable: true, version_introduced: "v2.0" },
+  "grade_notes": { required: false, type: "list", domain: "quality", nullable: true, version_introduced: "v2.0" },
+  "grade_notes_v2": { required: false, type: "list", domain: "quality", nullable: true, version_introduced: "v3.0" },
+  "graded_at": { required: false, type: "str", domain: "quality", nullable: true, version_introduced: "v2.0" },
+  "graded_at_v2": { required: false, type: "str", domain: "quality", nullable: true, version_introduced: "v3.0" },
+  "grade_engine_version": { required: false, type: "str", domain: "quality", nullable: true, version_introduced: "v3.0" },
+  "validation_status": { required: false, type: "str", domain: "quality", nullable: true, version_introduced: "v2.0" },
+  "verification_status": { required: false, type: "str", domain: "quality", nullable: true, version_introduced: "v2.0" },
+  "analyst_verdict": { required: false, type: "str", domain: "quality", nullable: true, version_introduced: "v3.0" },
+  "publication_decision": { required: false, type: "str", domain: "quality", nullable: true, version_introduced: "v3.0" },
+  // -- risk --------------------------------------------------------
+  "risk_score": { required: false, type: "float", domain: "risk", nullable: true, version_introduced: "v1.0" },
+  "risk_score_reasoning": { required: false, type: "str", domain: "risk", nullable: true, version_introduced: "v3.0" },
+  "threat_level": { required: false, type: "str", domain: "risk", nullable: true, version_introduced: "v1.0" },
+  "threat_priority": { required: false, type: "str", domain: "risk", nullable: true, version_introduced: "v2.0" },
+  "threat_category": { required: false, type: "str", domain: "risk", nullable: true, version_introduced: "v1.0" },
+  "threat_type": { required: false, type: "str", domain: "risk", nullable: true, version_introduced: "v1.0" },
+  "sla_priority": { required: false, type: "str", domain: "risk", nullable: true, version_introduced: "v2.0" },
+  "recommended_sla_action": { required: false, type: "str", domain: "risk", nullable: true, version_introduced: "v3.0" },
+  "action_deadline_hours": { required: false, type: "int", domain: "risk", nullable: true, version_introduced: "v3.0" },
+  // -- evidence ----------------------------------------------------
+  "evidence_chain": { required: false, type: "list", domain: "evidence", nullable: true, version_introduced: "v2.0" },
+  "evidence_count": { required: false, type: "int", domain: "evidence", nullable: true, version_introduced: "v2.0" },
+  "evidence_ledger": { required: false, type: "dict", domain: "evidence", nullable: true, version_introduced: "v3.0" },
+  "sources_reporting": { required: false, type: "list", domain: "evidence", nullable: true, version_introduced: "v2.0" },
+  // -- commercial --------------------------------------------------
+  "allowed_content_tier": { required: false, type: "str", domain: "commercial", nullable: true, version_introduced: "v2.0" },
+  "cti_tier": { required: false, type: "str", domain: "commercial", nullable: true, version_introduced: "v3.0" },
+  "premium_eligible": { required: false, type: "bool", domain: "commercial", nullable: true, version_introduced: "v2.0" },
+  "enterprise_eligible": { required: false, type: "bool", domain: "commercial", nullable: true, version_introduced: "v3.0" },
+  "mssp_eligible": { required: false, type: "bool", domain: "commercial", nullable: true, version_introduced: "v3.0" },
+  "revenue_opportunities": { required: false, type: "list", domain: "commercial", nullable: true, version_introduced: "v3.0" },
+  "pdf_available": { required: false, type: "bool", domain: "commercial", nullable: true, version_introduced: "v2.0" },
+  "pdf_url": { required: false, type: "str", domain: "commercial", nullable: true, version_introduced: "v2.0" },
+  "report_url": { required: false, type: "str", domain: "commercial", nullable: true, version_introduced: "v1.0" },
+  "blog_url": { required: false, type: "str", domain: "commercial", nullable: true, version_introduced: "v2.0" },
+  "internal_report_url": { required: false, type: "str", domain: "commercial", nullable: true, version_introduced: "v2.0" },
+  // -- governance --------------------------------------------------
+  "_enriched_at": { required: false, type: "str", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "_enriched_by": { required: false, type: "str", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "_governance_rules": { required: false, type: "list", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "_kev_marked_at": { required: false, type: "str", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "_kev_source": { required: false, type: "str", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "_quality_hardened_at": { required: false, type: "str", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "_quality_version": { required: false, type: "str", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "_risk_micro_adj": { required: false, type: "float", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "_score_details": { required: false, type: "dict", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "governed_at": { required: false, type: "str", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "governor_audit_log": { required: false, type: "list", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  "governor_version": { required: false, type: "str", domain: "governance", nullable: true, version_introduced: "v3.0" },
+  // -- campaign ----------------------------------------------------
+  "campaign_id": { required: false, type: "str", domain: "campaign", nullable: true, version_introduced: "v2.0" },
+  "campaign_name": { required: false, type: "str", domain: "campaign", nullable: true, version_introduced: "v2.0" },
+  "campaign_status": { required: false, type: "str", domain: "campaign", nullable: true, version_introduced: "v3.0" },
+  "tags": { required: false, type: "list", domain: "campaign", nullable: true, version_introduced: "v1.0" },
+  "tlp": { required: false, type: "str", domain: "campaign", nullable: true, version_introduced: "v1.0" },
+  "stix_id": { required: false, type: "str", domain: "campaign", nullable: true, version_introduced: "v2.0" },
+  "research_based": { required: false, type: "bool", domain: "campaign", nullable: true, version_introduced: "v3.0" },
+  "intelligence_age_days": { required: false, type: "int", domain: "campaign", nullable: true, version_introduced: "v3.0" },
+  // -- actor -------------------------------------------------------
+  "actor_id": { required: false, type: "str", domain: "actor", nullable: true, version_introduced: "v3.1", note: "internal actor ID used by attribution pipeline" },
+  // -- ioc ---------------------------------------------------------
+  "ioc_enforced": { required: false, type: "bool", domain: "ioc", nullable: true, version_introduced: "v3.1" },
+  "ioc_enforced_at": { required: false, type: "str", domain: "ioc", nullable: true, version_introduced: "v3.1" },
+  // -- identity ----------------------------------------------------
+  "published": { required: false, type: "bool", domain: "identity", nullable: true, version_introduced: "v3.1", note: "boolean publication flag (distinct from is_published which is also bool)" },
+  // -- apex --------------------------------------------------------
+  "apex": { required: false, type: "dict", domain: "apex", nullable: true, version_introduced: "v2.0" },
+  "apex_ai": { required: false, type: "dict", domain: "apex", nullable: true, version_introduced: "v3.0" },
+  "apex_ai_score": { required: false, type: "float", domain: "apex", nullable: true, version_introduced: "v3.0" },
+  "apex_ai_summary": { required: false, type: "str", domain: "apex", nullable: true, version_introduced: "v3.0" },
+};
+
+const SCHEMA_DOMAINS = [...new Set(Object.values(SCHEMA_REGISTRY).map(f => f.domain))];
+const SCHEMA_DEPRECATED_FIELDS = Object.entries(SCHEMA_REGISTRY).filter(([, v]) => v.deprecated).map(([k]) => k);
+
+// ---------------------------------------------------------------------------
 // COMMON RESPONSE HELPERS
 // ---------------------------------------------------------------------------
 function _json(data, status = 200) {
@@ -247,20 +415,21 @@ async function _loadKvFeed(env) {
 // HANDLER: Schema Registry
 // ---------------------------------------------------------------------------
 export async function handleP38SchemaRegistry(request, env) {
-  const DOMAIN_STATS = {};
-  const FIELD_COUNT = 153;
-  const deprecated = ['cves','epss_score','actor','corroboration_sources','confidence_score','grade_notes'];
-  const domains = ['identity','vulnerability','actor','confidence','ioc','detection','quality','risk','evidence','commercial','governance','campaign','apex'];
-  for (const d of domains) DOMAIN_STATS[d] = { fields: 0 };
-  return _json({
+  const full = new URL(request.url).searchParams.get('full') === 'true';
+  const base = {
     schema_version: 'p38.0',
-    total_fields:   FIELD_COUNT,
-    deprecated_fields: deprecated.length,
-    domains:        domains,
+    total_fields:   Object.keys(SCHEMA_REGISTRY).length,
+    deprecated_fields: SCHEMA_DEPRECATED_FIELDS.length,
+    domains:        SCHEMA_DOMAINS,
     schema_source:  'scripts/p38_shared_validators.py:SCHEMA_REGISTRY',
     note:           'Canonical schema registry is the Python SCHEMA_REGISTRY. This endpoint surfaces metadata for API consumers. Full field definitions available at /api/v1/p38/schema-registry?full=true (see p38_shared_validators.py).',
     governance:     { single_source_of_truth: 'scripts/p38_shared_validators.py', version_introduced: 'p38.0', backward_compatible: true },
-  });
+  };
+  if (!full) return _json(base);
+  // ?full=true — the full per-field registry, for cross-repo / external consumers
+  // that need the canonical schema contract without a shared code package
+  // (e.g. cyberdudebivash-blog validating intelligence objects it consumes).
+  return _json({ ...base, fields: SCHEMA_REGISTRY, deprecated_field_names: SCHEMA_DEPRECATED_FIELDS });
 }
 
 // ---------------------------------------------------------------------------
@@ -485,8 +654,8 @@ export async function handleP38Metrics(request, env) {
     enrichment_metrics: enrich,
     source_diversity:   { distinct: div.distinct, top_dom_pct: div.top_dominance_pct },
     governance_surface: {
-      schema_fields:     153,
-      deprecated_fields: 6,
+      schema_fields:     Object.keys(SCHEMA_REGISTRY).length,
+      deprecated_fields: SCHEMA_DEPRECATED_FIELDS.length,
       feed_variants:     12,
       p_layers:          22,
       api_routes:        209,
