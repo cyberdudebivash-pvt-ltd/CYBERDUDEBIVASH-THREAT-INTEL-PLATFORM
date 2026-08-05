@@ -52,6 +52,8 @@ REQUIRED_ADRS = [
     "0009-source-reliability-ownership.md",
     "0010-relationship-graph-ownership.md",
     "0011-evidence-lifecycle-ownership.md",
+    "0012-api-versioning-interface-governance.md",
+    "0013-typescript-rc1-disposition.md",
 ]
 
 REQUIRED_GOVERNANCE_DOCS = [
@@ -60,6 +62,9 @@ REQUIRED_GOVERNANCE_DOCS = [
     "TITAN_OWNERSHIP_MATRIX.md",
     "TITAN_STAGE6_VALIDATION.md",
     "ARCHITECTURE_DECISIONS.md",
+    "TITAN_STAGE7_VALIDATION.md",
+    "TITAN_INTERFACE_REGISTRY.md",
+    "TITAN_TECH_DEBT_REGISTER.md",
 ]
 
 # file -> function/property names ADR-0007/0008/0009 cite as "Existing Implementations".
@@ -203,7 +208,7 @@ def main() -> None:
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     if not all_findings:
-        print("Clean: all 5 ADRs present, all cited references resolve, no unreviewed "
+        print(f"Clean: all {len(REQUIRED_ADRS)} ADRs present, all cited references resolve, no unreviewed "
               "confidence/evidence/reliability functions found, ownership matrix in sync.")
         sys.exit(0)
 
