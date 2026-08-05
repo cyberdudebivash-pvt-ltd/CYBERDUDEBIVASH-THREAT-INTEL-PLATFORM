@@ -426,7 +426,7 @@ export async function handleP38SchemaRegistry(request, env) {
     governance:     { single_source_of_truth: 'scripts/p38_shared_validators.py', version_introduced: 'p38.0', backward_compatible: true },
   };
   if (!full) return _json(base);
-  // ?full=true — the full per-field registry, for cross-repo / external consumers
+  // ?full=true  -  the full per-field registry, for cross-repo / external consumers
   // that need the canonical schema contract without a shared code package
   // (e.g. cyberdudebivash-blog validating intelligence objects it consumes).
   return _json({ ...base, fields: SCHEMA_REGISTRY, deprecated_field_names: SCHEMA_DEPRECATED_FIELDS });
