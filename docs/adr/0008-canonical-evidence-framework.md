@@ -1,7 +1,8 @@
 # ADR-0008: Canonical Evidence Framework
 
 **Date:** 2026-08-05
-**Status:** Proposed — pending executive/architecture-review approval. Not Accepted.
+**Status:** Proposed — **REVISED 2026-08-05 (Stage 7), see "Revision" section — a new blocking
+finding (E9–E12) must be resolved before this ADR can be Accepted.** Not Accepted.
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
 Architect, Intelligence Engineering (P-layer stack owner), Blog/EIOS Engineering
 **Program:** Project TITAN, Stage 6
@@ -199,6 +200,39 @@ Phase 4 ships successfully.
   versioning) remains unbuilt. This ADR only fixes what a canonical Evidence record looks like;
   building the registry that manages many of them is `TITAN_IMPLEMENTATION_READINESS.md`'s
   concern, assessed separately.
+
+---
+
+## Revision — 2026-08-05, Stage 7
+
+**New candidates, blog repository, very likely live** (`TITAN_STAGE7_VALIDATION.md` §2A):
+
+| ID | System | Verified export | Computes |
+|---|---|---|---|
+| E9 | `evidence-manager.js` | `EvidenceManager.addEvidence()` | Typed evidence records (12 types: article/threat_report/ioc/malware/file/hash/pcap/url/domain/screenshot/external_reference/detection_rule/note) stored in Redis against an "investigation" |
+| E10 | `evidence-validator.js` | `EvidenceValidator.validateFinding()` | Checks a finding for required statement/evidence/reasoning/assumptions/limitations fields |
+| E11 | `evidence-conflict-engine.js` | `EvidenceConflictEngine.detectConflicts()` | Attribution/timeline/motive/tactical/victimology/scope conflict detection across an investigation |
+| E12 | `evidence-traceability-engine.js` | `EvidenceTraceabilityEngine.ensureTraceability()` | Traces product statements back to findings/IOCs/sources, computes traced-vs-orphaned coverage % |
+
+Routed via `api/v1/analysis/{assessments,findings}.js`, `api/v1/workbench/{investigations,
+cases}.js` (per the reachability trace). E9's `EVIDENCE_TYPES` enum is a real identity/typing
+scheme this ADR's Integrity field group (Decision item 1) does not currently account for.
+
+**This is a more sophisticated, more complete evidence *lifecycle* system (creation,
+validation, conflict detection, traceability) than E1 (P20's `evidence_chain`) currently has**,
+even though E1 remains the more consumed implementation *within the P-layer stack specifically*.
+E9–E12 appear to serve an "investigation/case" grain (an analyst working a case, assembling
+evidence toward findings) rather than E1's "single intelligence item" grain — these may be
+genuinely different, complementary levels (an investigation aggregates many items' evidence)
+rather than directly-competing implementations of the same thing, but **this ADR's original
+Decision did not have this system in view when concluding E1 should be canonical**, and that
+gap must be closed before Accepted status, not assumed away.
+
+**Same blocking-approval status as ADR-0007's revision.** This ADR should not be Accepted until
+a human reviewer confirms E9–E12's live status and either (a) designates them a distinct,
+complementary "Investigation Evidence" capability outside this ADR's "Intelligence Item
+Evidence" scope with its own future ADR, or (b) determines they should be reconciled with E1
+directly. Not decided here.
 
 ---
 
