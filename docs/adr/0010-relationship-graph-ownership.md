@@ -1,9 +1,11 @@
 # ADR-0010: Relationship Graph Ownership
 
 **Date:** 2026-08-05
-**Status:** Proposed — **REVISED 2026-08-05 (Stage 7), see "Revision" section — the fragmentation
-this ADR addresses grew from 2 implementations to 5; the original R1-vs-R2 recommendation may
-no longer be correct. Highest-priority open question in this document set.** Not Accepted.
+**Status:** Proposed — Revised twice. Stage 7 found the fragmentation grew from 2 to 5 candidate
+implementations; Stage 8's live verification narrowed it back to 3 live ones (R1, R3, R4) and
+found R1-vs-R3 is a same-repository, same-team conflict — see "Revision 2." **Original Decision
+(R1 target-canonical) stands and is ready for human Acceptance review; R1-vs-R3 reconciliation
+is flagged as the highest-priority follow-up implementation work.** Not Accepted yet.
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
 Architect, Intelligence Engineering (P31 owner), Blog/EIOS Engineering (`knowledge_graph.py`
 owner)
@@ -221,6 +223,33 @@ outside this stage's authority to resolve unilaterally:
 
 This is the single highest-priority open question this entire two-stage program has produced —
 see `TITAN_TECH_DEBT_REGISTER.md`'s new top entry.
+
+---
+
+## Revision 2 — 2026-08-05, Stage 8 (partially resolves Revision 1, redirects priority)
+
+Direct HTTP verification (`TITAN_STAGE8_VERIFICATION_REPORT.md`, `TITAN_AR000_RESOLUTION.md`):
+
+- **R5** (`graph-engine.js`/`graph-traversal.js`/`relationship-engine.js`/`correlation-engine.js`)
+  is **not deployed** — its only consumers (`api/v1/intelligence/{graph,correlations}.js`,
+  `api/v1/workbench/*`) return Vercel's platform-level `NOT_FOUND`. Removed from serious
+  contention as an R1 alternative; the "R5 already has persistence" argument no longer carries
+  practical weight since R5 has no live consumer regardless.
+- **R3** (`api-extensions.js`'s `handleIntelGraph`/`handleIntelRelations`, reading
+  `data/ai/intel_graph.json`) is **confirmed live** (HTTP 403, tier-gated — a real, working
+  route, not dead code).
+- **R4** (blog `api/_lib/threat-graph.js`) is **reconfirmed live**, unchanged from Stage 7.
+
+**The fragmentation is real but smaller than Revision 1 stated: three live implementations
+(R1, R3, R4), not five.** More importantly, this narrows the priority target: **R1 and R3 are
+both intel-platform-owned, both live, both answering "give me the relationship graph" for the
+same feed data, right now, in the same repository.** This is fully within this program's
+authority to reconcile without waiting on a cross-repo negotiation with blog engineering (R2,
+R4). Recommended: **resolve R1-vs-R3 first**, independent of and ahead of the broader
+R1-vs-R2/R4 cross-repo question, as the highest-confidence, lowest-friction fragmentation fix
+available to a future implementation stage. This ADR's original Decision (R1 target-canonical,
+contingent on persistence) is not contradicted by this finding — R3 competing with R1 is an
+argument for converging faster, not for choosing differently.
 
 ---
 

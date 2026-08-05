@@ -1,8 +1,8 @@
 # ADR-0007: Canonical Confidence Framework
 
 **Date:** 2026-08-05
-**Status:** Proposed — **REVISED 2026-08-05 (Stage 7), see "Revision" section — a new blocking
-finding (A10) must be resolved before this ADR can be Accepted.** Not Accepted. No
+**Status:** Proposed — Revised twice (Stage 7 raised a blocker re: A10's live status; Stage 8
+resolved it — see "Revision 2"). **Ready for human Acceptance review.** Not Accepted yet. No
 implementation may begin against this decision until it is explicitly approved (see
 "Approval" at the end of this document).
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
@@ -286,6 +286,16 @@ Reviewers evaluating this ADR's Approval checklist below should treat A10 as a b
 open item, not a footnote.
 
 ---
+
+## Revision 2 — 2026-08-05, Stage 8 (resolves Revision 1's blocker)
+
+Direct HTTP verification (`TITAN_STAGE8_VERIFICATION_REPORT.md`) confirms A10
+(`api/v1/intelligence/confidence.js`) returns Vercel's platform-level `NOT_FOUND` — it is not
+deployed, not reachable, not a production competitor to A1. Full evidence in
+`TITAN_AR000_RESOLUTION.md`. **A10 is reclassified from "blocking open question" to "excluded,
+zero production consumers" — the same basis as A8/A9.** This ADR's Decision stands as
+originally written and is ready for human Acceptance review; the blocking status Revision 1
+imposed is lifted.
 
 ## Approval
 

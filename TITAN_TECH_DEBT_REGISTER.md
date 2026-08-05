@@ -12,17 +12,40 @@ on it, not strictly by discovery date.
 
 ## CRITICAL
 
-### DEBT-000 — Undocumented, very-likely-live second CTI platform in the blog repository (`api/v1/{intelligence,workbench,analysis,customer}/*`), contradicting the blog's own CLAUDE.md
+### DEBT-000 / AR-000 — RESOLVED (downgraded from Critical to Low) — second CTI platform surface in the blog repo confirmed NOT live
+
+**Status: Resolved 2026-08-05, Stage 8.** Originally raised in Stage 7 as "undocumented,
+very-likely-live second CTI platform." Renamed AR-000 by Stage 8's task framing. Direct HTTP
+verification against production (`TITAN_STAGE8_VERIFICATION_REPORT.md`,
+`TITAN_AR000_RESOLUTION.md`) found 21 of the 22 flagged routes return Vercel's platform-level
+`NOT_FOUND`, byte-identical to a deliberately-nonexistent baseline path — **not deployed, not
+reachable, not a production competitor to the canonical confidence/evidence/relationship
+systems.** Only `api/v1/newsletter.js` is confirmed live, and it is an unrelated, low-stakes
+email-signup endpoint.
 
 | Field | Value |
 |---|---|
-| Severity | Critical — highest-priority item in this register, ranked above DEBT-001, because unlike `lib/` (confirmed dormant) this system is very likely receiving real production traffic today with zero architectural governance |
-| Risk | ~22 live-or-very-likely-live Vercel routes (`api/v1/intelligence/{confidence,correlations,graph,objects,publish,similarity}.js`, `api/v1/workbench/{cases,dashboard,investigations,search}.js`, `api/v1/analysis/{assessments,findings}.js`, `api/v1/customer/{dashboard,download}.js`, `api/v1/detections/rules{,/[id]}.js`, `api/v1/ioc/{search,[id]}.js`, `api/v1/products/*`, `api/v1/quality/index.js`, `api/v1/newsletter.js`, `api/v1/reports/index.js`) call a substantial, sophisticated `api/_lib/` engine cluster (confidence scoring, evidence management, conflict detection, traceability, source reliability learning, a 34-entity/31-relationship-type graph engine, quality gates, RBAC/governance) that computes confidence/evidence/reliability/relationship data for the same domain (CVEs, threat articles) ADR-0007–0010 govern — discovered only because this stage happened to trace an import graph and then double-checked `vercel.json`'s actual semantics, not because anything in either repository's documentation pointed at it. Directly violates blog's own CLAUDE.md: "DO NOT duplicate Sentinel APEX functionality on the blog," "intel.cyberdudebivash.com... Customer-facing API portal" (singular, exclusive). See `TITAN_STAGE7_VALIDATION.md` §2A for full evidence |
-| Owner | **Unknown.** No ADR, architecture document, or ownership record anywhere in either repository names an owner for this system. Whoever built it left extensive, professional-quality inline documentation (worked examples, clear purpose comments) but no architectural trace |
-| Affected Systems | ~30 `api/v1/*.js` route files, ~18+ `api/_lib/*.js` engine files, Redis (data store), and by extension every one of this program's Stage 6 ADRs (0007–0010), all now carrying an explicit blocking Revision pending this item's resolution |
-| Blocking Status | **Blocking ADR-0007, ADR-0008, ADR-0009, and ADR-0010's approval** — none can be responsibly Accepted while this system's live status and relationship to the already-decided canonical systems is unconfirmed |
-| Recommended Resolution | Immediate (not implementation, verification): someone with Vercel dashboard/CLI access confirms whether these 22 routes are actually receiving traffic. If live: a dedicated, higher-priority-than-normal ADR process (beyond this program's existing five) to decide this system's relationship to P25/P20/P18/P31 — possibly as a legitimately separate "Investigation Workbench" product tier requiring its own governance rather than a violation to unwind, possibly the reverse. Not determined by this stage — genuinely requires human judgment on product strategy, not just architecture |
-| Implementation Priority | **Highest in this register.** No code changes recommended until the verification step above happens — this is a "stop and find out what's actually running in production" item, not a "here's the fix" item |
+| Severity | **Downgraded: Critical → Low.** The blocking fear (live, undocumented, traffic-serving duplicate architecture) did not materialize. What remains is documentation hygiene, not an active risk |
+| Risk (residual) | Repository contains ~21 files' worth of substantially-engineered, unreachable code overlapping confidence/evidence/relationship territory. Low risk today (nothing calls it); moderate risk if someone later makes it reachable (a Vercel config change, a new route file re-exposing it) without first checking this register |
+| Owner | Still unknown — the code's existence is unexplained (WIP never promoted? config accident? something else?). Recommended: blog engineering confirms via Vercel dashboard/build logs per `TITAN_AR000_RESOLUTION.md`'s three candidate explanations, none confirmable from outside |
+| Affected Systems | `api/v1/{intelligence,workbench,analysis,customer,products,quality,reports,detections,ioc}/*` (21 files), the `api/_lib/` engine cluster they alone import |
+| Blocking Status | **No longer blocking.** ADR-0007, ADR-0008, ADR-0009 all carry a Stage 8 "Revision 2" marking them ready for human Acceptance review |
+| Recommended Resolution | Due-diligence follow-up, not urgent: confirm root cause via Vercel dashboard access; either wire the code up properly with its own ADR, or archive it with a correction note (same pattern as ADR-0013 for `lib/`) |
+| Implementation Priority | Low — downgraded from Highest. See DEBT-000B below for the one genuinely new high-priority item this verification pass produced |
+
+### DEBT-000B — R1 vs. R3: two live, independently-computed relationship graphs in the same intel-platform repository
+
+| Field | Value |
+|---|---|
+| Severity | **Critical** — the highest-priority actionable item this register now contains, promoted here specifically because AR-000's resolution freed up attention for it |
+| Risk | `p31-handlers.js` (`_buildGraph`, rebuilt per-request) and `api-extensions.js`'s `handleIntelGraph`/`handleIntelRelations` (reads a separately-generated `data/ai/intel_graph.json` snapshot from R2) are **both confirmed live** (`/api/v1/p31/graph` → 402; `/api/v1/intel/graph` → 403 — both real, tier-gated, working routes), in the **same repository, same team, same Worker**, answering the same "what's related to this item" question from two different, uncoordinated code paths and data sources |
+| Owner | Intelligence Engineering (owns both — this is the same team failing to coordinate with itself, not a cross-team or cross-repo issue) |
+| Affected Systems | `p31-handlers.js`, `api-extensions.js`, whatever pipeline produces `data/ai/intel_graph.json` (still unidentified — see DEBT-013) |
+| Blocking Status | Blocking ADR-0010's full resolution (Revision 2 names this explicitly) — but unlike the cross-repo R1-vs-R2/R4 question, this one requires no negotiation with another team, only internal prioritization |
+| Recommended Resolution | Identify the `data/ai/intel_graph.json` producer (DEBT-013) first, then converge `handleIntelGraph`/`handleIntelRelations` to call P31 directly (or vice versa) rather than maintaining two data paths |
+| Implementation Priority | **Highest actionable item in this register** — same-repo, same-team, no external dependency, clear technical path once the producer is identified |
+
+### DEBT-001 — `lib/` RC1 initiative: disposition undecided |
 
 ### DEBT-001 — `lib/` RC1 initiative: disposition undecided
 
@@ -186,7 +209,14 @@ migration.
 | Recommended Resolution | Dimension-by-dimension comparison against A1 (P25)'s twelve dimensions; replace matches with reads from A1, keep any genuinely novel dimension (e.g., "Detection Confidence" from `detection_bundle` format coverage has no obvious A1 equivalent and may be legitimately new) |
 | Implementation Priority | Medium — not scheduled in `TITAN_MIGRATION_ROADMAP.md`'s six phases; candidate for Stage 7+ planning once someone does the dimension-by-dimension read |
 
-### DEBT-013 — Four-way relationship-graph fragmentation (extends beyond what ADR-0010 originally scoped)
+### DEBT-013 — Relationship-graph fragmentation (superseded in part by DEBT-000B; `intel_graph.json` producer still unidentified)
+
+**Update, Stage 8:** Live verification confirmed 3 of the 4 candidates named here are actually
+live (P31, `api-extensions.js`'s R2-snapshot reader, blog's `threat-graph.js`); the 4th
+(blog's Python `KnowledgeGraph`) has no HTTP surface to verify (pipeline-internal, as
+originally noted). The same-repository P31-vs-`api-extensions.js` conflict is now tracked as
+**DEBT-000B** (promoted to Critical, since it's the most actionable). This entry remains open
+specifically for the still-unidentified `data/ai/intel_graph.json` producer.
 
 | Field | Value |
 |---|---|
@@ -198,17 +228,35 @@ migration.
 | Recommended Resolution | Identify the `data/ai/intel_graph.json` producer first (prerequisite to any further action); then converge `handleIntelGraph`/`handleIntelRelations` onto P31 once persisted, per ADR-0010 |
 | Implementation Priority | High — same-repository, same-team fragmentation is lower-friction to fix than cross-repo fragmentation and should not wait behind the cross-repo pieces |
 
-### DEBT-014 — Two TAXII path prefixes, unknown external-partner split
+### DEBT-014 — Two TAXII path prefixes, both confirmed live, unknown external-partner split
+
+**Update, Stage 8:** Live-verified. `/taxii/` → HTTP 200 (public, no auth). `/api/taxii/` → HTTP
+403 (exists, tier-gated, distinct behavior — not a dead duplicate). This is not "one path might
+be dead code" as Stage 7 left it; it's **two genuinely different, differently-gated live
+surfaces**, which makes the "which one do partners actually use" question more important, not
+less, since they may not be interchangeable.
 
 | Field | Value |
 |---|---|
 | Severity | Medium-High (external-partner-facing, wrong action risks breaking real integrations) |
-| Risk | `/taxii/*` (documented in `index.js`'s own header comment, "TAXII 2.1 server discovery") and `/api/taxii/*` (`enterprise-endpoints.js`, wired via `routeEnterpriseEndpoint`) both exist and both appear live. No document found this stage states which is the one external TAXII/STIX partners are actually told to integrate against |
+| Risk | `/taxii/*` (public discovery tier) and `/api/taxii/*` (`enterprise-endpoints.js`, tier-gated 403) are both confirmed live with **different access levels**, not equivalent paths. No document found this stage states which one external TAXII/STIX partners are actually told to integrate against, or whether `/api/taxii/*` is meant to be a superset (more data, paid tier) rather than a duplicate |
 | Owner | Intelligence Engineering, Partner/Customer-facing documentation owner (whoever publishes API docs to TAXII partners — not identified this stage) |
 | Affected Systems | `index.js`, `enterprise-endpoints.js` |
 | Blocking Status | Not blocking any ADR, but blocking a confident answer in the Interface Registry's "which TAXII path is canonical" question |
-| Recommended Resolution | Check partner-facing documentation/onboarding materials (outside this codebase, not searched this stage) to determine actual external usage before choosing a canonical path; do not guess |
-| Implementation Priority | Medium — real risk, but no evidence yet that both paths are actually diverging in behavior (they may be equivalent today), so not urgent as long as neither is changed without checking first |
+| Recommended Resolution | Check partner-facing documentation/onboarding materials (outside this codebase, not searched this stage) to determine actual external usage and whether the two paths are intentionally differentiated by tier (in which case this may not be "fragmentation" at all, just an undocumented product tier) |
+| Implementation Priority | Medium — confirmed both live and distinctly gated, so no immediate action-forcing risk, but the documentation gap should close before it causes partner confusion |
+
+### DEBT-015 — No discoverable monitoring/alerting/structured-logging story for any verified live route, including canonical ones
+
+| Field | Value |
+|---|---|
+| Severity | Medium — not urgent (nothing is observed broken), but real: this platform cannot currently say with confidence whether any given route silently started failing |
+| Risk | Found while live-verifying routes for Phase 4 (Stage 8): `/api/health` and per-P-layer `/observability` endpoints exist as monitoring *targets*, but no in-repo evidence of anything polling/alerting on them, and no structured request logging was found for any tested route, canonical or not (P25's trust-score included) |
+| Owner | Platform SRE |
+| Affected Systems | All verified-live routes, both repos |
+| Blocking Status | Not blocking any ADR — orthogonal concern |
+| Recommended Resolution | Confirm whether monitoring exists outside the repository (a third-party APM, Cloudflare Analytics, Vercel Analytics dashboard) before assuming a gap exists — this register only reflects what's discoverable from repository contents, and monitoring infra often lives entirely outside the codebase |
+| Implementation Priority | Medium — worth a quick confirmation, not worth engineering effort until confirmed absent |
 
 ## Register maintenance
 
