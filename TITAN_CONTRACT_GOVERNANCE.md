@@ -1,10 +1,20 @@
-# Project TITAN — Contract Governance Specification (Task 6)
+# Project TITAN — Contract Governance Specification (Task 6, Stage 7; partially implemented Stage 8)
 
-**Status:** Design specification only. Per this stage's explicit instruction ("No production
-changes yet"), nothing in this document is implemented — unlike Stage 6's Task 6, which shipped
-one small advisory script, this document contains no code and wires nothing into CI. It
-specifies what a future implementation should do, sequenced as Stage 8+ candidate work
-(`TITAN_STAGE8_PLAN.md`).
+**Status:** Written as design-only in Stage 7 ("No production changes yet" was that stage's
+explicit instruction). Stage 8's Phase 10 implemented three of the items below, extending
+`scripts/titan_architecture_governance_check.py` in place rather than creating new scripts —
+exactly the Priority-ordering recommendation this document made. Updated inline below rather
+than left stale; original Stage 7 text otherwise unchanged.
+
+**Implemented, Stage 8:** #4 (API Drift Detection, narrow form — route-documentation drift
+between `index.js`'s header comment and its actual route registrations) and a new item this
+document didn't originally name: a standing guard on the Phase 9 Evidence Registry
+scaffolding's authorization boundary (production-import check + feature-flag-default check),
+plus a best-effort, network-optional live regression check against the specific routes
+Stage 8's AR-000 verification depended on. **Still not implemented:** #1 (general Schema
+Validation), #2/#3 (Version Compatibility / Breaking Change Detection), #5 (general
+Documentation Drift beyond routes), #6 (Interface Completeness linting of the registry's own
+tables).
 
 ---
 

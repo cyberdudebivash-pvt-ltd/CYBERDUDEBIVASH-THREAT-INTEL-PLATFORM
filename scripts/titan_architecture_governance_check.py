@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 scripts/titan_architecture_governance_check.py
-Project TITAN Stage 6 — Architecture Governance Drift Check (advisory)
+Project TITAN Stage 6-8 — Architecture Governance Drift Check (advisory)
 
 Stage 6 produced five canonical-ownership ADRs (docs/adr/0007-0011) after finding that
 prior stages' discovery had real, non-hypothetical blind spots: TITAN_STAGE6_VALIDATION.md
@@ -12,23 +12,29 @@ mode in both cases was the same: a new confidence/evidence-shaped function or a 
 artifact went missing or was added without anyone checking it against the ownership decisions
 already on record.
 
-This script does not detect everything Stage 6 Task 6 asked for (schema drift and deprecated-
-interface detection are not implemented here — see TITAN_CI_GOVERNANCE.md's recommendations
-for the larger set this is a first slice of). It checks four narrow, concrete things that are
-cheap to check and were each a real finding this stage:
+Stage 7 added ADR-0012/0013 to the tracked set. Stage 8 (Phase 10) added three more checks
+after live production verification found that a documented route ("previously unreachable —
+now wired") had drifted from its own header comment once before, and that the Phase 9 Evidence
+Registry scaffolding needs a standing guard against being wired into production ahead of its
+authorization. See TITAN_AR000_RESOLUTION.md and TITAN_EVIDENCE_REGISTRY_AUTHORIZATION.md.
 
-  1. Do the five ADRs (docs/adr/0007-0011.md) and the discovery/governance docs they depend
-     on still exist? (documentation-deletion / broken-reference drift)
+Checks, in order:
+
+  1. Do the tracked ADRs and the discovery/governance docs they depend on still exist?
   2. Do the specific functions each ADR names as "Existing Implementations" still exist at
-     their cited locations? (broken architectural reference — an ADR citing a function that
-     has since been renamed or removed is exactly the "governance docs wrong, not just stale"
-     failure this program has hit before)
+     their cited locations?
   3. Do any *new* top-level functions in the P-layer handlers match a confidence/evidence/
      reliability-shaped name that ISN'T already accounted for in the ADRs' inventories?
-     (possible new, un-reviewed implementation — the thing this whole program exists to catch
-     before it becomes a sixth disagreeing scorer)
-  4. Does the ownership matrix (TITAN_OWNERSHIP_MATRIX.md) still exist and still list all
-     five ADRs?
+  4. Does the ownership matrix still exist and still list every tracked ADR?
+  5. (Stage 8) Does index.js's own header-comment route list still match a real route
+     registration in the file? (route/documentation drift — the exact failure mode
+     enterprise-endpoints.js already had once, per its own "previously unreachable" comment)
+  6. (Stage 8) Has the Phase 9 Evidence Registry scaffolding been wired into any production
+     file, or has its feature flag been flipped on, ahead of ADR-0008 Acceptance?
+  7. (Stage 8) Best-effort, network-optional: do the confirmed-live and confirmed-dead
+     blog routes from the AR-000 verification still match their last-known state? Skipped
+     silently (not a finding) if network access is unavailable — this check exists to catch
+     regression, not to require CI to have external network access.
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -40,6 +46,8 @@ from __future__ import annotations
 
 import re
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -199,17 +207,138 @@ def check_ownership_matrix() -> list[str]:
     return findings
 
 
+# Routes documented in index.js's own header comment (the "Routes (all v184.0 routes
+# preserved):" block). Hand-maintained here for the same reason CITED_REFERENCES is
+# hand-maintained: parsing the comment block itself would be more fragile than keeping
+# a short list in sync, and this list changes rarely. If a route below is removed from
+# the header comment, this check should be updated in the same PR — that's the point.
+DOCUMENTED_CORE_ROUTES = [
+    "/api/health",
+    "/api/v1/ioc/lookup",
+    "/api/preview",
+    "/api/feed",
+    "/taxii/",
+    "/api/admin/health",
+    "/api/admin/audit",
+    "/api/admin/keys",
+]
+
+
+def check_route_documentation_drift() -> list[str]:
+    findings = []
+    index_js = HANDLERS_DIR / "index.js"
+    if not index_js.exists():
+        return findings
+    text = index_js.read_text(encoding="utf-8", errors="replace")
+    for route in DOCUMENTED_CORE_ROUTES:
+        # Accept either an exact match or a startsWith-style prefix match, since some
+        # routes are matched via path.startsWith(...) rather than path === "...".
+        needle = route.rstrip("/")
+        if needle not in text and route not in text:
+            findings.append(
+                f"ROUTE DOCUMENTATION DRIFT: index.js's header comment documents '{route}' "
+                f"but no matching route registration string was found in the file. Either the "
+                f"route was removed (update the header comment) or renamed (same). This is the "
+                f"exact failure mode enterprise-endpoints.js already hit once — see its own "
+                f"'previously unreachable — now wired via routeEnterpriseEndpoint' comment."
+            )
+    return findings
+
+
+def check_evidence_registry_scaffolding_boundary() -> list[str]:
+    findings = []
+    scaffold_dir = HANDLERS_DIR / "evidence-registry"
+    if not scaffold_dir.exists():
+        return findings  # scaffolding not present yet — nothing to guard
+
+    # 1. Nothing outside evidence-registry/ may import from it yet.
+    for path in HANDLERS_DIR.rglob("*.js"):
+        if scaffold_dir in path.parents or path.parent == scaffold_dir:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "evidence-registry" in text:
+            findings.append(
+                f"EVIDENCE REGISTRY BOUNDARY VIOLATION: {path.relative_to(ROOT)} references "
+                f"'evidence-registry' — this scaffolding is authorized (Stage 8) for isolated, "
+                f"unimported existence only. See TITAN_EVIDENCE_REGISTRY_AUTHORIZATION.md — "
+                f"wiring it into production requires ADR-0008 Acceptance first."
+            )
+
+    # 2. The feature flag must still default to false.
+    flags_file = scaffold_dir / "feature-flags.js"
+    if flags_file.exists():
+        flags_text = flags_file.read_text(encoding="utf-8", errors="replace")
+        if "SCAFFOLDING_ENABLED: false" not in flags_text:
+            findings.append(
+                "EVIDENCE REGISTRY BOUNDARY VIOLATION: feature-flags.js's SCAFFOLDING_ENABLED "
+                "no longer defaults to false. Flipping this ahead of ADR-0008 Acceptance is "
+                "exactly what the Stage 8 authorization's Risk Assessment flagged as the "
+                "scenario to guard against."
+            )
+    return findings
+
+
+# (domain, path, expected_status_family) — a small, deliberately narrow sample from
+# TITAN_STAGE8_VERIFICATION_REPORT.md's live-verification table. "family" is one of
+# "not_found" (Vercel platform 404 expected) or "live" (any non-404 expected — the
+# exact code may legitimately vary with auth/tier state, only 404-vs-not matters here).
+AR000_REGRESSION_SAMPLE = [
+    ("https://blog.cyberdudebivash.in", "/api/v1/intelligence/confidence", "not_found"),
+    ("https://blog.cyberdudebivash.in", "/api/v1/newsletter", "live"),
+    ("https://intel.cyberdudebivash.com", "/api/health", "live"),
+]
+
+
+def check_ar000_regression() -> list[str]:
+    findings = []
+    for domain, path, expected in AR000_REGRESSION_SAMPLE:
+        url = domain + path
+        try:
+            req = urllib.request.Request(url, method="GET", headers={"User-Agent": "titan-governance-check/1.0"})
+            try:
+                resp = urllib.request.urlopen(req, timeout=8)
+                status = resp.status
+            except urllib.error.HTTPError as e:
+                status = e.code
+        except Exception:
+            # Network unavailable in this CI environment, DNS blocked, timeout, etc.
+            # Not a finding — this check is best-effort by design, see module docstring.
+            continue
+
+        is_not_found = (status == 404)
+        if expected == "not_found" and not is_not_found:
+            findings.append(
+                f"AR-000 REGRESSION: {url} was confirmed NOT deployed (404) in "
+                f"TITAN_STAGE8_VERIFICATION_REPORT.md but now returns HTTP {status}. If this "
+                f"route has been deployed, ADR-0007/0008/0009/0010's Stage 8 Revision 2 "
+                f"resolution needs re-examination — this route was the basis for un-blocking them."
+            )
+        elif expected == "live" and is_not_found:
+            findings.append(
+                f"AR-000 REGRESSION: {url} was confirmed live in "
+                f"TITAN_STAGE8_VERIFICATION_REPORT.md but now returns HTTP 404. Investigate "
+                f"whether this is an intentional deprecation (should be documented per the "
+                f"Deprecation Instead of Deletion policy) or an unintended outage."
+            )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
     all_findings += check_cited_references_exist()
     all_findings += check_for_unreviewed_new_scorers()
     all_findings += check_ownership_matrix()
+    all_findings += check_route_documentation_drift()
+    all_findings += check_evidence_registry_scaffolding_boundary()
+    all_findings += check_ar000_regression()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     if not all_findings:
         print(f"Clean: all {len(REQUIRED_ADRS)} ADRs present, all cited references resolve, no unreviewed "
-              "confidence/evidence/reliability functions found, ownership matrix in sync.")
+              "confidence/evidence/reliability functions found, ownership matrix in sync, "
+              "documented routes still registered, Evidence Registry scaffolding boundary intact, "
+              "no AR-000 regression detected (or network unavailable to check).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")

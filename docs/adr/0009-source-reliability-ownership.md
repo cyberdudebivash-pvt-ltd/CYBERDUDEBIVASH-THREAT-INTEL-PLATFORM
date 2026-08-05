@@ -1,8 +1,9 @@
 # ADR-0009: Source Reliability Ownership
 
 **Date:** 2026-08-05
-**Status:** Proposed — **REVISED 2026-08-05 (Stage 7), see "Revision" section — a new blocking
-finding (S6) must be resolved before this ADR can be Accepted.** Not Accepted.
+**Status:** Proposed — Revised twice (Stage 7 raised a blocker re: S6's live status; Stage 8
+resolved it — see "Revision 2"). **Ready for human Acceptance review** (the F→E mapping
+question remains open and needs explicit sign-off regardless). Not Accepted yet.
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
 Architect, Intelligence Engineering (P18/P20 owner)
 **Program:** Project TITAN, Stage 6
@@ -204,6 +205,17 @@ section above, which this revision extends rather than restates.
 live status and a human decision on whether it should feed the canonical S1, remain a
 blog-specific signal, or be evaluated as a replacement mechanism for S1's currently-static
 grading.
+
+---
+
+## Revision 2 — 2026-08-05, Stage 8 (resolves Revision 1's blocker)
+
+Direct HTTP verification confirms S6 (`source-reliability-engine.js`, reached only via the
+unreachable `api/v1/analysis/*`/`api/v1/workbench/*` surface) is not deployed — same Vercel
+platform-level `NOT_FOUND` evidence as ADR-0007/0008. Full detail: `TITAN_AR000_RESOLUTION.md`.
+**Reclassified from "blocking open question" to "excluded, zero production consumers."** This
+ADR's Decision stands as originally written and is ready for human Acceptance review. The
+F→E mapping question below remains open on its own merits, unrelated to S6's live status.
 
 ---
 
