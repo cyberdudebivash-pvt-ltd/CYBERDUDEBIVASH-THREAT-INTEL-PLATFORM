@@ -18,6 +18,12 @@ now wired") had drifted from its own header comment once before, and that the Ph
 Registry scaffolding needs a standing guard against being wired into production ahead of its
 authorization. See TITAN_AR000_RESOLUTION.md and TITAN_EVIDENCE_REGISTRY_AUTHORIZATION.md.
 
+Stage 9 Phase 1 added three more checks after graph-discovery found the true count of
+graph/relationship-shaped implementations was far larger than ADR-0010 tracked (two new
+same-repo implementations — R6, R7 — plus 16 long-tail files under agent/ and scripts/ that no
+prior stage had catalogued at all). See TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md and
+ADR-0010 Revision 3.
+
 Checks, in order:
 
   1. Do the tracked ADRs and the discovery/governance docs they depend on still exist?
@@ -35,6 +41,15 @@ Checks, in order:
      blog routes from the AR-000 verification still match their last-known state? Skipped
      silently (not a finding) if network access is unavailable — this check exists to catch
      regression, not to require CI to have external network access.
+  8. (Stage 9 Phase 1) Do any *new* Python files under core/, agent/, scripts/, or
+     sentinel-apex-api/ have a graph/relationship/correlation-shaped name that ISN'T already
+     accounted for in the graph candidate matrix?
+  9. (Stage 9 Phase 1) Is the traced R3 producer chain (enrichment_graph.py ->
+     core/orchestrator.py's R2AIExportStage -> Cloudflare R2 storage -> api-extensions.js)
+     still intact at the two reference points ADR-0010 Revision 3 cites? (Does NOT check
+     whether the chain actually executes anywhere — that remains DEBT-017, open.)
+  10. (Stage 9 Phase 1) Does ADR-0010 still mention every tracked graph-implementation ID
+      (R1-R7)?
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -323,6 +338,138 @@ def check_ar000_regression() -> list[str]:
     return findings
 
 
+# ---------------------------------------------------------------------------------------
+# Stage 9 Phase 1 additions — graph-implementation drift detection.
+# See TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md and ADR-0010 Revision 3: graph discovery
+# found the true count of graph/relationship-shaped implementations (R1-R7, plus 16 files
+# under agent/ and scripts/ not previously catalogued at all) far larger than ADR-0010 tracked
+# before this stage. These checks exist so the *next* one is caught at discovery time.
+# ---------------------------------------------------------------------------------------
+
+GRAPH_PYTHON_SCAN_DIRS = [
+    ROOT / "core",
+    ROOT / "agent",
+    ROOT / "scripts",
+    ROOT / "sentinel-apex-api",
+]
+
+# Every graph-related Python file known as of Stage 9 Phase 1 (ADR-0010 R6/R7 plus the
+# long-tail characterized in TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md Task 1C — 9
+# confirmed production, 6 confirmed dormant, 1 confirmed paused; runtime status does not
+# affect allowlist membership, only *discovery* completeness does). A match below that ISN'T
+# in this set is what check_for_unreviewed_graph_files() flags — mirrors
+# check_for_unreviewed_new_scorers()'s existing design for the JS side. Known incomplete: the
+# source file behind "ocios_campaign_correlation_engine" (evidenced only by
+# data/ocios/campaign_graph.json's own self-identification) was not located as of this
+# writing — deliberately NOT allowlisted, so a future scan that finds it is a useful signal,
+# not a false positive to suppress.
+KNOWN_GRAPH_PYTHON_FILES = {
+    "core/intelligence/enrichment_graph.py",                    # R6 (ADR-0010 Revision 3)
+    "core/correlation/threat_correlator.py",                    # reviewed — not a graph data structure, allowlisted to avoid false positive
+    "sentinel-apex-api/app/api/v1/endpoints/intel_graph.py",    # R7 (ADR-0010 Revision 3)
+    "agent/graph/graph_intel.py",                                # Dormant
+    "agent/graph_operations_engine.py",                          # Dormant
+    "agent/graph_integrity_validator.py",                        # Production (zombie-pipeline reader — DEBT-020)
+    "agent/graph_correlation_engine.py",                         # Production (zombie-pipeline writer — DEBT-020)
+    "agent/threat_graph/graph_engine.py",                        # Production
+    "agent/threat_graph_engine.py",                              # Dormant
+    "agent/v44_threat_graph/graph_models.py",                    # Dormant/Archived
+    "agent/v44_threat_graph/threat_graph_engine.py",             # Dormant/Archived
+    "scripts/adversary_graph_engine.py",                         # Production, schedule paused since 2026-07-29
+    "scripts/graph_integrity_validator.py",                      # Production (distinct code from the agent/ file of the same name)
+    "scripts/graph_intelligence_validator.py",                   # Dormant
+    "scripts/graph_intelligence_engine.py",                      # Dormant
+    "scripts/intelligence_knowledge_graph.py",                   # Production, possible silent no-op (continue-on-error, no observed output)
+    "scripts/omega_ioc_graph_layer.py",                          # Production
+    "scripts/persistent_campaign_graph_engine.py",               # Production
+    "scripts/threat_graph_engine.py",                            # Production — feeds live /api/graph/* endpoints
+    "scripts/ocios_campaign_correlation_engine.py",               # Production — imported by 3 sibling ocios_*.py scripts; was the "17th implementation" this check found on first run
+}
+
+# Deliberately NOT allowlisted: this first run of check_for_unreviewed_graph_files() also
+# surfaced agent/threat_graph/correlation_engine.py, agent/v70_apex_upgrade/engines/
+# correlation_engine.py, agent/v26/ioc_correlation.py, scripts/cve_correlation_engine.py, and
+# scripts/adversary_correlation_engine.py — none characterized as of this writing. Leaving
+# them un-allowlisted is intentional: the finding is accurate (they have not been reviewed
+# against ADR-0010's candidate matrix), and allowlisting them without doing that review would
+# be exactly the premature, undocumented closure this program exists to prevent. They will
+# keep appearing in this check's output until someone characterizes them and either adds them
+# here or records a disposition in TITAN_TECH_DEBT_REGISTER.md.
+
+GRAPH_NAME_PATTERN = re.compile(r"graph|relationship|correlat", re.IGNORECASE)
+
+
+def check_for_unreviewed_graph_files() -> list[str]:
+    findings = []
+    for scan_dir in GRAPH_PYTHON_SCAN_DIRS:
+        if not scan_dir.exists():
+            continue
+        for path in scan_dir.rglob("*.py"):
+            if "tests" in path.parts or path.name.startswith("test_") or path.name == "__init__.py":
+                continue  # test files and package markers reviewed separately
+            if GRAPH_NAME_PATTERN.search(path.stem):
+                rel = path.relative_to(ROOT).as_posix()
+                if rel not in KNOWN_GRAPH_PYTHON_FILES:
+                    findings.append(
+                        f"POSSIBLE NEW GRAPH IMPLEMENTATION: {rel} has a graph/relationship/"
+                        f"correlation-shaped name and is not in this script's known-implementations "
+                        f"allowlist. Review against ADR-0010's candidate matrix "
+                        f"(TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md Task 6) before this becomes "
+                        f"another uncatalogued fragmentation point."
+                    )
+    return findings
+
+
+def check_r3_producer_chain_intact() -> list[str]:
+    """Confirms the R3 producer chain traced in ADR-0010 Revision 3 (enrichment_graph.py ->
+    core/orchestrator.py's R2AIExportStage -> Cloudflare R2 storage -> api-extensions.js)
+    hasn't silently changed shape. Does NOT confirm the chain executes anywhere in production
+    (that remains DEBT-017, open) — only that the traced code path itself is intact, so a
+    future change to it is caught rather than silently invalidating the discovery report's
+    trace."""
+    findings = []
+    orchestrator = ROOT / "core" / "orchestrator.py"
+    if orchestrator.exists():
+        text = orchestrator.read_text(encoding="utf-8", errors="replace")
+        if "R2AIExportStage" not in text:
+            findings.append(
+                "GRAPH PRODUCER CHAIN DRIFT: core/orchestrator.py no longer references "
+                "R2AIExportStage. TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md Task 4 and "
+                "ADR-0010 Revision 3 trace R3's data through this exact reference — if it's been "
+                "removed or renamed, that trace is now stale and DEBT-013/DEBT-017 need review."
+            )
+    api_extensions = HANDLERS_DIR / "api-extensions.js"
+    if api_extensions.exists():
+        text = api_extensions.read_text(encoding="utf-8", errors="replace")
+        if "intel_graph.json" not in text:
+            findings.append(
+                "GRAPH PRODUCER CHAIN DRIFT: api-extensions.js no longer references "
+                "'intel_graph.json'. R3's consumer side of the traced producer chain "
+                "(ADR-0010 Revision 3) may have changed — review DEBT-013's resolution notes."
+            )
+    return findings
+
+
+def check_adr0010_graph_ids_present() -> list[str]:
+    """Confirms ADR-0010 still documents each graph-implementation ID this program has
+    catalogued (R1-R7 as of Revision 3), so a future edit that drops an ID isn't silently
+    lost."""
+    findings = []
+    adr = ADR_DIR / "0010-relationship-graph-ownership.md"
+    if not adr.exists():
+        return findings  # already reported by check_docs_exist
+    text = adr.read_text(encoding="utf-8", errors="replace")
+    for graph_id in ("R1", "R2", "R3", "R4", "R5", "R6", "R7"):
+        if graph_id not in text:
+            findings.append(
+                f"ADR-0010 DRIFT: docs/adr/0010-relationship-graph-ownership.md no longer "
+                f"mentions graph-implementation ID '{graph_id}', tracked as of Stage 9 Phase 1's "
+                f"candidate matrix. If this ID was intentionally retired, document why here; if "
+                f"it was accidentally dropped, restore it."
+            )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -332,13 +479,18 @@ def main() -> None:
     all_findings += check_route_documentation_drift()
     all_findings += check_evidence_registry_scaffolding_boundary()
     all_findings += check_ar000_regression()
+    all_findings += check_for_unreviewed_graph_files()
+    all_findings += check_r3_producer_chain_intact()
+    all_findings += check_adr0010_graph_ids_present()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     if not all_findings:
         print(f"Clean: all {len(REQUIRED_ADRS)} ADRs present, all cited references resolve, no unreviewed "
               "confidence/evidence/reliability functions found, ownership matrix in sync, "
               "documented routes still registered, Evidence Registry scaffolding boundary intact, "
-              "no AR-000 regression detected (or network unavailable to check).")
+              "no AR-000 regression detected (or network unavailable to check), no unreviewed "
+              "graph/relationship/correlation-shaped Python files found, R3's producer chain "
+              "intact, ADR-0010's tracked graph IDs (R1-R7) all present.")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")

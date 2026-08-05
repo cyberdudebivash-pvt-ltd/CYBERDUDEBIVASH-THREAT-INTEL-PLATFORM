@@ -33,17 +33,26 @@ email-signup endpoint.
 | Recommended Resolution | Due-diligence follow-up, not urgent: confirm root cause via Vercel dashboard access; either wire the code up properly with its own ADR, or archive it with a correction note (same pattern as ADR-0013 for `lib/`) |
 | Implementation Priority | Low — downgraded from Highest. See DEBT-000B below for the one genuinely new high-priority item this verification pass produced |
 
-### DEBT-000B — R1 vs. R3: two live, independently-computed relationship graphs in the same intel-platform repository
+### DEBT-000B — R1 vs. R6 (retitled Stage 9 Phase 1, was "R1 vs. R3"): two live-or-live-adjacent, independently-computed relationship graphs in the same intel-platform repository
+
+**Update, Stage 9 Phase 1:** Retitled from "R1 vs. R3" — DEBT-013's producer trace found R3
+(`api-extensions.js`) is a thin reader with no independent graph-computation logic of its own;
+the actual second implementation competing with P31/R1 is **R6**
+(`core/intelligence/enrichment_graph.py`), which R3 merely exposes via a Cloudflare R2 storage
+snapshot. The reconciliation question this item tracks is unchanged in spirit (two
+same-repository, same-team, uncoordinated "what's related to this" computations) but the
+technical target moves from "converge two JS files" to "decide R1 vs. a substantially more
+capable Python engine, and resolve whether that engine even runs in production" — see DEBT-017.
 
 | Field | Value |
 |---|---|
 | Severity | **Critical** — the highest-priority actionable item this register now contains, promoted here specifically because AR-000's resolution freed up attention for it |
-| Risk | `p31-handlers.js` (`_buildGraph`, rebuilt per-request) and `api-extensions.js`'s `handleIntelGraph`/`handleIntelRelations` (reads a separately-generated `data/ai/intel_graph.json` snapshot from R2) are **both confirmed live** (`/api/v1/p31/graph` → 402; `/api/v1/intel/graph` → 403 — both real, tier-gated, working routes), in the **same repository, same team, same Worker**, answering the same "what's related to this item" question from two different, uncoordinated code paths and data sources |
+| Risk | `p31-handlers.js` (`_buildGraph`, rebuilt per-request, no persistence) and `core/intelligence/enrichment_graph.py` (`IOCEnrichmentGraph` — persisted, OSINT-enriched, STIX-exporting, functionally more capable than P31) are **both real implementations in the same repository, same team**, answering the same "what's related to this item" question from two different, uncoordinated code paths. R6's output reaches customers via R3 (`/api/v1/intel/graph` → 403, confirmed live, tier-gated) — but R6's own production execution is unconfirmed (DEBT-017), so the "two live graphs" framing needs that caveat: P31 is confirmed live end-to-end, R6's live-ness is confirmed only up to "code exists and would work," not "definitely executes on a schedule" |
 | Owner | Intelligence Engineering (owns both — this is the same team failing to coordinate with itself, not a cross-team or cross-repo issue) |
-| Affected Systems | `p31-handlers.js`, `api-extensions.js`, whatever pipeline produces `data/ai/intel_graph.json` (still unidentified — see DEBT-013) |
-| Blocking Status | Blocking ADR-0010's full resolution (Revision 2 names this explicitly) — but unlike the cross-repo R1-vs-R2/R4 question, this one requires no negotiation with another team, only internal prioritization |
-| Recommended Resolution | Identify the `data/ai/intel_graph.json` producer (DEBT-013) first, then converge `handleIntelGraph`/`handleIntelRelations` to call P31 directly (or vice versa) rather than maintaining two data paths |
-| Implementation Priority | **Highest actionable item in this register** — same-repo, same-team, no external dependency, clear technical path once the producer is identified |
+| Affected Systems | `p31-handlers.js`, `api-extensions.js`, `core/intelligence/enrichment_graph.py`, `core/orchestrator.py`, `core/pipeline/stages.py` |
+| Blocking Status | Blocking ADR-0010's full resolution (Revision 3 names this explicitly) — but unlike the cross-repo R1-vs-R2/R4 question, this one requires no negotiation with another team, only internal prioritization |
+| Recommended Resolution | Resolve DEBT-017 first (confirm R6's actual execution status); then make an explicit R1-vs-R6 call — either adopt R6 as R1's long-sought persistence layer (it already exports a Worker-compatible snapshot shape) or formally deprecate R6 in favor of building persistence natively into R1, rather than leaving both running uncoordinated |
+| Implementation Priority | **Highest actionable item in this register** — same-repo, same-team, no external dependency, but the DEBT-017 prerequisite must close first or any decision here risks being made on stale assumptions about what actually runs |
 
 ### DEBT-001 — `lib/` RC1 initiative: disposition undecided |
 
@@ -209,7 +218,7 @@ migration.
 | Recommended Resolution | Dimension-by-dimension comparison against A1 (P25)'s twelve dimensions; replace matches with reads from A1, keep any genuinely novel dimension (e.g., "Detection Confidence" from `detection_bundle` format coverage has no obvious A1 equivalent and may be legitimately new) |
 | Implementation Priority | Medium — not scheduled in `TITAN_MIGRATION_ROADMAP.md`'s six phases; candidate for Stage 7+ planning once someone does the dimension-by-dimension read |
 
-### DEBT-013 — Relationship-graph fragmentation (superseded in part by DEBT-000B; `intel_graph.json` producer still unidentified)
+### DEBT-013 — Relationship-graph fragmentation (superseded in part by DEBT-000B; `intel_graph.json` producer now identified, execution trigger unconfirmed)
 
 **Update, Stage 8:** Live verification confirmed 3 of the 4 candidates named here are actually
 live (P31, `api-extensions.js`'s R2-snapshot reader, blog's `threat-graph.js`); the 4th
@@ -218,14 +227,27 @@ originally noted). The same-repository P31-vs-`api-extensions.js` conflict is no
 **DEBT-000B** (promoted to Critical, since it's the most actionable). This entry remains open
 specifically for the still-unidentified `data/ai/intel_graph.json` producer.
 
+**Update, Stage 9 Phase 1:** Producer identified with high confidence by tracing actual
+execution paths, not comments: `core/intelligence/enrichment_graph.py` (`IOCEnrichmentGraph`,
+newly catalogued as ADR-0010 R6 — not the blog's `KnowledgeGraph` at all, correcting a factual
+error in ADR-0010 Revision 2) → `core/orchestrator.py`'s `R2AIExportStage` → Cloudflare R2
+storage, key `data/ai/intel_graph.json` → `api-extensions.js`. See
+`TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md` Task 4 and ADR-0010 Revision 3 for the full
+trace. **This does not fully close the item**: no `.github/workflows/*.yml` file was found to
+invoke `core/orchestrator.py`, so while the producer's *identity* is now certain, its
+*execution* in production is not — tracked separately as DEBT-017 given the distinct
+commercial-risk shape (a live, tier-gated, paying-customer route with unconfirmed data
+freshness). DEBT-000B is retitled below to reflect the corrected target (R1-vs-R6, not
+R1-vs-R3 — R3 is a thin, non-computing reader over R6's output).
+
 | Field | Value |
 |---|---|
 | Severity | High (found Stage 7 — ADR-0010, written Stage 6, only compared 2 of these 4) |
-| Risk | P31 (`p31-handlers.js`, per-request-built, intel-platform), blog's Python `KnowledgeGraph`, blog's live `api/_lib/threat-graph.js` (Vercel, real actor data per `platform/open-issues.md` Issue 15), and intel-platform's own `api-extensions.js` `handleIntelGraph`/`handleIntelRelations` (reads a separately-generated `data/ai/intel_graph.json` snapshot from R2) are four independent relationship-graph data sources. The last one is the most concerning: it is **inside the same repository and the same Worker** as P31 yet reads an entirely different, separately-generated data source for what a customer would reasonably assume is "the" intelligence graph |
-| Owner | Intelligence Engineering (P31 + `api-extensions.js` owner — same team, two uncoordinated implementations) |
-| Affected Systems | `p31-handlers.js`, `api-extensions.js`, `api/_lib/threat-graph.js` (blog), `knowledge_graph.py` (blog), whatever pipeline produces `data/ai/intel_graph.json` (unidentified this stage) |
-| Blocking Status | Blocking ADR-0010's full resolution — the ADR as revised this stage names P31 as target-canonical, but cannot address the `intel_graph.json` source until its producing pipeline is identified |
-| Recommended Resolution | Identify the `data/ai/intel_graph.json` producer first (prerequisite to any further action); then converge `handleIntelGraph`/`handleIntelRelations` onto P31 once persisted, per ADR-0010 |
+| Risk | P31 (`p31-handlers.js`, per-request-built, intel-platform), blog's Python `KnowledgeGraph`, blog's live `api/_lib/threat-graph.js` (Vercel, real actor data per `platform/open-issues.md` Issue 15), and intel-platform's own `api-extensions.js` `handleIntelGraph`/`handleIntelRelations` (reads a snapshot of R6, `core/intelligence/enrichment_graph.py`, exported via Cloudflare R2 storage) are four independent relationship-graph data sources. The most concerning is still R6 vs. P31: both **inside the same repository and the same Worker deployment surface**, uncoordinated |
+| Owner | Intelligence Engineering (P31 + `enrichment_graph.py`/`core/orchestrator.py` owner — same team, two uncoordinated implementations) |
+| Affected Systems | `p31-handlers.js`, `api-extensions.js`, `core/intelligence/enrichment_graph.py`, `core/orchestrator.py`, `core/pipeline/stages.py` (`R2AIExportStage`), `api/_lib/threat-graph.js` (blog), `knowledge_graph.py` (blog) |
+| Blocking Status | Blocking ADR-0010's full resolution — Revision 3 (Stage 9 Phase 1) corrects the producer identity but does not resolve R1-vs-R6 ownership |
+| Recommended Resolution | Resolve DEBT-017 (confirm whether `core/orchestrator.py` runs anywhere) before treating R6's output as trustworthy input to any migration decision; then converge `handleIntelGraph`/`handleIntelRelations` onto P31 (or adopt R6 as P31's persistence layer — an option Stage 9 Phase 1 surfaced but did not decide) per ADR-0010 |
 | Implementation Priority | High — same-repository, same-team fragmentation is lower-friction to fix than cross-repo fragmentation and should not wait behind the cross-repo pieces |
 
 ### DEBT-014 — Two TAXII path prefixes, both confirmed live, unknown external-partner split
@@ -257,6 +279,97 @@ less, since they may not be interchangeable.
 | Blocking Status | Not blocking any ADR — orthogonal concern |
 | Recommended Resolution | Confirm whether monitoring exists outside the repository (a third-party APM, Cloudflare Analytics, Vercel Analytics dashboard) before assuming a gap exists — this register only reflects what's discoverable from repository contents, and monitoring infra often lives entirely outside the codebase |
 | Implementation Priority | Medium — worth a quick confirmation, not worth engineering effort until confirmed absent |
+
+### DEBT-016 — `sentinel-apex-api`: a substantial, uncatalogued parallel backend with a non-functional deploy path
+
+*Found Stage 9 Phase 1.*
+
+| Field | Value |
+|---|---|
+| Severity | **Critical** — the largest single new-ungoverned-surface finding this stage, same category as DEBT-001's `lib/` tree: real, substantial engineering investment (auth system, Supabase schema migration, 11 API routers, test suite, three deployment configs) that no prior TITAN stage found |
+| Risk | A separate FastAPI application implementing its own auth, its own graph computation (ADR-0010 R7), SIEM dispatch, MSSP multi-tenancy, and compliance endpoints — entirely disconnected from the Cloudflare Worker and the Python ingestion pipeline. Its Railway-deploy CI workflow is misplaced (`sentinel-apex-api/.github/workflows/sentinel-apex-api`, nested inside the subdirectory and missing the `.yml` extension — GitHub Actions never discovers it), so it has likely never auto-deployed. `app.cyberdudebivash.com` (the domain its own CORS config names) failed to connect in a direct probe. A future engineer could reasonably assume this is either live (Fortune-500-grade code) or safe to delete (never deploys) — both assumptions are currently unverifiable from repository contents alone |
+| Owner | Unassigned — requires a human product/architecture decision on intent, same as DEBT-001 |
+| Affected Systems | `sentinel-apex-api/` (entire subtree) |
+| Blocking Status | Not blocking any currently-Proposed ADR directly, but blocking ADR-0010 from being called complete (R7 is now a named candidate — see ADR-0010 Revision 3) |
+| Recommended Resolution | Architecture-review decision, same three options DEBT-001 already established: (a) fix the CI placement and finish deploying it as real product surface; (b) formally shelve with a "Status: Shelved" notice; (c) delete after confirming zero external dependency on `app.cyberdudebivash.com` ever having been live. This register does not recommend which |
+| Implementation Priority | High — not for code changes yet, but the decision itself, since every month undecided increases the chance someone builds on it (or deletes it) by mistake |
+
+### DEBT-017 — R6's production execution is unconfirmed, feeding a live, tier-gated, paying-customer route
+
+*Found Stage 9 Phase 1, split out from DEBT-013 for its distinct commercial-risk shape.*
+
+| Field | Value |
+|---|---|
+| Severity | **High** — not proven broken, but a real gap in confidence about data freshness on a route customers are paying tier-gated access to use |
+| Risk | R3 (`api-extensions.js`'s `handleIntelGraph`/`handleIntelRelations`, confirmed live at `/api/v1/intel/graph` → 403) serves data written by R6 (`core/intelligence/enrichment_graph.py`) via `core/orchestrator.py`'s `R2AIExportStage`. No `.github/workflows/*.yml` file was found to invoke `core/orchestrator.py` — a precise search distinguishing real invocations from the many workflow files that merely contain the English word "orchestrator" in their own names/descriptions (`master-deployment-orchestrator.yml`, `revenue-orchestrator.yml`, etc.) confirmed zero real invocations. The confirmed-live master pipeline (`scripts/run_pipeline.py`) does not import `core.orchestrator` either. If this chain genuinely never runs, ENTERPRISE/MSSP-tier customers hitting this route may be served a stale, one-time, or manually-generated snapshot indefinitely without any indication of staleness |
+| Owner | Intelligence Engineering (R6/`core/orchestrator.py` owner) |
+| Affected Systems | `core/orchestrator.py`, `core/pipeline/stages.py`, `core/intelligence/enrichment_graph.py`, `api-extensions.js` |
+| Blocking Status | Blocking confident resolution of DEBT-000B/DEBT-013 — any decision to adopt R6 as R1's persistence layer must first confirm R6 actually runs |
+| Recommended Resolution | Engineering confirmation: does anything outside this repository (a separate scheduler, a manual runbook, a one-time backfill) invoke `core/orchestrator.py`? If not, either wire it into a real schedule or treat R3's current data as a known-stale snapshot until it is |
+| Implementation Priority | High — commercial-trust-adjacent, same category as DEBT-015 but for a specific tier-gated route rather than general observability |
+
+### DEBT-018 — Long-tail graph-file sprawl under `agent/` and `scripts/` (16 files, fully characterized)
+
+*Found and closed out Stage 9 Phase 1.*
+
+**Update, Stage 9 Phase 1 (same session):** Full per-file characterization complete — see
+`TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md` Task 1C. Result: **9 of 16 are genuinely
+production (imported and/or scheduled), 6 are complete-but-dormant (zero importers, zero CI),
+1 is paused-since-2026-07-29.** No literal duplicates found, but four separate files
+independently implement "build a threat graph from advisories" without any awareness of each
+other — a coordination failure distinct from (and in addition to) DEBT-000B/DEBT-013's R1-vs-R6
+question. One of the 9 "production" files (`scripts/intelligence_knowledge_graph.py`) is
+scheduled with `continue-on-error: true` and shows no observed output — a possible silent
+no-op. Two of the 9 (`agent/graph_correlation_engine.py` writing,
+`agent/graph_integrity_validator.py` reading, both 6x/day scheduled) form the write/validate
+loop now tracked separately as **DEBT-020** given its distinct severity. A 17th implementation
+(`ocios_campaign_correlation_engine`, source: `scripts/ocios_campaign_correlation_engine.py`)
+was located and characterized this same session — real, documented, imported by 3 sibling
+`ocios_*` scripts. **That resolution immediately surfaced 5 more previously-uncatalogued files**
+via the same mechanism (the new CI governance check, run for the first time), none of which
+have been characterized: `agent/threat_graph/correlation_engine.py`,
+`agent/v70_apex_upgrade/engines/correlation_engine.py`, `agent/v26/ioc_correlation.py`,
+`scripts/cve_correlation_engine.py`, `scripts/adversary_correlation_engine.py`. Deliberately
+left off the governance check's allowlist so they continue to surface as findings rather than
+being assumed benign.
+
+| Field | Value |
+|---|---|
+| Severity | **High** — not because any single file is individually dangerous, but because 9 confirmed-live, uncoordinated graph implementations (on top of R1/R6/R3) is a materially larger fragmentation surface than ADR-0010 has ever been scoped to address |
+| Risk | Four independent, non-communicating "build a threat graph" engines (`agent/threat_graph/graph_engine.py`, `agent/threat_graph_engine.py` [dormant], `scripts/threat_graph_engine.py`, `agent/v44_threat_graph/threat_graph_engine.py` [dormant]) exist because nobody could see the others existed — the exact failure mode this entire TITAN program exists to close, now found one layer deeper than R1-R7 |
+| Owner | Intelligence Engineering (spans multiple named sub-owners per file — see the discovery report's Task 1C table for specifics) |
+| Affected Systems | `agent/graph/`, `agent/graph_operations_engine.py`, `agent/graph_integrity_validator.py`, `agent/graph_correlation_engine.py`, `agent/threat_graph/`, `agent/threat_graph_engine.py`, `agent/v44_threat_graph/`, `scripts/adversary_graph_engine.py`, `scripts/graph_integrity_validator.py`, `scripts/graph_intelligence_validator.py`, `scripts/graph_intelligence_engine.py`, `scripts/intelligence_knowledge_graph.py`, `scripts/omega_ioc_graph_layer.py`, `scripts/persistent_campaign_graph_engine.py`, `scripts/threat_graph_engine.py` |
+| Blocking Status | Blocking ADR-0010 from being called a complete picture of the platform's graph landscape — the ADR's R1-R7 taxonomy does not yet incorporate any of these 16 |
+| Recommended Resolution | Not decided this stage (no ownership decisions per Task 6's explicit instruction). Candidate next step: extend ADR-0010's candidate matrix formally to include the 9 confirmed-production long-tail files before any Phase 4 work, since several (`scripts/threat_graph_engine.py` especially, which feeds a live customer-facing API) may need explicit canonical/legacy dispositions of their own, not just a footnote |
+| Implementation Priority | High — discovery is now complete for this item; the remaining work is an ownership/architecture decision, which is explicitly out of Phase 1's scope (see Task 7's BLOCKED determination) |
+
+### DEBT-019 — ADR-0010's R2 (`knowledge_graph.py`) characterized as a live pipeline; evidence supports manual-only execution
+
+*Found Stage 9 Phase 1.*
+
+| Field | Value |
+|---|---|
+| Severity | Medium — documentation/ADR-accuracy item, not an active production risk (the underlying code is correct and tested) |
+| Risk | ADR-0010's Existing Implementations table lists R2's consumer as "Report generation pipeline," reading as active automation. Direct tracing this stage found `KnowledgeGraph()` is constructed only via manual `cli.py run`/`score` invocation and the repository's own test suite; `intelligence-engine-ci.yml` (the only blog workflow referencing `sentinel_engine`) runs only `pytest` and a compile check, never real ingestion; the repository's actual high-frequency auto-publish automation (`ai-security-intel.yml`) does not reference `sentinel_engine` at all. `platform/open-issues.md` Issue 9 independently confirms this in the repository's own words |
+| Owner | Blog/EIOS Engineering (`knowledge_graph.py`/`cli.py` owner) |
+| Affected Systems | `Sentinel-APEX/engine/sentinel_engine/knowledge_graph.py`, `cli.py`, `pipeline.py`, `report_ingest.py` |
+| Blocking Status | Not blocking any code change — informs migration-urgency judgment only (a manually-run tool has a different deprecation posture than a live pipeline) |
+| Recommended Resolution | Either schedule real ingestion (closing the gap `report_ingest.py`/GIKEP-GTIEP v1 already narrowed for hand-authored reports) or correct ADR-0010's "Report generation pipeline" framing to "manually-invoked tool" — a decision for whoever owns R2's roadmap, not decided by this register |
+| Implementation Priority | Low-Medium — accuracy fix, not schedule-critical |
+
+### DEBT-020 — "Zombie pipeline": scheduled, CI-wired graph scripts report clean while their data flow appears to have never worked
+
+*Found Stage 9 Phase 1, split out from DEBT-018 for its distinct severity.*
+
+| Field | Value |
+|---|---|
+| Severity | **Critical** — this is a materially worse failure mode than an undiscovered dormant file (DEBT-018's other findings): CI is actively green on a schedule for a data flow that, per this repository's own git history, has never once persisted its target output |
+| Risk | `agent/graph_correlation_engine.py` (writer, 6x/day cron, `enterprise-intel-quality.yml`) and `agent/graph_integrity_validator.py` (reader, 6x/day cron, `enterprise-observability.yml`) form a complete write/validate loop against `data/threat_graph/{graph_nodes,graph_edges}.json` — a path with **zero commits in this repository's entire git history.** The validator's own logic does not flag `nodes:0, edges:0` as anomalous, so every scheduled run reports a clean, structurally-valid result. `scripts/intelligence_knowledge_graph.py` (scheduled 4x/day, `continue-on-error: true`, no observed output) shows the same shape. This is a concrete instance of a risk this register had previously only described in the abstract (DEBT-015: "no discoverable monitoring/alerting story") — here, specific named jobs are demonstrably running green while accomplishing nothing observable, which is a stronger claim than "no monitoring exists" |
+| Owner | Intelligence Engineering (owner of `agent/graph_correlation_engine.py`, `agent/graph_integrity_validator.py`, `scripts/intelligence_knowledge_graph.py`) |
+| Affected Systems | `agent/graph_correlation_engine.py`, `agent/graph_integrity_validator.py`, `scripts/intelligence_knowledge_graph.py`, `.github/workflows/enterprise-intel-quality.yml`, `.github/workflows/enterprise-observability.yml`, `.github/workflows/generate-and-sync.yml` |
+| Blocking Status | Not blocking any ADR directly, but blocking confidence in this register's own DEBT-018 characterization of these files as "production" in any meaningful sense beyond "scheduled to execute" |
+| Recommended Resolution | Engineering investigation into root cause: is `data/threat_graph/` written but gitignored (real output, just untracked — lower severity, re-classify if confirmed)? Is the write silently failing (higher severity — the "zero-failure design" pattern noted in `agent/threat_graph_engine.py`'s docstring may be actively hiding real errors across this file family)? Is the path itself wrong on one side of the write/read pair? Do not assume an answer without checking — this register only states what was observed, not why |
+| Implementation Priority | **Critical** — resolving *why* CI is green here is a precondition for trusting any other "confirmed production" claim in this register that relies on scheduled-workflow evidence alone, not just this specific pipeline |
 
 ## Register maintenance
 
