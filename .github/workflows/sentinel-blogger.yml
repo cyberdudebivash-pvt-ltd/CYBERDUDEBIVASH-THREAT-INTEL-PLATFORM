@@ -3538,3 +3538,25 @@ jobs:
             echo "[PASS] Pipeline health terminal gate: PIPELINE_HEALTH=${PIPELINE_HEALTH:-HEALTHY}"
           fi
 
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.4 - PROJECT TITAN ARCHITECTURE GOVERNANCE CHECK (advisory)
+      # Added Project TITAN Stage 6, Task 6. CLAUDE.md's CI STAGE NUMBERING table
+      # names "STAGE 3.99" as next-available for future layers; that table itself
+      # predates STAGE 4.00-4.04/4.1/5.8.5/5.9-5.9.3 and is stale (see
+      # TITAN_TECH_DEBT_REGISTER.md DEBT-011) — this step uses the real next slot
+      # after the true last stage instead of the documented-but-wrong one.
+      # Checks docs/adr/0007-0011 and TITAN_OWNERSHIP_MATRIX.md against the live
+      # tree for broken references and un-reviewed new confidence/evidence/
+      # reliability-shaped functions. Non-blocking (continue-on-error + explicit
+      # exit 0) until proven stable across a few real drift cycles, matching the
+      # STAGE 4.04 schema-mirror-drift-check rollout precedent. `if: always()` so
+      # it still reports when STAGE 5.9.2's hard gate has already failed the job.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.4 - Project TITAN Architecture Governance Check (advisory)"
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          python3 scripts/titan_architecture_governance_check.py || true
+          exit 0
+
