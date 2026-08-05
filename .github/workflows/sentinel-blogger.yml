@@ -1198,6 +1198,21 @@ jobs:
       #   api/detections/cve_watchlist.csv   — CVE watchlist (CVSS/EPSS/KEV)
       #   api/detections/detection_pack.zip  — Bundled enterprise detection pack
       # Non-blocking: detection pack failure never fails the pipeline.
+      #
+      # ENGINEERING NOTE (2026-08-05): This run also executes 2 other independent
+      # Sigma/KQL/Suricata/YARA rule-generation implementations with zero shared
+      # code: generate_intel_reports.py's detection_engineering_orchestrator.py
+      # (subsystem #1, apex_real_detection_engine) and detection-engine.yml's
+      # v51_detection_engine.engine. detection_bundle_injector.py (STAGE 3.1.20
+      # above) has its own separate _sigma_rule/_kql_query/_suricata_rule
+      # functions too. Each writes to a different path with a confirmed distinct
+      # consumer (live api/v1_router.py, this pack's 3 HTML dashboards, or
+      # agent/detection_forge.py + core/detection/detection_engine.py) — real
+      # Single-Source-of-Truth duplication (Principle 3), but revenue-critical
+      # per detection_bundle_injector.py's own docstring and NOT safe to merge
+      # without the Architecture Preservation Rule's full Compatibility
+      # Assessment + Migration Plan and a product decision on which format is
+      # canonical. Flagged for a dedicated future review, not touched here.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.1.21 - Detection Pack Generator (v185.0 — enterprise suite)"
         timeout-minutes: 3
