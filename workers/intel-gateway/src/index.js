@@ -1440,7 +1440,12 @@ function buildAISummaryInline(feedData, stats) {
       title: i.title, risk_score: i.risk_score, source: i.source,
       cve_ids: i.cve_ids || [], kev_present: i.kev_present || false,
     })),
-    ai_confidence: 81, last_model_run: now(),
+    // Canonical unknown/no-model-run default (0-100 scale) -- see
+    // CONFIDENCE_FRAMEWORK_DISCOVERY.md Part A7. This fleet-wide summary has
+    // no dedicated confidence-fusion model behind it (unlike sentinel_ai_engine.py's
+    // per-item _compute_ai_risk_score), so it reports the same neutral default
+    // used elsewhere rather than a fabricated fixed figure.
+    ai_confidence: 50, last_model_run: now(),
   };
 }
 
