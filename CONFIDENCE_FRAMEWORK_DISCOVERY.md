@@ -106,27 +106,36 @@ already documented and enforced (fixed in `Sentinel-APEX/eios/sentinel-intellige
 §1 during this program's Stage 1). A future canonical confidence object should not re-invent a
 parallel severity scale.
 
-### A7. The `ai_confidence` sub-fragmentation (this repo)
+### A7. The `ai_confidence` sub-fragmentation (this repo) — **RESOLVED for the engineering-facing sites**
 
 Distinct from A1–A6: not one system, but **at least 8 independently-computed or independently-
 defaulted sites**, found by direct grep, each disagreeing on what an unknown item's default
-`ai_confidence` should be:
+`ai_confidence` should be. Verified by reading each site's actual surrounding code (not just the
+grep line), which corrected two things this table originally got wrong: `sentinel_ai_engine.py`
+and the second `ai_conf` computation in `apex_intelligence_upgrade.py` are genuine signal-fusion
+formulas (EPSS/KEV/CVSS/TTP-weighted), not bare fallback constants — left untouched, they're
+doing the right thing already. `apex_marketing_matrix.py`'s default was understated below; it's
+actually a hardcoded `99.9`, not "no default shown."
 
-| Site | Default / behavior when unknown |
-|---|---|
-| `p25-handlers.js:164` | No default — reads `confScore`, a pre-computed input |
-| `index.js:1443` | Hardcoded `81` |
-| `revenue-enforcement.js:828` | `item.confidence * 100`, else `50` |
-| `agent/sentinel_ai_engine.py` | Computed via `_compute_ai_risk_score`, no single default |
-| `agent/explainable_confidence_engine.py:569` | `advisory.get("ai_confidence") or advisory.get("confidence") or 30.0` |
-| `agent/apex_intelligence_upgrade.py:1580` | `item.get("ai_confidence") or item.get("confidence") or 21.3` |
-| `agent/ai_learning_engine.py:638` | `(ai_record or {}).get("ai_confidence") or 0.50` |
-| `agent/v30_apex/apex_marketing_matrix.py` | Reads an externally-supplied `confidence` var, no default shown |
+| Site | Default / behavior when unknown | Status |
+|---|---|---|
+| `p25-handlers.js:164` | No default — reads `confScore`, a pre-computed input | N/A, not a fallback site |
+| `index.js:1443` | Was hardcoded `81` (always, not even a real fallback) | **Fixed → 50** |
+| `revenue-enforcement.js:828` | `item.confidence * 100`, else `50` | Already canonical, tagged |
+| `agent/sentinel_ai_engine.py::_compute_ai_risk_score` | Genuine EPSS/KEV/CVSS/signal-weighted formula, 0–1 scale, no bare fallback | Correct as-is, untouched |
+| `agent/explainable_confidence_engine.py:569` | Was `30.0` | **Fixed → 50.0** |
+| `agent/apex_intelligence_upgrade.py:1580` | Was `21.3` (a *different*, genuine formula elsewhere in the same file, based at `28.0` + signal bonuses, was correctly left alone) | **Fixed → 50.0** |
+| `agent/ai_learning_engine.py:638` | `0.50` on this function's own documented 0–1 scale == 50 on the 0–100 scale used elsewhere | Already canonical (once scale-normalized), tagged |
+| `agent/v30_apex/apex_marketing_matrix.py:37` | Hardcoded `confidence_level` fallback of `99.9`, live in production via `.github/workflows/syndicate.yml` | **Deliberately excluded** — this is customer/marketing-facing copy ("APEX AI Confidence: 99.9%"), not an internal engineering field. Changing what confidence figure marketing materials claim is a commercial-messaging decision, not a pure engineering consolidation, and wasn't bundled into this pass. |
 
-Four different fallback defaults (81, 50, 30.0, 21.3, 0.50) for what is nominally the same field
-name. **This is the single clearest concrete argument for Stage 4's existence** — not the five
-well-structured systems above, which mostly *coexist* reasonably, but this kind of silent,
-undocumented disagreement about what "AI confidence" means when data is missing.
+Five distinct disagreeing values (81, 30.0, 21.3, 99.9, and 50/0.50 already agreeing with each
+other) for what is nominally the same field name — the clearest concrete argument for this
+stage's existence, more so than the five well-structured systems in Part A, which mostly
+*coexist* reasonably. The three genuinely-wrong engineering-facing constants (81, 30.0, 21.3) now
+read `50.0` (0–100 scale), matching the two sites that already agreed with each other. The
+marketing-copy default (99.9) is intentionally out of scope here; a business decision on that
+figure is a separate, explicit follow-on, not something to change silently under an engineering
+consolidation pass.
 
 ---
 

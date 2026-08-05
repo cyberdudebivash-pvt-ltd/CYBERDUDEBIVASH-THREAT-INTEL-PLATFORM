@@ -635,6 +635,11 @@ class ScoreAdjuster:
         base_risk    = float(
             (ai_record or {}).get("ai_risk_score") or entry.get("risk_score") or 0
         )
+        # 0.50 == 50 on this function's own documented 0-1 scale (see the
+        # docstring above: "adjusted_confidence: float (clamped 0-1)") --
+        # already equivalent to the canonical 0-100-scale unknown-confidence
+        # default (50) used elsewhere. See CONFIDENCE_FRAMEWORK_DISCOVERY.md
+        # Part A7. Kept as-is, tagged for discoverability.
         base_conf    = float((ai_record or {}).get("ai_confidence") or 0.50)
         base_exploit = float(
             (ai_record or {}).get("exploit_probability_pct") or
