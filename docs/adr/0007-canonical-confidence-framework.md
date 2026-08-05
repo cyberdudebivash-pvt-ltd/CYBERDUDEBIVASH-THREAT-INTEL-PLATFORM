@@ -1,7 +1,8 @@
 # ADR-0007: Canonical Confidence Framework
 
 **Date:** 2026-08-05
-**Status:** Proposed — pending executive/architecture-review approval. Not Accepted. No
+**Status:** Proposed — **REVISED 2026-08-05 (Stage 7), see "Revision" section — a new blocking
+finding (A10) must be resolved before this ADR can be Accepted.** Not Accepted. No
 implementation may begin against this decision until it is explicitly approved (see
 "Approval" at the end of this document).
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
@@ -242,6 +243,47 @@ rollback plan defined at that time.
   draft time as a decision aid, without removing analyst authorship.
 - The A–F (A2) vs. A–E (A18, per ADR-0009) letter-scale mismatch is out of this ADR's scope
   and is resolved in ADR-0009.
+
+---
+
+## Revision — 2026-08-05, Stage 7
+
+**A10 (new): `api/v1/intelligence/confidence.js` + `api/_lib/confidence-exposure.js` /
+`confidence-scorer.js` — blog repository, very likely live** (see
+`TITAN_STAGE7_VALIDATION.md` §2A for full evidence; confidence in "live" is high but not
+independently confirmed via traffic/dashboard access). Verified by reading the route's own
+header documentation: scores the same class of object (CVEs, threat articles) this ADR already
+governs, 5-dimension multidimensional score (source_reliability, evidence_quality,
+analyst_assessment, temporal_relevance, corroboration — different dimension names than A1's 12
+but substantial conceptual overlap), with a `governance` block (status/version/reviewed_by)
+suggesting a live publication-workflow system this ADR's discovery never catalogued either.
+
+**This is a materially different situation than A8 or A9.** A8 (`lib/governance`) and A9
+(P18's `computeTransparentConfidence`) were excluded from canonical candidacy on zero-consumer
+grounds — a fact, not a judgment call. A10 does not have zero consumers; if the "very likely
+live" assessment holds, it has a real, customer-facing, documented consumer this ADR's original
+Decision never weighed. **This ADR's Decision (A1/P25 as canonical) is not withdrawn, but it
+is no longer complete** — a canonical-confidence decision that doesn't account for the
+platform's actual customer-facing confidence API is not the decision Stage 6 believed it was
+making.
+
+**What this means for approval:** This ADR should **not** be Accepted as originally written.
+Before it can be, one of the following must happen, and is out of this stage's authority to
+decide unilaterally:
+1. Confirm A10 is *not* actually live (contradicts the routing-convention evidence above), in
+   which case the original Decision stands unmodified; or
+2. If A10 is live, the Decision must be extended to address it explicitly — either designating
+   A10 the canonical confidence API for blog-domain customer-facing responses specifically
+   (a Compatibility Adapter relationship to A1, mirroring how A3 was already treated) while A1
+   remains canonical for the P-layer stack's internal composite score, or reopening the
+   canonical-owner question entirely if A10's live customer traffic outweighs A1's internal
+   consumer count. **This stage does not make that call** — it is exactly the kind of decision
+   point this program's own rules require surfacing to a human rather than resolving by
+   assumption, and it is now the single most consequential open question this ADR set has
+   produced.
+
+Reviewers evaluating this ADR's Approval checklist below should treat A10 as a blocking
+open item, not a footnote.
 
 ---
 

@@ -1,7 +1,9 @@
 # ADR-0010: Relationship Graph Ownership
 
 **Date:** 2026-08-05
-**Status:** Proposed — pending executive/architecture-review approval. Not Accepted.
+**Status:** Proposed — **REVISED 2026-08-05 (Stage 7), see "Revision" section — the fragmentation
+this ADR addresses grew from 2 implementations to 5; the original R1-vs-R2 recommendation may
+no longer be correct. Highest-priority open question in this document set.** Not Accepted.
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
 Architect, Intelligence Engineering (P31 owner), Blog/EIOS Engineering (`knowledge_graph.py`
 owner)
@@ -175,6 +177,50 @@ Preservation Rule for architectural changes.
 - This ADR does not address relationship cycles, orphan detection, or other graph-validation
   rules — those are Stage 6 Phase 8 (Validation) concerns, tracked in
   `TITAN_CI_GOVERNANCE.md`, not decided here.
+
+---
+
+## Revision — 2026-08-05, Stage 7
+
+This ADR's original Decision compared 2 relationship-graph implementations. Stage 7 found 3
+more. Restated in full for clarity — this is now a **five-way** fragmentation:
+
+| ID | System | Repo | Persistence | Status this stage |
+|---|---|---|---|---|
+| R1 | `p31-handlers.js` `_buildGraph` | intel-platform | None (rebuilt per-request) | Original ADR-0010 subject, target-canonical |
+| R2 | `knowledge_graph.py` `KnowledgeGraph` | blog, Python | Persistent, JSON-backed | Original ADR-0010 subject |
+| **R3** | `api-extensions.js` `handleIntelGraph`/`handleIntelRelations` | intel-platform | Reads a separately-generated `data/ai/intel_graph.json` snapshot from R2 | Found this stage (§DEBT-013) — **same repository as R1, different data source, unreconciled** |
+| **R4** | `api/_lib/threat-graph.js` | blog, Vercel/JS | Unknown (Redis-adjacent, not independently confirmed) | Found this stage — confirmed live via `api/v1/intel.js` |
+| **R5** | `api/_lib/graph-engine.js` + `graph-traversal.js` + `relationship-engine.js` + `correlation-engine.js` | blog, Vercel/JS | Redis-backed (`GraphEngine` stores entities/relationships in Redis directly, per the reachability trace) | Found this stage, very likely live via `api/v1/intelligence/{graph,correlations}.js`, `api/v1/workbench/*` |
+
+R5 is, on paper, the most capable of all five: 34 named entity types, 31 named relationship
+types, Redis-backed persistence (a real advantage over R1's no-persistence and arguably a more
+production-grade choice than R2's flat JSON files), plus BFS traversal (`graph-traversal.js`)
+and correlation (`correlation-engine.js`) built on top of it. **If R5 is confirmed live, it is
+not obviously inferior to R1 as a persisted-graph target** — it already has the persistence
+property this ADR's original Decision named as R1's missing prerequisite (Decision item 2).
+
+**This ADR's Decision (R1 as target-canonical, contingent on persistence) is not withdrawn, but
+the contingency it was written around — "R1 lacks persistence, which R2 has" — is now a
+three-way comparison (R1 vs. R2 vs. R5) instead of two, and R5 already clears the bar R1 was
+being asked to clear.** This is the clearest case among all four revised ADRs where the new
+evidence could plausibly change the actual recommendation, not just add a footnote to it.
+
+**This ADR should not be Accepted as originally written.** Required before approval, all
+outside this stage's authority to resolve unilaterally:
+1. Confirm R5's live status and actual persistence characteristics (Redis TTL/durability
+   guarantees — not verified this stage).
+2. Identify what generates R3's `data/ai/intel_graph.json` (DEBT-013, still open).
+3. With R3 and R5 in view, re-decide whether R1 (intel-platform, no persistence, but
+   system-of-record precedent) or R5 (blog, persisted, but violates blog's own CLAUDE.md
+   "STRICT SEPARATION" rule by existing at all) should be the actual target — this is now a
+   genuine architectural trade-off between "correct precedent, missing property" and "wrong
+   location, has the property," not a clear-cut call this stage can make responsibly without
+   human input on how strictly the separation rule should bind against a system that may
+   already represent significant sunk engineering investment.
+
+This is the single highest-priority open question this entire two-stage program has produced —
+see `TITAN_TECH_DEBT_REGISTER.md`'s new top entry.
 
 ---
 
