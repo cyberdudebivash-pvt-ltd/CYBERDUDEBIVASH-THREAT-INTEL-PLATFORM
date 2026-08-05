@@ -1,5 +1,5 @@
 /**
- * Evidence entity validation — Phase 9 scaffolding (Project TITAN Stage 8).
+ * Evidence entity validation  -  Phase 9 scaffolding (Project TITAN Stage 8).
  * Not imported by index.js or any production route. See README.md.
  *
  * Pure validation functions, no I/O. Deliberately permissive on the Core fields

@@ -1,5 +1,5 @@
 /**
- * Evidence Registry feature flags — Phase 9 scaffolding (Project TITAN Stage 8).
+ * Evidence Registry feature flags  -  Phase 9 scaffolding (Project TITAN Stage 8).
  * Not imported by index.js or any production route. See README.md.
  *
  * Nothing reads these flags yet, because nothing is wired up yet. This file
