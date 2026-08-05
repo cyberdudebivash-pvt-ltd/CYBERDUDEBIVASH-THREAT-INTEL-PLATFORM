@@ -54,6 +54,20 @@ capable Python engine, and resolve whether that engine even runs in production" 
 | Recommended Resolution | Resolve DEBT-017 first (confirm R6's actual execution status); then make an explicit R1-vs-R6 call — either adopt R6 as R1's long-sought persistence layer (it already exports a Worker-compatible snapshot shape) or formally deprecate R6 in favor of building persistence natively into R1, rather than leaving both running uncoordinated |
 | Implementation Priority | **Highest actionable item in this register** — same-repo, same-team, no external dependency, but the DEBT-017 prerequisite must close first or any decision here risks being made on stale assumptions about what actually runs |
 
+**Update, Stage 9 Phase 2:** Re-reading `scripts/threat_graph_engine.py` (one of Phase 1's 16
+long-tail files, previously classified only as "production long-tail," not weighted for its
+architectural significance) in this phase's ownership-decision context found it feeds
+**`/api/graph/{nodes,edges,pivot}`** — a live, Free/Pro/Enterprise/MSSP-tiered, monetized public
+API surface, confirmed via its own preceding comment block in `sentinel-blogger.yml` ("uploaded
+to R2 by Stage 3.5 and served by the Worker"). This is a **fourth** independent "give me the
+graph" implementation with real commercial exposure that Phase 1's per-file table did not flag
+as competing with R1/R6 for ownership. Elevated to **R8** in
+`TITAN_STAGE9_PHASE2_ARCHITECTURE_PLAN.md` Task 2B. **This item's title and scope are updated
+accordingly: the reconciliation question is R1 vs. R6 vs. R8, not a two-way question.** R8 is
+explicitly the highest-commercial-risk item of the three (real paying traffic today) and is
+deliberately excluded from `TITAN_GRAPH_MIGRATION_BLUEPRINT.md`'s first authorized migration
+phase for exactly that reason — see that document's "Deferred, not forgotten" table.
+
 ### DEBT-001 — `lib/` RC1 initiative: disposition undecided |
 
 ### DEBT-001 — `lib/` RC1 initiative: disposition undecided
