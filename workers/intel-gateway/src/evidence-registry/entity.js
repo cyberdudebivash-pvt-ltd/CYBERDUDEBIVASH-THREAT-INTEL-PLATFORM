@@ -1,17 +1,17 @@
 /**
- * Canonical Evidence entity — Phase 9 scaffolding (Project TITAN Stage 8).
+ * Canonical Evidence entity  -  Phase 9 scaffolding (Project TITAN Stage 8).
  * Not imported by index.js or any production route. See README.md.
  *
  * Field list verified directly against the live, currently-deployed
  * `item.evidence_chain` shape in p20-handlers.js:185-244 (buildEvidenceChainBlock),
  * not copied from docs/adr/0008-canonical-evidence-framework.md's prose, which lists
- * a "corroboration_count" field that does not exist as its own field — it is the
+ * a "corroboration_count" field that does not exist as its own field  -  it is the
  * `corroboration` key inside `iq_breakdown`. Corrected here rather than propagated.
  */
 
 /**
  * @typedef {Object} EvidenceChainCore
- * Fields already live in production today (P20). Unmodified by this scaffolding —
+ * Fields already live in production today (P20). Unmodified by this scaffolding  - 
  * this typedef documents them, it does not redefine or replace them.
  * @property {string} [evidence_id] - Free-form existing identifier (not a UUID)
  * @property {string} [reliability_code] - A-F, Admiralty/NATO-style source-type grade
@@ -25,7 +25,7 @@
 
 /**
  * @typedef {Object} EvidenceIntegrityFields
- * New fields this scaffolding defines, per ADR-0008 Decision item 1. Additive only —
+ * New fields this scaffolding defines, per ADR-0008 Decision item 1. Additive only  - 
  * every field is optional so an EvidenceChainCore object remains a valid
  * EvidenceEntity without them (backward compatible by construction).
  * @property {string} [evidence_uuid] - Stable identity, distinct from the free-form evidence_id

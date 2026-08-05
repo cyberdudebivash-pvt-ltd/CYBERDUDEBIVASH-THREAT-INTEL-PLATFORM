@@ -1,5 +1,5 @@
 /**
- * Evidence identifier generation — Phase 9 scaffolding (Project TITAN Stage 8).
+ * Evidence identifier generation  -  Phase 9 scaffolding (Project TITAN Stage 8).
  * Not imported by index.js or any production route. See README.md.
  *
  * Uses the Web Crypto API already available in the Workers runtime (this repo's

@@ -1,5 +1,5 @@
 /**
- * Evidence repository interface — Phase 9 scaffolding (Project TITAN Stage 8).
+ * Evidence repository interface  -  Phase 9 scaffolding (Project TITAN Stage 8).
  * Not imported by index.js or any production route. See README.md.
  *
  * Contract only. Every method throws - this class defines the shape a future,
