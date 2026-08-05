@@ -326,6 +326,28 @@ factual basis.
 
 ---
 
+## Revision 4 — 2026-08-05, Stage 9 Phase 2 (adds R8; ownership recommendation prepared, not decided)
+
+Stage 9 Phase 2 (architecture planning, no migration executed) re-examined
+`scripts/threat_graph_engine.py` — one of Revision 3's 16 long-tail files, not previously
+weighted for ownership relevance — and found it feeds `/api/graph/{nodes,edges,pivot}`, a live,
+tiered, monetized public API surface, per its own documented upload path in
+`sentinel-blogger.yml`. **Catalogued as R8.** This is a fourth implementation with a real
+customer-facing role, materially changing DEBT-000B's reconciliation scope from "R1 vs. R6" to
+"R1 vs. R6 vs. R8" — see `TITAN_TECH_DEBT_REGISTER.md`'s updated DEBT-000B entry.
+
+Phase 2 also produced (as separate documents, not duplicated into this ADR): a full graph
+capability matrix, a **recommended, not decided** canonical ownership disposition for every
+implementation R1–R8 (`TITAN_STAGE9_PHASE2_ARCHITECTURE_PLAN.md` Task 3), a canonical
+relationship schema and shared interface specification (`TITAN_GRAPH_INTERFACE_SPECIFICATION.md`),
+and a migration blueprint whose first authorized phase deliberately excludes R8 given its
+commercial risk (`TITAN_GRAPH_MIGRATION_BLUEPRINT.md`). **None of this constitutes Acceptance.**
+This ADR's Approval section, below, is unchanged by Phase 2 — a reviewer accepting this ADR
+should review against Revision 4 (this section) for the current full picture, and the
+companion documents above for the detailed recommendation now on record.
+
+---
+
 ## Approval
 
 **Proposed**, not Accepted. Required sign-offs, with the persistence precondition specifically

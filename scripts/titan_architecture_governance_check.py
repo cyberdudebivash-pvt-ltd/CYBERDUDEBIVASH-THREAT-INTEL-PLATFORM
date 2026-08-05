@@ -24,6 +24,19 @@ same-repo implementations — R6, R7 — plus 16 long-tail files under agent/ an
 prior stage had catalogued at all). See TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md and
 ADR-0010 Revision 3.
 
+Stage 9 Phase 2 (architecture planning — no migration executed) added seven more checks
+covering the categories that phase's own charter named: duplicate relationship generators
+(a same-file inconsistency found this phase in p31-handlers.js), unused graph engines drifting
+out of their confirmed-dormant status, dead graph exports changing status, the DEBT-020
+"zombie pipeline" resuming or continuing, relationship-vocabulary drift against the new
+canonical schema, schema-spec-document integrity, and premature/unauthorized execution of the
+Migration Blueprint's feature flags. "Duplicate graph providers" (also named in that phase's
+charter) is deliberately not a separate check — any duplicate implementation of the new
+GraphProvider/RelationshipProvider/etc. interfaces would surface as a new file via the existing
+check_for_unreviewed_graph_files() (Phase 1), so a dedicated duplicate-provider check would be
+redundant with it today. See TITAN_STAGE9_PHASE2_ARCHITECTURE_PLAN.md,
+TITAN_GRAPH_INTERFACE_SPECIFICATION.md, TITAN_GRAPH_MIGRATION_BLUEPRINT.md.
+
 Checks, in order:
 
   1. Do the tracked ADRs and the discovery/governance docs they depend on still exist?
@@ -50,6 +63,18 @@ Checks, in order:
      whether the chain actually executes anywhere — that remains DEBT-017, open.)
   10. (Stage 9 Phase 1) Does ADR-0010 still mention every tracked graph-implementation ID
       (R1-R7)?
+  11. (Stage 9 Phase 2) Does p31-handlers.js still define two internally-inconsistent
+      relationship shapes (the 'rel' vs. 'relation' key drift found this phase)?
+  12. (Stage 9 Phase 2) Have any of the 7 files confirmed Archive/dormant-status candidates
+      gained a new importer, drifting out of that classification unreviewed?
+  13. (Stage 9 Phase 2) Has api/graph/graph.json's confirmed-stale status changed?
+  14. (Stage 9 Phase 2) Does data/threat_graph/ now contain the files DEBT-020 found were
+      never persisted, despite two scheduled scripts targeting that path?
+  15. (Stage 9 Phase 2) Does p31-handlers.js emit any relationship type outside the canonical
+      vocabulary now documented in TITAN_GRAPH_INTERFACE_SPECIFICATION.md?
+  16. (Stage 9 Phase 2) Is the canonical relationship schema specification document intact?
+  17. (Stage 9 Phase 2) Has TITAN_GRAPH_MIGRATION_BLUEPRINT.md's Phase 1/2 been prematurely
+      wired into production code ahead of its stated preconditions?
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -59,6 +84,7 @@ Promoting it to a blocking gate is a deliberate future decision, not a default.
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 import urllib.error
@@ -452,14 +478,14 @@ def check_r3_producer_chain_intact() -> list[str]:
 
 def check_adr0010_graph_ids_present() -> list[str]:
     """Confirms ADR-0010 still documents each graph-implementation ID this program has
-    catalogued (R1-R7 as of Revision 3), so a future edit that drops an ID isn't silently
-    lost."""
+    catalogued (R1-R8 as of Revision 4 — R8 added Stage 9 Phase 2), so a future edit that
+    drops an ID isn't silently lost."""
     findings = []
     adr = ADR_DIR / "0010-relationship-graph-ownership.md"
     if not adr.exists():
         return findings  # already reported by check_docs_exist
     text = adr.read_text(encoding="utf-8", errors="replace")
-    for graph_id in ("R1", "R2", "R3", "R4", "R5", "R6", "R7"):
+    for graph_id in ("R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"):
         if graph_id not in text:
             findings.append(
                 f"ADR-0010 DRIFT: docs/adr/0010-relationship-graph-ownership.md no longer "
@@ -467,6 +493,243 @@ def check_adr0010_graph_ids_present() -> list[str]:
                 f"candidate matrix. If this ID was intentionally retired, document why here; if "
                 f"it was accidentally dropped, restore it."
             )
+    return findings
+
+
+# ---------------------------------------------------------------------------------------
+# Stage 9 Phase 2 additions — canonical graph architecture governance (planning-only phase;
+# no migration has been authorized or executed, so several of these checks are forward-
+# looking sentinels with nothing to catch yet, by design — same rollout pattern as Stage 8's
+# Evidence Registry boundary check, which existed before any real risk did).
+# ---------------------------------------------------------------------------------------
+
+
+def check_r1_internal_relationship_shape_consistency() -> list[str]:
+    """TITAN_STAGE9_PHASE2_ARCHITECTURE_PLAN.md Task 2C found p31-handlers.js defines two
+    internally-inconsistent relationship shapes in the same file: buildP31RelationshipBlock
+    uses key 'rel' (UPPER_SNAKE_CASE values), _buildGraph uses key 'relation' (lowercase
+    values). Not yet fixed (Phase 2 is planning-only). This keeps the finding visible rather
+    than letting a one-time discovery age silently out of view."""
+    findings = []
+    p31 = HANDLERS_DIR / "p31-handlers.js"
+    if not p31.exists():
+        return findings
+    text = p31.read_text(encoding="utf-8", errors="replace")
+    uses_rel_key = bool(re.search(r"\brel:\s*[\"']", text))
+    uses_relation_key = bool(re.search(r"\brelation:\s*\w", text))
+    if uses_rel_key and uses_relation_key:
+        findings.append(
+            "RELATIONSHIP SHAPE DRIFT (standing finding): p31-handlers.js still defines two "
+            "internally-inconsistent relationship shapes — buildP31RelationshipBlock's 'rel' "
+            "key vs. _buildGraph's 'relation' key. Documented in "
+            "TITAN_STAGE9_PHASE2_ARCHITECTURE_PLAN.md Task 2C and reconciled in "
+            "TITAN_GRAPH_INTERFACE_SPECIFICATION.md's CanonicalRelationship schema, but not "
+            "yet fixed in production code — no migration has been authorized. Not a "
+            "regression; a tracked item this check keeps visible until Migration Blueprint "
+            "Phase 1 actually lands."
+        )
+    return findings
+
+
+# Files Stage 9 Phase 1/2 confirmed have zero importers and zero CI references (Archive
+# candidates per the Phase 2 ownership recommendation). If one gains a real importer without
+# review, that's a disposition-relevant change worth surfacing, not silently accepting.
+CONFIRMED_DORMANT_GRAPH_FILES = [
+    "agent/graph/graph_intel.py",
+    "agent/graph_operations_engine.py",
+    "agent/threat_graph_engine.py",
+    "agent/v44_threat_graph/graph_models.py",
+    "agent/v44_threat_graph/threat_graph_engine.py",
+    "scripts/graph_intelligence_validator.py",
+    "scripts/graph_intelligence_engine.py",
+]
+
+
+# Known, already-reviewed importers of a confirmed-dormant file, per
+# TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md Task 1C — these do NOT change the file's
+# Dormant classification (a sibling within the same unused v44 cluster; a sole caller that is
+# itself unwired anywhere else in the repo) and are excluded so the check below only flags a
+# genuinely NEW importer, not the ones already accounted for.
+REVIEWED_DORMANT_IMPORTERS = {
+    "agent/v44_threat_graph/graph_models.py": {"agent/v44_threat_graph/threat_graph_engine.py"},
+    "scripts/graph_intelligence_validator.py": {"scripts/apex_sovereign_trust_orchestrator.py"},
+}
+
+
+def check_dormant_graph_files_still_unused() -> list[str]:
+    findings = []
+    for rel_path in CONFIRMED_DORMANT_GRAPH_FILES:
+        target = ROOT / rel_path
+        if not target.exists():
+            continue
+        module_stem = target.stem
+        reviewed = REVIEWED_DORMANT_IMPORTERS.get(rel_path, set())
+        # Must match actual Python import syntax (from ...X import / import ...X), not a bare
+        # word/substring match — an earlier draft of this check used the latter and flagged
+        # all 7 files as false positives (the stem names are common enough to appear in
+        # unrelated comments/docstrings across a repo this large).
+        import_pattern = re.compile(
+            rf"(?:from\s+[\w.]*\b{re.escape(module_stem)}\b[\w.]*\s+import"
+            rf"|import\s+[\w.]*\b{re.escape(module_stem)}\b)"
+        )
+        new_importer = None
+        for scan_dir in GRAPH_PYTHON_SCAN_DIRS:
+            if not scan_dir.exists() or new_importer:
+                continue
+            for candidate in scan_dir.rglob("*.py"):
+                if candidate == target:
+                    continue
+                candidate_rel = candidate.relative_to(ROOT).as_posix()
+                if candidate_rel in reviewed:
+                    continue
+                try:
+                    candidate_text = candidate.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if import_pattern.search(candidate_text):
+                    new_importer = candidate_rel
+                    break
+        if new_importer:
+            findings.append(
+                f"DORMANT-STATUS DRIFT: {rel_path} was confirmed to have zero *externally-"
+                f"relevant* importers as of Stage 9 Phase 1/2 (an Archive candidate per "
+                f"TITAN_STAGE9_PHASE2_ARCHITECTURE_PLAN.md Task 3), but a new reference from "
+                f"{new_importer} was found beyond the ones already reviewed "
+                f"(REVIEWED_DORMANT_IMPORTERS in this script). Re-review its disposition."
+            )
+    return findings
+
+
+def check_dead_graph_export_still_stale() -> list[str]:
+    """TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md Task 1C confirmed api/graph/graph.json is
+    a stale, ~2-month-old static fixture, not regenerated by anything, while its sibling
+    api/graph/nodes.json (R8's real output) carries a fresh generated_at. Confirms that gap
+    still exists — convergence would be worth a human look (fixed? new confusion?), not a
+    silent non-finding either way."""
+    findings = []
+    dead_export = ROOT / "api" / "graph" / "graph.json"
+    live_export = ROOT / "api" / "graph" / "nodes.json"
+    if not (dead_export.exists() and live_export.exists()):
+        return findings
+    try:
+        dead_data = json.loads(dead_export.read_text(encoding="utf-8", errors="replace"))
+        live_data = json.loads(live_export.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return findings
+    dead_gen = dead_data.get("generated_at") or (dead_data.get("stats") or {}).get("generated_at")
+    live_gen = live_data.get("generated_at")
+    if dead_gen and live_gen and dead_gen == live_gen:
+        findings.append(
+            "DEAD GRAPH EXPORT STATUS CHANGE: api/graph/graph.json's generated_at now matches "
+            "api/graph/nodes.json's. Stage 9 Phase 1 found these had diverged (graph.json "
+            "frozen at 2026-05-29, nodes.json fresh). If graph.json is now being regenerated, "
+            "review whether its 'dead export' classification should change; if coincidental, "
+            "no action needed."
+        )
+    elif dead_gen is None:
+        findings.append(
+            "DEAD GRAPH EXPORT: api/graph/graph.json no longer has a readable generated_at "
+            "field — its schema may have changed. Re-verify its stale/dead classification "
+            "(TITAN_STAGE9_PHASE1_GRAPH_DISCOVERY_REPORT.md Task 1C) still applies."
+        )
+    return findings
+
+
+def check_zombie_pipeline_status() -> list[str]:
+    """DEBT-020: agent/graph_correlation_engine.py (writer) and agent/graph_integrity_
+    validator.py (reader) are both scheduled 6x/day against data/threat_graph/, a path with
+    zero git history as of Stage 9 Phase 1. Confirms that status in the current checkout —
+    if the expected files now exist, the zombie-pipeline finding may have resolved (or a new
+    form of it exists); either way this is worth surfacing rather than assuming unchanged."""
+    findings = []
+    target_dir = ROOT / "data" / "threat_graph"
+    expected_files = ["graph_nodes.json", "graph_edges.json"]
+    existing = [f for f in expected_files if (target_dir / f).exists()]
+    if existing:
+        findings.append(
+            f"ZOMBIE PIPELINE STATUS CHANGE (DEBT-020): data/threat_graph/ now contains "
+            f"{existing} in this checkout. Stage 9 Phase 1 found this path had zero git "
+            f"history despite two scheduled scripts targeting it 6x/day each "
+            f"(agent/graph_correlation_engine.py writing, agent/graph_integrity_validator.py "
+            f"reading). If this data is now real, DEBT-020 may be resolvable — confirm and "
+            f"update TITAN_TECH_DEBT_REGISTER.md rather than leaving its Critical severity "
+            f"stale."
+        )
+    return findings
+
+
+# Canonical relationship-type vocabulary, per TITAN_GRAPH_INTERFACE_SPECIFICATION.md Part A.3.
+# Open vocabulary by design — a new type here is not inherently wrong, but should be a
+# deliberate addition to that spec, not a silent one.
+CANONICAL_RELATIONSHIP_TYPES = {
+    "ATTRIBUTED_TO", "USES_TECHNIQUE", "REFERENCES", "RESOLVES_TO", "COMMUNICATES_WITH",
+    "HOSTS", "PART_OF", "SHARES_INFRASTRUCTURE", "DROPS", "EXPLOITS", "MENTIONS", "MAPS_TO",
+    "OBSERVED", "ASSOCIATED_WITH", "LINKED_TO", "CONTAINS_IOC", "MAPS_TO_TECHNIQUE", "INVOLVES",
+}
+
+
+def check_r1_relationship_type_vocabulary_drift() -> list[str]:
+    findings = []
+    p31 = HANDLERS_DIR / "p31-handlers.js"
+    if not p31.exists():
+        return findings
+    text = p31.read_text(encoding="utf-8", errors="replace")
+    literal_types = set(re.findall(r"rel:\s*[\"'](\w+)[\"']", text))
+    for t in sorted(literal_types - CANONICAL_RELATIONSHIP_TYPES):
+        findings.append(
+            f"RELATIONSHIP VOCABULARY DRIFT: p31-handlers.js emits relationship type '{t}', "
+            f"not present in TITAN_GRAPH_INTERFACE_SPECIFICATION.md Part A.3's canonical "
+            f"vocabulary. That vocabulary is open by design — add it there deliberately, or "
+            f"treat this as an unintentional new type worth reviewing."
+        )
+    return findings
+
+
+def check_relationship_schema_spec_intact() -> list[str]:
+    findings = []
+    spec = ROOT / "TITAN_GRAPH_INTERFACE_SPECIFICATION.md"
+    if not spec.exists():
+        findings.append(
+            "SCHEMA DRIFT: TITAN_GRAPH_INTERFACE_SPECIFICATION.md is missing — the canonical "
+            "relationship schema this program is designing toward has no documented source."
+        )
+        return findings
+    text = spec.read_text(encoding="utf-8", errors="replace")
+    if "canonical-relationship.0.1-draft" not in text:
+        findings.append(
+            "SCHEMA DRIFT: TITAN_GRAPH_INTERFACE_SPECIFICATION.md no longer contains the "
+            "expected schema_version string 'canonical-relationship.0.1-draft'. If the schema "
+            "was deliberately versioned forward, update this check's expected string in the "
+            "same change; if accidental, investigate."
+        )
+    return findings
+
+
+# TITAN_GRAPH_MIGRATION_BLUEPRINT.md's Phase 1/2 flags. Neither exists in code yet — this
+# migration is not authorized (ADR-0010 Acceptance with R8 added, plus DEBT-017/DEBT-020
+# resolution, are still-open preconditions per that document's own Phase 0).
+MIGRATION_BLUEPRINT_FLAGS = [
+    "GRAPH_CANONICAL_PERSISTENCE_ENABLED",
+    "GRAPH_R3_USES_CANONICAL_PROVIDER",
+]
+
+
+def check_migration_blueprint_not_prematurely_executed() -> list[str]:
+    findings = []
+    if not HANDLERS_DIR.exists():
+        return findings
+    for path in HANDLERS_DIR.rglob("*.js"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for flag in MIGRATION_BLUEPRINT_FLAGS:
+            if flag in text:
+                findings.append(
+                    f"MIGRATION VIOLATION: {path.relative_to(ROOT)} references '{flag}' — "
+                    f"TITAN_GRAPH_MIGRATION_BLUEPRINT.md's Phase 1/2 are NOT authorized to "
+                    f"execute (ADR-0010 Acceptance with R8 added, and DEBT-017/DEBT-020 "
+                    f"resolution, are still-open preconditions). If authorization has "
+                    f"genuinely landed, confirm it's documented before proceeding; if "
+                    f"accidental, revert."
+                )
     return findings
 
 
@@ -482,6 +745,13 @@ def main() -> None:
     all_findings += check_for_unreviewed_graph_files()
     all_findings += check_r3_producer_chain_intact()
     all_findings += check_adr0010_graph_ids_present()
+    all_findings += check_r1_internal_relationship_shape_consistency()
+    all_findings += check_dormant_graph_files_still_unused()
+    all_findings += check_dead_graph_export_still_stale()
+    all_findings += check_zombie_pipeline_status()
+    all_findings += check_r1_relationship_type_vocabulary_drift()
+    all_findings += check_relationship_schema_spec_intact()
+    all_findings += check_migration_blueprint_not_prematurely_executed()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     if not all_findings:
@@ -490,7 +760,9 @@ def main() -> None:
               "documented routes still registered, Evidence Registry scaffolding boundary intact, "
               "no AR-000 regression detected (or network unavailable to check), no unreviewed "
               "graph/relationship/correlation-shaped Python files found, R3's producer chain "
-              "intact, ADR-0010's tracked graph IDs (R1-R7) all present.")
+              "intact, ADR-0010's tracked graph IDs (R1-R7) all present, no relationship-shape "
+              "or vocabulary drift, no dormant/dead-export/zombie-pipeline status changes, "
+              "Migration Blueprint not prematurely executed.")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")
