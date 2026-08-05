@@ -1,7 +1,8 @@
 # ADR-0009: Source Reliability Ownership
 
 **Date:** 2026-08-05
-**Status:** Proposed — pending executive/architecture-review approval. Not Accepted.
+**Status:** Proposed — **REVISED 2026-08-05 (Stage 7), see "Revision" section — a new blocking
+finding (S6) must be resolved before this ADR can be Accepted.** Not Accepted.
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
 Architect, Intelligence Engineering (P18/P20 owner)
 **Program:** Project TITAN, Stage 6
@@ -177,6 +178,32 @@ rollback with no data migration to undo, since S1 itself is never written to by 
 - S4/S5's independent "has evidence" heuristics are not source-reliability scorers and are not
   in this ADR's scope — tracked instead under ADR-0008's Future Considerations and the tech
   debt register.
+
+---
+
+## Revision — 2026-08-05, Stage 7
+
+**New candidate, blog repository, very likely live** (`TITAN_STAGE7_VALIDATION.md` §2A): **S6
+— `api/_lib/source-reliability-engine.js`**, class `SourceReliabilityEngine`, exports
+`trackSource()` / `updateSourceReliability()`. Unlike S1–S3 (which grade a *source category* or
+read a pre-populated field), S6 maintains a **learned, historically-updated** reliability score
+per source in Redis — `historicalAccuracy`, `confirmationCount`/`rejectionCount`,
+`accuracyPercentage` — recalculated as intelligence is confirmed or rejected over time. This is
+a qualitatively different mechanism than any of S1–S3 (all static/rule-based) and, if live, is
+arguably the most sophisticated source-reliability signal in the entire ecosystem — genuinely
+novel capability, not just another static grading scale to reconcile.
+
+**This does not change S1's designation as canonical for the P-layer stack** (S6's consumer,
+per the reachability trace, is the same blog-side `api/v1/intelligence/*` / `api/v1/workbench/*`
+surface as ADR-0007/0008's new findings, not the P-layer stack). But a *learned* reliability
+score is a capability P20/P18/P25 do not have at all today, and is worth explicit evaluation as
+a future enhancement to S1 rather than filed away — see this ADR's Future Considerations
+section above, which this revision extends rather than restates.
+
+**Same blocking-approval status as ADR-0007/0008's revisions** — pending confirmation of S6's
+live status and a human decision on whether it should feed the canonical S1, remain a
+blog-specific signal, or be evaluated as a replacement mechanism for S1's currently-static
+grading.
 
 ---
 
