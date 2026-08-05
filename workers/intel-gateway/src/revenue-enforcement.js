@@ -825,6 +825,10 @@ function computeApexAIGated(item, tier) {
   const isFree = !tier || String(tier).toUpperCase() === "FREE";
   const base = {
     predictive_risk: typeof item.risk_score === "number" ? Math.min(10, item.risk_score) : 0,
+    // 50 is the canonical unknown-confidence default (0-100 scale) -- see
+    // CONFIDENCE_FRAMEWORK_DISCOVERY.md Part A7. Already correct here; kept
+    // as-is, tagged for discoverability alongside the other sites that used
+    // to disagree with it.
     ai_confidence:   typeof item.confidence === "number" ? Math.min(100, item.confidence * 100) : 50,
   };
   if (isFree) {

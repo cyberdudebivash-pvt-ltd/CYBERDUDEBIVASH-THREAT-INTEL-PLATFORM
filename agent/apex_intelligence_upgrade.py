@@ -1577,7 +1577,14 @@ def generate_campaign_intelligence(item: Dict[str, Any]) -> str:
         severity = str(item.get("severity") or "MEDIUM").upper()
         title = str(item.get("title") or "")
         threat_type = str(item.get("threat_type") or "").lower()
-        ai_conf = float(item.get("ai_confidence") or item.get("confidence") or 21.3)
+        # 50.0 is the canonical unknown-confidence default (0-100 scale) --
+        # see CONFIDENCE_FRAMEWORK_DISCOVERY.md Part A7. Previously 21.3 here,
+        # disagreeing with the other independently-hardcoded ai_confidence
+        # fallbacks scattered across this repo (81, 30.0, 99.9 elsewhere).
+        # NOT the same as the ai_conf computed a few hundred lines below in
+        # this file from real TTP/CVSS/KEV/IOC signals -- that one is a
+        # genuine formula, not a bare fallback, and is left untouched.
+        ai_conf = float(item.get("ai_confidence") or item.get("confidence") or 50.0)
         kev = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
 
         # Derive operation name

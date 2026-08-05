@@ -566,7 +566,11 @@ class ConfidenceLineageTracker:
         stages: List[Dict] = []
 
         # Stage 1: Raw advisory baseline
-        base = float(advisory.get("ai_confidence") or advisory.get("confidence") or 30.0)
+        # 50.0 is the canonical unknown-confidence default (0-100 scale) --
+        # see CONFIDENCE_FRAMEWORK_DISCOVERY.md Part A7. Previously 30.0 here,
+        # disagreeing with the other independently-hardcoded ai_confidence
+        # fallbacks scattered across this repo (81, 21.3, 99.9 elsewhere).
+        base = float(advisory.get("ai_confidence") or advisory.get("confidence") or 50.0)
         stages.append({
             "stage": "INGESTION",
             "confidence": round(base, 1),
