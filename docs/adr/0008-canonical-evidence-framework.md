@@ -1,8 +1,8 @@
 # ADR-0008: Canonical Evidence Framework
 
 **Date:** 2026-08-05
-**Status:** Proposed — **REVISED 2026-08-05 (Stage 7), see "Revision" section — a new blocking
-finding (E9–E12) must be resolved before this ADR can be Accepted.** Not Accepted.
+**Status:** Proposed — Revised twice (Stage 7 raised a blocker re: E9–E12's live status; Stage 8
+resolved it — see "Revision 2"). **Ready for human Acceptance review.** Not Accepted yet.
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
 Architect, Intelligence Engineering (P-layer stack owner), Blog/EIOS Engineering
 **Program:** Project TITAN, Stage 6
@@ -235,6 +235,14 @@ Evidence" scope with its own future ADR, or (b) determines they should be reconc
 directly. Not decided here.
 
 ---
+
+## Revision 2 — 2026-08-05, Stage 8 (resolves Revision 1's blocker)
+
+Direct HTTP verification confirms E9–E12 (`evidence-manager.js` and siblings, reached only via
+`api/v1/analysis/*` and `api/v1/workbench/*`) are not deployed — same Vercel platform-level
+`NOT_FOUND` evidence as ADR-0007's A10. Full detail: `TITAN_AR000_RESOLUTION.md`. **Reclassified
+from "blocking open question" to "excluded, zero production consumers."** This ADR's Decision
+stands as originally written and is ready for human Acceptance review.
 
 ## Approval
 
