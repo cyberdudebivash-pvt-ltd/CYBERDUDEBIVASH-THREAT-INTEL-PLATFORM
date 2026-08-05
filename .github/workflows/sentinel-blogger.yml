@@ -2493,6 +2493,28 @@ jobs:
           exit 0
 
       # -----------------------------------------------------------------------
+      # STAGE 4.04 - P38.0 Schema Mirror Drift Check
+      # workers/intel-gateway/src/p38-handlers.js hand-mirrors
+      # scripts/p38_shared_validators.py:SCHEMA_REGISTRY for Worker consumption
+      # (Workers have no Python runtime). Neither STAGE 4.03's certification nor
+      # any prior gate cross-checked the two — this check found the mirror
+      # stale (153 fields / 6 deprecated hardcoded vs. 179 / 5 actual) on
+      # first run. Non-blocking (continue-on-error: true) until proven stable
+      # across a few real drift cycles, matching this pipeline's rollout
+      # pattern for new checks (e.g. STAGE 3.93.17 before 3.93.17.1).
+      # -----------------------------------------------------------------------
+      - name: "STAGE 4.04 - P38.0 Schema Mirror Drift Check"
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          if python3 scripts/p38_schema_mirror_check.py; then
+            echo "::notice::P38.0 schema mirror in sync (Python SCHEMA_REGISTRY == JS mirror)."
+          else
+            echo "::warning::P38.0 schema mirror drift detected — see job log above. Regenerate the JS mirror in workers/intel-gateway/src/p38-handlers.js from scripts/p38_shared_validators.py:SCHEMA_REGISTRY."
+          fi
+          exit 0
+
+      # -----------------------------------------------------------------------
       # STAGE 4: GIT SYNC -- ALWAYS RUNS
       # Commits non-sensitive metadata and HTML reports. 4-attempt push retry.
       # Exit 0 guaranteed - never kills pipeline.
