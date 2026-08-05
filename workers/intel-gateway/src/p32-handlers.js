@@ -792,9 +792,22 @@ export function buildP32DriftBlock(item) {
 
 // -- P32.7: Evidence Transparency Engine ---------------------------------------
 // DIFFERENT from P25 (score explanation). P32.7 shows per-claim provenance chain.
+//
+// Per-claim confidence/reasoning below are read from computeEnterpriseTrustScore()'s
+// per-dimension breakdown (P25, already imported) rather than hardcoded per-claim-
+// type constants. Previously every KEV-listed item showed 99% confidence regardless
+// of how well-enriched it actually was; the number now reflects this specific item's
+// evidence, and the reasoning text can no longer drift from what actually produced
+// the number (same class of bug as the P38 schema-mirror fix). Each lookup falls
+// back to the prior hardcoded value/text if the named dimension is ever renamed.
 
 export function buildP32EvidenceTransparencyBlock(item) {
   const claims = [];
+
+  const trust = computeEnterpriseTrustScore(item);
+  const dim = name => trust.dims.find(d => d.name === name);
+  const dimPct = (name, fallback) => { const d = dim(name); return d ? Math.round((d.earned / d.max) * 100) : fallback; };
+  const dimReason = (name, fallback) => { const d = dim(name); return d ? d.rationale : fallback; };
 
   // KEV claim
   const kev = Boolean(item.kev_present || (item.apex || {}).kev_listed);
@@ -803,8 +816,8 @@ export function buildP32EvidenceTransparencyBlock(item) {
       claim: "Active exploitation confirmed",
       source: "CISA Known Exploited Vulnerabilities (KEV) Catalog",
       verification: "AUTOMATED  -  live KEV feed synchronization",
-      confidence: 99,
-      reasoning: "CISA requires confirmed evidence of active exploitation before KEV listing. Independent verification.",
+      confidence: dimPct("Exploitation Verification", 99),
+      reasoning: dimReason("Exploitation Verification", "CISA requires confirmed evidence of active exploitation before KEV listing. Independent verification."),
       color: "#ef4444",
     });
   }
@@ -816,8 +829,8 @@ export function buildP32EvidenceTransparencyBlock(item) {
       claim: `CVSS score ${cvss}  -  ${cvss >= 9 ? "Critical" : cvss >= 7 ? "High" : cvss >= 4 ? "Medium" : "Low"} severity`,
       source: "NVD / Vendor Security Advisory",
       verification: "AUTOMATED  -  NVD API batch enrichment (STAGE 3.1.2)",
-      confidence: 95,
-      reasoning: `CVSS v3.1 base score derived from AV/AC/PR/UI/S/C/I/A metrics. ${item.source || "Primary source"} advisory cross-referenced.`,
+      confidence: dimPct("Severity Accuracy", 95),
+      reasoning: dimReason("Severity Accuracy", `CVSS v3.1 base score derived from AV/AC/PR/UI/S/C/I/A metrics. ${item.source || "Primary source"} advisory cross-referenced.`),
       color: cvss >= 9 ? "#ef4444" : cvss >= 7 ? "#f97316" : "#f59e0b",
     });
   }
@@ -829,13 +842,14 @@ export function buildP32EvidenceTransparencyBlock(item) {
       claim: `${(epss * 100).toFixed(1)}% probability of exploitation within 30 days`,
       source: "FIRST.org EPSS Model (Exploit Prediction Scoring System)",
       verification: "AUTOMATED  -  FIRST.org API batch query (STAGE 3.1.2)",
-      confidence: 85,
-      reasoning: "EPSS is a ML model trained on vulnerability characteristics and exploitation history. Score reflects exploitation probability vs. peer vulnerabilities.",
+      confidence: dimPct("EPSS Probability Score", 85),
+      reasoning: dimReason("EPSS Probability Score", "EPSS is a ML model trained on vulnerability characteristics and exploitation history. Score reflects exploitation probability vs. peer vulnerabilities."),
       color: epss > 0.5 ? "#ef4444" : epss > 0.1 ? "#f97316" : "#22c55e",
     });
   }
 
-  // Attribution claim
+  // Attribution claim -- already item-aware (item.actor_confidence), not part of
+  // the hardcoded-regardless-of-evidence pattern the other claims had. Unchanged.
   const actor = item.actor_tag || item.threat_actor;
   if (actor) {
     claims.push({
@@ -855,8 +869,8 @@ export function buildP32EvidenceTransparencyBlock(item) {
       claim: `${iocCnt} actionable threat indicator(s) verified`,
       source: "OSINT IOC Enrichment (VirusTotal / Shodan / RiskIQ)",
       verification: "AUTOMATED  -  P20.2 IOC Hardener + OSINT enricher (STAGE 3.1.9)",
-      confidence: 78,
-      reasoning: "IOCs validated against external threat intelligence platforms. P20-hardened indicators have FP filtering applied.",
+      confidence: dimPct("IOC Operational Quality", 78),
+      reasoning: dimReason("IOC Operational Quality", "IOCs validated against external threat intelligence platforms. P20-hardened indicators have FP filtering applied."),
       color: "#22c55e",
     });
   }
@@ -866,7 +880,7 @@ export function buildP32EvidenceTransparencyBlock(item) {
       claim: "Advisory published  -  no high-confidence claims verified",
       source: item.source || "Feed source",
       verification: "PENDING  -  enrichment pipeline",
-      confidence: 40,
+      confidence: Math.min(40, trust.pct),
       reasoning: "Advisory entered pipeline but enrichment data not yet available. Confidence will increase as CVSS/EPSS/KEV data is populated.",
       color: "#6b7280",
     });
