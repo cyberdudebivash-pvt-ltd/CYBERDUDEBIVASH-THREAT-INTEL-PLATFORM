@@ -236,7 +236,7 @@ export class EvidenceMetricsService {
 }
 
 /**
- * "One Evidence Service" — the single aggregating facade Phase 1 names as this stage's primary
+ * "One Evidence Service"  -  the single aggregating facade Phase 1 names as this stage's primary
  * deliverable. Composes the six services above plus the one EvidenceRegistry instance they all
  * share, so a consumer needing general evidence access has exactly one thing to import and
  * instantiate. Each sub-service also remains independently importable/testable for a consumer
@@ -263,7 +263,7 @@ export class EvidenceService {
 
   // ---- Direct passthroughs for the registry's own mutation methods -----------------------
   // Deliberately thin: EvidenceService does not wrap these in its own validation or lifecycle
-  // logic (that would duplicate registry-service.js) — it delegates verbatim, matching "must
+  // logic (that would duplicate registry-service.js)  -  it delegates verbatim, matching "must
   // wrap Stage 11 Registry functionality... No duplicated logic."
 
   /**
