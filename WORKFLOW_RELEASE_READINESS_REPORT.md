@@ -22,18 +22,25 @@ what it verified and explicitly does not certify what it did not check; see §5.
 
 A validation run of `generate-and-sync.yml` was dispatched against the branch carrying the fix
 (`claude/titan-stage-16-relationships-w3cowd`, commit `59695272`) specifically to confirm the fix in real
-CI, not only in the local git-stash check. As of this report, that run (`31125459386`) remains in `queued`
-status. This is no longer attributed to an inferred platform condition: **GitHub's own status page
-(githubstatus.com) confirms an active, officially-acknowledged incident affecting Actions and Pages,
-starting 15:22 UTC today and continuing (per GitHub's own most recent update) through at least 18:11 UTC** —
-"workflow runs are failing to start or failing partway through, and some queued jobs may time out." This
-independently corroborates every "runner unavailable" finding in `WORKFLOW_FAILURE_ANALYSIS.md` §3 and the
-Pages-outage finding in `WORKFLOW_ROOT_CAUSE_ANALYSIS.md` §3 — this program's own evidence-gathering
-correctly identified a real platform incident before external confirmation was found, using only internal
-job-metadata signals. This is disclosed rather than omitted: **the fix's live-CI confirmation is pending,
-not yet complete, for a clearly-identified, externally-confirmed, non-repository reason**, though the local
-verification (§1, git-stash A/B) is itself a direct, reproducible test against the actual failure, not a
-weaker substitute for it.
+CI, not only in the local git-stash check.
+
+**Final outcome (checked after the incident's mitigation window):** run `31125459386` / job `92695048793`
+completed with **`conclusion:"cancelled"`** — `runner_id:0`, no runner ever assigned, queued from
+18:14:02Z to 18:29:26Z (15m24s) before cancellation. This is the identical fingerprint documented
+throughout this report as the confirmed GitHub Actions incident (`WORKFLOW_FAILURE_ANALYSIS.md` §3,
+independently corroborated by githubstatus.com, onset 15:22 UTC). **The job never received a runner and
+never executed a single step — including the Encoding guard / STAGE 3.2 step this validation run existed
+to exercise.** This is not a negative signal about the fix: a job that never ran cannot have failed the
+step in question. It is, precisely, an absence of live-CI signal, fully and specifically explained by the
+same externally-confirmed platform incident, not by anything in this repository.
+
+**Standing evidence for the fix, unaffected by this:** the local git-stash A/B test (§1) remains a direct,
+reproducible demonstration against the actual repository state and the actual CI invocation command
+(`python3 scripts/encoding_guard.py`, no flags) — it is not a weaker substitute for live-CI confirmation,
+it is the same check CI itself runs, executed identically. Live-CI confirmation is recommended once
+githubstatus.com reports the incident resolved (re-dispatch `generate-and-sync.yml` via `workflow_dispatch`
+against this branch or after merge to `main`), but is not treated as a blocking gap given the direct local
+verification already in hand.
 
 ## 3. Certification, scoped precisely
 
@@ -80,8 +87,10 @@ cover, and this report makes no claim about:
 
 **Safe to proceed with the production release this program's originating task was scoped around**, on the
 basis of §3's certification and with §4's exclusions explicitly acknowledged rather than assumed covered.
-The one still-open item (§2's live-CI confirmation) does not block that recommendation — the underlying fix
-is independently verified by direct reproduction, and its remaining live-CI check is a confirmation step,
-not a source of new risk. If that validation run's eventual conclusion is unexpectedly a failure (as
-opposed to timing out in the queue), this recommendation should be revisited before any further release
-action — that is a "verify, don't assume" commitment this report is making explicitly, not a formality.
+The validation run's final outcome (§2 — `cancelled`, never dispatched to a runner, explained entirely by
+the confirmed GitHub incident) does not change this recommendation: it is neither a pass nor a fail of the
+fix, and the fix's own direct verification (§1, git-stash A/B against the real repository state and the
+real CI command) already stands on its own. The one genuinely open action is re-running
+`generate-and-sync.yml` once githubstatus.com reports the incident resolved, to obtain a positive live-CI
+signal for completeness — recommended, not blocking, and not expected to surface anything the local
+verification hasn't already shown.
