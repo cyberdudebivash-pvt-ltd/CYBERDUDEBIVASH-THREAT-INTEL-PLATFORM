@@ -101,6 +101,30 @@ export class GatewayRegistry {
     return [...this._entries.keys()];
   }
 
+  /**
+   * Safe, read-only capability metadata -- unlike get(), never exposes the handler function
+   * itself, so this is fine to hand to a diagnostic/observability caller that has no business
+   * invoking capabilities directly. Stage 14 Phase 2 registry-maturity addition (see
+   * TITAN_STAGE14_SERVICE_ARCHITECTURE.md Sec 5); check_gateway_registry_describe_omits_handler()
+   * guards this property going forward.
+   * @param {string} name
+   * @returns {{name: string, version: string, description: string, requiredCapabilities: string[]}}
+   */
+  describe(name) {
+    const entry = this.get(name);
+    return {
+      name: entry.name,
+      version: entry.version,
+      description: entry.description,
+      requiredCapabilities: entry.requiredCapabilities,
+    };
+  }
+
+  /** @returns {Array<{name: string, version: string, description: string, requiredCapabilities: string[]}>} */
+  describeAll() {
+    return this.list().map((name) => this.describe(name));
+  }
+
   /** Test/rollback hook only -- production capability registration never needs to unregister. */
   unregister(name) {
     return this._entries.delete(name);

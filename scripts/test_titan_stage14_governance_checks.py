@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
 scripts/test_titan_stage14_governance_checks.py
-Project TITAN Stage 14 Phase 1 — positive/negative fixture tests for the 12 check_eig_*
-functions added to titan_architecture_governance_check.py.
+Project TITAN Stage 14 — positive/negative fixture tests for the Stage 14 governance check
+functions in titan_architecture_governance_check.py: the 12 added in Phase 1, plus Phase 2's
+check_gateway_registry_describe_omits_handler() (13 total; not all share the check_eig_* naming
+prefix, e.g. check_no_duplicate_enterprise_gateway() and check_gateway_capability_authorization_
+present() -- see that file's own docstring for the full naming list).
 
 titan_architecture_governance_check.py's existing check_* functions have no fixture-directory
-mechanism anywhere in this codebase (confirmed by grep before writing this file) — each one
-reads real production files from disk directly. Rather than inventing an inconsistent parallel
-fixture convention for only some checks, this file takes the narrower path: the 12 new
-check_eig_* functions (and no pre-existing function — their signatures are otherwise untouched)
-accept an optional directory-override parameter defaulting to the real path, so main()'s own
-call sites stay zero-argument while this file can point them at temp-directory good/bad content
-instead.
+mechanism anywhere in this codebase (confirmed by grep before writing this file in Phase 1) --
+each one reads real production files from disk directly. Rather than inventing an inconsistent
+parallel fixture convention for only some checks, this file takes the narrower path: only the
+Stage 14 check functions listed above (and no pre-existing function -- their signatures are
+otherwise untouched) accept an optional directory-override parameter defaulting to the real path,
+so main()'s own call sites stay zero-argument while this file can point them at temp-directory
+good/bad content instead.
 
 stdlib only (unittest + tempfile), matching the governance script's own zero-dependency ethos.
 Run: python3 scripts/test_titan_stage14_governance_checks.py
@@ -262,6 +265,98 @@ class CheckNoEigRegistryPrivateFieldBypassTests(unittest.TestCase):
             )
             findings = governance.check_no_eig_registry_private_field_bypass(gateway_dir=gateway_dir)
             self.assertTrue(any("REGISTRY BYPASS" in f and "_entries" in f for f in findings))
+
+
+GOOD_GATEWAY_REGISTRY_JS = """
+export class GatewayRegistry {
+  constructor() {
+    this._entries = new Map();
+  }
+
+  get(name) {
+    const entry = this._entries.get(name);
+    if (!entry) throw new CapabilityNotRegisteredError(name);
+    return entry;
+  }
+
+  list() {
+    return [...this._entries.keys()];
+  }
+
+  describe(name) {
+    const entry = this.get(name);
+    return {
+      name: entry.name,
+      version: entry.version,
+      description: entry.description,
+      requiredCapabilities: entry.requiredCapabilities,
+    };
+  }
+
+  describeAll() {
+    return this.list().map((name) => this.describe(name));
+  }
+}
+"""
+
+
+class CheckGatewayRegistryDescribeOmitsHandlerTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gateway_dir = Path(tmp) / "enterprise-gateway"
+            write_tree(gateway_dir, {"gateway-registry.js": GOOD_GATEWAY_REGISTRY_JS})
+            findings = governance.check_gateway_registry_describe_omits_handler(gateway_dir=gateway_dir)
+            self.assertEqual(findings, [])
+
+    def test_describe_leaking_handler_via_spread_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gateway_dir = Path(tmp) / "enterprise-gateway"
+            bad = GOOD_GATEWAY_REGISTRY_JS.replace(
+                "  describe(name) {\n    const entry = this.get(name);\n    return {\n"
+                "      name: entry.name,\n      version: entry.version,\n"
+                "      description: entry.description,\n"
+                "      requiredCapabilities: entry.requiredCapabilities,\n    };\n  }\n",
+                "  describe(name) {\n    const entry = this.get(name);\n    return { ...entry };\n  }\n",
+            )
+            self.assertIn("...entry", bad)
+            write_tree(gateway_dir, {"gateway-registry.js": bad})
+            findings = governance.check_gateway_registry_describe_omits_handler(gateway_dir=gateway_dir)
+            self.assertTrue(any("REGISTRY BYPASS" in f and "describe()" in f for f in findings))
+
+    def test_describe_leaking_handler_directly_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gateway_dir = Path(tmp) / "enterprise-gateway"
+            bad = GOOD_GATEWAY_REGISTRY_JS.replace(
+                "requiredCapabilities: entry.requiredCapabilities,\n    };\n  }\n",
+                "requiredCapabilities: entry.requiredCapabilities,\n      handler: entry.handler,\n    };\n  }\n",
+            )
+            write_tree(gateway_dir, {"gateway-registry.js": bad})
+            findings = governance.check_gateway_registry_describe_omits_handler(gateway_dir=gateway_dir)
+            self.assertTrue(any("REGISTRY BYPASS" in f and "describe()" in f for f in findings))
+
+    def test_missing_describe_method_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gateway_dir = Path(tmp) / "enterprise-gateway"
+            bad = GOOD_GATEWAY_REGISTRY_JS.replace(
+                "  describe(name) {\n    const entry = this.get(name);\n    return {\n"
+                "      name: entry.name,\n      version: entry.version,\n"
+                "      description: entry.description,\n"
+                "      requiredCapabilities: entry.requiredCapabilities,\n    };\n  }\n\n",
+                "",
+            )
+            # describeAll()'s own body still legitimately calls `this.describe(name)` -- assert the
+            # DEFINITION is gone (the " {" opening), not the substring, which remains at that call site.
+            self.assertNotIn("describe(name) {", bad)
+            write_tree(gateway_dir, {"gateway-registry.js": bad})
+            findings = governance.check_gateway_registry_describe_omits_handler(gateway_dir=gateway_dir)
+            self.assertTrue(any("GOVERNANCE" in f and "'describe()'" in f for f in findings))
+
+    def test_missing_file_yields_no_findings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gateway_dir = Path(tmp) / "enterprise-gateway"
+            gateway_dir.mkdir(parents=True)
+            findings = governance.check_gateway_registry_describe_omits_handler(gateway_dir=gateway_dir)
+            self.assertEqual(findings, [])
 
 
 class CheckGatewayRelationshipCapabilityStillPassthroughTests(unittest.TestCase):
