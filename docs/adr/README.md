@@ -45,20 +45,21 @@ existing scope (single-repo runtime/deployment decisions).
 | [0007](./0007-canonical-confidence-framework.md) | Canonical Confidence Framework | Proposed | Which system computes authoritative per-item confidence |
 | [0008](./0008-canonical-evidence-framework.md) | Canonical Evidence Framework | **Accepted** (2026-08-06) | Canonical Evidence record schema and system of record |
 | [0009](./0009-source-reliability-ownership.md) | Source Reliability Ownership | Proposed | Canonical source-reliability grade and scale reconciliation |
-| [0010](./0010-relationship-graph-ownership.md) | Relationship Graph Ownership | Proposed | Canonical entity-relationship graph (target-state, persistence-gated) |
+| [0010](./0010-relationship-graph-ownership.md) | Relationship Graph Ownership | **Accepted** (2026-08-06) | Canonical entity-relationship graph (R1/`p31-handlers.js` target-canonical, persistence resolved natively per Revision 5) |
 | [0011](./0011-evidence-lifecycle-ownership.md) | Evidence Lifecycle Ownership | **Accepted** (2026-08-06) | Canonical evidence lifecycle state model |
 | [0012](./0012-api-versioning-interface-governance.md) | API Versioning & Interface Governance | **Accepted** (2026-08-06) | Cross-surface API versioning policy; depends on ADR-0008 for Evidence API shape specifically |
 | [0013](./0013-typescript-rc1-disposition.md) | TypeScript RC1 Subsystem — Production Architecture Assessment | Proposed | Per-module disposition of the dormant `cyberdudebivash-blog` `lib/` tree (DEBT-001) — a disposition table, not a single ownership Decision |
 
-ADR-0008, ADR-0011, and ADR-0012 are **Accepted** (2026-08-06, executive architecture authority —
-see each ADR's "Approval" section and `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md` for the full
-record, including the individually-named sign-offs that were not independently obtained).
-ADR-0007, ADR-0009, ADR-0010, and ADR-0013 remain **Proposed**, not Accepted, and do not
+ADR-0008, ADR-0011, ADR-0012, and ADR-0010 are **Accepted** (2026-08-06, executive architecture
+authority — see each ADR's "Approval" section and `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md` for
+the full record, including the individually-named sign-offs that were not independently
+obtained). ADR-0007, ADR-0009, and ADR-0013 remain **Proposed**, not Accepted, and do not
 authorize implementation on their own. Note in particular: ADR-0010 (Relationship Graph
-Ownership) is **not** Accepted — Stage 12's Relationship Resolution phase depends on it and is
-scoped accordingly (thin pass-through over already-live output only, no new ownership/graph
-logic) until it is. See `TITAN_STAGE7_PLAN.md` for what becomes implementable once the remaining
-four are approved.
+Ownership) was accepted Stage 16, with its persistence precondition (Decision item 2) resolved
+by Revision 5 (native persistence built into R1's consumption layer, not R6 adoption) — see
+`workers/intel-gateway/src/relationship-framework/` and
+`TITAN_STAGE16_RELATIONSHIP_FRAMEWORK_REPORT.md` for the implementation this unblocked. See
+`TITAN_STAGE7_PLAN.md` for what remains implementable once the remaining three are approved.
 
 ## Reading order
 

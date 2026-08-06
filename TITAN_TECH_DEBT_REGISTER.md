@@ -68,6 +68,22 @@ explicitly the highest-commercial-risk item of the three (real paying traffic to
 deliberately excluded from `TITAN_GRAPH_MIGRATION_BLUEPRINT.md`'s first authorized migration
 phase for exactly that reason — see that document's "Deferred, not forgotten" table.
 
+**Update, Stage 16:** ADR-0010 Revision 5 resolved this item's role as an **Acceptance blocker**
+by taking DEBT-000B's own "build persistence natively into R1" resolution path — see ADR-0010
+Revision 5 and `TITAN_STAGE16_RELATIONSHIP_FRAMEWORK_REPORT.md`. **This narrows, but does not
+close, DEBT-000B.** What changed: R1's consumption boundary
+(`workers/intel-gateway/src/relationship-framework/`) now has its own native, in-memory-backed
+persistence layer, satisfying ADR-0010 Decision item 2 without depending on R6 or R8. What did
+**not** change: R6 (`core/intelligence/enrichment_graph.py`) and R8
+(`scripts/threat_graph_engine.py`) are both untouched — neither adopted, deprecated, nor
+modified — and DEBT-017's question (does R6 actually execute in production) remains exactly as
+open as Stage 9 Phase 1 left it. **Severity downgraded High → Medium**: the item no longer
+blocks any ADR or implementation stage, but the underlying fragmentation (three independent
+"give me the graph" implementations, one now with two persistence layers — R1's new native one
+and R6's Python one — still uncoordinated) is unresolved. Recommended resolution unchanged from
+Stage 9 Phase 2: resolve DEBT-017, then make an explicit R1-vs-R6-vs-R8 call — Stage 16's native
+persistence layer does not pre-empt that decision either way.
+
 ### DEBT-001 — `lib/` RC1 initiative: disposition undecided |
 
 ### DEBT-001 — `lib/` RC1 initiative: disposition undecided

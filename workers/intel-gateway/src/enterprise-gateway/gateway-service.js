@@ -76,7 +76,8 @@ export class EnterpriseGateway {
       description: "EvidenceProvenanceEngine -- 6 lineage kinds",
     });
     this._registry.register("evidence.relationships", createServiceMethodHandler(platform.relationshipResolution), {
-      description: "RelationshipResolutionService -- pass-through only, ADR-0010-gated (Proposed, not Accepted)",
+      description: "RelationshipResolutionService -- ADR-0010 Accepted (Stage 16); real data when " +
+        "platform was composed with a relationship-framework/-backed provider, NOT_WIRED otherwise",
     });
     this._registry.register("platform.metrics", createServiceMethodHandler(platform.metrics), {
       description: "IntelligenceMetricsService",

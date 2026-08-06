@@ -12,8 +12,9 @@ test("default (no provider injected) throws a clearly-labelled NOT_WIRED error, 
   assert.equal(service.isWired(), false);
   await assert.rejects(
     () => service.resolveRelationships("CVE-2026-0001"),
-    /ADR-0010 Acceptance first/,
-    "the error must name the actual governance blocker, not just say 'not implemented'"
+    /no RelationshipProviderInterface has been supplied/,
+    "the error must clearly say no provider was injected into THIS instance, not just 'not implemented' " +
+      "-- Stage 16: this is provider-agnostic-by-design DI, independent of ADR-0010's (now Accepted) status"
   );
 });
 
