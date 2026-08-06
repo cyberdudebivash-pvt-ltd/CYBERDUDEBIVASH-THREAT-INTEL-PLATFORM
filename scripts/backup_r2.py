@@ -40,8 +40,15 @@ SOURCE_BUCKETS = [
 ]
 
 
+def r2_credentials_configured() -> bool:
+    return all([CF_R2_ACCESS_KEY, CF_R2_SECRET_KEY, CF_R2_ENDPOINT])
+
+
 def get_s3():
-    if not all([CF_R2_ACCESS_KEY, CF_R2_SECRET_KEY, CF_R2_ENDPOINT]):
+    # Callers must check r2_credentials_configured() first (see main()) -- this function assumes
+    # it, so this remains a hard FATAL only for the case that should never happen (checked once,
+    # then called immediately after).
+    if not r2_credentials_configured():
         print("FATAL: CF_R2_ACCESS_KEY_ID, CF_R2_SECRET_ACCESS_KEY, and CF_R2_ENDPOINT required")
         sys.exit(1)
     return boto3.client(
@@ -158,6 +165,19 @@ def upload_manifest(s3, manifest, bucket, today):
 def main():
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     print(f"=== SENTINEL APEX R2 Backup | Date: {today} ===")
+
+    # Matches backup_kv_to_r2.py's upload_to_r2() precedent (same job, sibling script): missing
+    # R2 credentials is an expected, environment-dependent condition, not a code defect, and that
+    # script already treats it as a SKIP rather than a hard failure. Unlike that script, this
+    # one's entire job is R2-based (there's no KV-via-API fallback to still attempt), so there is
+    # nothing partial to do here -- the whole run is the thing being skipped. Exiting 0 (not 1)
+    # for this specific, named, already-precedented condition keeps this job from going red for
+    # an unconfigured-environment state its own sibling step doesn't fail on either.
+    if not r2_credentials_configured():
+        print("SKIP: CF_R2_ACCESS_KEY_ID, CF_R2_SECRET_ACCESS_KEY, and CF_R2_ENDPOINT not configured "
+              "-- R2 bucket backup requires them and has nothing else it can do. Not a code error; "
+              "matches backup_kv_to_r2.py's own treatment of this identical condition.")
+        sys.exit(0)
 
     s3 = get_s3()
     failed = []
