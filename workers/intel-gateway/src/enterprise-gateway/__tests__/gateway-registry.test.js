@@ -46,6 +46,46 @@ test("unregister() removes an entry and reports whether one existed", () => {
   assert.equal(registry.unregister("temp"), false);
 });
 
+test("describe() returns safe metadata without the handler function", () => {
+  const registry = new GatewayRegistry();
+  const handler = async () => "ok";
+  registry.register("evidence.lookup", handler, {
+    description: "test capability",
+    version: "2.0.0",
+    requiredCapabilities: ["evidence.lookup", "extra.scope"],
+  });
+  const described = registry.describe("evidence.lookup");
+  assert.deepEqual(described, {
+    name: "evidence.lookup",
+    version: "2.0.0",
+    description: "test capability",
+    requiredCapabilities: ["evidence.lookup", "extra.scope"],
+  });
+  assert.equal("handler" in described, false);
+});
+
+test("describe() of an unregistered capability throws CapabilityNotRegisteredError, same as get()", () => {
+  const registry = new GatewayRegistry();
+  assert.throws(() => registry.describe("nope"), CapabilityNotRegisteredError);
+});
+
+test("describeAll() returns safe metadata for every registered capability, in registration order", () => {
+  const registry = new GatewayRegistry();
+  registry.register("a", async () => {}, { description: "first" });
+  registry.register("b", async () => {}, { description: "second" });
+  const described = registry.describeAll();
+  assert.deepEqual(
+    described.map((entry) => entry.name),
+    ["a", "b"]
+  );
+  assert.ok(described.every((entry) => !("handler" in entry)));
+});
+
+test("describeAll() on an empty registry returns an empty array", () => {
+  const registry = new GatewayRegistry();
+  assert.deepEqual(registry.describeAll(), []);
+});
+
 test("createServiceMethodHandler dispatches to the named method on the target service", async () => {
   const service = {
     async byCVE(cve) {

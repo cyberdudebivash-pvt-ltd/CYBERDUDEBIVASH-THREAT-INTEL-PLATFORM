@@ -57,7 +57,7 @@ export const MiddlewareContract = Object.freeze({
 
 export const CapabilityRegistryContract = Object.freeze({
   name: "CapabilityRegistryContract",
-  version: "1.0.0",
+  version: "1.1.0",
   source: "gateway-registry.js",
   methods: Object.freeze([
     "GatewayRegistry.register",
@@ -65,10 +65,19 @@ export const CapabilityRegistryContract = Object.freeze({
     "GatewayRegistry.get",
     "GatewayRegistry.list",
     "GatewayRegistry.unregister",
+    "GatewayRegistry.describe",
+    "GatewayRegistry.describeAll",
     "createServiceMethodHandler",
   ]),
   history: Object.freeze([
     Object.freeze({ version: "1.0.0", change: "Initial contract (Stage 14 Phase 1)", backwardCompatibleWithPrevious: null }),
+    Object.freeze({
+      version: "1.1.0",
+      change:
+        "Added GatewayRegistry.describe/.describeAll (Stage 14 Phase 2) -- read-only capability " +
+        "metadata accessors that omit the handler function, additive and backward compatible.",
+      backwardCompatibleWithPrevious: true,
+    }),
   ]),
 });
 

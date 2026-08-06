@@ -53,6 +53,8 @@ Immutable (frozen), matching this codebase's freeze-heavy convention. Fields: `c
 
 Authorization is capability-granular (8 names), not per-method (~40+) — a DI-boundary trust model (the caller is already-trusted in-process code), not a network ACL.
 
+**Phase 2 addition — safe metadata introspection:** `get(name)` returns the full internal entry, including the raw `handler` function — correct for `GatewayDispatcher`, its one production caller, but unsafe to hand to a diagnostic/observability caller that has no business invoking capabilities directly. `describe(name)` returns `{name, version, description, requiredCapabilities}` (no `handler`); `describeAll()` returns that shape for every registered capability. `CapabilityRegistryContract` bumped to `1.1.0` (additive, `backwardCompatibleWithPrevious: true`); `check_gateway_registry_describe_omits_handler()` (governance check #54) guards both methods' bodies against reintroducing the leak.
+
 ## 6. `GatewayDispatcher`
 
 `dispatch({capability, method, args, caller, grantedCapabilities, environment, correlationId, metadata})`:
@@ -87,3 +89,4 @@ See `TITAN_STAGE14_PERFORMANCE_BASELINE.md` and the Completion Report for the fu
 - Per-method (not just per-capability) authorization granularity — a real limitation of the DI-trust model chosen for Phase 1, not an oversight (~40+ registrations vs. 8 was judged too heavy a Phase 1 lift for a boundary where the caller is already-trusted in-process code).
 - No `README.md` in this directory, following `intelligence-platform/`'s newer precedent (which also has none) rather than `evidence-registry/`'s older one (which does) — avoids creating a second "docstring says see README.md but none exists" instance of a pre-existing gap already present in `intelligence-platform/`.
 - See `TITAN_STAGE14_COMPLETION_REPORT.md` §11 for the full list of what's deferred to a future phase.
+- See `TITAN_STAGE14_PHASE2_COMPLETION_REPORT.md` for the Phase 2 architecture audit against this document (composition boundaries, registry, dispatcher, lifecycle, middleware, metrics, authorization) — every dimension except registry introspection (§5 above) was found to already satisfy its Phase 2 requirement by construction or by pre-existing reuse; documented there rather than re-litigated here.
