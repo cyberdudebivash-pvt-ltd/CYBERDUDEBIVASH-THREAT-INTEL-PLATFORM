@@ -64,7 +64,7 @@ test("recordFeatureFlagActivation tallies per-flag activation counts", () => {
   assert.deepEqual(metrics.snapshot().feature_flag_activations, { EER_ENABLED: 2 });
 });
 
-test("snapshot() returns a copy — mutating it does not affect the live counters", () => {
+test("snapshot() returns a copy  -  mutating it does not affect the live counters", () => {
   const metrics = new EvidenceRegistryMetrics();
   metrics.recordEvidenceCountDelta(1);
   const snap = metrics.snapshot();

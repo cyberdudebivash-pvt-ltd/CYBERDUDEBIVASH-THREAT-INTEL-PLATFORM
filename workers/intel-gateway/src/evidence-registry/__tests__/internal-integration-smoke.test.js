@@ -1,16 +1,16 @@
 /**
- * Internal integration smoke test — Stage 10 Phase 8 (Project TITAN).
+ * Internal integration smoke test  -  Stage 10 Phase 8 (Project TITAN).
  *
  * "Internal integration" here means demonstrating, at smoke-test level, that the Canonical
  * Evidence Core's own pieces compose correctly across the four named integration surfaces
- * (report pipeline, Relationship Framework, Confidence Framework, validation pipeline) — NOT
+ * (report pipeline, Relationship Framework, Confidence Framework, validation pipeline)  -  NOT
  * wiring any of them into a live call path. Nothing in this file imports index.js or any
  * pNN-handlers.js file; the second test below makes that an enforced property of every file in
  * this directory, not just an assumption.
  *
  * Phase 8's own scope note: "do not modify customer-visible reports." This file adds a test
  * only; it modifies nothing outside __tests__/ and asserts nothing about customer-visible
- * output — it only proves the CEC's own components interoperate.
+ * output  -  it only proves the CEC's own components interoperate.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -25,10 +25,10 @@ import { validateCanonicalEvidence, validateEvidenceBatch } from "../validation.
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCAFFOLD_DIR = dirname(HERE); // .../evidence-registry
 
-// Realistic full P-layer report item — same field-access contract ReportItemAdapter documents
+// Realistic full P-layer report item  -  same field-access contract ReportItemAdapter documents
 // (item.id, item.evidence_chain, item.cve_id, item.actor_tag, item.campaign_id,
 // item.mitre_techniques) plus a __trustScore the caller has already computed via P25's
-// computeEnterpriseTrustScore(item). This test does not call that function itself — it only
+// computeEnterpriseTrustScore(item). This test does not call that function itself  -  it only
 // demonstrates CEC can carry its output, per Single Source of Truth.
 const REALISTIC_REPORT_ITEM = {
   id: "SA-2026-0201",
@@ -124,7 +124,7 @@ test("Phase 8 integration smoke: report pipeline -> relationship framework -> co
 test("no file in evidence-registry/ imports a live pNN-handlers.js or index.js (adapters operate on documented shapes only)", () => {
   // Closes a gap zero-blast-radius.test.js doesn't cover: that test checks the OUTBOUND
   // direction (nothing outside this directory references it). This checks the INBOUND
-  // direction — that files inside this directory never import a real handler/router file —
+  // direction  -  that files inside this directory never import a real handler/router file  - 
   // which is the specific design property migration-adapters.js's file-level docstring claims
   // ("a deliberate design choice... it means adopting these adapters never creates a real
   // module dependency edge"). A prose mention of a filename in a comment (e.g. "verified

@@ -1,9 +1,9 @@
 /**
- * Evidence Lifecycle Engine — Stage 11 Phase 3 (Project TITAN).
+ * Evidence Lifecycle Engine  -  Stage 11 Phase 3 (Project TITAN).
  * Not imported by index.js or any production route. See README.md.
  *
  * Pure, stateless transition-graph validation. Deliberately holds no per-evidence state itself
- * (no Map, no cache) — "which state is evidence X currently in" is registry-service.js's job
+ * (no Map, no cache)  -  "which state is evidence X currently in" is registry-service.js's job
  * (One Evidence Lifecycle: a single registry instance is the one authority on current state);
  * this module only answers "is transitioning from A to B ever legal," a property of the state
  * machine itself, not of any specific evidence record.
@@ -71,15 +71,15 @@ export function canTransition(fromState, toState) {
 /**
  * Throws IllegalLifecycleTransitionError (or a plain Error for an unrecognized state name) if
  * the transition is not legal. Every registry-service.js mutation that changes lifecycle state
- * calls this first — "Every transition must be validated... Illegal transitions must fail."
+ * calls this first  -  "Every transition must be validated... Illegal transitions must fail."
  * @param {string} fromState @param {string} toState
  */
 export function assertValidTransition(fromState, toState) {
   if (!isValidLifecycleState(fromState)) {
-    throw new Error(`Unknown lifecycle state "${fromState}" — must be one of ${LIFECYCLE_STATES.join(", ")}`);
+    throw new Error(`Unknown lifecycle state "${fromState}"  -  must be one of ${LIFECYCLE_STATES.join(", ")}`);
   }
   if (!isValidLifecycleState(toState)) {
-    throw new Error(`Unknown lifecycle state "${toState}" — must be one of ${LIFECYCLE_STATES.join(", ")}`);
+    throw new Error(`Unknown lifecycle state "${toState}"  -  must be one of ${LIFECYCLE_STATES.join(", ")}`);
   }
   if (!canTransition(fromState, toState)) {
     throw new IllegalLifecycleTransitionError(fromState, toState);
@@ -92,7 +92,7 @@ export function isTerminalState(state) {
 }
 
 /**
- * Builds one immutable audit-trail entry for a transition. Pure function — the caller
+ * Builds one immutable audit-trail entry for a transition. Pure function  -  the caller
  * (registry-service.js) is responsible for storing the returned entry; this module holds no
  * state of its own, so the same transition graph can be reused (and independently unit-tested)
  * regardless of how or where transitions end up being recorded.

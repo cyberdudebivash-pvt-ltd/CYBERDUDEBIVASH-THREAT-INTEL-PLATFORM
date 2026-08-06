@@ -1,19 +1,19 @@
 /**
- * Enterprise Evidence Registry repository interface — Stage 11 Phase 2 (Project TITAN).
+ * Enterprise Evidence Registry repository interface  -  Stage 11 Phase 2 (Project TITAN).
  * Not imported by index.js or any production route. See README.md.
  *
  * Extends Stage 8's EvidenceRepositoryInterface (imported, not duplicated) with the additional
  * operations Stage 11 Phase 2 requires: create, update, supersede, archive, lookup, bulk
  * import/export, and version history. get/put/findByContentHash/delete are inherited exactly as
- * Stage 8 defined them — this class does not override or redeclare them.
+ * Stage 8 defined them  -  this class does not override or redeclare them.
  *
- * "Repository implementation must remain abstract enough to support future storage backends" —
+ * "Repository implementation must remain abstract enough to support future storage backends"  - 
  * this interface stays storage-agnostic (no KV/D1/R2 reference anywhere in this file). A
  * concrete backend only needs to satisfy this contract; see in-memory-repository.js for the
  * reference implementation this stage ships (deliberately not vendor-specific persistence).
  *
  * This class is deliberately storage-mechanics-only. It does not know about lifecycle-transition
- * legality (Draft -> Published rules, etc.) — that is lifecycle.js's sole responsibility,
+ * legality (Draft -> Published rules, etc.)  -  that is lifecycle.js's sole responsibility,
  * invoked by registry-service.js *before* calling into a repository method. Single
  * Responsibility: one authority decides whether a transition is legal (lifecycle.js), one
  * authority persists the result (this contract's implementations).
@@ -22,7 +22,7 @@
 import { EvidenceRepositoryInterface } from "./repository-interface.js";
 
 const NOT_IMPLEMENTED = (name) =>
-  `${name} is a contract, not a default implementation for this method — provide a concrete ` +
+  `${name} is a contract, not a default implementation for this method  -  provide a concrete ` +
   "override. See README.md.";
 
 /** @typedef {import('./entity.js').CanonicalEvidence} CanonicalEvidence */
@@ -30,7 +30,7 @@ const NOT_IMPLEMENTED = (name) =>
 export class EvidenceRegistryRepositoryInterface extends EvidenceRepositoryInterface {
   /**
    * Stores a genuinely new evidence record. Must reject (throw) if `entity.evidence_uuid`
-   * already exists — unlike `put()` (inherited, upsert semantics), `create()` never silently
+   * already exists  -  unlike `put()` (inherited, upsert semantics), `create()` never silently
    * overwrites, so the registry service layer can rely on it to catch a real
    * duplicate-registration bug rather than masking one.
    * @param {CanonicalEvidence} entity
@@ -64,7 +64,7 @@ export class EvidenceRegistryRepositoryInterface extends EvidenceRepositoryInter
 
   /**
    * Marks the record as archived. Archived evidence remains retrievable and indexed (archival
-   * is a lifecycle state, not a deletion) — this method only flips the storage-level marker;
+   * is a lifecycle state, not a deletion)  -  this method only flips the storage-level marker;
    * lifecycle legality of the Archived transition is checked by the caller via lifecycle.js.
    * @param {string} evidenceUuid
    * @returns {Promise<CanonicalEvidence>}

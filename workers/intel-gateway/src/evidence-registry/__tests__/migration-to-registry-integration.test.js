@@ -1,9 +1,9 @@
 /**
- * Migration -> Registry integration test — Stage 11 Phase 10's "Migration tests." Distinct
+ * Migration -> Registry integration test  -  Stage 11 Phase 10's "Migration tests." Distinct
  * from migration-adapters.test.js (Stage 10, tests each adapter in isolation) and
  * internal-integration-smoke.test.js (Stage 10 Phase 8, composes adapters with each other):
  * this file proves Stage 10's migration adapters and Stage 11's EvidenceRegistry work together
- * end to end — adapt a legacy shape, then actually register the result — which is the realistic
+ * end to end  -  adapt a legacy shape, then actually register the result  -  which is the realistic
  * path a future, separately-authorized integration would take. Nothing here is wired live.
  */
 import assert from "node:assert/strict";

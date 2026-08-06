@@ -1,5 +1,5 @@
 /**
- * Dedicated backward-compatibility test — Stage 10 Phase 9's explicit requirement, kept
+ * Dedicated backward-compatibility test  -  Stage 10 Phase 9's explicit requirement, kept
  * separate from entity.test.js/validation.test.js's inline backward-compat assertions so
  * there is one file whose sole purpose is "did Stage 10 change anything about Stage 8's
  * already-shipped behavior," independently reviewable and independently runnable.

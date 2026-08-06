@@ -68,14 +68,14 @@ export function validateEvidenceEntity(entity) {
   return { valid: errors.length === 0, errors };
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Stage 10 Phase 4 — Canonical Evidence Core validation engine.
-// validateEvidenceEntity() above is UNCHANGED — existing callers (none yet,
+// =======================================================================
+// Stage 10 Phase 4  -  Canonical Evidence Core validation engine.
+// validateEvidenceEntity() above is UNCHANGED  -  existing callers (none yet,
 // since nothing is wired up, but the function signature/behavior is
 // preserved regardless) see identical behavior. The functions below are
 // new, additive, and reusable across any future repository implementation
 // (Phase 3's EvidenceValidator interface wraps these).
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 
 /**
  * @typedef {Object} StrictValidationOptions
@@ -93,7 +93,7 @@ export function validateEvidenceEntity(entity) {
 
 /**
  * Validates the Stage 10 CanonicalEvidence field groups. Calls validateEvidenceEntity()
- * first and includes its errors verbatim (Reuse Before Build — this does not re-check what
+ * first and includes its errors verbatim (Reuse Before Build  -  this does not re-check what
  * that function already checks).
  * @param {import('./entity.js').CanonicalEvidence} entity
  * @param {StrictValidationOptions} [options]
@@ -116,7 +116,7 @@ export function validateCanonicalEvidence(entity, options = {}) {
     errors.push("source_id must be a string when present");
   }
 
-  // Schema violations — closed vocabularies
+  // Schema violations  -  closed vocabularies
   if (entity.visibility !== undefined && !VISIBILITY_LEVELS.includes(entity.visibility)) {
     errors.push(`visibility must be one of ${VISIBILITY_LEVELS.join(", ")} when present`);
   }
@@ -138,9 +138,9 @@ export function validateCanonicalEvidence(entity, options = {}) {
     }
   }
 
-  // Relationship inconsistencies — shape + within-field duplicates. Referential integrity
+  // Relationship inconsistencies  -  shape + within-field duplicates. Referential integrity
   // (does related_reports[i] actually exist?) is out of scope for a pure, storage-free
-  // validator — Phase 3's "no storage implementation yet" applies here too.
+  // validator  -  Phase 3's "no storage implementation yet" applies here too.
   for (const field of EVIDENCE_RELATIONSHIP_FIELDS) {
     const value = entity[field];
     if (value === undefined) continue;
@@ -161,7 +161,7 @@ export function validateCanonicalEvidence(entity, options = {}) {
     errors.push("version must be a positive integer when present");
   }
 
-  // Missing confidence / lifecycle / evidence type — strict, opt-in checks. Off by default so
+  // Missing confidence / lifecycle / evidence type  -  strict, opt-in checks. Off by default so
   // this function's default behavior stays permissive, matching validateEvidenceEntity()'s
   // own documented philosophy ("deliberately permissive... they're all optional in production
   // today").
@@ -180,7 +180,7 @@ export function validateCanonicalEvidence(entity, options = {}) {
 
 /**
  * Batch validation across a collection: duplicate identifiers and version conflicts.
- * Pure function, no I/O — operates on whatever collection the caller already has in memory.
+ * Pure function, no I/O  -  operates on whatever collection the caller already has in memory.
  * @param {import('./entity.js').CanonicalEvidence[]} entities
  * @returns {StrictValidationResult}
  */
@@ -225,7 +225,7 @@ export function validateEvidenceBatch(entities) {
     } else {
       warnings.push(
         `evidence_uuid ${uuid} appears ${group.length} times with distinct ascending versions ` +
-          `[${versions.join(", ")}] — treated as a version history, not a duplicate`
+          `[${versions.join(", ")}]  -  treated as a version history, not a duplicate`
       );
     }
   }

@@ -19,22 +19,22 @@ export const EVIDENCE_REGISTRY_FLAGS = Object.freeze({
   EVIDENCE_API_ENABLED: false,
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// Stage 10 Phase 6 — environment-aware flag support for the Canonical
+// =======================================================================
+// Stage 10 Phase 6  -  environment-aware flag support for the Canonical
 // Evidence Core specifically. EVIDENCE_REGISTRY_FLAGS above is unchanged:
 // it still governs the Registry/Service/API and is still all-false,
 // still gated on ADR-0008 Acceptance. CEC_FLAGS below governs only
 // whether this directory's own inert domain-model/validation/serialization
-// code may be *exercised* (e.g. by this stage's own test suite) — it does
+// code may be *exercised* (e.g. by this stage's own test suite)  -  it does
 // not gate wiring into any production route, which SCAFFOLDING_ENABLED
 // above continues to gate.
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 
 export const DEPLOYMENT_ENVIRONMENTS = Object.freeze(["development", "testing", "canary", "production"]);
 
 /**
  * Per-environment CEC flag table. Every environment except "canary"/"production" defaults to
- * enabled *for exercising this directory's own code in isolation* (tests, local dev) — none of
+ * enabled *for exercising this directory's own code in isolation* (tests, local dev)  -  none of
  * these values are read by index.js or any P-layer handler, so "enabled" here has zero
  * production blast radius regardless of value, unlike SCAFFOLDING_ENABLED above.
  */
@@ -47,7 +47,7 @@ export const CEC_FLAGS = Object.freeze({
 
 /**
  * Resolves CEC flag state for an environment. Unrecognized/missing environment strings
- * resolve to "production" (the all-disabled state) — secure by default (Principle 9), never
+ * resolve to "production" (the all-disabled state)  -  secure by default (Principle 9), never
  * fails open.
  * @param {string} [environment]
  * @returns {{CEC_ENABLED: boolean}}
@@ -66,19 +66,19 @@ export function rollbackCecFlags() {
   return CEC_FLAGS.production;
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Stage 11 — environment-aware flag support for the Enterprise Evidence
+// =======================================================================
+// Stage 11  -  environment-aware flag support for the Enterprise Evidence
 // Registry (EER) specifically. EVIDENCE_REGISTRY_FLAGS and CEC_FLAGS above
 // are both unchanged. EER_FLAGS below governs only whether this directory's
 // registry-service.js/in-memory-repository.js/lifecycle.js/versioning.js/
-// indexes.js may be *exercised* (tests, local dev) — same "zero production
+// indexes.js may be *exercised* (tests, local dev)  -  same "zero production
 // blast radius regardless of value" property as CEC_FLAGS, since nothing
 // reads this from index.js or any P-layer handler. Reuses
 // DEPLOYMENT_ENVIRONMENTS above rather than redefining the environment list.
-// ═══════════════════════════════════════════════════════════════════════
+// =======================================================================
 
 /**
- * Per-environment EER flag table. Mirrors CEC_FLAGS's exact shape and defaults —
+ * Per-environment EER flag table. Mirrors CEC_FLAGS's exact shape and defaults  - 
  * development/testing enabled, canary/production disabled.
  */
 export const EER_FLAGS = Object.freeze({
@@ -90,7 +90,7 @@ export const EER_FLAGS = Object.freeze({
 
 /**
  * Resolves EER flag state for an environment. Unrecognized/missing environment strings resolve
- * to "production" (the all-disabled state) — secure by default, never fails open. Mirrors
+ * to "production" (the all-disabled state)  -  secure by default, never fails open. Mirrors
  * resolveCecFlags() exactly.
  * @param {string} [environment]
  * @returns {{EER_ENABLED: boolean}}

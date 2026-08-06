@@ -1,5 +1,5 @@
 /**
- * Canonical Evidence Core migration adapters — Stage 10 Phase 7 (Project TITAN).
+ * Canonical Evidence Core migration adapters  -  Stage 10 Phase 7 (Project TITAN).
  * Not imported by index.js or any production route. See README.md.
  *
  * Every adapter here is a pure function operating on a documented DATA SHAPE, not an import
@@ -15,14 +15,14 @@
  * "Migration must be transparent. No consumer rewrites." (Phase 7) is satisfied by
  * construction: nothing calls these adapters yet, so there is no consumer to rewrite. When a
  * future, separately-authorized stage does wire one in, it is choosing to call a pure
- * function — no existing code needs to change shape to accommodate it.
+ * function  -  no existing code needs to change shape to accommodate it.
  */
 
 import { createCanonicalEvidence, createEvidenceEntity } from "./entity.js";
 import { EvidenceMigrationAdapterInterface } from "./interfaces.js";
 
 /**
- * Adapts P20's live `item.evidence_chain` shape (p20-handlers.js, buildEvidenceChainBlock —
+ * Adapts P20's live `item.evidence_chain` shape (p20-handlers.js, buildEvidenceChainBlock  - 
  * the same shape entity.js's EvidenceChainCore already documents) into a CanonicalEvidence.
  * Composes createEvidenceEntity() + createCanonicalEvidence() rather than reimplementing
  * either (Reuse Before Build).
@@ -51,7 +51,7 @@ export class P20EvidenceChainAdapter extends EvidenceMigrationAdapterInterface {
  * related_attack_techniques arrays. Direction note: CanonicalRelationship.evidence_references
  * points FROM a relationship TO evidence (an edge citing this evidence as support); this
  * adapter reads the *other* endpoint of each such relationship (whichever of source_entity /
- * target_entity is not the evidence's own related entity) and buckets it by entity_type —
+ * target_entity is not the evidence's own related entity) and buckets it by entity_type  - 
  * the inverse direction, populating what this evidence itself speaks to.
  */
 export class CanonicalRelationshipAdapter extends EvidenceMigrationAdapterInterface {
@@ -104,7 +104,7 @@ export class CanonicalRelationshipAdapter extends EvidenceMigrationAdapterInterf
 /**
  * Attaches a P25 computeEnterpriseTrustScore(item) output verbatim as canonical_confidence_
  * object. Shape `{dims, totalEarned, totalMax, pct, tier, tierColor}`, verified directly
- * against p25-handlers.js's own return statement, not assumed — this adapter does not
+ * against p25-handlers.js's own return statement, not assumed  -  this adapter does not
  * redeclare or recompute that shape, only carries it (Single Source of Truth: P25 remains the
  * one place trust scores are computed).
  */
@@ -140,7 +140,7 @@ export class P25ConfidenceAdapter extends EvidenceMigrationAdapterInterface {
  * through the standard P-layer response chain), extracts every evidence-relevant field into a
  * single CanonicalEvidence in one call, composing the three adapters above rather than
  * reimplementing their logic. This is the "Existing Report Structures" adapter Phase 7 asks
- * for — `item` here is documented by field access only (item.evidence_chain, item.id,
+ * for  -  `item` here is documented by field access only (item.evidence_chain, item.id,
  * item.cve_id/cves, item.actor_tag, item.mitre_techniques, item.iocs), the same defensive
  * field-presence style p20/p25-handlers.js themselves already use, so a field's absence degrades
  * gracefully rather than throwing. `item.iocs` verified against the live shape (p20/p22/

@@ -32,7 +32,7 @@ test("REJECTED is reachable from every pre-publication state", () => {
   }
 });
 
-test("ARCHIVED and REJECTED are terminal — no legal outgoing transitions", () => {
+test("ARCHIVED and REJECTED are terminal  -  no legal outgoing transitions", () => {
   assert.equal(isTerminalState("ARCHIVED"), true);
   assert.equal(isTerminalState("REJECTED"), true);
   assert.deepEqual(getLegalNextStates("ARCHIVED"), []);

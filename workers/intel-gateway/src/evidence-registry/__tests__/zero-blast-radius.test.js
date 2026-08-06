@@ -1,5 +1,5 @@
 /**
- * Zero-blast-radius test — mirrors scripts/titan_architecture_governance_check.py's
+ * Zero-blast-radius test  -  mirrors scripts/titan_architecture_governance_check.py's
  * check_evidence_registry_scaffolding_boundary() as an explicit, independently-runnable Node
  * test, so this property is verifiable from either toolchain (Python CI check or `node --test`)
  * without depending on the other. Confirms Stage 10's expansion of this directory has not

@@ -1,9 +1,9 @@
 /**
- * Evidence Registry Indexing — Stage 11 Phase 5 (Project TITAN).
+ * Evidence Registry Indexing  -  Stage 11 Phase 5 (Project TITAN).
  * Not imported by index.js or any production route. See README.md.
  *
  * Abstract, backend-independent indexes: plain in-memory Map<key, Set<evidence_uuid>>
- * structures. "Indexes should be abstract and backend-independent" — nothing here assumes any
+ * structures. "Indexes should be abstract and backend-independent"  -  nothing here assumes any
  * particular storage engine; a future KV/D1-backed repository could maintain equivalent
  * indexes using whatever native indexing that backend offers, satisfying the same query
  * methods this class exposes.
@@ -12,7 +12,7 @@
  * Campaign, IOC, ATT&CK Technique, Source, Report, Relationship, Confidence. UUID itself is a
  * repository's own primary key (no separate index needed here); "Relationship" is implemented
  * as a cross-cutting union over the other related_* dimensions rather than its own Map, since
- * CanonicalEvidence has no single "relationship" field to index — see byRelatedEntity().
+ * CanonicalEvidence has no single "relationship" field to index  -  see byRelatedEntity().
  */
 
 /** @typedef {import('./entity.js').CanonicalEvidence} CanonicalEvidence */
@@ -55,7 +55,7 @@ export class EvidenceRegistryIndexes {
 
   /**
    * Indexes one evidence record's current field values. Safe to call more than once for the
-   * same record (Set semantics — re-indexing an unchanged record is a no-op past the first
+   * same record (Set semantics  -  re-indexing an unchanged record is a no-op past the first
    * call).
    * @param {CanonicalEvidence} evidence
    */
@@ -88,7 +88,7 @@ export class EvidenceRegistryIndexes {
   }
 
   /**
-   * Removes `previous`'s index entries, then indexes `next` — used after update()/supersede()
+   * Removes `previous`'s index entries, then indexes `next`  -  used after update()/supersede()
    * so stale associations (e.g. a CVE reference removed by an edit) don't linger.
    * @param {CanonicalEvidence | null} previous @param {CanonicalEvidence} next
    */
@@ -135,7 +135,7 @@ export class EvidenceRegistryIndexes {
 
   /**
    * Cross-cutting "Relationship" index (Phase 5's 10th dimension): union of every related_*
-   * dimension for a given entity id — an evidence record's relationships ARE its related_*
+   * dimension for a given entity id  -  an evidence record's relationships ARE its related_*
    * arrays, so there is no separate structure to maintain beyond the six indexes above.
    * @param {string} entityId
    * @returns {string[]} evidence_uuids referencing entityId in any related_* field

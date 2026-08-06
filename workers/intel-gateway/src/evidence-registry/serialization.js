@@ -1,10 +1,10 @@
 /**
- * Canonical Evidence Core serialization — Stage 10 Phase 5 (Project TITAN).
+ * Canonical Evidence Core serialization  -  Stage 10 Phase 5 (Project TITAN).
  * Not imported by index.js or any production route. See README.md.
  *
  * Supports JSON, Markdown, and an internal DTO (plain object, already the entity's own
- * shape — no transformation needed, documented as its own format for interface completeness).
- * STIX and public-API serialization are explicitly stubbed, not implemented — Phase 5's own
+ * shape  -  no transformation needed, documented as its own format for interface completeness).
+ * STIX and public-API serialization are explicitly stubbed, not implemented  -  Phase 5's own
  * instruction is "Future STIX compatibility, Future API compatibility... Do not expose public
  * APIs yet." A stub that throws a clear, dated message is preferred over silently omitting
  * the format (Observable Everything: a caller finds out why, not just that it failed).
@@ -20,11 +20,11 @@ export const FUTURE_SERIALIZATION_FORMATS = Object.freeze(["stix", "api"]);
 
 const NOT_YET_AUTHORIZED = (format) =>
   `${format} serialization is a named future capability (Stage 10 Phase 5: "Future ${format} ` +
-  "compatibility\"), not implemented this stage. Requesting it is not a bug in the caller — it " +
+  "compatibility\"), not implemented this stage. Requesting it is not a bug in the caller  -  it " +
   "means this capability hasn't been built yet, and building it is out of this stage's scope.";
 
 /**
- * Default JSON implementation of EvidenceSerializerInterface. Plain JSON.stringify/parse —
+ * Default JSON implementation of EvidenceSerializerInterface. Plain JSON.stringify/parse  - 
  * no custom reviver/replacer, since CanonicalEvidence is already a plain-data shape (no
  * class instances, no circular references) by construction (createCanonicalEvidence() in
  * entity.js only ever returns plain objects).
@@ -48,7 +48,7 @@ export class JsonEvidenceSerializer extends EvidenceSerializerInterface {
 }
 
 /**
- * Default Markdown implementation — a human-readable rendering, not intended to round-trip
+ * Default Markdown implementation  -  a human-readable rendering, not intended to round-trip
  * (deserialize() throws; Markdown is a presentation format here, matching this platform's
  * existing report-generation convention of Markdown as an output-only format).
  */
@@ -66,7 +66,7 @@ export class MarkdownEvidenceSerializer extends EvidenceSerializerInterface {
       `- **Visibility:** ${entity.visibility || "INTERNAL"}`,
       `- **TLP:** ${entity.tlp_classification || "_unset_"}`,
       `- **Source:** ${entity.source_name || entity.source_id || "_unattributed_"} (${entity.source_category || "unknown category"})`,
-      `- **Reliability:** ${entity.reliability_code || "_unrated_"} — ${entity.source_reliability || ""}`,
+      `- **Reliability:** ${entity.reliability_code || "_unrated_"}  -  ${entity.source_reliability || ""}`,
       `- **Verification status:** ${entity.verification_status || "UNVERIFIED"}`,
       `- **Schema version:** ${entity.schema_version || "_unversioned_"}`,
     ];
@@ -96,7 +96,7 @@ export class MarkdownEvidenceSerializer extends EvidenceSerializerInterface {
    */
   deserialize(_payload) {
     throw new Error(
-      "MarkdownEvidenceSerializer.deserialize is intentionally unimplemented — Markdown is an " +
+      "MarkdownEvidenceSerializer.deserialize is intentionally unimplemented  -  Markdown is an " +
         "output-only presentation format in this scaffolding, matching this platform's existing " +
         "report-generation convention. Use JsonEvidenceSerializer or DtoEvidenceSerializer to " +
         "round-trip."
@@ -105,7 +105,7 @@ export class MarkdownEvidenceSerializer extends EvidenceSerializerInterface {
 }
 
 /**
- * Default "internal DTO" implementation — CanonicalEvidence's own in-memory shape IS the DTO;
+ * Default "internal DTO" implementation  -  CanonicalEvidence's own in-memory shape IS the DTO;
  * this class exists so "internal DTO" is a real, addressable format (per Phase 5's own list)
  * rather than an implicit assumption, and so a future caller has one obvious place to look.
  */
@@ -145,7 +145,7 @@ export function getSerializer(format) {
 }
 
 /**
- * Default EvidenceImporter: deserialize (JSON only — the only round-trippable format) then
+ * Default EvidenceImporter: deserialize (JSON only  -  the only round-trippable format) then
  * validate. Composes JsonEvidenceSerializer + validateCanonicalEvidence rather than
  * reimplementing either.
  */
