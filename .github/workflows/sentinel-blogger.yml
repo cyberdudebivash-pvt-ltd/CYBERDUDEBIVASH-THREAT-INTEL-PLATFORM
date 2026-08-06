@@ -2890,6 +2890,15 @@ jobs:
       #   Eliminates unbounded git object store growth on gh-pages.
       #   Combined with clean: true → gh-pages is always minimal and deterministic.
       # -----------------------------------------------------------------------
+      # v184.1 -- 2026-08-06 incident follow-up (see
+      # TITAN_PAGES_DEPLOYMENT_INCIDENT_2026-08-06.md): captured immediately before the push so
+      # STAGE 5.4.9.1 below can verify the live site actually picked up THIS run's deploy,
+      # independent of whatever GitHub's Pages backend reports about its own build.
+      - name: "STAGE 4.9.9 - Capture pre-deploy timestamp"
+        id: pre-deploy-ts
+        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' }}
+        run: echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: "STAGE 5 - Deploy to GitHub Pages"
         # v184.0: deploy only after 5.4.7 verified dist/ integrity — never deploy
         # a broken or incomplete artifact. This gate ensures convergence validator
@@ -2902,6 +2911,25 @@ jobs:
           folder: dist
           clean: true
           single-commit: true
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.4.9.1: GITHUB PAGES DEPLOYMENT FRESHNESS GATE (v184.1)
+      # 2026-08-06 incident follow-up -- see TITAN_PAGES_DEPLOYMENT_INCIDENT_2026-08-06.md.
+      # JamesIves' action (STAGE 5) only performs `git push` and reports success either way --
+      # it does not verify GitHub's Pages backend actually finished publishing. 3 consecutive
+      # "pages build and deployment" runs got stuck in deployment_queued and timed out that day,
+      # silently: STAGE 5 reported success, and STAGE 5.5.0's smoke tests (HTTP status/size only,
+      # continue-on-error: true) don't check content freshness. This gate closes that gap --
+      # HARD FAIL (no continue-on-error), unlike 5.5.0, because "we don't know if this deploy is
+      # actually live" is itself the actionable signal this step exists to surface.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.4.9.1 - GitHub Pages Deployment Freshness Gate (v184.1)"
+        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' }}
+        timeout-minutes: 14
+        env:
+          PLATFORM_URL: https://intel.cyberdudebivash.com
+          PRE_DEPLOY_TIMESTAMP: ${{ steps.pre-deploy-ts.outputs.ts }}
+        run: python3 scripts/pages_deploy_freshness_gate.py
 
       # -----------------------------------------------------------------------
       # STAGE 5.5.0: POST-DEPLOY SMOKE TESTS v184.0
