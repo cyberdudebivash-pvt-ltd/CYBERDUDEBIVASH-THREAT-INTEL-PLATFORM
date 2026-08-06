@@ -82,8 +82,8 @@ node --test
 ```
 
 Zero new dependencies — uses Node's built-in `node:test`/`node:assert`, matching this platform's
-existing hand-rolled-test-runner convention (`regression_tests.py`). As of Stage 10 Phase 9/10:
-61 tests, 0 failures. A `package.json` (`{"type": "module"}`) is scoped to this directory only —
+existing hand-rolled-test-runner convention (`regression_tests.py`). As of Stage 11 Phase 10:
+153 tests, 0 failures. A `package.json` (`{"type": "module"}`) is scoped to this directory only —
 it does not affect the parent Worker's build; it exists solely so Node resolves these files as
 ESM without an auto-reparse warning.
 
@@ -128,3 +128,53 @@ mechanisms guard this property so it can't silently regress:
    architectural event requiring its own explicit authorization — see
    `TITAN_EVIDENCE_REGISTRY_AUTHORIZATION.md`'s precedent for what that authorization looked like
    for this directory's original creation.
+
+---
+
+## Stage 11 extension — Enterprise Evidence Registry (EER)
+
+**Everything above this line is Stage 8/10 and is unmodified**, except two small, documented
+additions to `entity.js` and `identifiers.js` (see
+`TITAN_STAGE11_REGISTRY_ARCHITECTURE.md` §6). Stage 11 activated the CEC with a working internal
+registry service — still zero runtime effect, still not imported by `index.js`. Full
+documentation lives in five more top-level docs:
+
+| Document | Covers |
+|---|---|
+| `TITAN_STAGE11_REGISTRY_ARCHITECTURE.md` | Component map, design principles, what changed in Stage 10 files and why |
+| `TITAN_STAGE11_LIFECYCLE_SPECIFICATION.md` | The 9 lifecycle states, transition graph, audit trail |
+| `TITAN_STAGE11_VERSIONING_GUIDE.md` | Version numbering, lineage immutability, schema compatibility |
+| `TITAN_STAGE11_REPOSITORY_GUIDE.md` | The repository interface and its in-memory reference implementation |
+| `TITAN_STAGE11_INTERNAL_SERVICE_GUIDE.md` | `EvidenceRegistry`'s full API surface, with usage examples |
+| `TITAN_STAGE11_EVIDENCE_MIGRATION_GUIDE_UPDATE.md` | How Stage 10's migration adapters now feed a real registry |
+| `TITAN_STAGE11_COMPLETION_REPORT.md` | Proof Before Change, blast radius, Reuse Report, compliance checklist |
+
+### File layout additions
+
+```
+registry-repository-interface.js   Stage 11 — extends EvidenceRepositoryInterface (create/update/
+                                    supersede/archive/lookup/bulk import-export/version history)
+in-memory-repository.js            Stage 11 — reference repository implementation (in-memory only)
+lifecycle.js                       Stage 11 — pure transition-graph validation, 9 states
+versioning.js                      Stage 11 — version/lineage queries, schema-compat passthrough
+indexes.js                         Stage 11 — 10-dimension backend-independent indexing
+registry-metrics.js                Stage 11 — in-memory observability counters
+registry-service.js                Stage 11 — the ONE EvidenceRegistry service class
+feature-flags.js                   (extended) + Stage 11 EER_FLAGS
+```
+
+### The `EvidenceRegistry` in one line
+
+`new EvidenceRegistry()` composes an in-memory repository, the lifecycle engine, a version
+manager, indexes, and metrics into a single internal service exposing `registerEvidence`,
+`getEvidence`, `findEvidence`, `findByCVE`/`findByThreatActor`/`findByReport`/etc.,
+`updateEvidence`, `supersedeEvidence`, `archiveEvidence`, `resolveVersion`, `bulkImport`/
+`bulkExport`, and `getMetricsSnapshot`. See `TITAN_STAGE11_INTERNAL_SERVICE_GUIDE.md` for the
+full reference with examples.
+
+### Feature flags, updated
+
+A third, independent gate joins the two documented above: `EER_FLAGS` (Stage 11, same file as
+`CEC_FLAGS`) — identical shape and defaults (`development`/`testing` enabled,
+`canary`/`production` disabled), same "zero production blast radius regardless of value"
+property, since nothing outside this directory's own tests reads it.
