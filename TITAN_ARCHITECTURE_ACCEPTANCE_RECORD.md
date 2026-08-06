@@ -1,18 +1,26 @@
 # Project TITAN — Architecture Acceptance Record
 
-**Status:** Closed, 2026-08-06. Three of three dispositions recorded — all **Accepted**, by
-direct executive architecture authority (cyberdudebivash, confirmed in session). This was an
-executive-authority acceptance, not a completed multi-party review: the individually-named
-sign-offs in each ADR's own "Approval" section were not independently obtained, and each ADR now
-says so explicitly rather than implying otherwise. This record exists so that authority has one
-place to act, and so every later stage can verify disposition by reading a file instead of
-assuming — that verification now reads Accepted, on this basis.
+**Status:** Reopened once, Stage 16 (2026-08-06). Originally closed Stage 11.5 with three of
+three dispositions recorded, all **Accepted**. A fourth ADR — ADR-0010 — was added and Accepted
+in this same executive session at Stage 16, when Relationship Framework implementation was
+authorized; see the Stage 16 Addendum at the end of this record rather than assuming the
+original three-ADR scope below still describes this file's full contents. All four dispositions
+are, by direct executive architecture authority (cyberdudebivash, confirmed in session).
+This was an executive-authority acceptance, not a completed multi-party review: the
+individually-named sign-offs in each ADR's own "Approval" section were not independently
+obtained, and each ADR now says so explicitly rather than implying otherwise. This record exists
+so that authority has one place to act, and so every later stage can verify disposition by
+reading a file instead of assuming — that verification now reads Accepted, on this basis, for
+all four.
 
-**Program:** Project TITAN, Stage 11.5 (Executive Architecture Acceptance)
+**Program:** Project TITAN, Stage 11.5 (Executive Architecture Acceptance), reopened Stage 16
 **Created:** 2026-08-06, in response to an executive architecture decision to insert a
 governance milestone between Stage 11 (merged) and Stage 12 (not yet authorized).
-**Scope:** ADR-0008, ADR-0011, ADR-0012 — the three ADRs `TITAN_TECH_DEBT_REGISTER.md`'s
+**Original scope:** ADR-0008, ADR-0011, ADR-0012 — the three ADRs `TITAN_TECH_DEBT_REGISTER.md`'s
 DEBT-021 identifies as blocking Stage 12 (Enterprise Evidence Service Platform).
+**Stage 16 addition:** ADR-0010 (Relationship Graph Ownership) — see the addendum at the end of
+this file. Not part of DEBT-021's original three; added when Stage 16 needed a disposition on
+record before implementing the Relationship Framework.
 
 ---
 
@@ -42,10 +50,13 @@ input to the actual Decider's judgment, not a substitute for it.
 | [0008](docs/adr/0008-canonical-evidence-framework.md) | Canonical Evidence Framework | **Accepted** | **Accepted** | cyberdudebivash (executive authority) | 2026-08-06 |
 | [0011](docs/adr/0011-evidence-lifecycle-ownership.md) | Evidence Lifecycle Ownership | **Accepted** | **Accepted** | cyberdudebivash (executive authority) | 2026-08-06 |
 | [0012](docs/adr/0012-api-versioning-interface-governance.md) | API Versioning & Interface Governance | **Accepted** | **Accepted*** | cyberdudebivash (executive authority) | 2026-08-06 |
+| [0010](docs/adr/0010-relationship-graph-ownership.md) | Relationship Graph Ownership | **Accepted** | **Accepted**† | cyberdudebivash (executive authority) | 2026-08-06 (Stage 16) |
 
 \* Engineering recommendation below was Accepted *with Conditions* (Blog/Vercel confirmation).
 Executive disposition is unconditional Accepted — recorded as decided, not as recommended; see
 ADR-0012's section below for both, side by side.
+
+† Added Stage 16, not part of the original Stage 11.5 scope — see the Stage 16 Addendum.
 
 ---
 
@@ -176,3 +187,51 @@ Decided by / date: cyberdudebivash, executive architecture authority — 2026-08
 This record is itself subject to that same discipline: update it in place as dispositions land,
 keep prior recommendation text intact even if a Decider disagrees with it — the disagreement is
 useful signal, not noise to delete.
+
+---
+
+## Stage 16 Addendum — ADR-0010 (Relationship Graph Ownership)
+
+Added 2026-08-06, outside this record's original Stage 11.5 scope. Project TITAN Stage 16
+("Enterprise Relationship Framework Activation") required a governance-verified disposition on
+ADR-0010 before implementation could proceed. The pre-implementation gate found ADR-0010
+Proposed, not Accepted (see `TITAN_STAGE16_GOVERNANCE_REPORT.md` for that verification, performed
+against both the local repository and the live GitHub API). The executive authority who owns
+this record's disposition process was then asked directly and accepted it in-session.
+
+**Decides:** Canonical entity-relationship graph ownership. R1 (`p31-handlers.js`'s `_buildGraph`
+/ `buildP31RelationshipBlock` / `handleP31Relationships`) is target-canonical, per the ADR's
+original Decision (unchanged since Revision 4).
+
+**Where it stood:** Revision 4 left one prerequisite open for engineering scoping, not decided
+by any prior stage: Decision item 2's persistence-layer requirement, and specifically whether it
+should be satisfied by adopting R6 (`core/intelligence/enrichment_graph.py`, cross-language,
+DEBT-000B) or by building persistence natively into R1's own consumption boundary.
+
+**What resolved it:** ADR-0010's own Revision 5 (added this session) makes the scoping call:
+native persistence, not R6 adoption — see that revision for the full reasoning. This was an
+engineering scoping decision made in service of the executive's acceptance, using one of the two
+paths DEBT-000B's own entry already named as valid; it is not a new architectural direction
+invented for this occasion.
+
+**Downstream evidence available to this decision:** None yet at acceptance time — unlike
+ADR-0008/0011 (which had Stage 10/11's shipped, tested implementation as evidence before
+Acceptance), ADR-0010's Acceptance here precedes its implementation. Stage 16's own completion
+report (`TITAN_STAGE16_RELATIONSHIP_FRAMEWORK_REPORT.md`) is the evidence trail for whether the
+accepted design held up in practice — read that alongside this disposition, not in place of it.
+
+**Required sign-offs (per the ADR's own Approval section):** Platform Governance Lead, Chief
+Threat Intelligence Architect / P31 owner, Blog/EIOS engineering owner. Not independently
+obtained — see ADR-0010's own Approval section for the per-row disposition (the Blog/EIOS row
+specifically remains deferred, not accepted-by-proxy, since R2/`knowledge_graph.py` is untouched
+by this session's work).
+
+**Disposition:** **ACCEPTED**
+☑ Accepted&nbsp;&nbsp;☐ Accepted with Conditions&nbsp;&nbsp;☐ Requires Revision&nbsp;&nbsp;☐ Rejected
+Conditions (if any): None attached by the deciding authority. Engineering note carried forward
+(not a condition, a disclosure): R6-vs-native-persistence was an engineering scoping call made
+to unblock this Acceptance, not independently reviewed by the P31-owning team beyond this
+session.
+Decided by / date: cyberdudebivash, executive architecture authority — 2026-08-06, direct
+session authorization ("Yes accepted ADR-0010 right now go ahead build real Relationship
+Framework").

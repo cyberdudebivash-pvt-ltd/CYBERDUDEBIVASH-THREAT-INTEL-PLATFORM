@@ -618,5 +618,136 @@ class ComputeGatewayAdoptionMetricsTests(unittest.TestCase):
             self.assertAlmostEqual(metrics["adoption_percentage"], 66.7)
 
 
+# -- Stage 16: Relationship Framework governance check fixture tests -----------------------------
+
+GOOD_RELATIONSHIP_SERVICE_JS = """
+import { RelationshipResolutionService } from "../evidence-registry/relationship-resolution.js";
+import { P31RelationshipProvider } from "./relationship-provider.js";
+
+export class RelationshipService {
+  constructor(deps = {}) {
+    this._provider = new P31RelationshipProvider({ repository: this._repository });
+    this.resolution = new RelationshipResolutionService({ provider: this._provider });
+  }
+}
+"""
+
+GOOD_RELATIONSHIP_PROVIDER_JS = """
+import { RelationshipProviderInterface } from "../evidence-registry/relationship-resolution.js";
+export class P31RelationshipProvider extends RelationshipProviderInterface {}
+"""
+
+
+class CheckRelationshipFrameworkFilesPresentAndIsolatedTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rf_dir = Path(tmp) / "relationship-framework"
+            write_tree(rf_dir, {name: "export const x = 1;\n" for name in governance.RELATIONSHIP_FRAMEWORK_CORE_FILES})
+            findings = governance.check_relationship_framework_files_present_and_isolated(rf_dir=rf_dir)
+            self.assertEqual(findings, [])
+
+    def test_missing_file_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rf_dir = Path(tmp) / "relationship-framework"
+            files = {name: "export const x = 1;\n" for name in governance.RELATIONSHIP_FRAMEWORK_CORE_FILES}
+            del files["relationship-service.js"]
+            write_tree(rf_dir, files)
+            findings = governance.check_relationship_framework_files_present_and_isolated(rf_dir=rf_dir)
+            self.assertTrue(any("MISSING RELATIONSHIP FRAMEWORK FILE" in f and "relationship-service.js" in f for f in findings))
+
+    def test_pNN_handlers_import_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rf_dir = Path(tmp) / "relationship-framework"
+            files = {name: "export const x = 1;\n" for name in governance.RELATIONSHIP_FRAMEWORK_CORE_FILES}
+            files["relationship-provider.js"] = 'import { x } from "../p31-handlers.js";\n'
+            write_tree(rf_dir, files)
+            findings = governance.check_relationship_framework_files_present_and_isolated(rf_dir=rf_dir)
+            self.assertTrue(any("ARCHITECTURE VIOLATION" in f for f in findings))
+
+    def test_missing_directory_yields_no_findings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rf_dir = Path(tmp) / "relationship-framework"  # never created
+            findings = governance.check_relationship_framework_files_present_and_isolated(rf_dir=rf_dir)
+            self.assertEqual(findings, [])
+
+
+class CheckNoDuplicateRelationshipEngineTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            rf_dir = handlers_dir / "relationship-framework"
+            write_tree(
+                handlers_dir,
+                {
+                    "relationship-framework/relationship-service.js": "export class RelationshipService {}\n",
+                    "index.js": "// no relationship class here\n",
+                },
+            )
+            findings = governance.check_no_duplicate_relationship_engine(handlers_dir=handlers_dir, rf_dir=rf_dir)
+            self.assertEqual(findings, [])
+
+    def test_duplicate_class_outside_canonical_file_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            rf_dir = handlers_dir / "relationship-framework"
+            write_tree(
+                handlers_dir,
+                {
+                    "relationship-framework/relationship-traversal.js": "export class RelationshipTraversalService {}\n",
+                    "some-other-file.js": "export class RelationshipTraversalService {}\n",
+                },
+            )
+            findings = governance.check_no_duplicate_relationship_engine(handlers_dir=handlers_dir, rf_dir=rf_dir)
+            self.assertTrue(any("DUPLICATE ENGINE" in f and "RelationshipTraversalService" in f for f in findings))
+
+    def test_missing_directory_yields_no_findings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            rf_dir = handlers_dir / "relationship-framework"  # never created
+            findings = governance.check_no_duplicate_relationship_engine(handlers_dir=handlers_dir, rf_dir=rf_dir)
+            self.assertEqual(findings, [])
+
+
+class CheckRelationshipFrameworkProviderWiringIntactTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rf_dir = Path(tmp) / "relationship-framework"
+            write_tree(
+                rf_dir,
+                {
+                    "relationship-service.js": GOOD_RELATIONSHIP_SERVICE_JS,
+                    "relationship-provider.js": GOOD_RELATIONSHIP_PROVIDER_JS,
+                },
+            )
+            findings = governance.check_relationship_framework_provider_wiring_intact(rf_dir=rf_dir)
+            self.assertEqual(findings, [])
+
+    def test_regression_to_unwired_default_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rf_dir = Path(tmp) / "relationship-framework"
+            bad = GOOD_RELATIONSHIP_SERVICE_JS.replace(
+                "this.resolution = new RelationshipResolutionService({ provider: this._provider });",
+                "this.resolution = new RelationshipResolutionService();",
+            ).replace("P31RelationshipProvider", "SomethingElse")
+            write_tree(rf_dir, {"relationship-service.js": bad, "relationship-provider.js": GOOD_RELATIONSHIP_PROVIDER_JS})
+            findings = governance.check_relationship_framework_provider_wiring_intact(rf_dir=rf_dir)
+            self.assertTrue(any("RELATIONSHIP WIRING DRIFT" in f and "provider" in f for f in findings))
+            self.assertTrue(any("RELATIONSHIP WIRING DRIFT" in f and "P31RelationshipProvider" in f for f in findings))
+
+    def test_direct_p31_handlers_import_in_provider_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rf_dir = Path(tmp) / "relationship-framework"
+            bad_provider = 'import { buildP31RelationshipBlock } from "../p31-handlers.js";\n' + GOOD_RELATIONSHIP_PROVIDER_JS
+            write_tree(rf_dir, {"relationship-service.js": GOOD_RELATIONSHIP_SERVICE_JS, "relationship-provider.js": bad_provider})
+            findings = governance.check_relationship_framework_provider_wiring_intact(rf_dir=rf_dir)
+            self.assertTrue(any("ARCHITECTURE VIOLATION" in f for f in findings))
+
+    def test_missing_service_file_yields_no_findings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rf_dir = Path(tmp) / "relationship-framework"  # never created
+            findings = governance.check_relationship_framework_provider_wiring_intact(rf_dir=rf_dir)
+            self.assertEqual(findings, [])
+
+
 if __name__ == "__main__":
     unittest.main()

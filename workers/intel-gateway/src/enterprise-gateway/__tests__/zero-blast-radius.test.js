@@ -16,6 +16,19 @@ const EIG_DIR = dirname(HERE); // .../enterprise-gateway
 const WORKER_SRC_DIR = dirname(EIG_DIR); // .../src
 const INTELLIGENCE_PLATFORM_DIR = join(WORKER_SRC_DIR, "intelligence-platform");
 const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
+const RELATIONSHIP_FRAMEWORK_DIR = join(WORKER_SRC_DIR, "relationship-framework");
+
+/**
+ * Stage 16 (Project TITAN): relationship-framework/ is the first explicitly-authorized consumer
+ * of enterprise-gateway/, added once ADR-0010 was Accepted. Its integration test
+ * (relationship-framework/__tests__/integration.test.js) legitimately imports EnterpriseGateway
+ * to prove real relationship data flows through the Gateway end-to-end -- the actual Phase 5
+ * acceptance criterion. Its own zero-blast-radius test also names "enterprise-gateway" in prose
+ * throughout. Exempting the whole directory mirrors exactly how this file already exempts
+ * intelligence-platform's and evidence-registry's own __tests__ directories for the identical
+ * boundary-documentation reason.
+ */
+const AUTHORIZED_CONSUMER_DIRS = [RELATIONSHIP_FRAMEWORK_DIR];
 
 /**
  * True only if `file` IS `dir`, or is a path strictly inside it. Mirrors
@@ -50,14 +63,15 @@ test("isInside does not treat a sibling directory whose name merely extends dir'
   );
 });
 
-test("nothing outside enterprise-gateway/ references 'enterprise-gateway' -- zero authorized consumers in Phase 1", () => {
+test("nothing outside enterprise-gateway/ references 'enterprise-gateway' except relationship-framework/ (Stage 16, the first authorized consumer) and documented test-fixture directories", () => {
   // __tests__ directories are exempt from this sweep: both intelligence-platform's AND
   // evidence-registry's own zero-blast-radius tests legitimately document this directory BY
   // NAME in their own authorized-exception comments/AUTHORIZED_CONSUMER_DIRS arrays (the mirror
   // image of what this file does for them below) -- that is boundary documentation, not
   // production coupling. Production reachability is what actually matters and is covered
   // precisely by the two tests below (index.js, and pNN-handlers.js/index.js imports from
-  // inside this directory).
+  // inside this directory). AUTHORIZED_CONSUMER_DIRS (Stage 16, above) covers
+  // relationship-framework/'s real import plus its own boundary-documentation prose.
   const violations = [];
   const intelligencePlatformTestsDir = join(INTELLIGENCE_PLATFORM_DIR, "__tests__");
   const evidenceRegistryTestsDir = join(EVIDENCE_REGISTRY_DIR, "__tests__");
@@ -65,6 +79,7 @@ test("nothing outside enterprise-gateway/ references 'enterprise-gateway' -- zer
     if (isInside(file, EIG_DIR)) continue; // files inside this directory are exempt
     if (isInside(file, intelligencePlatformTestsDir)) continue; // see above
     if (isInside(file, evidenceRegistryTestsDir)) continue; // see above
+    if (AUTHORIZED_CONSUMER_DIRS.some((dir) => isInside(file, dir))) continue; // Stage 16, see above
     const text = readFileSync(file, "utf-8");
     if (text.includes("enterprise-gateway")) {
       violations.push(relative(WORKER_SRC_DIR, file));
@@ -129,7 +144,13 @@ test("neither evidence-registry/ nor intelligence-platform/ PRODUCTION code refe
   }
 });
 
-test("intelligence-platform/__tests__/zero-blast-radius.test.js's authorized exception names exactly this directory, nothing broader (the one exempted test file itself stays honest)", () => {
+test("intelligence-platform/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these two directories, nothing broader (the exempted test file itself stays honest)", () => {
+  // Stage 16: intelligence-platform's own array grew a second entry (relationship-framework)
+  // alongside its pre-existing enterprise-gateway entry -- see that file's own updated doc
+  // comment for why. This assertion is updated in lockstep.
   const text = readFileSync(join(INTELLIGENCE_PLATFORM_DIR, "__tests__", "zero-blast-radius.test.js"), "utf-8");
-  assert.match(text, /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\)\]/);
+  assert.match(
+    text,
+    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\)\]/
+  );
 });

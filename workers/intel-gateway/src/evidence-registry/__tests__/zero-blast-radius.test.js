@@ -39,8 +39,23 @@ const WORKER_SRC_DIR = dirname(SCAFFOLD_DIR); // .../src
  * test-helpers.js uses one directory up. Exempting the whole directory (tests included) mirrors
  * exactly how intelligence-platform is exempted above, for the same test-fixture-construction
  * reason, not a relaxation of the production-reachability guarantee this test protects.
+ *
+ * Stage 16: relationship-framework/ is added because ADR-0010 (Relationship Graph Ownership) is
+ * now Accepted (see docs/adr/0010-relationship-graph-ownership.md Revision 5). Its production
+ * code imports exactly one file from here -- relationship-resolution.js's
+ * RelationshipProviderInterface, which relationship-provider.js's P31RelationshipProvider
+ * implements (relationship-service.js constructs Stage 12's RelationshipResolutionService WITH
+ * that provider). This is the SAME single-file import shape intelligence-service.js itself
+ * already uses (see its own `import { RelationshipResolutionService } from
+ * "../evidence-registry/relationship-resolution.js"` line) -- relationship-framework/ is not
+ * granted any broader reach into this directory than an existing, already-authorized consumer
+ * has. It does not import entity.js, registry-service.js, or any other evidence-registry/ file.
  */
-const AUTHORIZED_CONSUMER_DIRS = [join(WORKER_SRC_DIR, "intelligence-platform"), join(WORKER_SRC_DIR, "enterprise-gateway")];
+const AUTHORIZED_CONSUMER_DIRS = [
+  join(WORKER_SRC_DIR, "intelligence-platform"),
+  join(WORKER_SRC_DIR, "enterprise-gateway"),
+  join(WORKER_SRC_DIR, "relationship-framework"),
+];
 
 /**
  * True only if `file` IS `dir`, or is a path strictly inside it -- a bare `startsWith(dir)`
