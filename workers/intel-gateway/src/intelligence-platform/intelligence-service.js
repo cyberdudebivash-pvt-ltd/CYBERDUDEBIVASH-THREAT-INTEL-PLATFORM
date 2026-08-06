@@ -196,8 +196,23 @@ export class IntelligenceService {
    *   serviceMetrics?: ServicePlatformMetrics}} [deps]
    */
   constructor(deps = {}) {
-    const serviceMetrics = deps.serviceMetrics || new ServicePlatformMetrics();
-    this._evidenceService = deps.evidenceService || new EvidenceService({ serviceMetrics });
+    // Must derive the shared serviceMetrics AFTER resolving _evidenceService, not before: an
+    // injected deps.evidenceService already owns its own ServicePlatformMetrics instance, and
+    // building a fresh one here first (the original Stage 13 bug) would silently split
+    // observability in two -- every component below would share a DIFFERENT instance than the
+    // injected EvidenceService actually uses, and IntelligenceMetricsService.snapshot() (which
+    // reads through _evidenceService.metrics) would never see Stage 13's own recorded calls.
+    // If both an evidenceService AND an explicit, different serviceMetrics are injected, that
+    // is a caller error -- fail loudly rather than silently using either instance.
+    this._evidenceService =
+      deps.evidenceService || new EvidenceService({ serviceMetrics: deps.serviceMetrics || new ServicePlatformMetrics() });
+    const serviceMetrics = deps.serviceMetrics || this._evidenceService.metrics.serviceMetrics;
+    if (this._evidenceService.metrics.serviceMetrics !== serviceMetrics) {
+      throw new Error(
+        "IntelligenceService: deps.serviceMetrics does not match the injected deps.evidenceService's " +
+          "own metrics instance -- inject one or the other, not two different ones."
+      );
+    }
     this._queryEngine = deps.queryEngine || new EvidenceQueryEngine(this._evidenceService.registry, serviceMetrics);
 
     /**

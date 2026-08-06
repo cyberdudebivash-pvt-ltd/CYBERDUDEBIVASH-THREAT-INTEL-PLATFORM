@@ -12,7 +12,7 @@ Node CLI script (Phase 10's one authorized internal consumer), invoked manually 
 by a customer request. It is gated behind `EIPS_FLAGS.INTERNAL_ADOPTION_ENABLED`, which is
 `true` in `development`/`testing` and `false` in `canary`/`production`:
 
-```
+```bash
 node scripts/intelligence_platform_snapshot.mjs production   # no-op: flag is false, prints a message, exits 0
 node scripts/intelligence_platform_snapshot.mjs development  # runs the platform, prints a JSON snapshot
 ```

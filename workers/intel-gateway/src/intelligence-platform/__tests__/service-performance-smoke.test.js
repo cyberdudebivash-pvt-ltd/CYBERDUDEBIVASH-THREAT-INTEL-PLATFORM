@@ -2,10 +2,13 @@
  * Enterprise Intelligence Platform Services performance smoke test -- Stage 13 Phase 9. Not a
  * benchmark suite (no statistical rigor claimed); matches
  * evidence-registry/__tests__/service-performance-smoke.test.js's (Stage 12) rationale exactly,
- * one layer up: Stage 12's own registry/query/provenance overhead is already smoke-tested there,
- * so this file measures ONLY what Stage 13 adds on top -- service composition, unified lookup,
- * correlation, and bundle validation -- which must stay a rounding error against the same
- * Cloudflare Worker cold-start budget (CLAUDE.md: < 50ms for the whole request).
+ * one layer up. Two categories here are genuinely isolated to Stage 13's own code (service
+ * composition: building the DI graph touches no registry data; metrics overhead: the .timed()
+ * wrapper's own cost). Unified lookup, correlation, and validation are END-TO-END facade
+ * budgets -- each call executes through to Stage 12's already-benchmarked
+ * EvidenceQueryEngine/EvidenceRegistry work as part of what it does, not a delta against a
+ * separate Stage-12-only baseline for the same operations. All five must stay well under the
+ * same Cloudflare Worker cold-start budget (CLAUDE.md: < 50ms for the whole request) regardless.
  *
  * Publishes per-category timings to stdout at the end of each test (Phase 9's "Publish
  * baselines"), mirroring this platform's existing convention.

@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -31,6 +31,18 @@ const WORKER_SRC_DIR = dirname(SCAFFOLD_DIR); // .../src
  */
 const AUTHORIZED_CONSUMER_DIRS = [join(WORKER_SRC_DIR, "intelligence-platform")];
 
+/**
+ * True only if `file` IS `dir`, or is a path strictly inside it -- a bare `startsWith(dir)`
+ * (this check's original Stage 8 form) also matches a sibling directory whose name merely
+ * EXTENDS `dir`'s name with no path separator between them, e.g. `dir` =
+ * ".../evidence-registry" would incorrectly match ".../evidence-registry-experimental/x.js".
+ * Requiring the separator immediately after `dir` closes that gap. Mirrors the Python
+ * counterpart's `path.parents` membership check, which was boundary-correct from the start.
+ */
+export function isInside(file, dir) {
+  return file === dir || file.startsWith(dir + sep);
+}
+
 function listJsFiles(dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
@@ -49,14 +61,25 @@ function listJsFiles(dir) {
 test("nothing outside evidence-registry/ references 'evidence-registry' (Stage 8 boundary, unchanged by Stage 10)", () => {
   const violations = [];
   for (const file of listJsFiles(WORKER_SRC_DIR)) {
-    if (file.startsWith(SCAFFOLD_DIR)) continue; // files inside the scaffolding are exempt
-    if (AUTHORIZED_CONSUMER_DIRS.some((dir) => file.startsWith(dir))) continue; // Stage 13, see above
+    if (isInside(file, SCAFFOLD_DIR)) continue; // files inside the scaffolding are exempt
+    if (AUTHORIZED_CONSUMER_DIRS.some((dir) => isInside(file, dir))) continue; // Stage 13, see above
     const text = readFileSync(file, "utf-8");
     if (text.includes("evidence-registry")) {
       violations.push(relative(WORKER_SRC_DIR, file));
     }
   }
   assert.deepEqual(violations, [], `boundary violation(s) found: ${violations.join(", ")}`);
+});
+
+test("isInside does not treat a sibling directory whose name merely extends dir's name as being inside it", () => {
+  const dir = join(WORKER_SRC_DIR, "evidence-registry");
+  assert.equal(isInside(join(dir, "entity.js"), dir), true, "a real child file must still match");
+  assert.equal(isInside(dir, dir), true, "the directory itself must match");
+  assert.equal(
+    isInside(join(WORKER_SRC_DIR, "evidence-registry-experimental", "x.js"), dir),
+    false,
+    "a sibling directory whose name extends dir's name must NOT be treated as inside it"
+  );
 });
 
 test("index.js does not import any Stage 10 Canonical Evidence Core file", () => {

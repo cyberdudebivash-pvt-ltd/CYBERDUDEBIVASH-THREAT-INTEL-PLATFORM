@@ -42,12 +42,23 @@ export const EIPS_FLAGS = Object.freeze({
 /**
  * Resolves EIPS flag state for an environment. Unrecognized/missing environment strings resolve
  * to "production" (the all-disabled state) -- secure by default, never fails open. Mirrors
- * resolveCecFlags()/resolveEerFlags() exactly.
+ * resolveCecFlags()/resolveEerFlags()'s intent exactly, but with one deliberate improvement:
+ * uses Object.hasOwn() rather than a bare `EIPS_FLAGS[environment] || ...` lookup, which would
+ * resolve an inherited Object.prototype member for an environment string like "constructor" or
+ * "toString" instead of falling back to production. Neither flag would read as enabled from
+ * that inherited value (EIPS_ENABLED/INTERNAL_ADOPTION_ENABLED would both be undefined, which is
+ * falsy, so this was never a fail-open path) -- but the returned value would violate this
+ * function's own documented {EIPS_ENABLED, INTERNAL_ADOPTION_ENABLED} shape, and
+ * intelligence_platform_snapshot.mjs serializes the return value directly into its output.
+ * `environment` reaches this function from CLI argv/an env var in that script, so a stray
+ * value is reachable in practice, not just theoretical. The identical pre-existing pattern in
+ * evidence-registry/feature-flags.js's resolveCecFlags()/resolveEerFlags() (Stage 8/11) is left
+ * unchanged here -- out of scope for this Stage 13 fix, flagged as a known follow-up.
  * @param {string} [environment]
  * @returns {{EIPS_ENABLED: boolean, INTERNAL_ADOPTION_ENABLED: boolean}}
  */
 export function resolveEipsFlags(environment) {
-  return EIPS_FLAGS[environment] || EIPS_FLAGS.production;
+  return Object.hasOwn(EIPS_FLAGS, environment) ? EIPS_FLAGS[environment] : EIPS_FLAGS.production;
 }
 
 /**
