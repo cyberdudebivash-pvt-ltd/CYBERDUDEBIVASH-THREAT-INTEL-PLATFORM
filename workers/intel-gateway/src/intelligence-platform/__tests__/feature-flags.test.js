@@ -27,6 +27,12 @@ test("resolveEipsFlags falls back to the production (all-disabled) state for an 
   assert.deepEqual(resolveEipsFlags(undefined), EIPS_FLAGS.production);
 });
 
+test("resolveEipsFlags falls back to production for inherited Object.prototype member names, not the prototype method itself", () => {
+  assert.deepEqual(resolveEipsFlags("constructor"), EIPS_FLAGS.production);
+  assert.deepEqual(resolveEipsFlags("toString"), EIPS_FLAGS.production);
+  assert.deepEqual(resolveEipsFlags("hasOwnProperty"), EIPS_FLAGS.production);
+});
+
 test("rollbackEipsFlags always returns the all-disabled production state", () => {
   assert.deepEqual(rollbackEipsFlags(), EIPS_FLAGS.production);
 });

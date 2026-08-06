@@ -33,6 +33,39 @@ test("IntelligenceService accepts full dependency injection (matching EvidenceSe
   assert.equal(found.evidence_uuid, UUID_1, "mutation through the injected EvidenceService must be visible via Stage 13's lookup");
 });
 
+test("IntelligenceService injected with an evidenceService but NO explicit serviceMetrics shares that evidenceService's own metrics instance, not a fresh one", async () => {
+  const { EvidenceService } = await import("../../evidence-registry/evidence-service.js");
+  const { ServicePlatformMetrics } = await import("../../evidence-registry/service-metrics.js");
+  const ownMetrics = new ServicePlatformMetrics();
+  const inner = new EvidenceService({ serviceMetrics: ownMetrics });
+
+  const service = new IntelligenceService({ evidenceService: inner });
+  assert.equal(
+    service.metrics.sharedServiceMetrics,
+    ownMetrics,
+    "queryEngine/provenance/correlation must share the INJECTED evidenceService's own metrics, not a newly-created one"
+  );
+
+  await service.evidenceService.registerEvidence(evidence(UUID_1, { related_cves: ["CVE-2029-0001"] }));
+  await service.enterpriseQuery.queryByCVE("CVE-2029-0001");
+  assert.ok(
+    ownMetrics.snapshot().query_counts.cve >= 1,
+    "a query made through Stage 13's own components must be recorded on the injected EvidenceService's metrics instance, proving they are the same object"
+  );
+});
+
+test("IntelligenceService rejects an explicit serviceMetrics that does not match an injected evidenceService's own metrics instance (fail loudly, not silently)", async () => {
+  const { EvidenceService } = await import("../../evidence-registry/evidence-service.js");
+  const { ServicePlatformMetrics } = await import("../../evidence-registry/service-metrics.js");
+  const inner = new EvidenceService({ serviceMetrics: new ServicePlatformMetrics() });
+  const mismatchedMetrics = new ServicePlatformMetrics();
+
+  assert.throws(
+    () => new IntelligenceService({ evidenceService: inner, serviceMetrics: mismatchedMetrics }),
+    /does not match the injected deps\.evidenceService/
+  );
+});
+
 test("IntelligenceLookupService unifies evidence-registry lookups and enterprise-query dimensions", async () => {
   const service = new IntelligenceService();
   await service.evidenceService.registerEvidence(evidence(UUID_1, { related_cves: ["CVE-2026-1234"] }));

@@ -17,7 +17,7 @@ document-don't-silently-resolve discipline.
 | Field | Entry |
 |---|---|
 | **Objective** | Build the Enterprise Intelligence Platform Services (EIPS) — a reusable internal orchestration layer composing Stage 12's Enterprise Evidence Service Platform, with no public APIs, no customer-facing surface, no duplicated business logic. |
-| **Affected Files** | See §3 below — 25 files, all new except two narrow, documented edits to pre-existing Stage 8/12 test/governance files. |
+| **Affected Files** | See §3 below — 26 files, all new except two narrow, documented edits to pre-existing Stage 8/12 test/governance files. |
 | **Existing Engine Reused** | `EvidenceService`, `EvidenceQueryEngine`, `EvidenceProvenanceEngine`, `RelationshipResolutionService`, `ServicePlatformMetrics` (all Stage 12); `EvidenceRegistry` (Stage 11); `isContractForwardCompatible()`/`checkContractCompatibility()` (Stage 12). |
 | **Evidence Modification Is Required** | The Stage 13 task specification itself (Phases 1-10), explicitly authorized after Stage 12 merged and ADR-0008/0011/0012 were Accepted (`TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md`). |
 | **Risk Classification** | LOW. Zero live-route reachability (verified both directions, both toolchains — see §2). The one live-executing artifact (`intelligence_platform_snapshot.mjs`) is a standalone script gated behind a flag defaulting off in `canary`/`production`. |
@@ -28,7 +28,7 @@ document-don't-silently-resolve discipline.
 
 | Dimension | Assessment |
 |---|---|
-| **Files** | 25 changed; 23 new, 2 edited (both test/governance files, both with narrow, documented, verified-narrow exceptions) |
+| **Files** | 26 changed; 24 new, 2 edited (both test/governance files, both with narrow, documented, verified-narrow exceptions) |
 | **Imports** | Nothing outside `intelligence-platform/` imports it, except `scripts/intelligence_platform_snapshot.mjs` (the one authorized consumer) — verified by `zero-blast-radius.test.js` and governance checks |
 | **Routes** | None. `index.js` unchanged — verified by both toolchains that it does not reference any Stage 13 file |
 | **Dashboards** | None render Stage 13 output — nothing customer-facing exists in this stage |
@@ -41,8 +41,8 @@ document-don't-silently-resolve discipline.
 
 ## 3. Exhaustive file list
 
-**New (23):**
-```
+**New (24):**
+```text
 workers/intel-gateway/src/intelligence-platform/
   intelligence-service.js, query-service.js, correlation-engine.js, platform.js,
   service-contracts.js, feature-flags.js, package.json
@@ -60,7 +60,7 @@ TITAN_STAGE13_COMPLETION_REPORT.md (this file)
 ```
 
 **Edited (2), both narrow and both verified not to weaken what they protect:**
-```
+```text
 workers/intel-gateway/src/evidence-registry/__tests__/zero-blast-radius.test.js
   +16 lines: one named, documented exception (intelligence-platform/) added to the "nothing
   outside evidence-registry/ references it" sweep. Verified via scratch fixture: silent on the
@@ -71,7 +71,7 @@ scripts/titan_architecture_governance_check.py
   after the existing Stage 12 section, in main()'s existing accumulation order.
 ```
 
-No file outside `intelligence-platform/`, these two files, and the four new top-level docs was
+No file outside `intelligence-platform/`, these two files, and the five new top-level docs was
 touched. No P-layer handler, no `index.js`, no certification script's *logic* (only its
 incidentally-regenerated JSON report, reverted before commit — see §6), no schema, no CI
 workflow.
@@ -147,7 +147,7 @@ under budget). All measured across three consecutive runs, range recorded, not e
 
 ## 9. Engineering Constitution Compliance Checklist
 
-```
+```text
   ☑ Principle 1 — Zero Unnecessary Modification
       Evidence table completed (§1). Only 2 pre-existing files touched, both with narrow,
       documented, fixture-verified exceptions.
