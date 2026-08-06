@@ -1,9 +1,9 @@
 /**
- * In-memory Evidence Registry repository — Stage 11 Phase 2 (Project TITAN).
+ * In-memory Evidence Registry repository  -  Stage 11 Phase 2 (Project TITAN).
  * Not imported by index.js or any production route. See README.md.
  *
  * Reference implementation of EvidenceRegistryRepositoryInterface, backed by plain in-process
- * Maps — deliberately NOT a KV/D1/R2-backed implementation ("Repository implementation must
+ * Maps  -  deliberately NOT a KV/D1/R2-backed implementation ("Repository implementation must
  * remain abstract enough to support future storage backends" + Implementation Constraints:
  * "Do NOT introduce vendor-specific persistence"). A future, separately-authorized storage
  * backend only needs to satisfy the same interface; nothing above this class needs to change.
@@ -28,7 +28,7 @@ export class EvidenceNotFoundError extends Error {
 
 export class DuplicateEvidenceError extends Error {
   constructor(evidenceUuid) {
-    super(`Evidence with evidence_uuid "${evidenceUuid}" already exists — use update() or supersede(), not create()`);
+    super(`Evidence with evidence_uuid "${evidenceUuid}" already exists  -  use update() or supersede(), not create()`);
     this.name = "DuplicateEvidenceError";
     this.evidenceUuid = evidenceUuid;
   }
@@ -43,7 +43,7 @@ function nextVersion(current) {
  * Pure preview of what update()/supersede() would store: the merged record, with a bumped
  * version and refreshed audit_metadata, WITHOUT mutating any repository state. Exported so a
  * caller (registry-service.js's updateEvidence()) can validate the prospective result BEFORE
- * committing it — this repository has no transactional rollback, so validating first is how
+ * committing it  -  this repository has no transactional rollback, so validating first is how
  * "never persist invalid data" is satisfied, without duplicating this merge shape a second time
  * at the call site (Reuse Before Build).
  * @param {CanonicalEvidence} current @param {Partial<CanonicalEvidence>} patch
@@ -82,7 +82,7 @@ export class InMemoryEvidenceRepository extends EvidenceRegistryRepositoryInterf
 
   /**
    * Stage 8's original upsert contract: create-or-replace the CURRENT record only, with no
-   * version-history side effect. This is deliberately simpler than create()/update() — it is
+   * version-history side effect. This is deliberately simpler than create()/update()  -  it is
    * the pre-Stage-11 contract, preserved exactly so a hypothetical existing caller of `put()`
    * (there are none in production today) would see unchanged behavior.
    * @param {CanonicalEvidence} entity @returns {Promise<CanonicalEvidence>}
@@ -104,9 +104,9 @@ export class InMemoryEvidenceRepository extends EvidenceRegistryRepositoryInterf
   }
 
   /**
-   * Hard delete — removes the identity entirely, including its history. Stage 8's original
+   * Hard delete  -  removes the identity entirely, including its history. Stage 8's original
    * interface method, kept for interface completeness; the Registry Service (Phase 1) never
-   * calls this in its normal operation flow — Archive is Stage 11's intended "soft delete."
+   * calls this in its normal operation flow  -  Archive is Stage 11's intended "soft delete."
    * @param {string} evidenceUuid @returns {Promise<boolean>}
    */
   async delete(evidenceUuid) {
@@ -193,12 +193,12 @@ export class InMemoryEvidenceRepository extends EvidenceRegistryRepositoryInterf
     for (const entity of entities) {
       if (!entity || !entity.evidence_uuid) {
         skipped += 1;
-        errors.push("entity missing evidence_uuid — skipped");
+        errors.push("entity missing evidence_uuid  -  skipped");
         continue;
       }
       if (this._current.has(entity.evidence_uuid)) {
         skipped += 1;
-        errors.push(`${entity.evidence_uuid} already exists — skipped (use update()/supersede() for existing records)`);
+        errors.push(`${entity.evidence_uuid} already exists  -  skipped (use update()/supersede() for existing records)`);
         continue;
       }
       this._current.set(entity.evidence_uuid, entity);

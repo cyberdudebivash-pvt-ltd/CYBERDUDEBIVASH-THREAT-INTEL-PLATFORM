@@ -1,8 +1,8 @@
 /**
- * Evidence Registry Observability — Stage 11 Phase 9 (Project TITAN).
+ * Evidence Registry Observability  -  Stage 11 Phase 9 (Project TITAN).
  * Not imported by index.js or any production route. See README.md.
  *
- * Plain in-memory counters, exposed via snapshot(). "No external telemetry changes" — nothing
+ * Plain in-memory counters, exposed via snapshot(). "No external telemetry changes"  -  nothing
  * here calls fetch(), an Analytics Engine binding, or any other external sink; this is a
  * passive accumulator a future, separately-authorized integration could read from (e.g. to
  * populate a data/quality/ report, matching this platform's existing convention), not a live

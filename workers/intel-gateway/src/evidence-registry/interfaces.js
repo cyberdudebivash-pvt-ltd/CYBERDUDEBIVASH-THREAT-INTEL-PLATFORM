@@ -1,16 +1,16 @@
 /**
- * Canonical Evidence Core interfaces — Stage 10 Phase 3 (Project TITAN).
+ * Canonical Evidence Core interfaces  -  Stage 10 Phase 3 (Project TITAN).
  * Not imported by index.js or any production route. See README.md.
  *
  * Contracts for EvidenceValidator, EvidenceProvider, EvidenceSerializer, EvidenceImporter,
- * EvidenceExporter, EvidenceMigrationAdapter — mirrors repository-interface.js's existing
+ * EvidenceExporter, EvidenceMigrationAdapter  -  mirrors repository-interface.js's existing
  * EvidenceRepositoryInterface pattern exactly (abstract class, NOT_IMPLEMENTED methods) for
- * consistency. EvidenceRepositoryInterface itself is NOT redefined here — it already exists
+ * consistency. EvidenceRepositoryInterface itself is NOT redefined here  -  it already exists
  * in repository-interface.js and is imported, not duplicated, per Single Source of Truth.
  *
  * Per Phase 3's own instruction ("Only contracts and default adapters"), the interfaces that
  * do not require persistence (Validator, Serializer, Importer, Exporter, MigrationAdapter) get
- * a working default implementation alongside their contract — only Provider (which composes
+ * a working default implementation alongside their contract  -  only Provider (which composes
  * EvidenceRepositoryInterface) and Repository itself stay pure contracts, since storage is
  * explicitly out of scope this stage.
  */
@@ -18,7 +18,7 @@
 import { validateCanonicalEvidence, validateEvidenceBatch } from "./validation.js";
 
 const NOT_IMPLEMENTED = (name) =>
-  `${name} is a contract, not a default implementation for this method — provide a concrete ` +
+  `${name} is a contract, not a default implementation for this method  -  provide a concrete ` +
   "override. See README.md.";
 
 /**
@@ -28,7 +28,7 @@ const NOT_IMPLEMENTED = (name) =>
 
 /**
  * Contract + default (working) implementation. The default delegates entirely to
- * validation.js's pure functions (Reuse Before Build) — it does not reimplement any check.
+ * validation.js's pure functions (Reuse Before Build)  -  it does not reimplement any check.
  */
 export class EvidenceValidatorInterface {
   /**
@@ -50,7 +50,7 @@ export class EvidenceValidatorInterface {
 }
 
 /**
- * Contract only — composes an injected EvidenceRepositoryInterface, so calling any method
+ * Contract only  -  composes an injected EvidenceRepositoryInterface, so calling any method
  * before a real repository implementation exists throws that interface's own
  * NOT_IMPLEMENTED error, not a duplicate one. This is intentional: Provider does not define
  * its own storage-access error message, it inherits Repository's, so there is exactly one
@@ -82,7 +82,7 @@ export class EvidenceProviderInterface {
 }
 
 /**
- * Contract only here — the working default implementations (JSON/Markdown/DTO) live in
+ * Contract only here  -  the working default implementations (JSON/Markdown/DTO) live in
  * serialization.js (Phase 5), which extends this class rather than duplicating its shape.
  */
 export class EvidenceSerializerInterface {
@@ -104,7 +104,7 @@ export class EvidenceSerializerInterface {
 }
 
 /**
- * Contract only — default implementation in serialization.js, composing an
+ * Contract only  -  default implementation in serialization.js, composing an
  * EvidenceSerializerInterface and an EvidenceValidatorInterface rather than reimplementing
  * either (Reuse Before Build: importing is deserialize-then-validate, not new logic).
  */
@@ -120,7 +120,7 @@ export class EvidenceImporterInterface {
 }
 
 /**
- * Contract only — default implementation in serialization.js, composing an
+ * Contract only  -  default implementation in serialization.js, composing an
  * EvidenceSerializerInterface.
  */
 export class EvidenceExporterInterface {
@@ -135,7 +135,7 @@ export class EvidenceExporterInterface {
 }
 
 /**
- * Contract only — default, concrete adapters (P20 evidence_chain, CanonicalRelationship,
+ * Contract only  -  default, concrete adapters (P20 evidence_chain, CanonicalRelationship,
  * P25 confidence object) live in migration-adapters.js (Phase 7), each extending this class.
  */
 export class EvidenceMigrationAdapterInterface {

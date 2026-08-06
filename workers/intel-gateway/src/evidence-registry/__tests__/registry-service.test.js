@@ -63,10 +63,10 @@ test("registerEvidence: rejects an unknown initialState", async () => {
   );
 });
 
-test("registerEvidence: cross-report reuse (Phase 7) — identical substantive content returns the existing record, not a duplicate", async () => {
+test("registerEvidence: cross-report reuse (Phase 7)  -  identical substantive content returns the existing record, not a duplicate", async () => {
   const registry = new EvidenceRegistry();
   // Same evidence_id/reliability_code/related_cves on purpose (the "identical substantive
-  // content" this test is about). Built directly rather than via evidence() — that helper
+  // content" this test is about). Built directly rather than via evidence()  -  that helper
   // derives evidence_id from the uuid (EC-${uuid}), and createCanonicalEvidence's `extension`
   // argument never reads evidence_id (only createEvidenceEntity's `core` argument sets it), so
   // two different uuids built via evidence() are never substantively identical.

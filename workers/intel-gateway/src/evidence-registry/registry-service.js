@@ -1,12 +1,12 @@
 /**
- * Enterprise Evidence Registry (EER) service — Stage 11 Phases 1, 6, 7 (Project TITAN).
+ * Enterprise Evidence Registry (EER) service  -  Stage 11 Phases 1, 6, 7 (Project TITAN).
  * Not imported by index.js or any production route. See README.md.
  *
  * The single canonical EvidenceRegistry class ("One Evidence Registry... One Registry API
  * (Internal)"). Composes, rather than reimplements, every lower-level piece this stage and
  * Stage 10 already built:
  *   - InMemoryEvidenceRepository (Phase 2) for storage mechanics
- *   - lifecycle.js (Phase 3) for transition legality — this class is the ONE place that tracks
+ *   - lifecycle.js (Phase 3) for transition legality  -  this class is the ONE place that tracks
  *     "which state is evidence X currently in" (per-registry-instance state), matching "One
  *     Evidence Lifecycle"
  *   - EvidenceVersionManager (Phase 4) for version/lineage queries
@@ -16,7 +16,7 @@
  *   - computeCanonicalEvidenceContentHash (Stage 11 Phase 7 addition to identifiers.js) for
  *     cross-report reuse detection
  *
- * Internal service only — every method here is a plain async class method, not an HTTP
+ * Internal service only  -  every method here is a plain async class method, not an HTTP
  * handler. No route in index.js references this file (enforced by
  * zero-blast-radius.test.js / check_evidence_registry_scaffolding_boundary()).
  */
@@ -95,17 +95,17 @@ export class EvidenceRegistry {
     }
     if (!evidence.evidence_uuid) {
       throw new Error(
-        "registerEvidence requires evidence.evidence_uuid — generate one via " +
+        "registerEvidence requires evidence.evidence_uuid  -  generate one via " +
           "identifiers.js's generateEvidenceUuid() before calling this method"
       );
     }
 
     // Cross-report reuse (Phase 7): "No duplication." A content-hash match against an
     // already-registered CURRENT record means this is the same underlying evidence being cited
-    // again (e.g. by a different report) — return the existing record rather than creating a
+    // again (e.g. by a different report)  -  return the existing record rather than creating a
     // duplicate. Uses computeCanonicalEvidenceContentHash (Stage 11), not Stage 8's
     // computeContentHash, specifically because it is stable across fresh audit_metadata
-    // timestamps — see identifiers.js's docstring.
+    // timestamps  -  see identifiers.js's docstring.
     let candidate = evidence;
     if (!options.skipReuseCheck) {
       const contentHash = candidate.content_hash || (await computeCanonicalEvidenceContentHash(candidate));
@@ -226,11 +226,11 @@ export class EvidenceRegistry {
   }
 
   /**
-   * Advances lifecycle state without changing the evidence content itself — e.g. DRAFT ->
+   * Advances lifecycle state without changing the evidence content itself  -  e.g. DRAFT ->
    * COLLECTED -> VALIDATED -> CORRELATED -> PUBLISHED, the pipeline steps that don't involve an
    * edit. Content-changing transitions go through updateEvidence()/supersedeEvidence() instead,
    * which combine a content change with a state transition in one call. "Every transition must
-   * be validated... Illegal transitions must fail" — assertValidTransition (inside
+   * be validated... Illegal transitions must fail"  -  assertValidTransition (inside
    * _recordTransition) throws IllegalLifecycleTransitionError for an illegal one.
    * @param {string} evidenceUuid @param {string} toState
    * @param {{reason?: string, actor?: string}} [context]
@@ -402,7 +402,7 @@ export class EvidenceRegistry {
 
   /**
    * Records that a feature-flag check resolved to an active state. Nothing in this class calls
-   * this today (EER_ENABLED does not gate anything inside EvidenceRegistry itself — the class
+   * this today (EER_ENABLED does not gate anything inside EvidenceRegistry itself  -  the class
    * always functions when explicitly instantiated, matching CEC_FLAGS's precedent); a future,
    * separately-authorized integration point would call this at the moment it checks
    * resolveEerFlags() and finds EER_ENABLED true, so "feature flag activation" (Phase 9's own
@@ -416,7 +416,7 @@ export class EvidenceRegistry {
   /**
    * Records that a migration adapter was used to produce evidence now being registered. Nothing
    * calls this automatically (adapters are pure functions with no registry awareness, per
-   * migration-adapters.js's own zero-coupling design) — a caller that adapts legacy data via
+   * migration-adapters.js's own zero-coupling design)  -  a caller that adapts legacy data via
    * P20EvidenceChainAdapter/etc. and then registers the result may call this to keep Phase 9's
    * "migration events" / "adapter usage" metrics accurate.
    * @param {string} adapterName

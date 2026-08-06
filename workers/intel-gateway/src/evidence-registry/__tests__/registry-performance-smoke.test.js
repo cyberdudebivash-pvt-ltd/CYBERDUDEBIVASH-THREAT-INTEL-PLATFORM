@@ -1,5 +1,5 @@
 /**
- * Registry performance smoke test — Stage 11 Phase 10. Not a benchmark suite (no statistical
+ * Registry performance smoke test  -  Stage 11 Phase 10. Not a benchmark suite (no statistical
  * rigor claimed); matches performance-smoke.test.js's (Stage 10) rationale exactly, applied to
  * EvidenceRegistry's own operations instead of the bare domain model: this is a Cloudflare
  * Worker cold-start context (CLAUDE.md: cold start < 50ms budget for the *whole request*), so

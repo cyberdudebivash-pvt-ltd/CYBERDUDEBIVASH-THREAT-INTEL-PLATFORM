@@ -1,8 +1,8 @@
 /**
- * Performance smoke test — Stage 10 Phase 9. Not a benchmark suite (no statistical rigor
+ * Performance smoke test  -  Stage 10 Phase 9. Not a benchmark suite (no statistical rigor
  * claimed); a smoke test whose only job is to catch a pathological regression (e.g. an
  * accidentally-quadratic loop) before it ships, matching this platform's Level 6 (Performance)
- * priority. Thresholds are generous on purpose — this is a Cloudflare Worker cold-start
+ * priority. Thresholds are generous on purpose  -  this is a Cloudflare Worker cold-start
  * context (CLAUDE.md: cold start < 50ms budget for the *whole request*), so pure in-memory
  * object construction/validation/serialization for a few thousand records must be a rounding
  * error against that budget, not a meaningful fraction of it.
@@ -25,7 +25,7 @@ test(`smoke: construct + adapt + validate + serialize + publish ${N} records wit
   const records = [];
   for (let i = 0; i < N; i += 1) {
     // P20EvidenceChainAdapter.adapt() already returns a full CanonicalEvidence (it composes
-    // createCanonicalEvidence internally) — evidence_uuid isn't part of the P20 evidence_chain
+    // createCanonicalEvidence internally)  -  evidence_uuid isn't part of the P20 evidence_chain
     // shape it adapts from, so identity assignment happens as a separate, explicit step here,
     // the same way a real caller would attach an identity after adapting legacy data.
     const evidence = {

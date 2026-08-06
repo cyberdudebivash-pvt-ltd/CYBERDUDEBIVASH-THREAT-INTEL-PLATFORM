@@ -22,7 +22,7 @@ test("JsonEvidenceSerializer round-trips a CanonicalEvidence exactly", () => {
   const serializer = new JsonEvidenceSerializer();
   const json = serializer.serialize(evidence);
   const roundTripped = serializer.deserialize(json);
-  // JSON has no `undefined` — plain JSON.stringify (which this serializer intentionally uses,
+  // JSON has no `undefined`  -  plain JSON.stringify (which this serializer intentionally uses,
   // per its own docstring: "no custom reviver/replacer") omits any key whose value is
   // `undefined` (e.g. optional CanonicalEvidence fields sampleEvidence() leaves unset). That's
   // JSON's own behavior, not a defect in this serializer, so the correct round-trip comparison

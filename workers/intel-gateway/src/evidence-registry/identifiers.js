@@ -40,7 +40,7 @@ export async function computeContentHash(entity) {
 }
 
 /**
- * Stage 11 Phase 7 addition — content hash scoped to CanonicalEvidence's stable, substantive
+ * Stage 11 Phase 7 addition  -  content hash scoped to CanonicalEvidence's stable, substantive
  * fields only. computeContentHash() above (Stage 8) is correct for the narrower EvidenceEntity
  * shape it was written for, but naively reusing it on a full CanonicalEvidence would fold in
  * volatile fields Stage 10 added that are NOT substantive to "is this the same evidence"
@@ -49,7 +49,7 @@ export async function computeContentHash(entity) {
  * verification_status/evidence_weight/visibility are governance or scoring metadata, not the
  * evidence's substance). Hashing those would make every fresh construction of otherwise-
  * identical evidence produce a different hash, defeating cross-report reuse detection (Phase 7)
- * entirely — this function picks the explicit substantive-field subset instead, reusing the
+ * entirely  -  this function picks the explicit substantive-field subset instead, reusing the
  * same canonicalization + SHA-256 approach as computeContentHash() (sha256Hex above), not a
  * different hashing scheme.
  * @param {import('./entity.js').CanonicalEvidence} evidence
