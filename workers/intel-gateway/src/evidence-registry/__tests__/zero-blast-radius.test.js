@@ -16,6 +16,21 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SCAFFOLD_DIR = dirname(HERE); // .../evidence-registry
 const WORKER_SRC_DIR = dirname(SCAFFOLD_DIR); // .../src
 
+/**
+ * Stage 13 (Project TITAN): intelligence-platform/ is the first explicitly-authorized consumer
+ * of this directory -- its own brief requires composing EvidenceService/EvidenceQueryEngine/
+ * EvidenceProvenanceEngine/RelationshipResolutionService (see
+ * TITAN_STAGE13_SERVICE_ARCHITECTURE.md). This does not weaken what this test actually
+ * protects: evidence-registry/ still must not be reachable from index.js or any pNN-handlers.js
+ * file -- see the "index.js does not import..." test below, and
+ * intelligence-platform/__tests__/zero-blast-radius.test.js's own independent boundary tests,
+ * which confirm both that index.js does not import intelligence-platform/ and that
+ * intelligence-platform/ never imports a pNN-handlers.js file or index.js itself. Exempting
+ * this one named, documented directory -- rather than relaxing the check generally -- keeps
+ * this test able to catch any OTHER, unauthorized reference.
+ */
+const AUTHORIZED_CONSUMER_DIRS = [join(WORKER_SRC_DIR, "intelligence-platform")];
+
 function listJsFiles(dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
@@ -35,6 +50,7 @@ test("nothing outside evidence-registry/ references 'evidence-registry' (Stage 8
   const violations = [];
   for (const file of listJsFiles(WORKER_SRC_DIR)) {
     if (file.startsWith(SCAFFOLD_DIR)) continue; // files inside the scaffolding are exempt
+    if (AUTHORIZED_CONSUMER_DIRS.some((dir) => file.startsWith(dir))) continue; // Stage 13, see above
     const text = readFileSync(file, "utf-8");
     if (text.includes("evidence-registry")) {
       violations.push(relative(WORKER_SRC_DIR, file));
