@@ -470,7 +470,21 @@ def check_evidence_registry_scaffolding_boundary() -> list[str]:
     # test-helpers.js one directory up. This Python check and the Node test above are two
     # independently-maintained mechanisms for the same property (a pre-existing duplication,
     # not introduced here) — kept in sync by hand, same as this addition does.
-    authorized_consumer_dirs = [HANDLERS_DIR / "intelligence-platform", HANDLERS_DIR / "enterprise-gateway"]
+    #
+    # Stage 16: relationship-framework/ is added because ADR-0010 (a DIFFERENT ADR from the
+    # ADR-0008 this check's own finding message names) is now Accepted. Its production code
+    # imports exactly one evidence-registry/ file, relationship-resolution.js's
+    # RelationshipProviderInterface (relationship-provider.js's P31RelationshipProvider
+    # implements it) — the same single-file shape intelligence-service.js itself already uses.
+    # This exemption does not touch what this check's finding message still correctly warns
+    # about: wiring evidence-registry/ itself into a live pNN-handlers.js/index.js route still
+    # requires ADR-0008 (separately, already Accepted, but not yet exercised for production
+    # wiring by any stage including this one).
+    authorized_consumer_dirs = [
+        HANDLERS_DIR / "intelligence-platform",
+        HANDLERS_DIR / "enterprise-gateway",
+        HANDLERS_DIR / "relationship-framework",
+    ]
 
     # 1. Nothing outside evidence-registry/ (or an authorized consumer) may import from it.
     for path in HANDLERS_DIR.rglob("*.js"):
@@ -1580,14 +1594,17 @@ def check_no_registry_private_field_bypass() -> list[str]:
 
 
 def check_relationship_resolution_still_unwired() -> list[str]:
-    """Relationship bypass: confirms relationship-resolution.js still does not import
-    p31-handlers.js (or any pNN-handlers.js/index.js file) directly — the specific,
-    highest-risk file this stage's own module docstring names, since ADR-0010 (Relationship
-    Graph Ownership) is not Accepted. This is the same zero-blast-radius property
-    check_eer_files_present_and_isolated() enforces for the full EER file set, verified here
-    as its own named check specifically because this file is the one place a future edit is
-    most likely to "helpfully" wire in a real P31 import without re-checking ADR-0010's
-    status first."""
+    """Architecture boundary (renamed in spirit, not in name, by Stage 16 -- see
+    check_relationship_framework_provider_wiring_intact() for the now-Accepted-ADR-0010 positive
+    check): confirms relationship-resolution.js still does not import p31-handlers.js (or any
+    pNN-handlers.js/index.js file) directly, and still has an explicit NullRelationshipProvider
+    default. This invariant is intentionally independent of ADR-0010's acceptance status (now
+    Accepted, Stage 16) -- it protects two separate properties that remain true regardless:
+    (1) the zero-blast-radius architecture boundary check_eer_files_present_and_isolated()
+    enforces for the full EER file set, and (2) good DI hygiene (an unconfigured instance should
+    fail loudly, not silently). Concrete wiring now happens by INJECTING a provider
+    (relationship-framework/'s P31RelationshipProvider) at a composition root, never by adding an
+    import to this file -- this check keeps verifying that stays true."""
     findings = []
     path = EVIDENCE_REGISTRY_DIR / "relationship-resolution.js"
     if not path.exists():
@@ -1876,10 +1893,11 @@ def check_intelligence_relationship_still_unwired() -> list[str]:
     """Dependency violation / relationship bypass: confirms correlation-engine.js still does not
     import p31-handlers.js (or any pNN-handlers.js/index.js file) directly, and still has no
     hardcoded relationship-graph logic of its own — mirrors
-    check_relationship_resolution_still_unwired() (Stage 12) one layer up, since Stage 13's
-    correlateByRelationship() is required to stay a pass-through to Stage 12's
-    RelationshipResolutionService per this stage's own Special Governance Rule (ADR-0010 not
-    Accepted)."""
+    check_relationship_resolution_still_unwired() (Stage 12) one layer up. Independent of
+    ADR-0010's acceptance status (now Accepted, Stage 16): correlateByRelationship() should
+    remain a pure pass-through to Stage 12's RelationshipResolutionService regardless, per
+    Single Source of Truth -- this file must never grow a second relationship-resolution path
+    even now that a real provider exists upstream."""
     findings = []
     path = INTELLIGENCE_PLATFORM_DIR / "correlation-engine.js"
     if not path.exists():
@@ -2208,8 +2226,12 @@ def check_no_eig_registry_private_field_bypass(gateway_dir: Path | None = None) 
 
 def check_gateway_relationship_capability_still_passthrough(gateway_dir: Path | None = None) -> list[str]:
     """ADR-0010 governance: confirms the evidence.relationships capability still targets
-    RelationshipResolutionService's pass-through-only surface (platform.relationshipResolution)
-    and that gateway-service.js still documents the ADR-0010 gate, mirroring
+    RelationshipResolutionService's surface (platform.relationshipResolution) and that
+    gateway-service.js still documents the ADR-0010 gate (now Accepted, Stage 16 — the
+    substring check only requires "ADR-0010" appear, not a specific status, so this check's
+    logic is unchanged by the acceptance; only its rationale is: the Gateway must keep routing
+    this capability through the same single surface regardless of whether that surface is wired
+    to a real provider or still NullRelationshipProvider-backed). Mirrors
     check_intelligence_relationship_still_unwired(). `gateway_dir` is overridable for fixture
     testing; main() always calls with the default."""
     gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
@@ -2521,6 +2543,127 @@ def compute_gateway_adoption_metrics(scripts_dir: Path | None = None, handlers_d
     }
 
 
+RELATIONSHIP_FRAMEWORK_DIR = HANDLERS_DIR / "relationship-framework"
+
+RELATIONSHIP_FRAMEWORK_CORE_FILES = [
+    "relationship-types.js",
+    "relationship-registry.js",
+    "edge-repository-interface.js",
+    "in-memory-edge-repository.js",
+    "p31-edge-adapter.js",
+    "relationship-provider.js",
+    "relationship-traversal.js",
+    "relationship-validation.js",
+    "relationship-metrics.js",
+    "relationship-lookup.js",
+    "relationship-service.js",
+    "service-contracts.js",
+]
+
+
+def check_relationship_framework_files_present_and_isolated(rf_dir: Path | None = None) -> list[str]:
+    """Stage 16: confirms every Relationship Framework file still exists (Deprecation Instead of
+    Deletion — no silent removal) and that none of them imports a live pNN-handlers.js/index.js
+    file directly — the same zero-blast-radius property every prior TITAN-stage scaffolding
+    directory (evidence-registry/, intelligence-platform/, enterprise-gateway/) enforces,
+    mirroring check_eig_files_present_and_isolated()/check_eesp_files_present_and_isolated()
+    exactly. This is the property that makes ADR-0010's Acceptance safe: real relationship data
+    now flows through this directory, but only via documented-shape adapters (p31-edge-adapter.js),
+    never via a direct handler import. `rf_dir` is overridable for fixture testing; main() always
+    calls with the default."""
+    rf_dir = rf_dir or RELATIONSHIP_FRAMEWORK_DIR
+    findings = []
+    if not rf_dir.exists():
+        return findings
+    for name in RELATIONSHIP_FRAMEWORK_CORE_FILES:
+        path = rf_dir / name
+        if not path.exists():
+            findings.append(f"MISSING RELATIONSHIP FRAMEWORK FILE: relationship-framework/{name} — Stage 16 file set is incomplete")
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r'from\s+["\'].*p\d+-handlers\.js["\']', text) or re.search(r'from\s+["\'].*/index\.js["\']', text):
+            findings.append(f"ARCHITECTURE VIOLATION: relationship-framework/{name} imports a live pNN-handlers.js/index.js file")
+    return findings
+
+
+def check_no_duplicate_relationship_engine(handlers_dir: Path | None = None, rf_dir: Path | None = None) -> list[str]:
+    """Duplicate engines (Stage 16's own NON-GOALS: "No duplicate graph engines... No duplicate
+    traversal engine"): confirms no file outside relationship-framework/ defines its own copy of
+    this stage's core classes. Mirrors check_no_duplicate_enterprise_gateway()'s exact pattern.
+    `handlers_dir`/`rf_dir` are overridable for fixture testing; main() always calls with the
+    defaults."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    rf_dir = rf_dir or RELATIONSHIP_FRAMEWORK_DIR
+    findings = []
+    if not rf_dir.exists():
+        return findings
+    class_to_file = {
+        "RelationshipService": "relationship-service.js",
+        "RelationshipRegistry": "relationship-registry.js",
+        "RelationshipTraversalService": "relationship-traversal.js",
+        "RelationshipValidationService": "relationship-validation.js",
+        "RelationshipMetricsService": "relationship-metrics.js",
+        "RelationshipLookupService": "relationship-lookup.js",
+        "P31RelationshipProvider": "relationship-provider.js",
+        "InMemoryRelationshipEdgeRepository": "in-memory-edge-repository.js",
+    }
+    for class_name, canonical_file in class_to_file.items():
+        pattern = re.compile(rf"\bclass\s+{class_name}\b")
+        for path in handlers_dir.rglob("*.js"):
+            if path.parent == rf_dir and path.name == canonical_file:
+                continue
+            if path.parent.name == "__tests__":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if pattern.search(text):
+                findings.append(
+                    f"DUPLICATE ENGINE: {_display_path(path)} defines its own 'class {class_name}' — "
+                    f"the canonical implementation is relationship-framework/{canonical_file}"
+                )
+    return findings
+
+
+def check_relationship_framework_provider_wiring_intact(rf_dir: Path | None = None) -> list[str]:
+    """Stage 16 positive-state check (architecture drift, both directions): confirms
+    relationship-service.js still constructs Stage 12's RelationshipResolutionService WITH a real
+    `provider` (P31RelationshipProvider), not left on the NullRelationshipProvider default — i.e.
+    that the ADR-0010 Acceptance this stage exercised has not silently regressed back to unwired.
+    Equally, confirms relationship-provider.js still does not import p31-handlers.js directly
+    (the P31RelationshipProvider must stay adapter-based, per p31-edge-adapter.js, even though a
+    real import would no longer violate ADR-0010's gate — it would still violate the
+    zero-blast-radius boundary check_relationship_framework_files_present_and_isolated() enforces).
+    `rf_dir` is overridable for fixture testing; main() always calls with the default."""
+    rf_dir = rf_dir or RELATIONSHIP_FRAMEWORK_DIR
+    findings = []
+    service_path = rf_dir / "relationship-service.js"
+    if not service_path.exists():
+        return findings
+    service_text = service_path.read_text(encoding="utf-8", errors="replace")
+    if "new RelationshipResolutionService({ provider:" not in service_text and "new RelationshipResolutionService({provider:" not in service_text:
+        findings.append(
+            "RELATIONSHIP WIRING DRIFT: relationship-service.js no longer constructs "
+            "RelationshipResolutionService with an explicit `provider` — ADR-0010 was Accepted "
+            "specifically so this wiring could happen; regressing to the unwired default silently "
+            "defeats that Acceptance. See TITAN_STAGE16_RELATIONSHIP_FRAMEWORK_REPORT.md."
+        )
+    if "P31RelationshipProvider" not in service_text:
+        findings.append(
+            "RELATIONSHIP WIRING DRIFT: relationship-service.js no longer references "
+            "P31RelationshipProvider — the concrete provider this stage built may have been bypassed."
+        )
+
+    provider_path = rf_dir / "relationship-provider.js"
+    if provider_path.exists():
+        provider_text = provider_path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r'from\s+["\'].*p\d+-handlers\.js["\']', provider_text):
+            findings.append(
+                "ARCHITECTURE VIOLATION: relationship-provider.js imports a pNN-handlers.js file "
+                "directly — it must stay adapter-based via p31-edge-adapter.js's documented data "
+                "shape, per this directory's zero-blast-radius rule."
+            )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -2588,6 +2731,9 @@ def main() -> None:
     all_findings += check_gateway_no_network_auth_scope_creep()
     all_findings += check_gateway_registry_describe_omits_handler()
     all_findings += check_gateway_bypass_new_direct_composition_consumers()
+    all_findings += check_relationship_framework_files_present_and_isolated()
+    all_findings += check_no_duplicate_relationship_engine()
+    all_findings += check_relationship_framework_provider_wiring_intact()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     metrics = compute_gateway_adoption_metrics()
