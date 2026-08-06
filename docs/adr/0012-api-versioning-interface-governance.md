@@ -1,7 +1,8 @@
 # ADR-0012: API Versioning & Interface Governance
 
 **Date:** 2026-08-05
-**Status:** Proposed — pending executive/architecture-review approval. Not Accepted.
+**Status:** **Accepted** — 2026-08-06, by executive architecture authority (see "Approval"
+section below and `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md`).
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
 Architect, Principal API Gateway Architect, Blog/Vercel Engineering
 **Program:** Project TITAN, Stage 7
@@ -232,12 +233,18 @@ path by construction).
 
 ## Approval
 
-**Proposed**, not Accepted. Required sign-offs:
+**Accepted, 2026-08-06.** Decided by executive architecture authority (cyberdudebivash,
+Project TITAN executive/repository owner) via direct confirmation, recorded in
+`TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md`. This is an executive-authority acceptance, not a
+completed multi-party review — the individually-named sign-offs below, including the
+cross-repository Blog/Vercel one this ADR's own text flagged as the least formality-like of the
+three, were not independently obtained and remain unchecked; recorded accurately rather than
+implied. If Blog/Vercel Engineering later finds the policy unworkable against their existing
+`api/v1/*` surface, reopen per this ADR's own Revision pattern.
 
-- [ ] Platform Governance Lead
-- [ ] Chief Threat Intelligence Architect / API Gateway Architect (intel-platform surface)
+- [ ] Platform Governance Lead (not independently obtained — see note above)
+- [ ] Chief Threat Intelligence Architect / API Gateway Architect (intel-platform surface) (not independently obtained)
 - [ ] Blog/Vercel engineering owner (blog surface, and acknowledgment of the "v1" label
-      collision documentation approach)
+      collision documentation approach) (not independently obtained)
 
-No code implementing this decision exists yet; none is required to accept it, since it
-formalizes an already-dominant convention rather than changing behavior.
+No code implementing this decision exists yet.

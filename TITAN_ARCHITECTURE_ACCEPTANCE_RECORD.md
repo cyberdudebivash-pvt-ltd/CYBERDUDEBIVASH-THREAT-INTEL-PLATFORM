@@ -1,10 +1,12 @@
 # Project TITAN — Architecture Acceptance Record
 
-**Status:** Open. Zero of three dispositions recorded. This document does not itself grant
-Acceptance to any ADR — that authority belongs to each ADR's own named Deciders (see each ADR's
-"Approval" section), or to whoever holds executive architecture authority for this program. This
-record exists so that authority has one place to act, and so every later stage can verify
-disposition by reading a file instead of assuming.
+**Status:** Closed, 2026-08-06. Three of three dispositions recorded — all **Accepted**, by
+direct executive architecture authority (cyberdudebivash, confirmed in session). This was an
+executive-authority acceptance, not a completed multi-party review: the individually-named
+sign-offs in each ADR's own "Approval" section were not independently obtained, and each ADR now
+says so explicitly rather than implying otherwise. This record exists so that authority has one
+place to act, and so every later stage can verify disposition by reading a file instead of
+assuming — that verification now reads Accepted, on this basis.
 
 **Program:** Project TITAN, Stage 11.5 (Executive Architecture Acceptance)
 **Created:** 2026-08-06, in response to an executive architecture decision to insert a
@@ -37,9 +39,13 @@ input to the actual Decider's judgment, not a substitute for it.
 
 | ADR | Subject | Current Status | Disposition | Decided By | Date |
 |---|---|---|---|---|---|
-| [0008](docs/adr/0008-canonical-evidence-framework.md) | Canonical Evidence Framework | Proposed | **PENDING** | — | — |
-| [0011](docs/adr/0011-evidence-lifecycle-ownership.md) | Evidence Lifecycle Ownership | Proposed | **PENDING** | — | — |
-| [0012](docs/adr/0012-api-versioning-interface-governance.md) | API Versioning & Interface Governance | Proposed | **PENDING** | — | — |
+| [0008](docs/adr/0008-canonical-evidence-framework.md) | Canonical Evidence Framework | **Accepted** | **Accepted** | cyberdudebivash (executive authority) | 2026-08-06 |
+| [0011](docs/adr/0011-evidence-lifecycle-ownership.md) | Evidence Lifecycle Ownership | **Accepted** | **Accepted** | cyberdudebivash (executive authority) | 2026-08-06 |
+| [0012](docs/adr/0012-api-versioning-interface-governance.md) | API Versioning & Interface Governance | **Accepted** | **Accepted*** | cyberdudebivash (executive authority) | 2026-08-06 |
+
+\* Engineering recommendation below was Accepted *with Conditions* (Blog/Vercel confirmation).
+Executive disposition is unconditional Accepted — recorded as decided, not as recommended; see
+ADR-0012's section below for both, side by side.
 
 ---
 
@@ -71,10 +77,10 @@ Revision-1 concern was closed with direct verification evidence, not assumption.
 **Accepted**, or **Accepted with Conditions** if reviewers want the E9–E12 exclusion re-verified
 independently before signing rather than relying on Stage 8's verification alone.
 
-**Disposition:** **PENDING**
-☐ Accepted&nbsp;&nbsp;☐ Accepted with Conditions&nbsp;&nbsp;☐ Requires Revision&nbsp;&nbsp;☐ Rejected
-Conditions (if any): _______________________________________________
-Decided by / date: _______________________________________________
+**Disposition:** **ACCEPTED**
+☑ Accepted&nbsp;&nbsp;☐ Accepted with Conditions&nbsp;&nbsp;☐ Requires Revision&nbsp;&nbsp;☐ Rejected
+Conditions (if any): None attached by the deciding authority
+Decided by / date: cyberdudebivash, executive architecture authority — 2026-08-06, direct session confirmation ("yes all three accepted... confirmed, production approved")
 
 ---
 
@@ -101,10 +107,10 @@ and the shipped implementation during this review.
 
 **Engineering recommendation:** No open technical blocker found. Recommend **Accepted**.
 
-**Disposition:** **PENDING**
-☐ Accepted&nbsp;&nbsp;☐ Accepted with Conditions&nbsp;&nbsp;☐ Requires Revision&nbsp;&nbsp;☐ Rejected
-Conditions (if any): _______________________________________________
-Decided by / date: _______________________________________________
+**Disposition:** **ACCEPTED**
+☑ Accepted&nbsp;&nbsp;☐ Accepted with Conditions&nbsp;&nbsp;☐ Requires Revision&nbsp;&nbsp;☐ Rejected
+Conditions (if any): None attached by the deciding authority
+Decided by / date: cyberdudebivash, executive architecture authority — 2026-08-06, direct session confirmation ("yes all three accepted... confirmed, production approved")
 
 ---
 
@@ -140,10 +146,17 @@ alignment. Recommend **Accepted with Conditions** — condition: explicit confir
 Blog/Vercel Engineering that the policy as written is workable against their existing `api/v1/*`
 manifest and webhook surface, since that surface wasn't built with this ADR in view.
 
-**Disposition:** **PENDING**
-☐ Accepted&nbsp;&nbsp;☐ Accepted with Conditions&nbsp;&nbsp;☐ Requires Revision&nbsp;&nbsp;☐ Rejected
-Conditions (if any): _______________________________________________
-Decided by / date: _______________________________________________
+**Executive disposition (overrides the conditional recommendation above):** **ACCEPTED**,
+unconditionally, by direct executive authority. The Blog/Vercel confirmation this session
+recommended as a condition was not independently obtained before this disposition was recorded —
+stated plainly, not silently dropped. If that surface later proves incompatible with this ADR's
+policy, reopen per this ADR's own Revision pattern; this is a real residual risk carried forward
+by choice, not by oversight.
+
+**Disposition:** **ACCEPTED**
+☑ Accepted&nbsp;&nbsp;☐ Accepted with Conditions&nbsp;&nbsp;☐ Requires Revision&nbsp;&nbsp;☐ Rejected
+Conditions (if any): None attached by the deciding authority (engineering had recommended one — see above)
+Decided by / date: cyberdudebivash, executive architecture authority — 2026-08-06, direct session confirmation ("yes all three accepted... confirmed, production approved")
 
 ---
 

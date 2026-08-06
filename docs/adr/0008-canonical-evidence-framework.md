@@ -1,8 +1,10 @@
 # ADR-0008: Canonical Evidence Framework
 
 **Date:** 2026-08-05
-**Status:** Proposed — Revised twice (Stage 7 raised a blocker re: E9–E12's live status; Stage 8
-resolved it — see "Revision 2"). **Ready for human Acceptance review.** Not Accepted yet.
+**Status:** **Accepted** — 2026-08-06, by executive architecture authority (see "Approval"
+section below and `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md`). Proposed → Revised twice (Stage 7
+raised a blocker re: E9–E12's live status; Stage 8 resolved it — see "Revision 2") → Ready for
+human Acceptance review (Stage 8) → Accepted (Stage 12 gate).
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
 Architect, Intelligence Engineering (P-layer stack owner), Blog/EIOS Engineering
 **Program:** Project TITAN, Stage 6
@@ -246,11 +248,18 @@ stands as originally written and is ready for human Acceptance review.
 
 ## Approval
 
-**Proposed**, not Accepted. Required sign-offs before Migration Strategy Phase 1 begins:
+**Accepted, 2026-08-06.** Decided by executive architecture authority (cyberdudebivash,
+Project TITAN executive/repository owner) via direct confirmation, recorded in
+`TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md`. This is an executive-authority acceptance, not a
+completed multi-party review — the individually-named sign-offs below were not independently
+obtained and remain unchecked; recorded accurately rather than implied. If any named Decider
+later raises a substantive objection, reopen per this ADR's own Revision pattern rather than
+treating this Acceptance as unconditional.
 
-- [ ] Platform Governance Lead
-- [ ] Chief Threat Intelligence Architect / P-layer stack owner (P20, P18, P32 owner)
+- [ ] Platform Governance Lead (not independently obtained — see note above)
+- [ ] Chief Threat Intelligence Architect / P-layer stack owner (P20, P18, P32 owner) (not independently obtained)
 - [ ] Blog/EIOS engineering owner (acknowledgment of E7/E8 scoping, not a blocking approval —
-      neither is modified by this ADR)
+      neither is modified by this ADR) (not independently obtained)
 
-No code implementing this decision exists yet.
+Code implementing this decision (Stage 10's Canonical Evidence Core, Stage 11's Evidence
+Registry) already exists, merged ahead of this Acceptance — see DEBT-021 for that history.

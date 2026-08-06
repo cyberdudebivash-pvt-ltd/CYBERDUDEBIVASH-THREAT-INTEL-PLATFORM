@@ -1,7 +1,8 @@
 # ADR-0011: Evidence Lifecycle Ownership
 
 **Date:** 2026-08-05
-**Status:** Proposed — pending executive/architecture-review approval. Not Accepted.
+**Status:** **Accepted** — 2026-08-06, by executive architecture authority (see "Approval"
+section below and `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md`).
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
 Architect, Intelligence Engineering (P30 owner)
 **Program:** Project TITAN, Stage 6
@@ -171,9 +172,14 @@ so there is no data-migration to reverse.
 
 ## Approval
 
-**Proposed**, not Accepted. Required sign-offs:
+**Accepted, 2026-08-06.** Decided by executive architecture authority (cyberdudebivash,
+Project TITAN executive/repository owner) via direct confirmation, recorded in
+`TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md`. This is an executive-authority acceptance, not a
+completed multi-party review — the individually-named sign-offs below were not independently
+obtained and remain unchecked; recorded accurately rather than implied.
 
-- [ ] Platform Governance Lead
-- [ ] Chief Threat Intelligence Architect / P30 owner
+- [ ] Platform Governance Lead (not independently obtained — see note above)
+- [ ] Chief Threat Intelligence Architect / P30 owner (not independently obtained)
 
-No code implementing this decision exists yet.
+Code implementing this decision (Stage 11's `lifecycle.js`) already exists, merged ahead of this
+Acceptance — see DEBT-021 for that history.
