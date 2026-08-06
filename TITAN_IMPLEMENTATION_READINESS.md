@@ -29,14 +29,14 @@ registry is a service, not just a shape).
 |---|---|
 | **Status** | **Blocked** |
 | **Blocked By** | Depends on the Evidence Registry existing (an API without a registry behind it has nothing authoritative to serve) — doubly blocked, since the Registry itself is Blocked |
-| **Required ADR** | ADR-0008 (schema) — Proposed. A dedicated "API versioning" ADR was named in Stage 5's original six but not included in this stage's five (ADR-0007–0011 cover Confidence, Evidence, Source Reliability, Relationship Graph, Evidence Lifecycle — API versioning was the sixth Stage 5 subject and remains unwritten). **This is a gap this assessment surfaces rather than silently fills** — a sixth ADR (candidate number ADR-0012) covering API versioning strategy is required before Provenance APIs can be built, and is not in this stage's scope. |
+| **Required ADR** | ADR-0008 (schema) — Proposed. A dedicated "API versioning" ADR was named in Stage 5's original six but not included in this stage's five (ADR-0007–0011 cover Confidence, Evidence, Source Reliability, Relationship Graph, Evidence Lifecycle — API versioning was the sixth Stage 5 subject and remains unwritten *as of this stage*). **This is a gap this assessment surfaces rather than silently fills** — a sixth ADR (candidate number ADR-0012) covering API versioning strategy is required before Provenance APIs can be built, and is not in this stage's scope. **Update, Stage 7 (2026-08-05):** ADR-0012 was drafted, closing this gap — see `docs/adr/0012-api-versioning-interface-governance.md`. It carries `Status: Proposed`, same as ADR-0007–0011; the ADR now exists but Acceptance is still pending, tracked in `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md` (Stage 11.5). |
 | **Required Refactoring** | None beyond what the Registry itself requires — this capability is additive API surface once its dependencies exist |
 | **Estimated Complexity** | Medium, once unblocked — this repository already has an established pattern for versioned, paginated `/api/v1/p*` routes to extend, per `EVIDENCE_ENGINE_DISCOVERY.md` EPIC 6's own assessment ("blocked on EPIC 1/2 existing first," not architecturally novel) |
 
 **Path to Ready:** Evidence Registry reaches Ready/ships → a dedicated API-versioning ADR
-(ADR-0012, not written this stage) is proposed and accepted → route design against
-`P38`'s existing `SCHEMA_REGISTRY` versioning convention (`version_introduced` per field),
-the closest existing precedent, per ADR-0008's Rationale.
+(ADR-0012, drafted Stage 7 — see update above, no longer "not written") is proposed **and
+accepted** → route design against `P38`'s existing `SCHEMA_REGISTRY` versioning convention
+(`version_introduced` per field), the closest existing precedent, per ADR-0008's Rationale.
 
 ---
 
