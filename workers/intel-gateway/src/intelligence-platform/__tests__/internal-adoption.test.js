@@ -14,7 +14,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, "..", "..", "..", "..", "..", "scripts", "intelligence_platform_snapshot.mjs");
 
 function run(env) {
-  return execFileSync("node", [SCRIPT, env], { encoding: "utf-8" });
+  // timeout: if the script ever hangs, this test fails fast instead of blocking the CI job.
+  return execFileSync("node", [SCRIPT, env], { encoding: "utf-8", timeout: 30_000 });
 }
 
 test("production (default): INTERNAL_ADOPTION_ENABLED is false -- documented no-op, zero platform construction", () => {

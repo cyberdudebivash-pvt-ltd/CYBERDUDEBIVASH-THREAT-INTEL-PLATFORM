@@ -23,10 +23,11 @@
  * silently or without separate authorization.
  *
  * Gating: reads EIPS_FLAGS.INTERNAL_ADOPTION_ENABLED for the given environment
- * (feature-flags.js) — hardcoded false in every environment by default (development, testing,
- * canary, production alike; see feature-flags.test.js's own regression guard for this). Running
- * this script with the flag at its default is a documented, intentional no-op — proof the
- * integration point exists and is off, not evidence it does nothing useful when turned on.
+ * (feature-flags.js) — hardcoded false in canary and production, and true in development and
+ * testing so the integration point stays regression-testable (see feature-flags.test.js's own
+ * regression guard for the canary/production values). Running this script in canary or
+ * production is a documented, intentional no-op — proof the integration point exists and is
+ * off where real traffic is, not evidence it does nothing useful when turned on.
  *
  * Rollback: there is nothing to roll back in the usual sense — this script holds no state
  * between runs (a fresh in-memory EvidenceRegistry every invocation) and touches no persisted
@@ -52,7 +53,7 @@ console.log(`EIPS_ENABLED=${flags.EIPS_ENABLED} INTERNAL_ADOPTION_ENABLED=${flag
 
 if (!flags.INTERNAL_ADOPTION_ENABLED) {
   console.log(
-    "INTERNAL_ADOPTION_ENABLED is false for this environment (the default everywhere) -- " +
+    `INTERNAL_ADOPTION_ENABLED is false for environment "${environment}" (true only in development/testing) -- ` +
       "documented no-op. This confirms the integration point exists and is correctly gated off, " +
       "per Phase 10's 'no customer-visible behavior changes' requirement. To exercise it, run " +
       "with an environment where this flag has been deliberately (and separately) flipped."

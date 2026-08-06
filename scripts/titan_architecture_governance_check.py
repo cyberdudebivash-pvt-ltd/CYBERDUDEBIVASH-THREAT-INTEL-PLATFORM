@@ -1449,7 +1449,9 @@ def check_contract_version_drift() -> list[str]:
     text = contracts_js.read_text(encoding="utf-8", errors="replace")
     # Each contract block: name: "X", version: "1.0.0", ... history: Object.freeze([ ... ]),
     for match in re.finditer(
-        r'name:\s*"([^"]+)",\s*version:\s*"([^"]+)".*?history:\s*Object\.freeze\(\[(.*?)\]\),\s*\}\);',
+        r'name:\s*"([^"]+)",\s*version:\s*"([^"]+)"'
+        r'(?:(?!\}\);).)*?'
+        r'history:\s*Object\.freeze\(\[(.*?)\]\),\s*\}\);',
         text,
         re.DOTALL,
     ):
@@ -1711,7 +1713,9 @@ def check_eips_contract_version_drift() -> list[str]:
         return findings
     text = contracts_js.read_text(encoding="utf-8", errors="replace")
     for match in re.finditer(
-        r'name:\s*"([^"]+)",\s*version:\s*"([^"]+)".*?history:\s*Object\.freeze\(\[(.*?)\]\),\s*\}\);',
+        r'name:\s*"([^"]+)",\s*version:\s*"([^"]+)"'
+        r'(?:(?!\}\);).)*?'
+        r'history:\s*Object\.freeze\(\[(.*?)\]\),\s*\}\);',
         text,
         re.DOTALL,
     ):
@@ -1852,19 +1856,55 @@ def check_eips_metrics_no_duplicate_instance() -> list[str]:
         return findings
     text = service_js.read_text(encoding="utf-8", errors="replace")
 
-    if not re.search(r"const\s+serviceMetrics\s*=\s*deps\.serviceMetrics\s*\|\|\s*new\s+ServicePlatformMetrics\(\)", text):
+    # Whitespace-tolerant: exact substring matching here would produce false
+    # DUPLICATE METRICS INSTANCE findings on a pure formatting change (brace spacing, wrapped
+    # argument lists) — a formatter run should never fail this advisory check.
+    # this._evidenceService must be resolved BEFORE serviceMetrics: an injected
+    # deps.evidenceService already owns its own metrics instance, so serviceMetrics must be
+    # DERIVED from it (or from the newly-constructed default), never built independently first —
+    # that ordering bug is exactly what this check exists to catch (see the fix's own commit).
+    if not re.search(
+        r"this\._evidenceService\s*=\s*deps\.evidenceService\s*\|\|\s*new\s+EvidenceService\(\s*\{\s*"
+        r"serviceMetrics:\s*deps\.serviceMetrics\s*\|\|\s*new\s+ServicePlatformMetrics\(\)\s*,?\s*\}\s*\)",
+        text,
+    ):
         findings.append(
             "DUPLICATE METRICS INSTANCE: intelligence-service.js's IntelligenceService "
-            "constructor no longer builds exactly one ServicePlatformMetrics instance up front — "
-            "verify every Stage 12/13 component it constructs still receives that SAME instance."
+            "constructor no longer resolves _evidenceService first, deriving its default "
+            "metrics instance from deps.serviceMetrics -- an injected deps.evidenceService must "
+            "own whichever ServicePlatformMetrics instance the rest of the constructor shares."
         )
-    for constructor_call in [
-        "new EvidenceService({ serviceMetrics })",
-        "new EvidenceQueryEngine(this._evidenceService.registry, serviceMetrics)",
-        "new EvidenceProvenanceEngine(this._evidenceService.registry, serviceMetrics)",
-        "new RelationshipResolutionService({ metrics: serviceMetrics })",
+    if not re.search(
+        r"const\s+serviceMetrics\s*=\s*deps\.serviceMetrics\s*\|\|\s*this\._evidenceService\.metrics\.serviceMetrics",
+        text,
+    ):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: intelligence-service.js no longer derives the shared "
+            "serviceMetrics from this._evidenceService.metrics.serviceMetrics -- an injected "
+            "evidenceService's own metrics instance may no longer be honored, silently splitting "
+            "observability in two."
+        )
+    if not re.search(r"this\._evidenceService\.metrics\.serviceMetrics\s*!==\s*serviceMetrics", text):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: intelligence-service.js no longer guards against a "
+            "mismatched explicit deps.serviceMetrics + deps.evidenceService combination -- that "
+            "caller error must fail loudly, not silently pick one instance over the other."
+        )
+    for constructor_call, pattern in [
+        (
+            "new EvidenceQueryEngine(this._evidenceService.registry, serviceMetrics)",
+            r"new\s+EvidenceQueryEngine\(\s*this\._evidenceService\.registry\s*,\s*serviceMetrics\s*,?\s*\)",
+        ),
+        (
+            "new EvidenceProvenanceEngine(this._evidenceService.registry, serviceMetrics)",
+            r"new\s+EvidenceProvenanceEngine\(\s*this\._evidenceService\.registry\s*,\s*serviceMetrics\s*,?\s*\)",
+        ),
+        (
+            "new RelationshipResolutionService({ metrics: serviceMetrics })",
+            r"new\s+RelationshipResolutionService\(\s*\{\s*metrics:\s*serviceMetrics\s*,?\s*\}\s*\)",
+        ),
     ]:
-        if constructor_call not in text:
+        if not re.search(pattern, text):
             findings.append(
                 f"DUPLICATE METRICS INSTANCE: intelligence-service.js no longer contains "
                 f"'{constructor_call}' — a component may be defaulting its own "

@@ -7,13 +7,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EIPS_DIR = dirname(HERE); // .../intelligence-platform
 const WORKER_SRC_DIR = dirname(EIPS_DIR); // .../src
 const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
+
+/**
+ * True only if `file` IS `dir`, or is a path strictly inside it -- a bare `startsWith(dir)`/
+ * `.includes(\`${dir}/...\`)` also matches a sibling directory whose name merely EXTENDS `dir`'s
+ * name (no separator in between), and hardcoding `/` breaks on Windows where `join()` produces
+ * `\`. Requiring `path.sep` immediately after `dir` closes both gaps. Mirrors
+ * evidence-registry/__tests__/zero-blast-radius.test.js's own identical helper.
+ */
+function isInside(file, dir) {
+  return file === dir || file.startsWith(dir + sep);
+}
 
 function listJsFiles(dir) {
   const out = [];
@@ -30,6 +41,16 @@ function listJsFiles(dir) {
   return out;
 }
 
+test("isInside does not treat a sibling directory whose name merely extends dir's name as being inside it", () => {
+  assert.equal(isInside(join(EIPS_DIR, "platform.js"), EIPS_DIR), true, "a real child file must still match");
+  assert.equal(isInside(EIPS_DIR, EIPS_DIR), true, "the directory itself must match");
+  assert.equal(
+    isInside(join(WORKER_SRC_DIR, "intelligence-platform-experimental", "x.js"), EIPS_DIR),
+    false,
+    "a sibling directory whose name extends EIPS_DIR's name must NOT be treated as inside it"
+  );
+});
+
 test("nothing outside intelligence-platform/ references 'intelligence-platform'", () => {
   // __tests__ directories are exempt from this sweep: this test's own counterpart in
   // evidence-registry/__tests__/zero-blast-radius.test.js legitimately documents this
@@ -38,9 +59,10 @@ test("nothing outside intelligence-platform/ references 'intelligence-platform'"
   // coupling. Production reachability is what actually matters and is covered precisely by the
   // two tests below (index.js, and pNN-handlers.js/index.js imports from inside this directory).
   const violations = [];
+  const evidenceRegistryTestsDir = join(EVIDENCE_REGISTRY_DIR, "__tests__");
   for (const file of listJsFiles(WORKER_SRC_DIR)) {
-    if (file.startsWith(EIPS_DIR)) continue; // files inside this directory are exempt
-    if (file.includes(`${WORKER_SRC_DIR}/evidence-registry/__tests__/`)) continue; // see above
+    if (isInside(file, EIPS_DIR)) continue; // files inside this directory are exempt
+    if (isInside(file, evidenceRegistryTestsDir)) continue; // see above
     const text = readFileSync(file, "utf-8");
     if (text.includes("intelligence-platform")) {
       violations.push(relative(WORKER_SRC_DIR, file));
@@ -64,8 +86,9 @@ test("index.js does not import any intelligence-platform/ file", () => {
 });
 
 test("intelligence-platform/ never imports a pNN-handlers.js file or index.js directly (same boundary rule evidence-registry/README.md documents for itself)", () => {
+  const eipsTestsDir = join(EIPS_DIR, "__tests__");
   for (const file of listJsFiles(EIPS_DIR)) {
-    if (file.includes(`${EIPS_DIR}/__tests__`)) continue;
+    if (isInside(file, eipsTestsDir)) continue;
     const text = readFileSync(file, "utf-8");
     assert.equal(/from\s+["'].*p\d+-handlers\.js["']/.test(text), false, `${relative(WORKER_SRC_DIR, file)} must not import a pNN-handlers.js file`);
     assert.equal(/from\s+["'].*\/index\.js["']/.test(text), false, `${relative(WORKER_SRC_DIR, file)} must not import index.js`);
@@ -74,8 +97,9 @@ test("intelligence-platform/ never imports a pNN-handlers.js file or index.js di
 
 test("intelligence-platform/ only imports evidence-registry/ files that already exist -- it does not modify evidence-registry/ itself", () => {
   const evidenceRegistryFiles = new Set(readdirSync(EVIDENCE_REGISTRY_DIR).filter((f) => f.endsWith(".js")));
+  const eipsTestsDir = join(EIPS_DIR, "__tests__");
   for (const file of listJsFiles(EIPS_DIR)) {
-    if (file.includes(`${EIPS_DIR}/__tests__`)) continue;
+    if (isInside(file, eipsTestsDir)) continue;
     const text = readFileSync(file, "utf-8");
     const importMatches = [...text.matchAll(/from\s+["']\.\.\/evidence-registry\/([\w-]+\.js)["']/g)];
     for (const match of importMatches) {
@@ -89,8 +113,9 @@ test("no evidence-registry/ PRODUCTION file references intelligence-platform/ (o
   // this directory BY NAME in its own authorized-exception comment (see that file). What this
   // test actually protects -- evidence-registry's PRODUCTION code never importing "upward" into
   // its one authorized consumer -- is unaffected by a test file's own boundary documentation.
+  const evidenceRegistryTestsDir = join(EVIDENCE_REGISTRY_DIR, "__tests__");
   for (const file of listJsFiles(EVIDENCE_REGISTRY_DIR)) {
-    if (file.includes(`${EVIDENCE_REGISTRY_DIR}/__tests__/`)) continue;
+    if (isInside(file, evidenceRegistryTestsDir)) continue;
     const text = readFileSync(file, "utf-8");
     assert.equal(text.includes("intelligence-platform"), false, `${relative(WORKER_SRC_DIR, file)} must not reference intelligence-platform/`);
   }

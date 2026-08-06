@@ -7,11 +7,16 @@ composed on top of Stage 12's Enterprise Evidence Service Platform (EESP).
 ## Methodology
 
 Stage 12's `evidence-registry/__tests__/service-performance-smoke.test.js` already benchmarks
-the registry/query/provenance layer Stage 13 composes. This document measures ONLY what Stage 13
-adds on top of that already-benchmarked substrate — service composition (the DI graph), the
-unified lookup surface, correlation, bundle validation, and the shared metrics instance's own
-call overhead — so the numbers below are Stage 13's *incremental* cost, not a re-measurement of
-Stage 12's.
+the registry/query/provenance layer Stage 13 composes. This document does not re-measure that
+layer in isolation — two of the five categories below genuinely are Stage-13-only numbers
+(**service composition**: building the DI graph touches no registry data at all; **metrics
+overhead**: the `.timed()` wrapper's own cost, measured directly). The other three (**unified
+lookup**, **correlation**, **validation**) are **end-to-end facade budgets**: each call executes
+through to Stage 12's already-benchmarked `EvidenceQueryEngine`/`EvidenceRegistry` work as part
+of what it does, so the wall-clock time includes that underlying work, not a delta computed
+against a separate Stage-12-only baseline for the identical operations. All five are real,
+useful budgets for "how long does calling this Stage 13 method actually take" — they are just
+not all isolated to Stage 13's own added code.
 
 Source: `workers/intel-gateway/src/intelligence-platform/__tests__/service-performance-smoke.test.js`
 (`node --test`, no statistical rigor claimed — a smoke test with a wall-clock budget per
@@ -55,7 +60,7 @@ enough to its budget to warrant a tighter margin before Phase 10 (Internal Adopt
 
 ## Reproducing these numbers
 
-```
+```bash
 cd workers/intel-gateway/src/intelligence-platform
 node --test __tests__/service-performance-smoke.test.js
 ```

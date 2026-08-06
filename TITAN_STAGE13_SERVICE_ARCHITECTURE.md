@@ -19,7 +19,7 @@ verified independently from both Node (`__tests__/zero-blast-radius.test.js`) an
 
 ## 2. Dependency diagram
 
-```
+```text
                      ┌─────────────────────────────────────────────┐
                      │   workers/intel-gateway/src/index.js         │
                      │   (live Cloudflare Worker request router)    │
