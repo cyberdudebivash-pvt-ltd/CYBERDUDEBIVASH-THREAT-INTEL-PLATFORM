@@ -37,6 +37,18 @@ check_for_unreviewed_graph_files() (Phase 1), so a dedicated duplicate-provider 
 redundant with it today. See TITAN_STAGE9_PHASE2_ARCHITECTURE_PLAN.md,
 TITAN_GRAPH_INTERFACE_SPECIFICATION.md, TITAN_GRAPH_MIGRATION_BLUEPRINT.md.
 
+Stage 10 added the Canonical Evidence Core (CEC) — a second canonical domain-model type
+(CanonicalEvidence, entity.js) alongside the CanonicalRelationship schema Stage 9 Phase 2
+already governs above — plus eight checks covering the categories that stage's own Phase 10
+charter named: duplicate evidence models, schema drift, version conflicts (specifically a
+version:0 falsy-zero bug this stage found and fixed in createCanonicalEvidence), missing
+validation, adapter regressions, feature-flag violations, serialization drift, and architecture
+violations (required-file-set integrity). All Stage 10 code lives inside
+workers/intel-gateway/src/evidence-registry/, already covered by
+check_evidence_registry_scaffolding_boundary()'s Stage 8 boundary checks above — these eight are
+additive, narrower checks specific to the CEC's own internal consistency, not a replacement for
+that boundary check. See TITAN_STAGE10_ENGINEERING_SPECIFICATION.md.
+
 Checks, in order:
 
   1. Do the tracked ADRs and the discovery/governance docs they depend on still exist?
@@ -75,6 +87,23 @@ Checks, in order:
   16. (Stage 9 Phase 2) Is the canonical relationship schema specification document intact?
   17. (Stage 9 Phase 2) Has TITAN_GRAPH_MIGRATION_BLUEPRINT.md's Phase 1/2 been prematurely
       wired into production code ahead of its stated preconditions?
+  18. (Stage 10) Does any file outside evidence-registry/entity.js define its own
+      createCanonicalEvidence or CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION (duplicate evidence
+      domain model)?
+  19. (Stage 10) Does schema.js's SCHEMA_VERSION_HISTORY still record both the Stage 8 and
+      Stage 10 schema version strings, in sync with entity.js's own constant?
+  20. (Stage 10) Has the version:0 falsy-zero bug in createCanonicalEvidence (found and fixed
+      this stage) regressed?
+  21. (Stage 10) Is the validation pipeline (validateCanonicalEvidence/validateEvidenceBatch)
+      still exported, still composed by interfaces.js, and still called by serialization.js's
+      DefaultEvidenceImporter before accepting an import?
+  22. (Stage 10) Do all four Phase 7 migration adapters still exist, and does
+      migration-adapters.js still avoid importing a live pNN-handlers.js file?
+  23. (Stage 10) Does feature-flags.js's CEC_FLAGS still default canary/production to disabled,
+      and has SCAFFOLDING_ENABLED stayed false?
+  24. (Stage 10) Does serialization.js's getSerializer() still refuse 'stix'/'api' as named
+      future capabilities rather than silently serializing them?
+  25. (Stage 10) Does the full Stage 10 CEC file set still exist under evidence-registry/?
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -733,6 +762,283 @@ def check_migration_blueprint_not_prematurely_executed() -> list[str]:
     return findings
 
 
+# ---------------------------------------------------------------------------------------
+# Stage 10 additions — Canonical Evidence Core (CEC) governance. Stage 10 Phases 1-9 added a
+# second canonical domain-model type (CanonicalEvidence, entity.js) alongside the
+# CanonicalRelationship schema Stage 9 Phase 2 already governs above. Same rationale as every
+# prior stage's additions: a domain model this young accumulates duplicate/drifted
+# implementations fastest before its discipline is habitual, so these checks exist before
+# evidence of a real violation, not after. All Stage 10 code lives inside
+# workers/intel-gateway/src/evidence-registry/, already covered by
+# check_evidence_registry_scaffolding_boundary()'s two boundary checks (Stage 8) above — these
+# eight checks are additive, narrower checks specific to the CEC's own internal consistency, not
+# a replacement for that boundary check. See TITAN_STAGE10_ENGINEERING_SPECIFICATION.md.
+# ---------------------------------------------------------------------------------------
+
+EVIDENCE_REGISTRY_DIR = HANDLERS_DIR / "evidence-registry"
+
+CEC_CORE_FILES = [
+    "entity.js",
+    "identifiers.js",
+    "validation.js",
+    "interfaces.js",
+    "serialization.js",
+    "migration-adapters.js",
+    "schema.js",
+    "feature-flags.js",
+    "repository-interface.js",
+]
+
+
+def check_no_duplicate_evidence_domain_model() -> list[str]:
+    """Duplicate evidence models: confirms entity.js remains the SOLE definer of
+    createCanonicalEvidence/CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION — the same "one canonical
+    source per capability" property check_for_unreviewed_new_scorers() already enforces for
+    confidence/evidence *functions* on the P-layer side, applied here to the CEC's own *domain
+    model*. A second definition anywhere else in workers/intel-gateway/src would mean two
+    authoritative shapes for the same concept, which Single Source of Truth (Principle 3)
+    forbids."""
+    findings = []
+    if not EVIDENCE_REGISTRY_DIR.exists():
+        return findings
+    for path in HANDLERS_DIR.rglob("*.js"):
+        if path.parent == EVIDENCE_REGISTRY_DIR and path.name == "entity.js":
+            continue  # the one authorized definition
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if re.search(r"\bfunction\s+createCanonicalEvidence\s*\(", text) or re.search(
+            r"\bCANONICAL_EVIDENCE_CORE_SCHEMA_VERSION\s*=", text
+        ):
+            findings.append(
+                f"DUPLICATE EVIDENCE MODEL: {path.relative_to(ROOT)} defines its own "
+                f"createCanonicalEvidence / CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION — "
+                f"evidence-registry/entity.js is the sole authorized definition (Stage 10 "
+                f"Phase 1). Import from there instead of re-implementing."
+            )
+    return findings
+
+
+def check_cec_schema_version_intact() -> list[str]:
+    """Schema drift: confirms schema.js's SCHEMA_VERSION_HISTORY still references both the
+    Stage 8 and Stage 10 schema version constants by name, and that entity.js still defines
+    CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION as a string literal. schema.js imports these
+    constants from entity.js rather than re-typing their string values (Single Source of
+    Truth), so this check looks for the imported symbol names being referenced, not for the
+    literal string values to appear a second time — mirrors
+    check_relationship_schema_spec_intact()'s pattern for the relationship schema."""
+    findings = []
+    entity_js = EVIDENCE_REGISTRY_DIR / "entity.js"
+    schema_js = EVIDENCE_REGISTRY_DIR / "schema.js"
+    if not (entity_js.exists() and schema_js.exists()):
+        return findings
+    entity_text = entity_js.read_text(encoding="utf-8", errors="replace")
+    schema_text = schema_js.read_text(encoding="utf-8", errors="replace")
+
+    if not re.search(r'CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION\s*=\s*"[^"]+"', entity_text):
+        findings.append(
+            "SCHEMA DRIFT: entity.js no longer defines CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION "
+            "as a string literal — schema.js's generated documentation depends on importing it."
+        )
+    for symbol in ("EVIDENCE_ENTITY_SCHEMA_VERSION", "CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION"):
+        if symbol not in schema_text:
+            findings.append(
+                f"SCHEMA DRIFT: schema.js's SCHEMA_VERSION_HISTORY no longer references "
+                f"{symbol} — history entries are additive-only (Deprecation Instead of "
+                f"Deletion applies to schema history too); every schema version bump must add "
+                f"a new history entry, not replace an earlier one."
+            )
+    return findings
+
+
+def check_version_field_falsy_zero_regression() -> list[str]:
+    """Version conflicts: guards against regression of a real bug this stage found and fixed —
+    createCanonicalEvidence() originally used `extension.version || 1`, which incorrectly
+    treats an explicit `version: 0` as absent and silently substitutes 1, which would mask a
+    real version conflict a caller passed (validateEvidenceBatch's whole job is detecting
+    exactly that). Fixed to `extension.version !== undefined ? extension.version : 1`. This
+    check exists so a future edit doesn't reintroduce the `||` form, the same rationale as
+    check_r1_internal_relationship_shape_consistency's standing-finding pattern above."""
+    findings = []
+    entity_js = EVIDENCE_REGISTRY_DIR / "entity.js"
+    if not entity_js.exists():
+        return findings
+    text = entity_js.read_text(encoding="utf-8", errors="replace")
+    if re.search(r"version:\s*extension\.version\s*\|\|\s*1\b", text):
+        findings.append(
+            "VERSION CONFLICT RISK: entity.js's createCanonicalEvidence() uses "
+            "`extension.version || 1` again — this treats an explicit `version: 0` as absent "
+            "(JS falsy-zero), silently masking what should be a detectable version conflict. "
+            "Use `extension.version !== undefined ? extension.version : 1` instead."
+        )
+    return findings
+
+
+def check_evidence_validation_pipeline_present() -> list[str]:
+    """Missing validation: confirms the validation pipeline Phases 3/4 built is still actually
+    composed, not silently bypassed — interfaces.js's EvidenceValidatorInterface must still
+    delegate to validation.js's functions, and serialization.js's DefaultEvidenceImporter must
+    still validate before accepting an import (Phase 5's own stated contract: "deserialize then
+    validate"). A regression here would mean invalid evidence could be imported without any
+    validation ever running."""
+    findings = []
+    interfaces_js = EVIDENCE_REGISTRY_DIR / "interfaces.js"
+    serialization_js = EVIDENCE_REGISTRY_DIR / "serialization.js"
+    validation_js = EVIDENCE_REGISTRY_DIR / "validation.js"
+    if not (interfaces_js.exists() and serialization_js.exists() and validation_js.exists()):
+        return findings
+
+    validation_text = validation_js.read_text(encoding="utf-8", errors="replace")
+    for fn in ("validateCanonicalEvidence", "validateEvidenceBatch"):
+        if f"export function {fn}" not in validation_text:
+            findings.append(
+                f"MISSING VALIDATION: validation.js no longer exports {fn}() — Stage 10 "
+                f"Phase 4's validation engine requires it."
+            )
+
+    interfaces_text = interfaces_js.read_text(encoding="utf-8", errors="replace")
+    if "validateCanonicalEvidence" not in interfaces_text or "validateEvidenceBatch" not in interfaces_text:
+        findings.append(
+            "MISSING VALIDATION: interfaces.js's EvidenceValidatorInterface no longer "
+            "references validation.js's functions — the interface must delegate to the "
+            "canonical validators (Reuse Before Build), not silently no-op."
+        )
+
+    serialization_text = serialization_js.read_text(encoding="utf-8", errors="replace")
+    if "validateCanonicalEvidence" not in serialization_text:
+        findings.append(
+            "MISSING VALIDATION: serialization.js's DefaultEvidenceImporter no longer "
+            "references validateCanonicalEvidence — Phase 5's contract is 'deserialize then "
+            "validate'; an importer that skips validation would accept structurally invalid "
+            "evidence."
+        )
+    return findings
+
+
+def check_migration_adapters_intact() -> list[str]:
+    """Adapter regressions: confirms all four Phase 7 migration adapters still exist AND still
+    avoid importing a live pNN-handlers.js/index.js file — the latter is the specific "zero
+    blast radius regardless of adapter sophistication" design property migration-adapters.js's
+    own file-level docstring claims (also smoke-tested from the Node side by
+    internal-integration-smoke.test.js; this is the authoritative CI-side check, since CI runs
+    this Python script on every build, not necessarily `node --test`)."""
+    findings = []
+    adapters_js = EVIDENCE_REGISTRY_DIR / "migration-adapters.js"
+    if not adapters_js.exists():
+        return findings
+    text = adapters_js.read_text(encoding="utf-8", errors="replace")
+
+    for adapter_class in (
+        "P20EvidenceChainAdapter",
+        "CanonicalRelationshipAdapter",
+        "P25ConfidenceAdapter",
+        "ReportItemAdapter",
+    ):
+        if f"class {adapter_class}" not in text:
+            findings.append(
+                f"ADAPTER REGRESSION: migration-adapters.js no longer defines {adapter_class} "
+                f"— Stage 10 Phase 7 requires all four named migration adapters (Legacy "
+                f"Evidence Objects, Existing Report Structures, Existing Graph/Relationship "
+                f"Structures, Existing Confidence Objects)."
+            )
+
+    if re.search(r'(?:from|require\()\s*["\'][^"\']*-handlers(?:\.js)?["\']', text):
+        findings.append(
+            "ADAPTER REGRESSION: migration-adapters.js now imports a pNN-handlers.js file "
+            "directly — this breaks the documented design property that these adapters "
+            "operate on data shapes only, never on a live handler import, which is what keeps "
+            "adopting them a zero-blast-radius change regardless of adapter complexity."
+        )
+    return findings
+
+
+def check_cec_feature_flags_disabled() -> list[str]:
+    """Feature-flag violations: confirms Stage 10 Phase 6's CEC_FLAGS still default the
+    canary/production environments to disabled, and that EVIDENCE_REGISTRY_FLAGS (Stage 8,
+    still the only flag that gates real production wiring) hasn't drifted. Mirrors
+    check_evidence_registry_scaffolding_boundary()'s existing SCAFFOLDING_ENABLED check,
+    extended to the two new CEC_FLAGS environments that actually matter for a rollback
+    scenario."""
+    findings = []
+    flags_js = EVIDENCE_REGISTRY_DIR / "feature-flags.js"
+    if not flags_js.exists():
+        return findings
+    text = flags_js.read_text(encoding="utf-8", errors="replace")
+
+    if "SCAFFOLDING_ENABLED: false" not in text:
+        findings.append(
+            "FEATURE-FLAG VIOLATION: feature-flags.js's SCAFFOLDING_ENABLED no longer defaults "
+            "to false (also checked by check_evidence_registry_scaffolding_boundary() above; "
+            "flagged here too since Stage 10 specifically extends this same file)."
+        )
+
+    canary_match = re.search(r"canary:\s*Object\.freeze\(\{\s*CEC_ENABLED:\s*(\w+)", text)
+    production_match = re.search(r"production:\s*Object\.freeze\(\{\s*CEC_ENABLED:\s*(\w+)", text)
+    if canary_match and canary_match.group(1) != "false":
+        findings.append(
+            "FEATURE-FLAG VIOLATION: feature-flags.js's CEC_FLAGS.canary.CEC_ENABLED is not "
+            "'false' — canary must stay disabled until a separately-authorized rollout stage "
+            "(Stage 10 Phase 6: Canary/Production tiers are 'all disabled by default')."
+        )
+    if production_match and production_match.group(1) != "false":
+        findings.append(
+            "FEATURE-FLAG VIOLATION: feature-flags.js's CEC_FLAGS.production.CEC_ENABLED is "
+            "not 'false' — production must stay disabled until a separately-authorized "
+            "rollout stage."
+        )
+    return findings
+
+
+def check_serialization_future_formats_still_stubbed() -> list[str]:
+    """Serialization drift: confirms getSerializer() still refuses to silently succeed for
+    'stix'/'api' — Phase 5's explicit instruction was "Future STIX compatibility, Future API
+    compatibility... Do not expose public APIs yet." A regression where either format silently
+    returns a working serializer instead of throwing would mean this stage started exposing a
+    public-API-shaped capability without the separate authorization Phase 5 deferred it
+    behind."""
+    findings = []
+    serialization_js = EVIDENCE_REGISTRY_DIR / "serialization.js"
+    if not serialization_js.exists():
+        return findings
+    text = serialization_js.read_text(encoding="utf-8", errors="replace")
+
+    if not re.search(r'case\s+"stix"\s*:\s*\n\s*case\s+"api"\s*:\s*\n\s*throw', text):
+        findings.append(
+            "SERIALIZATION DRIFT: serialization.js's getSerializer() no longer throws for "
+            "'stix'/'api' as named-future-capability stubs — verify neither format now returns "
+            "a working serializer ahead of its separate authorization (Phase 5's own scope "
+            "boundary: 'Do not expose public APIs yet')."
+        )
+    for fmt in ("json", "markdown", "dto"):
+        if f'"{fmt}"' not in text:
+            findings.append(
+                f"SERIALIZATION DRIFT: serialization.js no longer references the '{fmt}' "
+                f"format — Phase 5 requires JSON, Markdown, and internal DTO support."
+            )
+    return findings
+
+
+def check_cec_files_present() -> list[str]:
+    """Architecture violations: confirms every Stage 10 CEC file Phases 1-7 introduced still
+    exists — no silent deletion (Deprecation Instead of Deletion applies here too). A coarse
+    safety net alongside the more targeted symbol-level checks above, since those check specific
+    exports/classes but not whole-file presence for files like schema.js or
+    repository-interface.js that no other check here inspects directly."""
+    findings = []
+    if not EVIDENCE_REGISTRY_DIR.exists():
+        return findings
+    for filename in CEC_CORE_FILES:
+        if not (EVIDENCE_REGISTRY_DIR / filename).exists():
+            findings.append(
+                f"ARCHITECTURE VIOLATION: evidence-registry/{filename} is missing — Stage 10 "
+                f"requires it (see TITAN_STAGE10_ENGINEERING_SPECIFICATION.md). If "
+                f"intentionally removed, that is a breaking change requiring the Deprecation "
+                f"Instead of Deletion protocol, not silent removal."
+            )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -752,6 +1058,14 @@ def main() -> None:
     all_findings += check_r1_relationship_type_vocabulary_drift()
     all_findings += check_relationship_schema_spec_intact()
     all_findings += check_migration_blueprint_not_prematurely_executed()
+    all_findings += check_no_duplicate_evidence_domain_model()
+    all_findings += check_cec_schema_version_intact()
+    all_findings += check_version_field_falsy_zero_regression()
+    all_findings += check_evidence_validation_pipeline_present()
+    all_findings += check_migration_adapters_intact()
+    all_findings += check_cec_feature_flags_disabled()
+    all_findings += check_serialization_future_formats_still_stubbed()
+    all_findings += check_cec_files_present()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     if not all_findings:
@@ -762,7 +1076,11 @@ def main() -> None:
               "graph/relationship/correlation-shaped Python files found, R3's producer chain "
               "intact, ADR-0010's tracked graph IDs (R1-R7) all present, no relationship-shape "
               "or vocabulary drift, no dormant/dead-export/zombie-pipeline status changes, "
-              "Migration Blueprint not prematurely executed.")
+              "Migration Blueprint not prematurely executed, Canonical Evidence Core clean "
+              "(no duplicate models, no schema drift, no version-conflict regression, "
+              "validation pipeline intact, all migration adapters intact, feature flags still "
+              "disabled by default, serialization future-formats still stubbed, all CEC files "
+              "present).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")

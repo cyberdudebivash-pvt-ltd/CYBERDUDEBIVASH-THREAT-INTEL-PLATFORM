@@ -18,3 +18,50 @@ export const EVIDENCE_REGISTRY_FLAGS = Object.freeze({
   REGISTRY_SERVICE_ENABLED: false,
   EVIDENCE_API_ENABLED: false,
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// Stage 10 Phase 6 — environment-aware flag support for the Canonical
+// Evidence Core specifically. EVIDENCE_REGISTRY_FLAGS above is unchanged:
+// it still governs the Registry/Service/API and is still all-false,
+// still gated on ADR-0008 Acceptance. CEC_FLAGS below governs only
+// whether this directory's own inert domain-model/validation/serialization
+// code may be *exercised* (e.g. by this stage's own test suite) — it does
+// not gate wiring into any production route, which SCAFFOLDING_ENABLED
+// above continues to gate.
+// ═══════════════════════════════════════════════════════════════════════
+
+export const DEPLOYMENT_ENVIRONMENTS = Object.freeze(["development", "testing", "canary", "production"]);
+
+/**
+ * Per-environment CEC flag table. Every environment except "canary"/"production" defaults to
+ * enabled *for exercising this directory's own code in isolation* (tests, local dev) — none of
+ * these values are read by index.js or any P-layer handler, so "enabled" here has zero
+ * production blast radius regardless of value, unlike SCAFFOLDING_ENABLED above.
+ */
+export const CEC_FLAGS = Object.freeze({
+  development: Object.freeze({ CEC_ENABLED: true }),
+  testing: Object.freeze({ CEC_ENABLED: true }),
+  canary: Object.freeze({ CEC_ENABLED: false }),
+  production: Object.freeze({ CEC_ENABLED: false }),
+});
+
+/**
+ * Resolves CEC flag state for an environment. Unrecognized/missing environment strings
+ * resolve to "production" (the all-disabled state) — secure by default (Principle 9), never
+ * fails open.
+ * @param {string} [environment]
+ * @returns {{CEC_ENABLED: boolean}}
+ */
+export function resolveCecFlags(environment) {
+  return CEC_FLAGS[environment] || CEC_FLAGS.production;
+}
+
+/**
+ * Rollback: forces the safest (all-disabled) flag state regardless of environment. A rollback
+ * procedure calls this one function rather than needing to remember which environment string
+ * means "off."
+ * @returns {{CEC_ENABLED: boolean}}
+ */
+export function rollbackCecFlags() {
+  return CEC_FLAGS.production;
+}
