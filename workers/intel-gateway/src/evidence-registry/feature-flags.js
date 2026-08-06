@@ -65,3 +65,45 @@ export function resolveCecFlags(environment) {
 export function rollbackCecFlags() {
   return CEC_FLAGS.production;
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Stage 11 — environment-aware flag support for the Enterprise Evidence
+// Registry (EER) specifically. EVIDENCE_REGISTRY_FLAGS and CEC_FLAGS above
+// are both unchanged. EER_FLAGS below governs only whether this directory's
+// registry-service.js/in-memory-repository.js/lifecycle.js/versioning.js/
+// indexes.js may be *exercised* (tests, local dev) — same "zero production
+// blast radius regardless of value" property as CEC_FLAGS, since nothing
+// reads this from index.js or any P-layer handler. Reuses
+// DEPLOYMENT_ENVIRONMENTS above rather than redefining the environment list.
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Per-environment EER flag table. Mirrors CEC_FLAGS's exact shape and defaults —
+ * development/testing enabled, canary/production disabled.
+ */
+export const EER_FLAGS = Object.freeze({
+  development: Object.freeze({ EER_ENABLED: true }),
+  testing: Object.freeze({ EER_ENABLED: true }),
+  canary: Object.freeze({ EER_ENABLED: false }),
+  production: Object.freeze({ EER_ENABLED: false }),
+});
+
+/**
+ * Resolves EER flag state for an environment. Unrecognized/missing environment strings resolve
+ * to "production" (the all-disabled state) — secure by default, never fails open. Mirrors
+ * resolveCecFlags() exactly.
+ * @param {string} [environment]
+ * @returns {{EER_ENABLED: boolean}}
+ */
+export function resolveEerFlags(environment) {
+  return EER_FLAGS[environment] || EER_FLAGS.production;
+}
+
+/**
+ * Rollback: forces the safest (all-disabled) flag state regardless of environment. Mirrors
+ * rollbackCecFlags() exactly.
+ * @returns {{EER_ENABLED: boolean}}
+ */
+export function rollbackEerFlags() {
+  return EER_FLAGS.production;
+}

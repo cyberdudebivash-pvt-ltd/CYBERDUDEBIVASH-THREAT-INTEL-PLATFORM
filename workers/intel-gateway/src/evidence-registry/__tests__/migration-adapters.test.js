@@ -125,6 +125,18 @@ test("ReportItemAdapter: extracts evidence-relevant fields from a full report it
   assert.equal(result.valid, true, JSON.stringify(result.errors));
 });
 
+test("ReportItemAdapter: extracts related_iocs from item.iocs (array of {value, confidence} objects, the verified live shape)", () => {
+  const adapter = new ReportItemAdapter();
+  const evidence = adapter.adapt({
+    id: "SA-2026-0300",
+    iocs: [
+      { value: "1.2.3.4", confidence: 80 },
+      { value: "evil.example.com", confidence: 60 },
+    ],
+  });
+  assert.deepEqual(evidence.related_iocs, ["1.2.3.4", "evil.example.com"]);
+});
+
 test("ReportItemAdapter: degrades gracefully when optional fields are absent", () => {
   const adapter = new ReportItemAdapter();
   const evidence = adapter.adapt({ id: "SA-MINIMAL" });

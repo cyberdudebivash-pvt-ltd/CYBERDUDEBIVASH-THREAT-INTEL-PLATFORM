@@ -141,9 +141,11 @@ export class P25ConfidenceAdapter extends EvidenceMigrationAdapterInterface {
  * single CanonicalEvidence in one call, composing the three adapters above rather than
  * reimplementing their logic. This is the "Existing Report Structures" adapter Phase 7 asks
  * for — `item` here is documented by field access only (item.evidence_chain, item.id,
- * item.cve_id/cves, item.actor_tag, item.mitre_techniques), the same defensive field-presence
- * style p20/p25-handlers.js themselves already use, so a field's absence degrades gracefully
- * rather than throwing.
+ * item.cve_id/cves, item.actor_tag, item.mitre_techniques, item.iocs), the same defensive
+ * field-presence style p20/p25-handlers.js themselves already use, so a field's absence degrades
+ * gracefully rather than throwing. `item.iocs` verified against the live shape (p20/p22/
+ * p18-handlers.js: an array of `{value, confidence, ...}` objects) in Stage 11 Phase 5, when
+ * related_iocs was added to CanonicalEvidence for registry indexing.
  */
 export class ReportItemAdapter extends EvidenceMigrationAdapterInterface {
   constructor() {
@@ -168,6 +170,9 @@ export class ReportItemAdapter extends EvidenceMigrationAdapterInterface {
     const techniques = (item.mitre_techniques || [])
       .map((t) => (typeof t === "string" ? t : t?.id))
       .filter(Boolean);
+    const iocs = (item.iocs || [])
+      .map((ioc) => (typeof ioc === "string" ? ioc : ioc?.value))
+      .filter(Boolean);
 
     evidence = {
       ...evidence,
@@ -176,6 +181,7 @@ export class ReportItemAdapter extends EvidenceMigrationAdapterInterface {
       related_threat_actors: actorTag ? [String(actorTag)] : [],
       related_campaigns: item.campaign_id ? [String(item.campaign_id)] : [],
       related_attack_techniques: techniques,
+      related_iocs: iocs.map(String),
       audit_metadata: {
         ...evidence.audit_metadata,
         producer_implementation: this.sourceShapeName(),
