@@ -83,6 +83,13 @@ both concepts for the first time). See TITAN_STAGE14_SERVICE_ARCHITECTURE.md. (N
 docstring's narrative or numbered list below — a pre-existing documentation gap, not introduced
 or corrected by this stage's own additions, flagged here rather than silently left unremarked.)
 
+Stage 14 Phase 2 audited the merged Phase 1 Gateway (composition boundaries, registry, dispatcher,
+lifecycle, middleware, metrics, authorization) and found it already satisfied nearly every audited
+dimension by construction or by pre-existing reuse (see TITAN_STAGE14_PHASE2_COMPLETION_REPORT.md
+for the full per-dimension findings) — the one genuine, evidence-backed gap was GatewayRegistry.get()
+exposing its full internal entry, including the raw handler function, with no safe metadata-only
+accessor. One check below (#54) guards the fix: GatewayRegistry.describe()/.describeAll().
+
 Checks, in order:
 
   1. Do the tracked ADRs and the discovery/governance docs they depend on still exist?
@@ -205,6 +212,9 @@ Checks, in order:
       fetch handler, Request/Response construction, ADMIN_SECRET, a JWT library) — scope
       creep against this stage's own documented in-process/DI-only boundary (no Stage 12/13
       precedent)?
+  54. (Stage 14 Phase 2) Do GatewayRegistry.describe()/.describeAll() — the read-only capability
+      metadata accessors added for registry-maturity introspection — still exist in the
+      expected shape and still omit the raw handler function from their return value?
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -2387,6 +2397,37 @@ def check_gateway_no_network_auth_scope_creep(gateway_dir: Path | None = None) -
     return findings
 
 
+def check_gateway_registry_describe_omits_handler(gateway_dir: Path | None = None) -> list[str]:
+    """Registry maturity (Stage 14 Phase 2): confirms GatewayRegistry.describe()/.describeAll() --
+    the safe, read-only capability-metadata accessors added so a diagnostic caller can introspect
+    registered capabilities without get()'s full internal entry (which includes the raw handler
+    function) -- still exist in the expected shape and their bodies never reference `handler` or
+    spread the unfiltered internal entry, which would silently reopen the exact leak they exist
+    to close. `gateway_dir` is overridable for fixture testing; main() always calls with the
+    default."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    path = gateway_dir / "gateway-registry.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for method_name in ["describe", "describeAll"]:
+        match = re.search(rf"\n  {re.escape(method_name)}\(.*?\)\s*\{{([\s\S]*?)\n  \}}\n", text)
+        if not match:
+            findings.append(
+                f"GOVERNANCE: gateway-registry.js no longer defines '{method_name}()' in the "
+                f"expected shape -- registry metadata introspection may have been removed"
+            )
+            continue
+        body = match.group(1)
+        if re.search(r"\bhandler\b", body) or re.search(r"\.\.\.entry\b", body):
+            findings.append(
+                f"REGISTRY BYPASS: gateway-registry.js's {method_name}() body references 'handler' "
+                f"or spreads the full entry -- it must return handler-free metadata only"
+            )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -2452,6 +2493,7 @@ def main() -> None:
     all_findings += check_no_circular_dependency_gateway_intelligence_platform()
     all_findings += check_gateway_capability_authorization_present()
     all_findings += check_gateway_no_network_auth_scope_creep()
+    all_findings += check_gateway_registry_describe_omits_handler()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     if not all_findings:

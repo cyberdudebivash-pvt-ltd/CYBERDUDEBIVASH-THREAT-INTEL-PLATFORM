@@ -10,9 +10,11 @@ Source: `gateway-service.js`. Methods: `EnterpriseGateway.dispatch`, `.registerC
 
 Source: `gateway-middleware.js`. Methods: `composeGatewayMiddleware`, `tracingMiddleware`, `featureFlagEvaluationMiddleware`, `versionCompatibilityMiddleware`, `capabilityValidationMiddleware`, `auditLoggingMiddleware`, `metricsMiddleware`. 6 default composable stages (see the Service Architecture doc §8).
 
-## CapabilityRegistryContract (v1.0.0)
+## CapabilityRegistryContract (v1.1.0)
 
-Source: `gateway-registry.js`. Methods: `GatewayRegistry.register`, `.has`, `.get`, `.list`, `.unregister`, `createServiceMethodHandler`.
+Source: `gateway-registry.js`. Methods: `GatewayRegistry.register`, `.has`, `.get`, `.list`, `.unregister`, `.describe`, `.describeAll`, `createServiceMethodHandler`.
+
+**v1.1.0 (Stage 14 Phase 2, additive, `backwardCompatibleWithPrevious: true`):** added `.describe(name)`/`.describeAll()` — read-only capability metadata (`{name, version, description, requiredCapabilities}`) with the raw `handler` function omitted, for diagnostic/observability callers that shouldn't be able to invoke capabilities directly via `.get()`'s full internal entry. A caller still on v1.0.0 is unaffected — `.get()`/`.has()`/`.list()`/`.register()`/`.unregister()` are all unchanged.
 
 ## GatewayMetricsContract (v1.0.0)
 
