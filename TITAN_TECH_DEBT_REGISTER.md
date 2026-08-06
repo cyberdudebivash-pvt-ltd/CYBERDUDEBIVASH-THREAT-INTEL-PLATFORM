@@ -388,16 +388,25 @@ being assumed benign.
 ### DEBT-021 — Evidence Registry service built (Stage 10–11) ahead of its gating ADRs' Acceptance
 
 *Found Stage 11 post-implementation validation (resumed session, PR #115 pre-merge review).*
+**Correction, Stage 11.5 (2026-08-06):** the Recommended Resolution field below originally
+claimed ADR-0012 was "not-yet-drafted... never written." That was wrong — verified against
+`docs/adr/0012-api-versioning-interface-governance.md` directly, ADR-0012 was drafted in Stage 7
+(PR #110) specifically to fill this gap. It carries the same `Status: Proposed, not Accepted` as
+ADR-0008/0011. The error traced back to reading `docs/adr/README.md`'s index (stale — never
+updated to list ADR-0012/0013, now fixed) and `TITAN_IMPLEMENTATION_READINESS.md`'s Stage-6-era
+claim (accurate when written, since annotated) without checking `docs/adr/` directly. The
+underlying blocker is unchanged — absence of *Acceptance*, not absence of the ADR — but the text
+below is now corrected to say that accurately.
 
 | Field | Value |
 |---|---|
 | Severity | Medium — no active harm (zero blast radius, independently re-verified this review: zero imports of `evidence-registry/` outside its own directory, zero routes, `index.js`/`p32-handlers.js`/`p38-handlers.js` untouched, `EER_FLAGS` off by default in canary/production), but a governance-process gap that compounds if the same pattern repeats into Stage 12 |
-| Risk | Stage 8's own authorization memo (`TITAN_EVIDENCE_REGISTRY_AUTHORIZATION.md`) explicitly reserved "Evidence Registry service (actual persistence)" as `No — Blocked`, requiring ADR-0008 formal Acceptance first. Stage 10 built the authorized half (schema/entity/serialization). Stage 11 built the blocked half — `registry-service.js`, `in-memory-repository.js`, `lifecycle.js` (a 9-state machine, ADR-0011's exact subject), `versioning.js` — under a narrower reading that ADR-0008 blocks only *wiring into a live route*, not construction of the service itself. Both ADR-0008 and ADR-0011 remain `Status: Proposed`, confirmed by direct inspection of `docs/adr/0008-canonical-evidence-framework.md` and `docs/adr/0011-evidence-lifecycle-ownership.md` at time of this entry. Each stage has disclosed the unmet precondition transparently in its own completion report — nothing was hidden — but the scope built under "it's inert, so it's fine" has grown every stage, from type definitions (Stage 8) to a full service/lifecycle/versioning/indexing layer (Stage 11) |
-| Owner | Platform Governance Lead (ADR-0008 / ADR-0011 Acceptance decision) |
-| Affected Systems | `workers/intel-gateway/src/evidence-registry/*`, `docs/adr/0008-canonical-evidence-framework.md`, `docs/adr/0011-evidence-lifecycle-ownership.md` |
-| Blocking Status | Blocking Stage 12 (Enterprise Evidence Service APIs — the first stage that would touch real consumer/API surface). **Not** blocking PR #115's merge itself, which stays inert and reversible regardless of ADR status — confirmed by this review's independent re-run of the full test/regression/certification/governance gate set |
-| Recommended Resolution | Human Acceptance review of ADR-0008 and ADR-0011 before Stage 12 implementation begins, or an explicit Stage-8-style narrow re-authorization memo if Acceptance is intentionally deferred further. Stage 12 additionally requires a not-yet-drafted ADR-0012 (API versioning) — one of Stage 5's original six required ADRs, never written |
-| Implementation Priority | High — not for code changes, for the decision itself, before Stage 12 planning converts to implementation |
+| Risk | Stage 8's own authorization memo (`TITAN_EVIDENCE_REGISTRY_AUTHORIZATION.md`) explicitly reserved "Evidence Registry service (actual persistence)" as `No — Blocked`, requiring ADR-0008 formal Acceptance first. Stage 10 built the authorized half (schema/entity/serialization). Stage 11 built the blocked half — `registry-service.js`, `in-memory-repository.js`, `lifecycle.js` (a 9-state machine, ADR-0011's exact subject), `versioning.js` — under a narrower reading that ADR-0008 blocks only *wiring into a live route*, not construction of the service itself. ADR-0008, ADR-0011, **and ADR-0012** (API Versioning & Interface Governance — the policy Stage 12's Phase 7 "Internal API Contracts" would need) all remain `Status: Proposed`, confirmed by direct inspection of each ADR file. Each stage has disclosed the unmet precondition transparently in its own completion report — nothing was hidden — but the scope built under "it's inert, so it's fine" has grown every stage, from type definitions (Stage 8) to a full service/lifecycle/versioning/indexing layer (Stage 11) |
+| Owner | Platform Governance Lead (ADR-0008 / ADR-0011 / ADR-0012 Acceptance decision) |
+| Affected Systems | `workers/intel-gateway/src/evidence-registry/*`, `docs/adr/0008-canonical-evidence-framework.md`, `docs/adr/0011-evidence-lifecycle-ownership.md`, `docs/adr/0012-api-versioning-interface-governance.md` |
+| Blocking Status | Blocking Stage 12 (Enterprise Evidence Service Platform — the first stage that would touch real consumer/API surface, per its own Phase 3/Phase 7 scope). **Not** blocking PR #115's merge itself, which stayed inert and reversible regardless of ADR status — confirmed by independent re-run of the full test/regression/certification/governance gate set, merged 2026-08-06 |
+| Recommended Resolution | Human Acceptance review of ADR-0008, ADR-0011, and ADR-0012 before Stage 12 implementation begins — all three are drafted and ready for review, none require further authoring. See `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md` (Stage 11.5) for the formal disposition record awaiting each ADR's named Deciders |
+| Implementation Priority | High — not for code changes, for the decision itself, before Stage 12 implementation begins |
 
 ## Register maintenance
 

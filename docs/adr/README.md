@@ -1,7 +1,16 @@
 # Architecture Decision Records — Index
 
-This directory did not exist before Project TITAN Stage 6. It is created now to hold ADR-0007
-through ADR-0011, the five ownership decisions Stage 6 was chartered to produce.
+This directory did not exist before Project TITAN Stage 6. It was created to hold ADR-0007
+through ADR-0011, the five ownership decisions Stage 6 was chartered to produce. Stage 7 (PR
+#110) added ADR-0012, filling the sixth Stage 5 subject (API versioning) Stage 6 had explicitly
+left open — see `TITAN_IMPLEMENTATION_READINESS.md`'s Intelligence Provenance APIs assessment
+for that gap's original framing. Stage 7 also added ADR-0013, a per-module disposition table
+for the `cyberdudebivash-blog` `lib/` tree (Task 7's own subject), numbered into this same
+sequence though shaped differently (a table of dispositions, not a single ownership Decision).
+**Correction, Stage 11.5 (2026-08-06):** this index previously listed only ADR-0007–0011 even
+after ADR-0012 and ADR-0013 existed on disk — a documentation-drift gap that fed an inaccurate
+claim into `TITAN_TECH_DEBT_REGISTER.md`'s DEBT-021 (corrected the same day). The index below is
+now synchronized with the actual contents of this directory.
 
 ## Why numbering starts at 0007
 
@@ -38,22 +47,31 @@ existing scope (single-repo runtime/deployment decisions).
 | [0009](./0009-source-reliability-ownership.md) | Source Reliability Ownership | Proposed | Canonical source-reliability grade and scale reconciliation |
 | [0010](./0010-relationship-graph-ownership.md) | Relationship Graph Ownership | Proposed | Canonical entity-relationship graph (target-state, persistence-gated) |
 | [0011](./0011-evidence-lifecycle-ownership.md) | Evidence Lifecycle Ownership | Proposed | Canonical evidence lifecycle state model |
+| [0012](./0012-api-versioning-interface-governance.md) | API Versioning & Interface Governance | Proposed | Cross-surface API versioning policy; depends on ADR-0008 for Evidence API shape specifically |
+| [0013](./0013-typescript-rc1-disposition.md) | TypeScript RC1 Subsystem — Production Architecture Assessment | Proposed | Per-module disposition of the dormant `cyberdudebivash-blog` `lib/` tree (DEBT-001) — a disposition table, not a single ownership Decision |
 
-All five are **Proposed**, not **Accepted**. None authorizes implementation on its own — see
-each ADR's "Approval" section for required sign-offs, and `TITAN_STAGE7_PLAN.md` for what
-becomes implementable once approved.
+All seven are **Proposed**, not **Accepted**. None authorizes implementation on its own — see
+each ADR's "Approval" section for required sign-offs. `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md`
+(added Stage 11.5) is where ADR-0008, ADR-0011, and ADR-0012's dispositions get formally
+recorded once reviewed; see `TITAN_STAGE7_PLAN.md` for what becomes implementable once approved.
 
 ## Reading order
 
 0008 first (it defines the Evidence entity 0009, 0010, and 0011 each depend on), then 0007
 (independent of 0008, but references it), then 0009 → 0010 → 0011 in dependency order. See
-each ADR's "Depends on" header line.
+each ADR's "Depends on" header line. 0012 can be read any time after 0008 (it depends on 0008
+only for Evidence-specific API shape; otherwise independent). 0013 is independent of all six —
+a different repository, a different subject.
 
 ## Related documents
 
 - `TITAN_STAGE6_VALIDATION.md` — discovery validation and discrepancies these ADRs account for
-- `TITAN_OWNERSHIP_MATRIX.md` — the consolidated, single-table view of all decisions above
+- `TITAN_OWNERSHIP_MATRIX.md` — the consolidated, single-table view of ADR-0007–0011's ownership
+  decisions specifically (ADR-0012/0013 are policy/disposition documents, not ownership
+  decisions in this matrix's sense, and are intentionally not rows in it)
 - `TITAN_MIGRATION_ROADMAP.md` — the sequenced, dated implementation plan for approved ADRs
 - `TITAN_TECH_DEBT_REGISTER.md` — unresolved items these ADRs surface but don't close
+- `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md` — where ADR-0008/0011/0012's Acceptance dispositions
+  get formally recorded (added Stage 11.5)
 - `CONFIDENCE_FRAMEWORK_DISCOVERY.md`, `EVIDENCE_ENGINE_DISCOVERY.md` — Stage 4/5 source
   material these ADRs decide against
