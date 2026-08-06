@@ -35,10 +35,16 @@ export const SCHEMA_VERSION_HISTORY = Object.freeze([
     backwardCompatibleWithPrevious: null, // no predecessor
   }),
   Object.freeze({
-    version: CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION,
+    version: "canonical-evidence-core.1.0.0-draft",
     stage: "Stage 10 Phase 1-2",
     change:
       "Additive: Classification, Source Metadata, Quality, Relationships, Governance field groups",
+    backwardCompatibleWithPrevious: true,
+  }),
+  Object.freeze({
+    version: CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION,
+    stage: "Stage 11 Phase 5",
+    change: "Additive: related_iocs field (Relationships group) for Enterprise Evidence Registry indexing",
     backwardCompatibleWithPrevious: true,
   }),
 ]);

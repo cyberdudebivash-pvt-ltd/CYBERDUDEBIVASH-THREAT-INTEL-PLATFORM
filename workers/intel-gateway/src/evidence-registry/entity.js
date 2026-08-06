@@ -142,6 +142,13 @@ export function createEvidenceEntity(core, integrity = {}) {
  * @property {string[]} [related_threat_actors]
  * @property {string[]} [related_campaigns]
  * @property {string[]} [related_attack_techniques]
+ * @property {string[]} [related_iocs] - Stage 11 Phase 5 addition: indicator values (hash/IP/
+ *   domain/etc.) this evidence speaks to, mirroring the other related_* arrays exactly. Added
+ *   because Stage 11's registry indexing requires an IOC index and no existing field covered
+ *   it — verified against the live `item.iocs` shape (p20/p22/p18-handlers.js: array of
+ *   `{value, confidence, ...}` objects) rather than assumed; this field stores only the
+ *   `.value` strings, matching every other related_* field's "lightweight reference array,
+ *   not embedded records" convention.
  */
 
 /**
@@ -180,7 +187,7 @@ export const EVIDENCE_QUALITY_FIELDS = Object.freeze([
 
 export const EVIDENCE_RELATIONSHIP_FIELDS = Object.freeze([
   "related_reports", "related_cves", "related_threat_actors", "related_campaigns",
-  "related_attack_techniques",
+  "related_attack_techniques", "related_iocs",
 ]);
 
 export const EVIDENCE_GOVERNANCE_FIELDS = Object.freeze([
@@ -203,8 +210,13 @@ export const VERIFICATION_STATUSES = Object.freeze([
  * is not renamed or bumped by this change (existing scaffolding consumers still see the same
  * value from createEvidenceEntity). This new constant versions the expanded CanonicalEvidence
  * shape specifically.
+ *
+ * Bumped 1.0.0-draft -> 1.1.0-draft in Stage 11 Phase 5 for the additive `related_iocs` field
+ * (see EvidenceRelationshipFields above) — additive-only, so 1.0.0-draft objects remain valid
+ * 1.1.0-draft objects with `related_iocs` simply absent (schema.js's SCHEMA_VERSION_HISTORY
+ * records this as `backwardCompatibleWithPrevious: true`, per its own established convention).
  */
-export const CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION = "canonical-evidence-core.1.0.0-draft";
+export const CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION = "canonical-evidence-core.1.1.0-draft";
 
 /**
  * Constructs a well-formed CanonicalEvidence from an existing EvidenceEntity (Stage 8 shape,
@@ -240,6 +252,7 @@ export function createCanonicalEvidence(base, extension = {}) {
     related_threat_actors: extension.related_threat_actors || [],
     related_campaigns: extension.related_campaigns || [],
     related_attack_techniques: extension.related_attack_techniques || [],
+    related_iocs: extension.related_iocs || [],
     version: extension.version !== undefined ? extension.version : 1,
     audit_metadata: {
       created_at: extension.audit_metadata?.created_at || now,
@@ -256,10 +269,26 @@ export function createCanonicalEvidence(base, extension = {}) {
 }
 
 /**
+ * Recursively freezes plain object/array values (Object.freeze() alone is shallow). Extracted
+ * from publishEvidenceEntity() (Stage 10) in Stage 11 Phase 4 so version-history freezing
+ * (versioning.js, in-memory-repository.js) can reuse the exact same recursion instead of
+ * duplicating it — Reuse Before Build. publishEvidenceEntity()'s own behavior is unchanged by
+ * this extraction (same inputs still produce the same outputs; covered by entity.test.js).
+ * @param {unknown} value
+ * @returns {unknown} the same value, deep-frozen
+ */
+export function deepFreeze(value) {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) {
+    return value;
+  }
+  Object.values(value).forEach(deepFreeze);
+  return Object.freeze(value);
+}
+
+/**
  * Deep-freezes a CanonicalEvidence so it satisfies Stage 10 Phase 1's "must be immutable
- * once published" requirement. Object.freeze() alone is shallow — this recurses into plain
- * object/array values so nested fields (audit_metadata, canonical_confidence_object, the
- * related_* arrays) are frozen too.
+ * once published" requirement. Nested fields (audit_metadata, canonical_confidence_object, the
+ * related_* arrays) are frozen too, via deepFreeze().
  * @param {CanonicalEvidence} evidence
  * @returns {Readonly<CanonicalEvidence>}
  */
@@ -268,14 +297,7 @@ export function publishEvidenceEntity(evidence) {
     ...evidence,
     published_at: evidence.published_at || new Date().toISOString(),
   };
-  const freezeDeep = (value) => {
-    if (value === null || typeof value !== "object" || Object.isFrozen(value)) {
-      return value;
-    }
-    Object.values(value).forEach(freezeDeep);
-    return Object.freeze(value);
-  };
-  return freezeDeep(published);
+  return deepFreeze(published);
 }
 
 /**

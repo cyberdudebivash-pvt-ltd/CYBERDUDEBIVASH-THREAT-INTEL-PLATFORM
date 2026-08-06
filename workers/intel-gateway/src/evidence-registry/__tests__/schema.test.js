@@ -9,10 +9,16 @@ import {
   isForwardCompatible,
 } from "../schema.js";
 
-test("SCHEMA_VERSION_HISTORY records both known versions in order", () => {
-  assert.equal(SCHEMA_VERSION_HISTORY.length, 2);
+test("SCHEMA_VERSION_HISTORY records all three known versions in order (Stage 8, Stage 10, Stage 11 Phase 5)", () => {
+  assert.equal(SCHEMA_VERSION_HISTORY.length, 3);
   assert.equal(SCHEMA_VERSION_HISTORY[0].version, EVIDENCE_ENTITY_SCHEMA_VERSION);
-  assert.equal(SCHEMA_VERSION_HISTORY[1].version, CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION);
+  assert.equal(SCHEMA_VERSION_HISTORY[1].version, "canonical-evidence-core.1.0.0-draft");
+  assert.equal(SCHEMA_VERSION_HISTORY[2].version, CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION);
+  assert.notEqual(
+    SCHEMA_VERSION_HISTORY[1].version,
+    CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION,
+    "the current CANONICAL_EVIDENCE_CORE_SCHEMA_VERSION must be the LATEST entry, not the Stage 10 original"
+  );
 });
 
 test("isForwardCompatible: Stage 8 schema is forward compatible with Stage 10 (additive-only)", () => {

@@ -49,6 +49,17 @@ check_evidence_registry_scaffolding_boundary()'s Stage 8 boundary checks above �
 additive, narrower checks specific to the CEC's own internal consistency, not a replacement for
 that boundary check. See TITAN_STAGE10_ENGINEERING_SPECIFICATION.md.
 
+Stage 11 activated the CEC with a working internal registry service (registry-service.js),
+repository (in-memory-repository.js), lifecycle engine (lifecycle.js), version manager
+(versioning.js), and indexes (indexes.js) — still fully inert. Nine more checks cover that
+stage's own Phase 8 charter: duplicate registry entries, version conflicts, lifecycle
+violations, evidence duplication, broken references, missing relationships, invalid
+supersession, orphaned evidence, and architecture violations. Several of these are regression
+guards for specific mechanisms Stage 11's own test suite proved matter (index staleness after
+an edit, version-conflict masking) rather than static shape checks — there is no persisted
+registry data file to inspect, since nothing is wired live. See
+TITAN_STAGE11_REGISTRY_ARCHITECTURE.md.
+
 Checks, in order:
 
   1. Do the tracked ADRs and the discovery/governance docs they depend on still exist?
@@ -104,6 +115,21 @@ Checks, in order:
   24. (Stage 10) Does serialization.js's getSerializer() still refuse 'stix'/'api' as named
       future capabilities rather than silently serializing them?
   25. (Stage 10) Does the full Stage 10 CEC file set still exist under evidence-registry/?
+  26. (Stage 11) Does any file outside registry-service.js define its own `class
+      EvidenceRegistry` (duplicate registry)?
+  27. (Stage 11) Does in-memory-repository.js's version-bump arithmetic still avoid the
+      version:0 falsy-zero pattern?
+  28. (Stage 11) Do ARCHIVED/REJECTED remain terminal lifecycle states, and does
+      registry-service.js still enforce transitions through lifecycle.js?
+  29. (Stage 11) Does registerEvidence() still perform a content-hash reuse check before
+      creating a new record?
+  30. (Stage 11) Do updateEvidence()/supersedeEvidence() still reindex after a mutation?
+  31. (Stage 11) Does every EVIDENCE_RELATIONSHIP_FIELDS entry have a corresponding index
+      dimension in indexes.js?
+  32. (Stage 11) Does supersede() still stamp superseded_at on the outgoing historical version?
+  33. (Stage 11) Does registerEvidence() still index every record it creates?
+  34. (Stage 11) Does the full Stage 11 EER file set exist, and does none of it import a live
+      pNN-handlers.js/index.js file?
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -1039,6 +1065,254 @@ def check_cec_files_present() -> list[str]:
     return findings
 
 
+# ---------------------------------------------------------------------------------------
+# Stage 11 additions — Enterprise Evidence Registry (EER) governance. Stage 11 Phases 1-7
+# activated the Canonical Evidence Core (Stage 10) with a working internal registry service
+# (registry-service.js), repository (in-memory-repository.js), lifecycle engine (lifecycle.js),
+# version manager (versioning.js), and indexes (indexes.js) — all still inert (zero imports
+# from index.js or any pNN-handlers.js). These nine checks cover the categories Phase 8's own
+# charter named: duplicate registry entries, version conflicts, lifecycle violations, evidence
+# duplication, broken references, missing relationships, invalid supersession, orphaned
+# evidence, architecture violations. Unlike Stage 10's checks (which mostly guarded static
+# domain-model shape), several of these are regression guards for specific MECHANISMS this
+# stage's own test suite proved matter (e.g. index staleness after an edit, version-conflict
+# masking) — the same "guard the exact bug class this stage found" pattern
+# check_r1_internal_relationship_shape_consistency and
+# check_version_field_falsy_zero_regression established above. There is no persisted registry
+# data file to inspect (nothing is wired live; the reference repository is in-memory only), so
+# these checks are necessarily source-level, mirroring every other check in this script.
+# See TITAN_STAGE11_REGISTRY_ARCHITECTURE.md.
+# ---------------------------------------------------------------------------------------
+
+EER_CORE_FILES = [
+    "registry-repository-interface.js",
+    "in-memory-repository.js",
+    "lifecycle.js",
+    "versioning.js",
+    "indexes.js",
+    "registry-metrics.js",
+    "registry-service.js",
+]
+
+
+def check_no_duplicate_evidence_registry() -> list[str]:
+    """Duplicate registry entries: confirms registry-service.js remains the SOLE definer of
+    `class EvidenceRegistry` — the same "one canonical source per capability" property
+    check_no_duplicate_evidence_domain_model() already enforces for the CEC domain model,
+    applied here to the registry SERVICE ("One Evidence Registry")."""
+    findings = []
+    if not EVIDENCE_REGISTRY_DIR.exists():
+        return findings
+    for path in HANDLERS_DIR.rglob("*.js"):
+        if path.parent == EVIDENCE_REGISTRY_DIR and path.name == "registry-service.js":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if re.search(r"\bclass\s+EvidenceRegistry\b", text):
+            findings.append(
+                f"DUPLICATE REGISTRY: {path.relative_to(ROOT)} defines its own "
+                f"'class EvidenceRegistry' — evidence-registry/registry-service.js is the sole "
+                f"authorized definition (Stage 11 Phase 1, 'One Evidence Registry')."
+            )
+    return findings
+
+
+def check_registry_version_arithmetic_safe() -> list[str]:
+    """Version conflicts: guards against the same class of bug check_version_field_falsy_zero_
+    regression() guards against in entity.js, this time in in-memory-repository.js's version-
+    bump arithmetic (nextVersion() / computeNextVersion()). `current.version || 1` would
+    silently treat version 0 as absent and mask a real version conflict."""
+    findings = []
+    repo_js = EVIDENCE_REGISTRY_DIR / "in-memory-repository.js"
+    if not repo_js.exists():
+        return findings
+    text = repo_js.read_text(encoding="utf-8", errors="replace")
+    if re.search(r"current\.version\s*\|\|\s*1\b", text):
+        findings.append(
+            "VERSION CONFLICT RISK: in-memory-repository.js's version-bump arithmetic uses "
+            "`current.version || 1` — this treats an explicit `version: 0` as absent (JS "
+            "falsy-zero), silently masking what should be a detectable version conflict. Use "
+            '`typeof current.version === "number" ? current.version : 1` instead.'
+        )
+    return findings
+
+
+def check_lifecycle_terminal_states_intact() -> list[str]:
+    """Lifecycle violations: confirms ARCHIVED and REJECTED remain terminal (zero legal
+    outgoing transitions) in lifecycle.js, and that registry-service.js still enforces
+    transitions through lifecycle.js's assertValidTransition rather than mutating lifecycle
+    state directly — "Every transition must be validated... Illegal transitions must fail" only
+    holds if the one enforcement point is actually on the call path."""
+    findings = []
+    lifecycle_js = EVIDENCE_REGISTRY_DIR / "lifecycle.js"
+    registry_js = EVIDENCE_REGISTRY_DIR / "registry-service.js"
+    if not (lifecycle_js.exists() and registry_js.exists()):
+        return findings
+    lifecycle_text = lifecycle_js.read_text(encoding="utf-8", errors="replace")
+    for terminal in ("ARCHIVED", "REJECTED"):
+        if not re.search(rf"{terminal}:\s*Object\.freeze\(\[\]\)", lifecycle_text):
+            findings.append(
+                f"LIFECYCLE VIOLATION: lifecycle.js's {terminal} state no longer has zero "
+                f"legal outgoing transitions — Phase 3 requires ARCHIVED and REJECTED to be "
+                f"terminal."
+            )
+    registry_text = registry_js.read_text(encoding="utf-8", errors="replace")
+    if "assertValidTransition" not in registry_text:
+        findings.append(
+            "LIFECYCLE VIOLATION: registry-service.js no longer references "
+            "assertValidTransition — a mutation path that changes lifecycle state without "
+            "going through lifecycle.js's validated transition graph would let illegal "
+            "transitions succeed silently."
+        )
+    return findings
+
+
+def check_evidence_duplication_guard_intact() -> list[str]:
+    """Evidence duplication: confirms registerEvidence()'s cross-report reuse check (Phase 7 —
+    content-hash lookup before create) is still present in registry-service.js. Without it,
+    registering the same substantive evidence twice would silently create two records instead
+    of returning the existing one."""
+    findings = []
+    registry_js = EVIDENCE_REGISTRY_DIR / "registry-service.js"
+    if not registry_js.exists():
+        return findings
+    text = registry_js.read_text(encoding="utf-8", errors="replace")
+    if "findByContentHash" not in text:
+        findings.append(
+            "EVIDENCE DUPLICATION RISK: registry-service.js's registerEvidence() no longer "
+            "calls findByContentHash — the cross-report reuse check (Phase 7, 'No "
+            "duplication') would be silently bypassed, allowing duplicate registration of the "
+            "same substantive evidence under different evidence_uuids."
+        )
+    return findings
+
+
+def check_index_reindexing_on_mutation_intact() -> list[str]:
+    """Broken references: confirms updateEvidence() and supersedeEvidence() still call
+    indexes.reindex() after a content-changing mutation. Without it, an edit that removes a
+    relationship (e.g. a corrected CVE reference) would leave the OLD reference findable via
+    findByCVE() pointing at evidence that no longer actually references it — a broken/stale
+    reference, exactly the regression indexes.test.js's reindex() test guards against at the
+    unit level."""
+    findings = []
+    registry_js = EVIDENCE_REGISTRY_DIR / "registry-service.js"
+    if not registry_js.exists():
+        return findings
+    text = registry_js.read_text(encoding="utf-8", errors="replace")
+    if text.count("_indexes.reindex(") < 2:
+        findings.append(
+            "BROKEN REFERENCE RISK: registry-service.js calls `_indexes.reindex(` fewer than "
+            "2 times — Phase 1's updateEvidence() and supersedeEvidence() must each reindex "
+            "after mutating evidence content, or stale related_* associations will linger in "
+            "the registry's indexes after an edit."
+        )
+    return findings
+
+
+def check_relationship_fields_and_indexes_in_sync() -> list[str]:
+    """Missing relationships: confirms every field in entity.js's EVIDENCE_RELATIONSHIP_FIELDS
+    has a corresponding index dimension in indexes.js. If a future stage adds an 8th related_*
+    field to the CEC domain model without adding its index, that field becomes silently
+    unqueryable through the registry's named finders — this check catches that drift at the
+    point it's introduced, the same rationale as every other "N and M must stay in sync" check
+    in this script."""
+    findings = []
+    entity_js = EVIDENCE_REGISTRY_DIR / "entity.js"
+    indexes_js = EVIDENCE_REGISTRY_DIR / "indexes.js"
+    if not (entity_js.exists() and indexes_js.exists()):
+        return findings
+    entity_text = entity_js.read_text(encoding="utf-8", errors="replace")
+    indexes_text = indexes_js.read_text(encoding="utf-8", errors="replace")
+
+    match = re.search(r"EVIDENCE_RELATIONSHIP_FIELDS\s*=\s*Object\.freeze\(\[(.*?)\]\)", entity_text, re.DOTALL)
+    if not match:
+        findings.append(
+            "MISSING RELATIONSHIPS: entity.js no longer defines EVIDENCE_RELATIONSHIP_FIELDS "
+            "in the expected shape — indexes.js's sync with it cannot be verified."
+        )
+        return findings
+    fields = re.findall(r'"(related_\w+)"', match.group(1))
+    for field in fields:
+        if field not in indexes_text:
+            findings.append(
+                f"MISSING RELATIONSHIP INDEX: entity.js's EVIDENCE_RELATIONSHIP_FIELDS "
+                f"includes '{field}' but indexes.js has no reference to it — Stage 11 Phase 5 "
+                f"requires every relationship field to have a corresponding registry index "
+                f"dimension."
+            )
+    return findings
+
+
+def check_supersession_stamps_superseded_at() -> list[str]:
+    """Invalid supersession: confirms in-memory-repository.js's supersede() still stamps a
+    superseded_at timestamp on the outgoing historical version. Without it, a superseded
+    version would be indistinguishable from a plain updated version in the lineage — the exact
+    distinction getSupersededVersions() (versioning.js) depends on to exist."""
+    findings = []
+    repo_js = EVIDENCE_REGISTRY_DIR / "in-memory-repository.js"
+    if not repo_js.exists():
+        return findings
+    text = repo_js.read_text(encoding="utf-8", errors="replace")
+    if "superseded_at" not in text:
+        findings.append(
+            "INVALID SUPERSESSION: in-memory-repository.js no longer references "
+            "'superseded_at' — supersede() must stamp the outgoing historical version with it "
+            "so getSupersededVersions() can distinguish a supersession from a plain update."
+        )
+    return findings
+
+
+def check_registration_always_indexes_evidence() -> list[str]:
+    """Orphaned evidence: confirms registerEvidence() still calls indexes.index() on the record
+    it just created. Evidence stored via the repository but never indexed would be retrievable
+    only by exact evidence_uuid (getEvidence()) — orphaned from every named finder
+    (findByCVE/findByThreatActor/etc.), silently invisible to any relationship-based query."""
+    findings = []
+    registry_js = EVIDENCE_REGISTRY_DIR / "registry-service.js"
+    if not registry_js.exists():
+        return findings
+    text = registry_js.read_text(encoding="utf-8", errors="replace")
+    if "_indexes.index(stored)" not in text:
+        findings.append(
+            "ORPHANED EVIDENCE RISK: registry-service.js's registerEvidence() no longer calls "
+            "`_indexes.index(stored)` — newly registered evidence would be unreachable from "
+            "every named finder (findByCVE, findByThreatActor, etc.), retrievable only by "
+            "exact evidence_uuid."
+        )
+    return findings
+
+
+def check_eer_files_present_and_isolated() -> list[str]:
+    """Architecture violations: confirms every Stage 11 EER file still exists (Deprecation
+    Instead of Deletion — no silent removal) and that none of them imports a live
+    pNN-handlers.js/index.js file — the same zero-blast-radius property
+    check_migration_adapters_intact() enforces for Stage 10's migration adapters, extended to
+    the full Stage 11 file set."""
+    findings = []
+    if not EVIDENCE_REGISTRY_DIR.exists():
+        return findings
+    for filename in EER_CORE_FILES:
+        path = EVIDENCE_REGISTRY_DIR / filename
+        if not path.exists():
+            findings.append(
+                f"ARCHITECTURE VIOLATION: evidence-registry/{filename} is missing — Stage 11 "
+                f"requires it (see TITAN_STAGE11_REGISTRY_ARCHITECTURE.md). If intentionally "
+                f"removed, that is a breaking change requiring the Deprecation Instead of "
+                f"Deletion protocol, not silent removal."
+            )
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r'(?:from|require\()\s*["\'][^"\']*(?:-handlers(?:\.js)?|/index\.js)["\']', text):
+            findings.append(
+                f"ARCHITECTURE VIOLATION: evidence-registry/{filename} imports a pNN-handlers.js "
+                f"or index.js file directly — this breaks the zero-blast-radius property every "
+                f"file in this directory is required to maintain."
+            )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -1066,6 +1340,15 @@ def main() -> None:
     all_findings += check_cec_feature_flags_disabled()
     all_findings += check_serialization_future_formats_still_stubbed()
     all_findings += check_cec_files_present()
+    all_findings += check_no_duplicate_evidence_registry()
+    all_findings += check_registry_version_arithmetic_safe()
+    all_findings += check_lifecycle_terminal_states_intact()
+    all_findings += check_evidence_duplication_guard_intact()
+    all_findings += check_index_reindexing_on_mutation_intact()
+    all_findings += check_relationship_fields_and_indexes_in_sync()
+    all_findings += check_supersession_stamps_superseded_at()
+    all_findings += check_registration_always_indexes_evidence()
+    all_findings += check_eer_files_present_and_isolated()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     if not all_findings:
@@ -1080,7 +1363,11 @@ def main() -> None:
               "(no duplicate models, no schema drift, no version-conflict regression, "
               "validation pipeline intact, all migration adapters intact, feature flags still "
               "disabled by default, serialization future-formats still stubbed, all CEC files "
-              "present).")
+              "present), Enterprise Evidence Registry clean (no duplicate registry, version "
+              "arithmetic safe, lifecycle terminal states intact, evidence-duplication guard "
+              "intact, indexes reindexed on mutation, relationship fields/indexes in sync, "
+              "supersession stamps superseded_at, registration always indexes evidence, all "
+              "EER files present and isolated).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")
