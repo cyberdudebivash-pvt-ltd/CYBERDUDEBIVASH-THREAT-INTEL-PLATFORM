@@ -23,11 +23,17 @@ what it verified and explicitly does not certify what it did not check; see §5.
 A validation run of `generate-and-sync.yml` was dispatched against the branch carrying the fix
 (`claude/titan-stage-16-relationships-w3cowd`, commit `59695272`) specifically to confirm the fix in real
 CI, not only in the local git-stash check. As of this report, that run (`31125459386`) remains in `queued`
-status — itself consistent with, and additional evidence for, the ongoing GitHub Actions runner-capacity
-contention this same report documents in `WORKFLOW_FAILURE_ANALYSIS.md` §3. This is disclosed rather than
-omitted: **the fix's live-CI confirmation is pending, not yet complete**, though the local verification
-(§1, git-stash A/B) is itself a direct, reproducible test against the actual failure, not a weaker
-substitute for it.
+status. This is no longer attributed to an inferred platform condition: **GitHub's own status page
+(githubstatus.com) confirms an active, officially-acknowledged incident affecting Actions and Pages,
+starting 15:22 UTC today and continuing (per GitHub's own most recent update) through at least 18:11 UTC** —
+"workflow runs are failing to start or failing partway through, and some queued jobs may time out." This
+independently corroborates every "runner unavailable" finding in `WORKFLOW_FAILURE_ANALYSIS.md` §3 and the
+Pages-outage finding in `WORKFLOW_ROOT_CAUSE_ANALYSIS.md` §3 — this program's own evidence-gathering
+correctly identified a real platform incident before external confirmation was found, using only internal
+job-metadata signals. This is disclosed rather than omitted: **the fix's live-CI confirmation is pending,
+not yet complete, for a clearly-identified, externally-confirmed, non-repository reason**, though the local
+verification (§1, git-stash A/B) is itself a direct, reproducible test against the actual failure, not a
+weaker substitute for it.
 
 ## 3. Certification, scoped precisely
 
@@ -45,8 +51,10 @@ precise basis:
   they are documented with concrete, minimal remediation options in `WORKFLOW_OPERATIONAL_RECOMMENDATIONS.md`
   §2.1, pending the explicit authorization this program's own constraints require before schedule/concurrency
   changes are made.
-- The runner-unavailable pattern affecting 5 jobs across 6 concurrency groups today is a GitHub Actions
-  platform-side condition, not a repository defect; no repository-side fix exists or is proposed.
+- The runner-unavailable pattern affecting 5 jobs across 6 concurrency groups today is a **confirmed**
+  GitHub Actions platform-side incident (githubstatus.com, active since 15:22 UTC), not a repository defect;
+  no repository-side fix exists or is proposed. The same confirmed incident also explains the Pages
+  deployment stall in §2/`WORKFLOW_ROOT_CAUSE_ANALYSIS.md` §3.
 
 ## 4. What this certification does NOT cover
 

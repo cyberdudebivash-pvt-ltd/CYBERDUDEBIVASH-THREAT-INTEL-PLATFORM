@@ -67,11 +67,18 @@ reached the freshness gate, or any other stage. §2's row for `sentinel-blogger.
 run (`31123481986`, 17:33:39Z) remains the only confirmed Pages-related failure today's data directly
 examined.
 
-**This is not asserted as certain** — GitHub does not expose a public status signal this program's tools
-could independently query to confirm platform-side runner contention as opposed to some other explanation
-for a 15-minute queued-then-cancelled job. It is the best-evidenced explanation available (uniform duration,
-cross-cutting across unrelated concurrency groups, no log archive consistent with "never dispatched" rather
-than "ran and failed"), stated as such rather than as a certainty.
+**Update — independently confirmed, no longer just the best-evidenced inference:** GitHub's own status page
+(githubstatus.com) logged an active incident matching this exact pattern and window: "Investigating reports
+of degraded performance for Actions" at **15:22 UTC**, escalating through "Actions is experiencing degraded
+availability" (15:41 UTC), "identified the source of the disruption... workflow runs are failing to start or
+failing partway through... unexpected rate limiting" (15:45 UTC), with Pages also flagged degraded starting
+15:53 UTC, and continuing — per GitHub's own most recent update at the time this was checked — through at
+least **18:11 UTC** ("Engineers have applied further mitigations and are continuing to work towards full
+recovery... Customers using self-hosted runners may see errors or rate limiting when runners register").
+This is a platform-wide, officially-acknowledged GitHub Actions and Pages incident, not a theory — it
+directly covers this document's entire 16:16Z-18:13Z evidence window and both mechanisms this program
+identified independently (job-level "runner unavailable" starvation, and the Pages `deployment_queued`
+stall in `WORKFLOW_ROOT_CAUSE_ANALYSIS.md` §3) before this confirmation was found.
 
 ## 4. Business-impact read of this catalog
 

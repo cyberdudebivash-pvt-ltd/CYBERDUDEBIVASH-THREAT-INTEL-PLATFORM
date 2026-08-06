@@ -123,7 +123,16 @@ This is the fourth occurrence *today* of the exact GitHub Pages branch-deploymen
 own `pages-build-deployment` backend can get stuck in `deployment_queued` when force-pushes to `gh-pages`
 land close together, and eventually times out without publishing. Independently confirmed for this specific
 occurrence: the `pages-build-deployment` run for this exact commit (`73925cfc`) was still `status:"queued"`
-when checked directly via the GitHub API, well past its normal completion time.
+when checked directly via the GitHub API, well past its normal completion time (it later resolved to
+`conclusion:"failure"` rather than succeeding, checked separately).
+
+**Update — confirmed against GitHub's own status page, not just this repository's internal evidence:**
+githubstatus.com logged Pages as degraded starting **15:53 UTC** today, briefly "operating normally" at
+16:19 UTC, then degraded again from **16:27 UTC** onward, continuing (per GitHub's own wording) through at
+least 18:11 UTC alongside the same Actions incident described in §4. This run's 17:41-17:42 UTC deploy
+attempt falls squarely inside that officially-acknowledged degraded window — this was not merely "the same
+failure class as PR #125's incident," it is very likely literally the same platform-side event continuing,
+not a fresh, independent recurrence of an unrelated bug.
 
 **This is the STAGE 5.4.9.1 freshness gate — introduced by PR #125 specifically to catch this failure mode —
 functioning exactly as designed.** Before that PR, this exact backend stall would have gone undetected: the
@@ -156,9 +165,14 @@ already documented, for 4 total today by that document's own count).
    `sbom-generation.yml`'s `sbom-gate`, `post-deploy-validation.yml`, `sentinel-blogger.yml` (17:57:08Z run)
 
 See `WORKFLOW_FAILURE_ANALYSIS.md` §3 for the full evidence basis (~15-16 minute queued duration, no log
-archive, six distinct concurrency groups ruling out a single-group collision explanation). No repository
-code caused these; no repository code can fix them. Disposition: no action needed beyond the normal retry
-each affected workflow already gets on its own next schedule.
+archive, six distinct concurrency groups ruling out a single-group collision explanation) — since updated
+with direct confirmation from GitHub's own status page (githubstatus.com) of an active, officially-acknowledged
+Actions incident (onset 15:22 UTC, ongoing through at least 18:11 UTC as of last check: "workflow runs are
+failing to start or failing partway through... some queued jobs may time out"), covering this entire
+incident window precisely. This is no longer an inference — it is independently confirmed by GitHub itself.
+No repository code caused these; no repository code can fix them. Disposition: no action needed beyond the
+normal retry each affected workflow already gets on its own next schedule, once GitHub's own mitigation
+completes.
 
 ## 5. Summary table
 
@@ -167,4 +181,4 @@ each affected workflow already gets on its own next schedule.
 | `multi-source-intel.yml` / `detection-engine.yml` / `enterprise-intel-quality.yml` | Concurrency cancellation (this program's own diagnostic dispatch) | N/A — not a defect | Mechanism confirmed in `WORKFLOW_CONCURRENCY_REVIEW.md` |
 | `generate-and-sync.yml` | Repository bug — `encoding_guard.py` missing EOF token | **Yes** — 3 tokens added | Yes — git-stash A/B + live re-dispatch (Phase 6) |
 | `sentinel-blogger.yml` | Dependency outage (external) — GitHub Pages backend stall | No — gate is working as designed | Yes — corroborated against `pages-build-deployment`'s own run state |
-| `access-governance-gate.yml`, `enterprise-observability.yml` (x2), `sbom-generation.yml` gate job, `post-deploy-validation.yml`, `sentinel-blogger.yml` (17:57:08Z run) | Runner unavailable (best-evidenced, not certain — no independent platform-status signal available) | No — not a repository defect | Job-metadata fingerprint consistent across all 5 |
+| `access-governance-gate.yml`, `enterprise-observability.yml` (x2), `sbom-generation.yml` gate job, `post-deploy-validation.yml`, `sentinel-blogger.yml` (17:57:08Z run) | Runner unavailable — **confirmed** via GitHub's own status page (active incident, 15:22 UTC onset) | No — not a repository defect | Job-metadata fingerprint consistent across all 5, independently corroborated by githubstatus.com |

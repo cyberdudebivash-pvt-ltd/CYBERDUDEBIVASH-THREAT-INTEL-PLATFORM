@@ -56,18 +56,21 @@ occurrences. This program does not make that settings change itself (no tool acc
 and it is exactly the kind of infrastructure-affecting action this program's own guidance reserves for
 explicit authorization).
 
-### 2.3 Investigate GitHub Actions runner-capacity contention with GitHub Support if it recurs beyond today
+### 2.3 GitHub Actions runner-capacity contention — confirmed, already being mitigated by GitHub, no action needed
 
 **Evidence:** `WORKFLOW_FAILURE_ANALYSIS.md` §3 — 5 jobs across 6 different concurrency groups queued for
 15-16 minutes with `runner_id:0` and no log archive, spanning at least 16:16Z-18:13Z today, on top of an
-earlier (~15:34-17:25Z) window this program had already identified before the formal audit began. This
-platform has no self-hosted runners (100% `ubuntu-latest`/`ubuntu-24.04`), so this is GitHub-hosted-runner
-contention, not a capacity problem this repository controls directly.
+earlier (~15:34-17:25Z) window this program had already identified before the formal audit began. **Since
+confirmed directly against GitHub's own status page**: an active, officially-acknowledged incident affecting
+Actions and Pages, onset 15:22 UTC, GitHub's own engineers already applying mitigations as of the most
+recent update checked (18:11 UTC). This platform has no self-hosted runners (100% `ubuntu-latest`/
+`ubuntu-24.04`), consistent with a purely GitHub-hosted-runner-side incident.
 
-**Recommendation:** no repository-side fix exists for this. If the pattern persists into tomorrow (i.e., is
-not resolved by the time this document is read), it is worth checking GitHub's public status page and, if
-warranted, opening a support inquiry — but a single day's contention window, even a multi-hour one, does not
-yet clear the bar for that escalation on its own.
+**Recommendation:** none — no repository-side fix exists for a confirmed upstream platform incident, and no
+support escalation is needed since GitHub has already identified, publicly acknowledged, and is actively
+mitigating it. If workflow failures matching this exact fingerprint (job `runner_id:0`, no steps, ~15 minute
+queued-then-cancelled) are observed again *after* githubstatus.com reports the incident resolved, that would
+be new evidence worth a fresh, separate investigation rather than attributing it to this same incident.
 
 ## 3. Explicitly considered and rejected
 
