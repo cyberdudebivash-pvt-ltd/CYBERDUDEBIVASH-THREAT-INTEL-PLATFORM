@@ -385,6 +385,20 @@ being assumed benign.
 | Recommended Resolution | Engineering investigation into root cause: is `data/threat_graph/` written but gitignored (real output, just untracked — lower severity, re-classify if confirmed)? Is the write silently failing (higher severity — the "zero-failure design" pattern noted in `agent/threat_graph_engine.py`'s docstring may be actively hiding real errors across this file family)? Is the path itself wrong on one side of the write/read pair? Do not assume an answer without checking — this register only states what was observed, not why |
 | Implementation Priority | **Critical** — resolving *why* CI is green here is a precondition for trusting any other "confirmed production" claim in this register that relies on scheduled-workflow evidence alone, not just this specific pipeline |
 
+### DEBT-021 — Evidence Registry service built (Stage 10–11) ahead of its gating ADRs' Acceptance
+
+*Found Stage 11 post-implementation validation (resumed session, PR #115 pre-merge review).*
+
+| Field | Value |
+|---|---|
+| Severity | Medium — no active harm (zero blast radius, independently re-verified this review: zero imports of `evidence-registry/` outside its own directory, zero routes, `index.js`/`p32-handlers.js`/`p38-handlers.js` untouched, `EER_FLAGS` off by default in canary/production), but a governance-process gap that compounds if the same pattern repeats into Stage 12 |
+| Risk | Stage 8's own authorization memo (`TITAN_EVIDENCE_REGISTRY_AUTHORIZATION.md`) explicitly reserved "Evidence Registry service (actual persistence)" as `No — Blocked`, requiring ADR-0008 formal Acceptance first. Stage 10 built the authorized half (schema/entity/serialization). Stage 11 built the blocked half — `registry-service.js`, `in-memory-repository.js`, `lifecycle.js` (a 9-state machine, ADR-0011's exact subject), `versioning.js` — under a narrower reading that ADR-0008 blocks only *wiring into a live route*, not construction of the service itself. Both ADR-0008 and ADR-0011 remain `Status: Proposed`, confirmed by direct inspection of `docs/adr/0008-canonical-evidence-framework.md` and `docs/adr/0011-evidence-lifecycle-ownership.md` at time of this entry. Each stage has disclosed the unmet precondition transparently in its own completion report — nothing was hidden — but the scope built under "it's inert, so it's fine" has grown every stage, from type definitions (Stage 8) to a full service/lifecycle/versioning/indexing layer (Stage 11) |
+| Owner | Platform Governance Lead (ADR-0008 / ADR-0011 Acceptance decision) |
+| Affected Systems | `workers/intel-gateway/src/evidence-registry/*`, `docs/adr/0008-canonical-evidence-framework.md`, `docs/adr/0011-evidence-lifecycle-ownership.md` |
+| Blocking Status | Blocking Stage 12 (Enterprise Evidence Service APIs — the first stage that would touch real consumer/API surface). **Not** blocking PR #115's merge itself, which stays inert and reversible regardless of ADR status — confirmed by this review's independent re-run of the full test/regression/certification/governance gate set |
+| Recommended Resolution | Human Acceptance review of ADR-0008 and ADR-0011 before Stage 12 implementation begins, or an explicit Stage-8-style narrow re-authorization memo if Acceptance is intentionally deferred further. Stage 12 additionally requires a not-yet-drafted ADR-0012 (API versioning) — one of Stage 5's original six required ADRs, never written |
+| Implementation Priority | High — not for code changes, for the decision itself, before Stage 12 planning converts to implementation |
+
 ## Register maintenance
 
 New items should be added, not silently folded into existing ones, per this program's
