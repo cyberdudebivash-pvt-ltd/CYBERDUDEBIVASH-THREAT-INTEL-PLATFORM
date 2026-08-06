@@ -44,6 +44,15 @@ MAX_MANIFEST_AGE_HOURS = 6
 HARD_FAIL_GATES = {"A", "B", "E"}   # these block a deployment green state
 SOFT_FAIL_GATES = {"C", "D", "F"}   # these warn but don't block
 
+# GATE A read cap. Must stay comfortably above the largest live endpoint's actual response size
+# -- latest.json/feed.json were observed at ~2.06MB on 2026-08-06 (root-caused a run of false
+# GATE A failures: the old 1 MiB cap truncated their body, json.loads() then raised on the
+# truncated bytes, and that exception was indistinguishable from a real connection failure --
+# see probe_json()'s error handling below). 8 MiB gives ~4x headroom over that measurement.
+# This platform's feed is append-heavy (incremental ingest), so re-check this constant if GATE A
+# starts failing again with `body_too_large` in the error field.
+MAX_PROBE_BODY_BYTES = 8 * 1024 * 1024
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -54,12 +63,31 @@ def probe_json(url: str, timeout: int = 20) -> dict:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "SENTINEL-APEX-VALIDATOR/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
+            # Read one byte past the cap so a body that's actually larger is distinguishable
+            # from one that happens to be exactly MAX_PROBE_BODY_BYTES.
+            raw = resp.read(MAX_PROBE_BODY_BYTES + 1)
             latency_ms = int((time.monotonic() - t0) * 1000)
-            body = json.loads(resp.read(1048576).decode("utf-8", errors="replace"))
+            if len(raw) > MAX_PROBE_BODY_BYTES:
+                # A genuine HTTP success truncated by our own read cap must not be reported as
+                # status 0 -- that's indistinguishable from "never connected" and has previously
+                # caused a real, healthy deployment to be flagged as a hard GATE A failure. Report
+                # the real status and say exactly what happened.
+                return {
+                    "ok": False, "status": resp.status, "latency_ms": latency_ms, "body": None,
+                    "error": f"body_too_large: exceeds {MAX_PROBE_BODY_BYTES} byte probe cap (see MAX_PROBE_BODY_BYTES)",
+                }
+            try:
+                body = json.loads(raw.decode("utf-8", errors="replace"))
+            except json.JSONDecodeError as e:
+                # Connected and got a full response, but it wasn't valid JSON -- also a real
+                # status, not a connection failure.
+                return {"ok": False, "status": resp.status, "latency_ms": latency_ms, "body": None, "error": f"invalid_json: {e}"}
             return {"ok": True, "status": resp.status, "latency_ms": latency_ms, "body": body, "error": None}
     except urllib.error.HTTPError as e:
         return {"ok": False, "status": e.code, "latency_ms": 0, "body": None, "error": str(e)}
     except Exception as e:
+        # Genuine connection-level failure (DNS, refused, reset, timeout, TLS) -- no response was
+        # ever received, so status 0 is honest here.
         return {"ok": False, "status": 0, "latency_ms": 0, "body": None, "error": str(e)}
 
 
