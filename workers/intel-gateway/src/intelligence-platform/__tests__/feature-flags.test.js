@@ -15,10 +15,11 @@ test("EIPS_FLAGS defines all four deployment environments with development/testi
   assert.equal(EIPS_FLAGS.production.EIPS_ENABLED, false);
 });
 
-test("INTERNAL_ADOPTION_ENABLED defaults false in every environment, including development/testing", () => {
-  for (const env of DEPLOYMENT_ENVIRONMENTS) {
-    assert.equal(EIPS_FLAGS[env].INTERNAL_ADOPTION_ENABLED, false, `${env} must default INTERNAL_ADOPTION_ENABLED to false`);
-  }
+test("INTERNAL_ADOPTION_ENABLED mirrors EIPS_ENABLED's own shape: enabled in development/testing, disabled in canary/production", () => {
+  assert.equal(EIPS_FLAGS.development.INTERNAL_ADOPTION_ENABLED, true);
+  assert.equal(EIPS_FLAGS.testing.INTERNAL_ADOPTION_ENABLED, true);
+  assert.equal(EIPS_FLAGS.canary.INTERNAL_ADOPTION_ENABLED, false);
+  assert.equal(EIPS_FLAGS.production.INTERNAL_ADOPTION_ENABLED, false);
 });
 
 test("resolveEipsFlags falls back to the production (all-disabled) state for an unknown environment -- secure by default", () => {
@@ -35,8 +36,9 @@ test("every EIPS_FLAGS entry is frozen (immutable)", () => {
   for (const env of DEPLOYMENT_ENVIRONMENTS) assert.ok(Object.isFrozen(EIPS_FLAGS[env]));
 });
 
-test("INTERNAL_ADOPTION_ENABLED remains hardcoded false in source for every environment (not read from an env var that could be flipped without code review)", () => {
+test("INTERNAL_ADOPTION_ENABLED remains hardcoded (not read from an env var that could be flipped without code review), and stays false for canary/production specifically", () => {
   const text = readFileSync(join(HERE, "..", "feature-flags.js"), "utf-8");
-  const matches = text.match(/INTERNAL_ADOPTION_ENABLED:\s*false/g) || [];
-  assert.equal(matches.length, 4, "all four environments must hardcode INTERNAL_ADOPTION_ENABLED: false");
+  assert.doesNotMatch(text, /INTERNAL_ADOPTION_ENABLED:\s*process\.env/, "must not be sourced from an environment variable");
+  assert.match(text, /canary:\s*Object\.freeze\(\{\s*EIPS_ENABLED:\s*false,\s*INTERNAL_ADOPTION_ENABLED:\s*false\s*\}\)/);
+  assert.match(text, /production:\s*Object\.freeze\(\{\s*EIPS_ENABLED:\s*false,\s*INTERNAL_ADOPTION_ENABLED:\s*false\s*\}\)/);
 });

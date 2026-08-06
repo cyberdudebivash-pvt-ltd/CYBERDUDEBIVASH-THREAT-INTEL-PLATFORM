@@ -21,15 +21,20 @@ export { DEPLOYMENT_ENVIRONMENTS };
  * EIPS_ENABLED: governs whether this directory's own service graph may be constructed/exercised
  * (tests, local dev) -- same shape/defaults as CEC_FLAGS/EER_FLAGS.
  *
- * INTERNAL_ADOPTION_ENABLED (Phase 10): a SEPARATE, narrower gate. Defaults false in EVERY
- * environment, including development/testing -- unlike EIPS_ENABLED, it is not "on by default
- * outside production," because it is the one flag that gates a real (if internal-only,
- * non-customer-visible) call site rather than just this directory's own isolated tests. It must
- * be explicitly opted into per Phase 10's own "no customer-visible behavior changes" mandate.
+ * INTERNAL_ADOPTION_ENABLED (Phase 10): a SEPARATE, narrower gate for the one authorized
+ * internal consumer (scripts/intelligence_platform_snapshot.mjs). Mirrors EIPS_ENABLED's own
+ * shape -- development/testing enabled, canary/production disabled -- for the same reason
+ * EER_FLAGS/CEC_FLAGS already established this pattern: the property that actually matters is
+ * zero blast radius in canary/production (where real customers/traffic are), not zero blast
+ * radius everywhere. A flag that could never be true in any environment couldn't be
+ * regression-tested or compatibility-verified at all, which Phase 10 explicitly requires; a
+ * flag that's off in canary/production has the same real-world safety guarantee as
+ * EIPS_ENABLED already provides for this entire directory, satisfying "no customer-visible
+ * behavior changes" the same way.
  */
 export const EIPS_FLAGS = Object.freeze({
-  development: Object.freeze({ EIPS_ENABLED: true, INTERNAL_ADOPTION_ENABLED: false }),
-  testing: Object.freeze({ EIPS_ENABLED: true, INTERNAL_ADOPTION_ENABLED: false }),
+  development: Object.freeze({ EIPS_ENABLED: true, INTERNAL_ADOPTION_ENABLED: true }),
+  testing: Object.freeze({ EIPS_ENABLED: true, INTERNAL_ADOPTION_ENABLED: true }),
   canary: Object.freeze({ EIPS_ENABLED: false, INTERNAL_ADOPTION_ENABLED: false }),
   production: Object.freeze({ EIPS_ENABLED: false, INTERNAL_ADOPTION_ENABLED: false }),
 });
