@@ -96,6 +96,16 @@ WORKER_JS_VALID_EOF_TOKENS: set[str] = {
     "]",    # bare closing bracket
     "]);",  # Object.freeze([ ... ]) / fn([ ... ]);
     "])",   # bare fn([ ... ]) close
+    # Bare function-call-close forms, symmetric with the brace and bracket forms above -- a
+    # top-level export ending in a multi-line Object.freeze(...) call whose argument is itself
+    # already-closed (e.g. Object.freeze(\n  arr.map(...)\n)) closes on a bare `)`, with no
+    # trailing brace or bracket at all. Confirmed false-positiving (FATAL, hard-fails the
+    # encoding-guard CI gate) on relationship-framework/relationship-types.js, a legitimate,
+    # unmodified file ending in `);` (closing `Object.freeze(\n  DEFINITIONS.map(...)\n);`).
+    # Reproduced directly against that file before this fix; passes after it.
+    "),",   # trailing comma variant
+    ");",   # fn(\n  ...\n);
+    ")",    # bare fn(\n  ...\n) close
 }
 
 # Normalised forward-slash relative paths for cross-platform matching
