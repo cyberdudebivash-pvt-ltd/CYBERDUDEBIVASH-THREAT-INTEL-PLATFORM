@@ -84,6 +84,18 @@ WORKER_JS_VALID_EOF_TOKENS: set[str] = {
     "}",    # bare closing brace
     "});",  # IIFE or promise chain close
     "})",   # bare IIFE close
+    # Array-closing forms, symmetric with the object-closing set above -- a top-level export
+    # ending in Object.freeze([...]) or a plain array literal is just as valid as one ending in
+    # a brace, and this guard previously had no token for it at all. Confirmed false-positiving
+    # (FATAL, hard-fails the encoding-guard CI gate) on evidence-registry/service-contracts.js
+    # and intelligence-platform/service-contracts.js, both legitimate, unmodified/reviewed
+    # files ending in `]);` (Object.freeze([...]);). Reproduced directly against both files
+    # before this fix; both pass after it.
+    "];",   # const x = [ ... ];
+    "],",   # trailing comma variant
+    "]",    # bare closing bracket
+    "]);",  # Object.freeze([ ... ]) / fn([ ... ]);
+    "])",   # bare fn([ ... ]) close
 }
 
 # Normalised forward-slash relative paths for cross-platform matching
@@ -541,7 +553,21 @@ def run(root: pathlib.Path, fix: bool, strict: bool) -> int:
     # closing token.  A truncated file will pass ASCII checks (no bad bytes)
     # but esbuild will still fail with "Unexpected end of file".
     # This catch runs regardless of --fix / --strict / dirty state.
-    worker_js_files = [f for f in files if _is_worker_ascii_file(f, root)]
+    #
+    # __tests__/ directories are excluded from THIS check specifically (not from the broader
+    # ASCII enforcement above, which still applies to them -- non-ASCII corruption is still worth
+    # catching in test files). This check's entire rationale is "esbuild will fail" -- but esbuild
+    # only ever bundles from index.js's own import graph, and every file under __tests__/ is, by
+    # this platform's own governance (zero-blast-radius.test.js + titan_architecture_governance_
+    # check.py in both evidence-registry/ and intelligence-platform/), provably never imported by
+    # index.js. "Ends in a token esbuild would reject" is simply not a meaningful question for a
+    # file esbuild never reads. Confirmed reproducing false-positive: intelligence-platform/
+    # __tests__/test-helpers.js legitimately ends in `export const UUID_3 = "...";` -- a
+    # perfectly valid top-level statement with no bracket/brace to close, which no finite
+    # WORKER_JS_VALID_EOF_TOKENS set can enumerate in general (any scalar-valued top-level
+    # export/assignment ends the same way). Scoping this check to files esbuild can actually
+    # reject is the general fix; enumerating more tokens is not.
+    worker_js_files = [f for f in files if _is_worker_ascii_file(f, root) and "__tests__" not in f.relative_to(root).parts]
     truncated: list[pathlib.Path] = []
     for wf in worker_js_files:
         if not _check_worker_js_eof(wf, root):
