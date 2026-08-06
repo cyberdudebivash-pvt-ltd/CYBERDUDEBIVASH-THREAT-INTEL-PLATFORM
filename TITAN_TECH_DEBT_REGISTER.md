@@ -387,6 +387,12 @@ being assumed benign.
 
 ### DEBT-021 — Evidence Registry service built (Stage 10–11) ahead of its gating ADRs' Acceptance
 
+**Status: RESOLVED, 2026-08-06.** ADR-0008, ADR-0011, and ADR-0012 all now show `Status:
+Accepted` (executive architecture authority — see `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md`).
+The gap this item tracked — implementation ahead of Acceptance — is closed for these three going
+forward from Stage 12. Left below for the record, per this register's own
+document-don't-delete discipline; the history is still true, it's just no longer open.
+
 *Found Stage 11 post-implementation validation (resumed session, PR #115 pre-merge review).*
 **Correction, Stage 11.5 (2026-08-06):** the Recommended Resolution field below originally
 claimed ADR-0012 was "not-yet-drafted... never written." That was wrong — verified against
