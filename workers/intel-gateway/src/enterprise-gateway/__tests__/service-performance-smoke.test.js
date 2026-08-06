@@ -94,6 +94,54 @@ test("smoke: full dispatch() of evidence.lookup/byCVE (middleware + real handler
   console.log("[Stage 14 perf] shared ServicePlatformMetrics call_counts:", JSON.stringify(gateway.metrics.snapshot().service.call_counts));
 });
 
+test("smoke: Gateway dispatch overhead vs. direct composition, same operation, same data (Stage 15 Phase 8)", async () => {
+  const platform = testPlatform();
+  for (let i = 0; i < N; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await platform.evidenceService.registerEvidence(
+      evidence(`88888888-8888-4888-8888-${String(i).padStart(12, "0")}`, { related_cves: [`CVE-2030-${i}`] }),
+      { skipReuseCheck: true }
+    );
+  }
+  const gateway = new EnterpriseGateway({ platform });
+
+  // Arm 1: direct composition -- the scripts/intelligence_platform_snapshot.mjs (Stage 13)
+  // pattern this stage deprecated, calling IntelligenceService directly with no Gateway involved.
+  const directStart = performance.now();
+  for (let i = 0; i < N; i += 10) {
+    // eslint-disable-next-line no-await-in-loop
+    await platform.lookup.byCVE(`CVE-2030-${i}`);
+  }
+  const directElapsedMs = performance.now() - directStart;
+
+  // Arm 2: the identical operation over the identical data, routed through
+  // EnterpriseGateway.dispatch() instead -- the scripts/enterprise_gateway_snapshot.mjs pattern.
+  const gatewayStart = performance.now();
+  for (let i = 0; i < N; i += 10) {
+    // eslint-disable-next-line no-await-in-loop
+    await gateway.dispatch({
+      capability: "evidence.lookup",
+      method: "byCVE",
+      args: [`CVE-2030-${i}`],
+      caller: { id: "perf-smoke-comparison", kind: "test" },
+      grantedCapabilities: ["evidence.lookup"],
+    });
+  }
+  const gatewayElapsedMs = performance.now() - gatewayStart;
+  const overheadMs = gatewayElapsedMs - directElapsedMs;
+
+  assert.ok(
+    gatewayElapsedMs < DISPATCH_BUDGET_MS,
+    `Gateway-routed x100 samples took ${gatewayElapsedMs.toFixed(1)}ms, exceeding the ${DISPATCH_BUDGET_MS}ms budget`
+  );
+  console.log(`[Stage 15 perf] direct composition (platform.lookup.byCVE, no Gateway) x100 samples: ${directElapsedMs.toFixed(1)}ms total`);
+  console.log(`[Stage 15 perf] Gateway dispatch (evidence.lookup/byCVE, same data) x100 samples: ${gatewayElapsedMs.toFixed(1)}ms total`);
+  console.log(
+    `[Stage 15 perf] Gateway overhead vs. direct composition: ${overheadMs.toFixed(1)}ms total / ` +
+      `${((overheadMs / 100) * 1000).toFixed(0)}us per call (middleware + authorization + metrics-bridging)`
+  );
+});
+
 test(`smoke: the 6-stage default middleware chain alone, around a no-op handler, across ${N} samples within budget`, async () => {
   const platform = testPlatform();
   const gatewayMetrics = new GatewayMetrics(platform.metrics);

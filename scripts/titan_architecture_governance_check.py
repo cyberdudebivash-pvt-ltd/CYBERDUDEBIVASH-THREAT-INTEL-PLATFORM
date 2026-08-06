@@ -90,6 +90,18 @@ for the full per-dimension findings) — the one genuine, evidence-backed gap wa
 exposing its full internal entry, including the raw handler function, with no safe metadata-only
 accessor. One check below (#54) guards the fix: GatewayRegistry.describe()/.describeAll().
 
+Stage 15 inventoried every internal consumer of the Stage 8-14 lineage repo-wide (not just
+scripts/) and found exactly two: scripts/enterprise_gateway_snapshot.mjs (already Gateway-backed,
+Stage 14) and scripts/intelligence_platform_snapshot.mjs (direct composition, pre-dates the
+Gateway). The P16-P38 handler stack and ~100 Python quality/trust/correlation scripts were
+confirmed architecturally separate (different runtime or different data model, zero shared code)
+-- not migration candidates without a translation layer, itself unauthorized future work; see
+TITAN_STAGE15_GATEWAY_ADOPTION_REPORT.md Sec 2-4. The one real direct-composition consumer was
+deprecated in place (its replacement already existed and is a strict superset), not rewritten or
+deleted, per this program's Deprecation Instead of Deletion policy. One check below (#55) detects
+any NEW bypass beyond that one tracked exception; adoption metrics (informational, not a
+pass/fail gate) are printed separately by main().
+
 Checks, in order:
 
   1. Do the tracked ADRs and the discovery/governance docs they depend on still exist?
@@ -215,6 +227,9 @@ Checks, in order:
   54. (Stage 14 Phase 2) Do GatewayRegistry.describe()/.describeAll() — the read-only capability
       metadata accessors added for registry-maturity introspection — still exist in the
       expected shape and still omit the raw handler function from their return value?
+  55. (Stage 15) Does any scripts/ consumer import intelligence-platform/ directly
+      (createIntelligencePlatform) without also composing through enterprise-gateway/, beyond
+      the one tracked, already-deprecated Stage 13 exception (Gateway bypass)?
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -2428,6 +2443,84 @@ def check_gateway_registry_describe_omits_handler(gateway_dir: Path | None = Non
     return findings
 
 
+# Stage 15: scripts/intelligence_platform_snapshot.mjs (Stage 13) is a KNOWN, tracked,
+# already-deprecated direct-composition consumer -- see its own @deprecated header comment and
+# TITAN_STAGE15_GATEWAY_ADOPTION_REPORT.md Sec 1. Matched by filename, not full path, so this
+# allowlist is exercised correctly against both the real repo and a fixture temp directory.
+# Exempting this one named, documented file -- rather than relaxing the check generally --
+# mirrors check_evidence_registry_scaffolding_boundary()'s established idiom for the same kind
+# of "one authorized exception, not a general loophole" property.
+AUTHORIZED_LEGACY_GATEWAY_BYPASS_CONSUMER_NAMES = frozenset({"intelligence_platform_snapshot.mjs"})
+
+
+def _classify_scripts_gateway_consumers(
+    scripts_dir: Path | None = None, handlers_dir: Path | None = None
+) -> list[tuple[Path, str]]:
+    """Stage 15 shared helper: scans scripts_dir's .mjs/.js files and classifies each as
+    'gateway_backed' (imports enterprise-gateway/) or 'direct_composition' (imports
+    intelligence-platform/ directly, without also going through enterprise-gateway/). Files that
+    reference neither are not consumers of this lineage at all and are omitted. Single source of
+    truth for both check_gateway_bypass_new_direct_composition_consumers() (pass/fail findings)
+    and compute_gateway_adoption_metrics() (informational counts) -- Principle 3/4: one scan, two
+    views, not two independently-drifting implementations. `scripts_dir`/`handlers_dir` are
+    overridable for fixture testing; both check functions below always call with the defaults."""
+    scripts_dir = scripts_dir or (ROOT / "scripts")
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    consumers: list[tuple[Path, str]] = []
+    if not scripts_dir.exists() or not (handlers_dir / "intelligence-platform").exists():
+        return consumers
+    for path in sorted(list(scripts_dir.rglob("*.mjs")) + list(scripts_dir.rglob("*.js"))):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        imports_gateway = "enterprise-gateway/platform.js" in text or "createEnterpriseGateway" in text
+        imports_platform_directly = "intelligence-platform/platform.js" in text or "createIntelligencePlatform" in text
+        if imports_gateway:
+            consumers.append((path, "gateway_backed"))
+        elif imports_platform_directly:
+            consumers.append((path, "direct_composition"))
+    return consumers
+
+
+def check_gateway_bypass_new_direct_composition_consumers(
+    scripts_dir: Path | None = None, handlers_dir: Path | None = None
+) -> list[str]:
+    """Governance expansion (Stage 15): flags any scripts/ consumer that imports
+    intelligence-platform/ directly (bypassing enterprise-gateway/) and is NOT the one
+    already-tracked, already-deprecated legacy exception -- i.e., a genuinely NEW bypass, not a
+    restatement of the known one. `scripts_dir`/`handlers_dir` are overridable for fixture
+    testing; main() always calls with the defaults."""
+    findings = []
+    for path, classification in _classify_scripts_gateway_consumers(scripts_dir, handlers_dir):
+        if classification == "direct_composition" and path.name not in AUTHORIZED_LEGACY_GATEWAY_BYPASS_CONSUMER_NAMES:
+            findings.append(
+                f"GATEWAY BYPASS: {_display_path(path)} imports intelligence-platform/ directly "
+                f"(createIntelligencePlatform) without composing through enterprise-gateway/ -- "
+                f"new internal consumers should route through the Gateway per Stage 15's "
+                f"migration policy. See TITAN_STAGE15_GATEWAY_ADOPTION_REPORT.md."
+            )
+    return findings
+
+
+def compute_gateway_adoption_metrics(scripts_dir: Path | None = None, handlers_dir: Path | None = None) -> dict:
+    """Stage 15 Phase 6 -- Gateway adoption metrics. Reuses
+    _classify_scripts_gateway_consumers(), the same scan check_gateway_bypass_new_direct_
+    composition_consumers() uses, rather than a second independent implementation (Principle 3/4:
+    Reuse Before Build). Returns counts, not findings -- main() prints this as a separate,
+    informational section, never folded into the pass/fail governance finding count.
+    `scripts_dir`/`handlers_dir` are overridable for fixture testing; main() always calls with
+    the defaults."""
+    consumers = _classify_scripts_gateway_consumers(scripts_dir, handlers_dir)
+    gateway_backed = sum(1 for _, c in consumers if c == "gateway_backed")
+    direct_composition = sum(1 for _, c in consumers if c == "direct_composition")
+    total = gateway_backed + direct_composition
+    return {
+        "total_known_consumers": total,
+        "gateway_backed": gateway_backed,
+        "direct_composition_legacy": direct_composition,
+        "adoption_percentage": round(gateway_backed / total * 100, 1) if total else None,
+        "consumers": [{"file": _display_path(p), "classification": c} for p, c in consumers],
+    }
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -2494,8 +2587,18 @@ def main() -> None:
     all_findings += check_gateway_capability_authorization_present()
     all_findings += check_gateway_no_network_auth_scope_creep()
     all_findings += check_gateway_registry_describe_omits_handler()
+    all_findings += check_gateway_bypass_new_direct_composition_consumers()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
+    metrics = compute_gateway_adoption_metrics()
+    if metrics["total_known_consumers"]:
+        print(
+            f"Gateway adoption (Stage 15, informational -- not a pass/fail gate): "
+            f"{metrics['gateway_backed']}/{metrics['total_known_consumers']} known consumers "
+            f"Gateway-backed ({metrics['adoption_percentage']}%); "
+            f"{metrics['direct_composition_legacy']} direct-composition legacy "
+            f"(see TITAN_STAGE15_GATEWAY_ADOPTION_REPORT.md for the full classification).\n"
+        )
     if not all_findings:
         print(f"Clean: all {len(REQUIRED_ADRS)} ADRs present, all cited references resolve, no unreviewed "
               "confidence/evidence/reliability functions found, ownership matrix in sync, "
@@ -2531,7 +2634,9 @@ def main() -> None:
               "one shared ServicePlatformMetrics instance threaded through gateway-service.js "
               "and gateway-metrics.js, no circular dependency back into intelligence-platform/ "
               "or evidence-registry/, capability authorization present, no network-auth scope "
-              "creep, all EIG files present and isolated).")
+              "creep, all EIG files present and isolated, registry describe()/describeAll() "
+              "still omit the handler function, no new scripts/ consumer bypasses the Gateway "
+              "beyond the one tracked, deprecated Stage 13 exception).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")

@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
 scripts/test_titan_stage14_governance_checks.py
-Project TITAN Stage 14 — positive/negative fixture tests for the Stage 14 governance check
-functions in titan_architecture_governance_check.py: the 12 added in Phase 1, plus Phase 2's
-check_gateway_registry_describe_omits_handler() (13 total; not all share the check_eig_* naming
+Project TITAN Stage 14/15 — positive/negative fixture tests for the Stage 14/15 governance check
+functions in titan_architecture_governance_check.py: the 12 added in Stage 14 Phase 1, Phase 2's
+check_gateway_registry_describe_omits_handler(), and Stage 15's check_gateway_bypass_new_direct_
+composition_consumers() (14 check_* functions total, plus Stage 15's compute_gateway_adoption_
+metrics(), which returns counts rather than findings; not all share the check_eig_* naming
 prefix, e.g. check_no_duplicate_enterprise_gateway() and check_gateway_capability_authorization_
-present() -- see that file's own docstring for the full naming list).
+present() -- see that file's own docstring for the full naming list). Filename kept as Stage 14's
+original -- Stage 15 extends the same fixture suite rather than starting a parallel one.
 
 titan_architecture_governance_check.py's existing check_* functions have no fixture-directory
 mechanism anywhere in this codebase (confirmed by grep before writing this file in Phase 1) --
 each one reads real production files from disk directly. Rather than inventing an inconsistent
 parallel fixture convention for only some checks, this file takes the narrower path: only the
-Stage 14 check functions listed above (and no pre-existing function -- their signatures are
+Stage 14/15 functions listed above (and no pre-existing function -- their signatures are
 otherwise untouched) accept an optional directory-override parameter defaulting to the real path,
 so main()'s own call sites stay zero-argument while this file can point them at temp-directory
 good/bad content instead.
@@ -512,6 +515,107 @@ class CheckGatewayNoNetworkAuthScopeCreepTests(unittest.TestCase):
             write_tree(gateway_dir, {"gateway-service.js": bad})
             findings = governance.check_gateway_no_network_auth_scope_creep(gateway_dir=gateway_dir)
             self.assertTrue(any("SCOPE CREEP" in f and "fetch" in f for f in findings))
+
+
+def _write_gateway_consumer_fixture(tmp: str) -> tuple[Path, Path]:
+    """Shared fixture builder for the Stage 15 tests below: a scripts_dir with the two REAL,
+    known consumers (one legacy/authorized, one Gateway-backed) plus a handlers_dir whose mere
+    existence satisfies _classify_scripts_gateway_consumers()'s gate check (its own contents are
+    never read by that function)."""
+    scripts_dir = Path(tmp) / "scripts"
+    handlers_dir = Path(tmp) / "handlers"
+    write_tree(
+        scripts_dir,
+        {
+            "intelligence_platform_snapshot.mjs": (
+                'import { createIntelligencePlatform } from "../handlers/intelligence-platform/platform.js";\n'
+            ),
+            "enterprise_gateway_snapshot.mjs": (
+                'import { createEnterpriseGateway } from "../handlers/enterprise-gateway/platform.js";\n'
+            ),
+        },
+    )
+    (handlers_dir / "intelligence-platform").mkdir(parents=True, exist_ok=True)
+    return scripts_dir, handlers_dir
+
+
+class CheckGatewayBypassNewDirectCompositionConsumersTests(unittest.TestCase):
+    def test_known_legacy_and_gateway_backed_consumers_are_both_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts_dir, handlers_dir = _write_gateway_consumer_fixture(tmp)
+            findings = governance.check_gateway_bypass_new_direct_composition_consumers(
+                scripts_dir=scripts_dir, handlers_dir=handlers_dir
+            )
+            self.assertEqual(findings, [])
+
+    def test_new_unauthorized_direct_composition_consumer_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts_dir, handlers_dir = _write_gateway_consumer_fixture(tmp)
+            write_tree(
+                scripts_dir,
+                {
+                    "some_new_script.mjs": (
+                        'import { createIntelligencePlatform } from "../handlers/intelligence-platform/platform.js";\n'
+                    )
+                },
+            )
+            findings = governance.check_gateway_bypass_new_direct_composition_consumers(
+                scripts_dir=scripts_dir, handlers_dir=handlers_dir
+            )
+            self.assertTrue(any("GATEWAY BYPASS" in f and "some_new_script.mjs" in f for f in findings))
+
+    def test_missing_scripts_dir_yields_no_findings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            findings = governance.check_gateway_bypass_new_direct_composition_consumers(
+                scripts_dir=Path(tmp) / "nonexistent", handlers_dir=Path(tmp) / "handlers"
+            )
+            self.assertEqual(findings, [])
+
+    def test_missing_intelligence_platform_dir_yields_no_findings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts_dir, _ = _write_gateway_consumer_fixture(tmp)
+            findings = governance.check_gateway_bypass_new_direct_composition_consumers(
+                scripts_dir=scripts_dir, handlers_dir=Path(tmp) / "no-handlers-here"
+            )
+            self.assertEqual(findings, [])
+
+
+class ComputeGatewayAdoptionMetricsTests(unittest.TestCase):
+    def test_metrics_match_the_known_two_consumer_fixture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts_dir, handlers_dir = _write_gateway_consumer_fixture(tmp)
+            metrics = governance.compute_gateway_adoption_metrics(scripts_dir=scripts_dir, handlers_dir=handlers_dir)
+            self.assertEqual(metrics["total_known_consumers"], 2)
+            self.assertEqual(metrics["gateway_backed"], 1)
+            self.assertEqual(metrics["direct_composition_legacy"], 1)
+            self.assertEqual(metrics["adoption_percentage"], 50.0)
+            self.assertEqual(len(metrics["consumers"]), 2)
+
+    def test_empty_scripts_dir_yields_none_percentage_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts_dir = Path(tmp) / "scripts"
+            handlers_dir = Path(tmp) / "handlers"
+            scripts_dir.mkdir()
+            (handlers_dir / "intelligence-platform").mkdir(parents=True)
+            metrics = governance.compute_gateway_adoption_metrics(scripts_dir=scripts_dir, handlers_dir=handlers_dir)
+            self.assertEqual(metrics["total_known_consumers"], 0)
+            self.assertIsNone(metrics["adoption_percentage"])
+
+    def test_a_third_gateway_backed_consumer_shifts_the_percentage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts_dir, handlers_dir = _write_gateway_consumer_fixture(tmp)
+            write_tree(
+                scripts_dir,
+                {
+                    "another_gateway_consumer.mjs": (
+                        'import { createEnterpriseGateway } from "../handlers/enterprise-gateway/platform.js";\n'
+                    )
+                },
+            )
+            metrics = governance.compute_gateway_adoption_metrics(scripts_dir=scripts_dir, handlers_dir=handlers_dir)
+            self.assertEqual(metrics["total_known_consumers"], 3)
+            self.assertEqual(metrics["gateway_backed"], 2)
+            self.assertAlmostEqual(metrics["adoption_percentage"], 66.7)
 
 
 if __name__ == "__main__":
