@@ -1,11 +1,13 @@
 # ADR-0010: Relationship Graph Ownership
 
 **Date:** 2026-08-05
-**Status:** Proposed — Revised twice. Stage 7 found the fragmentation grew from 2 to 5 candidate
-implementations; Stage 8's live verification narrowed it back to 3 live ones (R1, R3, R4) and
-found R1-vs-R3 is a same-repository, same-team conflict — see "Revision 2." **Original Decision
-(R1 target-canonical) stands and is ready for human Acceptance review; R1-vs-R3 reconciliation
-is flagged as the highest-priority follow-up implementation work.** Not Accepted yet.
+**Status:** **Accepted** (2026-08-06, executive architecture authority — see Revision 5 and the
+Approval section below). Revised five times before acceptance. Stage 7 found the fragmentation
+grew from 2 to 5 candidate implementations; Stage 8's live verification narrowed it back to 3
+live ones (R1, R3, R4) and found R1-vs-R3 is a same-repository, same-team conflict — see
+"Revision 2." **Original Decision (R1 target-canonical) stands and was accepted as written;
+R1-vs-R6's persistence-layer prerequisite was resolved at acceptance time via Revision 5's
+scoping, below.**
 **Deciders (proposed reviewers):** Platform Governance Lead, Chief Threat Intelligence
 Architect, Intelligence Engineering (P31 owner), Blog/EIOS Engineering (`knowledge_graph.py`
 owner)
@@ -348,15 +350,69 @@ companion documents above for the detailed recommendation now on record.
 
 ---
 
+## Revision 5 — 2026-08-06, Stage 16 (Executive Acceptance; resolves the persistence precondition)
+
+Executive architecture authority (cyberdudebivash, direct session confirmation, mirroring the
+mechanism `TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md` used for ADR-0008/0011/0012) accepted this
+ADR as written in Revision 4, and in the same session resolved the one prerequisite Revision 4
+left open for engineering scoping: **how R1 gains the persistence layer Decision item 2 requires.**
+
+**Resolution: native persistence, not R6 adoption.** DEBT-000B's own "Recommended Resolution"
+named two valid paths: *"either adopt R6 as R1's persistence layer... or formally deprecate R6 in
+favor of building persistence natively into R1."* Stage 16 takes the second path:
+
+- A new, same-repository, same-language (JS) persistence layer is built at R1's *consumption*
+  boundary — `workers/intel-gateway/src/relationship-framework/` (`edge-repository-interface.js`
+  contract + `in-memory-edge-repository.js` reference implementation, mirroring
+  `evidence-registry/repository-interface.js` + `in-memory-repository.js`'s exact, already-
+  established pattern: a backend-agnostic contract with an in-memory reference implementation,
+  no vendor-specific (KV/D1/R2) binding hardcoded into it).
+- R1's live edge shape (`p31-handlers.js`'s `_buildGraph`/`handleP31Relationships` output —
+  `{source, target, relation, confidence, evidence, verified}`, documented from
+  `handleP31Relationships`'s own JSON response contract) is adapted into this persistence layer
+  and into Stage 12's `RelationshipProviderInterface` shape by a **documented-data-shape
+  adapter** (`p31-edge-adapter.js`), mirroring `evidence-registry/migration-adapters.js`'s
+  established rule exactly: adapt the shape, never `import` the live handler file. This preserves
+  every dormant-scaffolding directory's zero-blast-radius property unchanged.
+- **R6 (`core/intelligence/enrichment_graph.py`) is not adopted, not imported, not modified, and
+  not deprecated by this revision.** DEBT-000B's cross-language "R1 vs. R6" question — whether
+  R6 should eventually supersede this native persistence layer, and DEBT-017's prior question of
+  whether R6 executes in production at all — remains open and is explicitly **not** resolved
+  here. What Revision 5 removes is only R6-adoption's status as a *blocker to ADR-0010
+  Acceptance* — Decision item 2's persistence precondition is satisfied by the native layer
+  instead, so Acceptance no longer needs to wait on a cross-runtime (Python-in-a-JS-Worker)
+  integration question. See `TITAN_TECH_DEBT_REGISTER.md` DEBT-000B's Stage 16 update for the
+  full disposition.
+- **No new graph engine or new graph database is introduced.** The persistence layer stores the
+  same edge records R1 already computes — it does not recompute, re-derive, or duplicate
+  `_buildGraph`'s graph-construction logic (that logic is not imported, and is not
+  re-implemented; only its documented output shape is adapted). This satisfies both this ADR's
+  own "no graph database" scope boundary (Stage 6 NON-GOALS) and Stage 16's identical constraint.
+
+This resolution is scoped to unblocking Acceptance and Stage 16's Relationship Framework
+specifically. It does not foreclose a future, separately-authorized decision to adopt R6 (or
+retire it) — that remains exactly as open as DEBT-000B/DEBT-017 left it.
+
+---
+
 ## Approval
 
-**Proposed**, not Accepted. Required sign-offs, with the persistence precondition specifically
-flagged as needing engineering estimation before this ADR's migration plan can be scheduled:
+**Accepted.** Signed off by executive architecture authority, mirroring
+`TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md`'s ADR-0008/0011/0012 precedent — an executive-authority
+acceptance, not an independently-obtained multi-party review; the individually-named reviewers
+below were not separately consulted, and this record says so rather than implying otherwise:
 
-- [ ] Platform Governance Lead
-- [ ] Chief Threat Intelligence Architect / P31 owner (for the persistence-layer scoping
-      commitment)
-- [ ] Blog/EIOS engineering owner (`knowledge_graph.py`, `layer-09` owner — for the deprecation
-      timeline and the recommended Layer 9 correction note)
+- [x] Platform Governance Lead — accepted by executive authority, 2026-08-06
+- [x] Chief Threat Intelligence Architect / P31 owner (persistence-layer scoping commitment) —
+      resolved by Revision 5 (native persistence, not R6 adoption), 2026-08-06
+- [x] Blog/EIOS engineering owner (`knowledge_graph.py`, `layer-09` owner) — not independently
+      obtained; R2 (`knowledge_graph.py`) is unaffected by Stage 16 (Revision 5 touches only
+      intel-platform-side persistence), so the deprecation-timeline sign-off this row originally
+      tracked remains deferred until an actual R2 migration is proposed, per Migration Strategy
+      item 3 below, which Stage 16 does not execute
 
-No code implementing this decision exists yet.
+**Decided by / date:** cyberdudebivash, executive architecture authority — 2026-08-06, direct
+session authorization to accept ADR-0010 and build the Relationship Framework it gates.
+
+Code implementing this decision is Stage 16's own deliverable — see
+`TITAN_STAGE16_RELATIONSHIP_FRAMEWORK_REPORT.md`.

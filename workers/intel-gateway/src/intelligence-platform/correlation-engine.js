@@ -10,14 +10,18 @@
  * related_campaigns/related_iocs/related_reports/related_attack_techniques,
  * canonical_confidence_object).
  *
- * Relationship correlation: ADR-0010 (Relationship Graph Ownership) remains Proposed, not
- * Accepted (docs/adr/0010-relationship-graph-ownership.md; confirmed against
- * TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md, which lists only ADR-0008/0011/0012 as Accepted).
- * Per Stage 13's Special Governance Rule, correlateByRelationship() below delegates verbatim to
- * Stage 12's RelationshipResolutionService (relationship-resolution.js) -- an
- * injected-provider consumption contract with a NullRelationshipProvider default -- and
- * implements no graph logic of its own. It does not import p31-handlers.js or any other
- * concrete relationship-graph implementation.
+ * Relationship correlation: ADR-0010 (Relationship Graph Ownership) is now Accepted (Stage 16,
+ * 2026-08-06 -- docs/adr/0010-relationship-graph-ownership.md Revision 5;
+ * TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md's Stage 16 Addendum). correlateByRelationship() below
+ * is UNCHANGED by that acceptance: it still delegates verbatim to Stage 12's
+ * RelationshipResolutionService (relationship-resolution.js) and implements no graph logic of
+ * its own -- that pass-through design was always correct independent of ADR-0010's status
+ * (Single Source of Truth: this file should not grow a second relationship-resolution path). It
+ * still does not import p31-handlers.js or any other concrete relationship-graph implementation.
+ * What changed is which RelationshipResolutionService instance gets injected upstream:
+ * relationship-framework/ (Stage 16) now constructs one backed by a real P31RelationshipProvider
+ * instead of leaving it on the NullRelationshipProvider default -- see
+ * relationship-framework/relationship-service.js.
  */
 
 /** @typedef {import('../evidence-registry/entity.js').CanonicalEvidence} CanonicalEvidence */

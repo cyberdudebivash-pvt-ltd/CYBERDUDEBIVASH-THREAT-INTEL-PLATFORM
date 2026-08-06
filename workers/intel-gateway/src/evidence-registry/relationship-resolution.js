@@ -2,40 +2,34 @@
  * Enterprise Evidence Service Platform  -  Stage 12 Phase 4, Relationship Resolution
  * (Project TITAN). Not imported by index.js or any production route. See README.md.
  *
- * DELIBERATELY SCOPED NARROWER than Phase 4's full brief. The stage brief asks this phase to
- * "Consume: Canonical Relationship Framework" (p31-handlers.js / ADR-0010's subject). ADR-0010
- * (Relationship Graph Ownership) is NOT part of this stage's Acceptance  -  it remains Proposed
- * (see docs/adr/0010-relationship-graph-ownership.md, TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md).
- * Only ADR-0008, ADR-0011, and ADR-0012 were Accepted for this stage.
+ * ORIGINALLY scoped narrower than Phase 4's full brief, because ADR-0010 (Relationship Graph
+ * Ownership) was Proposed, not Accepted, at Stage 12 time. **ADR-0010 is now Accepted (Stage 16,
+ * 2026-08-06 -- see docs/adr/0010-relationship-graph-ownership.md Revision 5,
+ * TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md's Stage 16 Addendum).** This file itself is
+ * UNCHANGED beyond this docstring and the NOT_WIRED message below: the concrete wiring lives in
+ * `relationship-framework/` (Stage 16), which constructs a real `RelationshipResolutionService`
+ * by injecting its own `P31RelationshipProvider` here -- see relationship-framework/relationship-service.js.
  *
- * Two established constraints both point the same direction:
- *   1. Governance: this program has never treated an "internal only, so it's fine" reading as
- *      sufficient to bypass an ADR gate  -  DEBT-021 exists specifically because Stage 10-11 did
- *      exactly that for ADR-0008/0011, and this stage's own Executive Architecture Acceptance
- *      milestone (Stage 11.5) was inserted to stop that pattern, not extend it to a fourth ADR.
- *   2. Architecture: `zero-blast-radius.test.js`/`check_evidence_registry_scaffolding_boundary()`
- *      enforce that nothing in this directory imports a live handler/router file. Importing
- *      `buildP31RelationshipBlock` from `p31-handlers.js` directly would violate that boundary
- *      regardless of ADR-0010's status  -  it would give this "inert scaffolding" a real
- *      production import for the first time since Stage 8.
- *
- * So: this class defines the CONSUMPTION CONTRACT ("Consume... No new graph engine. No graph
- * rewrite.") without a concrete P31 import. `RelationshipProviderInterface` below is a
- * dependency-injection point, exactly mirroring interfaces.js's `EvidenceProviderInterface`
- * pattern (Stage 10)  -  a contract whose concrete, live-data-backed implementation is future,
- * separately-authorized wiring (requires both ADR-0010 Acceptance AND resolving DEBT-000B's
- * R1-vs-R6 ownership question), not something this stage builds. `NullRelationshipProvider`
- * (the default) makes that explicit rather than silently returning empty data as if it were a
- * real answer.
+ * This class stays a pure, provider-agnostic contract by design, independent of ADR-0010's
+ * status, for a reason ADR-0010 acceptance does not remove: the architectural boundary
+ * (`zero-blast-radius.test.js`/`check_evidence_registry_scaffolding_boundary()`) still requires
+ * that nothing in THIS directory import a live handler/router file directly. Concrete wiring
+ * happens by injecting a provider at a composition root (relationship-framework/, or any future
+ * caller), never by adding a `p31-handlers.js` import to this file. `RelationshipProviderInterface`
+ * below remains the same dependency-injection point Stage 10's `EvidenceProviderInterface`
+ * pattern established. `NullRelationshipProvider` (still the default for a zero-arg
+ * construction) makes "no provider was injected into THIS instance" explicit rather than
+ * silently returning empty data as if it were a real answer -- that default is good DI practice
+ * independent of ADR-0010, so it is unchanged.
  */
 
 import { ServicePlatformMetrics } from "./service-metrics.js";
 
 const NOT_WIRED = (name) =>
-  `${name}: no RelationshipProviderInterface has been supplied. Relationship Resolution is ` +
-  "scoped this stage to a consumption contract only  -  wiring a concrete provider (e.g. one " +
-  "backed by p31-handlers.js's buildP31RelationshipBlock()) requires ADR-0010 Acceptance first " +
-  "(currently Proposed) and is out of this stage's scope. See relationship-resolution.js's " +
+  `${name}: no RelationshipProviderInterface has been supplied. This class stays provider- ` +
+  "agnostic by design (dependency injection, not a hardcoded data source) -- inject a concrete " +
+  "provider at composition time (e.g. relationship-framework/'s P31RelationshipProvider, Stage " +
+  "16, now that ADR-0010 is Accepted) to get real data. See relationship-resolution.js's " +
   "module docstring.";
 
 /**

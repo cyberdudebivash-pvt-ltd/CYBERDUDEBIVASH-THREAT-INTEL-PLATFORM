@@ -28,8 +28,18 @@ const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
  * never imports a pNN-handlers.js file or index.js itself, nor evidence-registry/ directly.
  * Exempting this one named, documented directory -- rather than relaxing the check generally --
  * keeps this test able to catch any OTHER, unauthorized reference.
+ *
+ * Stage 16: relationship-framework/ is added for the same reason -- ADR-0010 Acceptance means
+ * its production code legitimately composes createIntelligencePlatform() (its integration test
+ * injects a real relationshipResolution via that factory's `deps` parameter; see
+ * relationship-framework/__tests__/integration.test.js). Its own docstrings also cite
+ * "intelligence-platform" by name as precedent (service-contracts.js) without importing it,
+ * and its own zero-blast-radius test necessarily names this directory throughout -- exempting
+ * the whole directory, as already done for enterprise-gateway above, covers both without
+ * weakening what this test actually protects (index.js/pNN-handlers.js reachability, checked
+ * independently below).
  */
-const AUTHORIZED_CONSUMER_DIRS = [join(WORKER_SRC_DIR, "enterprise-gateway")];
+const AUTHORIZED_CONSUMER_DIRS = [join(WORKER_SRC_DIR, "enterprise-gateway"), join(WORKER_SRC_DIR, "relationship-framework")];
 
 /**
  * True only if `file` IS `dir`, or is a path strictly inside it -- a bare `startsWith(dir)`/
@@ -138,14 +148,15 @@ test("no evidence-registry/ PRODUCTION file references intelligence-platform/ (o
   }
 });
 
-test("evidence-registry/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these two directories, nothing broader (the exempted test file itself stays honest)", () => {
+test("evidence-registry/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these three directories, nothing broader (the exempted test file itself stays honest)", () => {
   // Stage 14: evidence-registry's own array grew a second, narrowly-named entry
   // (enterprise-gateway) alongside this stage's pre-existing intelligence-platform entry -- see
-  // that file's own updated doc comment for why. This assertion is updated in lockstep so it
-  // keeps proving the array is exactly these two named directories, not a general relaxation.
+  // that file's own updated doc comment for why. Stage 16 added a third (relationship-framework).
+  // This assertion is updated in lockstep so it keeps proving the array is exactly these three
+  // named directories, not a general relaxation.
   const text = readFileSync(join(EVIDENCE_REGISTRY_DIR, "__tests__", "zero-blast-radius.test.js"), "utf-8");
   assert.match(
     text,
-    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[join\(WORKER_SRC_DIR,\s*"intelligence-platform"\),\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\)\]/
+    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[\s*join\(WORKER_SRC_DIR,\s*"intelligence-platform"\),\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\),?\s*\]/
   );
 });
