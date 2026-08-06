@@ -68,6 +68,21 @@ inert. Seven more checks cover that stage's own Phase 7 charter: duplicate servi
 contracts, version drift, registry bypass, relationship bypass, validation bypass, and
 architecture violations. See TITAN_STAGE12_SERVICE_ARCHITECTURE.md.
 
+Stage 14 built the Enterprise Intelligence Gateway (EIG) on top of Stage 13's Enterprise
+Intelligence Platform Services (EIPS) — a facade (EnterpriseGateway), a capability registry, a
+dispatcher with a composable middleware pipeline, in-process capability authorization, and its
+own gateway-layer metrics view sharing the one ServicePlatformMetrics instance the whole
+platform already threads through — the exact "no duplicate metrics instance" property this
+stage's own brief names as a bug class to guard against by name. Twelve checks below cover this
+stage's own Phase 1 charter: architecture violations, duplicate engines, reuse bypass, contract
+version drift, duplicate contracts, registry bypass, ADR-0010 governance, validation bypass,
+duplicate metrics instance, circular dependency, capability-authorization presence, and
+network-auth scope creep (the last two have no Stage 12/13 precedent — this stage introduces
+both concepts for the first time). See TITAN_STAGE14_SERVICE_ARCHITECTURE.md. (Note: Stage
+13/EIPS's own check functions, added by PR #119, were never correspondingly added to this
+docstring's narrative or numbered list below — a pre-existing documentation gap, not introduced
+or corrected by this stage's own additions, flagged here rather than silently left unremarked.)
+
 Checks, in order:
 
   1. Do the tracked ADRs and the discovery/governance docs they depend on still exist?
@@ -155,6 +170,41 @@ Checks, in order:
       (validation bypass)?
   41. (Stage 12) Does the full Stage 12 EESP file set still exist, and does none of it import
       a live pNN-handlers.js/index.js file (architecture violations)?
+
+  42. (Stage 14) Does the full Stage 14 EIG file set still exist, and does none of it import a
+      live pNN-handlers.js/index.js file (architecture violations)?
+  43. (Stage 14) Does any file outside its own canonical file define its own copy of
+      EnterpriseGateway/GatewayContext/GatewayRegistry/GatewayDispatcher/GatewayLifecycle/
+      GatewayMetrics (duplicate engines)?
+  44. (Stage 14) Do gateway-service.js's 8 pre-registered capabilities still delegate to
+      IntelligenceService's own public properties rather than reimplementing any of their
+      logic (reuse bypass)?
+  45. (Stage 14) Does each of the 4 EIG contracts' declared `version` still match its own
+      `history` array's last entry (version drift)?
+  46. (Stage 14) Does any file outside service-contracts.js export its own copy of the 4 named
+      EIG contract constants (duplicate contracts)?
+  47. (Stage 14) Do any EIG files reach into GatewayRegistry's/GatewayMetrics's private fields
+      directly instead of calling their public API (registry bypass)?
+  48. (Stage 14) Does the evidence.relationships capability still target
+      RelationshipResolutionService's pass-through-only surface, and does gateway-service.js
+      still document the ADR-0010 gate (ADR-0010 governance — ADR-0010 is not Accepted)?
+  49. (Stage 14) Does the intelligence.validation capability still target
+      IntelligenceValidationService, and has gateway-middleware.js's own validation stage
+      avoided growing evidence/intelligence DATA-validation-shaped logic of its own
+      (validation bypass)?
+  50. (Stage 14) Does EnterpriseGateway's constructor still resolve _platform first, derive
+      serviceMetrics from its sharedServiceMetrics rather than constructing a fresh
+      ServicePlatformMetrics, guard a mismatched explicit deps.serviceMetrics, and thread that
+      one instance into both GatewayMetrics and GatewayDispatcher (duplicate metrics instance
+      — the exact bug class this stage's own brief names)?
+  51. (Stage 14) Does any intelligence-platform/ or evidence-registry/ PRODUCTION file
+      reference enterprise-gateway/ (circular dependency)?
+  52. (Stage 14) Does GatewayDispatcher still perform a real capability-authorization check
+      before invoking a handler (governance expansion — no Stage 12/13 precedent)?
+  53. (Stage 14) Has any EIG file started reaching for network-auth-shaped primitives (a live
+      fetch handler, Request/Response construction, ADMIN_SECRET, a JWT library) — scope
+      creep against this stage's own documented in-process/DI-only boundary (no Stage 12/13
+      precedent)?
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -384,7 +434,18 @@ def check_evidence_registry_scaffolding_boundary() -> list[str]:
     # rather than relaxing the check generally -- keeps it able to catch any OTHER,
     # unauthorized reference. Mirrors the identical, symmetric fix already applied to
     # evidence-registry/__tests__/zero-blast-radius.test.js.
-    authorized_consumer_dirs = [HANDLERS_DIR / "intelligence-platform"]
+    #
+    # Stage 14: enterprise-gateway/ is added for the same test-fixture-construction reason its
+    # Node-side counterpart (evidence-registry/__tests__/zero-blast-radius.test.js's own
+    # AUTHORIZED_CONSUMER_DIRS) was updated for — its PRODUCTION code composes only
+    # intelligence-platform/'s IntelligenceService, one hop up (see its own
+    # TITAN_STAGE14_SERVICE_ARCHITECTURE.md and independent zero-blast-radius test); what trips
+    # this sweep is enterprise-gateway/__tests__/test-helpers.js importing
+    # evidence-registry/entity.js to build fixtures, identical to intelligence-platform's own
+    # test-helpers.js one directory up. This Python check and the Node test above are two
+    # independently-maintained mechanisms for the same property (a pre-existing duplication,
+    # not introduced here) — kept in sync by hand, same as this addition does.
+    authorized_consumer_dirs = [HANDLERS_DIR / "intelligence-platform", HANDLERS_DIR / "enterprise-gateway"]
 
     # 1. Nothing outside evidence-registry/ (or an authorized consumer) may import from it.
     for path in HANDLERS_DIR.rglob("*.js"):
@@ -1943,6 +2004,389 @@ def check_no_circular_dependency_intelligence_evidence_registry() -> list[str]:
     return findings
 
 
+def _display_path(path: Path) -> str:
+    """Repo-relative path for a finding message when `path` is really under ROOT (the normal,
+    non-test case); falls back to the absolute path otherwise so the check_eig_* functions stay
+    safely callable against a temp-directory fixture (scripts/test_titan_stage14_governance_checks.py)
+    without raising ValueError on `.relative_to(ROOT)`."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+ENTERPRISE_GATEWAY_DIR = HANDLERS_DIR / "enterprise-gateway"
+
+EIG_CORE_FILES = [
+    "gateway-context.js",
+    "gateway-lifecycle.js",
+    "gateway-registry.js",
+    "gateway-middleware.js",
+    "gateway-metrics.js",
+    "gateway-dispatcher.js",
+    "gateway-service.js",
+    "platform.js",
+    "feature-flags.js",
+    "service-contracts.js",
+]
+
+
+def check_eig_files_present_and_isolated(gateway_dir: Path | None = None) -> list[str]:
+    """Architecture violations: confirms every Stage 14 EIG file still exists (Deprecation
+    Instead of Deletion — no silent removal) and that none of them imports a live
+    pNN-handlers.js/index.js file directly — the same zero-blast-radius property
+    enterprise-gateway/__tests__/zero-blast-radius.test.js verifies independently in Node.
+    `gateway_dir` is overridable so scripts/test_titan_stage14_governance_checks.py can exercise
+    this against temp-directory good/bad fixtures; main() always calls with the default."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    if not gateway_dir.exists():
+        return findings
+    for name in EIG_CORE_FILES:
+        path = gateway_dir / name
+        if not path.exists():
+            findings.append(f"MISSING EIG FILE: enterprise-gateway/{name} — Stage 14 file set is incomplete")
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r'from\s+["\'].*p\d+-handlers\.js["\']', text) or re.search(r'from\s+["\'].*/index\.js["\']', text):
+            findings.append(f"ARCHITECTURE VIOLATION: enterprise-gateway/{name} imports a live pNN-handlers.js/index.js file")
+    return findings
+
+
+def check_no_duplicate_enterprise_gateway(handlers_dir: Path | None = None, gateway_dir: Path | None = None) -> list[str]:
+    """Duplicate engines: confirms no file outside enterprise-gateway/ defines its own copy of
+    any of this stage's six core classes (duplicate gateway/context/registry/dispatcher/
+    lifecycle/metrics). `handlers_dir`/`gateway_dir` are overridable for fixture testing; main()
+    always calls with the defaults."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    if not gateway_dir.exists():
+        return findings
+    class_to_file = {
+        "EnterpriseGateway": "gateway-service.js",
+        "GatewayContext": "gateway-context.js",
+        "GatewayRegistry": "gateway-registry.js",
+        "GatewayDispatcher": "gateway-dispatcher.js",
+        "GatewayLifecycle": "gateway-lifecycle.js",
+        "GatewayMetrics": "gateway-metrics.js",
+    }
+    for class_name, canonical_file in class_to_file.items():
+        pattern = re.compile(rf"\bclass\s+{class_name}\b")
+        for path in handlers_dir.rglob("*.js"):
+            if path.parent == gateway_dir and path.name == canonical_file:
+                continue
+            if path.parent.name == "__tests__":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if pattern.search(text):
+                findings.append(
+                    f"DUPLICATE ENGINE: {_display_path(path)} defines its own 'class {class_name}' — "
+                    f"the canonical implementation is enterprise-gateway/{canonical_file}"
+                )
+    return findings
+
+
+def check_gateway_capabilities_delegate_not_reimplement(gateway_dir: Path | None = None) -> list[str]:
+    """Reuse bypass: confirms gateway-service.js's 8 pre-registered capabilities still delegate
+    to IntelligenceService's own public properties (platform.lookup, .enterpriseQuery,
+    .correlation, .validation, .threatIntelligence, .provenance, .relationshipResolution,
+    .metrics) rather than reimplementing any of their logic. `gateway_dir` is overridable for
+    fixture testing; main() always calls with the default."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    path = gateway_dir / "gateway-service.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    required_targets = [
+        "platform.lookup", "platform.enterpriseQuery", "platform.correlation",
+        "platform.validation", "platform.threatIntelligence", "platform.provenance",
+        "platform.relationshipResolution", "platform.metrics",
+    ]
+    for target in required_targets:
+        if target not in text:
+            findings.append(
+                f"REUSE BYPASS: gateway-service.js no longer references '{target}' — a pre-registered "
+                f"capability may have stopped delegating to IntelligenceService's own public surface."
+            )
+    return findings
+
+
+def check_eig_contract_version_drift(gateway_dir: Path | None = None) -> list[str]:
+    """Version drift: confirms each of the 4 EIG contracts' declared `version` still matches its
+    own `history` array's last entry, mirroring check_eips_contract_version_drift().
+    `gateway_dir` is overridable for fixture testing; main() always calls with the default."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    path = gateway_dir / "service-contracts.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for contract_name in ["GatewayServiceContract", "MiddlewareContract", "CapabilityRegistryContract", "GatewayMetricsContract"]:
+        block_match = re.search(rf"export const {contract_name} = Object\.freeze\(\{{([\s\S]*?)\n\}}\);", text)
+        if not block_match:
+            findings.append(f"CONTRACT VERSION DRIFT: {contract_name} not found in service-contracts.js in the expected shape")
+            continue
+        versions_in_block = re.findall(r'version:\s*"([\d.]+)"', block_match.group(1))
+        if len(versions_in_block) < 2 or versions_in_block[0] != versions_in_block[-1]:
+            findings.append(f"CONTRACT VERSION DRIFT: {contract_name}'s declared version does not match its own history's last entry")
+    return findings
+
+
+def check_no_duplicate_eig_contracts(handlers_dir: Path | None = None, gateway_dir: Path | None = None) -> list[str]:
+    """Duplicate contracts: confirms no file outside service-contracts.js exports its own copy of
+    the 4 EIG contract constants. `handlers_dir`/`gateway_dir` are overridable for fixture
+    testing; main() always calls with the defaults."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    if not gateway_dir.exists():
+        return findings
+    canonical = gateway_dir / "service-contracts.js"
+    for contract_name in ["GatewayServiceContract", "MiddlewareContract", "CapabilityRegistryContract", "GatewayMetricsContract"]:
+        pattern = re.compile(rf"\bexport\s+const\s+{contract_name}\b")
+        for path in handlers_dir.rglob("*.js"):
+            if path == canonical or path.parent.name == "__tests__":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if pattern.search(text):
+                findings.append(f"DUPLICATE CONTRACT: {_display_path(path)} exports its own '{contract_name}'")
+    return findings
+
+
+def check_no_eig_registry_private_field_bypass(gateway_dir: Path | None = None) -> list[str]:
+    """Registry bypass: confirms no EIG file reaches into GatewayRegistry's/GatewayMetrics's
+    private fields directly (this._entries, this._featureFlagEvaluations, etc.) from outside
+    their own canonical files, instead of calling their public API. `gateway_dir` is overridable
+    for fixture testing; main() always calls with the default."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    if not gateway_dir.exists():
+        return findings
+    private_fields = [
+        "_entries", "_featureFlagEvaluations", "_capabilityAuthorizationDenials",
+        "_middlewareValidationFailures", "_auditEntries",
+    ]
+    for path in gateway_dir.rglob("*.js"):
+        if path.parent.name == "__tests__" or path.name in ("gateway-registry.js", "gateway-metrics.js"):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for field in private_fields:
+            if re.search(rf"\.{field}\b", text):
+                findings.append(
+                    f"REGISTRY BYPASS: {_display_path(path)} references '{field}' directly — "
+                    f"private state must only be touched inside its own canonical class."
+                )
+    return findings
+
+
+def check_gateway_relationship_capability_still_passthrough(gateway_dir: Path | None = None) -> list[str]:
+    """ADR-0010 governance: confirms the evidence.relationships capability still targets
+    RelationshipResolutionService's pass-through-only surface (platform.relationshipResolution)
+    and that gateway-service.js still documents the ADR-0010 gate, mirroring
+    check_intelligence_relationship_still_unwired(). `gateway_dir` is overridable for fixture
+    testing; main() always calls with the default."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    path = gateway_dir / "gateway-service.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if "platform.relationshipResolution" not in text:
+        findings.append(
+            "ADR-0010 GOVERNANCE: gateway-service.js no longer registers evidence.relationships "
+            "against platform.relationshipResolution"
+        )
+    if "ADR-0010" not in text:
+        findings.append("ADR-0010 GOVERNANCE: gateway-service.js no longer documents the ADR-0010 gate on its relationship capability")
+    return findings
+
+
+def check_gateway_validation_middleware_delegates_not_reimplements(gateway_dir: Path | None = None) -> list[str]:
+    """Validation bypass: confirms the intelligence.validation capability still targets
+    IntelligenceValidationService (platform.validation) and that gateway-middleware.js's own
+    validation stage has not grown evidence/intelligence DATA-validation-shaped logic of its
+    own (a reimplementation smell), which would duplicate what IntelligenceValidationService
+    already does. `gateway_dir` is overridable for fixture testing; main() always calls with
+    the default."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    service_path = gateway_dir / "gateway-service.js"
+    middleware_path = gateway_dir / "gateway-middleware.js"
+    if not service_path.exists() or not middleware_path.exists():
+        return findings
+    service_text = service_path.read_text(encoding="utf-8", errors="replace")
+    if "platform.validation" not in service_text:
+        findings.append("VALIDATION BYPASS: gateway-service.js no longer registers intelligence.validation against platform.validation")
+    middleware_text = middleware_path.read_text(encoding="utf-8", errors="replace")
+    for smell in ["reliability_code", "evidence_uuid", "canonical_confidence_object", "related_cves"]:
+        if smell in middleware_text:
+            findings.append(
+                f"VALIDATION BYPASS: gateway-middleware.js references '{smell}' — this looks like "
+                f"evidence/intelligence DATA validation logic, which belongs in "
+                f"IntelligenceValidationService, not gateway-request-shape validation."
+            )
+    return findings
+
+
+def check_eig_metrics_no_duplicate_instance(gateway_dir: Path | None = None) -> list[str]:
+    """Service drift / duplicate metrics instance: confirms EnterpriseGateway's constructor
+    still resolves _platform first, derives serviceMetrics from
+    this._platform.metrics.sharedServiceMetrics (never constructs a fresh ServicePlatformMetrics
+    independently), guards a mismatched explicit deps.serviceMetrics, and threads that one
+    instance into both GatewayMetrics and GatewayDispatcher — the exact bug class the prior,
+    interrupted attempt at this stage found in EIPS ("the metrics instance recording the flag
+    check never actually reaches the returned service") and this stage's own brief names by
+    name. Also confirms GatewayMetrics itself defines no ServicePlatformMetrics-owned private
+    field (no second counter set for anything ServicePlatformMetrics already tracks).
+    (Independently re-verified behaviorally, by instance identity, in
+    enterprise-gateway/__tests__/metrics-sharing.test.js.) `gateway_dir` is overridable for
+    fixture testing; main() always calls with the default."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    service_js = gateway_dir / "gateway-service.js"
+    if not service_js.exists():
+        return findings
+    text = service_js.read_text(encoding="utf-8", errors="replace")
+
+    if not re.search(r"this\._platform\s*=\s*deps\.platform\s*;", text):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: gateway-service.js's EnterpriseGateway constructor no "
+            "longer resolves this._platform from deps.platform first."
+        )
+    if not re.search(
+        r"const\s+serviceMetrics\s*=\s*deps\.serviceMetrics\s*\|\|\s*this\._platform\.metrics\.sharedServiceMetrics",
+        text,
+    ):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: gateway-service.js no longer derives the shared "
+            "serviceMetrics from this._platform.metrics.sharedServiceMetrics -- an injected "
+            "platform's own metrics instance may no longer be honored, silently splitting "
+            "observability in two."
+        )
+    if not re.search(r"this\._platform\.metrics\.sharedServiceMetrics\s*!==\s*serviceMetrics", text):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: gateway-service.js no longer guards against a mismatched "
+            "explicit deps.serviceMetrics + deps.platform combination -- that caller error must "
+            "fail loudly, not silently pick one instance over the other."
+        )
+    if not re.search(r"new\s+GatewayMetrics\(\s*this\._platform\.metrics\s*\)", text):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: gateway-service.js no longer constructs "
+            "'new GatewayMetrics(this._platform.metrics)' -- GatewayMetrics may be losing access "
+            "to the shared instance."
+        )
+    if not re.search(r"serviceMetrics\s*,\s*gatewayMetrics:\s*this\.metrics", text):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: gateway-service.js's GatewayDispatcher construction no "
+            "longer threads the shared serviceMetrics through -- a component may be defaulting "
+            "its own instance instead."
+        )
+
+    metrics_js = gateway_dir / "gateway-metrics.js"
+    if metrics_js.exists():
+        metrics_text = metrics_js.read_text(encoding="utf-8", errors="replace")
+        for field in [
+            "_callCounts", "_callLatenciesMs", "_queryCounts", "_relationshipResolutions",
+            "_provenanceLookups", "_validationFailures", "_contractVersionMismatches",
+        ]:
+            if re.search(rf"this\.{re.escape(field)}\b", metrics_text):
+                findings.append(
+                    f"DUPLICATE METRICS INSTANCE: gateway-metrics.js's GatewayMetrics defines "
+                    f"'{field}' -- already owned by ServicePlatformMetrics."
+                )
+    return findings
+
+
+def check_no_circular_dependency_gateway_intelligence_platform(
+    gateway_dir: Path | None = None,
+    intelligence_platform_dir: Path | None = None,
+    evidence_registry_dir: Path | None = None,
+) -> list[str]:
+    """Circular dependency: confirms the one-directional import rule holds — enterprise-gateway/
+    may import FROM intelligence-platform/ and evidence-registry/, but no intelligence-platform/
+    or evidence-registry/ PRODUCTION file (excluding their own __tests__, which legitimately
+    document Stage 14 by name in their authorized-exception comments — see those files) may
+    import FROM enterprise-gateway/. Directory params are overridable for fixture testing;
+    main() always calls with the defaults."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    intelligence_platform_dir = intelligence_platform_dir or INTELLIGENCE_PLATFORM_DIR
+    evidence_registry_dir = evidence_registry_dir or EVIDENCE_REGISTRY_DIR
+    findings = []
+    if not gateway_dir.exists():
+        return findings
+    for base_dir in [intelligence_platform_dir, evidence_registry_dir]:
+        if not base_dir.exists():
+            continue
+        for path in base_dir.rglob("*.js"):
+            if path.parent.name == "__tests__":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if "enterprise-gateway" in text:
+                findings.append(
+                    f"CIRCULAR DEPENDENCY: {_display_path(path)} references enterprise-gateway/ "
+                    f"— {base_dir.name}/ production files must not import from their own consumer; "
+                    f"this is a one-directional relationship."
+                )
+    return findings
+
+
+def check_gateway_capability_authorization_present(gateway_dir: Path | None = None) -> list[str]:
+    """Governance expansion: confirms GatewayDispatcher still performs a real capability-
+    authorization check (requiredCapabilities vs. grantedCapabilities) before invoking a
+    handler, and still has a dedicated CapabilityAuthorizationError — rather than routing every
+    request unconditionally. No Stage 12/13 precedent for this check: authorization is a
+    capability this stage introduces for the first time. `gateway_dir` is overridable for
+    fixture testing; main() always calls with the default."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    path = gateway_dir / "gateway-dispatcher.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for marker in ["requiredCapabilities", "grantedCapabilities", "CapabilityAuthorizationError"]:
+        if marker not in text:
+            findings.append(
+                f"GOVERNANCE: gateway-dispatcher.js no longer references '{marker}' -- capability "
+                f"authorization may have been removed or bypassed"
+            )
+    return findings
+
+
+def check_gateway_no_network_auth_scope_creep(gateway_dir: Path | None = None) -> list[str]:
+    """Architecture Preservation Rule: confirms this stage's own explicit scope boundary holds —
+    'internal authentication' stays in-process/DI-only (GatewayContext-carried capabilities), not
+    a real network-facing service-identity system, which this stage's own design doc names as a
+    separate, future, explicitly-authorized architectural event. Flags any EIG file that starts
+    reaching for network-auth-shaped primitives (a live fetch handler, Request/Response
+    construction, the existing blunt ADMIN_SECRET shared-secret pattern, or a JWT library) —
+    any of which would be exactly the kind of quiet scope creep this program's Architecture
+    Preservation Rule exists to catch. No Stage 12/13 precedent: this concept doesn't apply to
+    directories that were never even candidates for a network surface. `gateway_dir` is
+    overridable for fixture testing; main() always calls with the default."""
+    gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
+    findings = []
+    if not gateway_dir.exists():
+        return findings
+    forbidden_patterns = {
+        r"addEventListener\(\s*[\"']fetch[\"']": "a live 'fetch' event handler (this stage has no HTTP surface)",
+        r"\bnew\s+Response\(": "constructing a Response (this stage has no HTTP surface)",
+        r"\bnew\s+Request\(": "constructing a Request (this stage has no HTTP surface)",
+        r"\bADMIN_SECRET\b": "the existing blunt shared-secret admin pattern (a separate, future architectural decision, not this stage's)",
+        r"\bjsonwebtoken\b": "a JWT library (network-facing auth is explicitly out of Phase 1 scope)",
+    }
+    for path in gateway_dir.rglob("*.js"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for pattern, description in forbidden_patterns.items():
+            if re.search(pattern, text):
+                findings.append(
+                    f"SCOPE CREEP: {_display_path(path)} references {description} -- this "
+                    f"stage is documented as in-process/DI-only, no network-facing auth."
+                )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -1996,6 +2440,18 @@ def main() -> None:
     all_findings += check_intelligence_validation_delegates_not_reimplements()
     all_findings += check_eips_metrics_no_duplicate_instance()
     all_findings += check_no_circular_dependency_intelligence_evidence_registry()
+    all_findings += check_eig_files_present_and_isolated()
+    all_findings += check_no_duplicate_enterprise_gateway()
+    all_findings += check_gateway_capabilities_delegate_not_reimplement()
+    all_findings += check_eig_contract_version_drift()
+    all_findings += check_no_duplicate_eig_contracts()
+    all_findings += check_no_eig_registry_private_field_bypass()
+    all_findings += check_gateway_relationship_capability_still_passthrough()
+    all_findings += check_gateway_validation_middleware_delegates_not_reimplements()
+    all_findings += check_eig_metrics_no_duplicate_instance()
+    all_findings += check_no_circular_dependency_gateway_intelligence_platform()
+    all_findings += check_gateway_capability_authorization_present()
+    all_findings += check_gateway_no_network_auth_scope_creep()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     if not all_findings:
@@ -2024,7 +2480,16 @@ def main() -> None:
               "EIPS contracts, no registry private-field bypass, correlation-engine.js still "
               "unwired by default, validation service still delegates, exactly one shared "
               "ServicePlatformMetrics instance threaded through every component, no circular "
-              "dependency back into evidence-registry/, all EIPS files present and isolated).")
+              "dependency back into evidence-registry/, all EIPS files present and isolated), "
+              "Enterprise Intelligence Gateway clean (no duplicate gateway/context/registry/"
+              "dispatcher/lifecycle/metrics engines, capabilities still delegate to "
+              "IntelligenceService, no contract version drift, no duplicate EIG contracts, no "
+              "registry private-field bypass, evidence.relationships capability still "
+              "pass-through-only per ADR-0010, validation capability still delegates, exactly "
+              "one shared ServicePlatformMetrics instance threaded through gateway-service.js "
+              "and gateway-metrics.js, no circular dependency back into intelligence-platform/ "
+              "or evidence-registry/, capability authorization present, no network-auth scope "
+              "creep, all EIG files present and isolated).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")
