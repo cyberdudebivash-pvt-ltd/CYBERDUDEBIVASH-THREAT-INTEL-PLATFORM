@@ -60,6 +60,14 @@ an edit, version-conflict masking) rather than static shape checks — there is 
 registry data file to inspect, since nothing is wired live. See
 TITAN_STAGE11_REGISTRY_ARCHITECTURE.md.
 
+Stage 12 built the Enterprise Evidence Service Platform (EESP) on top of Stage 11's registry:
+seven named services, a twelve-dimension query engine, a six-lineage provenance engine, a
+deliberately-scoped relationship resolution contract (no concrete P31 import — ADR-0010 is not
+Accepted), five versioned internal contracts, and service-layer observability — still fully
+inert. Seven more checks cover that stage's own Phase 7 charter: duplicate services, duplicate
+contracts, version drift, registry bypass, relationship bypass, validation bypass, and
+architecture violations. See TITAN_STAGE12_SERVICE_ARCHITECTURE.md.
+
 Checks, in order:
 
   1. Do the tracked ADRs and the discovery/governance docs they depend on still exist?
@@ -130,6 +138,23 @@ Checks, in order:
   33. (Stage 11) Does registerEvidence() still index every record it creates?
   34. (Stage 11) Does the full Stage 11 EER file set exist, and does none of it import a live
       pNN-handlers.js/index.js file?
+
+  35. (Stage 12) Does any file outside evidence-service.js define its own `class
+      EvidenceService` (duplicate service)?
+  36. (Stage 12) Does any file outside service-contracts.js export its own copy of the five
+      named contract constants (duplicate contracts)?
+  37. (Stage 12) Does each of the five contracts' declared `version` still match its own
+      `history` array's last entry (version drift)?
+  38. (Stage 12) Do any Stage 12 files reach into EvidenceRegistry's private fields directly
+      instead of calling its public API (registry bypass)?
+  39. (Stage 12) Does relationship-resolution.js still avoid importing p31-handlers.js (or any
+      live handler/index.js file), and does it still throw rather than silently return empty
+      data when no provider is injected (relationship bypass  -  ADR-0010 is not Accepted)?
+  40. (Stage 12) Does EvidenceValidationService still delegate to registry.validateEvidence()
+      and validation.js's validateEvidenceBatch() rather than reimplementing either
+      (validation bypass)?
+  41. (Stage 12) Does the full Stage 12 EESP file set still exist, and does none of it import
+      a live pNN-handlers.js/index.js file (architecture violations)?
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -1313,6 +1338,227 @@ def check_eer_files_present_and_isolated() -> list[str]:
     return findings
 
 
+# ---------------------------------------------------------------------------------------
+# Stage 12 additions — Enterprise Evidence Service Platform (EESP) governance. Stage 12
+# Phases 1-6 built a service layer on top of Stage 11's registry: seven named services
+# (evidence-service.js), a twelve-dimension query engine (query-engine.js), a six-lineage
+# provenance engine (provenance-engine.js), a deliberately-scoped relationship resolution
+# contract (relationship-resolution.js — no concrete P31 import, since ADR-0010 is not
+# Accepted), five versioned internal contracts (service-contracts.js), and service-layer
+# observability (service-metrics.js) — still fully inert (zero imports from index.js or any
+# pNN-handlers.js). These seven checks cover the categories Phase 7's own charter named:
+# duplicate services, duplicate contracts, version drift, registry bypass, relationship
+# bypass, validation bypass, architecture drift. "Registry bypass" and "relationship bypass"
+# are new categories this script has not needed before Stage 12 — Stage 8-11 only had one
+# thing to avoid bypassing (the eventual live route); Stage 12 introduces a second, internal
+# kind of bypass (reaching around EvidenceRegistry's public API into its private fields, or
+# around relationship-resolution.js's contract into a direct P31 import) that matters even
+# though nothing here is wired live yet. See TITAN_STAGE12_SERVICE_ARCHITECTURE.md.
+# ---------------------------------------------------------------------------------------
+
+EESP_CORE_FILES = [
+    "evidence-service.js",
+    "query-engine.js",
+    "provenance-engine.js",
+    "relationship-resolution.js",
+    "service-contracts.js",
+    "service-metrics.js",
+]
+
+# Private fields only EvidenceRegistry (registry-service.js) itself may access. Any other
+# file under evidence-registry/ referencing these by name is reaching around the registry's
+# public API — Stage 12's own services are built specifically to avoid this (see
+# evidence-service.js's module docstring), so a new file doing it would be a real regression.
+REGISTRY_PRIVATE_FIELDS = ["_repository", "_versionManager", "_indexes", "_metrics", "_lifecycleStates", "_lifecycleAuditTrail"]
+
+
+def check_no_duplicate_evidence_service() -> list[str]:
+    """Duplicate services: confirms evidence-service.js remains the SOLE definer of
+    `class EvidenceService` — the same "one canonical source per capability" property
+    check_no_duplicate_evidence_registry() enforces for the registry, applied here to the
+    service layer ("One Evidence Service")."""
+    findings = []
+    if not EVIDENCE_REGISTRY_DIR.exists():
+        return findings
+    for path in HANDLERS_DIR.rglob("*.js"):
+        if path.parent == EVIDENCE_REGISTRY_DIR and path.name == "evidence-service.js":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if re.search(r"\bclass\s+EvidenceService\b", text):
+            findings.append(
+                f"DUPLICATE SERVICE: {path.relative_to(ROOT)} defines its own "
+                f"'class EvidenceService' — evidence-registry/evidence-service.js is the sole "
+                f"authorized definition (Stage 12 Phase 1, 'One Evidence Service')."
+            )
+    return findings
+
+
+def check_no_duplicate_service_contracts() -> list[str]:
+    """Duplicate contracts: confirms service-contracts.js remains the SOLE definer of each of
+    the five named contract constants — "One Service Layer" implies one contract registry,
+    not five scattered re-declarations."""
+    findings = []
+    if not EVIDENCE_REGISTRY_DIR.exists():
+        return findings
+    contract_names = ["EvidenceServiceContract", "RelationshipContract", "ProvenanceContract", "ValidationContract", "MetricsContract"]
+    for path in HANDLERS_DIR.rglob("*.js"):
+        if path.parent == EVIDENCE_REGISTRY_DIR and path.name == "service-contracts.js":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for name in contract_names:
+            if re.search(rf"\bexport\s+const\s+{name}\b", text):
+                findings.append(
+                    f"DUPLICATE CONTRACT: {path.relative_to(ROOT)} exports its own "
+                    f"'{name}' — evidence-registry/service-contracts.js is the sole authorized "
+                    f"definition."
+                )
+    return findings
+
+
+def check_contract_version_drift() -> list[str]:
+    """Version drift: confirms each of the five contracts' declared `version` field matches
+    the last entry in its own `history` array — the same kind of "declared version must match
+    the version history's own last entry" property check_cec_schema_version_intact() verifies
+    for the Evidence schema, applied here to Stage 12's five service contracts."""
+    findings = []
+    contracts_js = EVIDENCE_REGISTRY_DIR / "service-contracts.js"
+    if not contracts_js.exists():
+        return findings
+    text = contracts_js.read_text(encoding="utf-8", errors="replace")
+    # Each contract block: name: "X", version: "1.0.0", ... history: Object.freeze([ ... ]),
+    for match in re.finditer(
+        r'name:\s*"([^"]+)",\s*version:\s*"([^"]+)".*?history:\s*Object\.freeze\(\[(.*?)\]\),\s*\}\);',
+        text,
+        re.DOTALL,
+    ):
+        contract_name, declared_version, history_block = match.groups()
+        history_versions = re.findall(r'version:\s*"([^"]+)"', history_block)
+        if not history_versions:
+            findings.append(f"VERSION DRIFT: {contract_name}'s history block has no parseable version entries.")
+            continue
+        if history_versions[-1] != declared_version:
+            findings.append(
+                f"VERSION DRIFT: {contract_name}'s declared version \"{declared_version}\" does not "
+                f"match its own history array's last entry \"{history_versions[-1]}\"."
+            )
+    return findings
+
+
+def check_no_registry_private_field_bypass() -> list[str]:
+    """Registry bypass: confirms none of Stage 12's new files reach into EvidenceRegistry's
+    private fields (_repository, _versionManager, _indexes, _metrics, _lifecycleStates,
+    _lifecycleAuditTrail) directly. Every Stage 12 service is designed to call only
+    EvidenceRegistry's public methods (see evidence-service.js's module docstring) — reaching
+    around that public API would risk exactly the kind of divergent-state bug two separate
+    EvidenceVersionManager instances over two different repository instances would produce."""
+    findings = []
+    if not EVIDENCE_REGISTRY_DIR.exists():
+        return findings
+    for filename in EESP_CORE_FILES:
+        path = EVIDENCE_REGISTRY_DIR / filename
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for field in REGISTRY_PRIVATE_FIELDS:
+            if re.search(rf"registry\.{field}\b", text) or re.search(rf"_registry\.{field}\b", text):
+                findings.append(
+                    f"REGISTRY BYPASS: {filename} references EvidenceRegistry's private field "
+                    f"'{field}' directly — Stage 12 services must call only EvidenceRegistry's "
+                    f"public methods, per this stage's own design discipline."
+                )
+    return findings
+
+
+def check_relationship_resolution_still_unwired() -> list[str]:
+    """Relationship bypass: confirms relationship-resolution.js still does not import
+    p31-handlers.js (or any pNN-handlers.js/index.js file) directly — the specific,
+    highest-risk file this stage's own module docstring names, since ADR-0010 (Relationship
+    Graph Ownership) is not Accepted. This is the same zero-blast-radius property
+    check_eer_files_present_and_isolated() enforces for the full EER file set, verified here
+    as its own named check specifically because this file is the one place a future edit is
+    most likely to "helpfully" wire in a real P31 import without re-checking ADR-0010's
+    status first."""
+    findings = []
+    path = EVIDENCE_REGISTRY_DIR / "relationship-resolution.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if re.search(r'(?:from|require\()\s*["\'][^"\']*(?:p31-handlers|-handlers(?:\.js)?|/index\.js)["\']', text):
+        findings.append(
+            "RELATIONSHIP BYPASS: relationship-resolution.js imports a pNN-handlers.js or "
+            "index.js file directly — ADR-0010 (Relationship Graph Ownership) is not Accepted; "
+            "this file must remain a consumption contract only until it is. See "
+            "TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md."
+        )
+    if "NullRelationshipProvider" not in text or "NOT_WIRED" not in text:
+        findings.append(
+            "RELATIONSHIP BYPASS: relationship-resolution.js no longer has an explicit "
+            "unwired-by-default provider that throws rather than silently returning empty "
+            "data — this was the specific safeguard against ADR-0010's Proposed status being "
+            "worked around by accident."
+        )
+    return findings
+
+
+def check_validation_service_delegates_not_reimplements() -> list[str]:
+    """Validation bypass: confirms EvidenceValidationService still calls through to
+    registry.validateEvidence() and validation.js's validateEvidenceBatch() rather than
+    reimplementing any check inline — "One Validation Pipeline" (Stage 12's own architectural
+    principle) means Stage 10's validation.js remains the only place validation rules live."""
+    findings = []
+    service_js = EVIDENCE_REGISTRY_DIR / "evidence-service.js"
+    if not service_js.exists():
+        return findings
+    text = service_js.read_text(encoding="utf-8", errors="replace")
+    if "this._registry.validateEvidence" not in text:
+        findings.append(
+            "VALIDATION BYPASS: evidence-service.js's EvidenceValidationService no longer "
+            "delegates to registry.validateEvidence() — it may be reimplementing validation "
+            "logic inline, violating 'One Validation Pipeline'."
+        )
+    if "validateEvidenceBatch" not in text:
+        findings.append(
+            "VALIDATION BYPASS: evidence-service.js no longer references validation.js's "
+            "validateEvidenceBatch — EvidenceValidationService.validateBatch() must delegate "
+            "to it, not reimplement duplicate-identifier/version-conflict checking."
+        )
+    return findings
+
+
+def check_eesp_files_present_and_isolated() -> list[str]:
+    """Architecture violations: confirms every Stage 12 EESP file still exists (Deprecation
+    Instead of Deletion) and that none of them imports a live pNN-handlers.js/index.js file —
+    the same zero-blast-radius property check_eer_files_present_and_isolated() enforces for
+    Stage 11, extended to the full Stage 12 file set."""
+    findings = []
+    if not EVIDENCE_REGISTRY_DIR.exists():
+        return findings
+    for filename in EESP_CORE_FILES:
+        path = EVIDENCE_REGISTRY_DIR / filename
+        if not path.exists():
+            findings.append(
+                f"ARCHITECTURE VIOLATION: evidence-registry/{filename} is missing — Stage 12 "
+                f"requires it (see TITAN_STAGE12_SERVICE_ARCHITECTURE.md). If intentionally "
+                f"removed, that is a breaking change requiring the Deprecation Instead of "
+                f"Deletion protocol, not silent removal."
+            )
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r'(?:from|require\()\s*["\'][^"\']*(?:-handlers(?:\.js)?|/index\.js)["\']', text):
+            findings.append(
+                f"ARCHITECTURE VIOLATION: evidence-registry/{filename} imports a pNN-handlers.js "
+                f"or index.js file directly — this breaks the zero-blast-radius property every "
+                f"file in this directory is required to maintain."
+            )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -1349,6 +1595,13 @@ def main() -> None:
     all_findings += check_supersession_stamps_superseded_at()
     all_findings += check_registration_always_indexes_evidence()
     all_findings += check_eer_files_present_and_isolated()
+    all_findings += check_no_duplicate_evidence_service()
+    all_findings += check_no_duplicate_service_contracts()
+    all_findings += check_contract_version_drift()
+    all_findings += check_no_registry_private_field_bypass()
+    all_findings += check_relationship_resolution_still_unwired()
+    all_findings += check_validation_service_delegates_not_reimplements()
+    all_findings += check_eesp_files_present_and_isolated()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     if not all_findings:
@@ -1367,7 +1620,11 @@ def main() -> None:
               "arithmetic safe, lifecycle terminal states intact, evidence-duplication guard "
               "intact, indexes reindexed on mutation, relationship fields/indexes in sync, "
               "supersession stamps superseded_at, registration always indexes evidence, all "
-              "EER files present and isolated).")
+              "EER files present and isolated), Enterprise Evidence Service Platform clean "
+              "(no duplicate service, no duplicate contracts, no contract version drift, no "
+              "registry private-field bypass, relationship-resolution.js still unwired by "
+              "default, validation service still delegates rather than reimplements, all "
+              "EESP files present and isolated).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")
