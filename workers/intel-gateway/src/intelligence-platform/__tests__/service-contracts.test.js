@@ -6,21 +6,28 @@ import {
   QueryContract,
   CorrelationContract,
   ProvenanceContract,
-  ValidationContract,
-  MetricsContract,
+  IntelligenceValidationContract,
+  IntelligenceMetricsContract,
   isContractForwardCompatible,
   checkContractCompatibility,
 } from "../service-contracts.js";
-import { isContractForwardCompatible as evidenceRegistryVersion } from "../../evidence-registry/service-contracts.js";
+import {
+  isContractForwardCompatible as evidenceRegistryVersion,
+  ProvenanceContract as evidenceRegistryProvenanceContract,
+} from "../../evidence-registry/service-contracts.js";
 
-test("all six named contracts are present in ALL_EIPS_CONTRACTS, no duplicates", () => {
+test("all six named contracts are present in ALL_EIPS_CONTRACTS, no duplicates, all names globally unique", () => {
   assert.equal(ALL_EIPS_CONTRACTS.length, 6);
   const names = ALL_EIPS_CONTRACTS.map((c) => c.name);
   assert.equal(new Set(names).size, 6, "no duplicate contract names");
   assert.deepEqual(
     new Set(names),
-    new Set(["IntelligenceServiceContract", "QueryContract", "CorrelationContract", "ProvenanceContract", "ValidationContract", "MetricsContract"])
+    new Set(["IntelligenceServiceContract", "QueryContract", "CorrelationContract", "ProvenanceContract", "IntelligenceValidationContract", "IntelligenceMetricsContract"])
   );
+});
+
+test("ProvenanceContract is Stage 12's exact object, re-exported rather than redefined (identity check, not just equal shape)", () => {
+  assert.equal(ProvenanceContract, evidenceRegistryProvenanceContract);
 });
 
 test("every contract is frozen (immutable) at every level -- name, methods, history", () => {
@@ -40,14 +47,14 @@ test("QueryContract documents all 12 brief dimensions, including the 3 gap-only 
 
 test("ProvenanceContract's method surface is identical to Stage 12's, by design (Phase 4 fully satisfied via reuse)", () => {
   assert.equal(ProvenanceContract.methods.length, 6);
-  assert.ok(ProvenanceContract.source.includes("evidence-registry/provenance-engine.js"));
+  assert.ok(ProvenanceContract.source.includes("provenance-engine.js"));
 });
 
 test("CorrelationContract and IntelligenceServiceContract declare non-empty method lists", () => {
   assert.ok(CorrelationContract.methods.length > 0);
   assert.ok(IntelligenceServiceContract.methods.length > 0);
-  assert.ok(ValidationContract.methods.includes("IntelligenceValidationService.validateIntelligenceBundle"));
-  assert.ok(MetricsContract.methods.includes("ServicePlatformMetrics.snapshot"));
+  assert.ok(IntelligenceValidationContract.methods.includes("IntelligenceValidationService.validateIntelligenceBundle"));
+  assert.ok(IntelligenceMetricsContract.methods.includes("ServicePlatformMetrics.snapshot"));
 });
 
 test("this module's exported compatibility functions are Stage 12's own, re-exported (identity check -- proves reuse, not a parallel reimplementation)", () => {

@@ -372,9 +372,25 @@ def check_evidence_registry_scaffolding_boundary() -> list[str]:
     if not scaffold_dir.exists():
         return findings  # scaffolding not present yet — nothing to guard
 
-    # 1. Nothing outside evidence-registry/ may import from it yet.
+    # Stage 13: intelligence-platform/ is the first explicitly-authorized consumer of this
+    # scaffolding (its own brief requires composing EvidenceService/EvidenceQueryEngine/
+    # EvidenceProvenanceEngine/RelationshipResolutionService — see
+    # TITAN_STAGE13_SERVICE_ARCHITECTURE.md). This does not weaken what check 1 below actually
+    # protects: evidence-registry/ still must not be reachable from index.js or any
+    # pNN-handlers.js file — see check_eips_files_present_and_isolated() and
+    # check_no_circular_dependency_intelligence_evidence_registry() below, plus
+    # intelligence-platform/__tests__/zero-blast-radius.test.js's independent Node-side
+    # verification of the same property. Exempting this one named, documented directory --
+    # rather than relaxing the check generally -- keeps it able to catch any OTHER,
+    # unauthorized reference. Mirrors the identical, symmetric fix already applied to
+    # evidence-registry/__tests__/zero-blast-radius.test.js.
+    authorized_consumer_dirs = [HANDLERS_DIR / "intelligence-platform"]
+
+    # 1. Nothing outside evidence-registry/ (or an authorized consumer) may import from it.
     for path in HANDLERS_DIR.rglob("*.js"):
         if scaffold_dir in path.parents or path.parent == scaffold_dir:
+            continue
+        if any(consumer_dir in path.parents or path.parent == consumer_dir for consumer_dir in authorized_consumer_dirs):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         if "evidence-registry" in text:
@@ -1559,6 +1575,334 @@ def check_eesp_files_present_and_isolated() -> list[str]:
     return findings
 
 
+# ---------------------------------------------------------------------------------------
+# Stage 13 additions — Enterprise Intelligence Platform Services (EIPS) governance. Stage 13
+# Phases 1-7 built workers/intel-gateway/src/intelligence-platform/, an orchestration layer
+# composing Stage 12's EESP (evidence-registry/evidence-service.js, query-engine.js,
+# provenance-engine.js, relationship-resolution.js) — still fully inert (zero imports from
+# index.js or any pNN-handlers.js). Ten checks cover this stage's own Phase 8 charter: duplicate
+# services/orchestration, duplicate query logic, registry bypass, validation bypass, contract
+# drift, circular dependencies, architecture drift, plus a dedicated regression guard for the
+# single-shared-ServicePlatformMetrics-instance property — the specific "metrics propagation
+# bug" the interrupted prior attempt at this stage found (see the resume brief's Task 4) before
+# losing the fix along with everything else uncommitted when it hit a usage limit. Codifying
+# that exact bug class as a standing check, the same way check_version_field_falsy_zero_
+# regression() guards Stage 10's own found-and-fixed bug, is cheap insurance against
+# reintroducing it. See TITAN_STAGE13_SERVICE_ARCHITECTURE.md.
+# ---------------------------------------------------------------------------------------
+
+INTELLIGENCE_PLATFORM_DIR = HANDLERS_DIR / "intelligence-platform"
+
+EIPS_CORE_FILES = [
+    "intelligence-service.js",
+    "query-service.js",
+    "correlation-engine.js",
+    "platform.js",
+    "service-contracts.js",
+    "feature-flags.js",
+]
+
+
+def check_eips_files_present_and_isolated() -> list[str]:
+    """Architecture violations: confirms every Stage 13 EIPS file still exists (Deprecation
+    Instead of Deletion — no silent removal) and that none of them imports a live
+    pNN-handlers.js/index.js file directly — the same zero-blast-radius property
+    check_eesp_files_present_and_isolated() enforces for Stage 12, extended to Stage 13's file
+    set. (Independently re-verified from the Node side by
+    intelligence-platform/__tests__/zero-blast-radius.test.js, so this property is checkable
+    from either toolchain without depending on the other.)"""
+    findings = []
+    if not INTELLIGENCE_PLATFORM_DIR.exists():
+        return findings
+    for filename in EIPS_CORE_FILES:
+        path = INTELLIGENCE_PLATFORM_DIR / filename
+        if not path.exists():
+            findings.append(
+                f"ARCHITECTURE VIOLATION: intelligence-platform/{filename} is missing — Stage 13 "
+                f"requires it (see TITAN_STAGE13_SERVICE_ARCHITECTURE.md). If intentionally "
+                f"removed, that is a breaking change requiring the Deprecation Instead of "
+                f"Deletion protocol, not silent removal."
+            )
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r'(?:from|require\()\s*["\'][^"\']*(?:-handlers(?:\.js)?|/index\.js)["\']', text):
+            findings.append(
+                f"ARCHITECTURE VIOLATION: intelligence-platform/{filename} imports a "
+                f"pNN-handlers.js or index.js file directly — this breaks the zero-blast-radius "
+                f"property every file in this directory is required to maintain."
+            )
+    return findings
+
+
+def check_no_duplicate_intelligence_service() -> list[str]:
+    """Duplicate services / duplicate orchestration: confirms intelligence-service.js remains
+    the SOLE definer of `class IntelligenceService` (the Phase 1 facade) and
+    `class ThreatIntelligenceService` — mirrors check_no_duplicate_evidence_service() one layer
+    up."""
+    findings = []
+    if not INTELLIGENCE_PLATFORM_DIR.exists():
+        return findings
+    for path in HANDLERS_DIR.rglob("*.js"):
+        if path.parent == INTELLIGENCE_PLATFORM_DIR and path.name == "intelligence-service.js":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for class_name in ("IntelligenceService", "ThreatIntelligenceService"):
+            if re.search(rf"\bclass\s+{class_name}\b", text):
+                findings.append(
+                    f"DUPLICATE SERVICE: {path.relative_to(ROOT)} defines its own "
+                    f"'class {class_name}' — intelligence-platform/intelligence-service.js is "
+                    f"the sole authorized definition (Stage 13 Phase 1)."
+                )
+    return findings
+
+
+def check_no_duplicate_query_logic() -> list[str]:
+    """Duplicate query logic / query bypass: confirms query-service.js remains the SOLE definer
+    of `class EnterpriseQueryService`, AND that its nine covered-dimension methods still
+    delegate to `this._queryEngine.lookupBy*` rather than reimplementing a lookup inline —
+    "One Query Engine" (Stage 12's own principle) applies transitively: Stage 13 must compose
+    EvidenceQueryEngine, not grow a second query implementation next to it."""
+    findings = []
+    query_service_js = INTELLIGENCE_PLATFORM_DIR / "query-service.js"
+    if not query_service_js.exists():
+        return findings
+    text = query_service_js.read_text(encoding="utf-8", errors="replace")
+
+    for path in HANDLERS_DIR.rglob("*.js"):
+        if path == query_service_js:
+            continue
+        try:
+            other_text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if re.search(r"\bclass\s+EnterpriseQueryService\b", other_text):
+            findings.append(
+                f"DUPLICATE SERVICE: {path.relative_to(ROOT)} defines its own "
+                f"'class EnterpriseQueryService' — intelligence-platform/query-service.js is "
+                f"the sole authorized definition (Stage 13 Phase 2)."
+            )
+
+    covered_dimension_calls = [
+        "this._queryEngine.lookupByUuid", "this._queryEngine.lookupByReport",
+        "this._queryEngine.lookupByCve", "this._queryEngine.lookupByThreatActor",
+        "this._queryEngine.lookupByCampaign", "this._queryEngine.lookupByIoc",
+        "this._queryEngine.lookupByConfidence", "this._queryEngine.lookupBySource",
+        "this._queryEngine.lookupByAttackTechnique",
+    ]
+    for call in covered_dimension_calls:
+        if call not in text:
+            findings.append(
+                f"QUERY BYPASS: query-service.js no longer calls '{call}' — EnterpriseQueryService's "
+                f"covered dimensions must delegate to EvidenceQueryEngine, not reimplement lookup logic."
+            )
+    return findings
+
+
+def check_eips_contract_version_drift() -> list[str]:
+    """Contract drift: confirms each of Stage 13's six contracts' declared `version` field
+    matches the last entry in its own `history` array — mirrors
+    check_contract_version_drift() (Stage 12), same regex/algorithm, different file."""
+    findings = []
+    contracts_js = INTELLIGENCE_PLATFORM_DIR / "service-contracts.js"
+    if not contracts_js.exists():
+        return findings
+    text = contracts_js.read_text(encoding="utf-8", errors="replace")
+    for match in re.finditer(
+        r'name:\s*"([^"]+)",\s*version:\s*"([^"]+)".*?history:\s*Object\.freeze\(\[(.*?)\]\),\s*\}\);',
+        text,
+        re.DOTALL,
+    ):
+        contract_name, declared_version, history_block = match.groups()
+        history_versions = re.findall(r'version:\s*"([^"]+)"', history_block)
+        if not history_versions:
+            findings.append(f"VERSION DRIFT: {contract_name}'s history block has no parseable version entries.")
+            continue
+        if history_versions[-1] != declared_version:
+            findings.append(
+                f"VERSION DRIFT: {contract_name}'s declared version \"{declared_version}\" does not "
+                f"match its own history array's last entry \"{history_versions[-1]}\"."
+            )
+    return findings
+
+
+def check_no_duplicate_eips_contracts() -> list[str]:
+    """Duplicate contracts: confirms intelligence-platform/service-contracts.js remains the SOLE
+    `const`-definer of each of Stage 13's five genuinely-new contract constants.
+    ProvenanceContract is deliberately excluded from this name list: Stage 13 imports and
+    re-exports Stage 12's ProvenanceContract UNCHANGED (`export { ProvenanceContract } from
+    "../evidence-registry/service-contracts.js"`, not `export const`) rather than defining a
+    second one, so it correctly never matches this check's `export\\s+const` pattern in either
+    file — see service-contracts.js's own module docstring for why. The other two Stage 12
+    names this would otherwise collide with (ValidationContract, MetricsContract) were
+    deliberately renamed to IntelligenceValidationContract/IntelligenceMetricsContract for
+    exactly this reason."""
+    findings = []
+    if not INTELLIGENCE_PLATFORM_DIR.exists():
+        return findings
+    contract_names = ["IntelligenceServiceContract", "QueryContract", "CorrelationContract", "IntelligenceValidationContract", "IntelligenceMetricsContract"]
+    for path in HANDLERS_DIR.rglob("*.js"):
+        if path.parent == INTELLIGENCE_PLATFORM_DIR and path.name == "service-contracts.js":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for name in contract_names:
+            if re.search(rf"\bexport\s+const\s+{name}\b", text):
+                findings.append(
+                    f"DUPLICATE CONTRACT: {path.relative_to(ROOT)} exports its own '{name}' — "
+                    f"intelligence-platform/service-contracts.js is the sole authorized definition."
+                )
+    return findings
+
+
+def check_no_eips_registry_private_field_bypass() -> list[str]:
+    """Registry bypass: confirms none of Stage 13's files reach into EvidenceRegistry's private
+    fields directly — same REGISTRY_PRIVATE_FIELDS list check_no_registry_private_field_bypass()
+    (Stage 12) already governs for evidence-registry/'s own files, extended here to Stage 13's
+    directory since Stage 13 also holds registry references (via EvidenceService.registry)."""
+    findings = []
+    if not INTELLIGENCE_PLATFORM_DIR.exists():
+        return findings
+    for filename in EIPS_CORE_FILES:
+        path = INTELLIGENCE_PLATFORM_DIR / filename
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for field in REGISTRY_PRIVATE_FIELDS:
+            if re.search(rf"registry\.{field}\b", text) or re.search(rf"_registry\.{field}\b", text) or re.search(rf"_evidenceService\.{field}\b", text):
+                findings.append(
+                    f"REGISTRY BYPASS: {filename} references EvidenceRegistry's private field "
+                    f"'{field}' directly — Stage 13 services must call only EvidenceRegistry's "
+                    f"and EvidenceService's public methods."
+                )
+    return findings
+
+
+def check_intelligence_relationship_still_unwired() -> list[str]:
+    """Dependency violation / relationship bypass: confirms correlation-engine.js still does not
+    import p31-handlers.js (or any pNN-handlers.js/index.js file) directly, and still has no
+    hardcoded relationship-graph logic of its own — mirrors
+    check_relationship_resolution_still_unwired() (Stage 12) one layer up, since Stage 13's
+    correlateByRelationship() is required to stay a pass-through to Stage 12's
+    RelationshipResolutionService per this stage's own Special Governance Rule (ADR-0010 not
+    Accepted)."""
+    findings = []
+    path = INTELLIGENCE_PLATFORM_DIR / "correlation-engine.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if re.search(r'(?:from|require\()\s*["\'][^"\']*(?:p31-handlers|-handlers(?:\.js)?|/index\.js)["\']', text):
+        findings.append(
+            "RELATIONSHIP BYPASS: correlation-engine.js imports a pNN-handlers.js or index.js "
+            "file directly — ADR-0010 (Relationship Graph Ownership) is not Accepted; "
+            "correlateByRelationship() must remain a pass-through to Stage 12's "
+            "RelationshipResolutionService until it is. See TITAN_ARCHITECTURE_ACCEPTANCE_RECORD.md."
+        )
+    if "ADR-0010" not in text or "resolveRelationships" not in text:
+        findings.append(
+            "RELATIONSHIP BYPASS: correlation-engine.js no longer references ADR-0010's gating "
+            "status or RelationshipResolutionService.resolveRelationships() — it may have grown "
+            "independent relationship logic."
+        )
+    return findings
+
+
+def check_intelligence_validation_delegates_not_reimplements() -> list[str]:
+    """Validation bypass: confirms IntelligenceValidationService still calls through to
+    EvidenceValidationService's validateEvidence()/validateBatch() rather than reimplementing
+    any check inline — mirrors check_validation_service_delegates_not_reimplements() (Stage 12)
+    one layer up."""
+    findings = []
+    service_js = INTELLIGENCE_PLATFORM_DIR / "intelligence-service.js"
+    if not service_js.exists():
+        return findings
+    text = service_js.read_text(encoding="utf-8", errors="replace")
+    if "this._evidenceValidation.validateEvidence" not in text:
+        findings.append(
+            "VALIDATION BYPASS: intelligence-service.js's IntelligenceValidationService no "
+            "longer delegates to EvidenceValidationService.validateEvidence() — it may be "
+            "reimplementing validation logic inline."
+        )
+    if "this._evidenceValidation.validateBatch" not in text:
+        findings.append(
+            "VALIDATION BYPASS: intelligence-service.js's IntelligenceValidationService no "
+            "longer delegates to EvidenceValidationService.validateBatch()."
+        )
+    return findings
+
+
+def check_eips_metrics_no_duplicate_instance() -> list[str]:
+    """Service drift / duplicate metrics instance: confirms IntelligenceService's constructor
+    still builds exactly ONE ServicePlatformMetrics instance and threads it into every Stage 12
+    component it constructs (EvidenceService, EvidenceQueryEngine, EvidenceProvenanceEngine,
+    RelationshipResolutionService) rather than letting any of them default their own — this is
+    the specific bug class the prior, interrupted attempt at this stage found ("the metrics
+    instance recording the flag check never actually reaches the returned service") and lost
+    before committing a fix. Also confirms IntelligenceMetricsService itself defines no second
+    counter object (e.g. `this._callCounts`) — it must remain a passthrough view, per
+    intelligence-service.js's own module docstring. (Independently re-verified behaviorally, by
+    instance identity, in intelligence-platform/__tests__/metrics-sharing.test.js.)"""
+    findings = []
+    service_js = INTELLIGENCE_PLATFORM_DIR / "intelligence-service.js"
+    if not service_js.exists():
+        return findings
+    text = service_js.read_text(encoding="utf-8", errors="replace")
+
+    if not re.search(r"const\s+serviceMetrics\s*=\s*deps\.serviceMetrics\s*\|\|\s*new\s+ServicePlatformMetrics\(\)", text):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: intelligence-service.js's IntelligenceService "
+            "constructor no longer builds exactly one ServicePlatformMetrics instance up front — "
+            "verify every Stage 12/13 component it constructs still receives that SAME instance."
+        )
+    for constructor_call in [
+        "new EvidenceService({ serviceMetrics })",
+        "new EvidenceQueryEngine(this._evidenceService.registry, serviceMetrics)",
+        "new EvidenceProvenanceEngine(this._evidenceService.registry, serviceMetrics)",
+        "new RelationshipResolutionService({ metrics: serviceMetrics })",
+    ]:
+        if constructor_call not in text:
+            findings.append(
+                f"DUPLICATE METRICS INSTANCE: intelligence-service.js no longer contains "
+                f"'{constructor_call}' — a component may be defaulting its own "
+                f"ServicePlatformMetrics instance instead of sharing the one IntelligenceService "
+                f"already built, silently splitting observability in two."
+            )
+    if re.search(r"class\s+IntelligenceMetricsService\b[\s\S]*?_callCounts", text):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: IntelligenceMetricsService appears to define its own "
+            "counter state (_callCounts) — it must remain a passthrough over the shared "
+            "ServicePlatformMetrics instance's own snapshot(), not a second counter set."
+        )
+    return findings
+
+
+def check_no_circular_dependency_intelligence_evidence_registry() -> list[str]:
+    """Circular dependency: confirms the one-directional import rule holds — intelligence-
+    platform/ may import FROM evidence-registry/, but no evidence-registry/ PRODUCTION file
+    (i.e. excluding its own __tests__, which legitimately documents Stage 13 by name in its
+    authorized-exception comment — see that file) may import FROM intelligence-platform/. Same
+    direction P-layers themselves are required to import in (lower layers never import higher
+    ones)."""
+    findings = []
+    if not EVIDENCE_REGISTRY_DIR.exists() or not INTELLIGENCE_PLATFORM_DIR.exists():
+        return findings
+    for path in EVIDENCE_REGISTRY_DIR.rglob("*.js"):
+        if path.parent.name == "__tests__":
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "intelligence-platform" in text:
+            findings.append(
+                f"CIRCULAR DEPENDENCY: {path.relative_to(ROOT)} references intelligence-platform/ "
+                f"— evidence-registry/ production files must not import from their own consumer; "
+                f"this is a one-directional relationship."
+            )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -1602,6 +1946,16 @@ def main() -> None:
     all_findings += check_relationship_resolution_still_unwired()
     all_findings += check_validation_service_delegates_not_reimplements()
     all_findings += check_eesp_files_present_and_isolated()
+    all_findings += check_eips_files_present_and_isolated()
+    all_findings += check_no_duplicate_intelligence_service()
+    all_findings += check_no_duplicate_query_logic()
+    all_findings += check_eips_contract_version_drift()
+    all_findings += check_no_duplicate_eips_contracts()
+    all_findings += check_no_eips_registry_private_field_bypass()
+    all_findings += check_intelligence_relationship_still_unwired()
+    all_findings += check_intelligence_validation_delegates_not_reimplements()
+    all_findings += check_eips_metrics_no_duplicate_instance()
+    all_findings += check_no_circular_dependency_intelligence_evidence_registry()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     if not all_findings:
@@ -1624,7 +1978,13 @@ def main() -> None:
               "(no duplicate service, no duplicate contracts, no contract version drift, no "
               "registry private-field bypass, relationship-resolution.js still unwired by "
               "default, validation service still delegates rather than reimplements, all "
-              "EESP files present and isolated).")
+              "EESP files present and isolated), Enterprise Intelligence Platform Services "
+              "clean (no duplicate IntelligenceService/ThreatIntelligenceService, no duplicate "
+              "EnterpriseQueryService or query bypass, no contract version drift, no duplicate "
+              "EIPS contracts, no registry private-field bypass, correlation-engine.js still "
+              "unwired by default, validation service still delegates, exactly one shared "
+              "ServicePlatformMetrics instance threaded through every component, no circular "
+              "dependency back into evidence-registry/, all EIPS files present and isolated).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")

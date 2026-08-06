@@ -3,17 +3,35 @@
  * (Project TITAN). Not imported by index.js or any production route. See README.md.
  *
  * Six versioned internal contracts (IntelligenceServiceContract, QueryContract,
- * CorrelationContract, ProvenanceContract, ValidationContract, MetricsContract) --
- * documentation-as-data describing each Stage 13 service's public method surface, exactly
- * mirroring evidence-registry/service-contracts.js's (Stage 12) pattern and format.
+ * CorrelationContract, ProvenanceContract, IntelligenceValidationContract,
+ * IntelligenceMetricsContract) -- documentation-as-data describing each Stage 13 service's
+ * public method surface, exactly mirroring evidence-registry/service-contracts.js's (Stage 12)
+ * pattern and format.
  *
  * Reuses isContractForwardCompatible()/checkContractCompatibility() from Stage 12's
  * service-contracts.js UNCHANGED rather than redefining them -- those two functions are
  * already generic over any {history, version} shape, not specific to Stage 12's five
  * contracts, so there is nothing here to duplicate, only reuse.
+ *
+ * Naming note: two of Stage 12's five contract names (ValidationContract, MetricsContract)
+ * would collide as identifiers with genuinely different Stage 13 contracts of the same
+ * conceptual shape but different method surface -- prefixed Intelligence* here to keep every
+ * contract name globally unique across the platform (governance's
+ * check_no_duplicate_eips_contracts()/check_no_duplicate_service_contracts() both verify this).
+ * ProvenanceContract is the third case, but resolved the other way: Stage 13 Phase 4 adds zero
+ * new provenance code (see intelligence-service.js's IntelligenceService.provenance property
+ * docs), so rather than mint a second, identical contract under a different name, this module
+ * imports and re-exports Stage 12's ProvenanceContract UNCHANGED below -- one contract, one
+ * name, reused.
  */
 
-export { isContractForwardCompatible, checkContractCompatibility } from "../evidence-registry/service-contracts.js";
+import {
+  isContractForwardCompatible,
+  checkContractCompatibility,
+  ProvenanceContract,
+} from "../evidence-registry/service-contracts.js";
+
+export { isContractForwardCompatible, checkContractCompatibility, ProvenanceContract };
 
 export const IntelligenceServiceContract = Object.freeze({
   name: "IntelligenceServiceContract",
@@ -78,30 +96,8 @@ export const CorrelationContract = Object.freeze({
   ]),
 });
 
-export const ProvenanceContract = Object.freeze({
-  name: "ProvenanceContract",
-  version: "1.0.0",
-  source: "evidence-registry/provenance-engine.js (Stage 12, reused directly -- Stage 13 introduces no new provenance code; see intelligence-service.js's IntelligenceService.provenance property docs)",
-  methods: Object.freeze([
-    "EvidenceProvenanceEngine.getEvidenceLineage", "EvidenceProvenanceEngine.getVersionLineage",
-    "EvidenceProvenanceEngine.getRelationshipLineage", "EvidenceProvenanceEngine.getConfidenceLineage",
-    "EvidenceProvenanceEngine.getSourceLineage", "EvidenceProvenanceEngine.getAuditLineage",
-  ]),
-  history: Object.freeze([
-    Object.freeze({
-      version: "1.0.0",
-      change:
-        "Initial contract (Stage 13 Phase 4/5). Identical method surface to Stage 12's " +
-        "ProvenanceContract by design -- Phase 4's brief-named kinds (evidence/version/source/" +
-        "confidence/audit) are fully covered by the existing engine, so this contract documents " +
-        "reuse rather than a new implementation.",
-      backwardCompatibleWithPrevious: null,
-    }),
-  ]),
-});
-
-export const ValidationContract = Object.freeze({
-  name: "ValidationContract",
+export const IntelligenceValidationContract = Object.freeze({
+  name: "IntelligenceValidationContract",
   version: "1.0.0",
   source: "intelligence-service.js",
   methods: Object.freeze([
@@ -113,8 +109,8 @@ export const ValidationContract = Object.freeze({
   ]),
 });
 
-export const MetricsContract = Object.freeze({
-  name: "MetricsContract",
+export const IntelligenceMetricsContract = Object.freeze({
+  name: "IntelligenceMetricsContract",
   version: "1.0.0",
   source: "intelligence-service.js + evidence-registry/service-metrics.js (single shared ServicePlatformMetrics instance)",
   methods: Object.freeze([
@@ -137,6 +133,6 @@ export const ALL_EIPS_CONTRACTS = Object.freeze([
   QueryContract,
   CorrelationContract,
   ProvenanceContract,
-  ValidationContract,
-  MetricsContract,
+  IntelligenceValidationContract,
+  IntelligenceMetricsContract,
 ]);
