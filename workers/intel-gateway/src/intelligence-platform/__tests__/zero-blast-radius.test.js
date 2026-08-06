@@ -16,6 +16,22 @@ const WORKER_SRC_DIR = dirname(EIPS_DIR); // .../src
 const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
 
 /**
+ * Stage 14 (Project TITAN): enterprise-gateway/ is the first explicitly-authorized consumer of
+ * this directory -- its own brief requires composing IntelligenceService via dependency
+ * injection (see TITAN_STAGE14_SERVICE_ARCHITECTURE.md), mirroring exactly how
+ * evidence-registry/__tests__/zero-blast-radius.test.js's own AUTHORIZED_CONSUMER_DIRS
+ * authorized this directory as Stage 13's consumer one layer down. This does not weaken what
+ * this test actually protects: intelligence-platform/ still must not be reachable from index.js
+ * or any pNN-handlers.js file -- see the "index.js does not import..." test below, and
+ * enterprise-gateway/__tests__/zero-blast-radius.test.js's own independent boundary tests, which
+ * confirm both that index.js does not import enterprise-gateway/ and that enterprise-gateway/
+ * never imports a pNN-handlers.js file or index.js itself, nor evidence-registry/ directly.
+ * Exempting this one named, documented directory -- rather than relaxing the check generally --
+ * keeps this test able to catch any OTHER, unauthorized reference.
+ */
+const AUTHORIZED_CONSUMER_DIRS = [join(WORKER_SRC_DIR, "enterprise-gateway")];
+
+/**
  * True only if `file` IS `dir`, or is a path strictly inside it -- a bare `startsWith(dir)`/
  * `.includes(\`${dir}/...\`)` also matches a sibling directory whose name merely EXTENDS `dir`'s
  * name (no separator in between), and hardcoding `/` breaks on Windows where `join()` produces
@@ -63,6 +79,7 @@ test("nothing outside intelligence-platform/ references 'intelligence-platform'"
   for (const file of listJsFiles(WORKER_SRC_DIR)) {
     if (isInside(file, EIPS_DIR)) continue; // files inside this directory are exempt
     if (isInside(file, evidenceRegistryTestsDir)) continue; // see above
+    if (AUTHORIZED_CONSUMER_DIRS.some((dir) => isInside(file, dir))) continue; // Stage 14, see above
     const text = readFileSync(file, "utf-8");
     if (text.includes("intelligence-platform")) {
       violations.push(relative(WORKER_SRC_DIR, file));
@@ -121,7 +138,14 @@ test("no evidence-registry/ PRODUCTION file references intelligence-platform/ (o
   }
 });
 
-test("evidence-registry/__tests__/zero-blast-radius.test.js's authorized exception names exactly this directory, nothing broader (the one exempted test file itself stays honest)", () => {
+test("evidence-registry/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these two directories, nothing broader (the exempted test file itself stays honest)", () => {
+  // Stage 14: evidence-registry's own array grew a second, narrowly-named entry
+  // (enterprise-gateway) alongside this stage's pre-existing intelligence-platform entry -- see
+  // that file's own updated doc comment for why. This assertion is updated in lockstep so it
+  // keeps proving the array is exactly these two named directories, not a general relaxation.
   const text = readFileSync(join(EVIDENCE_REGISTRY_DIR, "__tests__", "zero-blast-radius.test.js"), "utf-8");
-  assert.match(text, /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[join\(WORKER_SRC_DIR,\s*"intelligence-platform"\)\]/);
+  assert.match(
+    text,
+    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[join\(WORKER_SRC_DIR,\s*"intelligence-platform"\),\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\)\]/
+  );
 });

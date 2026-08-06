@@ -28,8 +28,19 @@ const WORKER_SRC_DIR = dirname(SCAFFOLD_DIR); // .../src
  * intelligence-platform/ never imports a pNN-handlers.js file or index.js itself. Exempting
  * this one named, documented directory -- rather than relaxing the check generally -- keeps
  * this test able to catch any OTHER, unauthorized reference.
+ *
+ * Stage 14: enterprise-gateway/ is added for a narrower reason than intelligence-platform's --
+ * its PRODUCTION code does not import evidence-registry/ at all (it composes only
+ * intelligence-platform/'s IntelligenceService, one hop up, per its own
+ * TITAN_STAGE14_SERVICE_ARCHITECTURE.md and its own independent zero-blast-radius test, which
+ * asserts exactly that). What trips this sweep is enterprise-gateway/__tests__/test-helpers.js,
+ * which imports evidence-registry/entity.js to build CanonicalEvidence fixtures for gateway
+ * tests -- the identical, already-precedented pattern intelligence-platform/__tests__/
+ * test-helpers.js uses one directory up. Exempting the whole directory (tests included) mirrors
+ * exactly how intelligence-platform is exempted above, for the same test-fixture-construction
+ * reason, not a relaxation of the production-reachability guarantee this test protects.
  */
-const AUTHORIZED_CONSUMER_DIRS = [join(WORKER_SRC_DIR, "intelligence-platform")];
+const AUTHORIZED_CONSUMER_DIRS = [join(WORKER_SRC_DIR, "intelligence-platform"), join(WORKER_SRC_DIR, "enterprise-gateway")];
 
 /**
  * True only if `file` IS `dir`, or is a path strictly inside it -- a bare `startsWith(dir)`
