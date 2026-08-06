@@ -3,6 +3,18 @@
  * scripts/intelligence_platform_snapshot.mjs
  * Project TITAN Stage 13 Phase 10 — Internal Adoption (first real, non-test consumer)
  *
+ * @deprecated Stage 15 Phase 3 (Gateway migration). This script calls IntelligenceService
+ * directly, bypassing EnterpriseGateway (Stage 14) — the exact "direct composition consumer"
+ * pattern Stage 15 migrates away from. Replacement: scripts/enterprise_gateway_snapshot.mjs,
+ * which performs a strict superset of this script's operations (evidence registration, the same
+ * byCVE lookup, the same metrics snapshot) routed through EnterpriseGateway.dispatch() instead.
+ * Per this repository's Deprecation Instead of Deletion policy: kept fully functional (not
+ * removed, not behavior-changed), confirmed zero known consumers (not CI-wired — see
+ * TITAN_STAGE15_GATEWAY_ADOPTION_REPORT.md §1 — and not referenced by any package.json/workflow,
+ * grep-confirmed before this notice was added). Eligible for removal at Stage 16 or later, once
+ * zero-consumer status has held for a full stage cycle after this notice. See
+ * TITAN_STAGE15_MIGRATION_RUNBOOK.md for the full migration record.
+ *
  * This is the one, deliberately low-risk internal consumer this stage's Phase 10 authorizes.
  * It is a standalone internal script — invoked manually or by CI, never by a live HTTP request —
  * NOT a change to workers/intel-gateway/src/index.js or any pNN-handlers.js file. That boundary
@@ -49,6 +61,11 @@ const environment = process.argv[2] || process.env.EIPS_ENVIRONMENT || "producti
 const flags = resolveEipsFlags(environment);
 
 console.log(`=== Project TITAN Stage 13 -- Intelligence Platform Snapshot (environment: ${environment}) ===`);
+console.log(
+  "[DEPRECATED, Stage 15] This script bypasses EnterpriseGateway. Prefer " +
+    "scripts/enterprise_gateway_snapshot.mjs, a strict superset routed through the Gateway. " +
+    "Still fully functional -- see this file's own header comment for the deprecation record."
+);
 console.log(`EIPS_ENABLED=${flags.EIPS_ENABLED} INTERNAL_ADOPTION_ENABLED=${flags.INTERNAL_ADOPTION_ENABLED}`);
 
 if (!flags.INTERNAL_ADOPTION_ENABLED) {
