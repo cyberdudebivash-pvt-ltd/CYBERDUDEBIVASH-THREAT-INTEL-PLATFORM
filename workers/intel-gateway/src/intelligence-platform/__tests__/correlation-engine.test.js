@@ -90,3 +90,40 @@ test("correlation calls are recorded on the shared ServicePlatformMetrics instan
   const snapshot = metrics.snapshot();
   assert.ok(snapshot.call_counts["correlation.source"] >= 1);
 });
+
+// --- Project TITAN Stage 17 Phase 2 additions -------------------------------------------------
+
+test("correlateByAttackTechnique delegates to the shared query engine (closes the asymmetry with correlateBySource/Report/IOC)", async () => {
+  const { service, evidenceService } = await buildService();
+  await evidenceService.registerEvidence(evidence(UUID_1, { related_attack_techniques: ["T1059"] }));
+  const result = await service.correlateByAttackTechnique("T1059");
+  assert.equal(result.length, 1);
+  assert.equal(result[0].evidence_uuid, UUID_1);
+});
+
+test("correlateByAttackTechnique records a correlation.attackTechnique metric", async () => {
+  const { service, metrics, evidenceService } = await buildService();
+  await evidenceService.registerEvidence(evidence(UUID_1, { related_attack_techniques: ["T1059"] }));
+  await service.correlateByAttackTechnique("T1059");
+  assert.ok(metrics.snapshot().call_counts["correlation.attackTechnique"] >= 1);
+});
+
+test("aggregateSources tallies source_id across a record set, mirroring aggregateConfidence's tally shape", async () => {
+  const { service } = await buildService();
+  const records = [
+    { source_id: "SRC-A" },
+    { source_id: "SRC-A" },
+    { source_id: "SRC-B" },
+    {},
+  ];
+  const result = await service.aggregateSources(records);
+  assert.equal(result.total, 4);
+  assert.equal(result.withSource, 3);
+  assert.deepEqual(result.bySource, { "SRC-A": 2, "SRC-B": 1 });
+});
+
+test("aggregateSources handles an empty/undefined record set without throwing", async () => {
+  const { service } = await buildService();
+  assert.deepEqual(await service.aggregateSources([]), { total: 0, withSource: 0, bySource: {} });
+  assert.deepEqual(await service.aggregateSources(undefined), { total: 0, withSource: 0, bySource: {} });
+});

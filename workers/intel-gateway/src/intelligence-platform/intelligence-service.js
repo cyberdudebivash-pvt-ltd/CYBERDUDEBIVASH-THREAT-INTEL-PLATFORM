@@ -15,6 +15,7 @@ import { RelationshipResolutionService } from "../evidence-registry/relationship
 import { ServicePlatformMetrics } from "../evidence-registry/service-metrics.js";
 import { EnterpriseQueryService } from "./query-service.js";
 import { IntelligenceCorrelationService } from "./correlation-engine.js";
+import { IntelligenceExplainabilityService } from "./explainability-engine.js";
 
 /**
  * Unifies EvidenceService.lookup (Stage 12's 9 evidence-registry-native method names) with
@@ -246,6 +247,21 @@ export class IntelligenceService {
       lookup: this.lookup,
       correlation: this.correlation,
       provenanceEngine: this.provenance,
+    });
+
+    /**
+     * Project TITAN Stage 17 (Track A) addition: composes lookup + correlation + provenance
+     * (all three already public above) into the Explainable Intelligence Engine / Analyst
+     * Reasoning Object. See explainability-engine.js's module docstring for the full ADR-0007
+     * boundary. Added last, after every dependency it needs already exists -- no reordering of
+     * anything above.
+     * @type {IntelligenceExplainabilityService}
+     */
+    this.explainability = new IntelligenceExplainabilityService({
+      lookup: this.lookup,
+      correlation: this.correlation,
+      provenance: this.provenance,
+      metrics: serviceMetrics,
     });
   }
 

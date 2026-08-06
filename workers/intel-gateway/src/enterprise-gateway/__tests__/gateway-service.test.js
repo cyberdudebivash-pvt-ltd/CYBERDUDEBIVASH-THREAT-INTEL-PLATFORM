@@ -3,13 +3,13 @@ import { test } from "node:test";
 import { EnterpriseGateway } from "../gateway-service.js";
 import { CapabilityNotRegisteredError, DuplicateCapabilityError } from "../gateway-registry.js";
 import { ServicePlatformMetrics } from "../../evidence-registry/service-metrics.js";
-import { testPlatform, evidence, UUID_1 } from "./test-helpers.js";
+import { testPlatform, evidence, UUID_1, UUID_2 } from "./test-helpers.js";
 
 test("constructor requires a platform dependency", () => {
   assert.throws(() => new EnterpriseGateway({}), /requires a platform/);
 });
 
-test("all 8 capabilities are pre-registered", () => {
+test("all 9 capabilities are pre-registered", () => {
   const gateway = new EnterpriseGateway({ platform: testPlatform() });
   assert.deepEqual(
     gateway.listCapabilities().sort(),
@@ -18,6 +18,7 @@ test("all 8 capabilities are pre-registered", () => {
       "evidence.provenance",
       "evidence.relationships",
       "intelligence.correlation",
+      "intelligence.explainability",
       "intelligence.query",
       "intelligence.threatProfile",
       "intelligence.validation",
@@ -59,6 +60,38 @@ test("dispatch() end to end: evidence.lookup/byCVE returns real registered evide
   assert.equal(result[0].evidence_uuid, UUID_1);
 });
 
+test("dispatch() end to end: intelligence.explainability/explainEvidence returns a real Analyst Reasoning Object (Stage 17)", async () => {
+  const platform = testPlatform();
+  await platform.evidenceService.registerEvidence(evidence(UUID_1, { related_cves: ["CVE-2026-8888"] }));
+  await platform.evidenceService.registerEvidence(evidence(UUID_2, { related_cves: ["CVE-2026-8888"] }));
+  const gateway = new EnterpriseGateway({ platform });
+  const result = await gateway.dispatch({
+    capability: "intelligence.explainability",
+    method: "explainEvidence",
+    args: [UUID_1],
+    caller: { id: "test", kind: "test" },
+    grantedCapabilities: ["intelligence.explainability"],
+  });
+  assert.equal(result.found, true);
+  assert.equal(result.supportingEvidence.length, 1);
+  assert.equal(result.supportingEvidence[0].evidence_uuid, UUID_2);
+});
+
+test("dispatch() enforces capability authorization for intelligence.explainability like every other capability", async () => {
+  const gateway = new EnterpriseGateway({ platform: testPlatform() });
+  await assert.rejects(
+    () =>
+      gateway.dispatch({
+        capability: "intelligence.explainability",
+        method: "explainEvidence",
+        args: [UUID_1],
+        caller: { id: "test", kind: "test" },
+        grantedCapabilities: [], // deliberately missing the required capability
+      }),
+    /intelligence\.explainability/
+  );
+});
+
 test("dispatch() after stop() throws", async () => {
   const gateway = new EnterpriseGateway({ platform: testPlatform() });
   gateway.stop();
@@ -68,7 +101,7 @@ test("dispatch() after stop() throws", async () => {
   );
 });
 
-test("registerCapability() extends the registry without touching the 8 pre-registered capabilities", () => {
+test("registerCapability() extends the registry without touching the 9 pre-registered capabilities", () => {
   const gateway = new EnterpriseGateway({ platform: testPlatform() });
   gateway.registerCapability("custom.echo", async (context, method, value) => value);
   assert.ok(gateway.listCapabilities().includes("custom.echo"));
@@ -89,5 +122,5 @@ test("healthCheck() reports lifecycle state, capability list, and environment", 
   assert.equal(health.state, "READY");
   assert.equal(health.ready, true);
   assert.equal(health.environment, "testing");
-  assert.equal(health.capabilities.length, 8);
+  assert.equal(health.capabilities.length, 9);
 });
