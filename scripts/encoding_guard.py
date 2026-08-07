@@ -466,6 +466,54 @@ def _check_worker_js_eof(path: pathlib.Path, root: pathlib.Path) -> bool:
         return False  # unreadable = broken
 
 
+_IMPORT_SPECIFIER_RE = re.compile(r'''from\s+["'](\.[^"']+)["']''')
+
+
+def _resolve_bundled_worker_files(root: pathlib.Path) -> set[pathlib.Path]:
+    """
+    Returns the exact set of files esbuild actually bundles for the intel-gateway Worker:
+    workers/intel-gateway/src/index.js plus everything transitively reachable through its own
+    (and its dependencies' own) `from "./relative"` / `from "../relative"` import specifiers.
+
+    This is the general, root-cause fix for a false positive that has now recurred three times
+    under the previous "scan every .js file in workers/intel-gateway/src" scope -- each time in a
+    directory (evidence-registry/, intelligence-platform/, relationship-framework/) this
+    platform's own convention documents, in that directory's own README.md, as "not imported by
+    index.js or any production route." Those directories are correct to be excluded from an
+    "esbuild will fail on this" check, because esbuild never reads them: it only bundles what
+    index.js's own import graph actually reaches. Enumerating more valid last-line tokens (the
+    previous fix, twice) treats the symptom -- it does not stop the next new file in any
+    currently- or future-unwired directory (e.g. knowledge-platform/, Stage 18) from
+    false-positiving the same way. Proving reachability from the real import graph closes the
+    whole class of bug rather than the one instance in front of it.
+    """
+    entry = root / "workers" / "intel-gateway" / "src" / "index.js"
+    if not entry.exists():
+        return set()
+
+    visited: set[pathlib.Path] = set()
+    queue = [entry.resolve()]
+
+    while queue:
+        current = queue.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        try:
+            text = current.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in _IMPORT_SPECIFIER_RE.finditer(text):
+            specifier = match.group(1)
+            resolved = (current.parent / specifier).resolve()
+            if not resolved.suffix:
+                resolved = resolved.with_suffix(".js")
+            if resolved not in visited:
+                queue.append(resolved)
+
+    return visited
+
+
 def scan_repo(root: pathlib.Path) -> list[pathlib.Path]:
     """Return all target text files, skipping ignored dirs."""
     result = []
@@ -549,25 +597,35 @@ def run(root: pathlib.Path, fix: bool, strict: bool) -> int:
         print("Status  : DRY RUN -- pass --fix to apply")
 
     # -- Worker JS EOF Integrity Check ------------------------------------------
-    # Independently validate that every Worker JS file ends with a valid
-    # closing token.  A truncated file will pass ASCII checks (no bad bytes)
-    # but esbuild will still fail with "Unexpected end of file".
-    # This catch runs regardless of --fix / --strict / dirty state.
+    # Independently validate that every Worker JS file esbuild actually bundles ends with a
+    # valid closing token. A truncated file will pass ASCII checks (no bad bytes) but esbuild
+    # will still fail with "Unexpected end of file". This catch runs regardless of
+    # --fix / --strict / dirty state.
     #
-    # __tests__/ directories are excluded from THIS check specifically (not from the broader
-    # ASCII enforcement above, which still applies to them -- non-ASCII corruption is still worth
-    # catching in test files). This check's entire rationale is "esbuild will fail" -- but esbuild
-    # only ever bundles from index.js's own import graph, and every file under __tests__/ is, by
-    # this platform's own governance (zero-blast-radius.test.js + titan_architecture_governance_
-    # check.py in both evidence-registry/ and intelligence-platform/), provably never imported by
-    # index.js. "Ends in a token esbuild would reject" is simply not a meaningful question for a
-    # file esbuild never reads. Confirmed reproducing false-positive: intelligence-platform/
-    # __tests__/test-helpers.js legitimately ends in `export const UUID_3 = "...";` -- a
-    # perfectly valid top-level statement with no bracket/brace to close, which no finite
-    # WORKER_JS_VALID_EOF_TOKENS set can enumerate in general (any scalar-valued top-level
-    # export/assignment ends the same way). Scoping this check to files esbuild can actually
-    # reject is the general fix; enumerating more tokens is not.
-    worker_js_files = [f for f in files if _is_worker_ascii_file(f, root) and "__tests__" not in f.relative_to(root).parts]
+    # Scope: _resolve_bundled_worker_files() walks index.js's real, live import graph rather
+    # than scanning every .js file under workers/intel-gateway/src. This check's entire
+    # rationale is "esbuild will fail" -- but esbuild only ever bundles what index.js actually
+    # imports (transitively), and this platform's Stage 8-18 lineage (evidence-registry/,
+    # intelligence-platform/, enterprise-gateway/, relationship-framework/, knowledge-platform/)
+    # is, by each directory's own README.md, deliberately never imported by index.js or any
+    # production route. "Ends in a token esbuild would reject" is not a meaningful question for
+    # a file esbuild never reads.
+    #
+    # This replaces a hand-maintained exclusion (previously just "__tests__/ directories") that
+    # had already produced three separate false-positive incidents as this platform grew new
+    # unwired directories one stage at a time: intelligence-platform/__tests__/test-helpers.js
+    # (ends in a bare `export const ... = "...";` statement), evidence-registry/
+    # service-contracts.js and intelligence-platform/service-contracts.js (both end in `]);`,
+    # fixed by enumerating more tokens), and relationship-framework/relationship-types.js (ends
+    # in a bare `);` closing `Object.freeze(DEFINITIONS.map(...))` -- the token enumeration this
+    # check used has no general answer for "what is a valid last line of any expression
+    # statement", because there isn't a finite one). Proving reachability from the real import
+    # graph closes the whole class of bug: a hand-maintained list needs updating every time a new
+    # unwired directory is added (this repository's own established, repeated pattern since
+    # Stage 8); an import-graph walk needs no maintenance because it asks the only question that
+    # was ever actually true -- "does esbuild read this file at all."
+    _bundled = _resolve_bundled_worker_files(root)
+    worker_js_files = [f for f in files if _is_worker_ascii_file(f, root) and f.resolve() in _bundled]
     truncated: list[pathlib.Path] = []
     for wf in worker_js_files:
         if not _check_worker_js_eof(wf, root):
