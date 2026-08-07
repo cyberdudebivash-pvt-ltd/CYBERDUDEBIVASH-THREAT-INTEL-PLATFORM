@@ -22,6 +22,12 @@
  * relationship-framework/ (Stage 16) now constructs one backed by a real P31RelationshipProvider
  * instead of leaving it on the NullRelationshipProvider default -- see
  * relationship-framework/relationship-service.js.
+ *
+ * Stage 17 Phase 2 addition: correlateByAttackTechnique() and aggregateSources() below close the
+ * two asymmetries Stage 17's Correlation Domain Audit found against this file's existing
+ * dimensions (see TITAN_STAGE17_READINESS_REPORT.md Sec 2.2) -- same "no new storage, direct
+ * passthrough / tally over already-fetched records" pattern as every method above. Confidence
+ * remains untouched by this addition: aggregateConfidence() below is unmodified.
  */
 
 /** @typedef {import('../evidence-registry/entity.js').CanonicalEvidence} CanonicalEvidence */
@@ -136,5 +142,40 @@ export class IntelligenceCorrelationService {
       );
     }
     return this._timed("relationship", () => this._relationshipResolution.resolveRelationships(entityId));
+  }
+
+  /**
+   * ATT&CK technique correlation: direct passthrough to EvidenceQueryEngine.lookupByAttackTechnique().
+   * Project TITAN Stage 17 Phase 2 addition -- this dimension was already queryable via
+   * EvidenceQueryEngine (Stage 12) but, unlike source/report/IOC, had no correlateBy* wrapper at
+   * this layer. Mirrors correlateBySource()/correlateByReport()/correlateByIOC() exactly; no new
+   * storage, no new query logic. @param {string} technique
+   */
+  async correlateByAttackTechnique(technique) {
+    return this._timed("attackTechnique", () => this._queryEngine.lookupByAttackTechnique(technique));
+  }
+
+  /**
+   * Multi-source aggregation: source-tally view across a set of evidence records (e.g.
+   * correlateEvidence()'s output), mirroring aggregateConfidence()'s tally-by-tier shape exactly
+   * but keyed by source_id instead of confidence tier. Project TITAN Stage 17 Phase 2 addition --
+   * closes the one asymmetry between the two aggregate* methods (confidence had a tally, source
+   * did not). Reads only the already-fetched records passed in; no new query, no new storage.
+   * @param {CanonicalEvidence[]} evidenceRecords
+   * @returns {Promise<{total: number, withSource: number, bySource: Record<string, number>}>}
+   */
+  async aggregateSources(evidenceRecords) {
+    return this._timed("sources", () => {
+      const bySource = {};
+      let withSource = 0;
+      for (const record of evidenceRecords || []) {
+        const sourceId = record?.source_id;
+        if (sourceId) {
+          bySource[sourceId] = (bySource[sourceId] || 0) + 1;
+          withSource += 1;
+        }
+      }
+      return { total: (evidenceRecords || []).length, withSource, bySource };
+    });
   }
 }

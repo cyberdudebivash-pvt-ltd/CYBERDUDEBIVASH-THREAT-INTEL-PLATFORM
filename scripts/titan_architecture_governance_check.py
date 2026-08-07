@@ -230,6 +230,17 @@ Checks, in order:
   55. (Stage 15) Does any scripts/ consumer import intelligence-platform/ directly
       (createIntelligencePlatform) without also composing through enterprise-gateway/, beyond
       the one tracked, already-deprecated Stage 13 exception (Gateway bypass)?
+  56. (Stage 17) Do correlation-policy.js and explainability-engine.js still exist and still
+      avoid importing a live pNN-handlers.js/index.js file directly?
+  57. (Stage 17) Does any file outside intelligence-platform/ define its own
+      'class IntelligenceExplainabilityService' (duplicate engine)?
+  58. (Stage 17) Do correlation-policy.js/explainability-engine.js still avoid defining a new
+      compute*/score*/weight*/rank*Confidence* function — the ADR-0007 boundary (Proposed, not
+      Accepted) made mechanically enforceable?
+  59. (Stage 17) Does index.js still have zero references to explainability-engine.js,
+      correlation-policy.js, or IntelligenceExplainabilityService (still unwired)?
+  60. (Stage 17) Does correlation-policy.js still export CORRELATION_POLICY_VERSION and
+      describePolicy() (policies must be versioned and auditable)?
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -2131,11 +2142,12 @@ def check_no_duplicate_enterprise_gateway(handlers_dir: Path | None = None, gate
 
 
 def check_gateway_capabilities_delegate_not_reimplement(gateway_dir: Path | None = None) -> list[str]:
-    """Reuse bypass: confirms gateway-service.js's 8 pre-registered capabilities still delegate
-    to IntelligenceService's own public properties (platform.lookup, .enterpriseQuery,
-    .correlation, .validation, .threatIntelligence, .provenance, .relationshipResolution,
-    .metrics) rather than reimplementing any of their logic. `gateway_dir` is overridable for
-    fixture testing; main() always calls with the default."""
+    """Reuse bypass: confirms gateway-service.js's 9 pre-registered capabilities (8 from Stage 14,
+    plus Stage 17's intelligence.explainability) still delegate to IntelligenceService's own
+    public properties (platform.lookup, .enterpriseQuery, .correlation, .validation,
+    .threatIntelligence, .provenance, .relationshipResolution, .metrics, .explainability) rather
+    than reimplementing any of their logic. `gateway_dir` is overridable for fixture testing;
+    main() always calls with the default."""
     gateway_dir = gateway_dir or ENTERPRISE_GATEWAY_DIR
     findings = []
     path = gateway_dir / "gateway-service.js"
@@ -2145,7 +2157,7 @@ def check_gateway_capabilities_delegate_not_reimplement(gateway_dir: Path | None
     required_targets = [
         "platform.lookup", "platform.enterpriseQuery", "platform.correlation",
         "platform.validation", "platform.threatIntelligence", "platform.provenance",
-        "platform.relationshipResolution", "platform.metrics",
+        "platform.relationshipResolution", "platform.metrics", "platform.explainability",
     ]
     for target in required_targets:
         if target not in text:
@@ -2664,6 +2676,150 @@ def check_relationship_framework_provider_wiring_intact(rf_dir: Path | None = No
     return findings
 
 
+STAGE17_CORE_FILES = [
+    "correlation-policy.js",
+    "explainability-engine.js",
+]
+
+
+def check_stage17_files_present_and_isolated(platform_dir: Path | None = None) -> list[str]:
+    """Stage 17: confirms both Track A files (correlation-policy.js, explainability-engine.js)
+    still exist (Deprecation Instead of Deletion — no silent removal) and that neither imports a
+    live pNN-handlers.js/index.js file directly — the same zero-blast-radius property every prior
+    TITAN-stage scaffolding file in this directory enforces, mirroring
+    check_eips_files_present_and_isolated()/check_relationship_framework_files_present_and_isolated()
+    exactly. `platform_dir` is overridable for fixture testing; main() always calls with the
+    default."""
+    platform_dir = platform_dir or INTELLIGENCE_PLATFORM_DIR
+    findings = []
+    if not platform_dir.exists():
+        return findings
+    for name in STAGE17_CORE_FILES:
+        path = platform_dir / name
+        if not path.exists():
+            findings.append(f"MISSING STAGE 17 FILE: intelligence-platform/{name} — Track A file set is incomplete")
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r'from\s+["\'].*p\d+-handlers\.js["\']', text) or re.search(r'from\s+["\'].*/index\.js["\']', text):
+            findings.append(f"ARCHITECTURE VIOLATION: intelligence-platform/{name} imports a live pNN-handlers.js/index.js file")
+    return findings
+
+
+def check_no_duplicate_explainability_engine(handlers_dir: Path | None = None, platform_dir: Path | None = None) -> list[str]:
+    """Duplicate engines (Stage 17's own NON-GOALS, inherited from every prior stage's "no
+    duplicate engines" rule): confirms no file outside intelligence-platform/ defines its own copy
+    of IntelligenceExplainabilityService. Mirrors check_no_duplicate_relationship_engine()'s exact
+    pattern. `handlers_dir`/`platform_dir` are overridable for fixture testing; main() always
+    calls with the defaults."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    platform_dir = platform_dir or INTELLIGENCE_PLATFORM_DIR
+    findings = []
+    if not platform_dir.exists():
+        return findings
+    pattern = re.compile(r"\bclass\s+IntelligenceExplainabilityService\b")
+    for path in handlers_dir.rglob("*.js"):
+        if path.parent == platform_dir and path.name == "explainability-engine.js":
+            continue
+        if path.parent.name == "__tests__":
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if pattern.search(text):
+            findings.append(
+                f"DUPLICATE ENGINE: {_display_path(path)} defines its own 'class IntelligenceExplainabilityService' — "
+                f"the canonical implementation is intelligence-platform/explainability-engine.js"
+            )
+    return findings
+
+
+# Function-name shapes that would signal Stage 17 quietly computing/weighting/ranking a
+# confidence value itself, rather than surfacing canonical_confidence_object verbatim -- the
+# exact boundary TITAN_STAGE17_READINESS_REPORT.md Sec 4 documents as gated on ADR-0007
+# (Proposed, not Accepted). Deliberately narrow (matches this script's existing
+# KNOWN_CONFIDENCE_EVIDENCE_FUNCTIONS idiom): named function/method DEFINITIONS only, not every
+# occurrence of the word "confidence" (both files legitimately mention it in comments/field names).
+_STAGE17_CONFIDENCE_COMPUTATION_PATTERN = re.compile(
+    r"\b(?:function|async\s+function)\s+(?:compute|score|weight|rank)\w*[Cc]onfidence\w*\s*\("
+)
+
+
+def check_no_confidence_computation_introduced_stage17(platform_dir: Path | None = None) -> list[str]:
+    """Stage 17's own ADR-0007 boundary, made mechanically enforceable rather than only
+    documented in prose: confirms neither Track A file (correlation-policy.js,
+    explainability-engine.js) defines a new compute*/score*/weight*/rank*Confidence* function --
+    the shape a confidence-computing, -weighting, or -ranking function would take, mirroring this
+    script's existing KNOWN_CONFIDENCE_EVIDENCE_FUNCTIONS/NAME_PATTERN idiom used for the P16-P38
+    handler stack. Both files are permitted (and expected) to reference
+    `canonical_confidence_object`/`verification_status`/`evidence_weight` verbatim -- this check
+    only fires on a new function DEFINITION whose name claims to compute/score/weight/rank
+    confidence, which the module docstrings of both files say should never happen while ADR-0007
+    (docs/adr/0007-canonical-confidence-framework.md) remains Proposed. `platform_dir` is
+    overridable for fixture testing; main() always calls with the default."""
+    platform_dir = platform_dir or INTELLIGENCE_PLATFORM_DIR
+    findings = []
+    for name in STAGE17_CORE_FILES:
+        path = platform_dir / name
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if _STAGE17_CONFIDENCE_COMPUTATION_PATTERN.search(text):
+            findings.append(
+                f"ADR-0007 BOUNDARY VIOLATION: intelligence-platform/{name} appears to define a "
+                f"confidence-computing/weighting/ranking function — ADR-0007 (Canonical Confidence "
+                f"Framework) is Proposed, not Accepted. Confidence fields must be surfaced verbatim "
+                f"only until it is. See TITAN_STAGE17_READINESS_REPORT.md Sec 4."
+            )
+    return findings
+
+
+def check_explainability_still_unwired(handlers_dir: Path | None = None) -> list[str]:
+    """Architecture boundary: confirms index.js has zero references to explainability-engine.js,
+    correlation-policy.js, or IntelligenceExplainabilityService -- Stage 17's Track A output stays
+    an internal Gateway capability only, not a live index.js route, matching the unbroken Stage
+    8-16 precedent this lineage has kept for every one of its files (see
+    TITAN_STAGE17_READINESS_REPORT.md Sec 3). Mirrors check_relationship_resolution_still_unwired()'s
+    exact pattern. `handlers_dir` is overridable for fixture testing; main() always calls with the
+    default."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    findings = []
+    index_path = handlers_dir / "index.js"
+    if not index_path.exists():
+        return findings
+    text = index_path.read_text(encoding="utf-8", errors="replace")
+    for needle in ("explainability-engine", "correlation-policy.js", "IntelligenceExplainabilityService"):
+        if needle in text:
+            findings.append(
+                f"STAGE 17 BYPASS: index.js references '{needle}' — Stage 17's Track A output is "
+                f"authorized as an internal Gateway capability only; wiring it into a live "
+                f"production route requires its own separate authorization, not granted by this "
+                f"stage (see TITAN_STAGE17_READINESS_REPORT.md Sec 3)."
+            )
+    return findings
+
+
+def check_correlation_policy_versioned(platform_dir: Path | None = None) -> list[str]:
+    """Phase 4's own auditability requirement ("policies must be auditable and versioned"), made
+    mechanically enforceable: confirms correlation-policy.js still exports
+    CORRELATION_POLICY_VERSION and a describePolicy() introspection function. `platform_dir` is
+    overridable for fixture testing; main() always calls with the default."""
+    platform_dir = platform_dir or INTELLIGENCE_PLATFORM_DIR
+    findings = []
+    path = platform_dir / "correlation-policy.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if "export const CORRELATION_POLICY_VERSION" not in text:
+        findings.append(
+            "POLICY GOVERNANCE: correlation-policy.js no longer exports CORRELATION_POLICY_VERSION "
+            "— Phase 4 requires correlation policies to be versioned."
+        )
+    if "export function describePolicy" not in text:
+        findings.append(
+            "POLICY GOVERNANCE: correlation-policy.js no longer exports describePolicy() — Phase 4 "
+            "requires correlation policies to be auditable/introspectable."
+        )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -2734,6 +2890,11 @@ def main() -> None:
     all_findings += check_relationship_framework_files_present_and_isolated()
     all_findings += check_no_duplicate_relationship_engine()
     all_findings += check_relationship_framework_provider_wiring_intact()
+    all_findings += check_stage17_files_present_and_isolated()
+    all_findings += check_no_duplicate_explainability_engine()
+    all_findings += check_no_confidence_computation_introduced_stage17()
+    all_findings += check_explainability_still_unwired()
+    all_findings += check_correlation_policy_versioned()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     metrics = compute_gateway_adoption_metrics()
@@ -2782,7 +2943,11 @@ def main() -> None:
               "or evidence-registry/, capability authorization present, no network-auth scope "
               "creep, all EIG files present and isolated, registry describe()/describeAll() "
               "still omit the handler function, no new scripts/ consumer bypasses the Gateway "
-              "beyond the one tracked, deprecated Stage 13 exception).")
+              "beyond the one tracked, deprecated Stage 13 exception), Stage 17 Correlation & "
+              "Explainability clean (both Track A files present and isolated, no duplicate "
+              "IntelligenceExplainabilityService, no confidence-computing/weighting/ranking "
+              "function introduced pending ADR-0007, explainability-engine.js/correlation-policy.js "
+              "still unwired from index.js, correlation policy still versioned and auditable).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")

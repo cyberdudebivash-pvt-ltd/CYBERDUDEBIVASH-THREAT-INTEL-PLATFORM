@@ -46,7 +46,7 @@ test("development: INTERNAL_ADOPTION_ENABLED is true -- the gateway actually dis
   assert.ok(jsonStart >= 0, "the final snapshot JSON block must be present in stdout");
   const snapshot = JSON.parse(output.slice(jsonStart, jsonEnd));
   assert.equal(snapshot.contracts.length, 4);
-  assert.equal(snapshot.capabilities.length, 8);
+  assert.equal(snapshot.capabilities.length, 9);
   assert.equal(snapshot.health.ready, true);
   assert.ok(snapshot.gatewayMetrics.registry, "snapshot must include a real registry metrics view");
   assert.equal(snapshot.gatewayMetrics.registry.evidence_count, 1, "the one sample record must have been registered");

@@ -6,9 +6,10 @@
  * "One Gateway" -- the single aggregating facade this stage's brief names as its primary
  * deliverable, mirroring Stage 12's EvidenceService and Stage 13's IntelligenceService pattern
  * one layer up. Composes Context/Registry/Dispatcher/Lifecycle/Metrics and pre-registers the 8
- * Stage 13 capabilities below against an injected IntelligenceService instance. No business
- * logic of its own: every capability handler is a thin createServiceMethodHandler() adapter over
- * an already-existing, already-public IntelligenceService property.
+ * Stage 13 capabilities below against an injected IntelligenceService instance, plus one Stage 17
+ * addition (`intelligence.explainability`). No business logic of its own: every capability
+ * handler is a thin createServiceMethodHandler() adapter over an already-existing, already-public
+ * IntelligenceService property.
  */
 
 import { GatewayRegistry, createServiceMethodHandler } from "./gateway-registry.js";
@@ -81,6 +82,10 @@ export class EnterpriseGateway {
     });
     this._registry.register("platform.metrics", createServiceMethodHandler(platform.metrics), {
       description: "IntelligenceMetricsService",
+    });
+    this._registry.register("intelligence.explainability", createServiceMethodHandler(platform.explainability), {
+      description: "IntelligenceExplainabilityService -- Stage 17 Explainable Intelligence Engine / " +
+        "Analyst Reasoning Object; confidence fields surfaced verbatim only (ADR-0007 Proposed, not Accepted)",
     });
   }
 

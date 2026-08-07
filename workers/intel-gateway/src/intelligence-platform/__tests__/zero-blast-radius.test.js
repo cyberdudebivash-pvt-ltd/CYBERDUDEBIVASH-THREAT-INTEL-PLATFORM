@@ -107,6 +107,8 @@ test("index.js does not import any intelligence-platform/ file", () => {
     "correlation-engine.js",
     "platform.js",
     "service-contracts.js",
+    "correlation-policy.js",
+    "explainability-engine.js",
   ]) {
     assert.equal(text.includes(newFile), false, `index.js must not reference ${newFile}`);
   }
