@@ -50,11 +50,21 @@ const WORKER_SRC_DIR = dirname(SCAFFOLD_DIR); // .../src
  * "../evidence-registry/relationship-resolution.js"` line) -- relationship-framework/ is not
  * granted any broader reach into this directory than an existing, already-authorized consumer
  * has. It does not import entity.js, registry-service.js, or any other evidence-registry/ file.
+ *
+ * Stage 18: knowledge-platform/ is added for the same test-fixture-construction reason as
+ * intelligence-platform/enterprise-gateway above -- its own __tests__/test-helpers.js imports
+ * evidence-registry/entity.js to build CanonicalEvidence fixtures. Its PRODUCTION code does not
+ * import evidence-registry/ at all (it composes only intelligence-platform/'s IntelligenceService
+ * properties, one hop up, per TITAN_STAGE18_READINESS_REPORT.md and its own independent
+ * zero-blast-radius test); what trips this sweep is JSDoc `@param`/`@returns` type references to
+ * evidence-registry/entity.js's CanonicalEvidence and evidence-registry/service-metrics.js's
+ * ServicePlatformMetrics types (comments only, not runtime imports).
  */
 const AUTHORIZED_CONSUMER_DIRS = [
   join(WORKER_SRC_DIR, "intelligence-platform"),
   join(WORKER_SRC_DIR, "enterprise-gateway"),
   join(WORKER_SRC_DIR, "relationship-framework"),
+  join(WORKER_SRC_DIR, "knowledge-platform"),
 ];
 
 /**
