@@ -46,6 +46,15 @@ data/manifest_versions/
 data/logs/
 *.log
 
+# Phase 8 storage-sanitation backups (scripts/storage_governance.py):
+# verified copies of files kept as a same-session/same-disk restore safety
+# net before a delete is allowed to proceed. Committing these would defeat
+# the purpose of the cleanup they back up. The durable rollback for anything
+# that was git-tracked is `git revert` against history, not this directory --
+# see the deletion_manifest_*.json / rollback_manifest_*.json in
+# data/governance/, which ARE committed as the audit trail.
+data/governance/deletion_backups/
+
 # --- HIGH-VOLUME STIX INDIVIDUAL OBJECTS ---
 # These are large individual advisory JSON files — excluded from tracking.
 data/stix/CDB-APEX-*.json

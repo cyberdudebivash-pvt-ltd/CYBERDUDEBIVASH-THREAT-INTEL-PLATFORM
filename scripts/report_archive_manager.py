@@ -42,7 +42,22 @@ USAGE:
   python3 scripts/report_archive_manager.py --status      # show current stats
 
 ENVIRONMENT:
-  REPORT_RETENTION_DAYS  -- days to keep in working tree (default: 90)
+  REPORT_RETENTION_DAYS  -- days to keep in working tree (default: 90). Classification
+                            is by (year, month) path segments, not by day (see note
+                            below) -- a report is archived only once its entire
+                            calendar month is older than the cutoff. Effective
+                            retention therefore ranges from REPORT_RETENTION_DAYS up
+                            to REPORT_RETENTION_DAYS + ~1 month depending on where in
+                            the current month the job runs. This is intentional, not
+                            a bug: reports/ paths are the only reliable per-file date
+                            signal available (git commit dates are unusable here --
+                            this repo's reports/ tree was bulk-seeded by a single
+                            historical commit, so commit timestamps do not reflect
+                            true report age; filesystem mtimes are unreliable too,
+                            reset on every fresh checkout). Month-level granularity is
+                            deliberately conservative: it only ever widens the HOT
+                            window, never narrows it, so it cannot archive a report
+                            before it's genuinely eligible.
   ARCHIVE_DRY_RUN        -- "1" to force dry-run mode
   ARCHIVE_MIN_REPORTS    -- minimum reports to retain in working tree (default: 500)
 
@@ -103,11 +118,20 @@ def _git(*args: str) -> subprocess.CompletedProcess:
 
 
 def _git_tracked_reports() -> List[str]:
-    """Return all git-tracked .html files under reports/."""
-    result = _git("ls-files", "reports/", "--", "*.html")
+    """Return all git-tracked .html files under reports/.
+
+    v184.1 FIX: previously passed "reports/" and "*.html" as two separate
+    pathspecs to `git ls-files` (`ls-files reports/ -- *.html`). A bare
+    `*.html` pathspec has no `/`, so git matches it unanchored against the
+    whole repo, not scoped under reports/ -- this pulled in every unrelated
+    HTML file in the tree (e.g. root-level pages), inflating counts and
+    landing those paths in the "unparseable" bucket every run. Fix: pass a
+    single `reports/` pathspec and filter for the extension in Python.
+    """
+    result = _git("ls-files", "reports/")
     if result.returncode != 0:
         return []
-    return [l.strip() for l in result.stdout.splitlines() if l.strip()]
+    return [l.strip() for l in result.stdout.splitlines() if l.strip().endswith(".html")]
 
 
 def _git_rm_cached(paths: List[str], batch_size: int = 500) -> bool:
@@ -277,7 +301,13 @@ def _show_status() -> None:
         year_counts[year] = year_counts.get(year, 0) + 1
     log.info("  Year breakdown:")
     for yr in sorted(year_counts):
-        tier = "HOT" if int(yr) >= cutoff.year else "ARCHIVE"
+        # v184.1 FIX: guard against non-numeric path segments so a stray file
+        # can't crash the read-only --status path (matches the try/except
+        # already used for the same case in _classify_reports).
+        try:
+            tier = "HOT" if int(yr) >= cutoff.year else "ARCHIVE"
+        except ValueError:
+            tier = "HOT (unparseable)"
         log.info("    %s: %d reports [%s]", yr, year_counts[yr], tier)
 
 
