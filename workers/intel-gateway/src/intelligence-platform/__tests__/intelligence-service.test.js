@@ -9,6 +9,7 @@ import {
 } from "../intelligence-service.js";
 import { EnterpriseQueryService } from "../query-service.js";
 import { IntelligenceCorrelationService } from "../correlation-engine.js";
+import { IntelligenceExplainabilityService } from "../explainability-engine.js";
 import { EvidenceProvenanceEngine } from "../../evidence-registry/provenance-engine.js";
 import { evidence, UUID_1, UUID_2 } from "./test-helpers.js";
 
@@ -22,6 +23,7 @@ test("IntelligenceService composes every Stage 13 service over one shared Eviden
   assert.ok(service.enterpriseQuery instanceof EnterpriseQueryService);
   assert.ok(service.provenance instanceof EvidenceProvenanceEngine, "Phase 4: reused directly, no Stage 13 wrapper class");
   assert.equal(service.lookup._evidenceLookup, service.evidenceService.lookup, "must share the same EvidenceService.lookup instance");
+  assert.ok(service.explainability instanceof IntelligenceExplainabilityService, "Stage 17: composed last, over lookup/correlation/provenance above");
 });
 
 test("IntelligenceService accepts full dependency injection (matching EvidenceService's own deps pattern)", async () => {
