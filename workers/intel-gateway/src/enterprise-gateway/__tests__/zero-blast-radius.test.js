@@ -17,6 +17,7 @@ const WORKER_SRC_DIR = dirname(EIG_DIR); // .../src
 const INTELLIGENCE_PLATFORM_DIR = join(WORKER_SRC_DIR, "intelligence-platform");
 const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
 const RELATIONSHIP_FRAMEWORK_DIR = join(WORKER_SRC_DIR, "relationship-framework");
+const KNOWLEDGE_PLATFORM_DIR = join(WORKER_SRC_DIR, "knowledge-platform");
 
 /**
  * Stage 16 (Project TITAN): relationship-framework/ is the first explicitly-authorized consumer
@@ -27,8 +28,17 @@ const RELATIONSHIP_FRAMEWORK_DIR = join(WORKER_SRC_DIR, "relationship-framework"
  * throughout. Exempting the whole directory mirrors exactly how this file already exempts
  * intelligence-platform's and evidence-registry's own __tests__ directories for the identical
  * boundary-documentation reason.
+ *
+ * Stage 18: knowledge-platform/ is added because its feature-flags.js docstring names
+ * "enterprise-gateway" in prose (documenting that it mirrors EIG_FLAGS's shape) and its
+ * __tests__/gateway-integration.test.js legitimately imports EnterpriseGateway and
+ * createServiceMethodHandler to demonstrate Phase 7's registerCapability()-based wiring end to
+ * end -- the same "composition-script consumer" pattern relationship-framework/'s own
+ * integration test already established, not a new production dependency in either direction
+ * (enterprise-gateway/ does not import knowledge-platform/ -- see
+ * knowledge-platform/__tests__/zero-blast-radius.test.js's own independent confirmation).
  */
-const AUTHORIZED_CONSUMER_DIRS = [RELATIONSHIP_FRAMEWORK_DIR];
+const AUTHORIZED_CONSUMER_DIRS = [RELATIONSHIP_FRAMEWORK_DIR, KNOWLEDGE_PLATFORM_DIR];
 
 /**
  * True only if `file` IS `dir`, or is a path strictly inside it. Mirrors
@@ -144,13 +154,14 @@ test("neither evidence-registry/ nor intelligence-platform/ PRODUCTION code refe
   }
 });
 
-test("intelligence-platform/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these two directories, nothing broader (the exempted test file itself stays honest)", () => {
+test("intelligence-platform/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these three directories, nothing broader (the exempted test file itself stays honest)", () => {
   // Stage 16: intelligence-platform's own array grew a second entry (relationship-framework)
   // alongside its pre-existing enterprise-gateway entry -- see that file's own updated doc
-  // comment for why. This assertion is updated in lockstep.
+  // comment for why. Stage 18 added a third (knowledge-platform). This assertion is updated in
+  // lockstep.
   const text = readFileSync(join(INTELLIGENCE_PLATFORM_DIR, "__tests__", "zero-blast-radius.test.js"), "utf-8");
   assert.match(
     text,
-    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\)\]/
+    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\),\s*join\(WORKER_SRC_DIR,\s*"knowledge-platform"\),?\s*\]/
   );
 });

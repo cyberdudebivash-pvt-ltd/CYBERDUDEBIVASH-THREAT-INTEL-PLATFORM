@@ -38,8 +38,22 @@ const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
  * the whole directory, as already done for enterprise-gateway above, covers both without
  * weakening what this test actually protects (index.js/pNN-handlers.js reachability, checked
  * independently below).
+ *
+ * Stage 18: knowledge-platform/ is added because its production code legitimately composes
+ * IntelligenceService's own public lookup/correlation/provenance/explainability properties (one
+ * hop up, the same pattern enterprise-gateway/ already uses) and imports one pure function,
+ * correlation-policy.js's detectConflicts(), directly (see TITAN_STAGE18_READINESS_REPORT.md
+ * Sec 3 for why that one-hop-down import is authorized and does not create a circular
+ * dependency -- knowledge-platform/ is a peer of enterprise-gateway/, not a consumer of it, and
+ * intelligence-service.js itself is not modified to reference knowledge-platform/ at all, which
+ * the "intelligence-service.js does not import knowledge-platform/" test in knowledge-platform/
+ * __tests__/zero-blast-radius.test.js independently confirms).
  */
-const AUTHORIZED_CONSUMER_DIRS = [join(WORKER_SRC_DIR, "enterprise-gateway"), join(WORKER_SRC_DIR, "relationship-framework")];
+const AUTHORIZED_CONSUMER_DIRS = [
+  join(WORKER_SRC_DIR, "enterprise-gateway"),
+  join(WORKER_SRC_DIR, "relationship-framework"),
+  join(WORKER_SRC_DIR, "knowledge-platform"),
+];
 
 /**
  * True only if `file` IS `dir`, or is a path strictly inside it -- a bare `startsWith(dir)`/
@@ -150,15 +164,15 @@ test("no evidence-registry/ PRODUCTION file references intelligence-platform/ (o
   }
 });
 
-test("evidence-registry/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these three directories, nothing broader (the exempted test file itself stays honest)", () => {
+test("evidence-registry/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these four directories, nothing broader (the exempted test file itself stays honest)", () => {
   // Stage 14: evidence-registry's own array grew a second, narrowly-named entry
   // (enterprise-gateway) alongside this stage's pre-existing intelligence-platform entry -- see
   // that file's own updated doc comment for why. Stage 16 added a third (relationship-framework).
-  // This assertion is updated in lockstep so it keeps proving the array is exactly these three
-  // named directories, not a general relaxation.
+  // Stage 18 added a fourth (knowledge-platform). This assertion is updated in lockstep so it
+  // keeps proving the array is exactly these four named directories, not a general relaxation.
   const text = readFileSync(join(EVIDENCE_REGISTRY_DIR, "__tests__", "zero-blast-radius.test.js"), "utf-8");
   assert.match(
     text,
-    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[\s*join\(WORKER_SRC_DIR,\s*"intelligence-platform"\),\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\),?\s*\]/
+    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[\s*join\(WORKER_SRC_DIR,\s*"intelligence-platform"\),\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\),\s*join\(WORKER_SRC_DIR,\s*"knowledge-platform"\),?\s*\]/
   );
 });
