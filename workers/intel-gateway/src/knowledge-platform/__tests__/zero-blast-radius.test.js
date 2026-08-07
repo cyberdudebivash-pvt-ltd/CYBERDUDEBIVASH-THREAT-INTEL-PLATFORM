@@ -18,6 +18,7 @@ const WORKER_SRC_DIR = dirname(KP_DIR); // .../src
 const INTELLIGENCE_PLATFORM_DIR = join(WORKER_SRC_DIR, "intelligence-platform");
 const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
 const ENTERPRISE_GATEWAY_DIR = join(WORKER_SRC_DIR, "enterprise-gateway");
+const PRODUCT_PLATFORM_DIR = join(WORKER_SRC_DIR, "product-platform");
 const KP_TESTS_DIR = join(KP_DIR, "__tests__");
 
 const KP_PRODUCTION_FILES = Object.freeze([
@@ -56,7 +57,7 @@ function listJsFiles(dir) {
   return out;
 }
 
-test("nothing outside knowledge-platform/ references 'knowledge-platform' except the three lower layers' own boundary-documentation __tests__ files", () => {
+test("nothing outside knowledge-platform/ references 'knowledge-platform' except the three lower layers' own boundary-documentation __tests__ files and product-platform/ (Stage 19, the first authorized real consumer)", () => {
   // evidence-registry/, intelligence-platform/, and enterprise-gateway/'s own
   // __tests__/zero-blast-radius.test.js files each legitimately name "knowledge-platform" in
   // their own AUTHORIZED_CONSUMER_DIRS array and doc comments (added alongside this directory,
@@ -65,6 +66,14 @@ test("nothing outside knowledge-platform/ references 'knowledge-platform' except
   // production coupling -- the same distinction those three files' own doc comments draw for
   // themselves. Production reachability is what actually matters and is covered precisely by the
   // tests below (index.js, and pNN-handlers.js/index.js imports from inside this directory).
+  //
+  // product-platform/ (Stage 19) is exempted as a whole directory, not just its __tests__/
+  // subdirectory, because its PRODUCTION code has a real, legitimate import of this directory --
+  // feature-flags.js imports DEPLOYMENT_ENVIRONMENTS from ./feature-flags.js, service-contracts.js
+  // imports isContractForwardCompatible/checkContractCompatibility from ./service-contracts.js,
+  // and product-quality.js imports evaluateKnowledgeObjectQuality from ./knowledge-quality.js --
+  // the one authorized hop down this stage's own README.md documents. See
+  // TITAN_STAGE19_READINESS_REPORT.md Sec 3.2.
   const violations = [];
   const exemptTestsDirs = [
     join(EVIDENCE_REGISTRY_DIR, "__tests__"),
@@ -74,6 +83,7 @@ test("nothing outside knowledge-platform/ references 'knowledge-platform' except
   for (const file of listJsFiles(WORKER_SRC_DIR)) {
     if (isInside(file, KP_DIR)) continue; // files inside this directory are exempt
     if (exemptTestsDirs.some((dir) => isInside(file, dir))) continue; // see above
+    if (isInside(file, PRODUCT_PLATFORM_DIR)) continue; // Stage 19, see above
     const text = readFileSync(file, "utf-8");
     if (text.includes("knowledge-platform")) violations.push(relative(WORKER_SRC_DIR, file));
   }

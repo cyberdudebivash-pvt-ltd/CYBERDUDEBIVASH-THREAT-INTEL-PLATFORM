@@ -251,6 +251,21 @@ Checks, in order:
       check #58 enforces on intelligence-platform/, mechanically enforced here too?
   64. (Stage 18) Does index.js, gateway-service.js, and intelligence-service.js still have zero
       references to "knowledge-platform"/"KnowledgePlatform" (still unwired)?
+  65. (Stage 19) Does the full Stage 19 product-platform/ file set still exist, and does none of
+      it import a live pNN-handlers.js/index.js file (architecture violations)?
+  66. (Stage 19) Does any file outside its own canonical file define its own copy of
+      ProductEngineService/ProductProfileService/ProductPackagingService/ProductQualityService/
+      ProductPlatform (duplicate engines)?
+  67. (Stage 19) Do product-platform/ files still avoid defining a new compute*/score*/weight*/
+      rank*Confidence* function -- the same ADR-0007 boundary (Proposed, not Accepted) Stage
+      17/18's checks #58/#63 enforce, mechanically enforced here too?
+  68. (Stage 19) Does index.js, gateway-service.js, intelligence-service.js, and
+      knowledge-platform.js still have zero references to "product-platform"/"ProductPlatform"
+      (still unwired)?
+  69. (Stage 19) Does any product-platform/ production file reference the Python dossier/report
+      pipeline (report_generator.py, dynamic_dossier_engine.py, dossier_quality_engine.py,
+      generate_intel_reports.py) by name -- the re-verified architectural boundary from
+      TITAN_STAGE19_READINESS_REPORT.md Sec 2.3, made mechanically enforceable?
 
 Advisory only. Exit code is informational (0 = clean, 1 = findings to review) but the CI step
 invoking this script wraps it in continue-on-error / an unconditional exit 0, matching the
@@ -513,11 +528,19 @@ def check_evidence_registry_scaffolding_boundary() -> list[str]:
     # runtime imports) plus this directory's own zero-blast-radius.test.js/test-helpers.js
     # naming "evidence-registry" for the identical boundary-documentation reason already
     # exempted for the other three consumers.
+    #
+    # Stage 19: product-platform/ is added for the identical JSDoc-comment reason as
+    # knowledge-platform above — its own production files' @param/@returns type comments cite
+    # evidence-registry/service-metrics.js's ServicePlatformMetrics type. Its PRODUCTION code
+    # does not import evidence-registry/ at all (it composes only knowledge-platform/'s
+    # KnowledgePlatform properties, one hop up, per TITAN_STAGE19_READINESS_REPORT.md and its
+    # own independent zero-blast-radius test).
     authorized_consumer_dirs = [
         HANDLERS_DIR / "intelligence-platform",
         HANDLERS_DIR / "enterprise-gateway",
         HANDLERS_DIR / "relationship-framework",
         HANDLERS_DIR / "knowledge-platform",
+        HANDLERS_DIR / "product-platform",
     ]
 
     # 1. Nothing outside evidence-registry/ (or an authorized consumer) may import from it.
@@ -2980,6 +3003,181 @@ def check_knowledge_platform_still_unwired(handlers_dir: Path | None = None) -> 
     return findings
 
 
+PRODUCT_PLATFORM_DIR = HANDLERS_DIR / "product-platform"
+
+STAGE19_CORE_FILES = [
+    "feature-flags.js",
+    "service-contracts.js",
+    "product-engine.js",
+    "product-profiles.js",
+    "product-packaging.js",
+    "product-quality.js",
+    "product-platform.js",
+    "platform.js",
+]
+
+STAGE19_CLASS_TO_FILE = {
+    "ProductEngineService": "product-engine.js",
+    "ProductProfileService": "product-profiles.js",
+    "ProductPackagingService": "product-packaging.js",
+    "ProductQualityService": "product-quality.js",
+    "ProductPlatform": "product-platform.js",
+}
+
+# The four canonical Python dossier/report pipeline files, per TITAN_STAGE19_READINESS_REPORT.md
+# Sec 2.3's fresh re-verification: CI-wired, independent, unmodified, uncoupled from the JS
+# lineage. Named here (not imported/executed) purely so check_product_platform_no_python_pipeline_coupling()
+# below can detect an accidental future reference.
+STAGE19_PYTHON_PIPELINE_MARKERS = [
+    "report_generator.py",
+    "dynamic_dossier_engine.py",
+    "dossier_quality_engine.py",
+    "generate_intel_reports.py",
+]
+
+
+def check_stage19_files_present_and_isolated(pp_dir: Path | None = None) -> list[str]:
+    """Stage 19: confirms every product-platform/ production file still exists (Deprecation
+    Instead of Deletion -- no silent removal) and that none of them imports a live
+    pNN-handlers.js/index.js file directly -- the same zero-blast-radius property every prior
+    TITAN-stage scaffolding directory in this lineage enforces, mirroring
+    check_stage18_files_present_and_isolated()/check_stage17_files_present_and_isolated() exactly.
+    `pp_dir` is overridable for fixture testing; main() always calls with the default."""
+    pp_dir = pp_dir or PRODUCT_PLATFORM_DIR
+    findings = []
+    if not pp_dir.exists():
+        return findings
+    for name in STAGE19_CORE_FILES:
+        path = pp_dir / name
+        if not path.exists():
+            findings.append(f"MISSING STAGE 19 FILE: product-platform/{name} -- file set is incomplete")
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r'from\s+["\'].*p\d+-handlers\.js["\']', text) or re.search(r'from\s+["\'].*/index\.js["\']', text):
+            findings.append(f"ARCHITECTURE VIOLATION: product-platform/{name} imports a live pNN-handlers.js/index.js file")
+    return findings
+
+
+def check_no_duplicate_product_platform_engines(handlers_dir: Path | None = None, pp_dir: Path | None = None) -> list[str]:
+    """Duplicate engines (Stage 19's own NON-GOALS, inherited from every prior stage's "no
+    duplicate engines" rule): confirms no file outside product-platform/ defines its own copy of
+    any of the five Stage 19 classes. Mirrors check_no_duplicate_knowledge_platform_engines()'s
+    exact pattern. `handlers_dir`/`pp_dir` are overridable for fixture testing; main() always
+    calls with the defaults."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    pp_dir = pp_dir or PRODUCT_PLATFORM_DIR
+    findings = []
+    if not pp_dir.exists():
+        return findings
+    for class_name, canonical_file in STAGE19_CLASS_TO_FILE.items():
+        pattern = re.compile(rf"\bclass\s+{class_name}\b")
+        for path in handlers_dir.rglob("*.js"):
+            if path.parent == pp_dir and path.name == canonical_file:
+                continue
+            if path.parent.name == "__tests__":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if pattern.search(text):
+                findings.append(
+                    f"DUPLICATE ENGINE: {_display_path(path)} defines its own 'class {class_name}' -- "
+                    f"the canonical implementation is product-platform/{canonical_file}"
+                )
+    return findings
+
+
+_STAGE19_CONFIDENCE_COMPUTATION_PATTERN = re.compile(
+    r"\b(?:function|async\s+function)\s+(?:compute|score|weight|rank)\w*[Cc]onfidence\w*\s*\("
+)
+
+
+def check_no_confidence_computation_introduced_stage19(pp_dir: Path | None = None) -> list[str]:
+    """Stage 19's own ADR-0007 boundary, made mechanically enforceable rather than only
+    documented in prose -- mirrors check_no_confidence_computation_introduced_stage18() exactly.
+    Confirms no Stage 19 file defines a new compute*/score*/weight*/rank*Confidence* function.
+    `confidenceAsRecorded` passthrough (read from an assembled Knowledge Object, unchanged) is
+    permitted and expected -- this check only fires on a new function DEFINITION whose name
+    claims to compute/score/weight/rank confidence, which every Stage 19 file's own module
+    docstring says should never happen while ADR-0007
+    (docs/adr/0007-canonical-confidence-framework.md) remains Proposed. `pp_dir` is overridable
+    for fixture testing; main() always calls with the default."""
+    pp_dir = pp_dir or PRODUCT_PLATFORM_DIR
+    findings = []
+    for name in STAGE19_CORE_FILES:
+        path = pp_dir / name
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if _STAGE19_CONFIDENCE_COMPUTATION_PATTERN.search(text):
+            findings.append(
+                f"ADR-0007 BOUNDARY VIOLATION: product-platform/{name} appears to define a "
+                f"confidence-computing/weighting/ranking function -- ADR-0007 (Canonical Confidence "
+                f"Framework) is Proposed, not Accepted. Confidence fields must be surfaced verbatim "
+                f"only until it is. See TITAN_STAGE19_READINESS_REPORT.md."
+            )
+    return findings
+
+
+def check_product_platform_still_unwired(handlers_dir: Path | None = None) -> list[str]:
+    """Architecture boundary: confirms index.js, gateway-service.js, intelligence-service.js, and
+    knowledge-platform.js all have zero references to any product-platform/ file or its exported
+    class names -- Stage 19's output stays an internal, externally-composed Gateway capability
+    only (wired via registerCapability() from a composition script, per
+    TITAN_STAGE19_READINESS_REPORT.md Sec 3.2), never a live index.js route and never a property
+    baked onto KnowledgePlatform, IntelligenceService, or EnterpriseGateway themselves (which
+    would create a circular import). Mirrors check_knowledge_platform_still_unwired()'s exact
+    pattern, extended with knowledge-platform.js since that is this stage's own one authorized
+    upstream hop. `handlers_dir` is overridable for fixture testing; main() always calls with the
+    default."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    findings = []
+    targets = {
+        "index.js": handlers_dir / "index.js",
+        "enterprise-gateway/gateway-service.js": handlers_dir / "enterprise-gateway" / "gateway-service.js",
+        "intelligence-platform/intelligence-service.js": handlers_dir / "intelligence-platform" / "intelligence-service.js",
+        "knowledge-platform/knowledge-platform.js": handlers_dir / "knowledge-platform" / "knowledge-platform.js",
+    }
+    for label, path in targets.items():
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "product-platform" in text or "ProductPlatform" in text:
+            findings.append(
+                f"STAGE 19 BYPASS: {label} references product-platform/ or ProductPlatform -- "
+                f"Stage 19's output is authorized as an externally-composed Gateway capability "
+                f"only; wiring it directly into {label} requires its own separate authorization, "
+                f"not granted by this stage (see TITAN_STAGE19_READINESS_REPORT.md Sec 3.2)."
+            )
+    return findings
+
+
+def check_product_platform_no_python_pipeline_coupling(pp_dir: Path | None = None) -> list[str]:
+    """Stage 19's own re-verified architectural decision (TITAN_STAGE19_READINESS_REPORT.md Sec
+    2.3), made mechanically enforceable: confirms no product-platform/ production file references
+    the Python dossier/report pipeline (report_generator.py, dynamic_dossier_engine.py,
+    dossier_quality_engine.py, generate_intel_reports.py) by name. The two systems are
+    independent, unmodified, and uncoupled -- product-platform/'s "tactical_dossier" package type
+    is a structured JSON envelope over Knowledge Platform output, not the Python pipeline's HTML
+    output, and this check guards against the two architectures ever being silently merged.
+    `pp_dir` is overridable for fixture testing; main() always calls with the default."""
+    pp_dir = pp_dir or PRODUCT_PLATFORM_DIR
+    findings = []
+    for name in STAGE19_CORE_FILES:
+        path = pp_dir / name
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for marker in STAGE19_PYTHON_PIPELINE_MARKERS:
+            if marker in text:
+                findings.append(
+                    f"PYTHON PIPELINE COUPLING: product-platform/{name} references '{marker}' -- "
+                    f"the Python dossier/report pipeline must remain independent, unmodified, and "
+                    f"uncoupled from the JS Evidence Registry/Intelligence Platform/Gateway/"
+                    f"Knowledge Platform/Product Platform lineage (see "
+                    f"TITAN_STAGE19_READINESS_REPORT.md Sec 2.3)."
+                )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -3059,6 +3257,11 @@ def main() -> None:
     all_findings += check_no_duplicate_knowledge_platform_engines()
     all_findings += check_no_confidence_computation_introduced_stage18()
     all_findings += check_knowledge_platform_still_unwired()
+    all_findings += check_stage19_files_present_and_isolated()
+    all_findings += check_no_duplicate_product_platform_engines()
+    all_findings += check_no_confidence_computation_introduced_stage19()
+    all_findings += check_product_platform_still_unwired()
+    all_findings += check_product_platform_no_python_pipeline_coupling()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     metrics = compute_gateway_adoption_metrics()
@@ -3117,7 +3320,13 @@ def main() -> None:
               "AnalystViewService/ExecutiveViewService/KnowledgeQualityService/KnowledgePlatform "
               "engine, no confidence-computing/weighting/ranking function introduced pending "
               "ADR-0007, knowledge-platform/ still unwired from index.js/gateway-service.js/"
-              "intelligence-service.js).")
+              "intelligence-service.js), Stage 19 Product Platform clean (all 8 "
+              "product-platform/ files present and isolated, no duplicate ProductEngineService/"
+              "ProductProfileService/ProductPackagingService/ProductQualityService/"
+              "ProductPlatform engine, no confidence-computing/weighting/ranking function "
+              "introduced pending ADR-0007, product-platform/ still unwired from index.js/"
+              "gateway-service.js/intelligence-service.js/knowledge-platform.js, no Python "
+              "dossier/report pipeline coupling detected).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")

@@ -34,5 +34,10 @@ export class KnowledgePlatform {
     this.analystViews = new AnalystViewService({ knowledgeObject: this.object, navigation: this.navigation, metrics });
     this.executiveViews = new ExecutiveViewService({ knowledgeObject: this.object, navigation: this.navigation, metrics });
     this.quality = new KnowledgeQualityService({ knowledgeObject: this.object });
+    // Retained (not just threaded into the five services above) so a future external composer
+    // one layer up can share this exact instance rather than going without metrics or
+    // constructing a second one. Read-only by convention (no setter); every existing consumer of
+    // this class ignores an added property it doesn't ask for.
+    this.metrics = metrics || null;
   }
 }

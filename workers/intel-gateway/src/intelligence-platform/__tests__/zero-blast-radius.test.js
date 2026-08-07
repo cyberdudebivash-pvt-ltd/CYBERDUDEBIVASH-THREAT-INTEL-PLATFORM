@@ -48,11 +48,18 @@ const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
  * intelligence-service.js itself is not modified to reference knowledge-platform/ at all, which
  * the "intelligence-service.js does not import knowledge-platform/" test in knowledge-platform/
  * __tests__/zero-blast-radius.test.js independently confirms).
+ *
+ * Stage 19: product-platform/ is added because its feature-flags.js docstring names
+ * "intelligence-platform" in prose (documenting that it composes knowledge-platform/, not this
+ * directory, directly), not because its production code imports this directory -- it does not
+ * (product-platform/ holds itself to the one-hop-down rule into knowledge-platform/ only, per
+ * TITAN_STAGE19_READINESS_REPORT.md Sec 3.2 and its own independent zero-blast-radius test).
  */
 const AUTHORIZED_CONSUMER_DIRS = [
   join(WORKER_SRC_DIR, "enterprise-gateway"),
   join(WORKER_SRC_DIR, "relationship-framework"),
   join(WORKER_SRC_DIR, "knowledge-platform"),
+  join(WORKER_SRC_DIR, "product-platform"),
 ];
 
 /**
@@ -164,15 +171,16 @@ test("no evidence-registry/ PRODUCTION file references intelligence-platform/ (o
   }
 });
 
-test("evidence-registry/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these four directories, nothing broader (the exempted test file itself stays honest)", () => {
+test("evidence-registry/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these five directories, nothing broader (the exempted test file itself stays honest)", () => {
   // Stage 14: evidence-registry's own array grew a second, narrowly-named entry
   // (enterprise-gateway) alongside this stage's pre-existing intelligence-platform entry -- see
   // that file's own updated doc comment for why. Stage 16 added a third (relationship-framework).
-  // Stage 18 added a fourth (knowledge-platform). This assertion is updated in lockstep so it
-  // keeps proving the array is exactly these four named directories, not a general relaxation.
+  // Stage 18 added a fourth (knowledge-platform). Stage 19 added a fifth (product-platform). This
+  // assertion is updated in lockstep so it keeps proving the array is exactly these five named
+  // directories, not a general relaxation.
   const text = readFileSync(join(EVIDENCE_REGISTRY_DIR, "__tests__", "zero-blast-radius.test.js"), "utf-8");
   assert.match(
     text,
-    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[\s*join\(WORKER_SRC_DIR,\s*"intelligence-platform"\),\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\),\s*join\(WORKER_SRC_DIR,\s*"knowledge-platform"\),?\s*\]/
+    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[\s*join\(WORKER_SRC_DIR,\s*"intelligence-platform"\),\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\),\s*join\(WORKER_SRC_DIR,\s*"knowledge-platform"\),\s*join\(WORKER_SRC_DIR,\s*"product-platform"\),?\s*\]/
   );
 });
