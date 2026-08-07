@@ -60,6 +60,28 @@ def bare_vuln_item():
 
 
 @pytest.fixture
+def fake_view():
+    """Hand-built Commercial Quality View, independent of any real item or
+    the 5-dimension/7-detection-format applicability space, so tests can
+    reach composite/failure combinations a real fixture cannot (e.g.
+    >=98% composite with a genuine applicable failure)."""
+    def _build(applicable, failed):
+        return {
+            "item_id": "synthetic-premium-test",
+            "applicability": {
+                "excluded": False,
+                "dimensions": {},
+                "summary": {"applicable": applicable, "not_applicable": 0, "unknown": 0,
+                            "passed": applicable - failed, "failed": failed},
+            },
+            "applicability_adjusted_composite": round(((applicable - failed) / applicable) * 100),
+            "agreement_summary": {"systems_evaluated": 0, "positive_signals": [], "agreement_count": 0, "note": ""},
+            "inputs_cited": [],
+        }
+    return _build
+
+
+@pytest.fixture
 def fresh_cve_no_epss():
     from datetime import datetime, timezone
     return {
@@ -196,15 +218,28 @@ def test_commercial_explanation_cites_the_same_inputs_as_the_view(rich_item):
 # ─── Commercial Recommendation Layer -- presentation-only ──────────────────
 
 class TestCommercialRecommendationLayer:
-    def test_premium_intelligence_requires_zero_applicable_failures(self, rich_item):
-        item = dict(rich_item)
-        item["ioc_count"] = 0
-        item["iocs"] = []
-        view = build_commercial_quality_view(item, {})
+    def test_premium_intelligence_requires_zero_applicable_failures(self, fake_view):
+        # A real fixture cannot reach this branch: the engine only has 5 named
+        # dimensions + 7 detection formats (~11 applicable dimensions best
+        # case), and one failure among 11 rounds to 91%, never 98%+. This uses
+        # a hand-built view (see the fake_view fixture) with enough applicable
+        # dimensions to actually reach >=98% with one real failure -- the
+        # Commercial Recommendation Layer is a pure function of an
+        # already-computed view, independently testable from
+        # build_commercial_quality_view's realistic-item derivation.
+        view = fake_view(applicable=50, failed=1)  # 49/50 = 98%, 1 applicable failure
+        assert view["applicability_adjusted_composite"] == 98
         readiness = build_commercial_readiness_summary(view)
-        if (view["applicability_adjusted_composite"] or 0) >= 98 and not readiness["zero_applicable_failures"]:
-            rec = build_commercial_recommendation_layer(view)
-            assert rec["tier"] != "PREMIUM_INTELLIGENCE"
+        assert readiness["zero_applicable_failures"] is False
+        rec = build_commercial_recommendation_layer(view)
+        assert rec["tier"] == "COMMERCIAL_CERTIFIED", "a 98%+ composite with a real applicable failure must be downgraded from PREMIUM_INTELLIGENCE"
+
+    def test_premium_intelligence_awarded_at_98_plus_with_zero_applicable_failures(self, fake_view):
+        view = fake_view(applicable=50, failed=0)  # 50/50 = 100%, zero applicable failures
+        readiness = build_commercial_readiness_summary(view)
+        assert readiness["zero_applicable_failures"] is True
+        rec = build_commercial_recommendation_layer(view)
+        assert rec["tier"] == "PREMIUM_INTELLIGENCE"
 
     def test_recommendation_is_explicitly_presentation_only(self, rich_item):
         view = build_commercial_quality_view(rich_item, {})

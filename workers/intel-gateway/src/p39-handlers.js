@@ -395,10 +395,16 @@ export function buildCommercialPublicationDecision(item, view, feedContext = {})
 export function buildCommercialExplanation(view) {
   if (!view) return null;
   const readiness = buildCommercialReadinessSummary(view);
+  // Defensive fallback (matches the Python counterpart's view.get("agreement_summary", {}))
+  // -- a view object that omits agreement_summary must not throw here, since
+  // buildCommercialRecommendationLayer and buildCommercialReleaseDecision
+  // both call this function internally and would otherwise propagate the crash.
+  const agreement = view.agreement_summary || {};
+  const positiveSignals = agreement.positive_signals || [];
   const lines = [];
-  lines.push(`${view.agreement_summary.systems_evaluated} system(s) evaluated this item.`);
-  if (view.agreement_summary.positive_signals.length > 0) {
-    lines.push(`${view.agreement_summary.positive_signals.length} agree on a positive commercial signal: ${view.agreement_summary.positive_signals.join(', ')}.`);
+  lines.push(`${agreement.systems_evaluated ?? 0} system(s) evaluated this item.`);
+  if (positiveSignals.length > 0) {
+    lines.push(`${positiveSignals.length} agree on a positive commercial signal: ${positiveSignals.join(', ')}.`);
   }
   lines.push(`${readiness.applicable_gates} applicable gate(s); ${readiness.non_applicable_gates} not applicable for this item type (excluded from scoring, not penalized); ${readiness.unknown_gates} unknown/pending.`);
   lines.push(`${readiness.failed_applicable_gates} applicable gate(s) failed.`);

@@ -80,10 +80,12 @@ detection formats), **composite = 100/100**, tier = `PREMIUM_INTELLIGENCE`.
 signal, disclosed in 2020): MITRE correctly `NOT_APPLICABLE` (excluded from
 the denominator, not scored as a failure), EPSS `APPLICABLE`/`FAIL` (old
 enough that a real gap exists), KEV `APPLICABLE`/`PASS`, IOC
-`APPLICABLE`/`FAIL`, 7 detection formats `UNKNOWN`. Applicable set = 2
-(KEV pass, IOC fail) → **composite = 50/100** — correctly excluding the
-inapplicable MITRE dimension rather than penalizing the item for a technique
-it structurally cannot have.
+`APPLICABLE`/`FAIL`, 7 detection formats `UNKNOWN`. Applicable set = 3
+(EPSS fail, KEV pass, IOC fail), 1 pass → **composite = 33/100** (verified
+against the real, committed fixture this session: `{'applicable': 3,
+'not_applicable': 1, 'unknown': 7, 'passed': 1, 'failed': 2}`) — correctly
+excluding the inapplicable MITRE dimension rather than penalizing the item
+for a technique it structurally cannot have.
 
 ---
 

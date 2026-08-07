@@ -161,7 +161,15 @@ def compute_commercial_applicability(item: Dict) -> Dict:
     dims: Dict[str, Any] = {}
 
     # --- MITRE ATT&CK mapping ---
-    has_mitre = bool(item.get("mitre_tactics")) or bool(item.get("ttps")) or bool(item.get("attck_technique_ids"))
+    # Requires a non-empty LIST specifically (matching p39-handlers.js's
+    # Array.isArray(...) && .length > 0 check) -- a bare truthy check would
+    # let a malformed scalar/string value pass here in Python while the same
+    # item fails this check in JS, breaking the "same conceptual model,
+    # independently coded" guarantee both runtimes are supposed to honor.
+    has_mitre = any(
+        isinstance(item.get(field), list) and len(item.get(field)) > 0
+        for field in ("mitre_tactics", "ttps", "attck_technique_ids")
+    )
     if not has_behavior:
         dims["mitre_attack"] = {
             "status": "NOT_APPLICABLE",
@@ -204,7 +212,15 @@ def compute_commercial_applicability(item: Dict) -> Dict:
         dims["ioc_presence"] = {"status": "NOT_APPLICABLE", "rationale": "Pure policy/compliance advisory -- not the kind of item that plausibly carries IOCs."}
     else:
         iocs = item.get("iocs")
-        ioc_cnt = int(item.get("ioc_count") or (len(iocs) if isinstance(iocs, list) else 0) or 0)
+        raw_cnt = item.get("ioc_count") or (len(iocs) if isinstance(iocs, list) else 0) or 0
+        try:
+            # A malformed feed value (non-numeric string, dict, list) must
+            # never raise here -- this function's contract (see module
+            # docstring) is "never raises on malformed input," and one bad
+            # item must not abort an entire run_orchestration() batch.
+            ioc_cnt = int(float(raw_cnt))
+        except (TypeError, ValueError):
+            ioc_cnt = 0
         if ioc_cnt > 0:
             dims["ioc_presence"] = {"status": "APPLICABLE", "result": "PASS", "rationale": f"{ioc_cnt} IOC(s) present."}
         else:
@@ -537,9 +553,9 @@ def run_orchestration(items: Optional[List[Dict]] = None) -> Dict:
         "per_item_summary": per_item_views[:200],
     }
 
-    _QUAL.mkdir(parents=True, exist_ok=True)
     if not DRY_RUN:
-        _OUT_REPORT.write_text(json.dumps(report, indent=2))
+        _QUAL.mkdir(parents=True, exist_ok=True)
+        _OUT_REPORT.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     return report
 

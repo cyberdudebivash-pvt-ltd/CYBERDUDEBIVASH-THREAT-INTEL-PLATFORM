@@ -198,16 +198,42 @@ test("buildCommercialExplanation: narrative cites the same inputs_cited array as
 // Commercial Recommendation Layer -- presentation-only, never authoritative
 // ---------------------------------------------------------------------------
 
+// A real fixture cannot reach this branch: the engine only has 5 named
+// dimensions + 7 detection formats, so the best case is ~11 applicable
+// dimensions -- one failure among 11 rounds to 91%, never 98%+. Reaching the
+// >=98%-with-one-failure condition needs a hand-built view (>=50 applicable
+// dimensions), which is exactly what the Commercial Recommendation Layer's
+// own contract is: a pure function of an already-computed view, independently
+// testable from buildCommercialQualityView's realistic-item derivation.
+function fakeView(applicable, failed) {
+  return {
+    item_id: "synthetic-premium-test",
+    applicability: {
+      excluded: false,
+      dimensions: {},
+      summary: { applicable, not_applicable: 0, unknown: 0, passed: applicable - failed, failed },
+    },
+    applicability_adjusted_composite: Math.round(((applicable - failed) / applicable) * 100),
+    agreement_summary: { systems_evaluated: 0, positive_signals: [], agreement_count: 0, note: "" },
+    inputs_cited: [],
+  };
+}
+
 test("buildCommercialRecommendationLayer: Premium Intelligence requires zero applicable failures even at a 98+ composite", () => {
-  const item = richItem();
-  item.ioc_count = 0; // introduce one applicable failure
-  item.iocs = [];
-  const view = buildCommercialQualityView(item, {});
+  const view = fakeView(50, 1); // 49/50 = 98%, 1 applicable failure
+  assert.equal(view.applicability_adjusted_composite, 98);
   const readiness = buildCommercialReadinessSummary(view);
-  if (view.applicability_adjusted_composite >= 98 && !readiness.zero_applicable_failures) {
-    const rec = buildCommercialRecommendationLayer(view);
-    assert.notEqual(rec.tier, "PREMIUM_INTELLIGENCE");
-  }
+  assert.equal(readiness.zero_applicable_failures, false);
+  const rec = buildCommercialRecommendationLayer(view);
+  assert.equal(rec.tier, "COMMERCIAL_CERTIFIED", "a 98%+ composite with a real applicable failure must be downgraded from PREMIUM_INTELLIGENCE");
+});
+
+test("buildCommercialRecommendationLayer: Premium Intelligence is awarded at 98+ composite with zero applicable failures", () => {
+  const view = fakeView(50, 0); // 50/50 = 100%, zero applicable failures
+  const readiness = buildCommercialReadinessSummary(view);
+  assert.equal(readiness.zero_applicable_failures, true);
+  const rec = buildCommercialRecommendationLayer(view);
+  assert.equal(rec.tier, "PREMIUM_INTELLIGENCE");
 });
 
 test("buildCommercialRecommendationLayer: is explicitly labeled presentation_only and never authoritative", () => {

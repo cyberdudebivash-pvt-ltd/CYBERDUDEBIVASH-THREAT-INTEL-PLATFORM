@@ -3262,13 +3262,20 @@ def check_no_duplicate_commercial_orchestrator_functions(handlers_dir: Path | No
     always calls with the defaults."""
     handlers_dir = handlers_dir or HANDLERS_DIR
     scripts_dir = scripts_dir or (ROOT / "scripts")
+    # Resolved against the (possibly overridden) supplied directories, not the
+    # global module-level constants -- otherwise a fixture copy of
+    # p39-handlers.js/commercial_quality_orchestrator.py under a test's own
+    # handlers_dir/scripts_dir would never match the exclusion check below
+    # and would be false-positive-reported as a duplicate of itself.
+    canonical_js = handlers_dir / COMMERCIAL_ORCHESTRATOR_JS.name
+    canonical_py = scripts_dir / COMMERCIAL_ORCHESTRATOR_PY.name
     findings = []
 
-    if COMMERCIAL_ORCHESTRATOR_JS.exists() and handlers_dir.exists():
+    if canonical_js.exists():
         for fn in COMMERCIAL_ORCHESTRATOR_JS_FUNCTIONS:
             pattern = re.compile(rf"\bfunction\s+{fn}\b")
             for path in handlers_dir.rglob("*.js"):
-                if path == COMMERCIAL_ORCHESTRATOR_JS or path.parent.name == "__tests__":
+                if path == canonical_js or path.parent.name == "__tests__":
                     continue
                 text = path.read_text(encoding="utf-8", errors="replace")
                 if pattern.search(text):
@@ -3277,11 +3284,11 @@ def check_no_duplicate_commercial_orchestrator_functions(handlers_dir: Path | No
                         f"canonical implementation is workers/intel-gateway/src/p39-handlers.js"
                     )
 
-    if COMMERCIAL_ORCHESTRATOR_PY.exists() and scripts_dir.exists():
+    if canonical_py.exists():
         for fn in COMMERCIAL_ORCHESTRATOR_PY_FUNCTIONS:
             pattern = re.compile(rf"^def\s+{fn}\b", re.MULTILINE)
             for path in scripts_dir.rglob("*.py"):
-                if path == COMMERCIAL_ORCHESTRATOR_PY:
+                if path == canonical_py:
                     continue
                 text = path.read_text(encoding="utf-8", errors="replace")
                 if pattern.search(text):
@@ -3292,14 +3299,21 @@ def check_no_duplicate_commercial_orchestrator_functions(handlers_dir: Path | No
     return findings
 
 
-def check_commercial_orchestrator_protected_engines_intact(handlers_dir: Path | None = None) -> list[str]:
+def check_commercial_orchestrator_protected_engine_signatures_present(handlers_dir: Path | None = None) -> list[str]:
     """Stage 20A's charter explicitly forbids modifying P20/P21/P25/P26 (JS)
     or commercial_readiness_governor.py/dossier_quality_engine.py (Python).
-    Confirms the specific function/class signatures those engines are known
-    to export are still present at their canonical file -- see the module
-    comment above COMMERCIAL_ORCHESTRATOR_PROTECTED_JS for what this can and
-    cannot detect. `handlers_dir` is overridable for fixture testing; main()
-    always calls with the default."""
+
+    IMPORTANT SCOPE NOTE: this check confirms the specific function/class
+    *declarations* those engines are known to export are still textually
+    present at their canonical file. It is a declaration/signature-presence
+    check only -- it has no stored baseline to diff against, so it CANNOT
+    detect a body-only edit that keeps the same name and signature (e.g. a
+    changed formula inside an unchanged `function computeP26Grade(item) {`).
+    It catches accidental deletion, renaming, or file removal, not silent
+    in-place modification. See the module comment above
+    COMMERCIAL_ORCHESTRATOR_PROTECTED_JS for the same caveat. `handlers_dir`
+    is overridable for fixture testing; main() always calls with the default.
+    """
     handlers_dir = handlers_dir or HANDLERS_DIR
     findings = []
     for fn, filename in COMMERCIAL_ORCHESTRATOR_PROTECTED_JS.items():
@@ -3311,7 +3325,8 @@ def check_commercial_orchestrator_protected_engines_intact(handlers_dir: Path | 
         if not re.search(rf"\bfunction\s+{fn}\b", text):
             findings.append(
                 f"PROTECTED ENGINE SIGNATURE MISSING: {filename} no longer defines 'function {fn}' -- Stage 20A's "
-                f"composition layer depends on this exact export remaining unchanged."
+                f"composition layer depends on this exact export remaining present (declaration-presence check only; "
+                f"see this function's docstring for what it cannot detect)."
             )
     for needle, path in COMMERCIAL_ORCHESTRATOR_PROTECTED_PY.items():
         if not path.exists():
@@ -3321,7 +3336,8 @@ def check_commercial_orchestrator_protected_engines_intact(handlers_dir: Path | 
         if needle not in text:
             findings.append(
                 f"PROTECTED ENGINE SIGNATURE MISSING: {_display_path(path)} no longer defines '{needle}' -- Stage "
-                f"20A's composition layer depends on this exact export remaining unchanged."
+                f"20A's composition layer depends on this exact export remaining present (declaration-presence check "
+                f"only; see this function's docstring for what it cannot detect)."
             )
     return findings
 
@@ -3470,7 +3486,7 @@ def main() -> None:
     all_findings += check_product_platform_no_python_pipeline_coupling()
     all_findings += check_commercial_orchestrator_files_present()
     all_findings += check_no_duplicate_commercial_orchestrator_functions()
-    all_findings += check_commercial_orchestrator_protected_engines_intact()
+    all_findings += check_commercial_orchestrator_protected_engine_signatures_present()
     all_findings += check_commercial_orchestrator_no_new_scorer()
     all_findings += check_commercial_orchestrator_still_unwired()
 

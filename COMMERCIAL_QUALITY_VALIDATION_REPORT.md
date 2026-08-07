@@ -2,7 +2,10 @@
 
 **Program:** Project TITAN Stage 20A — Enterprise Commercial Quality Orchestrator (Implementation)
 **Date:** 2026-08-07
-**Status:** All validation gates PASS. Zero regressions detected.
+**Status:** All Stage-20A-scoped validation gates PASS. Zero regressions detected. (The
+architecture governance check — §6 — is advisory-only and retains its own exit code 1 from 6
+pre-existing findings unrelated to this change; the 5 new Stage 20A checks it gained this session
+report zero findings.)
 **Companion documents:** `COMMERCIAL_QUALITY_GOVERNANCE_AUDIT.md`, `COMMERCIAL_QUALITY_ORCHESTRATOR_ARCHITECTURE.md` (PR #131, merged), `COMMERCIAL_APPLICABILITY_REPORT.md`, `COMMERCIAL_ORCHESTRATOR_REPORT.md`, `COMMERCIAL_DECISION_FLOW_REPORT.md`, `COMMERCIAL_QUALITY_PERFORMANCE_REPORT.md`, `COMMERCIAL_QUALITY_ARCHITECTURE_COMPLIANCE_REPORT.md`
 
 ---
@@ -117,7 +120,7 @@ concern `agent/threat_graph/`, `scripts/cve_correlation_engine.py`, and a
 **Zero new findings were produced by the five Stage 20A checks
 (`check_commercial_orchestrator_files_present`,
 `check_no_duplicate_commercial_orchestrator_functions`,
-`check_commercial_orchestrator_protected_engines_intact`,
+`check_commercial_orchestrator_protected_engine_signatures_present`,
 `check_commercial_orchestrator_no_new_scorer`,
 `check_commercial_orchestrator_still_unwired`)** — each ran and returned an
 empty list. This script is advisory-only (documented in its own `main()`);
@@ -148,4 +151,7 @@ changes.
 | Conflict markers | None |
 | Syntax (JS + Python) | Clean |
 
-**No regressions. All validation gates pass.**
+**No regressions. Every Stage-20A-scoped validation gate passes. The advisory
+architecture governance check retains its pre-existing exit code 1 (6
+findings, all pre-dating and unrelated to this stage) — this is unchanged
+from before this session and is not a Stage 20A regression.**

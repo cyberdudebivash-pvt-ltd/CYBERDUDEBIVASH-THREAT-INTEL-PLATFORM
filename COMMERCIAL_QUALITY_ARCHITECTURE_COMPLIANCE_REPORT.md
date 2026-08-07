@@ -73,10 +73,17 @@ with zero new findings:
 2. `check_no_duplicate_commercial_orchestrator_functions` — none of the 14
    exported function names (7 per runtime) is defined anywhere else in the
    codebase.
-3. `check_commercial_orchestrator_protected_engines_intact` — `computeP20QualityScore`,
-   `getP21CertificationLevel`, `computeEnterpriseTrustScore`, `computeP26Grade`,
+3. `check_commercial_orchestrator_protected_engine_signatures_present` —
+   `computeP20QualityScore`, `getP21CertificationLevel`,
+   `computeEnterpriseTrustScore`, `computeP26Grade`,
    `enforce_publication_decision`, and `class DossierQualityEngine` are all
-   still defined at their canonical, pre-existing location.
+   still *declared* at their canonical, pre-existing location. **Scope note:**
+   this is a declaration/signature-presence check, not a content diff against
+   a stored baseline — it catches accidental deletion, renaming, or file
+   removal of these exports; it cannot detect a body-only edit that keeps the
+   same name and signature. The actual non-modification claim for this PR
+   rests on the diff itself (§1 Affected Files) plus this repo's own git
+   history, not on this check alone.
 4. `check_commercial_orchestrator_no_new_scorer` — neither new file defines a
    `compute*/score*/weight*/rank*Confidence|Trust|Quality|Certification*`
    function (ADR-0007's boundary, made mechanical).
@@ -146,7 +153,7 @@ with zero new findings:
 | Criterion | Status |
 |---|---|
 | One commercial decision layer exists | ✅ Two independent runtime implementations of the same one conceptual layer |
-| Zero existing engines modified | ✅ Mechanically verified (§3 item 3) |
+| Zero existing engines modified | ✅ Confirmed by the diff itself (§1 Affected Files lists every changed file; no P20/P21/P25/P26/P29/P35/P36/P37 file, `commercial_readiness_governor.py`, or `dossier_quality_engine.py` appears in it), with declaration-presence for the six protected exports additionally checked by automation (§3 item 3 — see that item's scope note for what the automated check can and cannot detect) |
 | Commercial applicability implemented | ✅ `COMMERCIAL_APPLICABILITY_REPORT.md` |
 | No duplicated scoring / confidence / certification | ✅ Mechanically verified (§3 items 2, 4) |
 | Commercial recommendation deterministic | ✅ Pure functions of already-computed inputs; same input → same output, no randomness, no I/O inside the recommendation functions themselves |
