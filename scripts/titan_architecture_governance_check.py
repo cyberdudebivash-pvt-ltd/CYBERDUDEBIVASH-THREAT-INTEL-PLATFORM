@@ -3178,6 +3178,228 @@ def check_product_platform_no_python_pipeline_coupling(pp_dir: Path | None = Non
     return findings
 
 
+# =============================================================================
+# Stage 20A -- Commercial Quality Orchestrator governance checks
+# =============================================================================
+# Project TITAN Stage 20A built a read-only composition layer over existing
+# quality/trust/certification engines (COMMERCIAL_QUALITY_GOVERNANCE_AUDIT.md
+# + COMMERCIAL_QUALITY_ORCHESTRATOR_ARCHITECTURE.md, PR #131). Its own charter
+# is explicit: never modify P20/P21/P25/P26/P29/P35/P36/P37, never modify
+# commercial_readiness_governor.py or dossier_quality_engine.py, never
+# duplicate quality/certification/confidence/publication engines, and stay
+# internal-only (never wired into index.js). Five checks cover that charter,
+# mirroring check_stage19_files_present_and_isolated() /
+# check_no_duplicate_product_platform_engines() /
+# check_no_confidence_computation_introduced_stage19() /
+# check_product_platform_still_unwired()'s exact patterns, extended one step
+# further with a protected-engine-signature check since Stage 20A (unlike
+# Stage 19) composes directly from live P20/P21/P25/P26 exports by name.
+
+COMMERCIAL_ORCHESTRATOR_JS = HANDLERS_DIR / "p39-handlers.js"
+COMMERCIAL_ORCHESTRATOR_PY = ROOT / "scripts" / "commercial_quality_orchestrator.py"
+
+COMMERCIAL_ORCHESTRATOR_JS_FUNCTIONS = [
+    "computeCommercialApplicability",
+    "buildCommercialQualityView",
+    "buildCommercialReadinessSummary",
+    "buildCommercialPublicationDecision",
+    "buildCommercialExplanation",
+    "buildCommercialRecommendationLayer",
+    "buildCommercialReleaseDecision",
+]
+
+COMMERCIAL_ORCHESTRATOR_PY_FUNCTIONS = [
+    "compute_commercial_applicability",
+    "build_commercial_quality_view",
+    "build_commercial_readiness_summary",
+    "build_commercial_publication_decision",
+    "build_commercial_explanation",
+    "build_commercial_recommendation_layer",
+    "build_commercial_release_decision",
+]
+
+# Protected engines Stage 20A's charter forbids modifying (governance audit +
+# architecture doc Sec 0). This does not diff file contents against a stored
+# baseline -- it confirms the specific function/class names those engines are
+# known to own are still defined at their canonical location, the same
+# structural guarantee every duplicate-engine check in this file provides in
+# the opposite direction.
+COMMERCIAL_ORCHESTRATOR_PROTECTED_JS = {
+    "computeP20QualityScore": "p20-handlers.js",
+    "getP21CertificationLevel": "p21-handlers.js",
+    "computeEnterpriseTrustScore": "p25-handlers.js",
+    "computeP26Grade": "p26-handlers.js",
+}
+COMMERCIAL_ORCHESTRATOR_PROTECTED_PY = {
+    "def enforce_publication_decision": ROOT / "scripts" / "commercial_readiness_governor.py",
+    "class DossierQualityEngine": ROOT / "agent" / "dossier_quality_engine.py",
+}
+
+
+def check_commercial_orchestrator_files_present() -> list[str]:
+    """Stage 20A: confirms both runtime halves of the Commercial Quality
+    Orchestrator still exist (Deprecation Instead of Deletion -- no silent
+    removal), mirroring check_stage19_files_present_and_isolated()'s pattern
+    for a two-file (not multi-file-directory) deliverable."""
+    findings = []
+    for label, path in [("p39-handlers.js", COMMERCIAL_ORCHESTRATOR_JS),
+                         ("commercial_quality_orchestrator.py", COMMERCIAL_ORCHESTRATOR_PY)]:
+        if not path.exists():
+            findings.append(
+                f"MISSING STAGE 20A FILE: {_display_path(path)} -- {label} is required by the approved "
+                f"architecture (PR #131) and must not be silently removed."
+            )
+    return findings
+
+
+def check_no_duplicate_commercial_orchestrator_functions(handlers_dir: Path | None = None, scripts_dir: Path | None = None) -> list[str]:
+    """Stage 20A's own NON-GOAL (inherited from every prior stage's "no
+    duplicate engines" rule): confirms no file other than p39-handlers.js
+    defines any of its 7 exported composition functions, and no file other
+    than commercial_quality_orchestrator.py defines any of its 7. Mirrors
+    check_no_duplicate_product_platform_engines()'s exact pattern.
+    `handlers_dir`/`scripts_dir` are overridable for fixture testing; main()
+    always calls with the defaults."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    scripts_dir = scripts_dir or (ROOT / "scripts")
+    # Resolved against the (possibly overridden) supplied directories, not the
+    # global module-level constants -- otherwise a fixture copy of
+    # p39-handlers.js/commercial_quality_orchestrator.py under a test's own
+    # handlers_dir/scripts_dir would never match the exclusion check below
+    # and would be false-positive-reported as a duplicate of itself.
+    canonical_js = handlers_dir / COMMERCIAL_ORCHESTRATOR_JS.name
+    canonical_py = scripts_dir / COMMERCIAL_ORCHESTRATOR_PY.name
+    findings = []
+
+    if canonical_js.exists():
+        for fn in COMMERCIAL_ORCHESTRATOR_JS_FUNCTIONS:
+            pattern = re.compile(rf"\bfunction\s+{fn}\b")
+            for path in handlers_dir.rglob("*.js"):
+                if path == canonical_js or path.parent.name == "__tests__":
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if pattern.search(text):
+                    findings.append(
+                        f"DUPLICATE ENGINE: {_display_path(path)} defines its own 'function {fn}' -- the "
+                        f"canonical implementation is workers/intel-gateway/src/p39-handlers.js"
+                    )
+
+    if canonical_py.exists():
+        for fn in COMMERCIAL_ORCHESTRATOR_PY_FUNCTIONS:
+            pattern = re.compile(rf"^def\s+{fn}\b", re.MULTILINE)
+            for path in scripts_dir.rglob("*.py"):
+                if path == canonical_py:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if pattern.search(text):
+                    findings.append(
+                        f"DUPLICATE ENGINE: {_display_path(path)} defines its own 'def {fn}' -- the canonical "
+                        f"implementation is scripts/commercial_quality_orchestrator.py"
+                    )
+    return findings
+
+
+def check_commercial_orchestrator_protected_engine_signatures_present(handlers_dir: Path | None = None) -> list[str]:
+    """Stage 20A's charter explicitly forbids modifying P20/P21/P25/P26 (JS)
+    or commercial_readiness_governor.py/dossier_quality_engine.py (Python).
+
+    IMPORTANT SCOPE NOTE: this check confirms the specific function/class
+    *declarations* those engines are known to export are still textually
+    present at their canonical file. It is a declaration/signature-presence
+    check only -- it has no stored baseline to diff against, so it CANNOT
+    detect a body-only edit that keeps the same name and signature (e.g. a
+    changed formula inside an unchanged `function computeP26Grade(item) {`).
+    It catches accidental deletion, renaming, or file removal, not silent
+    in-place modification. See the module comment above
+    COMMERCIAL_ORCHESTRATOR_PROTECTED_JS for the same caveat. `handlers_dir`
+    is overridable for fixture testing; main() always calls with the default.
+    """
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    findings = []
+    for fn, filename in COMMERCIAL_ORCHESTRATOR_PROTECTED_JS.items():
+        path = handlers_dir / filename
+        if not path.exists():
+            findings.append(f"PROTECTED ENGINE MISSING: {filename} -- Stage 20A composes this engine and must not cause its removal.")
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not re.search(rf"\bfunction\s+{fn}\b", text):
+            findings.append(
+                f"PROTECTED ENGINE SIGNATURE MISSING: {filename} no longer defines 'function {fn}' -- Stage 20A's "
+                f"composition layer depends on this exact export remaining present (declaration-presence check only; "
+                f"see this function's docstring for what it cannot detect)."
+            )
+    for needle, path in COMMERCIAL_ORCHESTRATOR_PROTECTED_PY.items():
+        if not path.exists():
+            findings.append(f"PROTECTED ENGINE MISSING: {_display_path(path)} -- Stage 20A composes this engine and must not cause its removal.")
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if needle not in text:
+            findings.append(
+                f"PROTECTED ENGINE SIGNATURE MISSING: {_display_path(path)} no longer defines '{needle}' -- Stage "
+                f"20A's composition layer depends on this exact export remaining present (declaration-presence check "
+                f"only; see this function's docstring for what it cannot detect)."
+            )
+    return findings
+
+
+_COMMERCIAL_ORCHESTRATOR_NEW_SCORER_PATTERN = re.compile(
+    r"\b(?:function|async\s+function|def)\s+(?:compute|score|weight|rank)\w*(?:Confidence|Trust|Quality|Certification)\w*\s*\("
+)
+
+
+def check_commercial_orchestrator_no_new_scorer() -> list[str]:
+    """ADR-0007's boundary and the governance audit's own mandate ("no new
+    independent scorer"), made mechanically enforceable -- mirrors
+    check_no_confidence_computation_introduced_stage19() exactly, extended to
+    also catch a new *Quality*/*Certification* computation, not just
+    *Confidence*/*Trust*. computeCommercialApplicability()/compute_commercial_
+    applicability() are exempt by construction -- they classify APPLICABLE/
+    NOT_APPLICABLE/UNKNOWN, not compute/score/weight/rank a number, so neither
+    matches this pattern."""
+    findings = []
+    for path in [COMMERCIAL_ORCHESTRATOR_JS, COMMERCIAL_ORCHESTRATOR_PY]:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in _COMMERCIAL_ORCHESTRATOR_NEW_SCORER_PATTERN.finditer(text):
+            findings.append(
+                f"ADR-0007 / GOVERNANCE AUDIT BOUNDARY VIOLATION: {_display_path(path)} appears to define a new "
+                f"confidence/trust/quality/certification-computing function ('{match.group(0).strip()}') -- Stage "
+                f"20A's charter and ADR-0007 both forbid a new independent scorer. Composed values must be cited "
+                f"verbatim from an existing engine only."
+            )
+    return findings
+
+
+def check_commercial_orchestrator_still_unwired(handlers_dir: Path | None = None) -> list[str]:
+    """Architecture boundary: confirms index.js has zero references to
+    p39-handlers.js or its exported function names -- Stage 20A's explicit
+    implementation directive ("Integrate with Gateway composition layer only.
+    Never expose publicly. Remain internal.") means this file, unlike every
+    P16-P38 handler, is never imported and never routed. Mirrors
+    check_product_platform_still_unwired()'s exact pattern. `handlers_dir` is
+    overridable for fixture testing; main() always calls with the default."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    findings = []
+    index_path = handlers_dir / "index.js"
+    if not index_path.exists():
+        return findings
+    text = index_path.read_text(encoding="utf-8", errors="replace")
+    if "p39-handlers" in text:
+        findings.append(
+            "STAGE 20A BYPASS: index.js references p39-handlers.js -- the Commercial Quality Orchestrator's JS "
+            "composition layer is authorized as internal-only per its explicit implementation directive; wiring "
+            "it into index.js requires its own separate authorization, not granted by this stage."
+        )
+    for fn in COMMERCIAL_ORCHESTRATOR_JS_FUNCTIONS:
+        if fn in text:
+            findings.append(
+                f"STAGE 20A BYPASS: index.js references '{fn}' -- the Commercial Quality Orchestrator must remain "
+                f"unrouted (see p39-handlers.js file header)."
+            )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -3262,6 +3484,11 @@ def main() -> None:
     all_findings += check_no_confidence_computation_introduced_stage19()
     all_findings += check_product_platform_still_unwired()
     all_findings += check_product_platform_no_python_pipeline_coupling()
+    all_findings += check_commercial_orchestrator_files_present()
+    all_findings += check_no_duplicate_commercial_orchestrator_functions()
+    all_findings += check_commercial_orchestrator_protected_engine_signatures_present()
+    all_findings += check_commercial_orchestrator_no_new_scorer()
+    all_findings += check_commercial_orchestrator_still_unwired()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     metrics = compute_gateway_adoption_metrics()
@@ -3326,7 +3553,12 @@ def main() -> None:
               "ProductPlatform engine, no confidence-computing/weighting/ranking function "
               "introduced pending ADR-0007, product-platform/ still unwired from index.js/"
               "gateway-service.js/intelligence-service.js/knowledge-platform.js, no Python "
-              "dossier/report pipeline coupling detected).")
+              "dossier/report pipeline coupling detected), Stage 20A Commercial Quality "
+              "Orchestrator clean (both p39-handlers.js and commercial_quality_orchestrator.py "
+              "present, no duplicate orchestrator functions, all protected P20/P21/P25/P26/"
+              "commercial_readiness_governor.py/dossier_quality_engine.py signatures intact, no "
+              "new confidence/trust/quality/certification scorer introduced, p39-handlers.js "
+              "still unwired from index.js).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")
