@@ -101,13 +101,13 @@ export const COMMERCIAL_SERVICE_CATALOG = Object.freeze(
       name: "Relationship Summary",
       description:
         "Entity-to-related-entity graph edges. NullRelationshipProvider throws NOT_WIRED by " +
-        "default -- real data requires composing with relationship-framework/ (ADR-0010 " +
-        "Accepted, Stage 16). Not activatable as-is; catalogued for completeness, not marketed " +
-        "as ready.",
+        "default -- real data requires composing with the relationship graph framework (Stage " +
+        "16, ADR-0010 Accepted). Not activatable as-is; catalogued for completeness, not " +
+        "marketed as ready.",
       gatewayCapability: "evidence.relationships",
       newAdapter: false,
       sourceLayer: "evidence-registry",
-      owner: "Evidence Registry (Stage 12) / Relationship Framework (Stage 16)",
+      owner: "Evidence Registry (Stage 12) / Relationship Graph Framework (Stage 16)",
       classification: Object.freeze(["commercial", "partner", "soc", "ai-agent", "mcp"]),
       visibility: "commercial",
       securityClassification: "standard",
@@ -116,7 +116,7 @@ export const COMMERCIAL_SERVICE_CATALOG = Object.freeze(
       internalConsumers: Object.freeze([]),
       expectedLatencyMs: 400,
       documentationStatus: "documented",
-      dependencies: Object.freeze(["evidence-registry/relationship-resolution.js", "relationship-framework/"]),
+      dependencies: Object.freeze(["evidence-registry/relationship-resolution.js"]),
     },
     {
       id: "intelligence.explainability",
@@ -139,20 +139,25 @@ export const COMMERCIAL_SERVICE_CATALOG = Object.freeze(
       dependencies: Object.freeze(["intelligence-platform/explainability-engine.js"]),
     },
     {
-      id: "evidence.provenance",
+      id: "commercial.evidenceProvenanceSummary",
       name: "Evidence Provenance Summary",
       description:
-        "5 of 6 lineage views (evidence/version/confidence/source/relationship lineage). " +
-        "getAuditLineage is EXCLUDED -- it carries internal actor identity and stays " +
-        "internal-only, enforced by the adapter (see commercial-adapters.js).",
-      gatewayCapability: "evidence.provenance",
-      newAdapter: false,
+        "5 of 6 lineage views (evidence/version/confidence/source/relationship lineage) over the " +
+        "existing 'evidence.provenance' capability's EvidenceProvenanceEngine. A NEW, separate, " +
+        "narrower adapter -- not a reclassification of 'evidence.provenance' itself, which stays " +
+        "registered exactly as-is (all 6 methods, including getAuditLineage) and is annotated " +
+        "internal-only (see INTERNAL_ONLY_CAPABILITY_ANNOTATIONS below) because it has no method " +
+        "restriction. This adapter reuses createServiceMethodHandler()'s existing allowedMethods " +
+        "option to exclude getAuditLineage (internal actor identity) at the dispatch boundary --" +
+        " real enforcement, not a documentation-only caveat.",
+      gatewayCapability: null,
+      newAdapter: true,
       sourceLayer: "evidence-registry",
       owner: "Evidence Registry (Stage 12)",
       classification: Object.freeze(["commercial", "partner"]),
       visibility: "commercial",
       securityClassification: "restricted",
-      lifecycle: "ga",
+      lifecycle: "beta",
       commercialValue: "Chain-of-custody / trust narrative for enterprise and partner consumption.",
       internalConsumers: Object.freeze([]),
       expectedLatencyMs: 300,
@@ -384,3 +389,40 @@ export function listNewAdapterEntries() {
 export function listExistingCapabilityEntries() {
   return COMMERCIAL_SERVICE_CATALOG.filter((entry) => !entry.newAdapter && entry.gatewayCapability);
 }
+
+/**
+ * The 3 of the 9 pre-Stage-21 capabilities that are neither a catalog entry themselves (see the
+ * audit doc Sec 4: "internal-only capabilities ... are annotated in the registry but deliberately
+ * excluded from the catalog") nor superseded by a narrower Stage 21 adapter of their own (unlike
+ * evidence.provenance, superseded for commercial purposes by commercial.evidenceProvenanceSummary
+ * above). Still annotated for registry completeness -- Phase 4's describe()/describeAll() should
+ * report an explicit classification for every registered capability, not leave 3 of 9 silently
+ * defaulted. Single source of truth for this list; commercial-catalog/platform.js applies it, it
+ * does not redefine it.
+ */
+export const INTERNAL_ONLY_CAPABILITY_ANNOTATIONS = Object.freeze([
+  Object.freeze({
+    gatewayCapability: "intelligence.query",
+    owner: "Intelligence Platform (Stage 13)",
+    consumers: Object.freeze([]),
+    securityClassification: "internal",
+    visibility: "internal",
+    lifecycle: "internal-only",
+  }),
+  Object.freeze({
+    gatewayCapability: "evidence.provenance",
+    owner: "Evidence Registry (Stage 12)",
+    consumers: Object.freeze(["commercial-catalog/commercial-adapters.js (via allowedMethods-restricted sub-handler)"]),
+    securityClassification: "restricted",
+    visibility: "internal",
+    lifecycle: "internal-only",
+  }),
+  Object.freeze({
+    gatewayCapability: "platform.metrics",
+    owner: "Intelligence Platform (Stage 13)",
+    consumers: Object.freeze([]),
+    securityClassification: "internal",
+    visibility: "internal",
+    lifecycle: "internal-only",
+  }),
+]);

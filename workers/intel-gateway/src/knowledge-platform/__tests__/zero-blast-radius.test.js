@@ -19,6 +19,7 @@ const INTELLIGENCE_PLATFORM_DIR = join(WORKER_SRC_DIR, "intelligence-platform");
 const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
 const ENTERPRISE_GATEWAY_DIR = join(WORKER_SRC_DIR, "enterprise-gateway");
 const PRODUCT_PLATFORM_DIR = join(WORKER_SRC_DIR, "product-platform");
+const COMMERCIAL_CATALOG_DIR = join(WORKER_SRC_DIR, "commercial-catalog");
 const KP_TESTS_DIR = join(KP_DIR, "__tests__");
 
 const KP_PRODUCTION_FILES = Object.freeze([
@@ -57,7 +58,7 @@ function listJsFiles(dir) {
   return out;
 }
 
-test("nothing outside knowledge-platform/ references 'knowledge-platform' except the three lower layers' own boundary-documentation __tests__ files and product-platform/ (Stage 19, the first authorized real consumer)", () => {
+test("nothing outside knowledge-platform/ references 'knowledge-platform' except the three lower layers' own boundary-documentation __tests__ files, product-platform/ (Stage 19), and commercial-catalog/ (Stage 21) -- the authorized real consumers", () => {
   // evidence-registry/, intelligence-platform/, and enterprise-gateway/'s own
   // __tests__/zero-blast-radius.test.js files each legitimately name "knowledge-platform" in
   // their own AUTHORIZED_CONSUMER_DIRS array and doc comments (added alongside this directory,
@@ -74,6 +75,14 @@ test("nothing outside knowledge-platform/ references 'knowledge-platform' except
   // and product-quality.js imports evaluateKnowledgeObjectQuality from ./knowledge-quality.js --
   // the one authorized hop down this stage's own README.md documents. See
   // TITAN_STAGE19_READINESS_REPORT.md Sec 3.2.
+  //
+  // commercial-catalog/ (Stage 21) is exempted for the identical reason -- its production
+  // platform.js imports createKnowledgePlatform from knowledge-platform/platform.js (this
+  // directory's own composition root, called unchanged, not reimplemented), per
+  // TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md Sec 3. Unlike product-platform/, this is a
+  // deliberate cross-cutting composition (Stage 21 also imports enterprise-gateway/ and
+  // product-platform/ directly), not a strict one-hop-down relationship -- documented explicitly
+  // in that audit rather than silently treated as another instance of the one-hop pattern.
   const violations = [];
   const exemptTestsDirs = [
     join(EVIDENCE_REGISTRY_DIR, "__tests__"),
@@ -84,6 +93,7 @@ test("nothing outside knowledge-platform/ references 'knowledge-platform' except
     if (isInside(file, KP_DIR)) continue; // files inside this directory are exempt
     if (exemptTestsDirs.some((dir) => isInside(file, dir))) continue; // see above
     if (isInside(file, PRODUCT_PLATFORM_DIR)) continue; // Stage 19, see above
+    if (isInside(file, COMMERCIAL_CATALOG_DIR)) continue; // Stage 21, see above
     const text = readFileSync(file, "utf-8");
     if (text.includes("knowledge-platform")) violations.push(relative(WORKER_SRC_DIR, file));
   }

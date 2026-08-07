@@ -12,10 +12,10 @@
  * IntelligenceService property.
  *
  * Stage 21 addition: describeCapability()/describeAllCapabilities()/annotateCapability() thin
- * passthroughs (see below) let commercial-catalog/platform.js classify capabilities for
- * commercial activation from outside this file -- _registerDefaultCapabilities() itself is
- * unmodified, and this file still imports nothing from knowledge-platform/, product-platform/, or
- * p39-handlers.js. See TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md Sec 3.1.
+ * passthroughs (see below) let an external commercial-classification composition script annotate
+ * capabilities for commercial activation from outside this file -- _registerDefaultCapabilities()
+ * itself is unmodified, and this file still imports nothing beyond intelligence-platform/ (its
+ * one existing, pre-Stage-21 dependency). See TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md Sec 3.1.
  */
 
 import { GatewayRegistry, createServiceMethodHandler } from "./gateway-registry.js";

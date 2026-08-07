@@ -535,12 +535,23 @@ def check_evidence_registry_scaffolding_boundary() -> list[str]:
     # does not import evidence-registry/ at all (it composes only knowledge-platform/'s
     # KnowledgePlatform properties, one hop up, per TITAN_STAGE19_READINESS_REPORT.md and its
     # own independent zero-blast-radius test).
+    #
+    # Stage 21: commercial-catalog/ is added for the identical JSDoc-comment and
+    # test-fixture-construction reasons as knowledge-platform/product-platform above —
+    # commercial-metrics.js's @returns type comment cites evidence-registry/service-metrics.js's
+    # ServicePlatformMetrics type, catalog.js/service-contracts.js name evidence-registry paths
+    # in documentation-as-data dependency lists, and its own __tests__/test-helpers.js imports
+    # evidence-registry/entity.js to build fixtures. Its PRODUCTION code does not import
+    # evidence-registry/ at all (it composes enterprise-gateway/'s EnterpriseGateway,
+    # knowledge-platform/'s KnowledgePlatform, and product-platform/'s ProductPlatform, per
+    # TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md and its own independent zero-blast-radius test).
     authorized_consumer_dirs = [
         HANDLERS_DIR / "intelligence-platform",
         HANDLERS_DIR / "enterprise-gateway",
         HANDLERS_DIR / "relationship-framework",
         HANDLERS_DIR / "knowledge-platform",
         HANDLERS_DIR / "product-platform",
+        HANDLERS_DIR / "commercial-catalog",
     ]
 
     # 1. Nothing outside evidence-registry/ (or an authorized consumer) may import from it.

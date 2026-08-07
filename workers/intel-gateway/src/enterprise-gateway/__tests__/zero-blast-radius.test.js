@@ -186,14 +186,15 @@ test("neither evidence-registry/ nor intelligence-platform/ PRODUCTION code refe
   }
 });
 
-test("intelligence-platform/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these four directories, nothing broader (the exempted test file itself stays honest)", () => {
+test("intelligence-platform/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these five directories, nothing broader (the exempted test file itself stays honest)", () => {
   // Stage 16: intelligence-platform's own array grew a second entry (relationship-framework)
   // alongside its pre-existing enterprise-gateway entry -- see that file's own updated doc
   // comment for why. Stage 18 added a third (knowledge-platform). Stage 19 added a fourth
-  // (product-platform). This assertion is updated in lockstep.
+  // (product-platform). Stage 21 added a fifth (commercial-catalog). This assertion is updated
+  // in lockstep.
   const text = readFileSync(join(INTELLIGENCE_PLATFORM_DIR, "__tests__", "zero-blast-radius.test.js"), "utf-8");
   assert.match(
     text,
-    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\),\s*join\(WORKER_SRC_DIR,\s*"knowledge-platform"\),\s*join\(WORKER_SRC_DIR,\s*"product-platform"\),?\s*\]/
+    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\),\s*join\(WORKER_SRC_DIR,\s*"knowledge-platform"\),\s*join\(WORKER_SRC_DIR,\s*"product-platform"\),\s*join\(WORKER_SRC_DIR,\s*"commercial-catalog"\),?\s*\]/
   );
 });
