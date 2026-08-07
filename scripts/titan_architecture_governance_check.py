@@ -535,12 +535,23 @@ def check_evidence_registry_scaffolding_boundary() -> list[str]:
     # does not import evidence-registry/ at all (it composes only knowledge-platform/'s
     # KnowledgePlatform properties, one hop up, per TITAN_STAGE19_READINESS_REPORT.md and its
     # own independent zero-blast-radius test).
+    #
+    # Stage 21: commercial-catalog/ is added for the identical JSDoc-comment and
+    # test-fixture-construction reasons as knowledge-platform/product-platform above —
+    # commercial-metrics.js's @returns type comment cites evidence-registry/service-metrics.js's
+    # ServicePlatformMetrics type, catalog.js/service-contracts.js name evidence-registry paths
+    # in documentation-as-data dependency lists, and its own __tests__/test-helpers.js imports
+    # evidence-registry/entity.js to build fixtures. Its PRODUCTION code does not import
+    # evidence-registry/ at all (it composes enterprise-gateway/'s EnterpriseGateway,
+    # knowledge-platform/'s KnowledgePlatform, and product-platform/'s ProductPlatform, per
+    # TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md and its own independent zero-blast-radius test).
     authorized_consumer_dirs = [
         HANDLERS_DIR / "intelligence-platform",
         HANDLERS_DIR / "enterprise-gateway",
         HANDLERS_DIR / "relationship-framework",
         HANDLERS_DIR / "knowledge-platform",
         HANDLERS_DIR / "product-platform",
+        HANDLERS_DIR / "commercial-catalog",
     ]
 
     # 1. Nothing outside evidence-registry/ (or an authorized consumer) may import from it.
@@ -3400,6 +3411,356 @@ def check_commercial_orchestrator_still_unwired(handlers_dir: Path | None = None
     return findings
 
 
+# ============================================================
+# Stage 21: Enterprise Intelligence Gateway Commercial Activation
+# ============================================================
+#
+# commercial-catalog/ (workers/intel-gateway/src/) is a new sibling directory following the
+# unbroken Stage 14/16/18/19 precedent -- see TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md Sec 3.
+# It composes ACROSS the enterprise-gateway/knowledge-platform/product-platform lineage plus
+# P39 (Stage 20A) simultaneously, via dependency injection over already-constructed instances,
+# never a direct pNN-handlers.js/evidence-registry/intelligence-platform import (one narrow,
+# explicitly authorized exception: commercial-adapters.js imports p39-handlers.js's already-
+# exported PURE functions directly, since P39 has no composition-root class to inject -- audit
+# doc Sec 2.4). All ten checks below instance existing idioms already proven by Stage 14/17/18/19
+# (*_files_present_and_isolated, check_no_duplicate_*, contract version drift +
+# no-duplicate-contracts, *_still_unwired, ADR-0007 confidence boundary) rather than inventing new
+# ones (Reuse Before Build) -- plus two idioms specific to this stage's own acceptance criteria
+# (no duplicate capability IDs; no adapter-registration bypass of the one composition root).
+
+COMMERCIAL_CATALOG_DIR = HANDLERS_DIR / "commercial-catalog"
+
+STAGE21_CORE_FILES = [
+    "catalog.js",
+    "feature-flags.js",
+    "commercial-adapters.js",
+    "commercial-metrics.js",
+    "commercial-readiness.js",
+    "service-contracts.js",
+    "platform.js",
+]
+
+STAGE21_CLASS_TO_FILE = {
+    "CommercialMetrics": "commercial-metrics.js",
+    "CommercialAdapterValidationError": "commercial-adapters.js",
+}
+
+STAGE21_ADAPTER_FACTORIES = [
+    "createKnowledgeObjectAdapter",
+    "createKnowledgeNavigationAdapter",
+    "createKnowledgeExecutiveBriefingAdapter",
+    "createEvidenceProvenanceSummaryAdapter",
+    "createProductAssemblyAdapter",
+    "createProductProfiledViewAdapter",
+    "createProductPackageAdapter",
+    "createMsspPartnerPackageAdapter",
+    "createCommercialReadinessSummaryAdapter",
+    "createCommercialExplanationAdapter",
+]
+
+STAGE21_CONTRACT_NAMES = [
+    "CommercialCatalogContract",
+    "CommercialAdaptersContract",
+    "CommercialMetricsContract",
+    "CommercialReadinessContract",
+]
+
+# The one explicitly authorized exception to "no pNN-handlers.js import" below: commercial-
+# adapters.js imports P39's already-exported pure functions directly (audit doc Sec 2.4/5.2). No
+# other pNN-handlers.js import, from any commercial-catalog/ file, is authorized.
+STAGE21_AUTHORIZED_HANDLERS_IMPORT = {"commercial-adapters.js": "p39-handlers.js"}
+
+_STAGE21_CONFIDENCE_COMPUTATION_PATTERN = re.compile(
+    r"\b(?:function|async\s+function)\s+(?:compute|score|weight|rank)\w*[Cc]onfidence\w*\s*\("
+)
+
+
+def check_stage21_files_present_and_isolated(cc_dir: Path | None = None) -> list[str]:
+    """Stage 21: confirms every commercial-catalog/ production file still exists (Deprecation
+    Instead of Deletion -- no silent removal) and that none of them imports a live
+    pNN-handlers.js/index.js file directly, except commercial-adapters.js's one authorized
+    p39-handlers.js pure-function import (STAGE21_AUTHORIZED_HANDLERS_IMPORT). Mirrors
+    check_stage18_files_present_and_isolated()/check_stage19_files_present_and_isolated() exactly.
+    `cc_dir` is overridable for fixture testing; main() always calls with the default."""
+    cc_dir = cc_dir or COMMERCIAL_CATALOG_DIR
+    findings = []
+    if not cc_dir.exists():
+        return findings
+    for name in STAGE21_CORE_FILES:
+        path = cc_dir / name
+        if not path.exists():
+            findings.append(f"MISSING STAGE 21 FILE: commercial-catalog/{name} -- file set is incomplete")
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        authorized = STAGE21_AUTHORIZED_HANDLERS_IMPORT.get(name)
+        for imported in re.findall(r'from\s+["\'].*?(p\d+-handlers\.js)["\']', text):
+            if imported != authorized:
+                findings.append(
+                    f"ARCHITECTURE VIOLATION: commercial-catalog/{name} imports '{imported}' directly -- "
+                    f"the only Stage-21-authorized pNN-handlers.js import is commercial-adapters.js's "
+                    f"p39-handlers.js pure-function import (see audit doc Sec 2.4/3)."
+                )
+        if re.search(r'from\s+["\'].*/index\.js["\']', text):
+            findings.append(f"ARCHITECTURE VIOLATION: commercial-catalog/{name} imports index.js")
+    return findings
+
+
+def check_no_duplicate_commercial_catalog_classes(handlers_dir: Path | None = None, cc_dir: Path | None = None) -> list[str]:
+    """Duplicate engines/metrics: confirms no file outside commercial-catalog/ defines its own
+    copy of either Stage 21 class (STAGE21_CLASS_TO_FILE). Mirrors
+    check_no_duplicate_knowledge_platform_engines()'s exact pattern. `handlers_dir`/`cc_dir` are
+    overridable for fixture testing; main() always calls with the defaults."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    cc_dir = cc_dir or COMMERCIAL_CATALOG_DIR
+    findings = []
+    if not cc_dir.exists():
+        return findings
+    for class_name, canonical_file in STAGE21_CLASS_TO_FILE.items():
+        pattern = re.compile(rf"\bclass\s+{class_name}\b")
+        for path in handlers_dir.rglob("*.js"):
+            if path.parent == cc_dir and path.name == canonical_file:
+                continue
+            if path.parent.name == "__tests__":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if pattern.search(text):
+                findings.append(
+                    f"DUPLICATE ENGINE: {_display_path(path)} defines its own 'class {class_name}' -- "
+                    f"the canonical implementation is commercial-catalog/{canonical_file}"
+                )
+    return findings
+
+
+def check_no_duplicate_commercial_adapter_factories(handlers_dir: Path | None = None, cc_dir: Path | None = None) -> list[str]:
+    """No duplicate adapters: confirms none of the 10 Stage 21 adapter factory functions
+    (STAGE21_ADAPTER_FACTORIES) is defined anywhere outside commercial-adapters.js -- the same
+    per-symbol scan check_no_duplicate_commercial_catalog_classes() uses, applied to
+    `function NAME(` instead of `class NAME`. `handlers_dir`/`cc_dir` are overridable for fixture
+    testing; main() always calls with the defaults."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    cc_dir = cc_dir or COMMERCIAL_CATALOG_DIR
+    findings = []
+    if not cc_dir.exists():
+        return findings
+    canonical = cc_dir / "commercial-adapters.js"
+    for factory_name in STAGE21_ADAPTER_FACTORIES:
+        pattern = re.compile(rf"\bfunction\s+{factory_name}\s*\(")
+        for path in handlers_dir.rglob("*.js"):
+            if path == canonical or path.parent.name == "__tests__":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if pattern.search(text):
+                findings.append(
+                    f"DUPLICATE ADAPTER: {_display_path(path)} defines its own '{factory_name}' -- "
+                    f"the canonical implementation is commercial-catalog/commercial-adapters.js"
+                )
+    return findings
+
+
+def check_no_duplicate_commercial_capability_ids(cc_dir: Path | None = None) -> list[str]:
+    """No duplicate capability IDs: confirms every `id:` field in commercial-catalog/catalog.js's
+    COMMERCIAL_SERVICE_CATALOG is unique. A duplicate id would make gateway.registerCapability()
+    throw DuplicateCapabilityError for one of them at runtime (enterprise-gateway/gateway-
+    registry.js) -- this is a static, pre-runtime version of that same guarantee. `cc_dir` is
+    overridable for fixture testing; main() always calls with the default."""
+    cc_dir = cc_dir or COMMERCIAL_CATALOG_DIR
+    findings = []
+    path = cc_dir / "catalog.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    seen: set[str] = set()
+    for entry_id in re.findall(r'^\s*id:\s*"([^"]+)"', text, re.MULTILINE):
+        if entry_id in seen:
+            findings.append(f"DUPLICATE CAPABILITY ID: catalog.js defines '{entry_id}' more than once")
+        seen.add(entry_id)
+    return findings
+
+
+def check_commercial_catalog_contract_version_drift(cc_dir: Path | None = None) -> list[str]:
+    """Version drift: confirms each of the 4 Stage 21 internal/v1 contracts' declared `version`
+    still matches its own history array's last entry, mirroring
+    check_eig_contract_version_drift()/check_eips_contract_version_drift() exactly. `cc_dir` is
+    overridable for fixture testing; main() always calls with the default."""
+    cc_dir = cc_dir or COMMERCIAL_CATALOG_DIR
+    findings = []
+    path = cc_dir / "service-contracts.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for contract_name in STAGE21_CONTRACT_NAMES:
+        block_match = re.search(rf"export const {contract_name} = Object\.freeze\(\{{([\s\S]*?)\n\}}\);", text)
+        if not block_match:
+            findings.append(
+                f"CONTRACT VERSION DRIFT: {contract_name} not found in commercial-catalog/service-contracts.js "
+                f"in the expected shape"
+            )
+            continue
+        versions_in_block = re.findall(r'version:\s*"([\d.]+)"', block_match.group(1))
+        if len(versions_in_block) < 2 or versions_in_block[0] != versions_in_block[-1]:
+            findings.append(
+                f"CONTRACT VERSION DRIFT: {contract_name}'s declared version does not match its own "
+                f"history's last entry"
+            )
+    return findings
+
+
+def check_no_duplicate_commercial_catalog_contracts(handlers_dir: Path | None = None, cc_dir: Path | None = None) -> list[str]:
+    """Duplicate contracts: confirms no file outside service-contracts.js exports its own copy of
+    the 4 Stage 21 contract constants. Mirrors check_no_duplicate_eig_contracts() exactly.
+    `handlers_dir`/`cc_dir` are overridable for fixture testing; main() always calls with the
+    defaults."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    cc_dir = cc_dir or COMMERCIAL_CATALOG_DIR
+    findings = []
+    if not cc_dir.exists():
+        return findings
+    canonical = cc_dir / "service-contracts.js"
+    for contract_name in STAGE21_CONTRACT_NAMES:
+        pattern = re.compile(rf"\bexport\s+const\s+{contract_name}\b")
+        for path in handlers_dir.rglob("*.js"):
+            if path == canonical or path.parent.name == "__tests__":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if pattern.search(text):
+                findings.append(f"DUPLICATE CONTRACT: {_display_path(path)} exports its own '{contract_name}'")
+    return findings
+
+
+def check_commercial_catalog_still_unwired(handlers_dir: Path | None = None) -> list[str]:
+    """Architecture boundary: confirms index.js, gateway-service.js, knowledge-platform.js, and
+    product-platform.js all have zero references to commercial-catalog/ or its wiring functions
+    (wireCommercialCapabilities/createCommercialGateway) -- Stage 21's output stays an internal,
+    externally-composed Gateway capability only (wired via registerCapability()/
+    annotateCapability() from commercial-catalog/platform.js, per audit doc Sec 3), never a live
+    index.js route and never baked into any lower layer's own production file. Mirrors
+    check_knowledge_platform_still_unwired()/check_product_platform_still_unwired() exactly.
+    `handlers_dir` is overridable for fixture testing; main() always calls with the default."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    findings = []
+    targets = {
+        "index.js": handlers_dir / "index.js",
+        "enterprise-gateway/gateway-service.js": handlers_dir / "enterprise-gateway" / "gateway-service.js",
+        "knowledge-platform/knowledge-platform.js": handlers_dir / "knowledge-platform" / "knowledge-platform.js",
+        "product-platform/product-platform.js": handlers_dir / "product-platform" / "product-platform.js",
+    }
+    for label, path in targets.items():
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "commercial-catalog" in text or "wireCommercialCapabilities" in text or "createCommercialGateway" in text:
+            findings.append(
+                f"STAGE 21 BYPASS: {label} references commercial-catalog/ or its wiring functions -- "
+                f"Stage 21's output is authorized as an externally-composed Gateway capability only; "
+                f"wiring it directly into {label} requires its own separate authorization, not granted "
+                f"by this stage (see TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md Sec 3)."
+            )
+    return findings
+
+
+def check_commercial_catalog_no_direct_engine_imports(cc_dir: Path | None = None) -> list[str]:
+    """No direct engine imports: confirms commercial-catalog/ production files never import
+    evidence-registry/ or intelligence-platform/ directly by relative path -- the Gateway ->
+    Adapter -> Internal Platform -> Engine layering (audit doc Sec 3) requires reaching those
+    layers only through an already-constructed EnterpriseGateway/KnowledgePlatform/ProductPlatform
+    instance injected as a dependency, never a direct import. A CI-gated Python-side mirror of
+    commercial-catalog/__tests__/zero-blast-radius.test.js's identical JS-side assertion (that
+    suite is not CI-wired; only this script is -- audit doc Sec 2.6). Non-recursive glob so
+    __tests__/ (which legitimately imports composition roots to prove end-to-end wiring) is
+    naturally excluded. `cc_dir` is overridable for fixture testing; main() always calls with the
+    default."""
+    cc_dir = cc_dir or COMMERCIAL_CATALOG_DIR
+    findings = []
+    if not cc_dir.exists():
+        return findings
+    for path in cc_dir.glob("*.js"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for forbidden in ("evidence-registry", "intelligence-platform"):
+            if re.search(rf'from\s+["\'].*{forbidden}/', text):
+                findings.append(
+                    f"ARCHITECTURE VIOLATION: commercial-catalog/{path.name} imports '{forbidden}/' directly "
+                    f"-- must be reached only through an already-constructed EnterpriseGateway instance "
+                    f"(gateway.platform), never a direct import."
+                )
+    return findings
+
+
+def check_commercial_catalog_no_adapter_bypass(handlers_dir: Path | None = None, cc_dir: Path | None = None) -> list[str]:
+    """No adapter bypass: confirms no file outside commercial-catalog/platform.js calls
+    `registerCapability("commercial.` -- every commercial capability must be registered exactly
+    once, through wireCommercialCapabilities()'s single ADAPTER_FACTORIES loop, never a second
+    ad-hoc registration path. `handlers_dir`/`cc_dir` are overridable for fixture testing; main()
+    always calls with the defaults."""
+    handlers_dir = handlers_dir or HANDLERS_DIR
+    cc_dir = cc_dir or COMMERCIAL_CATALOG_DIR
+    findings = []
+    if not cc_dir.exists():
+        return findings
+    canonical = cc_dir / "platform.js"
+    pattern = re.compile(r'registerCapability\(\s*["\']commercial\.')
+    for path in handlers_dir.rglob("*.js"):
+        if path == canonical or path.parent.name == "__tests__":
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if pattern.search(text):
+            findings.append(
+                f"ADAPTER BYPASS: {_display_path(path)} registers a 'commercial.*' capability directly -- "
+                f"all commercial capabilities must be registered exactly once, through commercial-catalog/"
+                f"platform.js's wireCommercialCapabilities()."
+            )
+    return findings
+
+
+def check_commercial_metrics_no_duplicate_instance(cc_dir: Path | None = None) -> list[str]:
+    """Duplicate metrics instance: confirms CommercialMetrics's constructor still resolves
+    this._gatewayMetrics from its required gatewayMetrics dependency and never constructs a fresh
+    ServicePlatformMetrics of its own -- mirrors check_eig_metrics_no_duplicate_instance()/
+    check_eips_metrics_no_duplicate_instance()'s "exactly one shared instance" property, applied
+    to Stage 21's own metrics class. `cc_dir` is overridable for fixture testing; main() always
+    calls with the default."""
+    cc_dir = cc_dir or COMMERCIAL_CATALOG_DIR
+    findings = []
+    path = cc_dir / "commercial-metrics.js"
+    if not path.exists():
+        return findings
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not re.search(r"this\._gatewayMetrics\s*=\s*gatewayMetrics\s*;", text):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: commercial-metrics.js's CommercialMetrics constructor no longer "
+            "resolves this._gatewayMetrics from its gatewayMetrics dependency."
+        )
+    if re.search(r"new\s+ServicePlatformMetrics\s*\(", text):
+        findings.append(
+            "DUPLICATE METRICS INSTANCE: commercial-metrics.js constructs its own ServicePlatformMetrics "
+            "instance instead of reusing gatewayMetrics.sharedServiceMetrics."
+        )
+    return findings
+
+
+def check_no_confidence_computation_introduced_stage21(cc_dir: Path | None = None) -> list[str]:
+    """Stage 21's own ADR-0007 boundary, mirrors check_no_confidence_computation_introduced_
+    stage17()/_stage18()/_stage19() exactly. Confirms no commercial-catalog/ file defines a new
+    compute*/score*/weight*/rank*Confidence* function -- every adapter/envelope in this stage
+    surfaces upstream confidence fields verbatim only (e.g. intelligence.explainability's
+    confidenceAsRecorded, passed through commercial-adapters.js unmodified), consistent with
+    ADR-0007 (Canonical Confidence Framework) remaining Proposed, not Accepted. `cc_dir` is
+    overridable for fixture testing; main() always calls with the default."""
+    cc_dir = cc_dir or COMMERCIAL_CATALOG_DIR
+    findings = []
+    if not cc_dir.exists():
+        return findings
+    for path in cc_dir.glob("*.js"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if _STAGE21_CONFIDENCE_COMPUTATION_PATTERN.search(text):
+            findings.append(
+                f"ADR-0007 BOUNDARY VIOLATION: commercial-catalog/{path.name} appears to define a "
+                f"confidence-computing/weighting/ranking function -- ADR-0007 (Canonical Confidence "
+                f"Framework) is Proposed, not Accepted. Confidence fields must be surfaced verbatim only "
+                f"until it is."
+            )
+    return findings
+
+
 def main() -> None:
     all_findings: list[str] = []
     all_findings += check_docs_exist()
@@ -3489,6 +3850,17 @@ def main() -> None:
     all_findings += check_commercial_orchestrator_protected_engine_signatures_present()
     all_findings += check_commercial_orchestrator_no_new_scorer()
     all_findings += check_commercial_orchestrator_still_unwired()
+    all_findings += check_stage21_files_present_and_isolated()
+    all_findings += check_no_duplicate_commercial_catalog_classes()
+    all_findings += check_no_duplicate_commercial_adapter_factories()
+    all_findings += check_no_duplicate_commercial_capability_ids()
+    all_findings += check_commercial_catalog_contract_version_drift()
+    all_findings += check_no_duplicate_commercial_catalog_contracts()
+    all_findings += check_commercial_catalog_still_unwired()
+    all_findings += check_commercial_catalog_no_direct_engine_imports()
+    all_findings += check_commercial_catalog_no_adapter_bypass()
+    all_findings += check_commercial_metrics_no_duplicate_instance()
+    all_findings += check_no_confidence_computation_introduced_stage21()
 
     print("=== Project TITAN Architecture Governance Check (advisory) ===")
     metrics = compute_gateway_adoption_metrics()
@@ -3558,7 +3930,16 @@ def main() -> None:
               "present, no duplicate orchestrator functions, all protected P20/P21/P25/P26/"
               "commercial_readiness_governor.py/dossier_quality_engine.py signatures intact, no "
               "new confidence/trust/quality/certification scorer introduced, p39-handlers.js "
-              "still unwired from index.js).")
+              "still unwired from index.js), Stage 21 Commercial Gateway Activation clean (all "
+              "7 commercial-catalog/ files present and isolated, no unauthorized pNN-handlers.js/"
+              "index.js import, no duplicate CommercialMetrics/CommercialAdapterValidationError "
+              "engine, no duplicate adapter factory, no duplicate capability ID in the catalog, "
+              "no contract version drift across the 4 internal/v1 contracts, no duplicate "
+              "contract export, commercial-catalog/ still unwired from index.js/gateway-"
+              "service.js/knowledge-platform.js/product-platform.js, no direct evidence-registry/"
+              "intelligence-platform import, no adapter-registration bypass of platform.js's one "
+              "composition root, exactly one shared metrics instance, no confidence-computing/"
+              "weighting/ranking function introduced pending ADR-0007).")
         sys.exit(0)
 
     print(f"{len(all_findings)} finding(s):\n")

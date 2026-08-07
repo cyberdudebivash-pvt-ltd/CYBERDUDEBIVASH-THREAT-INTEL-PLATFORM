@@ -10,6 +10,12 @@
  * addition (`intelligence.explainability`). No business logic of its own: every capability
  * handler is a thin createServiceMethodHandler() adapter over an already-existing, already-public
  * IntelligenceService property.
+ *
+ * Stage 21 addition: describeCapability()/describeAllCapabilities()/annotateCapability() thin
+ * passthroughs (see below) let an external commercial-classification composition script annotate
+ * capabilities for commercial activation from outside this file -- _registerDefaultCapabilities()
+ * itself is unmodified, and this file still imports nothing beyond intelligence-platform/ (its
+ * one existing, pre-Stage-21 dependency). See TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md Sec 3.1.
  */
 
 import { GatewayRegistry, createServiceMethodHandler } from "./gateway-registry.js";
@@ -103,6 +109,29 @@ export class EnterpriseGateway {
 
   listCapabilities() {
     return this._registry.list();
+  }
+
+  /**
+   * Stage 21 Phase 4 additions -- thin passthroughs to the registry's Stage 21 additions
+   * (gateway-registry.js's describe()/describeAll()/annotate()), mirroring registerCapability()'s
+   * own passthrough style exactly. GatewayServiceContract bumped 1.0.0 -> 1.1.0, additive.
+   * @param {string} name
+   */
+  describeCapability(name) {
+    return this._registry.describe(name);
+  }
+
+  describeAllCapabilities() {
+    return this._registry.describeAll();
+  }
+
+  /**
+   * @param {string} name
+   * @param {{owner?: string, consumers?: string[], securityClassification?: string,
+   *   visibility?: string, lifecycle?: string}} [patch]
+   */
+  annotateCapability(name, patch) {
+    this._registry.annotate(name, patch);
   }
 
   /**

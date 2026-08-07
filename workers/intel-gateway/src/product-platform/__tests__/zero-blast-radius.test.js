@@ -19,6 +19,7 @@ const KNOWLEDGE_PLATFORM_DIR = join(WORKER_SRC_DIR, "knowledge-platform");
 const INTELLIGENCE_PLATFORM_DIR = join(WORKER_SRC_DIR, "intelligence-platform");
 const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
 const ENTERPRISE_GATEWAY_DIR = join(WORKER_SRC_DIR, "enterprise-gateway");
+const COMMERCIAL_CATALOG_DIR = join(WORKER_SRC_DIR, "commercial-catalog");
 const PP_TESTS_DIR = join(PP_DIR, "__tests__");
 
 const PP_PRODUCTION_FILES = Object.freeze([
@@ -56,7 +57,7 @@ function listJsFiles(dir) {
   return out;
 }
 
-test("nothing outside product-platform/ references 'product-platform' except the four lower layers' own boundary-documentation __tests__ files", () => {
+test("nothing outside product-platform/ references 'product-platform' except the four lower layers' own boundary-documentation __tests__ files and commercial-catalog/ (Stage 21, the first authorized real consumer)", () => {
   // evidence-registry/, intelligence-platform/, enterprise-gateway/, and knowledge-platform/'s
   // own __tests__/zero-blast-radius.test.js files each legitimately name "product-platform" in
   // their own AUTHORIZED_CONSUMER_DIRS array and doc comments (added alongside this directory,
@@ -64,6 +65,12 @@ test("nothing outside product-platform/ references 'product-platform' except the
   // identical reason). That is boundary documentation, not production coupling -- the same
   // distinction those files' own doc comments draw for themselves. Production reachability is
   // what actually matters and is covered precisely by the tests below.
+  //
+  // commercial-catalog/ (Stage 21) is exempted as a whole directory, not just its __tests__/
+  // subdirectory, because its production platform.js imports createProductPlatform from
+  // product-platform/platform.js (this directory's own composition root, called unchanged, not
+  // reimplemented) -- Stage 21 is the first real production consumer of this directory. See
+  // TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md Sec 3.
   const violations = [];
   const exemptTestsDirs = [
     join(EVIDENCE_REGISTRY_DIR, "__tests__"),
@@ -74,6 +81,7 @@ test("nothing outside product-platform/ references 'product-platform' except the
   for (const file of listJsFiles(WORKER_SRC_DIR)) {
     if (isInside(file, PP_DIR)) continue; // files inside this directory are exempt
     if (exemptTestsDirs.some((dir) => isInside(file, dir))) continue; // see above
+    if (isInside(file, COMMERCIAL_CATALOG_DIR)) continue; // Stage 21, see above
     const text = readFileSync(file, "utf-8");
     if (text.includes("product-platform")) violations.push(relative(WORKER_SRC_DIR, file));
   }
