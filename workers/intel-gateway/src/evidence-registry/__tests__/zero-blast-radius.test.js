@@ -66,6 +66,16 @@ const WORKER_SRC_DIR = dirname(SCAFFOLD_DIR); // .../src
  * import evidence-registry/ at all (it composes only knowledge-platform/'s KnowledgePlatform
  * properties, one hop up, per TITAN_STAGE19_READINESS_REPORT.md and its own independent
  * zero-blast-radius test).
+ *
+ * Stage 21: commercial-catalog/ is added for the identical JSDoc-comment reason as
+ * knowledge-platform/product-platform above -- commercial-metrics.js's `@returns` type comment
+ * cites evidence-registry/service-metrics.js's ServicePlatformMetrics type, and its own
+ * __tests__/test-helpers.js imports evidence-registry/entity.js to build CanonicalEvidence
+ * fixtures, mirroring every prior stage's identical test-fixture-construction pattern. Its
+ * PRODUCTION code does not import evidence-registry/ at all (it composes only
+ * enterprise-gateway/'s EnterpriseGateway, knowledge-platform/'s KnowledgePlatform, and
+ * product-platform/'s ProductPlatform, per TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md and its own
+ * independent zero-blast-radius test).
  */
 const AUTHORIZED_CONSUMER_DIRS = [
   join(WORKER_SRC_DIR, "intelligence-platform"),
@@ -73,6 +83,7 @@ const AUTHORIZED_CONSUMER_DIRS = [
   join(WORKER_SRC_DIR, "relationship-framework"),
   join(WORKER_SRC_DIR, "knowledge-platform"),
   join(WORKER_SRC_DIR, "product-platform"),
+  join(WORKER_SRC_DIR, "commercial-catalog"),
 ];
 
 /**

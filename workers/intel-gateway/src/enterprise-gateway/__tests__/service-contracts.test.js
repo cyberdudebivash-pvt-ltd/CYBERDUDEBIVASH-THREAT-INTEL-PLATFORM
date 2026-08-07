@@ -25,13 +25,22 @@ test("contract names are unique across the 4 contracts", () => {
 });
 
 test("checkContractCompatibility() is the reused Stage 12/13 function, not a reimplementation", () => {
+  // GatewayServiceContract is 1.1.0 as of Stage 21 Phase 4 (describeCapability/
+  // describeAllCapabilities/annotateCapability, additive) -- a caller that still expects the
+  // Stage 14 Phase 1 baseline (1.0.0) must remain forward-compatible with the current version.
   const result = checkContractCompatibility(GatewayServiceContract, "1.0.0");
   assert.equal(result.compatible, true);
-  assert.equal(result.currentVersion, "1.0.0");
+  assert.equal(result.currentVersion, "1.1.0");
 });
 
 test("isContractForwardCompatible() rejects an unknown version", () => {
   assert.equal(isContractForwardCompatible(GatewayServiceContract.history, "0.9.0", "1.0.0"), false);
+});
+
+test("Stage 21: CapabilityRegistryContract 1.2.0 remains forward-compatible with a caller still expecting 1.0.0", () => {
+  const result = checkContractCompatibility(CapabilityRegistryContract, "1.0.0");
+  assert.equal(result.compatible, true);
+  assert.equal(result.currentVersion, "1.2.0");
 });
 
 test("each contract's source names the expected module", () => {

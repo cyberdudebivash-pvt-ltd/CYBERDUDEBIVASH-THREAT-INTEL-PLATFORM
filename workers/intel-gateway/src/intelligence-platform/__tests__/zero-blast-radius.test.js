@@ -54,12 +54,22 @@ const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
  * directory, directly), not because its production code imports this directory -- it does not
  * (product-platform/ holds itself to the one-hop-down rule into knowledge-platform/ only, per
  * TITAN_STAGE19_READINESS_REPORT.md Sec 3.2 and its own independent zero-blast-radius test).
+ *
+ * Stage 21: commercial-catalog/ is added because its __tests__/gateway-integration.test.js
+ * imports createIntelligencePlatform directly to build isolated, fully-composed test fixtures,
+ * mirroring product-platform/__tests__/gateway-integration.test.js's identical pattern exactly
+ * (see TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md Sec 3). commercial-catalog/'s own PRODUCTION
+ * code (platform.js) does not import this directory -- it reaches IntelligenceService only via
+ * EnterpriseGateway's already-public `platform` getter, one hop further removed than even
+ * knowledge-platform/product-platform's own production code -- confirmed independently by
+ * commercial-catalog/__tests__/zero-blast-radius.test.js.
  */
 const AUTHORIZED_CONSUMER_DIRS = [
   join(WORKER_SRC_DIR, "enterprise-gateway"),
   join(WORKER_SRC_DIR, "relationship-framework"),
   join(WORKER_SRC_DIR, "knowledge-platform"),
   join(WORKER_SRC_DIR, "product-platform"),
+  join(WORKER_SRC_DIR, "commercial-catalog"),
 ];
 
 /**
@@ -171,16 +181,16 @@ test("no evidence-registry/ PRODUCTION file references intelligence-platform/ (o
   }
 });
 
-test("evidence-registry/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these five directories, nothing broader (the exempted test file itself stays honest)", () => {
+test("evidence-registry/__tests__/zero-blast-radius.test.js's authorized exceptions name exactly these six directories, nothing broader (the exempted test file itself stays honest)", () => {
   // Stage 14: evidence-registry's own array grew a second, narrowly-named entry
   // (enterprise-gateway) alongside this stage's pre-existing intelligence-platform entry -- see
   // that file's own updated doc comment for why. Stage 16 added a third (relationship-framework).
-  // Stage 18 added a fourth (knowledge-platform). Stage 19 added a fifth (product-platform). This
-  // assertion is updated in lockstep so it keeps proving the array is exactly these five named
-  // directories, not a general relaxation.
+  // Stage 18 added a fourth (knowledge-platform). Stage 19 added a fifth (product-platform).
+  // Stage 21 added a sixth (commercial-catalog). This assertion is updated in lockstep so it
+  // keeps proving the array is exactly these six named directories, not a general relaxation.
   const text = readFileSync(join(EVIDENCE_REGISTRY_DIR, "__tests__", "zero-blast-radius.test.js"), "utf-8");
   assert.match(
     text,
-    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[\s*join\(WORKER_SRC_DIR,\s*"intelligence-platform"\),\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\),\s*join\(WORKER_SRC_DIR,\s*"knowledge-platform"\),\s*join\(WORKER_SRC_DIR,\s*"product-platform"\),?\s*\]/
+    /AUTHORIZED_CONSUMER_DIRS\s*=\s*\[\s*join\(WORKER_SRC_DIR,\s*"intelligence-platform"\),\s*join\(WORKER_SRC_DIR,\s*"enterprise-gateway"\),\s*join\(WORKER_SRC_DIR,\s*"relationship-framework"\),\s*join\(WORKER_SRC_DIR,\s*"knowledge-platform"\),\s*join\(WORKER_SRC_DIR,\s*"product-platform"\),\s*join\(WORKER_SRC_DIR,\s*"commercial-catalog"\),?\s*\]/
   );
 });

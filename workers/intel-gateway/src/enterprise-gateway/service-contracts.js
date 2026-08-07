@@ -20,16 +20,26 @@ export { isContractForwardCompatible, checkContractCompatibility };
 
 export const GatewayServiceContract = Object.freeze({
   name: "GatewayServiceContract",
-  version: "1.0.0",
+  version: "1.1.0",
   source: "gateway-service.js",
   methods: Object.freeze([
     "EnterpriseGateway.dispatch",
     "EnterpriseGateway.registerCapability",
     "EnterpriseGateway.listCapabilities",
     "EnterpriseGateway.healthCheck",
+    "EnterpriseGateway.describeCapability",
+    "EnterpriseGateway.describeAllCapabilities",
+    "EnterpriseGateway.annotateCapability",
   ]),
   history: Object.freeze([
     Object.freeze({ version: "1.0.0", change: "Initial contract (Stage 14 Phase 1)", backwardCompatibleWithPrevious: null }),
+    Object.freeze({
+      version: "1.1.0",
+      change:
+        "Added describeCapability/describeAllCapabilities/annotateCapability (Stage 21 Phase 4) -- " +
+        "thin passthroughs to the registry's Stage 21 additions, additive and backward compatible.",
+      backwardCompatibleWithPrevious: true,
+    }),
   ]),
 });
 
@@ -57,7 +67,7 @@ export const MiddlewareContract = Object.freeze({
 
 export const CapabilityRegistryContract = Object.freeze({
   name: "CapabilityRegistryContract",
-  version: "1.1.0",
+  version: "1.2.0",
   source: "gateway-registry.js",
   methods: Object.freeze([
     "GatewayRegistry.register",
@@ -67,6 +77,7 @@ export const CapabilityRegistryContract = Object.freeze({
     "GatewayRegistry.unregister",
     "GatewayRegistry.describe",
     "GatewayRegistry.describeAll",
+    "GatewayRegistry.annotate",
     "createServiceMethodHandler",
   ]),
   history: Object.freeze([
@@ -76,6 +87,16 @@ export const CapabilityRegistryContract = Object.freeze({
       change:
         "Added GatewayRegistry.describe/.describeAll (Stage 14 Phase 2) -- read-only capability " +
         "metadata accessors that omit the handler function, additive and backward compatible.",
+      backwardCompatibleWithPrevious: true,
+    }),
+    Object.freeze({
+      version: "1.2.0",
+      change:
+        "Added GatewayRegistry.annotate and 5 optional commercial-classification fields to " +
+        "register()/describe()/describeAll() -- owner, consumers, securityClassification, " +
+        "visibility, lifecycle (Stage 21 Phase 4). All 5 fields are optional with secure-by-default " +
+        "values; every pre-Stage-21 register() call site is unaffected. Additive and backward " +
+        "compatible.",
       backwardCompatibleWithPrevious: true,
     }),
   ]),
