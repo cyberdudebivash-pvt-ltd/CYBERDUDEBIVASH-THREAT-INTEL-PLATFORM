@@ -750,5 +750,407 @@ class CheckRelationshipFrameworkProviderWiringIntactTests(unittest.TestCase):
             self.assertEqual(findings, [])
 
 
+# ============================================================
+# Stage 21: Enterprise Intelligence Gateway Commercial Activation
+# ============================================================
+# Positive/negative fixture tests for the 11 Stage 21 governance check functions. No stage after
+# 15 had fixture coverage in this file before now (confirmed by the class list above -- Stage
+# 17/18/19/20A's checks read real production files directly, untested in isolation); this
+# continues the same narrower Stage 14/15 path this file's own module docstring describes
+# (directory-override parameter on the Stage 21 functions only, main()'s call sites stay
+# zero-argument) rather than either leaving Stage 21 untested too or inventing a second fixture
+# convention.
+
+GOOD_COMMERCIAL_CATALOG_JS = """
+export const COMMERCIAL_SERVICE_CATALOG = Object.freeze([
+  Object.freeze({
+    id: "evidence.lookup",
+    newAdapter: false,
+  }),
+  Object.freeze({
+    id: "commercial.knowledgeObject",
+    newAdapter: true,
+  }),
+]);
+"""
+
+GOOD_COMMERCIAL_ADAPTERS_JS = """
+import { buildCommercialQualityView } from "../p39-handlers.js";
+export class CommercialAdapterValidationError extends Error {}
+export function createKnowledgeObjectAdapter({ knowledgePlatform } = {}) {
+  return async function knowledgeObjectAdapter(context, method, ...args) {};
+}
+"""
+
+GOOD_COMMERCIAL_METRICS_JS = """
+export class CommercialMetrics {
+  constructor({ gatewayMetrics } = {}) {
+    this._gatewayMetrics = gatewayMetrics;
+  }
+}
+"""
+
+GOOD_COMMERCIAL_CATALOG_SERVICE_CONTRACTS_JS = "".join(
+    f'''
+export const {name} = Object.freeze({{
+  name: "{name}",
+  namespace: "internal/v1",
+  version: "1.0.0",
+  source: "x.js",
+  methods: Object.freeze(["a"]),
+  history: Object.freeze([
+    Object.freeze({{ version: "1.0.0", change: "Initial", backwardCompatibleWithPrevious: null }}),
+  ]),
+}});
+'''
+    for name in [
+        "CommercialCatalogContract",
+        "CommercialAdaptersContract",
+        "CommercialMetricsContract",
+        "CommercialReadinessContract",
+    ]
+)
+
+GOOD_COMMERCIAL_CATALOG_PLATFORM_JS = """
+export function wireCommercialCapabilities({ gateway } = {}) {
+  gateway.registerCapability("__placeholder_from_platform_js__", async () => {});
+}
+"""
+
+GOOD_STAGE21_FILE_SET = {
+    "catalog.js": GOOD_COMMERCIAL_CATALOG_JS,
+    "feature-flags.js": "export const CC_FLAGS = Object.freeze({});\n",
+    "commercial-adapters.js": GOOD_COMMERCIAL_ADAPTERS_JS,
+    "commercial-metrics.js": GOOD_COMMERCIAL_METRICS_JS,
+    "commercial-readiness.js": "export function buildCommercialReadinessReport() {}\n",
+    "service-contracts.js": GOOD_COMMERCIAL_CATALOG_SERVICE_CONTRACTS_JS,
+    "platform.js": GOOD_COMMERCIAL_CATALOG_PLATFORM_JS,
+}
+
+
+class CheckStage21FilesPresentAndIsolatedTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            write_tree(cc_dir, GOOD_STAGE21_FILE_SET)
+            findings = governance.check_stage21_files_present_and_isolated(cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+    def test_missing_file_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            files = dict(GOOD_STAGE21_FILE_SET)
+            del files["platform.js"]
+            write_tree(cc_dir, files)
+            findings = governance.check_stage21_files_present_and_isolated(cc_dir=cc_dir)
+            self.assertTrue(any("MISSING STAGE 21 FILE" in f and "platform.js" in f for f in findings))
+
+    def test_authorized_p39_import_in_adapters_is_not_flagged(self):
+        # GOOD_COMMERCIAL_ADAPTERS_JS already imports p39-handlers.js -- this is the one
+        # authorized exception (STAGE21_AUTHORIZED_HANDLERS_IMPORT), asserted explicitly rather
+        # than only implied by test_good_fixture_is_clean's overall emptiness.
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            write_tree(cc_dir, GOOD_STAGE21_FILE_SET)
+            findings = governance.check_stage21_files_present_and_isolated(cc_dir=cc_dir)
+            self.assertFalse(any("p39-handlers.js" in f for f in findings))
+
+    def test_unauthorized_pNN_handlers_import_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            files = dict(GOOD_STAGE21_FILE_SET)
+            files["catalog.js"] = 'import { x } from "../p20-handlers.js";\n' + GOOD_COMMERCIAL_CATALOG_JS
+            write_tree(cc_dir, files)
+            findings = governance.check_stage21_files_present_and_isolated(cc_dir=cc_dir)
+            self.assertTrue(any("ARCHITECTURE VIOLATION" in f and "p20-handlers.js" in f for f in findings))
+
+    def test_p39_import_outside_adapters_is_flagged(self):
+        # The exception is scoped to commercial-adapters.js specifically, not to p39-handlers.js
+        # in general -- catalog.js importing it is still unauthorized.
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            files = dict(GOOD_STAGE21_FILE_SET)
+            files["catalog.js"] = 'import { x } from "../p39-handlers.js";\n' + GOOD_COMMERCIAL_CATALOG_JS
+            write_tree(cc_dir, files)
+            findings = governance.check_stage21_files_present_and_isolated(cc_dir=cc_dir)
+            self.assertTrue(any("ARCHITECTURE VIOLATION" in f and "p39-handlers.js" in f for f in findings))
+
+    def test_index_js_import_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            files = dict(GOOD_STAGE21_FILE_SET)
+            files["platform.js"] = 'import { x } from "../index.js";\n' + GOOD_COMMERCIAL_CATALOG_PLATFORM_JS
+            write_tree(cc_dir, files)
+            findings = governance.check_stage21_files_present_and_isolated(cc_dir=cc_dir)
+            self.assertTrue(any("ARCHITECTURE VIOLATION" in f and "imports index.js" in f for f in findings))
+
+
+class CheckNoDuplicateCommercialCatalogClassesTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            cc_dir = handlers_dir / "commercial-catalog"
+            write_tree(handlers_dir, {"commercial-catalog/commercial-metrics.js": GOOD_COMMERCIAL_METRICS_JS})
+            findings = governance.check_no_duplicate_commercial_catalog_classes(handlers_dir=handlers_dir, cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+    def test_duplicate_class_outside_canonical_file_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            cc_dir = handlers_dir / "commercial-catalog"
+            write_tree(
+                handlers_dir,
+                {
+                    "commercial-catalog/commercial-metrics.js": GOOD_COMMERCIAL_METRICS_JS,
+                    "some-other-file.js": "export class CommercialMetrics {}\n",
+                },
+            )
+            findings = governance.check_no_duplicate_commercial_catalog_classes(handlers_dir=handlers_dir, cc_dir=cc_dir)
+            self.assertTrue(any("DUPLICATE ENGINE" in f and "CommercialMetrics" in f for f in findings))
+
+
+class CheckNoDuplicateCommercialAdapterFactoriesTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            cc_dir = handlers_dir / "commercial-catalog"
+            write_tree(handlers_dir, {"commercial-catalog/commercial-adapters.js": GOOD_COMMERCIAL_ADAPTERS_JS})
+            findings = governance.check_no_duplicate_commercial_adapter_factories(handlers_dir=handlers_dir, cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+    def test_duplicate_factory_outside_canonical_file_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            cc_dir = handlers_dir / "commercial-catalog"
+            write_tree(
+                handlers_dir,
+                {
+                    "commercial-catalog/commercial-adapters.js": GOOD_COMMERCIAL_ADAPTERS_JS,
+                    "rogue.js": "export function createKnowledgeObjectAdapter() {}\n",
+                },
+            )
+            findings = governance.check_no_duplicate_commercial_adapter_factories(handlers_dir=handlers_dir, cc_dir=cc_dir)
+            self.assertTrue(any("DUPLICATE ADAPTER" in f and "createKnowledgeObjectAdapter" in f for f in findings))
+
+
+class CheckNoDuplicateCommercialCapabilityIdsTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            write_tree(cc_dir, {"catalog.js": GOOD_COMMERCIAL_CATALOG_JS})
+            findings = governance.check_no_duplicate_commercial_capability_ids(cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+    def test_duplicate_id_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            bad = GOOD_COMMERCIAL_CATALOG_JS.replace('id: "commercial.knowledgeObject"', 'id: "evidence.lookup"')
+            write_tree(cc_dir, {"catalog.js": bad})
+            findings = governance.check_no_duplicate_commercial_capability_ids(cc_dir=cc_dir)
+            self.assertTrue(any("DUPLICATE CAPABILITY ID" in f and "evidence.lookup" in f for f in findings))
+
+
+class CheckCommercialCatalogContractVersionDriftTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            write_tree(cc_dir, {"service-contracts.js": GOOD_COMMERCIAL_CATALOG_SERVICE_CONTRACTS_JS})
+            findings = governance.check_commercial_catalog_contract_version_drift(cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+    def test_mismatched_version_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            bad = GOOD_COMMERCIAL_CATALOG_SERVICE_CONTRACTS_JS.replace(
+                'name: "CommercialCatalogContract",\n  namespace: "internal/v1",\n  version: "1.0.0"',
+                'name: "CommercialCatalogContract",\n  namespace: "internal/v1",\n  version: "2.0.0"',
+            )
+            write_tree(cc_dir, {"service-contracts.js": bad})
+            findings = governance.check_commercial_catalog_contract_version_drift(cc_dir=cc_dir)
+            self.assertTrue(any("CONTRACT VERSION DRIFT" in f and "CommercialCatalogContract" in f for f in findings))
+
+
+class CheckNoDuplicateCommercialCatalogContractsTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            cc_dir = handlers_dir / "commercial-catalog"
+            write_tree(
+                handlers_dir, {"commercial-catalog/service-contracts.js": GOOD_COMMERCIAL_CATALOG_SERVICE_CONTRACTS_JS}
+            )
+            findings = governance.check_no_duplicate_commercial_catalog_contracts(handlers_dir=handlers_dir, cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+    def test_duplicate_contract_export_elsewhere_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            cc_dir = handlers_dir / "commercial-catalog"
+            write_tree(
+                handlers_dir,
+                {
+                    "commercial-catalog/service-contracts.js": GOOD_COMMERCIAL_CATALOG_SERVICE_CONTRACTS_JS,
+                    "rogue.js": "export const CommercialCatalogContract = {};\n",
+                },
+            )
+            findings = governance.check_no_duplicate_commercial_catalog_contracts(handlers_dir=handlers_dir, cc_dir=cc_dir)
+            self.assertTrue(any("DUPLICATE CONTRACT" in f and "CommercialCatalogContract" in f for f in findings))
+
+
+class CheckCommercialCatalogStillUnwiredTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            write_tree(
+                handlers_dir,
+                {
+                    "index.js": "// nothing routed here beyond the live P16-P39 handler stack\n",
+                    "enterprise-gateway/gateway-service.js": "export class EnterpriseGateway {}\n",
+                    "knowledge-platform/knowledge-platform.js": "export class KnowledgePlatform {}\n",
+                    "product-platform/product-platform.js": "export class ProductPlatform {}\n",
+                },
+            )
+            findings = governance.check_commercial_catalog_still_unwired(handlers_dir=handlers_dir)
+            self.assertEqual(findings, [])
+
+    def test_index_js_reference_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            write_tree(
+                handlers_dir,
+                {
+                    "index.js": 'import { createCommercialGateway } from "./commercial-catalog/platform.js";\n',
+                    "enterprise-gateway/gateway-service.js": "export class EnterpriseGateway {}\n",
+                    "knowledge-platform/knowledge-platform.js": "export class KnowledgePlatform {}\n",
+                    "product-platform/product-platform.js": "export class ProductPlatform {}\n",
+                },
+            )
+            findings = governance.check_commercial_catalog_still_unwired(handlers_dir=handlers_dir)
+            self.assertTrue(any("STAGE 21 BYPASS" in f and "index.js" in f for f in findings))
+
+    def test_gateway_service_reference_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            write_tree(
+                handlers_dir,
+                {
+                    "index.js": "// clean\n",
+                    "enterprise-gateway/gateway-service.js": "// wireCommercialCapabilities called here\n",
+                    "knowledge-platform/knowledge-platform.js": "export class KnowledgePlatform {}\n",
+                    "product-platform/product-platform.js": "export class ProductPlatform {}\n",
+                },
+            )
+            findings = governance.check_commercial_catalog_still_unwired(handlers_dir=handlers_dir)
+            self.assertTrue(any("STAGE 21 BYPASS" in f and "gateway-service.js" in f for f in findings))
+
+
+class CheckCommercialCatalogNoDirectEngineImportsTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            write_tree(cc_dir, {"platform.js": GOOD_COMMERCIAL_CATALOG_PLATFORM_JS})
+            findings = governance.check_commercial_catalog_no_direct_engine_imports(cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+    def test_direct_intelligence_platform_import_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            bad = 'import { x } from "../intelligence-platform/intelligence-service.js";\n' + GOOD_COMMERCIAL_CATALOG_PLATFORM_JS
+            write_tree(cc_dir, {"platform.js": bad})
+            findings = governance.check_commercial_catalog_no_direct_engine_imports(cc_dir=cc_dir)
+            self.assertTrue(any("ARCHITECTURE VIOLATION" in f and "intelligence-platform/" in f for f in findings))
+
+    def test_direct_evidence_registry_import_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            bad = 'import { x } from "../evidence-registry/entity.js";\n' + GOOD_COMMERCIAL_CATALOG_PLATFORM_JS
+            write_tree(cc_dir, {"platform.js": bad})
+            findings = governance.check_commercial_catalog_no_direct_engine_imports(cc_dir=cc_dir)
+            self.assertTrue(any("ARCHITECTURE VIOLATION" in f and "evidence-registry/" in f for f in findings))
+
+    def test_tests_directory_import_is_not_flagged(self):
+        # __tests__/ legitimately imports composition roots to prove end-to-end wiring (audit doc
+        # Sec 2.6) -- the non-recursive glob("*.js") in the check must not descend into it.
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            write_tree(
+                cc_dir,
+                {
+                    "platform.js": GOOD_COMMERCIAL_CATALOG_PLATFORM_JS,
+                    "__tests__/gateway-integration.test.js": 'import { x } from "../../intelligence-platform/intelligence-service.js";\n',
+                },
+            )
+            findings = governance.check_commercial_catalog_no_direct_engine_imports(cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+
+class CheckCommercialCatalogNoAdapterBypassTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            cc_dir = handlers_dir / "commercial-catalog"
+            write_tree(handlers_dir, {"commercial-catalog/platform.js": GOOD_COMMERCIAL_CATALOG_PLATFORM_JS})
+            findings = governance.check_commercial_catalog_no_adapter_bypass(handlers_dir=handlers_dir, cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+    def test_bypass_from_outside_canonical_file_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handlers_dir = Path(tmp)
+            cc_dir = handlers_dir / "commercial-catalog"
+            write_tree(
+                handlers_dir,
+                {
+                    "commercial-catalog/platform.js": GOOD_COMMERCIAL_CATALOG_PLATFORM_JS,
+                    "rogue.js": 'gateway.registerCapability("commercial.rogueCapability", handler);\n',
+                },
+            )
+            findings = governance.check_commercial_catalog_no_adapter_bypass(handlers_dir=handlers_dir, cc_dir=cc_dir)
+            self.assertTrue(any("ADAPTER BYPASS" in f for f in findings))
+
+
+class CheckCommercialMetricsNoDuplicateInstanceTests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            write_tree(cc_dir, {"commercial-metrics.js": GOOD_COMMERCIAL_METRICS_JS})
+            findings = governance.check_commercial_metrics_no_duplicate_instance(cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+    def test_missing_gateway_metrics_resolution_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            bad = GOOD_COMMERCIAL_METRICS_JS.replace("this._gatewayMetrics = gatewayMetrics;", "")
+            write_tree(cc_dir, {"commercial-metrics.js": bad})
+            findings = governance.check_commercial_metrics_no_duplicate_instance(cc_dir=cc_dir)
+            self.assertTrue(any("no longer resolves this._gatewayMetrics" in f for f in findings))
+
+    def test_second_service_platform_metrics_instance_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            bad = GOOD_COMMERCIAL_METRICS_JS.replace(
+                "this._gatewayMetrics = gatewayMetrics;",
+                "this._gatewayMetrics = gatewayMetrics;\n    this._own = new ServicePlatformMetrics();",
+            )
+            write_tree(cc_dir, {"commercial-metrics.js": bad})
+            findings = governance.check_commercial_metrics_no_duplicate_instance(cc_dir=cc_dir)
+            self.assertTrue(any("constructs its own ServicePlatformMetrics" in f for f in findings))
+
+
+class CheckNoConfidenceComputationIntroducedStage21Tests(unittest.TestCase):
+    def test_good_fixture_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            write_tree(cc_dir, {"commercial-adapters.js": GOOD_COMMERCIAL_ADAPTERS_JS})
+            findings = governance.check_no_confidence_computation_introduced_stage21(cc_dir=cc_dir)
+            self.assertEqual(findings, [])
+
+    def test_new_confidence_scorer_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_dir = Path(tmp) / "commercial-catalog"
+            bad = GOOD_COMMERCIAL_ADAPTERS_JS + "\nfunction computeWeightedConfidence(x) { return 0.5; }\n"
+            write_tree(cc_dir, {"commercial-adapters.js": bad})
+            findings = governance.check_no_confidence_computation_introduced_stage21(cc_dir=cc_dir)
+            self.assertTrue(any("ADR-0007 BOUNDARY VIOLATION" in f for f in findings))
+
+
 if __name__ == "__main__":
     unittest.main()
