@@ -19,6 +19,7 @@ const EVIDENCE_REGISTRY_DIR = join(WORKER_SRC_DIR, "evidence-registry");
 const RELATIONSHIP_FRAMEWORK_DIR = join(WORKER_SRC_DIR, "relationship-framework");
 const KNOWLEDGE_PLATFORM_DIR = join(WORKER_SRC_DIR, "knowledge-platform");
 const PRODUCT_PLATFORM_DIR = join(WORKER_SRC_DIR, "product-platform");
+const COMMERCIAL_CATALOG_DIR = join(WORKER_SRC_DIR, "commercial-catalog");
 
 /**
  * Stage 16 (Project TITAN): relationship-framework/ is the first explicitly-authorized consumer
@@ -46,8 +47,30 @@ const PRODUCT_PLATFORM_DIR = join(WORKER_SRC_DIR, "product-platform");
  * end, the same composition-script-consumer pattern. Not a new production dependency in either
  * direction (enterprise-gateway/ does not import product-platform/ -- see
  * product-platform/__tests__/zero-blast-radius.test.js's own independent confirmation).
+ *
+ * Stage 21: commercial-catalog/ is added for a related but distinct reason. Unlike
+ * knowledge-platform/product-platform (each composing exactly one thing one hop below
+ * themselves), commercial-catalog/ is a deliberate cross-cutting layer over enterprise-gateway/,
+ * knowledge-platform/, product-platform/, and p39-handlers.js simultaneously (Stage 21's own
+ * charter -- see TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md Sec 3), so its feature-flags.js
+ * genuinely imports DEPLOYMENT_ENVIRONMENTS from enterprise-gateway/feature-flags.js (a real,
+ * constants-only import -- not just a prose mention), on the reasoning that EnterpriseGateway is
+ * the instance every new commercial capability is ultimately registered onto. The Gateway
+ * *instance* itself still reaches commercial-catalog/'s production files only via dependency
+ * injection (platform.js/commercial-adapters.js take an already-constructed EnterpriseGateway as
+ * a parameter, mirroring knowledge-platform/product-platform's identical DI pattern for their own
+ * upstream dependency) -- only feature-flags.js's constants re-export, and
+ * __tests__/gateway-integration.test.js proving Stage 21's registerCapability()/
+ * annotateCapability()-based wiring end to end, are real imports. See
+ * commercial-catalog/__tests__/zero-blast-radius.test.js's own independent confirmation that
+ * enterprise-gateway/ does not import commercial-catalog/ back.
  */
-const AUTHORIZED_CONSUMER_DIRS = [RELATIONSHIP_FRAMEWORK_DIR, KNOWLEDGE_PLATFORM_DIR, PRODUCT_PLATFORM_DIR];
+const AUTHORIZED_CONSUMER_DIRS = [
+  RELATIONSHIP_FRAMEWORK_DIR,
+  KNOWLEDGE_PLATFORM_DIR,
+  PRODUCT_PLATFORM_DIR,
+  COMMERCIAL_CATALOG_DIR,
+];
 
 /**
  * True only if `file` IS `dir`, or is a path strictly inside it. Mirrors
