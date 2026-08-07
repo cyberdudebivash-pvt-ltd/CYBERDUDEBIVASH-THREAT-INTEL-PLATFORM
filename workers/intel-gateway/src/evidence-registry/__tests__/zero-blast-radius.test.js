@@ -59,12 +59,20 @@ const WORKER_SRC_DIR = dirname(SCAFFOLD_DIR); // .../src
  * zero-blast-radius test); what trips this sweep is JSDoc `@param`/`@returns` type references to
  * evidence-registry/entity.js's CanonicalEvidence and evidence-registry/service-metrics.js's
  * ServicePlatformMetrics types (comments only, not runtime imports).
+ *
+ * Stage 19: product-platform/ is added for the identical JSDoc-comment reason as knowledge-platform
+ * above -- its own production files' `@param`/`@returns` type comments cite
+ * evidence-registry/service-metrics.js's ServicePlatformMetrics type. Its PRODUCTION code does not
+ * import evidence-registry/ at all (it composes only knowledge-platform/'s KnowledgePlatform
+ * properties, one hop up, per TITAN_STAGE19_READINESS_REPORT.md and its own independent
+ * zero-blast-radius test).
  */
 const AUTHORIZED_CONSUMER_DIRS = [
   join(WORKER_SRC_DIR, "intelligence-platform"),
   join(WORKER_SRC_DIR, "enterprise-gateway"),
   join(WORKER_SRC_DIR, "relationship-framework"),
   join(WORKER_SRC_DIR, "knowledge-platform"),
+  join(WORKER_SRC_DIR, "product-platform"),
 ];
 
 /**
