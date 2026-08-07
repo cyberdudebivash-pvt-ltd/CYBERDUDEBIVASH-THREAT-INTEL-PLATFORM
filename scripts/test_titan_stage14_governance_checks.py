@@ -67,6 +67,7 @@ export class EnterpriseGateway {
     // ADR-0010: pass-through only
     this._registry.register("evidence.relationships", createServiceMethodHandler(platform.relationshipResolution));
     this._registry.register("platform.metrics", createServiceMethodHandler(platform.metrics));
+    this._registry.register("intelligence.explainability", createServiceMethodHandler(platform.explainability));
   }
 }
 """
