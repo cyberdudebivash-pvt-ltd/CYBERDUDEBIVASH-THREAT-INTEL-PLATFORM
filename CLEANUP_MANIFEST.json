@@ -1,0 +1,223 @@
+{
+  "manifest_version": "1.0",
+  "generated_at": "2026-08-07T16:35:00Z",
+  "phase": "PHASE_7_PLAN",
+  "status": "PROPOSED_NOT_EXECUTED",
+  "branch": "claude/titan-stage-22-cleanup-vjc8a7",
+  "companion_document": "SAFE_CLEANUP_PLAN.md",
+  "notes": "No file has been deleted, untracked, or modified as a result of this manifest. Verdicts and evidence are detailed per-candidate in SAFE_CLEANUP_PLAN.md sections 4.1-4.9.",
+  "candidates": [
+    {
+      "id": "nodemodules-tracked",
+      "path": "workers/intel-gateway/node_modules/",
+      "verdict": "DELETE",
+      "action": "git rm -r --cached",
+      "file_count": 894,
+      "size_bytes": 123731968,
+      "size_human": "118MB",
+      "risk_level": "LOW",
+      "reversible": true,
+      "reversal_method": "git revert",
+      "evidence_refs": ["workers/intel-gateway/package.json", "workers/intel-gateway/package-lock.json", ".gitignore:126-127"]
+    },
+    {
+      "id": "reports-2026-07-html",
+      "path": "reports/2026/07/",
+      "verdict": "ARCHIVE",
+      "action": "python3 scripts/report_archive_manager.py --days 6 (existing tool, no code change)",
+      "file_count": 7359,
+      "size_bytes": 701530931,
+      "size_human": "669MB",
+      "risk_level": "LOW_MEDIUM",
+      "reversible": true,
+      "reversal_method": "git revert; git checkout <pre-commit> -- reports/2026/07/",
+      "evidence_refs": [
+        "workers/intel-gateway/src/index.js:3791-3890",
+        "workers/intel-gateway/wrangler.toml:100-108",
+        "scripts/r2_upload.py:379-402",
+        "scripts/report_archive_manager.py"
+      ],
+      "caveat": "R2 bucket contents not independently queryable from this sandboxed session (no Cloudflare credentials present); confidence based on code path + sync-cadence analysis, not a live bucket check."
+    },
+    {
+      "id": "reports-pdf",
+      "path": "reports/pdf/",
+      "verdict": "UNKNOWN",
+      "action": "NONE — no existing tool covers this path; requires Phase 8 addition + its own dry-run before any Phase 9 action",
+      "file_count": 9934,
+      "size_bytes": 371195904,
+      "size_human": "354MB",
+      "risk_level": "UNKNOWN",
+      "reversible": null,
+      "reversal_method": null,
+      "evidence_refs": ["scripts/r2_upload.py:404-423"]
+    },
+    {
+      "id": "manifest-backups",
+      "path": "data/.manifest_backups/",
+      "verdict": "ARCHIVE",
+      "action": "prune to newest 5 files + git rm --cached remainder; keep directory and mechanism",
+      "file_count": 30,
+      "size_bytes": 20971520,
+      "size_human": "~20MB",
+      "risk_level": "LOW",
+      "reversible": true,
+      "reversal_method": "git revert; restore from pre-prune tar in data/archive/",
+      "evidence_refs": [
+        "agent/autonomous_guardian/guardian.py:297-315",
+        "agent/v70_apex_upgrade/core/schema_validator.py:195,254",
+        "scripts/validate_intel_schema.py:465-488"
+      ]
+    },
+    {
+      "id": "root-report-cert-audit-files",
+      "path": "root: *_REPORT.md, *_CERTIFICATION.md, *_AUDIT.json (82 files)",
+      "verdict": "ARCHIVE",
+      "action": "relocate to reports/ or archive/root-reports/ (no net deletion)",
+      "file_count": 82,
+      "size_bytes": 1363149,
+      "size_human": "1.3MB",
+      "risk_level": "LOW",
+      "reversible": true,
+      "reversal_method": "git revert",
+      "evidence_refs": ["repo-wide href scan across all .html files: zero matches"]
+    },
+    {
+      "id": "root-bat-ps1-devscripts",
+      "path": "root: *.bat, *.ps1 (62 files, excludes data/simulations/)",
+      "verdict": "DELETE",
+      "action": "git rm",
+      "file_count": 62,
+      "size_bytes": 450560,
+      "size_human": "440KB",
+      "risk_level": "LOW",
+      "reversible": true,
+      "reversal_method": "git revert",
+      "evidence_refs": ["zero references in .github/workflows/*.yml", "zero references in docs"]
+    },
+    {
+      "id": "stray-3.9",
+      "path": "3.9",
+      "verdict": "DELETE",
+      "action": "git rm",
+      "file_count": 1,
+      "size_bytes": 0,
+      "size_human": "0B",
+      "risk_level": "LOW",
+      "reversible": true,
+      "reversal_method": "git revert",
+      "evidence_refs": [".gitignore:115 (existing but currently ineffective pattern)"]
+    },
+    {
+      "id": "stray-pre-p21-baseline",
+      "path": ".pre-p21-baseline",
+      "verdict": "DELETE",
+      "action": "git rm",
+      "file_count": 1,
+      "size_bytes": 223,
+      "size_human": "223B",
+      "risk_level": "LOW",
+      "reversible": true,
+      "reversal_method": "git revert",
+      "evidence_refs": ["zero repo-wide references"]
+    },
+    {
+      "id": "railway-dotfile",
+      "path": ".railway",
+      "verdict": "N/A",
+      "action": "NONE — file does not exist; brief's claim was incorrect, likely conflated with railway.json (KEEP, legitimate)",
+      "file_count": 0,
+      "size_bytes": 0,
+      "size_human": "0B",
+      "risk_level": "N/A",
+      "reversible": null,
+      "reversal_method": null,
+      "evidence_refs": ["full root dotfile listing contains no .railway entry"]
+    },
+    {
+      "id": "bingsiteauth",
+      "path": "BingSiteAuth.xml",
+      "verdict": "KEEP",
+      "action": "NONE",
+      "file_count": 1,
+      "size_bytes": 85,
+      "size_human": "85B",
+      "risk_level": "N/A",
+      "evidence_refs": ["platform/frontend/src/app/layout.tsx:97"]
+    },
+    {
+      "id": "changelog-root",
+      "path": "root: CHANGELOG_vNN.md (26 files)",
+      "verdict": "KEEP",
+      "action": "NONE",
+      "file_count": 26,
+      "size_bytes": 204800,
+      "size_human": "200KB",
+      "evidence_refs": ["index.html:479-504", "docs/enterprise-knowledge-center-guide.md:35,75"]
+    },
+    {
+      "id": "commercial-zips",
+      "path": "data/products/detections/*.zip",
+      "verdict": "KEEP",
+      "action": "NONE",
+      "file_count": 392,
+      "size_bytes": 2516582,
+      "size_human": "2.4MB",
+      "evidence_refs": ["agent/api/premium_api.py:24-29", "agent/product_factory/detection_pack_builder.py"]
+    },
+    {
+      "id": "bas-simulations",
+      "path": "data/simulations/*.bat",
+      "verdict": "KEEP",
+      "action": "NONE",
+      "file_count": 308,
+      "size_bytes": 1258291,
+      "size_human": "1.2MB",
+      "evidence_refs": ["agent/v30_apex/apex_purple_swarm.py:21,79,83"]
+    },
+    {
+      "id": "data-analyst-unbounded",
+      "path": "data/analyst/",
+      "verdict": "UNKNOWN",
+      "action": "NONE this pass — recommend additive retention-policy entry in Phase 8",
+      "file_count": 6410,
+      "size_bytes": 27262976,
+      "size_human": "26MB",
+      "risk_level": "UNKNOWN",
+      "evidence_refs": ["agent/v37_analyst/analyst_engine.py (writer)", "v38_arsenal, v39_nexus (readers)"]
+    },
+    {
+      "id": "data-subdirs-untraced",
+      "path": "data/trust/, data/quarantine/, data/remediation/, data/ocios/, data/products/, data/sovereign/, data/bughunter/, data/observability/enrichment_snapshots/, data/intelligence_repository/",
+      "verdict": "UNKNOWN",
+      "action": "NONE — insufficient evidence this session; per task rule UNKNOWN always becomes KEEP",
+      "file_count": null,
+      "size_bytes": null,
+      "size_human": "~1.5-21MB each",
+      "risk_level": "UNKNOWN"
+    }
+  ],
+  "flagged_defects_not_in_scope": [
+    {
+      "id": "report-archive-manager-month-granularity",
+      "file": "scripts/report_archive_manager.py",
+      "description": "Classification compares (year, month) tuples instead of actual dates, causing up to ~5-6 weeks of over-retention at month boundaries. Not a safety defect (only over-retains, never mis-deletes). Verified via --dry-run --days 6 vs --days 7.",
+      "recommended_action": "Separate, dedicated fix-and-verify session, not this cleanup pass"
+    },
+    {
+      "id": "report-archive-manager-pathspec-bug",
+      "file": "scripts/report_archive_manager.py",
+      "description": "git ls-files 'reports/', '--', '*.html' matches *.html anywhere in the repo (unanchored pathspec), not just under reports/. Inflates reported counts (22,323 vs true ~19,955-22,323 depending on measurement) and causes --status to crash on non-numeric path segments. Does not cause incorrect deletions.",
+      "recommended_action": "Separate, dedicated fix-and-verify session, not this cleanup pass"
+    },
+    {
+      "id": "safe-git-commit-reports-force-add",
+      "file": "scripts/safe_git_commit.py:333,366",
+      "description": "Deliberately force-adds (git add -f) reports/ every pipeline run despite .gitignore:188, as an intra-run recovery safety net. This is the root cause of ongoing reports/ growth (~240-380 files/day) and will regrow the directory after this one-time cleanup.",
+      "recommended_action": "OUT OF SCOPE — lives inside STAGE 4: GIT SYNC, explicitly marked 'never modify' in CLAUDE.md. Flagged for user awareness only, no code change proposed."
+    }
+  ],
+  "estimated_total_reclaim_tier1_bytes": 847208448,
+  "estimated_total_reclaim_tier1_human": "~808MB",
+  "reclaim_caveat": "git rm --cached reduces future checkout/working-tree size only. .git pack size is unaffected because history is not rewritten (git filter-repo / BFG explicitly prohibited by task rules)."
+}
