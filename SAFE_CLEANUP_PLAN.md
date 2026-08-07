@@ -2,7 +2,7 @@
 
 **Branch:** `claude/titan-stage-22-cleanup-vjc8a7`
 **Date:** 2026-08-07
-**Status:** PROPOSED — no destructive action has been taken yet. This document requires sign-off before Phase 9 execution.
+**Status:** EXECUTED — see `PRODUCTION_SANITATION_REPORT.md` and `EXECUTION_SUMMARY.md` for the final outcome, including one verdict correction (§4.5, root report/cert/audit files: ARCHIVE → KEEP) made during pre-execution verification, after this document was first written.
 
 ---
 
@@ -172,18 +172,20 @@ This directory is a second, independent instance of the same "gitignored but nev
 
 ### 4.5 Root-level `*_REPORT.md` / `*_CERTIFICATION.md` / `*_AUDIT.json` (82 files, ~1.3 MB)
 
+**UPDATE (post-execution-check correction):** this section originally read ARCHIVE, based on a subagent-assisted check that scanned only HTML `href=` links. Before acting, a broader repo-wide `git grep` for each of the 82 filenames found real hits — comments in live source code citing these documents as the justification for architectural decisions, e.g. `workers/intel-gateway/src/commercial-catalog/catalog.js:3`: *"Not imported by index.js or any production route. See TITAN_STAGE21_GATEWAY_ACTIVATION_AUDIT.md."*, and similar citations in `scripts/titan_architecture_governance_check.py` and several `__tests__/zero-blast-radius.test.js` files. Not a functional/runtime dependency (nothing parses or loads these paths at runtime), but a real documentation-provenance reference that relocation would silently break, for 1.3MB of no-net-reclaim relocation. **Verdict corrected to KEEP. No action taken.**
+
 | Field | Value |
 |---|---|
-| **Verdict** | **ARCHIVE** (move into `reports/` or a dedicated `archive/root-reports/` path — small enough that deletion isn't necessary to hit meaningful storage goals) |
-| Reason | One-off CI-run snapshots that predate the `reports/` convention; zero public links found (`href` scan across all `.html` returned no matches) |
+| **Verdict** | **KEEP** (revised from ARCHIVE) |
+| Reason | Cited as documentation provenance by live source code across `commercial-catalog/`, `titan_architecture_governance_check.py`, and test files — see above |
 | Owner | Platform engineering |
-| Current references | None found |
-| Dependency analysis | No script or workflow reads these back |
-| Risk level | **LOW** |
-| Rollback method | `git revert` |
-| Backup method | Moved, not deleted — content preserved at new path |
-| Recovery steps | N/A — files remain in repo, just relocated |
-| Estimated storage reclaimed | ~1.3 MB (relocation, not net reclaim) |
+| Current references | ~70 of 82 files have repo-wide hits; sampled and confirmed as comment-level citations, not functional dependencies |
+| Dependency analysis | No script or workflow reads these back at runtime; source-code comments reference them by path for human readers |
+| Risk level | **LOW to touch storage-wise, but relocation would create stale doc-trail references for negligible benefit** |
+| Rollback method | N/A — no action taken |
+| Backup method | N/A |
+| Recovery steps | N/A |
+| Estimated storage reclaimed | 0 (no action taken) |
 | Runtime / Cloudflare / CI impact | None |
 | Commercial impact | None |
 
@@ -268,9 +270,9 @@ Per Principle 4 (Reuse Before Build) and the explicit "do not create a second cl
 
 | Verdict | Items |
 |---|---|
-| **DELETE** | tracked `node_modules/` (894 files), root `.bat`/`.ps1` cruft (62 files), `3.9`, `.pre-p21-baseline` |
-| **ARCHIVE** | `reports/2026/07/` and earlier (7,359 files, via existing tool), `data/.manifest_backups/` (prune to 5), root `*_REPORT`/`*_CERTIFICATION`/`*_AUDIT` files (82 files, relocate) |
-| **KEEP** | CHANGELOG_vNN.md, commercial ZIPs, BAS simulation content, deploy/platform config, BingSiteAuth.xml, all `data/quality/` and already-governed `data/` subdirs |
+| **DELETE** (executed) | tracked `node_modules/` (894 files), root `.bat`/`.ps1` cruft + 2 stray transcript dumps (64 files), `3.9`, `.pre-p21-baseline` |
+| **ARCHIVE** (executed) | `reports/2026/07/` (7,359 files, via existing tool), `data/.manifest_backups/` (pruned to 5) |
+| **KEEP** | CHANGELOG_vNN.md, commercial ZIPs, BAS simulation content, deploy/platform config, BingSiteAuth.xml, all `data/quality/` and already-governed `data/` subdirs, and (revised from ARCHIVE, see §4.5) root `*_REPORT`/`*_CERTIFICATION`/`*_AUDIT` files (82 files) |
 | **UNKNOWN → KEEP** | `data/analyst/`, `reports/pdf/`, and the seven untraced small `data/` subdirs listed in §4.9 |
 
-**No execution has occurred.** This plan requires explicit confirmation before Phase 8 (code changes) or Phase 9 (untracking/deletion) proceeds — see the accompanying session message for the specific decision point.
+**Execution complete.** See `PRODUCTION_SANITATION_REPORT.md`, `STORAGE_OPTIMIZATION_REPORT.md`, `EXECUTION_SUMMARY.md`, `CLEANUP_MANIFEST.json`, and `ROLLBACK_MANIFEST.json` for the full outcome, validation results, and rollback instructions.
