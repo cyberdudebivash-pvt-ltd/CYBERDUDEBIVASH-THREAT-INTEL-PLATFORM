@@ -6,6 +6,38 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [200.0.0-rc] — 2026-08-07 Project TITAN Stage 22 — Commercial Release Certification (Unreleased)
+
+This entry documents the certification work itself, not a code release — `config/version.json`
+remains at `184.0`/`v185` pending an explicit release decision (see `V200_EXECUTIVE_RELEASE_REPORT.md`).
+Recorded here per this file's own Keep-a-Changelog convention so the certification's existence and
+findings are discoverable from the same place as every other change.
+
+### Added
+- Full v200 GA readiness certification: `TITAN_V200_RELEASE_AUDIT.md`,
+  `COMMERCIAL_QUALITY_CERTIFICATION_REPORT.md`, `UI_FREEZE_POLICY.md`,
+  `PERFORMANCE_CERTIFICATION.md`, `SECURITY_CERTIFICATION.md`, `OPERATIONAL_READINESS.md`,
+  `COMMERCIAL_READINESS.md`, `V200_RELEASE_GATE.md`, `V200_EXECUTIVE_RELEASE_REPORT.md`, plus the
+  release documentation set (`V200_UPGRADE_GUIDE.md`, `V200_API_REFERENCE.md`,
+  `V200_CUSTOMER_GUIDE.md`, `V200_ADMINISTRATOR_GUIDE.md`, `V200_OPERATIONS_RUNBOOK.md`,
+  `V200_ARCHITECTURE_OVERVIEW.md`).
+- A current SBOM (`data/sbom/sbom-latest.spdx.json`, `sbom-latest.cyclonedx.json`), generated via
+  the platform's existing `scripts/enterprise_sbom_generator.py`.
+
+### Found, not yet fixed (see `V200_EXECUTIVE_RELEASE_REPORT.md` for full risk register)
+- `docs/BCP_DISASTER_RECOVERY.md` describes infrastructure (AWS multi-region, ClickHouse HA, Redis
+  Cluster, Kubernetes, PagerDuty) not evidenced in the actual single-Worker deployment.
+- `workers/revenue-engine/src/index.js` duplicates tier pricing with a ~2x mismatch against the
+  canonical `config/subscription_tiers.json` (PRO $99 vs. $49).
+- 12 `/api/v1/p34/*` "engineering assurance" endpoints have no authentication.
+- CORS wildcard (`Access-Control-Allow-Origin: "*"`) on every response.
+- 219 known dependency vulnerabilities (4 critical) across the repository.
+- `provisionApiKey()`'s revenue-integrity fix (`SUBSCRIPTION_EXPIRY_ENABLED`) ships disabled by
+  default.
+- Confidence scoring fragmented across 116 files / 5+ non-reconciled systems; ADR-0007 unresolved.
+
+---
+
 ## [1.0.0] — 2026-02-25 🎉 First Public Release
 
 ### 🆕 Added — Test Suite & CI/CD
