@@ -120,6 +120,7 @@ def _parse_ts(ts_str: str) -> Optional[datetime]:
         "%Y-%m-%dT%H:%M:%SZ",
         "%Y-%m-%dT%H:%M:%S+00:00",
         "%Y-%m-%dT%H:%M:%S.%fZ",
+        "%Y-%m-%dT%H:%M:%S.%f",  # NVD CVE API v2 `published`/`lastModified` — no trailing Z (e.g. "2026-08-06T22:16:40.020")
         "%Y-%m-%dT%H:%M:%S%z",
         "%Y-%m-%d",
         "%a, %d %b %Y %H:%M:%S %z",
