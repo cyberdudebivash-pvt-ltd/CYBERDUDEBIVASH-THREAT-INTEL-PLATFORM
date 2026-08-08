@@ -259,3 +259,92 @@ class TestUrlhausAuthKeyFix:
         tii.ingest_urlhaus(feed_state)
 
         assert captured_request["headers"].get("Auth-key") == "test-key-123"
+
+
+# --- _parse_ts NVD timestamp format regression -------------------------------
+#
+# Verified live against the real NVD CVE API v2 response on 2026-08-08: its
+# `cve.published` / `cve.lastModified` fields are formatted
+# "YYYY-MM-DDTHH:MM:SS.mmm" — fractional seconds, NO trailing "Z". Before this
+# fix, _parse_ts() had no matching pattern, so every NVD item's timestamp
+# silently parsed to None. That made ingest_nvd_cves() always treat items as
+# "new" (is_new() short-circuits True on a None timestamp) but never advance
+# feed_state's nvd_cve cursor (the "if newest_ts:" guard was never true), so
+# data/cache/feed_state.json never once recorded an nvd_cve entry across
+# dozens of live production runs — confirmed via GitHub Actions job logs and
+# the committed feed_state.json history. NVD itself was never the problem
+# (live API check returned 200 with fresh CVEs); the parser was silently
+# discarding every timestamp it saw.
+
+class TestParseTsNvdFormat:
+    def test_parses_nvd_fractional_seconds_without_z(self):
+        dt = tii._parse_ts("2026-08-06T22:16:40.020")
+        assert dt is not None
+        assert dt.year == 2026 and dt.month == 8 and dt.day == 6
+        assert dt.hour == 22 and dt.minute == 16 and dt.second == 40
+
+    def test_still_parses_github_advisory_format(self):
+        """Regression guard: the fix must not break the format other
+        sources already rely on (GitHub Advisory's published_at)."""
+        assert tii._parse_ts("2026-08-07T19:29:09Z") is not None
+
+    def test_still_parses_cisa_kev_date_only_format(self):
+        assert tii._parse_ts("2026-08-07") is not None
+
+
+class TestIngestNvdCves:
+    def _fake_response(self, cves):
+        return {
+            "vulnerabilities": [
+                {"cve": {
+                    "id": cve_id,
+                    "published": published,
+                    "descriptions": [{"lang": "en", "value": "desc"}],
+                    "metrics": {},
+                }}
+                for cve_id, published in cves
+            ]
+        }
+
+    def test_feed_state_cursor_advances_with_real_nvd_timestamp_format(self, monkeypatch):
+        """The actual regression this change fixes: before the _parse_ts
+        fix, this cursor never advanced no matter how many runs executed."""
+        monkeypatch.setattr(tii, "_get_json", lambda *a, **k: self._fake_response(
+            [("CVE-2024-0001", "2026-08-06T22:16:40.020"),
+             ("CVE-2024-0002", "2026-08-07T09:05:12.500")]
+        ))
+        feed_state = tii.FeedState()
+        feed_state._state = {"sources": {}}
+
+        items = tii.ingest_nvd_cves(feed_state)
+
+        assert len(items) == 2
+        cursor = feed_state.get_last_seen("nvd_cve")
+        assert cursor is not None
+        assert cursor.day == 7 and cursor.hour == 9  # advanced to the newest item, not left at None
+
+    def test_second_run_excludes_items_at_or_before_the_cursor(self, monkeypatch):
+        feed_state = tii.FeedState()
+        feed_state._state = {"sources": {}}
+
+        monkeypatch.setattr(tii, "_get_json", lambda *a, **k: self._fake_response(
+            [("CVE-2024-0001", "2026-08-06T22:16:40.020")]
+        ))
+        tii.ingest_nvd_cves(feed_state)
+        assert feed_state.get_last_seen("nvd_cve") is not None
+
+        # A clearly-later (by whole seconds, not sub-second) timestamp so
+        # this test isn't sensitive to _ts_to_str()'s separate, pre-existing
+        # whole-second persistence precision (already safety-netted at the
+        # manifest merge stage by the fingerprint-based DedupState).
+        monkeypatch.setattr(tii, "_get_json", lambda *a, **k: self._fake_response(
+            [("CVE-2024-0003", "2026-08-08T01:00:00.000")]
+        ))
+        items = tii.ingest_nvd_cves(feed_state)
+        assert [i["cves"][0] for i in items] == ["CVE-2024-0003"]
+
+    def test_network_failure_returns_empty_not_raise(self, monkeypatch):
+        monkeypatch.setattr(tii, "_get_json", lambda *a, **k: None)
+        feed_state = tii.FeedState()
+        feed_state._state = {"sources": {}}
+        assert tii.ingest_nvd_cves(feed_state) == []
