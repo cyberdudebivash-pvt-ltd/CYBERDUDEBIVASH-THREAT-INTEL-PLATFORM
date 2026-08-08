@@ -2,26 +2,27 @@
   "platform": "CYBERDUDEBIVASH SENTINEL APEX",
   "module": "v51_detection_engine",
   "version": "51.0.0",
-  "batch_id": "f324a176f853",
-  "generated_at": "2026-08-03T15:25:01.013006+00:00",
-  "ioc_count": 21,
+  "batch_id": "a929aaa60fed",
+  "generated_at": "2026-08-08T13:26:42.159215+00:00",
+  "ioc_count": 24,
   "ioc_type_breakdown": {
-    "cve": 19,
-    "ipv4": 2
+    "cve": 13,
+    "sha1": 7,
+    "ipv4": 4
   },
   "rules_generated": {
-    "sigma": 1,
+    "sigma": 2,
     "yara": 1,
     "suricata": 1,
-    "total": 3
+    "total": 4
   },
   "rules": [
     {
-      "rule_id": "cdb-net-f324a176f853",
+      "rule_id": "cdb-net-a929aaa60fed",
       "rule_type": "sigma",
-      "title": "Network IOC Detection [f324a176f853]",
-      "content": "title: CDB SENTINEL APEX - Network Threat Intel [f324a176f853]\nid: cdb-net-f324a176f853\nstatus: production\ndescription: >\n    Auto-generated detection rule for 2 malicious IPs and 0 malicious domains\n    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-08-03\nmodified: 2026-08-03\ntags:\n    - attack.command_and_control\n    - attack.t1071\n    - attack.t1090\nlogsource:\n    category: firewall\n    product: any\ndetection:\n    selection:\n        DestinationIp:\n            - '1.8.5.3'\n            - '0.0.0.0'\n    condition: selection\nlevel: medium\nfalsepositives:\n    - Shared hosting infrastructure\n    - CDN/cloud provider IP overlap\nreferences:\n    - https://intel.cyberdudebivash.com\n    - https://cyberdudebivash.com/threat-intel",
-      "ioc_count": 2,
+      "title": "Network IOC Detection [a929aaa60fed]",
+      "content": "title: CDB SENTINEL APEX - Network Threat Intel [a929aaa60fed]\nid: cdb-net-a929aaa60fed\nstatus: production\ndescription: >\n    Auto-generated detection rule for 4 malicious IPs and 0 malicious domains\n    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-08-08\nmodified: 2026-08-08\ntags:\n    - attack.command_and_control\n    - attack.t1071\n    - attack.t1090\nlogsource:\n    category: firewall\n    product: any\ndetection:\n    selection:\n        DestinationIp:\n            - '3.1.3.1'\n            - '1.6.12.10'\n            - '3.6.4.1'\n            - '3.8.13.1'\n    condition: selection\nlevel: medium\nfalsepositives:\n    - Shared hosting infrastructure\n    - CDN/cloud provider IP overlap\nreferences:\n    - https://intel.cyberdudebivash.com\n    - https://cyberdudebivash.com/threat-intel",
+      "ioc_count": 4,
       "ioc_types": [
         "ipv4",
         "domain"
@@ -31,19 +32,49 @@
         "T1071",
         "T1090"
       ],
-      "generated_at": "2026-08-03T15:25:01.089036+00:00",
+      "generated_at": "2026-08-08T13:26:42.213884+00:00",
       "source_advisories": [
-        "CVE-2025-15675: The Charitable  WordPress plugin before 1.8.5.3 does not sanitise and escape one of its campaign image text fields befor",
-        "CVE-2026-67315: axios versions 0.31.0 before 0.33.0 and 1.15.0 before 1.18.0 fail to recognize 0.0.0.0 as a loopback address in shouldBy"
+        "CVE-2026-65513: Unauthenticated Cross Site Scripting (XSS) in Simply Schedule Appointments <= 1.6.12.10 versions.",
+        "CVE-2026-28082: Unauthenticated Cross Site Scripting (XSS) in JetEngine <= 3.8.13.1 versions.",
+        "CVE-2026-28140: Unauthenticated Broken Access Control in JetFormBuilder <= 3.6.4.1 versions.",
+        "CVE-2026-65546: Unauthenticated SQL Injection in Qode Tours <= 3.1.3.1 versions."
       ],
-      "filename": "cdb_network_ioc_f324a176f853.yml"
+      "filename": "cdb_network_ioc_a929aaa60fed.yml"
     },
     {
-      "rule_id": "yara-net-f324a176f853",
+      "rule_id": "cdb-hash-a929aaa60fed",
+      "rule_type": "sigma",
+      "title": "File Hash Detection [a929aaa60fed]",
+      "content": "title: CDB SENTINEL APEX - Malicious File Hash Detection [a929aaa60fed]\nid: cdb-hash-a929aaa60fed\nstatus: production\ndescription: >\n    Auto-generated detection rule for 7 malicious file hashes\n    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-08-08\ntags:\n    - attack.execution\n    - attack.t1204\n    - attack.defense_evasion\nlogsource:\n    category: file_event\n    product: any\ndetection:\n    selection:\n        Hashes|contains:\n            - '549f494a9e363f40530149de324b8097de424230'\n            - 'e0729dcfd3a2b1682a7bff86e7174852c03419ba'\n            - 'b30a82aa1d1d1139e0de846c41c8aadee6e06114'\n            - 'a40f54d4533ba6618e1749383a245900eeb024c1'\n            - 'f068ab4ad6f0907ac7001b995588c2673f11a755'\n            - '8ebbbb99b26f80ff6162fe00957c6dec73fbc5a5'\n            - '1102172c9adec4a619e241efd6bfb74f5b1f4332'\n    condition: selection\nlevel: critical\nfalsepositives:\n    - Hash collision (negligible probability)\nreferences:\n    - https://intel.cyberdudebivash.com",
+      "ioc_count": 7,
+      "ioc_types": [
+        "sha256",
+        "sha1",
+        "md5"
+      ],
+      "severity": "critical",
+      "mitre_techniques": [
+        "T1204",
+        "T1059"
+      ],
+      "generated_at": "2026-08-08T13:26:42.213907+00:00",
+      "source_advisories": [
+        "CVE-2026-19041: A vulnerability has been found in MissionSquad mcp-api up to 1.11.8. The impacted element is the function this.packageSe",
+        "CVE-2026-19263 - INQUIRELAB mcp-bridge-api Servers Endpoint mcp-bridge.js command injection",
+        "CVE-2026-19038: A security vulnerability has been detected in MonomythDevelopment la-forge-mcp 1.0.0. This issue affects the function sc",
+        "CVE-2026-19040: A flaw has been found in MissionSquad mcp-api up to 1.11.9. The affected element is an unknown function of the file src/",
+        "CVE-2026-19039: A vulnerability was detected in Kino-Kafkaesque ssh-mcp-server up to 8ebbbb99b26f80ff6162fe00957c6dec73fbc5a5. Impacted",
+        "CVE-2026-19266 - Kirachon context-engine review-git-diff Endpoint gitUtils.ts execGitCommand command injection",
+        "CVE-2026-19268 - abdullah1854 MCPGateway Claude Usage Range Endpoint claude-usage.ts getUsageByDateRange command injection"
+      ],
+      "filename": "cdb_file_hash_a929aaa60fed.yml"
+    },
+    {
+      "rule_id": "yara-net-a929aaa60fed",
       "rule_type": "yara",
-      "title": "Network Intel YARA [f324a176f853]",
-      "content": "rule CDB_SENTINEL_Network_Intel_f324a176f853\n{\n    meta:\n        author = \"CyberDudeBivash SENTINEL APEX v51\"\n        description = \"Detects network IOCs from threat intelligence feeds\"\n        date = \"2026-08-03\"\n        severity = \"high\"\n        reference = \"https://intel.cyberdudebivash.com\"\n        batch_id = \"f324a176f853\"\n        ioc_count = 2\n\n    strings:\n        $ip_0 = \"1.8.5.3\" ascii wide nocase\n        $ip_1 = \"0.0.0.0\" ascii wide nocase\n\n    condition:\n        filesize < 100MB and any of them\n}",
-      "ioc_count": 2,
+      "title": "Network Intel YARA [a929aaa60fed]",
+      "content": "rule CDB_SENTINEL_Network_Intel_a929aaa60fed\n{\n    meta:\n        author = \"CyberDudeBivash SENTINEL APEX v51\"\n        description = \"Detects network IOCs from threat intelligence feeds\"\n        date = \"2026-08-08\"\n        severity = \"high\"\n        reference = \"https://intel.cyberdudebivash.com\"\n        batch_id = \"a929aaa60fed\"\n        ioc_count = 4\n\n    strings:\n        $ip_0 = \"3.1.3.1\" ascii wide nocase\n        $ip_1 = \"1.6.12.10\" ascii wide nocase\n        $ip_2 = \"3.6.4.1\" ascii wide nocase\n        $ip_3 = \"3.8.13.1\" ascii wide nocase\n\n    condition:\n        filesize < 100MB and any of them\n}",
+      "ioc_count": 4,
       "ioc_types": [
         "ipv4",
         "domain"
@@ -53,21 +84,24 @@
         "T1071",
         "T1090"
       ],
-      "generated_at": "2026-08-03T15:25:01.089331+00:00",
+      "generated_at": "2026-08-08T13:26:42.214226+00:00",
       "source_advisories": [
-        "CVE-2025-15675: The Charitable  WordPress plugin before 1.8.5.3 does not sanitise and escape one of its campaign image text fields befor",
-        "CVE-2026-67315: axios versions 0.31.0 before 0.33.0 and 1.15.0 before 1.18.0 fail to recognize 0.0.0.0 as a loopback address in shouldBy"
+        "CVE-2026-65513: Unauthenticated Cross Site Scripting (XSS) in Simply Schedule Appointments <= 1.6.12.10 versions.",
+        "CVE-2026-28082: Unauthenticated Cross Site Scripting (XSS) in JetEngine <= 3.8.13.1 versions.",
+        "CVE-2026-28140: Unauthenticated Broken Access Control in JetFormBuilder <= 3.6.4.1 versions.",
+        "CVE-2026-65546: Unauthenticated SQL Injection in Qode Tours <= 3.1.3.1 versions."
       ],
-      "filename": "cdb_network_intel_f324a176f853.yar"
+      "filename": "cdb_network_intel_a929aaa60fed.yar"
     },
     {
-      "rule_id": "suricata-f324a176f853",
+      "rule_id": "suricata-a929aaa60fed",
       "rule_type": "suricata",
-      "title": "Suricata Threat Intel [f324a176f853]",
-      "content": "# CDB SENTINEL APEX v51 - Auto-Generated Suricata Rules\n# Batch: f324a176f853 | Generated: 2026-08-03\n# IOC Count: 21\n# Source: https://intel.cyberdudebivash.com\n\nalert ip any any -> 1.8.5.3 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 1.8.5.3\"; sid:9035095; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-03, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 0.0.0.0 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 0.0.0.0\"; sid:9035096; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-03, severity high, source CDB_SENTINEL_APEX_v51;)",
-      "ioc_count": 2,
+      "title": "Suricata Threat Intel [a929aaa60fed]",
+      "content": "# CDB SENTINEL APEX v51 - Auto-Generated Suricata Rules\n# Batch: a929aaa60fed | Generated: 2026-08-08\n# IOC Count: 24\n# Source: https://intel.cyberdudebivash.com\n\nalert ip any any -> 3.1.3.1 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 3.1.3.1\"; sid:9187173; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-08, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 1.6.12.10 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 1.6.12.10\"; sid:9187174; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-08, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 3.6.4.1 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 3.6.4.1\"; sid:9187175; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-08, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 3.8.13.1 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 3.8.13.1\"; sid:9187176; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-08, severity high, source CDB_SENTINEL_APEX_v51;)",
+      "ioc_count": 4,
       "ioc_types": [
         "cve",
+        "sha1",
         "ipv4"
       ],
       "severity": "high",
@@ -76,20 +110,20 @@
         "T1090",
         "T1568"
       ],
-      "generated_at": "2026-08-03T15:25:01.089634+00:00",
+      "generated_at": "2026-08-08T13:26:42.214433+00:00",
       "source_advisories": [
-        "CVE-2025-15675: The Charitable  WordPress plugin before 1.8.5.3 does not sanitise and escape one of its campaign image text fields befor",
-        "Exploit for Type Confusion in Handlebarsjs Handlebars",
-        "Exploit for SQL Injection in Wordpress",
-        "CVE-2026-69079 - Unauthenticated Denial of Service via Unbounded Activity-Timeline Range in CTI-Transmute",
-        "CVE-2026-62416 - Sharp Corporation Network Scanner Tool Unauthenticated Arbitrary File Upload and Denial of Service Vulnerability",
-        "KindaRails2Shell threatens Ruby on Rails apps (CVE-2026-66066)",
-        "Exploit for CVE-2026-17583",
-        "exploitarium",
-        "CVE-2026-69075 - Stored Cross-Site Scripting via Vue Template Injection in FlowIntel",
-        "CVE-2026-69078 - Server-Side Request Forgery and Local File Disclosure in CTI-Transmute Evaluation PDF Rendering"
+        "CVE-2026-28082: Unauthenticated Cross Site Scripting (XSS) in JetEngine <= 3.8.13.1 versions.",
+        "CVE-2026-19041: A vulnerability has been found in MissionSquad mcp-api up to 1.11.8. The impacted element is the function this.packageSe",
+        "Exploit for CVE-2026-64638",
+        "CVE-2026-19268 - abdullah1854 MCPGateway Claude Usage Range Endpoint claude-usage.ts getUsageByDateRange command injection",
+        "CVE-2026-16953 - AI Engine < 3.6.4 - Unauthenticated Cross-Session Chatbot File Deletion via Forgeable Session Cookie",
+        "CVE-2026-65513: Unauthenticated Cross Site Scripting (XSS) in Simply Schedule Appointments <= 1.6.12.10 versions.",
+        "CVE-2026-19038: A security vulnerability has been detected in MonomythDevelopment la-forge-mcp 1.0.0. This issue affects the function sc",
+        "CVE-2026-19040: A flaw has been found in MissionSquad mcp-api up to 1.11.9. The affected element is an unknown function of the file src/",
+        "CVE-2026-19259 - MZ Automation libiec61850 MMS Protocol Workflow iec61850_common.c MmsMapping_varAccessSpecToObjectReference heap-based overflow",
+        "Progress Kemp LoadMaster Flaw Hits CISA KEV After 792 Reported Exploit Attempts"
       ],
-      "filename": "cdb_threat_intel_f324a176f853.rules"
+      "filename": "cdb_threat_intel_a929aaa60fed.rules"
     }
   ]
 }
