@@ -221,6 +221,49 @@ def s3_sync(
     return False
 
 
+def upload_p40_artifacts(endpoint: str) -> int:
+    """
+    Upload the 3 P40 Global Intelligence Source Fabric artifacts to R2.
+
+    Extracted from main()'s inline "Upload 2b" block so it can also be
+    invoked standalone (--p40-only) late in sentinel-blogger.yml, after
+    STAGE 5.9.5 regenerates these files. Without this, main()'s single
+    upload pass at STAGE 3.5 runs BEFORE STAGE 5.9.5 in the same pipeline
+    execution, so the freshly-regenerated certification/health reports were
+    never uploaded until the *next* pipeline run — R2 was permanently one
+    full pipeline cycle (~8h) behind what was actually on disk/in git.
+    Returns the count of artifacts uploaded (0-3).
+    """
+    p40_source_fabric_files = [
+        ("data/registry/source_registry.json",           "intel/source_registry.json"),
+        ("data/quality/source_fabric_health.json",        "intel/source_fabric_health.json"),
+        ("data/quality/p40_certification_report.json",    "intel/p40_certification_report.json"),
+    ]
+    uploaded_p40 = 0
+    for src, dst_key in p40_source_fabric_files:
+        if Path(src).exists():
+            s3_cp(src, BUCKET_DATA, dst_key, endpoint)
+            uploaded_p40 += 1
+        else:
+            log.warning("SKIP: %s not found (P40 endpoint will 503 until it is generated)", src)
+    log.info("OK: P40 source fabric artifacts uploaded (%d/%d)",
+             uploaded_p40, len(p40_source_fabric_files))
+    return uploaded_p40
+
+
+def main_p40_only() -> None:
+    """Late-pipeline sync of just the P40 artifacts (see upload_p40_artifacts)."""
+    log.info("=" * 60)
+    log.info("SENTINEL APEX v%s -- R2 Upload Engine (P40-only late sync)", PIPELINE_VERSION)
+    log.info("=" * 60)
+    os.chdir(REPO_ROOT)
+    cf_account, _access_key, _secret_key = get_credentials()
+    endpoint = f"https://{cf_account}.r2.cloudflarestorage.com"
+    install_awscli()
+    upload_p40_artifacts(endpoint)
+    log.info("P40-only R2 sync complete.")
+
+
 def count_manifest() -> int:
     """Count advisory entries in feed_manifest.json."""
     path = REPO_ROOT / "data" / "stix" / "feed_manifest.json"
@@ -283,21 +326,11 @@ def main() -> None:
     # workers/intel-gateway/src/p40-handlers.js (env.INTEL_R2.get(...)) can
     # actually serve real data instead of a permanent 503. Same
     # additive-tuple-list pattern as "Upload 2" above -- no existing upload
-    # touched.
-    p40_source_fabric_files = [
-        ("data/registry/source_registry.json",           "intel/source_registry.json"),
-        ("data/quality/source_fabric_health.json",        "intel/source_fabric_health.json"),
-        ("data/quality/p40_certification_report.json",    "intel/p40_certification_report.json"),
-    ]
-    uploaded_p40 = 0
-    for src, dst_key in p40_source_fabric_files:
-        if Path(src).exists():
-            s3_cp(src, BUCKET_DATA, dst_key, endpoint)
-            uploaded_p40 += 1
-        else:
-            log.warning("SKIP: %s not found (P40 endpoint will 503 until it is generated)", src)
-    log.info("OK: P40 source fabric artifacts uploaded (%d/%d)",
-             uploaded_p40, len(p40_source_fabric_files))
+    # touched. This early-pipeline upload is superseded later in the same
+    # run by STAGE 5.9.5's `r2_upload.py --p40-only` call once the
+    # certification/health reports are regenerated fresh -- see
+    # upload_p40_artifacts()'s docstring for why that late call exists.
+    upload_p40_artifacts(endpoint)
 
     # --- Upload 3: apex_v2 API endpoint files ---
     apex_v2_dir = REPO_ROOT / "api" / "apex_v2"
@@ -485,7 +518,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     try:
-        main()
+        if "--p40-only" in sys.argv:
+            main_p40_only()
+        else:
+            main()
     except SystemExit:
         raise
     except Exception as e:
