@@ -348,3 +348,114 @@ class TestIngestNvdCves:
         feed_state = tii.FeedState()
         feed_state._state = {"sources": {}}
         assert tii.ingest_nvd_cves(feed_state) == []
+
+
+# --- Source health reason codes -----------------------------------------
+#
+# Verified live against the real CISA advisories endpoint on 2026-08-08:
+# https://www.cisa.gov/cybersecurity-advisories/all.xml now 403s at the
+# Akamai edge (same domain's KEV JSON endpoint still 200s -- a targeted WAF
+# rule, not an outage). Before this change, every fetch failure -- a 403
+# WAF block, a 429 rate limit, a DNS failure -- looked identical to
+# scripts/source_fabric_health.py: generic silence, surfaced only as
+# "STALE" with no distinguishing detail. _classify_http_exception +
+# FeedState.set_reason_code close that gap.
+
+class TestHttpReasonCodeClassification:
+    def test_http_403_classified(self, monkeypatch):
+        import urllib.error
+        def raise_403(*a, **k):
+            raise urllib.error.HTTPError("http://x", 403, "Forbidden", {}, None)
+        monkeypatch.setattr("urllib.request.urlopen", raise_403)
+        result = tii._get_text("http://x")
+        assert result is None
+        assert tii.get_last_http_reason_code() == "HTTP_403"
+
+    def test_http_401_classified_as_auth_failure(self, monkeypatch):
+        import urllib.error
+        def raise_401(*a, **k):
+            raise urllib.error.HTTPError("http://x", 401, "Unauthorized", {}, None)
+        monkeypatch.setattr("urllib.request.urlopen", raise_401)
+        tii._get_json("http://x")
+        assert tii.get_last_http_reason_code() == "AUTH_FAILURE"
+
+    def test_http_429_classified(self, monkeypatch):
+        import urllib.error
+        def raise_429(*a, **k):
+            raise urllib.error.HTTPError("http://x", 429, "Too Many Requests", {}, None)
+        monkeypatch.setattr("urllib.request.urlopen", raise_429)
+        tii._get_json("http://x")
+        assert tii.get_last_http_reason_code() == "HTTP_429"
+
+    def test_http_5xx_classified(self, monkeypatch):
+        import urllib.error
+        def raise_500(*a, **k):
+            raise urllib.error.HTTPError("http://x", 503, "Service Unavailable", {}, None)
+        monkeypatch.setattr("urllib.request.urlopen", raise_500)
+        tii._get_json("http://x")
+        assert tii.get_last_http_reason_code() == "HTTP_503"
+
+    def test_reason_code_resets_to_none_on_success(self, monkeypatch):
+        """A stale reason code from a PRIOR call must never leak into a
+        subsequent successful call's outcome."""
+        import urllib.error
+
+        calls = {"n": 0}
+
+        class _Resp:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return b'{"ok": true}'
+
+        def flaky(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise urllib.error.HTTPError("http://x", 403, "Forbidden", {}, None)
+            return _Resp()
+
+        monkeypatch.setattr("urllib.request.urlopen", flaky)
+        tii._get_json("http://x")
+        assert tii.get_last_http_reason_code() == "HTTP_403"
+        tii._get_json("http://x")
+        assert tii.get_last_http_reason_code() is None
+
+    def test_source_stats_record_accepts_reason_code(self):
+        stats = tii.SourceStats()
+        stats.record("test_source", 5, 5, 0, reason_code="OK")
+        assert stats.sources["test_source"]["reason_code"] == "OK"
+
+    def test_feed_state_set_reason_code_merges_not_overwrites(self):
+        feed_state = tii.FeedState()
+        feed_state._state = {"sources": {}}
+        feed_state.update_last_seen("cisa_kev", tii.datetime(2026, 8, 8, tzinfo=tii.timezone.utc))
+        feed_state.set_reason_code("cisa_kev", "OK")
+        entry = feed_state._state["sources"]["cisa_kev"]
+        assert entry["last_seen"] is not None
+        assert entry["last_reason_code"] == "OK"
+
+    def test_record_source_outcome_persists_ok_when_items_found(self):
+        stats = tii.SourceStats()
+        feed_state = tii.FeedState()
+        feed_state._state = {"sources": {}}
+        tii._last_http_reason_code = None  # simulate a prior successful HTTP call
+        tii._record_source_outcome(stats, feed_state, "test_source", [{"title": "x"}])
+        assert stats.sources["test_source"]["reason_code"] == "OK"
+        assert feed_state._state["sources"]["test_source"]["last_reason_code"] == "OK"
+
+    def test_record_source_outcome_persists_zero_output_when_empty(self):
+        stats = tii.SourceStats()
+        feed_state = tii.FeedState()
+        feed_state._state = {"sources": {}}
+        tii._last_http_reason_code = None
+        tii._record_source_outcome(stats, feed_state, "test_source", [])
+        assert stats.sources["test_source"]["reason_code"] == "ZERO_OUTPUT"
+
+    def test_record_source_outcome_persists_classified_failure(self):
+        stats = tii.SourceStats()
+        feed_state = tii.FeedState()
+        feed_state._state = {"sources": {}}
+        tii._last_http_reason_code = "HTTP_403"
+        tii._record_source_outcome(stats, feed_state, "test_source", [])
+        assert stats.sources["test_source"]["reason_code"] == "HTTP_403"
+        assert feed_state._state["sources"]["test_source"]["last_reason_code"] == "HTTP_403"
+        tii._last_http_reason_code = None  # reset module state for other tests
