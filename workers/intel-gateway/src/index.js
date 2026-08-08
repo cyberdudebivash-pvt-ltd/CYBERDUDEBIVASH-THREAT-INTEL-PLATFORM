@@ -90,6 +90,7 @@ import { handleP36Quality, handleP36Maturity, handleP36Targets, handleP36Gaps, h
 import { handleP37Hardening, handleP37FeedAudit, handleP37Enrichment, handleP37IQScore, handleP37Detection, handleP37SourceDiversity, handleP37Reliability, handleP37Debt, handleP37Metrics, handleP37Certification, handleP37Dashboard, handleP37Observability } from './p37-handlers.js';
 import { handleP38SchemaRegistry, handleP38FeedGovernance, handleP38SchemaDrift, handleP38EnrichmentAudit, handleP38ConfidenceAudit, handleP38IQIndex, handleP38SourceDiversity, handleP38Certification, handleP38Executive, handleP38Reliability, handleP38Metrics, handleP38Observability } from './p38-handlers.js';
 import { handleP40SourceRegistry, handleP40SourceDetail, handleP40SourceHealth, handleP40Licensing, handleP40Coverage, handleP40Waves, handleP40Certification, handleP40Metrics, handleP40Dashboard, handleP40Observability } from './p40-handlers.js';
+import { evaluatePublicationGate } from './publication-gate.js';
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
@@ -543,6 +544,88 @@ async function findItemBySlug(env, slug) {
     } catch (_) { /* continue to next source */ }
   }
   return null;
+}
+
+/**
+ * GET /api/v1/reports/{id}/publication-status — the source of truth for
+ * whether a report is customer-accessible (Section 28). Resolves the item
+ * the same way /reports/** does (findItemBySlug) and returns the SAME
+ * evaluatePublicationGate() verdict that route enforces -- this endpoint
+ * cannot say CUSTOMER_READY for something /reports/** would 404, or vice
+ * versa, since both call the identical gate function.
+ */
+async function handlePublicationStatus(request, env, reportId) {
+  if (!reportId) {
+    return jsonResp({ error: "Missing report id", version: PLATFORM_VERSION }, 400);
+  }
+  const slug = reportId.replace(/\.html?$/, "");
+  const item = await findItemBySlug(env, slug);
+  if (!item) {
+    return jsonResp({
+      report_id: reportId,
+      state: "UNKNOWN",
+      customer_ready: false,
+      reason_codes: ["ITEM_NOT_RESOLVABLE"],
+      evaluated_at: new Date().toISOString(),
+    }, 404);
+  }
+
+  const gate = evaluatePublicationGate(item);
+  return jsonResp({
+    report_id: reportId,
+    state: gate.publication_state,
+    customer_ready: gate.customer_ready,
+    reason_codes: gate.blocking_gates,
+    certification_version: gate.certification_version,
+    snapshot_id: item.stix_id || item.id || reportId,
+    evaluated_at: gate.evaluated_at,
+    scores: {
+      P20_SCORE: gate.P20_SCORE,
+      P21_CERTIFICATION: gate.P21_CERTIFICATION,
+      P23_OPERATIONAL_READINESS_PCT: gate.P23_OPERATIONAL_READINESS_PCT,
+      P25_TRUST_SCORE: gate.P25_TRUST_SCORE,
+      P25_TRUST_TIER: gate.P25_TRUST_TIER,
+      P26_COMMERCIAL_SCORE: gate.P26_COMMERCIAL_SCORE,
+      P26_GRADE: gate.P26_GRADE,
+      P26_CERT_TIER: gate.P26_CERT_TIER,
+    },
+  }, 200);
+}
+
+/**
+ * P0 publication gate for pre-built report indexes (Section 14/30): filters
+ * a report-index payload's `reports` array to drop any entry whose
+ * underlying item is resolvable (via the same feed sources findItemBySlug
+ * uses, loaded ONCE here -- not per-entry -- to avoid an R2 round-trip per
+ * index row) AND fails evaluatePublicationGate(). An entry that can't be
+ * resolved against these feed sources is left untouched, same policy as
+ * the /reports/** route: don't newly block what this gate has no way to
+ * verify. Returns a shallow-cloned payload; never mutates the input.
+ */
+async function _filterReportsIndexByPublicationGate(env, data) {
+  if (!data || !Array.isArray(data.reports) || data.reports.length === 0) return data;
+
+  const byId = new Map();
+  for (const key of [LATEST_PRO_JSON_KEY, LATEST_JSON_KEY, "api/v1/intel/top10.json", "api/v1/intel/apex.json"]) {
+    try {
+      const feed = await r2Get(env, key);
+      if (!feed) continue;
+      const items = Array.isArray(feed) ? feed : (feed.items || feed.data || []);
+      for (const i of items) {
+        const id = (i.stix_id || i.id || "").replace(/\.html?$/, "");
+        if (id && !byId.has(id)) byId.set(id, i);
+      }
+    } catch (_) { /* continue to next source */ }
+  }
+  if (byId.size === 0) return data;
+
+  const filtered = data.reports.filter(r => {
+    const item = byId.get((r.id || "").replace(/\.html?$/, ""));
+    if (!item) return true; // unresolvable -- unchanged behavior, not newly blocked
+    return evaluatePublicationGate(item).customer_ready;
+  });
+  if (filtered.length === data.reports.length) return data;
+  return { ...data, reports: filtered, total_reports: filtered.length, reports_listed: filtered.length };
 }
 
 function generateIntelReport(item, reqPath, items = []) {
@@ -3703,7 +3786,12 @@ async function handleRequest(request, env, ctx) {
     if (!data) data = await r2Get(env, REPORTS_KEY);
     if (!data) {
       const feedData  = await loadFeedItems(env);
-      const critItems = (feedData.items || []).filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0);
+      // P0 publication gate (Section 14/30): the same firewall as /reports/**
+      // applies to the index -- a rejected report must not be listed even
+      // when this fallback computes the index live from feed items.
+      const critItems = (feedData.items || [])
+        .filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0)
+        .filter(i => evaluatePublicationGate(i).customer_ready);
       data = {
         schema_version: "sentinel_apex_reports_v1", generated_at: now(),
         total_reports: critItems.length, reports_listed: Math.min(critItems.length, 50),
@@ -3713,6 +3801,8 @@ async function handleRequest(request, env, ctx) {
           cve: i.cve_id || (i.cve_ids || [])[0] || null, timestamp: i.published || i.published_at,
         })),
       };
+    } else {
+      data = await _filterReportsIndexByPublicationGate(env, data);
     }
     return jsonResp(data, 200, { "Cache-Control": "public, max-age=300" });
   }
@@ -3722,7 +3812,9 @@ async function handleRequest(request, env, ctx) {
     let data = await r2Get(env, REPORTS_KEY);
     if (!data) {
       const feedData  = await loadFeedItems(env);
-      const critItems = (feedData.items || []).filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0);
+      const critItems = (feedData.items || [])
+        .filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0)
+        .filter(i => evaluatePublicationGate(i).customer_ready);
       data = {
         schema_version: "sentinel_apex_reports_v1", version: PLATFORM_VERSION, generated_at: now(),
         total_reports: critItems.length, reports_listed: Math.min(critItems.length, 20),
@@ -3732,6 +3824,8 @@ async function handleRequest(request, env, ctx) {
           cve: i.cve_id || (i.cve_ids || [])[0] || null, timestamp: i.published || i.published_at,
         })),
       };
+    } else {
+      data = await _filterReportsIndexByPublicationGate(env, data);
     }
     return jsonResp(data, 200, { "Cache-Control": "public, max-age=300" });
   }
@@ -3806,8 +3900,37 @@ async function handleRequest(request, env, ctx) {
     // Root cause of recurring 404: old regex only matched slug-without-extension or trailing-slash.
     // Fix: (?:\.html)? now catches the .html-extension-without-date-path form too.
     const legacyMatch = path.match(/^\/reports\/(intel--[a-f0-9]+)(?:\.html)?\/?$/i);
-    if (legacyMatch || (path.endsWith("/") && path.startsWith("/reports/"))) {
-      const slug = legacyMatch ? legacyMatch[1] : path.replace(/^\/reports\//, "").replace(/[./]+$/, "");
+    const isLegacyForm = legacyMatch || (path.endsWith("/") && path.startsWith("/reports/"));
+    const canonicalSlugMatch = path.match(/\/(intel--[a-f0-9_A-Z0-9-]+)\.html$/i);
+    const gateSlug = isLegacyForm
+      ? (legacyMatch ? legacyMatch[1] : path.replace(/^\/reports\//, "").replace(/[./]+$/, ""))
+      : (canonicalSlugMatch ? canonicalSlugMatch[1] : null);
+
+    // -------------------------------------------------------------------
+    // P0 CUSTOMER PUBLICATION AUTHORIZATION GATE
+    // Incident: intel--ba996dad34540150b8ea1b5f was served here despite
+    // P21=BELOW_MINIMUM, P25=BELOW THRESHOLD, P26=REJECTED, P23=DO NOT
+    // PUBLISH -- root cause and full rationale in publication-gate.js's
+    // header. Resolved ONCE here (reused below by both the legacy and
+    // canonical branches, replacing their own separate findItemBySlug
+    // calls) so every serving path -- direct R2 cache hit, redirect
+    // target, or fresh synthesis -- is covered by a single evaluation.
+    //
+    // When the item is NOT resolvable via findItemBySlug's feed sources
+    // (an older report that has aged out of the "latest" windows this
+    // function searches), this is deliberately non-blocking: existing
+    // behavior is unchanged rather than newly 404ing content this gate
+    // has no way to verify either way. That population -- and any
+    // already-cached bad copies matching a resolvable item -- is covered
+    // by scripts/publication_gate_scan.py, not by blocking every view.
+    // -------------------------------------------------------------------
+    const gateItem = gateSlug ? await findItemBySlug(env, gateSlug) : null;
+    if (gateItem && !evaluatePublicationGate(gateItem).customer_ready) {
+      return jsonResp({ error: "Report not found", path, suggestion: "Report may still be generating. Try again in a few minutes." }, 404);
+    }
+
+    if (isLegacyForm) {
+      const slug = gateSlug;
       const fn   = slug.startsWith("intel--") ? `${slug}.html` : `intel--${slug}.html`;
       for (const y of PROBE_YEARS) {
         for (const m of PROBE_MONTHS) {
@@ -3816,7 +3939,7 @@ async function handleRequest(request, env, ctx) {
         }
       }
       // Synthesis fallback: generate from feed data so the report is always available
-      const legacyItem = await findItemBySlug(env, slug);
+      const legacyItem = gateItem;
       if (legacyItem) {
         const legacyFeed = await loadFeedItems(env);
         // /reports/** is a public, permanently-R2-cached HTML surface with no
@@ -3874,9 +3997,7 @@ async function handleRequest(request, env, ctx) {
     }
 
     // Synthesis fallback: find item in feed by slug and generate HTML report
-    const slugFromPath = path.match(/\/(intel--[a-f0-9_A-Z0-9-]+)\.html$/i);
-    const fallbackSlug = slugFromPath ? slugFromPath[1] : path.replace(/^\/reports\//, "").replace(/[./]+$/, "");
-    const fallbackItem = await findItemBySlug(env, fallbackSlug);
+    const fallbackItem = gateItem;
     if (fallbackItem) {
       const fallbackFeed = await loadFeedItems(env);
       // Same reasoning as the legacy-slug branch above: public, permanently
@@ -4358,6 +4479,22 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/v1/p40/metrics")            return await handleP40Metrics(request, env);
   if (path === "/api/v1/p40/dashboard")          return await handleP40Dashboard(request, env);
   if (path === "/api/v1/p40/observability")      return await handleP40Observability(request, env);
+
+  // --- P0 publication authorization gate (incident: intel--ba996dad34540150b8ea1b5f) ---
+  // Supports both /api/v1/reports/{id}/publication-status (path form) and
+  // /api/v1/reports/publication-status?id={id} (query form, matching this
+  // codebase's dominant ?id= convention -- e.g. handleP32Decision,
+  // handleP40SourceDetail). This endpoint is the source of truth the
+  // /reports/** route itself now enforces; see publication-gate.js.
+  if (path.startsWith("/api/v1/reports/") && path.endsWith("/publication-status")) {
+    const segments = path.split("/").filter(Boolean);
+    const reportId = segments.length >= 4 ? decodeURIComponent(segments[3]) : "";
+    return await handlePublicationStatus(request, env, reportId);
+  }
+  if (path === "/api/v1/reports/publication-status") {
+    const reportId = url.searchParams.get("id") || "";
+    return await handlePublicationStatus(request, env, reportId);
+  }
 
   // --- api-extensions.js routes (previously unreachable  -  now wired, auth already resolved above) ---
   if (path === "/api/search")                       return await handleSearch(request, env, auth, crypto.randomUUID());
