@@ -14,7 +14,7 @@ import {
 } from "../p40-handlers.js";
 
 // ---------------------------------------------------------------------------
-// Mock R2 environment — env.INTEL_R2.get(key) returns an object with a
+// Mock R2 environment  -  env.INTEL_R2.get(key) returns an object with a
 // text() method, matching the real Cloudflare R2Object contract used by
 // every other P-layer's _loadFeed(env) helper (e.g. p21-handlers.js).
 // ---------------------------------------------------------------------------
@@ -206,7 +206,7 @@ test("handleP40SourceDetail: health is null (not an error) when health report un
 });
 
 // ---------------------------------------------------------------------------
-// handleP40Licensing — Section 23 governance surface
+// handleP40Licensing  -  Section 23 governance surface
 // ---------------------------------------------------------------------------
 
 test("handleP40Licensing: computes redistribution/commercial rollups correctly", async () => {
@@ -232,7 +232,7 @@ test("handleP40Coverage: builds per-domain status breakdown", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Global CTI Coverage Score — dedicated fixture with authority_level/
+// Global CTI Coverage Score  -  dedicated fixture with authority_level/
 // quality_score/reliability_score populated (FAKE_REGISTRY above predates
 // the scoring feature and omits them, which would silently zero every
 // source's contribution -- not a useful signal for testing the model).
@@ -467,7 +467,7 @@ test("handleP40Dashboard: lists only ACTIVE sources sorted by priority", async (
 });
 
 // ---------------------------------------------------------------------------
-// handleP40Observability — no R2 dependency, must always succeed
+// handleP40Observability  -  no R2 dependency, must always succeed
 // ---------------------------------------------------------------------------
 
 test("handleP40Observability: lists all 10 endpoints and never depends on R2", async () => {

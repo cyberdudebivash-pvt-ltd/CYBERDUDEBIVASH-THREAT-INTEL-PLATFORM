@@ -1,12 +1,12 @@
 /**
  * workers/intel-gateway/src/p40-handlers.js
- * P40.0 Global Intelligence Source Fabric — Source Registry & Health API
+ * P40.0 Global Intelligence Source Fabric  -  Source Registry & Health API
  *
  * ARCHITECTURE NOTE: this layer composes over the canonical Source Registry
  * and Source Health artifacts produced Python-side
  * (scripts/build_source_registry.py, scripts/source_fabric_health.py) and
- * bridged into R2 by scripts/r2_upload.py — the same "Python pipeline
- * writes JSON → R2 → Worker reads via env.INTEL_R2.get()" pattern already
+ * bridged into R2 by scripts/r2_upload.py  -  the same "Python pipeline
+ * writes JSON -> R2 -> Worker reads via env.INTEL_R2.get()" pattern already
  * used by p21-handlers.js:_loadFeed and every other P-layer that reads
  * feed data, replicated here rather than introducing a new access pattern.
  *
@@ -14,7 +14,7 @@
  * computeP20QualityScore / computeEnterpriseTrustScore / computeP26Grade:
  * those score individual intelligence ITEMS, which is a different problem
  * from source-level registry/health data. There is no existing P-layer
- * engine for "is this SOURCE healthy and what does it cost to use" — that
+ * engine for "is this SOURCE healthy and what does it cost to use"  -  that
  * gap is exactly what the Global Intelligence Source Fabric mission adds.
  * See the P40 Reuse Report in the implementation's final deliverables for
  * why this is a genuine gap, not a missed reuse opportunity.
@@ -42,7 +42,7 @@ const HEALTH_KEY    = 'intel/source_fabric_health.json';
 const CERT_KEY      = 'intel/p40_certification_report.json';
 
 // ---------------------------------------------------------------------------
-// Global CTI Coverage Score — documented, deterministic scoring model.
+// Global CTI Coverage Score  -  documented, deterministic scoring model.
 //
 // Deliberately NOT `active_sources / total_sources` (meaningless: treats a
 // single low-quality source identically to five corroborating authoritative
@@ -53,10 +53,10 @@ const CERT_KEY      = 'intel/p40_certification_report.json';
 //   contribution = authority_weight * health_weight * quality
 //
 //   authority_weight  from source.authority_level (registry field, already
-//                      populated for all 104 sources) — GOVERNMENT_AUTHORITATIVE
+//                      populated for all 104 sources)  -  GOVERNMENT_AUTHORITATIVE
 //                      counts more than COMMUNITY.
 //   health_weight     from the source's live health_status (see
-//                      source_fabric_health.py) — a HEALTHY source counts
+//                      source_fabric_health.py)  -  a HEALTHY source counts
 //                      fully, a STALE one partially, a not-yet-live one not
 //                      at all. This is what makes the score reflect CURRENT
 //                      reality, not registry aspiration.
@@ -73,9 +73,9 @@ const CERT_KEY      = 'intel/p40_certification_report.json';
 // This rewards corroboration (multiple independent healthy sources push a
 // domain's score toward 100 with diminishing returns) without letting one
 // weak or dead source drag down a domain three good sources already cover
-// well — the failure mode of a naive average. The global score is the
+// well  -  the failure mode of a naive average. The global score is the
 // unweighted mean of the 9 mission-domain scores (equal weighting is a
-// deliberate, documented simplification — every domain matters equally to
+// deliberate, documented simplification  -  every domain matters equally to
 // the mission; weighting by e.g. customer usage is a natural v2 input once
 // that telemetry exists, not fabricated here).
 const _AUTHORITY_WEIGHT = {
@@ -149,7 +149,7 @@ function _computeDomainScore(sources, domainKeys, healthById) {
 }
 
 // ---------------------------------------------------------------------------
-// R2 loaders — mirrors p21-handlers.js:_loadFeed's env.INTEL_R2?.get() +
+// R2 loaders  -  mirrors p21-handlers.js:_loadFeed's env.INTEL_R2?.get() +
 // optional-chaining-safe pattern, scoped to this layer's own R2 keys.
 // ---------------------------------------------------------------------------
 
@@ -203,7 +203,7 @@ export async function handleP40SourceRegistry(request, env) {
   const domain = url.searchParams.get('domain');
   // Ops-oriented filters: reuse this endpoint rather than standing up a
   // second near-identical /api/v1/p40/sources route (Single Source of
-  // Truth — a duplicate route serving the same registry data would be an
+  // Truth  -  a duplicate route serving the same registry data would be an
   // architectural violation, not a convenience).
   const healthFilter = url.searchParams.get('health');
   const priorityFilter = url.searchParams.get('priority');   // maps to criticality
@@ -291,7 +291,7 @@ export async function handleP40Licensing(request, env) {
     commercial_use_allowed: sources.filter(s => s.commercial_use_allowed).length,
     attribution_required: sources.filter(s => s.attribution_required).length,
     by_licensing_class: byClass,
-    // Governance surface for Section 23 — "the system must prevent
+    // Governance surface for Section 23  -  "the system must prevent
     // accidental redistribution of restricted data": every non-
     // redistributable source, explicitly enumerated.
     restricted_sources: sources
@@ -382,8 +382,8 @@ export async function handleP40Waves(request, env) {
   return _json({ schema_version: 'p40.0', waves });
 }
 
-// sentinel-blogger.yml — the pipeline that regenerates and R2-syncs this
-// report — runs 3x/day (cron '0 0,8,16 * * *', ~8h cadence). This threshold
+// sentinel-blogger.yml  -  the pipeline that regenerates and R2-syncs this
+// report  -  runs 3x/day (cron '0 0,8,16 * * *', ~8h cadence). This threshold
 // is a generous 2x that cadence, matching source_fabric_health.py's
 // staleness philosophy: flag genuine silence, not a run landing a bit late.
 const CERT_FRESHNESS_STALE_SECONDS = 16 * 3600;
@@ -490,6 +490,6 @@ export async function handleP40Observability(request, env) {
       'scripts/p40_production_certification.py',
     ],
     engines_reused: [],
-    engines_reused_note: 'P40 is source-level (not item-level) — see file header for why P20/P25/P26 do not apply here.',
+    engines_reused_note: 'P40 is source-level (not item-level)  -  see file header for why P20/P25/P26 do not apply here.',
   });
 }
