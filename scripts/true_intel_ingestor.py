@@ -51,6 +51,8 @@ _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "scripts"))
 sys.path.insert(0, str(_REPO))
 
+from canonical_timestamp import parse_ts as _canonical_parse_ts  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -113,34 +115,20 @@ def _utc_epoch() -> str:
 
 
 def _parse_ts(ts_str: str) -> Optional[datetime]:
-    """Parse ISO-8601 string to tz-aware datetime. Returns None on failure."""
-    if not ts_str:
-        return None
-    for fmt in (
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%dT%H:%M:%S+00:00",
-        "%Y-%m-%dT%H:%M:%S.%fZ",
-        "%Y-%m-%dT%H:%M:%S.%f",  # NVD CVE API v2 `published`/`lastModified` — no trailing Z (e.g. "2026-08-06T22:16:40.020")
-        "%Y-%m-%dT%H:%M:%S%z",
-        "%Y-%m-%d",
-        "%a, %d %b %Y %H:%M:%S %z",
-        "%a, %d %b %Y %H:%M:%S GMT",
-    ):
-        try:
-            dt = datetime.strptime(ts_str.strip(), fmt)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except ValueError:
-            continue
-    # feedparser sometimes emits 9-tuples
-    if isinstance(ts_str, (list, tuple)) and len(ts_str) >= 6:
-        try:
-            dt = datetime(*ts_str[:6], tzinfo=timezone.utc)
-            return dt
-        except Exception:
-            pass
-    return None
+    """
+    Parse ISO-8601 (or RSS/HTTP-date, or date-only) string to a tz-aware
+    UTC datetime. Returns None on failure.
+
+    Delegates to scripts/canonical_timestamp.py — the single normalization
+    engine adopted repo-wide by this file and source_fabric_health.py after
+    the NVD CVE incident (a missing fractional-seconds-no-Z format here
+    silently discarded every NVD timestamp for weeks; see that fix's
+    commit). Kept as a same-signature wrapper rather than replacing every
+    call site with canonical_timestamp.parse_ts() directly — zero behavior
+    change for this file's ~20 existing callers, verified byte-for-byte
+    against every format this function previously handled before the swap.
+    """
+    return _canonical_parse_ts(ts_str)
 
 
 def _ts_to_str(dt: Optional[datetime]) -> str:
@@ -222,6 +210,22 @@ class FeedState:
             return True
         return item_ts > last
 
+    def set_reason_code(self, source_key: str, reason_code: Optional[str]) -> None:
+        """
+        Records the most recent fetch outcome's reason code (e.g. "OK",
+        "ZERO_OUTPUT", "HTTP_403", "NETWORK_TIMEOUT") independent of
+        last_seen -- last_seen only advances on genuinely new items, so a
+        source failing on every run (e.g. the CISA RSS Akamai 403 block)
+        would otherwise leave zero trace in feed_state.json for
+        scripts/source_fabric_health.py to surface. Merges into the
+        existing per-source entry (setdefault, not overwrite) so it never
+        clobbers a last_seen/updated_at that update_last_seen() already set
+        earlier in the same run.
+        """
+        entry = self._state.setdefault("sources", {}).setdefault(source_key, {})
+        entry["last_reason_code"] = reason_code
+        entry["last_reason_at"] = _utc_now()
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # DEDUP ENGINE (wraps dedup_state.py)
@@ -261,7 +265,46 @@ class _IngestorDedup:
 # HTTP HELPER
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Set by _get_json/_get_text on every call (reset to None first, then set on
+# failure) so callers can attach a machine-readable reason code to
+# SourceStats.record()/FeedState.set_reason_code() without changing these two
+# functions' long-standing Optional[Dict]/Optional[str] return contract --
+# 7+ existing call sites depend on "None on failure" unchanged. This is what
+# lets source_fabric_health.py distinguish "CISA RSS blocked with HTTP 403"
+# from generic staleness instead of only ever seeing silence.
+_last_http_reason_code: Optional[str] = None
+
+
+def get_last_http_reason_code() -> Optional[str]:
+    """Reason code for the most recent _get_json/_get_text call, or None if
+    that call succeeded. See module docstring on _last_http_reason_code."""
+    return _last_http_reason_code
+
+
+def _classify_http_exception(e: Exception) -> str:
+    """Maps an exception from _get_json/_get_text to one of the reason codes
+    scripts/source_fabric_health.py exposes through the observability API."""
+    import urllib.error as _ue
+    import socket as _socket
+
+    if isinstance(e, _ue.HTTPError):
+        if e.code == 401:
+            return "AUTH_FAILURE"
+        if e.code == 429:
+            return "HTTP_429"
+        return f"HTTP_{e.code}"
+    if isinstance(e, (_socket.timeout, TimeoutError)):
+        return "NETWORK_TIMEOUT"
+    if isinstance(e, _ue.URLError):
+        return "NETWORK_FAILURE"
+    if isinstance(e, json.JSONDecodeError):
+        return "PARSER_FAILURE"
+    return "NETWORK_FAILURE"
+
+
 def _get_json(url: str, headers: Optional[Dict] = None, timeout: int = REQUEST_TIMEOUT) -> Optional[Dict]:
+    global _last_http_reason_code
+    _last_http_reason_code = None
     try:
         import urllib.request as _ur
         req = _ur.Request(url, headers={
@@ -272,11 +315,14 @@ def _get_json(url: str, headers: Optional[Dict] = None, timeout: int = REQUEST_T
             raw = resp.read()
             return json.loads(raw)
     except Exception as e:
-        log.warning("[HTTP] GET %s → %s", url[:80], e)
+        _last_http_reason_code = _classify_http_exception(e)
+        log.warning("[HTTP] GET %s → %s (%s)", url[:80], e, _last_http_reason_code)
         return None
 
 
 def _get_text(url: str, headers: Optional[Dict] = None, timeout: int = REQUEST_TIMEOUT) -> Optional[str]:
+    global _last_http_reason_code
+    _last_http_reason_code = None
     try:
         import urllib.request as _ur
         req = _ur.Request(url, headers={
@@ -286,7 +332,8 @@ def _get_text(url: str, headers: Optional[Dict] = None, timeout: int = REQUEST_T
         with _ur.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except Exception as e:
-        log.warning("[HTTP] GET-TEXT %s → %s", url[:80], e)
+        _last_http_reason_code = _classify_http_exception(e)
+        log.warning("[HTTP] GET-TEXT %s → %s (%s)", url[:80], e, _last_http_reason_code)
         return None
 
 
@@ -1298,16 +1345,39 @@ def _merge_into_manifest(new_items: List[Dict], dedup: _IngestorDedup) -> Tuple[
 # MAIN INGESTION RUN
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _record_source_outcome(stats: "SourceStats", feed_state: "FeedState", source: str,
+                            items: List[Dict], error: bool = False) -> None:
+    """
+    Shared reason-code bookkeeping for run_ingestion()'s per-source blocks:
+    "OK" (items found), "ZERO_OUTPUT" (fetch succeeded, nothing new -- not
+    an error), the classified HTTP/network/parser failure from the most
+    recent _get_json/_get_text call (see get_last_http_reason_code), or
+    "UNEXPECTED_ERROR" for an exception _get_json/_get_text didn't already
+    classify (e.g. a bug in this file's own parsing logic downstream of a
+    successful fetch). Persists to feed_state.json (independent of
+    last_seen) so scripts/source_fabric_health.py can surface e.g. "CISA
+    RSS: HTTP_403" instead of only ever seeing generic staleness.
+    """
+    if error:
+        reason = get_last_http_reason_code() or "UNEXPECTED_ERROR"
+    else:
+        reason = get_last_http_reason_code() or ("OK" if items else "ZERO_OUTPUT")
+    stats.record(source, len(items), len(items), 0, error=error, reason_code=reason)
+    feed_state.set_reason_code(source, reason)
+
+
 class SourceStats:
     def __init__(self):
         self.sources: Dict[str, Dict] = {}
 
-    def record(self, source: str, fetched: int, new: int, skipped: int, error: bool = False):
+    def record(self, source: str, fetched: int, new: int, skipped: int, error: bool = False,
+               reason_code: Optional[str] = None):
         self.sources[source] = {
             "fetched": fetched,
             "new": new,
             "skipped": skipped,
             "error": error,
+            "reason_code": reason_code,
         }
 
     def summary(self) -> Dict:
@@ -1342,82 +1412,93 @@ def run_ingestion() -> Dict:
     try:
         items = ingest_cisa_kev(feed_state)
         all_new_items.extend(items)
-        stats.record("cisa_kev", len(items), len(items), 0)
+        _record_source_outcome(stats, feed_state, "cisa_kev", items)
     except Exception as e:
         log.error("[CISA-KEV] Source failed: %s", e)
-        stats.record("cisa_kev", 0, 0, 0, error=True)
+        _record_source_outcome(stats, feed_state, "cisa_kev", [], error=True)
 
     # ── NVD CVE ─────────────────────────────────────────────────────────────
     try:
         items = ingest_nvd_cves(feed_state)
         all_new_items.extend(items)
-        stats.record("nvd_cve", len(items), len(items), 0)
+        _record_source_outcome(stats, feed_state, "nvd_cve", items)
     except Exception as e:
         log.error("[NVD] Source failed: %s", e)
-        stats.record("nvd_cve", 0, 0, 0, error=True)
+        _record_source_outcome(stats, feed_state, "nvd_cve", [], error=True)
 
     # ── GitHub Advisories ───────────────────────────────────────────────────
     try:
         items = ingest_github_advisories(feed_state)
         all_new_items.extend(items)
-        stats.record("github_advisory", len(items), len(items), 0)
+        _record_source_outcome(stats, feed_state, "github_advisory", items)
     except Exception as e:
         log.error("[GH-ADVISORY] Source failed: %s", e)
-        stats.record("github_advisory", 0, 0, 0, error=True)
+        _record_source_outcome(stats, feed_state, "github_advisory", [], error=True)
 
     # ── ransomware.live ─────────────────────────────────────────────────────
     try:
         items = ingest_ransomware_live(feed_state)
         all_new_items.extend(items)
-        stats.record("ransomware_live", len(items), len(items), 0)
+        _record_source_outcome(stats, feed_state, "ransomware_live", items)
     except Exception as e:
         log.error("[RANSOMWARE-LIVE] Source failed: %s", e)
-        stats.record("ransomware_live", 0, 0, 0, error=True)
+        _record_source_outcome(stats, feed_state, "ransomware_live", [], error=True)
 
     # ── URLhaus ─────────────────────────────────────────────────────────────
     try:
         items = ingest_urlhaus(feed_state)
         all_new_items.extend(items)
-        stats.record("urlhaus", len(items), len(items), 0)
+        _record_source_outcome(stats, feed_state, "urlhaus", items)
     except Exception as e:
         log.error("[URLHAUS] Source failed: %s", e)
-        stats.record("urlhaus", 0, 0, 0, error=True)
+        _record_source_outcome(stats, feed_state, "urlhaus", [], error=True)
 
     # ── RSS Feeds ────────────────────────────────────────────────────────────
     try:
         rss_items = ingest_rss_feeds(feed_state)
         all_new_items.extend(rss_items)
-        stats.record("rss_feeds", len(rss_items), len(rss_items), 0)
+        _record_source_outcome(stats, feed_state, "rss_feeds", rss_items)
     except Exception as e:
         log.error("[RSS] Source failed: %s", e)
-        stats.record("rss_feeds", 0, 0, 0, error=True)
+        _record_source_outcome(stats, feed_state, "rss_feeds", [], error=True)
 
     # ── OpenPhish (v185.0) ──────────────────────────────────────────────────
     try:
         items = ingest_openphish(feed_state)
         all_new_items.extend(items)
-        stats.record("openphish", len(items), len(items), 0)
+        _record_source_outcome(stats, feed_state, "openphish", items)
     except Exception as e:
         log.error("[OPENPHISH] Source failed: %s", e)
-        stats.record("openphish", 0, 0, 0, error=True)
+        _record_source_outcome(stats, feed_state, "openphish", [], error=True)
 
     # ── EPSS enrichment (v185.0) — runs over everything collected above ─────
+    # Not an ingest_*() item-list source (it enriches items already collected
+    # above), so it doesn't use _record_source_outcome's HTTP-reason-code path
+    # -- "OK"/"ZERO_OUTPUT" still meaningfully describe whether any CVE got a
+    # score attached this run.
     try:
         enriched_count = enrich_with_epss(all_new_items)
-        stats.record("first_epss", enriched_count, enriched_count, 0)
+        stats.record("first_epss", enriched_count, enriched_count, 0,
+                     reason_code="OK" if enriched_count else "ZERO_OUTPUT")
+        feed_state.set_reason_code("first_epss", "OK" if enriched_count else "ZERO_OUTPUT")
     except Exception as e:
         log.error("[EPSS] Enrichment failed: %s", e)
-        stats.record("first_epss", 0, 0, 0, error=True)
+        stats.record("first_epss", 0, 0, 0, error=True, reason_code="UNEXPECTED_ERROR")
+        feed_state.set_reason_code("first_epss", "UNEXPECTED_ERROR")
 
     # ── MITRE ATT&CK reference sync (v185.0) — does not touch the manifest ──
     try:
         attck_result = sync_mitre_attack()
         attck_n = sum(v for k, v in attck_result.items()
                        if k in ("techniques", "groups", "software", "mitigations", "tactics"))
-        stats.record("mitre_attack", attck_n, attck_n if attck_result.get("changed") else 0, 0)
+        reason = get_last_http_reason_code() or ("OK" if attck_n else "ZERO_OUTPUT")
+        stats.record("mitre_attack", attck_n, attck_n if attck_result.get("changed") else 0, 0,
+                     reason_code=reason)
+        feed_state.set_reason_code("mitre_attack", reason)
     except Exception as e:
         log.error("[ATTCK] Reference sync failed: %s", e)
-        stats.record("mitre_attack", 0, 0, 0, error=True)
+        stats.record("mitre_attack", 0, 0, 0, error=True, reason_code="UNEXPECTED_ERROR")
+        feed_state.set_reason_code("mitre_attack", "UNEXPECTED_ERROR")
 
     log.info("[INGESTOR] Total candidate items across all sources: %d", len(all_new_items))
 

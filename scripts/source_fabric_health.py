@@ -38,6 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from source_registry import load_registry, all_sources  # noqa: E402
+from canonical_timestamp import parse_ts as _canonical_parse_ts  # noqa: E402
 
 FEED_STATE_PATH   = ROOT / "data" / "cache" / "feed_state.json"
 MANIFEST_PATH     = ROOT / "data" / "stix" / "feed_manifest.json"
@@ -59,24 +60,22 @@ _FRESHNESS_MAX_AGE = {
 
 
 def _parse_ts(ts: Optional[str]) -> Optional[datetime]:
-    """Parses to a UTC-aware datetime, or None. The manifest this reads from
+    """
+    Parses to a UTC-aware datetime, or None. The manifest this reads from
     is merged by several independent pipelines (see reconnaissance findings
     in the P40 deliverables report) with inconsistent timestamp formatting,
     so this always normalizes to tz-aware UTC rather than assuming one
-    format -- a naive/aware mismatch here would crash every health run."""
-    if not ts:
-        return None
-    dt: Optional[datetime] = None
-    try:
-        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
-    except ValueError:
-        try:
-            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        except Exception:
-            return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt
+    format -- a naive/aware mismatch here would crash every health run.
+
+    Delegates to scripts/canonical_timestamp.py (see true_intel_ingestor.py's
+    _parse_ts for the incident that motivated consolidating this repo's many
+    independent timestamp parsers into one engine). Strictly gains coverage
+    versus the two-format list this used to have -- e.g. RFC-822/RFC-7231
+    dates now parse instead of silently returning None -- verified
+    byte-for-byte against every format this function previously handled
+    before the swap.
+    """
+    return _canonical_parse_ts(ts)
 
 
 def _load_json_safe(path: Path) -> Any:
@@ -130,6 +129,85 @@ def _feed_state_last_seen(pipeline_key: str, feed_state_sources: Dict[str, Any])
             if ts and (newest is None or ts > newest):
                 newest = ts
     return newest
+
+
+def _feed_state_reason_code(pipeline_key: str, feed_state_sources: Dict[str, Any]) -> Optional[str]:
+    """
+    Resolves the most recent fetch-outcome reason code
+    scripts/true_intel_ingestor.py persisted for this source (e.g. "OK",
+    "HTTP_403", "NETWORK_TIMEOUT") -- see FeedState.set_reason_code and
+    _record_source_outcome there. Mirrors _feed_state_last_seen's
+    same-key / "rss:" matching so RSS-bucketed registry entries resolve
+    correctly too. This is what lets the CISA advisories RSS block surface
+    as "HTTP_403" instead of generic silence -- confirmed live against the
+    real Akamai 403 during this change.
+    """
+    if not pipeline_key.startswith("rss:"):
+        return feed_state_sources.get(pipeline_key, {}).get("last_reason_code")
+
+    newest_ts: Optional[datetime] = None
+    newest_reason: Optional[str] = None
+    for key, entry in feed_state_sources.items():
+        if _match_manifest_key(pipeline_key, key):
+            ts = _parse_ts(entry.get("last_seen")) or _parse_ts(entry.get("last_reason_at"))
+            if ts and (newest_ts is None or ts > newest_ts):
+                newest_ts = ts
+                newest_reason = entry.get("last_reason_code")
+    return newest_reason
+
+
+# Non-ACTIVE/IMPLEMENTED registry status -> reason code (Section 7's
+# vocabulary). Additive alongside health_status -- see compute_health().
+_STATUS_REASON_CODE = {
+    "REQUIRES_CREDENTIALS": "CREDENTIAL_REQUIRED",
+    "REQUIRES_LICENSE":     "LICENSE_REQUIRED",
+    "DISABLED":              "DISABLED_BY_CONFIG",
+    "PLANNED":               "NOT_YET_IMPLEMENTED",
+}
+
+# health_status -> the task's preferred state vocabulary (Section 6), as an
+# ADDITIVE alias field -- health_status itself is unchanged for backward
+# compatibility with existing API consumers (the dashboard, the P40
+# certification gates, handleP40SourceHealth). A reason_code of HTTP_401/
+# AUTH_FAILURE, HTTP_403, or a transport-level failure upgrades a merely
+# "STALE" source to the more actionable AUTH_FAILURE/FAILING state -- this
+# is what distinguishes "CISA RSS is blocked by a WAF" from "CISA KEV
+# genuinely hasn't published anything new this week."
+_HEALTH_TO_STATE = {
+    "HEALTHY":              "LIVE",
+    "DEGRADED":              "LIVE_DEGRADED",
+    "NO_DATA":               "LIVE_DEGRADED",
+    "AWAITING_CREDENTIALS":  "CREDENTIAL_REQUIRED",
+    "AWAITING_LICENSE":      "LICENSE_REQUIRED",
+    "NOT_RUNNING":           "IMPLEMENTED_NOT_ENABLED",
+    "NOT_APPLICABLE":        "PLANNED",
+    "DISABLED":              "DISABLED",
+}
+_FAILURE_REASON_CODES = {"HTTP_403", "HTTP_429", "NETWORK_TIMEOUT", "NETWORK_FAILURE", "PARSER_FAILURE"}
+
+
+def _compute_reason_code(status: str, health: str, fs_reason: Optional[str]) -> str:
+    if status in _STATUS_REASON_CODE:
+        return _STATUS_REASON_CODE[status]
+    if status == "IMPLEMENTED":
+        return "NOT_ENABLED"
+    if health == "HEALTHY":
+        return "OK"
+    if health == "NO_DATA":
+        return fs_reason if fs_reason and fs_reason not in ("OK",) else "ZERO_OUTPUT"
+    if health == "STALE":
+        return fs_reason if fs_reason and fs_reason not in ("OK",) else "NO_RECENT_DATA"
+    return fs_reason or "UNKNOWN"
+
+
+def _compute_state(health: str, reason_code: str) -> str:
+    if health == "STALE":
+        if reason_code == "AUTH_FAILURE":
+            return "AUTH_FAILURE"
+        if reason_code in _FAILURE_REASON_CODES:
+            return "FAILING"
+        return "STALE"
+    return _HEALTH_TO_STATE.get(health, "UNKNOWN")
 
 
 def compute_health() -> Dict[str, Any]:
@@ -191,6 +269,7 @@ def compute_health() -> Dict[str, Any]:
         status = s["implementation_status"]
         manifest_bucket = per_source.get(sid, {"manifest_count": 0, "latest_ts": None})
         fs_last_seen = _feed_state_last_seen(s["pipeline_feed_source_key"], feed_state_sources)
+        fs_reason_code = _feed_state_reason_code(s["pipeline_feed_source_key"], feed_state_sources)
 
         # ATT&CK is REFERENCE_SYNC, not manifest-tracked -- health comes from
         # its own state file.
@@ -221,6 +300,8 @@ def compute_health() -> Dict[str, Any]:
                 health = "HEALTHY"
 
         counts_by_health[health] = counts_by_health.get(health, 0) + 1
+        reason_code = _compute_reason_code(status, health, fs_reason_code)
+        state = _compute_state(health, reason_code)
 
         results.append({
             "source_id": sid,
@@ -229,6 +310,8 @@ def compute_health() -> Dict[str, Any]:
             "wave": s["wave"],
             "integration_mode": s["integration_mode"],
             "health_status": health,
+            "state": state,
+            "reason_code": reason_code,
             "records_received_current_window": records_received,
             "last_event": last_event.strftime("%Y-%m-%dT%H:%M:%SZ") if last_event else None,
             "age_hours": round((now - last_event).total_seconds() / 3600, 1) if last_event else None,
