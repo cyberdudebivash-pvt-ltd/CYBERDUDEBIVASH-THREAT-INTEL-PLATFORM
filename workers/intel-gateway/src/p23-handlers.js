@@ -657,9 +657,15 @@ export function buildActionabilityScoreBlock(item) {
 // P23.10  -  Operational Readiness Gate
 // -----------------------------------------------------------------------------
 
-export function buildOperationalReadinessGateBlock(item) {
-  if (!item || typeof item !== 'object') return '';
-
+/**
+ * P23.10 Operational Readiness Gate -- pure computation, extracted from
+ * buildOperationalReadinessGateBlock so the publication authorization gate
+ * (workers/intel-gateway/src/publication-gate.js) can reuse the exact same
+ * 10-gate pass/fail/pct/label logic that already produces the
+ * "INCOMPLETE - DO NOT PUBLISH" verdict shown in reports, instead of
+ * re-implementing a second copy of this decision elsewhere.
+ */
+export function computeOperationalReadiness(item) {
   const iocs     = item.iocs || [];
   const detects  = item.detection_bundle || item.apex?.sigma_rules || item.apex?.detections || [];
   const mitres   = item.mitre_techniques || item.apex?.mitre_techniques || [];
@@ -691,6 +697,14 @@ export function buildOperationalReadinessGateBlock(item) {
 
   const gateColor = allPass ? "#00ffc6" : pct >= 70 ? "#3b82f6" : pct >= 50 ? "#eab308" : "#ef4444";
   const gateLabel = allPass ? "OPERATIONALLY CERTIFIED" : pct >= 70 ? "CONDITIONALLY DEPLOYABLE" : pct >= 50 ? "REVIEW REQUIRED" : "INCOMPLETE  -  DO NOT PUBLISH";
+
+  return { gates, passed, total, pct, allPass, gateColor, gateLabel };
+}
+
+export function buildOperationalReadinessGateBlock(item) {
+  if (!item || typeof item !== 'object') return '';
+
+  const { gates, passed, total, pct, allPass, gateColor, gateLabel } = computeOperationalReadiness(item);
 
   const gateRows = gates.map(g => `
     <div style="display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-bottom:1px solid #1a1f2e;">
