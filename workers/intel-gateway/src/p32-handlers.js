@@ -17,7 +17,9 @@
  *   P32.8  Intelligence Maturity Model            (15-dimension maturity scoring)
  *   P32.9  Operational Metrics                    (MTTI/MTTD/MTTR per advisory)
  *   P32.12 Intelligence Quality Governance        (automated quality issue detection)
- *   P32.13 Production Release Gate                (per-advisory publication gate)
+ *   P32.13 Operational Completeness Gate           (per-advisory data-completeness check --
+                                                    NOT the customer publication authority;
+                                                    see publication-gate.js::evaluatePublicationGate)
  *   P32.14 Commercial Intelligence Package        (all-format package builder)
  *   API    handleP32Decision                      /api/v1/p32/decision
  *   API    handleP32Drift                         /api/v1/p32/drift
@@ -33,7 +35,7 @@
  * AUDIT-CONFIRMED REUSE (zero duplication):
  *   computeP20QualityScore     -  quality scoring (P20) - reused in P32.8 maturity
  *   computeActionabilityScore  -  actionability (P23)   - reused in P32.2 decisions
- *   computeEnterpriseTrustScore  -  trust (P25)         - reused in P32.13 release gate
+ *   computeEnterpriseTrustScore  -  trust (P25)         - reused in P32.13 completeness gate
  *   computeP26Grade            -  composite grade (P26) - reused in P32.8 maturity
  *   P29.4 decisions            -  tactical 8-action     - P32.2 adds STRATEGIC layer above
  *   P29.5 lifecycle            -  enrichment status     - P32.1 adds OPERATIONAL process
@@ -1072,9 +1074,14 @@ export function buildP32MetricsBlock(item) {
     "MTTI * MTTD * MTTR per advisory  -  compared against CISA/DBIR 2024 industry benchmarks");
 }
 
-// -- P32.13: Production Release Gate -------------------------------------------
-// Per-advisory publication gate. DIFFERENT from P25 (enterprise trust gate for feed).
-// P32.13 is a per-advisory gate: 12 checks must pass before the advisory is published.
+// -- P32.13: Operational Completeness Gate --------------------------------------
+// Per-advisory data-completeness check (title/description/severity/CVSS + 8
+// non-blocking quality warnings). This is NOT the customer publication
+// authorization decision -- that is the single authoritative
+// evaluatePublicationGate() in publication-gate.js, which this function is
+// never consulted by (P0 follow-through, Section 18: P32 must not emit a
+// "PUBLICATION APPROVED"-shaped verdict that can conflict with the real
+// gate). Kept here as an internal engineering-assurance/dashboard signal.
 
 function _computeReleaseGate(item) {
   let q = 0;
@@ -1113,14 +1120,14 @@ function _computeReleaseGate(item) {
   const blockers  = checks.filter(c => !c.pass && c.blocker);
   const warnings  = checks.filter(c => !c.pass && !c.blocker);
   const passed    = checks.filter(c => c.pass);
-  const gate      = blockers.length === 0 ? "PUBLICATION_APPROVED" : "PUBLICATION_BLOCKED";
+  const gate      = blockers.length === 0 ? "OPERATIONAL_CHECKS_PASSED" : "OPERATIONAL_CHECKS_FAILED";
 
   return { checks, blockers, warnings, passed, gate };
 }
 
 export function buildP32ReleaseGateBlock(item) {
   const { checks, blockers, warnings, passed, gate } = _computeReleaseGate(item);
-  const gateColor = gate === "PUBLICATION_APPROVED" ? "#22c55e" : "#ef4444";
+  const gateColor = gate === "OPERATIONAL_CHECKS_PASSED" ? "#22c55e" : "#ef4444";
 
   const rows = checks.map(c => {
     const color = c.pass ? "#22c55e" : c.blocker ? "#ef4444" : "#f59e0b";
@@ -1134,15 +1141,15 @@ export function buildP32ReleaseGateBlock(item) {
   }).join("");
 
   const body = `
-  <div style="padding:12px 18px;background:${gate === "PUBLICATION_APPROVED" ? "#0a1a0e" : "#1a0a0a"};border:2px solid ${gateColor}44;border-radius:5px;margin-bottom:12px;text-align:center;">
+  <div style="padding:12px 18px;background:${gate === "OPERATIONAL_CHECKS_PASSED" ? "#0a1a0e" : "#1a0a0a"};border:2px solid ${gateColor}44;border-radius:5px;margin-bottom:12px;text-align:center;">
     <div style="color:${gateColor};font-size:13px;font-weight:800;">${gate.replace(/_/g, " ")}</div>
-    <div style="color:#6b7280;font-size:10px;margin-top:3px;">${passed.length}/12 gates passed * ${blockers.length} blockers * ${warnings.length} warnings</div>
+    <div style="color:#6b7280;font-size:10px;margin-top:3px;">${passed.length}/12 checks passed * ${blockers.length} blockers * ${warnings.length} warnings</div>
   </div>
   ${rows}`;
 
   return _block(`p32-release-${esc(item.id || "x")}`,
-    "P32.13  -  Production Release Gate", gateColor, body,
-    "Per-advisory publication gate  -  12 checks required before advisory is published to customers");
+    "P32.13  -  Operational Completeness Gate", gateColor, body,
+    "Per-advisory data-completeness check -- NOT the customer publication authority. See /api/v1/reports/{id}/publication-status for the CUSTOMER_READY determination.");
 }
 
 // -- P32 Package builder -------------------------------------------------------
@@ -1365,7 +1372,7 @@ export async function handleP32Release(request, env) {
   let approved = 0, blocked = 0;
   for (const i of items) {
     const { gate } = _computeReleaseGate(i);
-    if (gate === "PUBLICATION_APPROVED") approved++; else blocked++;
+    if (gate === "OPERATIONAL_CHECKS_PASSED") approved++; else blocked++;
   }
   return _jsonResp({ version: P32_VERSION, feed_items: items.length, approved, blocked,
     approval_rate_pct: Math.round(approved / Math.max(1, items.length) * 100) });
@@ -1422,7 +1429,7 @@ export async function handleP32Observability(request, env) {
   const matScores  = items.slice(0, 50).map(i => _computeMaturity(i).overall);
   const avgMat     = matScores.length ? Math.round(matScores.reduce((a, b) => a + b, 0) / matScores.length) : 0;
   const gateResults = items.slice(0, 50).map(i => _computeReleaseGate(i));
-  const approved   = gateResults.filter(r => r.gate === "PUBLICATION_APPROVED").length;
+  const approved   = gateResults.filter(r => r.gate === "OPERATIONAL_CHECKS_PASSED").length;
 
   return _jsonResp({
     version: P32_VERSION,
