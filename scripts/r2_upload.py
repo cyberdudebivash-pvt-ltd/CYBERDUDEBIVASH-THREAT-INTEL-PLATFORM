@@ -277,6 +277,28 @@ def main() -> None:
         if Path(src).exists():
             s3_cp(src, BUCKET_DATA, dst_key, endpoint)
 
+    # --- Upload 2b: P40 Global Intelligence Source Fabric artifacts ---
+    # Bridges scripts/build_source_registry.py, scripts/source_fabric_health.py,
+    # and scripts/p40_production_certification.py output into R2 so
+    # workers/intel-gateway/src/p40-handlers.js (env.INTEL_R2.get(...)) can
+    # actually serve real data instead of a permanent 503. Same
+    # additive-tuple-list pattern as "Upload 2" above -- no existing upload
+    # touched.
+    p40_source_fabric_files = [
+        ("data/registry/source_registry.json",           "intel/source_registry.json"),
+        ("data/quality/source_fabric_health.json",        "intel/source_fabric_health.json"),
+        ("data/quality/p40_certification_report.json",    "intel/p40_certification_report.json"),
+    ]
+    uploaded_p40 = 0
+    for src, dst_key in p40_source_fabric_files:
+        if Path(src).exists():
+            s3_cp(src, BUCKET_DATA, dst_key, endpoint)
+            uploaded_p40 += 1
+        else:
+            log.warning("SKIP: %s not found (P40 endpoint will 503 until it is generated)", src)
+    log.info("OK: P40 source fabric artifacts uploaded (%d/%d)",
+             uploaded_p40, len(p40_source_fabric_files))
+
     # --- Upload 3: apex_v2 API endpoint files ---
     apex_v2_dir = REPO_ROOT / "api" / "apex_v2"
     if apex_v2_dir.is_dir():

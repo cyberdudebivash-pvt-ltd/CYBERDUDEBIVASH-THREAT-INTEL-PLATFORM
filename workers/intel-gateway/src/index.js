@@ -89,6 +89,7 @@ import { handleP35Quality, handleP35Freshness, handleP35Evidence, handleP35Confi
 import { handleP36Quality, handleP36Maturity, handleP36Targets, handleP36Gaps, handleP36CustomerValue, handleP36Competitive, handleP36Detection, handleP36Reliability, handleP36Metrics, handleP36Roadmap, handleP36Dashboard, handleP36Observability } from './p36-handlers.js';
 import { handleP37Hardening, handleP37FeedAudit, handleP37Enrichment, handleP37IQScore, handleP37Detection, handleP37SourceDiversity, handleP37Reliability, handleP37Debt, handleP37Metrics, handleP37Certification, handleP37Dashboard, handleP37Observability } from './p37-handlers.js';
 import { handleP38SchemaRegistry, handleP38FeedGovernance, handleP38SchemaDrift, handleP38EnrichmentAudit, handleP38ConfidenceAudit, handleP38IQIndex, handleP38SourceDiversity, handleP38Certification, handleP38Executive, handleP38Reliability, handleP38Metrics, handleP38Observability } from './p38-handlers.js';
+import { handleP40SourceRegistry, handleP40SourceDetail, handleP40SourceHealth, handleP40Licensing, handleP40Coverage, handleP40Waves, handleP40Certification, handleP40Metrics, handleP40Dashboard, handleP40Observability } from './p40-handlers.js';
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
@@ -4346,6 +4347,17 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/v1/p38/reliability")        return await handleP38Reliability(request, env);
   if (path === "/api/v1/p38/metrics")            return await handleP38Metrics(request, env);
   if (path === "/api/v1/p38/observability")      return await handleP38Observability(request, env);
+
+  if (path === "/api/v1/p40/source-registry")    return await handleP40SourceRegistry(request, env);
+  if (path === "/api/v1/p40/source-detail")      return await handleP40SourceDetail(request, env);
+  if (path === "/api/v1/p40/source-health")      return await handleP40SourceHealth(request, env);
+  if (path === "/api/v1/p40/licensing")          return await handleP40Licensing(request, env);
+  if (path === "/api/v1/p40/coverage")           return await handleP40Coverage(request, env);
+  if (path === "/api/v1/p40/waves")              return await handleP40Waves(request, env);
+  if (path === "/api/v1/p40/certification")      return await handleP40Certification(request, env);
+  if (path === "/api/v1/p40/metrics")            return await handleP40Metrics(request, env);
+  if (path === "/api/v1/p40/dashboard")          return await handleP40Dashboard(request, env);
+  if (path === "/api/v1/p40/observability")      return await handleP40Observability(request, env);
 
   // --- api-extensions.js routes (previously unreachable  -  now wired, auth already resolved above) ---
   if (path === "/api/search")                       return await handleSearch(request, env, auth, crypto.randomUUID());
