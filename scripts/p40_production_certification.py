@@ -8,7 +8,7 @@ internal-only per its own file header and has no certification report to
 chain from — this mirrors how P34 chained from P33 when an intermediate
 layer's report was unavailable).
 
-22 gates covering:
+25 gates covering:
   G01-G03: Certification chain (P38)
   G04-G07: Source registry integrity (existence, honesty-contract validation,
            scale, domain breadth)
@@ -20,6 +20,9 @@ layer's report was unavailable).
   G21:     Licensing governance coherence (permanent regression guard for the
            commercial_use_allowed bug found and fixed during this change)
   G22:     Source health dashboard existence
+  G23:     Canonical timestamp engine adopted by both ingestion parsers
+  G24:     Source health reason_code/state vocabulary present on every entry
+  G25:     Global CTI Coverage Score engine wired into handleP40Coverage
 
 Reuses scripts/p38_shared_validators.py:gate()/load_json_safe() (its own
 docstring: "New P-layer cert scripts MUST call this function") and
@@ -248,6 +251,60 @@ def run_certification() -> dict:
     g22 = dashboard_path.exists()
     gates.append(_gate("G22", "Source Fabric Health Dashboard exists", "WARNING", g22,
                         "found" if g22 else "NOT FOUND"))
+
+    # ── G23: Canonical timestamp engine adopted by both ingestion parsers ────
+    # Evidence-driven, not "the file exists": both true_intel_ingestor.py's
+    # and source_fabric_health.py's _parse_ts must actually delegate to
+    # scripts/canonical_timestamp.py (the NVD incident's root cause was one
+    # parser's format list silently missing a variant another parser already
+    # handled -- this gate would have caught the regression this change
+    # fixes, and prevents the two parsers drifting apart again).
+    canonical_ts_path = ROOT / "scripts" / "canonical_timestamp.py"
+    g23 = False
+    g23_detail = "canonical_timestamp.py not found"
+    if canonical_ts_path.exists():
+        try:
+            sys.path.insert(0, str(ROOT / "scripts"))
+            import canonical_timestamp as _ct
+            has_engine = (hasattr(_ct, "parse_timestamp") and hasattr(_ct, "parse_ts")
+                          and hasattr(_ct, "is_cursor_advance"))
+            tii_src = (ROOT / "scripts" / "true_intel_ingestor.py").read_text(encoding="utf-8")
+            sfh_src = (ROOT / "scripts" / "source_fabric_health.py").read_text(encoding="utf-8")
+            tii_adopted = "canonical_timestamp import parse_ts" in tii_src
+            sfh_adopted = "canonical_timestamp import parse_ts" in sfh_src
+            g23 = has_engine and tii_adopted and sfh_adopted
+            g23_detail = (f"engine_api={has_engine} true_intel_ingestor_adopted={tii_adopted} "
+                          f"source_fabric_health_adopted={sfh_adopted}")
+        except Exception as e:
+            g23_detail = f"import/check failed: {e}"
+    gates.append(_gate("G23", "Canonical timestamp engine adopted by true_intel_ingestor.py "
+                        "and source_fabric_health.py", "BLOCKER", g23, g23_detail))
+
+    # ── G24: Source health reason codes / state vocabulary wired ─────────────
+    # Checks the ACTUAL health report has state+reason_code on every entry
+    # (not just that the code exists) -- a genuinely-computed field, not a
+    # green check because a function happens to be defined somewhere.
+    g24 = False
+    g24_detail = "health report unavailable"
+    if health:
+        entries = health.get("sources", [])
+        g24 = bool(entries) and all(("state" in e and "reason_code" in e) for e in entries)
+        g24_detail = f"{sum(1 for e in entries if 'state' in e and 'reason_code' in e)}/{len(entries)} entries have state+reason_code"
+    gates.append(_gate("G24", "Every source health entry has a state + reason_code",
+                        "BLOCKER", g24, g24_detail))
+
+    # ── G25: Global CTI Coverage Score engine wired into handleP40Coverage ───
+    g25 = False
+    g25_detail = "p40-handlers.js not found"
+    p40_js_path = SRC_P / "p40-handlers.js"
+    if p40_js_path.exists():
+        js_src = p40_js_path.read_text(encoding="utf-8")
+        has_score_fn = "_computeDomainScore" in js_src and "_MISSION_DOMAINS" in js_src
+        wired_into_handler = "scoring_model: 'noisy_or_corroboration_v1'" in js_src
+        g25 = has_score_fn and wired_into_handler
+        g25_detail = f"scoring_functions_present={has_score_fn} wired_into_handler={wired_into_handler}"
+    gates.append(_gate("G25", "Global CTI Coverage Score engine wired into handleP40Coverage",
+                        "BLOCKER", g25, g25_detail))
 
     # ── Tally ─────────────────────────────────────────────────────────────────
     blockers = sum(1 for g in gates if g["status"] == "FAIL_BLOCKER")
