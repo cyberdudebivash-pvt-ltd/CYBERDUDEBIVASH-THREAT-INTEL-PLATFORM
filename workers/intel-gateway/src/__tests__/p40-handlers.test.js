@@ -199,6 +199,50 @@ test("handleP40Certification: 503 when unavailable", async () => {
   assert.equal(res.status, 503);
 });
 
+test("handleP40Certification: freshly generated report reports FRESH/SYNCED", async () => {
+  const env = mockEnv({
+    "intel/p40_certification_report.json": {
+      release_tier: "WORLDWIDE_RELEASE",
+      generated_at: new Date().toISOString(),
+      source_commit: "abc123def456",
+    },
+  });
+  const res = await handleP40Certification(new Request("https://x/api/v1/p40/certification"), env);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, "WORLDWIDE_RELEASE");
+  assert.equal(body.freshness, "FRESH");
+  assert.equal(body.sync_status, "SYNCED");
+  assert.equal(typeof body.age_seconds, "number");
+  assert.ok(body.age_seconds < 60);
+});
+
+test("handleP40Certification: report older than 16h reports STALE/LAGGING", async () => {
+  const twentyHoursAgo = new Date(Date.now() - 20 * 3600 * 1000).toISOString();
+  const env = mockEnv({
+    "intel/p40_certification_report.json": {
+      release_tier: "WORLDWIDE_RELEASE",
+      generated_at: twentyHoursAgo,
+    },
+  });
+  const res = await handleP40Certification(new Request("https://x/api/v1/p40/certification"), env);
+  const body = await res.json();
+  assert.equal(body.freshness, "STALE");
+  assert.equal(body.sync_status, "LAGGING");
+  assert.ok(body.age_seconds > 16 * 3600);
+});
+
+test("handleP40Certification: missing/malformed generated_at degrades to UNKNOWN, not a crash", async () => {
+  const env = mockEnv({
+    "intel/p40_certification_report.json": { release_tier: "WORLDWIDE_RELEASE" },
+  });
+  const res = await handleP40Certification(new Request("https://x/api/v1/p40/certification"), env);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.freshness, "UNKNOWN");
+  assert.equal(body.age_seconds, null);
+});
+
 test("handleP40Metrics: composes registry + health breakdowns", async () => {
   const env = mockEnv({
     "intel/source_registry.json": FAKE_REGISTRY,

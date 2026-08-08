@@ -3619,3 +3619,23 @@ jobs:
           fi
           exit 0
 
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.6 - P40.0 Late R2 Sync (closes the cert/health staleness gap)
+      # ROOT CAUSE: STAGE 3.5 (r2_upload.py, full run) uploads the P40 registry/
+      # health/certification artifacts EARLY in this pipeline, before STAGE 5.9.5
+      # above regenerates source_fabric_health.json and p40_certification_report.json
+      # fresh for THIS run. STAGE 4.1's later "final R2 sync" (r2_resync_manifests.py)
+      # never touches the P40 R2 keys either. Net effect: /api/v1/p40/certification
+      # and /api/v1/p40/source-health served data that was permanently one full
+      # pipeline cycle (~8h, this workflow's cron cadence) behind what was already
+      # generated and committed. This step re-uploads just the 3 P40 artifacts
+      # (r2_upload.py --p40-only, see its docstring) now that they're fresh.
+      # Non-blocking, matching STAGE 5.9.5 -- P40 R2 sync failure must never fail
+      # the pipeline (existing R2 data remains valid; next run retries).
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.6 - P40.0 Late R2 Sync"
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        run: python3 scripts/r2_upload.py --p40-only || true
+

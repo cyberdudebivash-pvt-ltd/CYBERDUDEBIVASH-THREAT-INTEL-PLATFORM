@@ -197,6 +197,12 @@ export async function handleP40Waves(request, env) {
   return _json({ schema_version: 'p40.0', waves });
 }
 
+// sentinel-blogger.yml — the pipeline that regenerates and R2-syncs this
+// report — runs 3x/day (cron '0 0,8,16 * * *', ~8h cadence). This threshold
+// is a generous 2x that cadence, matching source_fabric_health.py's
+// staleness philosophy: flag genuine silence, not a run landing a bit late.
+const CERT_FRESHNESS_STALE_SECONDS = 16 * 3600;
+
 export async function handleP40Certification(request, env) {
   const cert = await _loadR2Json(env, CERT_KEY);
   if (!cert) {
@@ -206,7 +212,23 @@ export async function handleP40Certification(request, env) {
       version: P40_VERSION,
     }, 503);
   }
-  return _json({ schema_version: 'p40.0', ...cert });
+
+  const generatedAtMs = cert.generated_at ? Date.parse(cert.generated_at) : NaN;
+  const ageSeconds = Number.isFinite(generatedAtMs)
+    ? Math.max(0, Math.floor((Date.now() - generatedAtMs) / 1000))
+    : null;
+  const freshness = ageSeconds === null
+    ? 'UNKNOWN'
+    : (ageSeconds > CERT_FRESHNESS_STALE_SECONDS ? 'STALE' : 'FRESH');
+
+  return _json({
+    schema_version: 'p40.0',
+    ...cert,
+    status: cert.release_tier ?? null,
+    age_seconds: ageSeconds,
+    freshness,
+    sync_status: freshness === 'STALE' ? 'LAGGING' : 'SYNCED',
+  });
 }
 
 export async function handleP40Metrics(request, env) {

@@ -32,6 +32,7 @@ Result written to data/quality/p40_certification_report.json.
 from __future__ import annotations
 import datetime
 import json
+import os
 import pathlib
 import sys
 
@@ -258,6 +259,11 @@ def run_certification() -> dict:
     report = {
         "schema_version":    "p40.0",
         "generated_at":      datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        # Which commit produced this report — lets consumers (the /certification
+        # API, dashboards) detect a report that's stuck from an old commit even
+        # if generated_at alone looks recent. GITHUB_SHA is set by every GitHub
+        # Actions job; empty/"local" outside CI is honest, not fabricated.
+        "source_commit":     os.environ.get("GITHUB_SHA", "")[:12] or "local",
         "layer":             "P40",
         "scope":             "global_intelligence_source_fabric",
         "release_tier":      tier,
