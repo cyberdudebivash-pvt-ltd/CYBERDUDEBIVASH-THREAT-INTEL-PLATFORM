@@ -3588,3 +3588,34 @@ jobs:
           python3 scripts/titan_architecture_governance_check.py || true
           exit 0
 
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.5 - P40.0 Global Intelligence Source Fabric Certification
+      # Chains from P38 (P39 is deliberately internal-only, no cert report to
+      # chain from — see workers/intel-gateway/src/p39-handlers.js header).
+      # Refreshes source_fabric_health.json against the current manifest/
+      # feed_state (this pipeline run's real freshness signal), then runs the
+      # 22-gate certification. data/registry/source_registry.json itself is a
+      # maintained, checked-in artifact (regenerated manually via
+      # scripts/build_source_registry.py when sources are added/changed, not
+      # every pipeline run — its generated_at timestamp would otherwise churn
+      # every run for zero data change). Non-blocking (continue-on-error:
+      # true) — CI helper only, matching every other P-layer cert stage.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.5 - P40.0 Global Intelligence Source Fabric Certification"
+        if: always()
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          python3 scripts/source_fabric_health.py || true
+          python3 scripts/p40_production_certification.py
+          if [ -f "data/quality/p40_certification_report.json" ]; then
+            read -r TIER BLOCKERS WARNINGS PASSED TOTAL SOURCES <<< "$(python3 scripts/ci_stats_extract.py p40 2>/dev/null || echo 'UNKNOWN 0 0 0 0 0')"
+            echo "P40 Source Fabric: tier=${TIER} passed=${PASSED}/${TOTAL} blockers=${BLOCKERS} warnings=${WARNINGS} sources=${SOURCES}"
+            if [ "${BLOCKERS}" = "0" ]; then
+              echo "::notice::P40.0 WORLDWIDE_RELEASE — ${PASSED}/${TOTAL} gates passed. ${SOURCES} sources registered."
+            else
+              echo "::warning::P40.0 BLOCKED — ${BLOCKERS} blocker(s). Gates: ${PASSED}/${TOTAL}. See data/quality/p40_certification_report.json."
+            fi
+          fi
+          exit 0
+

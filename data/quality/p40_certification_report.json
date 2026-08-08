@@ -1,0 +1,245 @@
+{
+  "schema_version": "p40.0",
+  "generated_at": "2026-08-08T16:44:16.766197+00:00",
+  "layer": "P40",
+  "scope": "global_intelligence_source_fabric",
+  "release_tier": "WORLDWIDE_RELEASE",
+  "passed_count": 24,
+  "blocker_count": 0,
+  "warning_count": 0,
+  "total_gates": 24,
+  "p38_tier": "WORLDWIDE_RELEASE",
+  "shared_validators_import_ok": true,
+  "registry_import_ok": true,
+  "source_registry": {
+    "total_sources": 104,
+    "status_breakdown": {
+      "ACTIVE": 9,
+      "REQUIRES_CREDENTIALS": 25,
+      "REQUIRES_LICENSE": 21,
+      "PLANNED": 48,
+      "IMPLEMENTED": 1
+    },
+    "wave_breakdown": {
+      "1": 21,
+      "2": 39,
+      "3": 22,
+      "4": 11,
+      "5": 11
+    }
+  },
+  "source_health": {
+    "health_breakdown": {
+      "HEALTHY": 3,
+      "STALE": 4,
+      "NO_DATA": 2,
+      "DEGRADED": 0,
+      "AWAITING_CREDENTIALS": 25,
+      "AWAITING_LICENSE": 21,
+      "NOT_RUNNING": 1,
+      "NOT_APPLICABLE": 48,
+      "DISABLED": 0
+    }
+  },
+  "governance_deliverables": {
+    "canonical_source_registry": "data/registry/source_registry.json",
+    "registry_generator": "scripts/build_source_registry.py",
+    "registry_loader": "scripts/source_registry.py",
+    "health_aggregator": "scripts/source_fabric_health.py",
+    "handler_js": "workers/intel-gateway/src/p40-handlers.js",
+    "executive_dashboard": "/api/v1/p40/dashboard"
+  },
+  "adr": [
+    {
+      "id": "ADR-P40-001",
+      "decision": "Extend scripts/true_intel_ingestor.py (live, scheduled, proven-resilient) rather than activate core/ingestion's dormant BaseSource adapter engine (mounted but never .start()'d — verified during reconnaissance) or build a third parallel ingestion path.",
+      "rationale": "Activating a previously-never-run background scheduler inside the shared Railway web dyno is a real architectural/operational-risk event (Architecture Preservation Rule) with no blast-radius sign-off in this change. The existing batch pipeline already has checkpointing, dedup, and atomic-write resilience matching mission Section 20's requirements.",
+      "approach": "Additive — 0 lines changed in the 6 existing source functions' logic (URLhaus's Auth-Key fix is the one evidence-based exception, HTTP 401 verified live). 3 new functions appended, registry-driven where new.",
+      "risk": "LOW"
+    },
+    {
+      "id": "ADR-P40-002",
+      "decision": "EPSS integrated as ENRICHMENT over already-collected CVE IDs, not a standalone ingest_* event-stream source.",
+      "rationale": "FIRST.org publishes a score for the entire ~280k-CVE corpus daily; treating that as a firehose of 'new items' would misrepresent a daily re-score as 280k new intelligence events.",
+      "approach": "New enrich_with_epss(items) function, mirrors the same technique already used by core/ingestion/sources/nvd_source.py._enrich_with_epss().",
+      "risk": "LOW"
+    },
+    {
+      "id": "ADR-P40-003",
+      "decision": "MITRE ATT&CK ingested as REFERENCE_SYNC to data/attck/enterprise-attack.json, never merged into feed_manifest.json.",
+      "rationale": "ATT&CK techniques/groups/software/mitigations are taxonomy data, not discrete threat events — the manifest represents 'new intelligence happened', not 'this reference dataset was revised'. Original STIX object IDs preserved verbatim per mission Section 8.",
+      "approach": "New module-level function, content-hash gated against re-sync churn, dry_run-aware (no disk writes under --dry-run, matching the other 6 sources' no-persisted-side-effects contract).",
+      "risk": "LOW"
+    }
+  ],
+  "gates": [
+    {
+      "gate_id": "G01",
+      "label": "P38 certification report present",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "tier=WORLDWIDE_RELEASE blockers=0"
+    },
+    {
+      "gate_id": "G02",
+      "label": "P38 release tier = WORLDWIDE_RELEASE",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "WORLDWIDE_RELEASE"
+    },
+    {
+      "gate_id": "G03",
+      "label": "P38 has zero blockers",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "blockers=0"
+    },
+    {
+      "gate_id": "G04",
+      "label": "scripts/source_registry.py imports successfully",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "OK"
+    },
+    {
+      "gate_id": "G04B",
+      "label": "data/registry/source_registry.json loads",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "total_sources=104"
+    },
+    {
+      "gate_id": "G05",
+      "label": "Source registry passes honesty-contract + integrity validation",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "0 errors"
+    },
+    {
+      "gate_id": "G06",
+      "label": "Source registry covers >= 90 sources (global taxonomy breadth)",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "total_sources=104"
+    },
+    {
+      "gate_id": "G07",
+      "label": "All 5 mission waves represented in registry",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "waves_present=['1', '2', '3', '4', '5']"
+    },
+    {
+      "gate_id": "G07B",
+      "label": "At least 1 source is genuinely ACTIVE (not all scaffolding)",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "active_count=9"
+    },
+    {
+      "gate_id": "G08",
+      "label": "data/quality/source_fabric_health.json present",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "sources=104"
+    },
+    {
+      "gate_id": "G09",
+      "label": "Health report source count matches registry (not stale)",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "health=104 registry=104"
+    },
+    {
+      "gate_id": "G10",
+      "label": "At least 1 source reports HEALTHY (pipeline genuinely alive)",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "healthy_count=3"
+    },
+    {
+      "gate_id": "G11",
+      "label": "ACTIVE sources with zero observed output stay bounded (<=3)",
+      "severity": "WARNING",
+      "status": "PASS",
+      "detail": "no_data_count=2 — expected to include openphish/first_epss until the next scheduled multi-source-intel.yml run persists their first real output"
+    },
+    {
+      "gate_id": "G12",
+      "label": "true_intel_ingestor.py has all 3 new P40 source functions",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "OK"
+    },
+    {
+      "gate_id": "G13",
+      "label": "Verified URLhaus Auth-Key regression fix present",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "OK — Auth-Key header wired from ABUSECH_AUTH_KEY"
+    },
+    {
+      "gate_id": "G14",
+      "label": "p40-handlers.js exists",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "found"
+    },
+    {
+      "gate_id": "G15",
+      "label": "p40-handlers.js has all 10 required exports",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "OK"
+    },
+    {
+      "gate_id": "G16",
+      "label": "index.js imports p40-handlers.js",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "OK"
+    },
+    {
+      "gate_id": "G17",
+      "label": "index.js registers all 10 P40 routes",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "OK"
+    },
+    {
+      "gate_id": "G18",
+      "label": "r2_upload.py bridges all 3 P40 artifacts to R2",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "OK"
+    },
+    {
+      "gate_id": "G19",
+      "label": "MITRE ATT&CK reference sync has >= 500 techniques",
+      "severity": "WARNING",
+      "status": "PASS",
+      "detail": "techniques=697"
+    },
+    {
+      "gate_id": "G20",
+      "label": "P40 documentation set complete (4 docs)",
+      "severity": "WARNING",
+      "status": "PASS",
+      "detail": "OK"
+    },
+    {
+      "gate_id": "G21",
+      "label": "Zero FREE_NONCOMMERCIAL/INTERNAL_USE_ONLY sources flagged commercially usable",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "violations=0 commercial_use_allowed=88/104"
+    },
+    {
+      "gate_id": "G22",
+      "label": "Source Fabric Health Dashboard exists",
+      "severity": "WARNING",
+      "status": "PASS",
+      "detail": "found"
+    }
+  ]
+}

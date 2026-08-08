@@ -84,6 +84,20 @@ URLHAUS_URL     = "https://urlhaus-api.abuse.ch/v1/urls/recent/"
 # NVD: look back max 2 days per run (CI runs 4x/day)
 NVD_LOOKBACK_HOURS = 48
 
+# v185.0 -- P40 Global Intelligence Source Fabric additions.
+# abuse.ch mandates an Auth-Key on URLhaus/ThreatFox/MalwareBazaar as of their
+# 2023+ policy change -- VERIFIED via a live unauthenticated request during
+# this change (HTTP 401 on 2026-08-08). ABUSECH_AUTH_KEY activates URLhaus
+# automatically once provisioned as a GitHub Actions secret; ingest_urlhaus()
+# reports an explicit "requires credentials" log line (not a silent empty
+# result) when it is absent -- see data/registry/source_registry.json.
+ABUSECH_AUTH_KEY   = os.environ.get("ABUSECH_AUTH_KEY", "")
+EPSS_API_URL        = "https://api.first.org/data/v1/epss"
+OPENPHISH_FEED_URL  = "https://openphish.com/feed.txt"
+MITRE_ATTACK_URL    = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
+ATTCK_STATE_PATH    = _REPO / "data" / "cache" / "attck_state.json"
+ATTCK_OUTPUT_PATH   = _REPO / "data" / "attck" / "enterprise-attack.json"
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # FEED STATE — per-source last_seen_timestamp
@@ -626,10 +640,23 @@ def ingest_ransomware_live(feed_state: FeedState) -> List[Dict]:
 def ingest_urlhaus(feed_state: FeedState) -> List[Dict]:
     """
     abuse.ch URLhaus — recent malicious URLs.
-    Uses JSON API endpoint (no auth required).
+    v185.0 P0 FIX: abuse.ch now requires an Auth-Key on this endpoint —
+    VERIFIED via a live unauthenticated request returning HTTP 401 on
+    2026-08-08, meaning this source has been silently yielding zero items
+    every run since abuse.ch's policy change. Sends the key from
+    ABUSECH_AUTH_KEY when present; reports an explicit "requires
+    credentials" state (not a silent empty result) when it is not, so
+    source-health observability can distinguish "no new items this run"
+    from "this source cannot currently authenticate."
     Field: 'dateadded' from API.
     """
     SOURCE_KEY = "urlhaus"
+
+    if not ABUSECH_AUTH_KEY:
+        log.warning("[URLHAUS] ABUSECH_AUTH_KEY not set — source requires credentials "
+                    "(see data/registry/source_registry.json:abuse_ch_urlhaus). Skipping fetch.")
+        return []
+
     log.info("[URLHAUS] Fetching recent malicious URLs...")
 
     try:
@@ -638,7 +665,10 @@ def ingest_urlhaus(feed_state: FeedState) -> List[Dict]:
             URLHAUS_URL,
             data=b"",
             method="POST",
-            headers={"User-Agent": "CyberDudeBivash-SentinelAPEX/142.0"},
+            headers={
+                "User-Agent": "CyberDudeBivash-SentinelAPEX/142.0",
+                "Auth-Key": ABUSECH_AUTH_KEY,
+            },
         )
         with _ur.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
@@ -869,6 +899,249 @@ def ingest_rss_feeds(feed_state: FeedState, max_per_feed: int = 10) -> List[Dict
         len(rss_feeds), total_new, total_skip,
     )
     return all_items
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ENRICHMENT: FIRST.org EPSS (v185.0 — P40 Global Intelligence Source Fabric)
+# ═══════════════════════════════════════════════════════════════════════════
+# Registered in data/registry/source_registry.json as integration_mode
+# "ENRICHMENT", not "EVENT_STREAM": FIRST publishes a score for the entire
+# ~280k-CVE corpus daily, so pulling it as a standalone ingest_* source would
+# mean treating "EPSS re-scored the whole corpus" as 280k new intel events
+# every run. Instead this enriches CVE IDs already present in this run's
+# candidate items (from KEV/NVD/GHSA/RSS) in place, mirroring how
+# core/ingestion/sources/nvd_source.py._enrich_with_epss() enriches its own
+# NVD-only candidate set — same technique, applied across this file's whole
+# multi-source candidate pool.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def enrich_with_epss(items: List[Dict]) -> int:
+    """
+    Batch-enrich already-collected items with FIRST.org EPSS scores.
+    Mutates items with a 'cves' list in place, adding epss_score /
+    epss_percentile. Returns the count of items enriched.
+    """
+    cve_ids = sorted({
+        cve for item in items for cve in (item.get("cves") or [])
+        if isinstance(cve, str) and cve.startswith("CVE-")
+    })
+    if not cve_ids:
+        return 0
+
+    log.info("[EPSS] Enriching %d distinct CVE(s)...", len(cve_ids))
+    epss_map: Dict[str, Dict] = {}
+    for i in range(0, len(cve_ids), 100):   # FIRST API processes up to 100 CVEs/request
+        batch = cve_ids[i:i + 100]
+        data = _get_json(f"{EPSS_API_URL}?cve={','.join(batch)}&limit=100", timeout=20)
+        if not data:
+            continue
+        for row in data.get("data", []):
+            cve = row.get("cve")
+            if cve:
+                epss_map[cve] = row
+
+    enriched = 0
+    for item in items:
+        for cve in (item.get("cves") or []):
+            if cve in epss_map:
+                row = epss_map[cve]
+                try:
+                    item["epss_score"] = float(row.get("epss", 0))
+                    item["epss_percentile"] = float(row.get("percentile", 0))
+                except (TypeError, ValueError):
+                    continue
+                enriched += 1
+                break
+
+    log.info("[EPSS] Enriched %d/%d candidate item(s) with EPSS scores", enriched, len(items))
+    return enriched
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SOURCE: OpenPhish community feed (v185.0)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def ingest_openphish(feed_state: FeedState) -> List[Dict]:
+    """
+    OpenPhish community feed — free plaintext list of actively-verified
+    phishing URLs. No auth, no per-URL timestamp from source, so incremental
+    behaviour deliberately comes from the id/stix_id dedup already performed
+    in _merge_into_manifest() (both are stable hashes of source_url+title,
+    independent of published_at) rather than a FeedState timestamp cursor —
+    OpenPhish's plaintext feed has no date field to cursor against. Capped at
+    50 URLs/run, matching the existing URLhaus/ransomware.live cap pattern.
+    """
+    SOURCE_KEY = "openphish"
+    log.info("[OPENPHISH] Fetching community phishing feed...")
+
+    text = _get_text(OPENPHISH_FEED_URL, timeout=15)
+    if not text:
+        log.warning("[OPENPHISH] No data received")
+        return []
+
+    urls = [line.strip() for line in text.splitlines() if line.strip().startswith("http")]
+    if not urls:
+        log.warning("[OPENPHISH] Empty or unexpected feed format")
+        return []
+
+    now = _utc_now()
+    items: List[Dict] = []
+    for url_val in urls[:50]:
+        item = _normalize_item(
+            source_key   = SOURCE_KEY,
+            title        = f"[OpenPhish] Phishing URL: {url_val[:100]}",
+            source_url   = url_val,
+            published_at = now,   # source carries no timestamp; safe — see docstring
+            description  = f"URL flagged by OpenPhish community feed as active phishing: {url_val}",
+            tags         = ["openphish", "phishing"],
+            severity     = "HIGH",
+            threat_type  = "PHISHING-URL",
+            risk_score   = 7.0,
+        )
+        item["iocs"] = [{"type": "url", "value": url_val}]
+        item["ioc_count"] = len(item["iocs"])
+        items.append(item)
+
+    log.info("[OPENPHISH] Candidate items: %d (final new-count determined by manifest dedup)", len(items))
+    return items
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# REFERENCE SYNC: MITRE ATT&CK Enterprise Matrix (v185.0)
+# ═══════════════════════════════════════════════════════════════════════════
+# Deliberately NOT routed into feed_manifest.json: ATT&CK objects (techniques,
+# groups, software, mitigations) are taxonomy/reference data, not discrete
+# "new intelligence events" — dumping ~800+ STIX objects into the item feed
+# every time MITRE revises the matrix would misrepresent a taxonomy update as
+# hundreds of new threats. Original STIX 2.1 object IDs are preserved
+# verbatim (mission Section 8: "do not generate meaningless replacement
+# IDs"). Output feeds Section 16 ATT&CK correlation across the platform.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _attck_external_id(obj: Dict) -> str:
+    for ref in obj.get("external_references", []) or []:
+        if ref.get("source_name") == "mitre-attack":
+            return ref.get("external_id", "")
+    return ""
+
+
+def sync_mitre_attack(dry_run: bool = False) -> Dict:
+    """
+    Fetch the MITRE ATT&CK Enterprise STIX 2.1 bundle, extract techniques /
+    groups / software / mitigations / tactics, and write a curated reference
+    file to ATTCK_OUTPUT_PATH. Content-hash gated against ATTCK_STATE_PATH so
+    an unchanged upstream bundle does not cause needless writes/git churn.
+    dry_run=True computes and returns stats without writing either file —
+    matches the no-persisted-side-effects contract --dry-run already gives
+    the other 6 sources (they mutate an in-memory FeedState but only
+    feed_state.save() persists it, and dry-run mode never calls that).
+    Returns a stats dict (never a manifest item list — see module docstring).
+    """
+    log.info("[ATTCK] Fetching MITRE ATT&CK Enterprise bundle...")
+    raw_text = _get_text(MITRE_ATTACK_URL, timeout=45)
+    if not raw_text:
+        log.warning("[ATTCK] No data received")
+        return {"changed": False, "error": "fetch_failed"}
+
+    content_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+
+    prior_hash = ""
+    try:
+        if ATTCK_STATE_PATH.exists():
+            prior_hash = json.loads(ATTCK_STATE_PATH.read_text(encoding="utf-8")).get("content_hash", "")
+    except Exception as e:
+        log.warning("[ATTCK] Could not read prior state: %s", e)
+
+    if content_hash == prior_hash and ATTCK_OUTPUT_PATH.exists():
+        log.info("[ATTCK] Bundle unchanged (content hash match) — skipping rewrite")
+        return {"changed": False, "content_hash": content_hash}
+
+    try:
+        bundle = json.loads(raw_text)
+    except Exception as e:
+        log.error("[ATTCK] Bundle JSON parse failed: %s", e)
+        return {"changed": False, "error": "parse_failed"}
+
+    objects = bundle.get("objects", [])
+    techniques, groups, software, mitigations, tactics = [], [], [], [], []
+
+    for obj in objects:
+        otype = obj.get("type")
+        if obj.get("revoked") or obj.get("x_mitre_deprecated"):
+            continue
+
+        if otype == "attack-pattern":
+            techniques.append({
+                "id": obj.get("id"),                       # original STIX id, preserved verbatim
+                "attck_id": _attck_external_id(obj),
+                "name": obj.get("name", ""),
+                "description": (obj.get("description", "") or "")[:500],
+                "tactics": [p.get("phase_name", "") for p in obj.get("kill_chain_phases", [])
+                            if p.get("kill_chain_name") == "mitre-attack"],
+                "is_subtechnique": bool(obj.get("x_mitre_is_subtechnique")),
+                "platforms": obj.get("x_mitre_platforms", []),
+            })
+        elif otype == "intrusion-set":
+            groups.append({
+                "id": obj.get("id"), "attck_id": _attck_external_id(obj),
+                "name": obj.get("name", ""), "aliases": obj.get("aliases", []),
+                "description": (obj.get("description", "") or "")[:500],
+            })
+        elif otype in ("malware", "tool"):
+            software.append({
+                "id": obj.get("id"), "attck_id": _attck_external_id(obj),
+                "name": obj.get("name", ""), "type": otype,
+                "description": (obj.get("description", "") or "")[:500],
+            })
+        elif otype == "course-of-action":
+            mitigations.append({
+                "id": obj.get("id"), "attck_id": _attck_external_id(obj),
+                "name": obj.get("name", ""),
+                "description": (obj.get("description", "") or "")[:500],
+            })
+        elif otype == "x-mitre-tactic":
+            tactics.append({
+                "id": obj.get("id"), "attck_id": _attck_external_id(obj),
+                "name": obj.get("name", ""),
+                "shortname": obj.get("x_mitre_shortname", ""),
+            })
+
+    output = {
+        "schema_version": "1.0.0",
+        "source": "mitre_attack",
+        "source_bundle": MITRE_ATTACK_URL,
+        "stix_version": bundle.get("spec_version", "2.1"),
+        "synced_at": _utc_now(),
+        "content_hash": content_hash,
+        "counts": {
+            "techniques": len(techniques), "groups": len(groups),
+            "software": len(software), "mitigations": len(mitigations),
+            "tactics": len(tactics),
+        },
+        "techniques": techniques, "groups": groups, "software": software,
+        "mitigations": mitigations, "tactics": tactics,
+    }
+
+    if dry_run:
+        log.info("[ATTCK] [DRY-RUN] Would sync: %d techniques, %d groups, %d software, "
+                  "%d mitigations, %d tactics (no files written)",
+                  len(techniques), len(groups), len(software), len(mitigations), len(tactics))
+        return {"changed": True, "dry_run": True, "content_hash": content_hash, **output["counts"]}
+
+    ATTCK_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ATTCK_OUTPUT_PATH.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    try:
+        ATTCK_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ATTCK_STATE_PATH.write_text(
+            json.dumps({"content_hash": content_hash, "synced_at": _utc_now()}), encoding="utf-8"
+        )
+    except Exception as e:
+        log.warning("[ATTCK] Could not persist state: %s", e)
+
+    log.info("[ATTCK] Synced: %d techniques, %d groups, %d software, %d mitigations, %d tactics",
+              len(techniques), len(groups), len(software), len(mitigations), len(tactics))
+    return {"changed": True, "content_hash": content_hash, **output["counts"]}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1118,6 +1391,33 @@ def run_ingestion() -> Dict:
         log.error("[RSS] Source failed: %s", e)
         stats.record("rss_feeds", 0, 0, 0, error=True)
 
+    # ── OpenPhish (v185.0) ──────────────────────────────────────────────────
+    try:
+        items = ingest_openphish(feed_state)
+        all_new_items.extend(items)
+        stats.record("openphish", len(items), len(items), 0)
+    except Exception as e:
+        log.error("[OPENPHISH] Source failed: %s", e)
+        stats.record("openphish", 0, 0, 0, error=True)
+
+    # ── EPSS enrichment (v185.0) — runs over everything collected above ─────
+    try:
+        enriched_count = enrich_with_epss(all_new_items)
+        stats.record("first_epss", enriched_count, enriched_count, 0)
+    except Exception as e:
+        log.error("[EPSS] Enrichment failed: %s", e)
+        stats.record("first_epss", 0, 0, 0, error=True)
+
+    # ── MITRE ATT&CK reference sync (v185.0) — does not touch the manifest ──
+    try:
+        attck_result = sync_mitre_attack()
+        attck_n = sum(v for k, v in attck_result.items()
+                       if k in ("techniques", "groups", "software", "mitigations", "tactics"))
+        stats.record("mitre_attack", attck_n, attck_n if attck_result.get("changed") else 0, 0)
+    except Exception as e:
+        log.error("[ATTCK] Reference sync failed: %s", e)
+        stats.record("mitre_attack", 0, 0, 0, error=True)
+
     log.info("[INGESTOR] Total candidate items across all sources: %d", len(all_new_items))
 
     # ── Merge into manifest (dedup-gated) ────────────────────────────────────
@@ -1157,7 +1457,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CyberDudeBivash True Intel Ingestor v142.0")
     parser.add_argument("--dry-run", action="store_true", help="Fetch and report without writing manifest")
     parser.add_argument("--reset-state", action="store_true", help="Reset feed_state.json (full re-scan)")
-    parser.add_argument("--source", choices=["kev", "nvd", "github", "ransomware", "urlhaus", "rss"],
+    parser.add_argument("--source",
+                        choices=["kev", "nvd", "github", "ransomware", "urlhaus", "rss",
+                                 "openphish", "attck"],
                         help="Run only a specific source")
     args = parser.parse_args()
 
@@ -1178,9 +1480,13 @@ if __name__ == "__main__":
             "ransomware": lambda: ingest_ransomware_live(feed_state),
             "urlhaus": lambda: ingest_urlhaus(feed_state),
             "rss": lambda: ingest_rss_feeds(feed_state),
+            "openphish": lambda: ingest_openphish(feed_state),
         }
 
-        if args.source:
+        if args.source == "attck":
+            result = sync_mitre_attack(dry_run=True)
+            log.info("[DRY-RUN] attck: %s", result)
+        elif args.source:
             items = sources[args.source]()
             log.info("[DRY-RUN] %s: %d items would be ingested", args.source, len(items))
             for item in items[:5]:
