@@ -51,12 +51,105 @@ import { computeOperationalReadiness } from './p23-handlers.js';
 import { computeEnterpriseTrustScore } from './p25-handlers.js';
 import { computeP26Grade } from './p26-handlers.js';
 
-export const PUBLICATION_GATE_VERSION = '1.0.0';
+export const PUBLICATION_GATE_VERSION = '1.1.0';
 
 // Below this, P20 is "critically low" per P26's own existing C-P20 warning
 // threshold (p26-handlers.js) — reused here as a blocking condition, not a
 // new number invented for this gate.
 const P20_CRITICAL_THRESHOLD = 25;
+
+/**
+ * Report-type-aware policy (P0 follow-through, Section 8-9). Two of
+ * computeOperationalReadiness()'s 10 named gates ("IR Package", "Patch
+ * Priority") are defined purely in terms of CVSS/KEV presence -- structurally
+ * impossible for a report that was never about a scored vulnerability (a
+ * phishing campaign, a threat-actor profile, a data-breach notice) to
+ * satisfy. Counting that absence as a quality FAILURE conflates
+ * "not applicable to this report type" with "missing required content."
+ *
+ * This does NOT touch computeOperationalReadiness() itself (no shared
+ * P23 engine logic changes -- Section 26 forbids silently changing scoring),
+ * does NOT lower the 50% threshold, and does NOT apply to VULNERABILITY-type
+ * items (a CVE advisory with no CVSS/patch data is still genuinely
+ * incomplete). It only changes the DENOMINATOR for non-vulnerability items
+ * that carry zero CVE/CVSS/KEV signal at all, by excluding gates that could
+ * never have passed for that report type -- the same items still need every
+ * gate that legitimately applies (Evidence Chain, IOC packages, Detection,
+ * P21 Certification, etc.) to reach 50%.
+ */
+const CVE_SPECIFIC_GATES = new Set(['IR Package', 'Patch Priority']);
+
+/**
+ * Classifies an intelligence item's report type from its own content --
+ * never fabricated, never inferred beyond what the item already asserts.
+ * Returns one of: VULNERABILITY, RANSOMWARE, PHISHING, MALWARE, BREACH,
+ * THREAT_ACTOR, SECURITY_NEWS (fallback).
+ */
+export function classifyReportType(item) {
+  if (!item || typeof item !== 'object') return 'SECURITY_NEWS';
+
+  const cvss = parseFloat(item.cvss_score || item.risk_score || 0);
+  const hasCveSignal = Boolean(
+    item.cve_id || (item.cve_ids || []).length > 0 || cvss > 0 ||
+    item.kev_present || item.kev || (item.title || '').includes('CVE-')
+  );
+  if (hasCveSignal) return 'VULNERABILITY';
+
+  const t = String(item.threat_type || item.apex?.threat_category || '').toLowerCase();
+  const title = String(item.title || '').toLowerCase();
+  const hay = `${t} ${title}`;
+
+  if (hay.includes('ransomware')) return 'RANSOMWARE';
+  if (hay.includes('phishing') || hay.includes('smishing')) return 'PHISHING';
+  if (hay.includes('breach') || hay.includes('data leak') || hay.includes('data-leak')) return 'BREACH';
+  if (item.malware_family || hay.includes('malware') || hay.includes('trojan') || hay.includes('backdoor')) return 'MALWARE';
+  if (item.actor_tag || item.threat_actor || hay.includes('apt') || hay.includes('threat actor')) return 'THREAT_ACTOR';
+  return 'SECURITY_NEWS';
+}
+
+/**
+ * Re-derives P23's pct over only the gates that genuinely apply to this
+ * report's type, using computeOperationalReadiness()'s own unmodified gate
+ * results -- it filters, it never re-scores. VULNERABILITY items always use
+ * the full, unfiltered gate set.
+ */
+function _typeAdjustedReadiness(p23, reportType) {
+  if (reportType === 'VULNERABILITY') {
+    return { pct: p23.pct, applicableGates: p23.gates.map(g => g.name), notApplicableGates: [], basis: 'full' };
+  }
+
+  const applicable = p23.gates.filter(g => !CVE_SPECIFIC_GATES.has(g.name));
+  const notApplicable = p23.gates.filter(g => CVE_SPECIFIC_GATES.has(g.name)).map(g => g.name);
+  const passed = applicable.filter(g => g.pass).length;
+  const pct = applicable.length ? Math.round((passed / applicable.length) * 100) : p23.pct;
+
+  return { pct, applicableGates: applicable.map(g => g.name), notApplicableGates: notApplicable, basis: 'type_adjusted' };
+}
+
+/**
+ * Deterministic, synchronous content fingerprint over exactly the fields
+ * this gate evaluates (Section 10/11's certification-contract "content_hash").
+ * Deliberately NOT a cryptographic hash: evaluatePublicationGate() is called
+ * from hot .filter() paths across the Worker (index building, exports) and
+ * must stay synchronous -- crypto.subtle.digest is async and making this
+ * function async would be a breaking change to every existing call site.
+ * It is a stable fingerprint sufficient to detect "certified A, served B"
+ * drift; it is not a tamper-proof signature.
+ */
+function _contentFingerprint(item) {
+  const canonical = JSON.stringify({
+    id: item.id, title: item.title, description: item.description,
+    severity: item.severity, cvss_score: item.cvss_score, cve_id: item.cve_id,
+    evidence_chain: item.evidence_chain, iocs: item.iocs, ioc_count: item.ioc_count,
+    ttps: item.ttps, mitre_techniques: item.mitre_techniques,
+    detection_bundle: item.detection_bundle,
+    executive_summary: item.executive_summary, exec_summary: item.exec_summary,
+    source_url: item.source_url, kev_present: item.kev_present, epss_score: item.epss_score,
+  });
+  let hash = 5381;
+  for (let i = 0; i < canonical.length; i++) hash = ((hash << 5) + hash + canonical.charCodeAt(i)) | 0;
+  return 'fp_' + (hash >>> 0).toString(16);
+}
 
 /**
  * Evaluates the ONE authoritative publication decision for an intelligence
@@ -79,13 +172,16 @@ export function evaluatePublicationGate(item) {
              blocking_gates: ['ITEM_MISSING'] };
   }
 
-  let p20, p21, p23, p25, p26;
+  let p20, p21, p23, p25, p26, reportType, readiness, contentHash;
   try {
     p20 = computeP20QualityScore(item);
     p21 = getP21CertificationLevel(p20.total);
     p23 = computeOperationalReadiness(item);
     p25 = computeEnterpriseTrustScore(item);
     p26 = computeP26Grade(item);
+    reportType = classifyReportType(item);
+    readiness  = _typeAdjustedReadiness(p23, reportType);
+    contentHash = _contentFingerprint(item);
   } catch (e) {
     // FAIL CLOSED — a certification engine throwing must never be treated
     // as "unknown = approved" (Section 8's explicit prohibition).
@@ -98,7 +194,12 @@ export function evaluatePublicationGate(item) {
   if (p21.id === 'BELOW_MINIMUM')            blockingGates.push('P21_BELOW_MINIMUM');
   if (p20.total < P20_CRITICAL_THRESHOLD)    blockingGates.push('P20_QUALITY_CRITICALLY_LOW');
   if (p25.tier === 'BELOW THRESHOLD')        blockingGates.push('P25_BELOW_THRESHOLD');
-  if (p23.pct < 50)                          blockingGates.push('P23_OPERATIONAL_READINESS_DO_NOT_PUBLISH');
+  // Report-type-aware: for non-VULNERABILITY items with zero CVE/CVSS/KEV
+  // signal, CVE-only gates (IR Package, Patch Priority) are excluded from
+  // the denominator as NOT_APPLICABLE rather than counted as failures -- the
+  // 50% threshold itself is unchanged (Section 8/9, Section 26 forbids
+  // lowering thresholds; this only fixes what the pct is computed over).
+  if (readiness.pct < 50)                    blockingGates.push('P23_OPERATIONAL_READINESS_DO_NOT_PUBLISH');
   if (p26.certFlags.certTier === 'REJECTED') blockingGates.push('P26_REJECTED');
 
   const customerReady = blockingGates.length === 0;
@@ -112,12 +213,17 @@ export function evaluatePublicationGate(item) {
     customer_ready: customerReady,
     P20_SCORE: p20.total,
     P21_CERTIFICATION: p21.id,
-    P23_OPERATIONAL_READINESS_PCT: p23.pct,
+    P23_OPERATIONAL_READINESS_PCT: readiness.pct,
+    P23_OPERATIONAL_READINESS_RAW_PCT: p23.pct,
+    P23_OPERATIONAL_READINESS_BASIS: readiness.basis,
+    P23_NOT_APPLICABLE_GATES: readiness.notApplicableGates,
     P25_TRUST_SCORE: p25.pct,
     P25_TRUST_TIER: p25.tier,
     P26_COMMERCIAL_SCORE: p26.composite,
     P26_GRADE: p26.grade,
     P26_CERT_TIER: p26.certFlags.certTier,
+    REPORT_TYPE: reportType,
+    content_hash: contentHash,
     blocking_gates: blockingGates,
   };
 }

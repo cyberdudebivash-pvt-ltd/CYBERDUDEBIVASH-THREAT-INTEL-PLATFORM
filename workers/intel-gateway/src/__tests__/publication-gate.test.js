@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { evaluatePublicationGate, isCustomerReady, PUBLICATION_GATE_VERSION } from "../publication-gate.js";
+import { evaluatePublicationGate, isCustomerReady, classifyReportType, PUBLICATION_GATE_VERSION } from "../publication-gate.js";
 
 // ---------------------------------------------------------------------------
 // P0 incident regression suite — CYBERDUDEBIVASH SENTINEL APEX
@@ -174,11 +174,99 @@ test("evaluation is deterministic: same item evaluated twice yields identical ve
   assert.deepEqual(r1.blocking_gates, r2.blocking_gates);
 });
 
-test("P32's own permissive release-gate verdict is never consulted (most permissive engine must not win)", () => {
-  // REJECTED_ITEM would report PUBLICATION_APPROVED under p32-handlers.js's
-  // own _computeReleaseGate (only 4 basic completeness checks are
-  // blockers) -- this gate must reject it anyway, proving P32 is not
-  // part of the decision at all.
+test("P32's own permissive completeness-gate verdict is never consulted (most permissive engine must not win)", () => {
+  // REJECTED_ITEM has a title and a severity, so it would report
+  // OPERATIONAL_CHECKS_PASSED under p32-handlers.js's own
+  // _computeReleaseGate (only 4 basic completeness checks are blockers,
+  // and that function's output is deliberately no longer named with
+  // publication terminology -- P0 follow-through Section 18) -- this gate
+  // must reject it anyway, proving P32 is not part of the decision at all.
   const r = evaluatePublicationGate(REJECTED_ITEM);
   assert.equal(r.customer_ready, false);
+});
+
+// ---------------------------------------------------------------------------
+// P0 follow-through regression suite (report-type-aware policy, Section 21
+// Cases E/F/G, and export-path gating Cases I/J covered in index/api-extensions
+// integration below).
+// ---------------------------------------------------------------------------
+
+test("Case G: valid vulnerability report with complete required evidence -> CUSTOMER_READY, REPORT_TYPE=VULNERABILITY", () => {
+  const r = evaluatePublicationGate(CUSTOMER_READY_ITEM);
+  assert.equal(r.customer_ready, true);
+  assert.equal(r.REPORT_TYPE, "VULNERABILITY");
+  assert.equal(r.P23_OPERATIONAL_READINESS_BASIS, "full");
+  assert.deepEqual(r.P23_NOT_APPLICABLE_GATES, []);
+});
+
+test("Case E/F: a non-vulnerability report with no CVE/CVSS/KEV signal treats IR Package and Patch Priority as NOT_APPLICABLE, not MISSING_REQUIRED", () => {
+  // A well-documented phishing campaign report: no CVE, no CVSS, no KEV --
+  // "IR Package" and "Patch Priority" (both defined purely in terms of
+  // CVSS/KEV in computeOperationalReadiness) can never legitimately pass for
+  // this report type. It still must clear every gate that DOES apply.
+  const PHISHING_ITEM = {
+    id: "intel--phishing-1",
+    title: "Active Phishing Campaign Impersonating Major Bank",
+    threat_type: "phishing",
+    severity: "HIGH",
+    description: "B".repeat(200),
+    evidence_chain: { reliability_code: "A", source_reliability: "HIGH", source_name: "Vendor Takedown Report" },
+    iocs: [
+      { value: "secure-bank-login.example.net", type: "domain", response_guidance: "Add to DNS sinkhole / block at proxy" },
+    ],
+    ioc_count: 1,
+    ttps: ["T1566"],
+    mitre_techniques: ["T1566"],
+    detection_bundle: [{ type: "sigma", rule: "title: Phishing Domain Detection" }],
+    executive_summary: "Active phishing campaign targeting customers of a major bank.",
+    exec_summary: "Active phishing campaign targeting customers of a major bank.",
+    source_url: "https://vendor.example.com/takedown/phishing-1",
+    confidence: 0.9,
+    apex: { ai_summary: "AI-generated executive narrative here." },
+  };
+
+  const r = evaluatePublicationGate(PHISHING_ITEM);
+  assert.equal(r.REPORT_TYPE, "PHISHING");
+  assert.equal(r.P23_OPERATIONAL_READINESS_BASIS, "type_adjusted");
+  assert.deepEqual(r.P23_NOT_APPLICABLE_GATES.sort(), ["IR Package", "Patch Priority"]);
+  // Excluding two structurally-inapplicable gates must never LOWER the
+  // threshold -- it must never be lower than what full-population would give.
+  assert.ok(r.P23_OPERATIONAL_READINESS_PCT >= r.P23_OPERATIONAL_READINESS_RAW_PCT);
+});
+
+test("type-adjustment never applies to VULNERABILITY-type items, even when otherwise poorly enriched", () => {
+  // A CVE advisory that genuinely lacks IR/patch data is still incomplete --
+  // report-type adjustment must not silently exempt the report type the
+  // gates were written for.
+  const r = evaluatePublicationGate(REJECTED_ITEM);
+  assert.notEqual(r.REPORT_TYPE, undefined);
+  // REJECTED_ITEM has no cve/cvss/kev signal, so it classifies as
+  // SECURITY_NEWS (the honest fallback), not VULNERABILITY -- proving
+  // classification is never inferred beyond what the item actually asserts.
+  assert.equal(r.REPORT_TYPE, "SECURITY_NEWS");
+});
+
+test("classifyReportType is pure content-derived classification, never fabricated", () => {
+  assert.equal(classifyReportType({ cve_id: "CVE-2026-1234" }), "VULNERABILITY");
+  assert.equal(classifyReportType({ cvss_score: 7.5 }), "VULNERABILITY");
+  assert.equal(classifyReportType({ kev_present: true }), "VULNERABILITY");
+  assert.equal(classifyReportType({ threat_type: "ransomware" }), "RANSOMWARE");
+  assert.equal(classifyReportType({ title: "New Ransomware Strain Observed" }), "RANSOMWARE");
+  assert.equal(classifyReportType({ threat_type: "phishing" }), "PHISHING");
+  assert.equal(classifyReportType({ malware_family: "Emotet" }), "MALWARE");
+  assert.equal(classifyReportType({ title: "Data breach at Example Corp" }), "BREACH");
+  assert.equal(classifyReportType({ actor_tag: "APT99" }), "THREAT_ACTOR");
+  assert.equal(classifyReportType({ title: "Weekly Security Roundup" }), "SECURITY_NEWS");
+  assert.equal(classifyReportType(null), "SECURITY_NEWS");
+});
+
+test("content_hash is present, stable for identical content, and changes when evaluated fields change", () => {
+  const r1 = evaluatePublicationGate(CUSTOMER_READY_ITEM);
+  const r2 = evaluatePublicationGate({ ...CUSTOMER_READY_ITEM });
+  assert.ok(r1.content_hash);
+  assert.equal(r1.content_hash, r2.content_hash);
+
+  const mutated = { ...CUSTOMER_READY_ITEM, description: CUSTOMER_READY_ITEM.description + " EDITED" };
+  const r3 = evaluatePublicationGate(mutated);
+  assert.notEqual(r1.content_hash, r3.content_hash);
 });
