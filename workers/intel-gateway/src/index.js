@@ -90,7 +90,7 @@ import { handleP36Quality, handleP36Maturity, handleP36Targets, handleP36Gaps, h
 import { handleP37Hardening, handleP37FeedAudit, handleP37Enrichment, handleP37IQScore, handleP37Detection, handleP37SourceDiversity, handleP37Reliability, handleP37Debt, handleP37Metrics, handleP37Certification, handleP37Dashboard, handleP37Observability } from './p37-handlers.js';
 import { handleP38SchemaRegistry, handleP38FeedGovernance, handleP38SchemaDrift, handleP38EnrichmentAudit, handleP38ConfidenceAudit, handleP38IQIndex, handleP38SourceDiversity, handleP38Certification, handleP38Executive, handleP38Reliability, handleP38Metrics, handleP38Observability } from './p38-handlers.js';
 import { handleP40SourceRegistry, handleP40SourceDetail, handleP40SourceHealth, handleP40Licensing, handleP40Coverage, handleP40Waves, handleP40Certification, handleP40Metrics, handleP40Dashboard, handleP40Observability } from './p40-handlers.js';
-import { evaluatePublicationGate } from './publication-gate.js';
+import { evaluatePublicationGate, isCustomerReady } from './publication-gate.js';
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
@@ -1876,11 +1876,63 @@ async function handleAdmin(request, env, ctx, path, method) {
     return jsonResp({ message: "API key revoked", key_prefix: key.slice(0, 12) });
   }
 
+  // GET /api/admin/publication-audit — P0 follow-through (Section 16):
+  // incremental scanner over the full historical REPORTS_R2 archive. Each
+  // page lists up to `limit` objects under reports/ via R2's own cursor
+  // (never loads the archive into memory at once), resolves each report id
+  // against the SAME bounded feed sources findItemBySlug() searches, and
+  // classifies it with the SAME evaluatePublicationGate() the live routes
+  // enforce -- zero duplicate certification logic. Reports outside the
+  // currently-resolvable feed window are honestly reported UNKNOWN (never
+  // assumed safe) rather than guessed at by parsing rendered HTML.
+  if (path === "/api/admin/publication-audit" && method === "GET") {
+    try {
+      const url    = new URL(request.url);
+      const cursor = url.searchParams.get("cursor") || undefined;
+      const limit  = Math.min(parseInt(url.searchParams.get("limit") || "100", 10), 500);
+
+      const listing = await env.REPORTS_R2.list({ prefix: "reports/", cursor, limit });
+      const results = { CUSTOMER_READY: 0, INTERNAL: 0, REJECTED: 0, BLOCKED: 0, UNKNOWN: 0 };
+      const unknownSample = [];
+
+      for (const obj of listing.objects || []) {
+        const fn = obj.key.split("/").pop() || "";
+        const id = fn.replace(/\.html?$/, "");
+        if (!id) continue;
+        const item = await findItemBySlug(env, id);
+        if (!item) {
+          results.UNKNOWN++;
+          if (unknownSample.length < 10) unknownSample.push(obj.key);
+          continue;
+        }
+        const gate = evaluatePublicationGate(item);
+        if (gate.customer_ready) results.CUSTOMER_READY++;
+        else if (gate.publication_state === "REJECTED") results.REJECTED++;
+        else results.BLOCKED++;
+      }
+
+      return jsonResp({
+        version: PLATFORM_VERSION,
+        scanned_this_page: (listing.objects || []).length,
+        results,
+        unknown_sample_keys: unknownSample,
+        unknown_scope_note: "UNKNOWN = report id not resolvable via the currently-active feed windows (latest/top10/apex) -- outside this scanner's verifiable reach; NOT assumed safe, NOT counted as customer_ready.",
+        cursor: listing.truncated ? listing.cursor : null,
+        truncated: !!listing.truncated,
+        generated_at: now(),
+      });
+    } catch (e) {
+      console.error(`[publication-audit] failed: ${e.message}`);
+      return jsonResp({ error: "Publication audit scan failed", message: e.message }, 500);
+    }
+  }
+
   return jsonResp({
     error: "Admin endpoint not found",
     endpoints: [
       "GET /api/admin/health",
       "GET /api/admin/audit?limit=50",
+      "GET /api/admin/publication-audit?limit=100&cursor=...",
       "POST /api/admin/keys  body:{customer_id,tier,label?,expires_in_days?}",
       "DELETE /api/admin/keys/{key}",
     ],
@@ -1956,10 +2008,14 @@ async function handleTAXII(request, env, ctx, path, auth) {
     }
 
     const feedData   = await loadFeedItems(env);
-    const allItems   = feedData.items || [];
+    const allItems   = (feedData.items || []).filter(isCustomerReady);
     const sourceItems = collId === TAXII_KEV_COLL ? allItems.filter(i => i.kev_present) : allItems;
 
-    // Prefer pre-built STIX bundle from R2
+    // Prefer pre-built STIX bundle from R2. NOTE (P0 follow-through, Section
+    // 15 residual scope): this pre-built bundle is written by a separate
+    // Python CI stage, not this route -- the same documented scope boundary
+    // as report_generator.py in publication-gate.js's header. The inline
+    // fallback bundle below (this route's own output) is gated above.
     const r2Bundle = await r2Get(env, `stix/bundle-${collId}.json`);
     if (r2Bundle) {
       return new Response(JSON.stringify(r2Bundle), {

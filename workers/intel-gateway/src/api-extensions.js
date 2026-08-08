@@ -18,6 +18,7 @@
 // =============================================================================
 
 import { applyTierGateV2 } from './revenue-enforcement.js';
+import { isCustomerReady } from './publication-gate.js';
 
 // 
 // SCOPES SYSTEM
@@ -568,7 +569,10 @@ export async function handleMISPExport(request, env, auth, rid) {
     const index = await fetchReportsIndexExt(env);
     if (!index?.reports?.length) return extJson({ error: "feed_unavailable" }, 503);
 
-    let items = index.reports;
+    // P0 follow-through (Section 15): a report blocked from customer HTML
+    // must not leak through the MISP export -- same authoritative gate,
+    // reused unchanged (never re-implemented).
+    let items = index.reports.filter(isCustomerReady);
 
     if (reportId) {
       items = items.filter(i => (i.stix_id || i.id || "") === reportId || (i.title || "").toLowerCase().includes(reportId.toLowerCase()));
@@ -716,7 +720,9 @@ export async function handleCSVExport(request, env, auth, rid) {
     const index = await fetchReportsIndexExt(env);
     if (!index?.reports?.length) return extJson({ error: "feed_unavailable" }, 503);
 
-    let items = index.reports;
+    // P0 follow-through (Section 15): same authoritative gate as the MISP
+    // export and /reports/** -- a rejected report must not leak IOCs via CSV.
+    let items = index.reports.filter(isCustomerReady);
     if (since) {
       const sinceMs = new Date(since).getTime();
       items = items.filter(i => new Date(i.processed_at || 0).getTime() >= sinceMs);

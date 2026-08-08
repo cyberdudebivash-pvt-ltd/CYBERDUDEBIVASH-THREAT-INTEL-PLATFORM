@@ -10,6 +10,8 @@
 //   - Revenue tracked in ANALYTICS_KV per report generation
 // =============================================================================
 
+import { isCustomerReady } from './publication-gate.js';
+
 // -- Tier & Pricing Config -----------------------------------------------------
 const REPORT_CONFIG = {
   VERSION: "143.0.0",
@@ -305,6 +307,11 @@ export async function handlePremiumReport(request, env, auth, rid) {
   } catch (e) {
     // Non-fatal -- proceed with empty feed, report will still generate structure
   }
+
+  // P0 follow-through (Section 15): this is a PAID customer artifact ($49/report,
+  // $149/mo) -- it must be held to the same authoritative publication gate as
+  // the free HTML reports. Reuses evaluatePublicationGate unchanged.
+  feedItems = feedItems.filter(isCustomerReady);
 
   // Apply filters
   let filtered = feedItems;
