@@ -1754,8 +1754,11 @@ def generate_ai_insight_premium(item: Dict[str, Any]) -> str:
         actor = str(item.get("actor_cluster") or item.get("actor") or "")
         kev = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
         cvss = item.get("cvss_score") or item.get("cvss")
+        epss = item.get("epss_score") or item.get("epss")
         threat_type = str(item.get("threat_type") or "").lower()
         vuln_class = _detect_vuln_class(title, desc)
+        seed_str  = str(item.get("id") or item.get("stix_id") or title)
+        seed_hash = int(hashlib.md5(seed_str.encode("utf-8", errors="replace"), usedforsecurity=False).hexdigest(), 16)
 
         # ── DYNAMIC AI CONFIDENCE SCORING (replaces static 15.6% / 21.3%) ──
         # Base confidence from intelligence data richness
@@ -1780,19 +1783,60 @@ def generate_ai_insight_premium(item: Dict[str, Any]) -> str:
         # Predictive risk horizon (14-day model)
         pred_risk = min(10.0, risk + (1.5 if kev else 0.3))
 
-        # Escalation prediction
+        # Escalation prediction. v186.0 P0 FIX: escalation_detail used to be one fixed
+        # sentence per risk bucket, so any two items landing in the same bucket (common
+        # for the many similarly-scored low-severity CVE stubs a single feed run
+        # produces) rendered byte-for-byte identical AI Insight text. When a real EPSS
+        # score is available it's interpolated directly (never fabricated); otherwise
+        # a small set of honestly-worded variants is selected deterministically by the
+        # item's own id/title, mirroring the same seed_hash mechanism already used for
+        # exec-summary template selection elsewhere in this module.
+        try:
+            epss_pct = float(epss)
+            if epss_pct <= 1.0:
+                epss_pct *= 100.0
+        except (TypeError, ValueError):
+            epss_pct = None
+
         if kev or risk >= 9:
             escalation = "IMMINENT (24–72 hours)"
-            escalation_detail = "Active exploitation confirmed or near-certain. Emergency response warranted."
+            _variants = (
+                "Active exploitation confirmed or near-certain. Emergency response warranted.",
+                "Exploitation signals leave no meaningful remediation window remaining. Treat as an active incident, not a patch backlog item.",
+            )
         elif risk >= 7:
             escalation = "LIKELY (72 hours – 7 days)"
-            escalation_detail = "High exploitation probability within the week. Prioritised patching required."
+            _variants = (
+                "High exploitation probability within the week. Prioritised patching required.",
+                "Weaponisation within days is plausible given the severity profile. Escalate above routine patch SLAs.",
+            )
         elif risk >= 5:
             escalation = "POSSIBLE (7–30 days)"
-            escalation_detail = "Moderate exploitation probability. Monitor threat intel feeds for PoC emergence."
+            _variants = (
+                "Moderate exploitation probability. Monitor threat intel feeds for PoC emergence.",
+                "Exploitation is plausible but not imminent. Track exploit-database and vendor-advisory updates over the coming weeks.",
+            )
         else:
             escalation = "LOW (30+ days)"
-            escalation_detail = "Limited exploitation probability. Address in standard patching cycle."
+            _variants = (
+                "Limited exploitation probability. Address in standard patching cycle.",
+                "No signals indicate near-term targeting. Standard vulnerability-management cadence is appropriate.",
+                "Current evidence does not support an accelerated timeline. Revisit if KEV or EPSS status changes.",
+            )
+
+        if epss_pct is not None:
+            if epss_pct >= 10.0:
+                epss_read = "an elevated"
+            elif epss_pct >= 1.0:
+                epss_read = "a modest"
+            else:
+                epss_read = "a low"
+            escalation_detail = (
+                f"FIRST.org EPSS models {epss_read} 30-day exploitation probability of "
+                f"{epss_pct:.2f}% for this specific advisory. " + _variants[0]
+            )
+        else:
+            escalation_detail = _variants[seed_hash % len(_variants)]
 
         # Sector risk forecasting
         sector_risks = []
@@ -2455,12 +2499,50 @@ _KEV_URGENCY = (
     "compromised. Execute immediate triage against your asset inventory."
 )
 
-_NO_KEV = (
+# v186.0 P0 FIX: this paragraph was a single fixed string inserted verbatim into
+# every non-KEV report regardless of the item's own actual signals -- across reports
+# for different CVEs it read byte-for-byte identical. _render_no_kev_paragraph()
+# below uses the item's real (already-computed, never fabricated) EPSS score when
+# known, and otherwise deterministically selects among several honestly-worded "no
+# data" variants using the same seed_hash mechanism generate_executive_summary()
+# already uses to vary its body template -- extending that existing pattern to this
+# paragraph instead of inventing new evidence.
+_NO_KEV_VARIANTS = (
     "No confirmed exploitation has been recorded in the CISA Known Exploited Vulnerabilities "
-    "catalogue at time of analysis. However, proof-of-concept availability and attacker tooling "
-    "integration timelines suggest exploitation in the wild is probable within 14-30 days of "
-    "public disclosure for vulnerabilities of this class and severity."
+    "catalogue at time of analysis. Historical patterns for vulnerabilities of this class and "
+    "severity suggest weaponised exploitation, if it occurs, typically follows within 14-30 days "
+    "of public disclosure.",
+    "This advisory does not currently appear in the CISA KEV catalogue. Absent an EPSS score to "
+    "quantify near-term exploitation probability, treat proof-of-concept availability and public "
+    "exploit-tooling integration as the leading indicators to monitor.",
+    "CISA KEV has no entry for this vulnerability as of this analysis. Exploitation likelihood "
+    "cannot be quantified from EPSS at this time; prioritise remediation using CVSS severity and "
+    "your own asset exposure rather than assuming imminent exploitation.",
 )
+
+
+def _render_no_kev_paragraph(epss, seed_hash: int) -> str:
+    if epss is not None:
+        try:
+            epss_pct = float(epss)
+            if epss_pct <= 1.0:
+                epss_pct *= 100.0
+        except (TypeError, ValueError):
+            epss_pct = None
+        if epss_pct is not None:
+            if epss_pct >= 10.0:
+                interp = "a meaningfully elevated near-term exploitation probability"
+            elif epss_pct >= 1.0:
+                interp = "a modest but non-trivial exploitation probability"
+            else:
+                interp = "a low modelled exploitation probability"
+            return (
+                "No confirmed exploitation has been recorded in the CISA Known Exploited "
+                "Vulnerabilities catalogue at time of analysis. FIRST.org's EPSS model puts "
+                f"30-day exploitation probability at {epss_pct:.2f}%, indicating {interp} for "
+                "this specific advisory."
+            )
+    return _NO_KEV_VARIANTS[seed_hash % len(_NO_KEV_VARIANTS)]
 
 
 def generate_executive_summary(item):
@@ -2504,7 +2586,8 @@ def generate_executive_summary(item):
             "<div class='callout critical' style='margin:14px 0'>"
             + _KEV_URGENCY + "</div>\n"
             if kev else
-            "<p style='color:var(--muted);font-size:12px'>" + _NO_KEV + "</p>\n"
+            "<p style='color:var(--muted);font-size:12px'>"
+            + _render_no_kev_paragraph(epss, seed_hash) + "</p>\n"
         )
 
         body = template.format(
