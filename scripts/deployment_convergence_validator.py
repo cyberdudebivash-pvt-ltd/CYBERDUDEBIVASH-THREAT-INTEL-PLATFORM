@@ -65,6 +65,7 @@ import logging
 import math
 import os
 import random
+import re
 import sys
 import time
 import urllib.error
@@ -632,11 +633,49 @@ def phase4_convergence_confirmation(feed: List[dict], manifest: dict) -> PhaseRe
     )
 
 
+_HIST_REPORT_ID_RE = re.compile(r"(intel--[a-f0-9]+)\.html?$", re.IGNORECASE)
+
+
+def _is_expected_publication_rejection(url: str) -> bool:
+    """
+    v186.0 P0 FIX: a 404 on a historical report URL used to always count as
+    a "continuity breach." Since PR #141/#143 (the P0 customer-publication
+    gate), the Worker deliberately 404s any report whose id is resolvable but
+    fails evaluatePublicationGate() (P21_BELOW_MINIMUM / P26_REJECTED /
+    etc.) -- verified live: every one of a real batch of "inaccessible"
+    historical reports this check flagged was, in fact, a legitimate
+    REJECTED verdict from the publication-status API, not a broken
+    deployment. Consult that same authoritative endpoint before counting a
+    404 against continuity, so this check can no longer conflict with the
+    gate it postdates. Fails closed: any doubt (network error, ambiguous
+    response) leaves the URL counted as a genuine failure, unchanged from
+    prior behaviour.
+    """
+    m = _HIST_REPORT_ID_RE.search(url)
+    if not m:
+        return False
+    report_id = m.group(1)
+    status_url = f"{PAGES_BASE_URL}/api/v1/reports/{report_id}/publication-status"
+    probe = _http_probe(status_url)
+    if not probe.success:
+        return False
+    try:
+        req = urllib.request.Request(status_url, headers={"User-Agent": "SentinelApex-ConvergenceValidator/1.0"})
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        return data.get("customer_ready") is False
+    except Exception:
+        return False
+
+
 def phase5_historical_report_audit(feed: List[dict], manifest: dict) -> PhaseResult:
     """
     Phase 5: Historical report continuity verification.
     Ensures historical reports (not just latest) remain accessible.
     Guards against Pages deployments that accidentally delete older reports.
+    A 404 caused by the P0 publication gate correctly rejecting an
+    uncertified report is NOT a continuity breach -- see
+    _is_expected_publication_rejection().
     """
     log.info("=" * 70)
     log.info("PHASE 5  -  HISTORICAL REPORT CONTINUITY AUDIT")
@@ -659,22 +698,33 @@ def phase5_historical_report_audit(feed: List[dict], manifest: dict) -> PhaseRes
     log.info("Phase 5: Probing %d historical report URLs...", len(historical_urls))
     results, ok, fail = _probe_batch(historical_urls, "Phase5-Historical")
 
-    success_rate = ok / len(historical_urls) if historical_urls else 1.0
+    gate_rejected = 0
+    for r in results:
+        if not r.success and r.status_code == 404 and _is_expected_publication_rejection(r.url):
+            gate_rejected += 1
+            log.info("  ℹ️  [Phase5-Historical] %s  -  404 is an EXPECTED publication-gate rejection, not a breach", r.url)
+
+    effective_total = len(historical_urls) - gate_rejected
+    effective_ok = ok
+    success_rate = (effective_ok / effective_total) if effective_total else 1.0
     phase_success = success_rate >= 0.8   # 80% threshold  -  some historical loss is alert, not hard-fail
 
     duration = time.monotonic() - t0
     if not phase_success:
-        log.error("Phase 5: HISTORICAL CONTINUITY BREACH  -  %d/%d historical reports inaccessible!", fail, len(historical_urls))
+        log.error("Phase 5: HISTORICAL CONTINUITY BREACH  -  %d/%d historical reports inaccessible (excluding %d expected gate rejections)!",
+                   fail - gate_rejected, effective_total, gate_rejected)
     else:
-        log.info("Phase 5: Historical continuity OK  -  %d/%d accessible (%.0f%%)", ok, len(historical_urls), success_rate * 100)
+        log.info("Phase 5: Historical continuity OK  -  %d/%d accessible (%.0f%%), %d expected gate rejections excluded",
+                  effective_ok, effective_total, success_rate * 100, gate_rejected)
 
     return PhaseResult(
         phase=5,
         name="Historical Report Audit",
         success=phase_success,
-        probes=all_results if False else results,
+        probes=results,
         duration_s=round(duration, 1),
-        message=f"{ok}/{len(historical_urls)} historical reports accessible ({success_rate:.0%}). "
+        message=f"{effective_ok}/{effective_total} historical reports accessible ({success_rate:.0%}), "
+                f"{gate_rejected} excluded as expected publication-gate rejections. "
                 f"{'PASS' if phase_success else 'HISTORICAL CONTINUITY BREACH'}",
     )
 

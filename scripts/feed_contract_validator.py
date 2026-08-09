@@ -290,33 +290,48 @@ class FeedContractValidator:
 
         src = wp.read_text(encoding="utf-8", errors="replace")
 
-        # CONTRACT-5: Verify handlePreview() returns nested envelope
+        # CONTRACT-5: Verify /api/preview returns nested envelope
         # We expect: preview: { items: [...], total_preview: N, ... }
+        #
+        # v186.0 P0 FIX: this check regex-matched ONLY a named-variable pattern
+        # (`previewPayload = { ... items ... }`), assuming a specific coding
+        # style. The live route (index.js, "/api/preview" branch) constructs
+        # the response as an inline object literal passed straight into
+        # jsonResp() -- there is no `previewPayload` variable at all, so this
+        # check HARD-FAILED against fully contract-compliant code (verified
+        # live: GET /api/preview returns exactly
+        # {"status":"ok","preview":{"items":[...],"total_preview":N,...}}).
+        # Fixed to recognize EITHER coding style -- the named-variable
+        # pattern (in case it's used elsewhere) or the inline literal nested
+        # under the "preview" key within the /api/preview route's own source
+        # block, scoped to that block so this doesn't accidentally match an
+        # unrelated "preview:" occurrence elsewhere in the file.
+        preview_route_m = re.search(r'path === "/api/preview"[\s\S]{0,2000}', src)
+        preview_block = preview_route_m.group(0) if preview_route_m else ""
+
         self._tick()
-        # Check that the previewPayload pattern is present
-        if "total_preview:" in src and "preview:" in src:
-            # Verify the structure: previewPayload has items + total_preview
-            if re.search(r"previewPayload\s*=\s*\{[^}]*\bitems\b", src, re.DOTALL):
-                self._pass("/api/preview", "CONTRACT-5",
-                           "handlePreview() emits previewPayload.items (nested envelope confirmed)")
-            else:
-                self._hard("/api/preview", "CONTRACT-5",
-                           "handlePreview() previewPayload structure changed -- canary B may false-negative",
-                           "Expected: previewPayload = { items: [...], total_preview: N }")
+        has_named_pattern  = bool(re.search(r"previewPayload\s*=\s*\{[^}]*\bitems\b", src, re.DOTALL))
+        has_inline_pattern = bool(re.search(r"preview\s*:\s*\{[^}]*\bitems\b[^}]*\btotal_preview\b",
+                                            preview_block, re.DOTALL))
+        if has_named_pattern or has_inline_pattern:
+            self._pass("/api/preview", "CONTRACT-5",
+                       "preview envelope emits items + total_preview (nested envelope confirmed)")
         else:
             self._hard("/api/preview", "CONTRACT-5",
-                       "handlePreview() envelope missing 'items' or 'total_preview' keys in Worker source",
-                       "Root cause of Run 25621416977 canary B false-negative")
+                       "/api/preview envelope structure changed -- canary B may false-negative",
+                       "Expected: preview object containing both 'items' and 'total_preview'")
 
-        # CONTRACT-5b: Verify the final jsonResponse wraps preview: previewPayload
+        # CONTRACT-5b: Verify the final jsonResponse wraps preview: {...} or preview: previewPayload
         self._tick()
-        # The response must be: { status:"ok", preview: previewPayload, ... }
-        if re.search(r'preview\s*:\s*previewPayload', src):
+        # The response must be: { status:"ok", preview: <object> }
+        has_named_nest  = bool(re.search(r'preview\s*:\s*previewPayload', src))
+        has_inline_nest = bool(re.search(r'preview\s*:\s*\{', preview_block))
+        if has_named_nest or has_inline_nest:
             self._pass("/api/preview", "CONTRACT-5b",
-                       "handlePreview() final response wraps payload under 'preview' key")
+                       "/api/preview response wraps payload under 'preview' key")
         else:
             self._hard("/api/preview", "CONTRACT-5b",
-                       "handlePreview() may not nest payload under 'preview' key",
+                       "/api/preview may not nest payload under 'preview' key",
                        "Contract requires: { status:'ok', preview: { items:[...], total_preview:N }}")
 
         # CONTRACT-7: Verify canary parser alignment with Worker envelope
