@@ -45,7 +45,7 @@
  * the incident report's Root Cause / Residual Risk sections.
  */
 
-import { computeP20QualityScore } from './p20-handlers.js';
+import { computeP20QualityScore, classifyReportType } from './p20-handlers.js';
 import { getP21CertificationLevel } from './p21-handlers.js';
 import { computeOperationalReadiness } from './p23-handlers.js';
 import { computeEnterpriseTrustScore } from './p25-handlers.js';
@@ -79,33 +79,12 @@ const P20_CRITICAL_THRESHOLD = 25;
  */
 const CVE_SPECIFIC_GATES = new Set(['IR Package', 'Patch Priority']);
 
-/**
- * Classifies an intelligence item's report type from its own content --
- * never fabricated, never inferred beyond what the item already asserts.
- * Returns one of: VULNERABILITY, RANSOMWARE, PHISHING, MALWARE, BREACH,
- * THREAT_ACTOR, SECURITY_NEWS (fallback).
- */
-export function classifyReportType(item) {
-  if (!item || typeof item !== 'object') return 'SECURITY_NEWS';
-
-  const cvss = parseFloat(item.cvss_score || item.risk_score || 0);
-  const hasCveSignal = Boolean(
-    item.cve_id || (item.cve_ids || []).length > 0 || cvss > 0 ||
-    item.kev_present || item.kev || (item.title || '').includes('CVE-')
-  );
-  if (hasCveSignal) return 'VULNERABILITY';
-
-  const t = String(item.threat_type || item.apex?.threat_category || '').toLowerCase();
-  const title = String(item.title || '').toLowerCase();
-  const hay = `${t} ${title}`;
-
-  if (hay.includes('ransomware')) return 'RANSOMWARE';
-  if (hay.includes('phishing') || hay.includes('smishing')) return 'PHISHING';
-  if (hay.includes('breach') || hay.includes('data leak') || hay.includes('data-leak')) return 'BREACH';
-  if (item.malware_family || hay.includes('malware') || hay.includes('trojan') || hay.includes('backdoor')) return 'MALWARE';
-  if (item.actor_tag || item.threat_actor || hay.includes('apt') || hay.includes('threat actor')) return 'THREAT_ACTOR';
-  return 'SECURITY_NEWS';
-}
+// classifyReportType() now lives in p20-handlers.js (moved so
+// computeP20QualityScore() can reuse it for its own type-aware IOC-quality
+// scoring without a circular import -- p20-handlers.js has no imports of
+// its own). Re-exported here unchanged for every existing consumer of this
+// module (Section 5 backward compatibility) -- same name, same behavior.
+export { classifyReportType };
 
 /**
  * Re-derives P23's pct over only the gates that genuinely apply to this

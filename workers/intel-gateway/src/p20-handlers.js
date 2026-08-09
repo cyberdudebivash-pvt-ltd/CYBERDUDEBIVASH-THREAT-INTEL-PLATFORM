@@ -32,6 +32,49 @@ const Q_WEIGHTS = {
   consistency:      5,   // internal scoring consistency
 };
 
+// -- Report-type classification (moved here from publication-gate.js so
+// computeP20QualityScore() can reuse it directly -- p20-handlers.js has no
+// imports of its own, so this is the lowest layer both modules share
+// without creating a circular import). publication-gate.js re-exports this
+// unchanged for its existing consumers (Section 5 backward compatibility).
+/**
+ * Classifies an intelligence item's report type from its own content --
+ * never fabricated, never inferred beyond what the item already asserts.
+ * Returns one of: VULNERABILITY, RANSOMWARE, PHISHING, MALWARE, BREACH,
+ * THREAT_ACTOR, SECURITY_NEWS (fallback).
+ */
+export function classifyReportType(item) {
+  if (!item || typeof item !== 'object') return 'SECURITY_NEWS';
+
+  const cvss = parseFloat(item.cvss_score || item.risk_score || 0);
+  const hasCveSignal = Boolean(
+    item.cve_id || (item.cve_ids || []).length > 0 || cvss > 0 ||
+    item.kev_present || item.kev || (item.title || '').includes('CVE-')
+  );
+  if (hasCveSignal) return 'VULNERABILITY';
+
+  const t = String(item.threat_type || item.apex?.threat_category || '').toLowerCase();
+  const title = String(item.title || '').toLowerCase();
+  const hay = `${t} ${title}`;
+
+  if (hay.includes('ransomware')) return 'RANSOMWARE';
+  if (hay.includes('phishing') || hay.includes('smishing')) return 'PHISHING';
+  if (hay.includes('breach') || hay.includes('data leak') || hay.includes('data-leak')) return 'BREACH';
+  if (item.malware_family || hay.includes('malware') || hay.includes('trojan') || hay.includes('backdoor')) return 'MALWARE';
+  if (item.actor_tag || item.threat_actor || hay.includes('apt') || hay.includes('threat actor')) return 'THREAT_ACTOR';
+  return 'SECURITY_NEWS';
+}
+
+// Report types that are themselves raw indicator feeds -- a malware sample,
+// ransomware campaign, or phishing takedown report naturally carries file
+// hashes / C2 IPs / phishing URLs as its primary payload. A vulnerability
+// bulletin, breach notice, threat-actor profile, or general security-news
+// item does not, by nature, carry raw technical indicators (Section 8/9's
+// "CVE != IOC" invariant) -- scoring it against a 20-point IOC-presence
+// rubric conflates "not applicable to this report type" with "missing
+// required content."
+const IOC_NATIVE_TYPES = new Set(['MALWARE', 'RANSOMWARE', 'PHISHING']);
+
 // -- P20.9: Publication Workflow -----------------------------------------------
 const PUB_STAGES = [
   { id: "PREMIUM_INTELLIGENCE", label: "Premium Intelligence",  minScore: 90, color: "#00ffc6" },
@@ -150,7 +193,16 @@ export function computeP20QualityScore(item) {
   scores.detection = hasSigma ? (sigmaIsSpecific ? 10 : 5) : 0;
 
   // Executive quality (10 pts)
-  const execSummary = item.apex?.ai_summary || item.apex_ai_summary || item.description || "";
+  // v184.0 P0 fix: item.apex is the paywall-lock wrapper ({locked, upgrade})
+  // and never carries ai_summary -- the real (if truncated for free tier)
+  // AI summary lives at item.apex_ai.ai_summary. The old lookup order
+  // (item.apex?.ai_summary, always undefined) fell straight through to
+  // item.apex_ai_summary, which for paywalled content is always the same
+  // static marketing string ("...requires Pro or Enterprise") -- always
+  // under the 20-word floor, always scoring 0 regardless of the item's
+  // actual description/content richness. item.description is now checked
+  // before that marketing string, not after.
+  const execSummary = item.apex_ai?.ai_summary || item.apex?.ai_summary || item.description || item.apex_ai_summary || "";
   const execWords = stripMarkdown(execSummary).split(/\s+/).filter(Boolean).length;
   scores.executive = execWords >= 100 ? 10 : execWords >= 50 ? 7 : execWords >= 20 ? 4 : 0;
 
@@ -169,7 +221,27 @@ export function computeP20QualityScore(item) {
   const hasCve  = !!(item.cve_id || (item.cve_ids || []).length);
   scores.consistency = (hasCvss ? 2 : 0) + (hasEpss ? 1 : 0) + (hasCve ? 2 : 0);
 
-  const total = Object.values(scores).reduce((s, v) => s + v, 0);
+  // P0 follow-through (Section 8/9 "CVE != IOC" invariant): exclude
+  // ioc_quality (20 pts) from the score denominator when this item's own
+  // classified type is not an indicator-native one (IOC_NATIVE_TYPES) AND
+  // it genuinely carries no real IOCs itself -- a vulnerability bulletin or
+  // security-news report is not a raw indicator feed by nature. Mirrors the
+  // exact renormalization pattern already applied to P23's readiness gates
+  // (_typeAdjustedReadiness in publication-gate.js): filters, never
+  // re-scores, and never lowers the threshold -- an item that DOES carry
+  // real IOCs, or whose type is indicator-native, is scored exactly as
+  // before with no change at all.
+  const reportType = classifyReportType(item);
+  const iocApplicable = iocs.length > 0 || IOC_NATIVE_TYPES.has(reportType);
+
+  let total;
+  if (iocApplicable) {
+    total = Object.values(scores).reduce((s, v) => s + v, 0);
+  } else {
+    const possible = 100 - Q_WEIGHTS.ioc_quality;
+    const scoreSum = Object.entries(scores).reduce((s, [k, v]) => k === "ioc_quality" ? s : s + v, 0);
+    total = possible ? (scoreSum / possible) * 100 : 0;
+  }
   return { total: Math.min(100, Math.round(total)), breakdown: scores };
 }
 
