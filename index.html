@@ -5966,8 +5966,19 @@
             </a>
         </div>
 
-        <!-- ═══ THREAT GRID ═══ -->
-        <div id="threat-grid">
+        <!-- ═══ THREAT GRID (DEPRECATED, v187.0) ═══
+             renderCards() (below) still runs in full -- it drives
+             renderLiveExploits(), renderTopThreats(), the intel status bar,
+             and threatRegistry population (used by XSS-safe modal dispatch
+             elsewhere on this page) -- only this container's own card
+             markup is suppressed. #sapx-card-grid (card_renderer.js, the
+             9-zone canonical card) is now the sole visible card grid for
+             the LIVE tab; it independently fetches and renders the full
+             feed (see MAX_CARDS in js/card_renderer_integration.js).
+             Do not delete renderCards()/#threat-grid outright -- retained
+             per deprecation policy pending confirmed migration; only the
+             visual output is retired here. -->
+        <div id="threat-grid" style="display:none !important;">
             <div class="loading-state">
                 <div class="loading-spinner"></div>
                 <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:3px;text-transform:uppercase;">
