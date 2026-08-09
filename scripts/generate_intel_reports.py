@@ -697,6 +697,79 @@ def _h(s: Any) -> str:
     return html.escape(str(s), quote=True)
 
 
+_CVE_ID_FALLBACK_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
+_CVSS_FALLBACK_INDEX: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+def _extract_cve_ids_for_fallback(it: dict) -> List[str]:
+    ids: set = set()
+    explicit = it.get("cve_ids") or ([it["cve_id"]] if it.get("cve_id") else [])
+    if isinstance(explicit, str):
+        explicit = [explicit]
+    for c in explicit or []:
+        if c:
+            ids.add(str(c).strip().upper())
+    for m in _CVE_ID_FALLBACK_RE.findall(str(it.get("title", ""))):
+        ids.add(m.upper())
+    return list(ids)
+
+
+def _load_cvss_fallback_index() -> Dict[str, Dict[str, Any]]:
+    """
+    v186.0 P0 FIX: STAGE 3.1.2 (scripts/enrich_cvss_epss_batch.py) enriches
+    api/feed.json with real NVD CVSS / FIRST.org EPSS values, rate-limited and
+    processed in bounded batches per run. This report generator renders from a
+    separate manifest snapshot that can be produced before a given CVE's
+    enrichment lands there, showing "CVSS: N/A" / "EPSS: N/A" even when this
+    repo's own pipeline has already scored the same CVE elsewhere in
+    api/feed.json (confirmed: the same intel item's CVSS shows correctly on
+    the dashboard, which reads api/feed.json directly, but not in the
+    generated dossier). This is a DISPLAY-ONLY fallback lookup by CVE ID:
+    it never mutates the item, never feeds into severity/risk classification,
+    and fails silently to "unknown" if api/feed.json is missing or the CVE
+    isn't enriched there either -- it surfaces data this repo's own pipeline
+    already computed, it never invents a value.
+    """
+    global _CVSS_FALLBACK_INDEX
+    if _CVSS_FALLBACK_INDEX is not None:
+        return _CVSS_FALLBACK_INDEX
+    index: Dict[str, Dict[str, Any]] = {}
+    try:
+        feed_path = Path(__file__).resolve().parent.parent / "api" / "feed.json"
+        if feed_path.exists():
+            raw = json.loads(feed_path.read_text(encoding="utf-8"))
+            feed_items = raw if isinstance(raw, list) else (raw.get("items") or raw.get("advisories") or [])
+            for fi in feed_items:
+                if not isinstance(fi, dict):
+                    continue
+                if fi.get("cvss_score") is None and fi.get("epss_score") is None:
+                    continue
+                for cve in _extract_cve_ids_for_fallback(fi):
+                    if cve not in index:
+                        index[cve] = {"cvss_score": fi.get("cvss_score"), "epss_score": fi.get("epss_score")}
+    except Exception:
+        pass
+    _CVSS_FALLBACK_INDEX = index
+    return index
+
+
+def _resolve_cvss_epss(item: dict) -> tuple:
+    """Returns (cvss, epss) -- item's own values if present, else the
+    api/feed.json fallback for the same CVE, else (None, None) unchanged."""
+    cvss = item.get("cvss_score")
+    epss = item.get("epss_score")
+    if cvss is None or epss is None:
+        for cve in _extract_cve_ids_for_fallback(item):
+            fb = _load_cvss_fallback_index().get(cve)
+            if fb:
+                if cvss is None and fb.get("cvss_score") is not None:
+                    cvss = fb["cvss_score"]
+                if epss is None and fb.get("epss_score") is not None:
+                    epss = fb["epss_score"]
+                break
+    return cvss, epss
+
+
 def _fmt_ts(ts: str) -> str:
     if not ts or not isinstance(ts, str):
         return "-"
@@ -1298,12 +1371,11 @@ def build_report_sections(item: dict) -> str:
     actor       = str(item.get("actor_tag") or item.get("primary_actor") or "UNATTRIBUTED")
     threat_type = str(item.get("threat_type") or "General Cyber Threat")
     feed        = str(item.get("feed_source") or item.get("source") or "SENTINEL-APEX")
-    cvss        = item.get("cvss_score")
-    epss        = item.get("epss_score")
+    cvss, epss  = _resolve_cvss_epss(item)
     # v184.0 G4 FIX: read KEV from all possible field names for consistency
     kev         = bool(item.get("kev_present") or item.get("kev") or item.get("kev_status"))
     # v184.0 G9 FIX: use composite APEX risk_score (not CVSS) as authoritative risk metric
-    risk        = float(item.get("risk_score") or item.get("cvss_score") or 0)
+    risk        = float(item.get("risk_score") or cvss or 0)
     ttps        = item.get("ttps") or item.get("mitre_tactics") or []
     iocs        = item.get("iocs") or []
     # P0 FIX v134.0: IOC enforcement + confidence scoring pipeline
@@ -2022,8 +2094,9 @@ def render_report(item: dict, public_prefix: str) -> str:
     ts       = _fmt_ts(str(item.get("processed_at") or item.get("timestamp") or ""))
     intel_id = str(item.get("id") or "intel--unknown")
     tlp      = str(item.get("tlp") or "TLP:CLEAR").replace(":", "-")
+    _cvss_resolved, _epss_resolved = _resolve_cvss_epss(item)
     # v184.0 G9 FIX: use composite APEX risk_score as authoritative metric (not CVSS alone)
-    risk     = float(item.get("risk_score") or item.get("cvss_score") or 0)
+    risk     = float(item.get("risk_score") or _cvss_resolved or 0)
     tags     = item.get("tags") or []
     # v166.3-FIX: include year/month in canonical report URL (was missing → 404)
     _yyyy, _mm = iso_path(item.get("processed_at") or item.get("timestamp") or utc_now_iso())
@@ -2044,9 +2117,9 @@ def render_report(item: dict, public_prefix: str) -> str:
     )
     _ioc_list    = item.get("iocs") or []
     _ttp_list    = (item.get("apex_ai") or {}).get("ttps") or item.get("ttps") or []
-    _cvss_disp   = str(item["cvss_score"]) if item.get("cvss_score") is not None else "N/A"
-    _epss_disp   = str(item["epss_score"]) if item.get("epss_score") is not None else "N/A"
-    _epss_pct    = "%" if item.get("epss_score") is not None else ""
+    _cvss_disp   = str(_cvss_resolved) if _cvss_resolved is not None else "N/A"
+    _epss_disp   = str(_epss_resolved) if _epss_resolved is not None else "N/A"
+    _epss_pct    = "%" if _epss_resolved is not None else ""
     # v184.0 G4 FIX: read KEV from all possible field names for cross-source consistency
     _kev         = bool(item.get("kev_present") or item.get("kev") or item.get("kev_status"))
     _kev_disp    = "YES &#x26A0;" if _kev else "No"
@@ -2061,12 +2134,12 @@ def render_report(item: dict, public_prefix: str) -> str:
     _risk_tile   = ("crit" if risk >= 9 else "high" if risk >= 7 else
                     "med"  if risk >= 5 else "low")
     # Tile colour: "neutral" when score absent  -  never show red/orange on a null value
-    _cvss_raw    = item.get("cvss_score")
+    _cvss_raw    = _cvss_resolved
     _cvss_f      = float(_cvss_raw) if _cvss_raw is not None else None
     _cvss_tile   = ("neutral" if _cvss_f is None else
                     "crit" if _cvss_f >= 9 else "high" if _cvss_f >= 7 else
                     "med"  if _cvss_f >= 4 else "neutral")
-    _epss_raw    = item.get("epss_score")
+    _epss_raw    = _epss_resolved
     _epss_f      = float(_epss_raw) if _epss_raw is not None else None
     _epss_tile   = ("neutral" if _epss_f is None else
                     "crit" if _epss_f >= 50 else "high" if _epss_f >= 20 else "neutral")

@@ -151,8 +151,33 @@ def build_kill_chain_section(item: Dict) -> str:
     return _card("ATTACK KILL CHAIN", content, icon="⚔️")
 
 
+_IOC_CVE_REF_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
+_IOC_ADVISORY_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+
+
+def _is_reference_not_ioc(i) -> bool:
+    """
+    v186.0 P0 FIX: CVE identifiers and NVD/vendor-advisory URLs are vulnerability
+    references, not network/endpoint observables -- they were being rendered in this
+    table with a hardcoded "C2" context default (see _ioc_row below), which fabricates
+    a specific command-and-control claim for values that were never observed as C2
+    infrastructure. Mirrors the exclusion already applied in
+    scripts/report_generator.py's _is_actionable_ioc.
+    """
+    if isinstance(i, dict):
+        val, itype = str(i.get("value", "")), str(i.get("type", ""))
+    else:
+        val, itype = str(i), "indicator"
+    val = val.strip()
+    if _IOC_CVE_REF_RE.match(val) or (itype or "").lower() in ("cve", "cve_reference"):
+        return True
+    if _IOC_ADVISORY_URL_RE.match(val) and any(d in val.lower() for d in ("nvd.nist.gov", "cve.org", "cvefeed.io")):
+        return True
+    return False
+
+
 def build_ioc_table_section(item: Dict) -> str:
-    iocs = item.get("iocs") or []
+    iocs = [i for i in (item.get("iocs") or []) if not _is_reference_not_ioc(i)]
     if not iocs:
         iocs = [{"type": "—", "value": "No IOCs in current data feed", "confidence": 0}]
 
@@ -179,7 +204,10 @@ def build_ioc_table_section(item: Dict) -> str:
             f'{str(i.get("value","?"))}</td>'
             f'<td style="padding:8px 12px;color:{col};'
             f'font-size:11px;font-weight:700;text-align:center;">{i.get("confidence","?")}%</td>'
-            f'<td style="padding:8px 12px;color:{C_MUTED};font-size:10px;">{i.get("context","C2")}</td>'
+            # v186.0 P0 FIX: was defaulting every IOC with no explicit context to the
+            # literal string "C2" -- fabricating a command-and-control claim for
+            # indicators never observed in that role. Honest default: unclassified.
+            f'<td style="padding:8px 12px;color:{C_MUTED};font-size:10px;">{i.get("context") or "Unclassified"}</td>'
             f'<td style="padding:8px 12px;font-size:10px;">{status}</td>'
             f'</tr>'
         )

@@ -72,7 +72,16 @@ class IOCConfidenceEngine:
             raw_val = ioc.strip()
             # Infer type from value pattern to preserve maximum signal
             ioc_type = "indicator"
-            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", raw_val):
+            if re.match(r"^CVE-\d{4}-\d{4,}$", raw_val, re.IGNORECASE):
+                # v186.0 P0 FIX: a CVE identifier is a vulnerability reference, not a
+                # network/endpoint observable -- classifying it as a bare "indicator"
+                # (quality=0.45, generic) let it flow into the IOC table mislabeled and
+                # scored as if it were a real indicator. "cve" is an existing, correctly
+                # weighted type (quality=0.88, see _IOC_TYPE_QUALITY above); consumers
+                # that build the actionable-IOC hunting table are expected to exclude it
+                # (see scripts/report_generator.py's _is_actionable_ioc for the pattern).
+                ioc_type = "cve"
+            elif re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", raw_val):
                 ioc_type = "ipv4"
             elif re.match(r"^[a-f0-9]{64}$", raw_val, re.IGNORECASE):
                 ioc_type = "sha256"
