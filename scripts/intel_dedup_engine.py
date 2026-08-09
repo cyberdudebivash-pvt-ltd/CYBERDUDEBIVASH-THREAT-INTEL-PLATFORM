@@ -169,6 +169,35 @@ def _get_source_url(item: Dict) -> str:
 def _get_stix_id(item: Dict) -> str:
     return (item.get("stix_id") or item.get("bundle_id") or "").strip()
 
+
+_CVE_ID_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
+
+
+def _get_cve_ids(item: Dict) -> List[str]:
+    """
+    v186.0 P0 FIX: the same CVE (e.g. CVE-2026-71988) ingested from two different
+    feeds (e.g. "CVE Feed" / cvefeed.io and "Vulners") produces two customer-facing
+    reports with different stix_ids, different source_urls, and differently-worded
+    titles ("CVE-2026-71988 - MSI Radix AXE6600 ... portFw function" vs "Low Security
+    Vulnerability (CVE-2026-71988)") -- none of Layers 0-3 match, so both pass
+    through. Layer 3 (title_hash) deliberately SKIPS generic titles like "Low
+    Security Vulnerability (CVE-X)" (see _is_generic_title) to avoid false-positive
+    merges of unrelated items -- but that is exactly the class of title these
+    cross-source CVE republishes have, so the CVE ID itself (unambiguous, external)
+    is the correct dedup key here, not title similarity.
+    """
+    ids: Set[str] = set()
+    explicit = item.get("cve_ids") or ([item["cve_id"]] if item.get("cve_id") else [])
+    if isinstance(explicit, str):
+        explicit = [explicit]
+    for c in explicit or []:
+        if c:
+            ids.add(str(c).strip().upper())
+    title = str(item.get("title", ""))
+    for m in _CVE_ID_RE.findall(title):
+        ids.add(m.upper())
+    return sorted(ids)
+
 # ---------------------------------------------------------------------------
 # Atomic write
 # ---------------------------------------------------------------------------
@@ -217,6 +246,7 @@ class IntelDedupEngine:
         "total_seen": 0,
         "source_urls":    {},   # url_sha256  -> {first_seen, title}
         "stix_ids":       {},   # stix_id     -> {first_seen, title}
+        "cve_ids":        {},   # CVE-YYYY-NNNNN -> {first_seen, title}
         "content_hashes": {},   # content_sha256 -> {first_seen, title}
         "title_hashes":   {},   # title_sha256   -> {first_seen, title}
     }
@@ -247,10 +277,16 @@ class IntelDedupEngine:
                     # v152.1.0: Validate and heal section types before assigning.
                     # If any dict section is a list (old/corrupt schema), reset it
                     # to an empty dict rather than letting a TypeError kill dedup-L0.
-                    _dict_sections = ("source_urls", "stix_ids", "content_hashes", "title_hashes")
+                    _dict_sections = ("source_urls", "stix_ids", "cve_ids", "content_hashes", "title_hashes")
                     _healed = False
                     for _sec in _dict_sections:
-                        if _sec in raw and not isinstance(raw[_sec], dict):
+                        if _sec not in raw:
+                            # v186.0: index files persisted before the cve_ids layer
+                            # was added won't have this key -- add it rather than
+                            # KeyError on first is_duplicate()/mark_seen() call.
+                            raw[_sec] = {}
+                            _healed = True
+                        elif not isinstance(raw[_sec], dict):
                             log.warning(
                                 "[DEDUP] intel_index.json section '%s' is %s (expected dict) — "
                                 "resetting to empty dict. This fixed the dedup-L0 TypeError.",
@@ -299,10 +335,11 @@ class IntelDedupEngine:
         Multi-layer duplicate check.
         Returns (True, reason) if duplicate, (False, "") if new.
 
-        Layer 0: source_url (PRIMARY KEY -- strict unique)
-        Layer 1: stix_id    (PRIMARY KEY -- strict unique)
-        Layer 2: content_hash (strong content match)
-        Layer 3: title_hash   (cross-feed, skipped for generic titles)
+        Layer 0:   source_url (PRIMARY KEY -- strict unique)
+        Layer 1:   stix_id    (PRIMARY KEY -- strict unique)
+        Layer 1.5: cve_id     (CROSS-SOURCE -- same CVE from a different feed)
+        Layer 2:   content_hash (strong content match)
+        Layer 3:   title_hash   (cross-feed, skipped for generic titles)
         """
         url = _get_source_url(item)
         if url:
@@ -314,6 +351,10 @@ class IntelDedupEngine:
         if sid and not sid.startswith("null"):
             if sid in self._index["stix_ids"]:
                 return True, f"stix_id:{sid[:40]}"
+
+        for cve in _get_cve_ids(item):
+            if cve in self._index["cve_ids"]:
+                return True, f"cve_id:{cve}"
 
         ck = _content_key(item)
         if ck in self._index["content_hashes"]:
@@ -340,6 +381,9 @@ class IntelDedupEngine:
         sid = _get_stix_id(item)
         if sid and not sid.startswith("null"):
             self._index["stix_ids"][sid] = {"first_seen": ts, "title": title}
+
+        for cve in _get_cve_ids(item):
+            self._index["cve_ids"][cve] = {"first_seen": ts, "title": title}
 
         ck = _content_key(item)
         self._index["content_hashes"][ck] = {"first_seen": ts, "title": title}
@@ -380,6 +424,7 @@ class IntelDedupEngine:
         return {
             "source_urls":    len(self._index["source_urls"]),
             "stix_ids":       len(self._index["stix_ids"]),
+            "cve_ids":        len(self._index.get("cve_ids", {})),
             "content_hashes": len(self._index["content_hashes"]),
             "title_hashes":   len(self._index["title_hashes"]),
             "last_updated":   self._index.get("last_updated", ""),
@@ -684,6 +729,7 @@ def enforce_manifest_uniqueness(items) -> Tuple[List[Dict], int]:
 
     seen_urls:    Dict[str, int] = {}  # url_key -> first_index
     seen_sids:    Dict[str, int] = {}
+    seen_cves:    Dict[str, int] = {}
     seen_content: Dict[str, int] = {}
     seen_titles:  Dict[str, int] = {}
 
@@ -712,6 +758,17 @@ def enforce_manifest_uniqueness(items) -> Tuple[List[Dict], int]:
                 removed += 1
                 continue
             seen_sids[sid] = len(unique)
+
+        cve_dup = False
+        for cve in _get_cve_ids(item):
+            if cve in seen_cves:
+                log.info("[MANIFEST-GUARD] Duplicate cve_id blocked (cross-source republish): %s", cve)
+                removed += 1
+                cve_dup = True
+                break
+            seen_cves[cve] = len(unique)
+        if cve_dup:
+            continue
 
         ck = _content_key(item)
         if ck in seen_content:
