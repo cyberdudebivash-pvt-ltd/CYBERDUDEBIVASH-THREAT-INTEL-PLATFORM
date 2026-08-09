@@ -60,7 +60,13 @@
       "#intel-list",
     ],
     AUTO_REFRESH_MS: 0,
-    MAX_CARDS:       30,
+    // v187.0 P0 FIX: raised from 30 -- #sapx-card-grid is now the sole
+    // visible card grid on the LIVE tab (the legacy #threat-grid/renderCards()
+    // path in index.html is hidden, see index.html comment at #threat-grid).
+    // 30 silently truncated coverage to the top 30 items while the now-hidden
+    // legacy grid showed the full feed (~100-200+ items); 500 comfortably
+    // covers the current feed size with headroom.
+    MAX_CARDS:       500,
     VERSION:         "182.0",
     LOADING_COUNT:   4,
   };
