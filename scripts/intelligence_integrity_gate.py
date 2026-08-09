@@ -838,17 +838,55 @@ class RuntimeIntegrityBaseline:
 
 # ── Safeguard F: Advisory Authenticity Scoring ───────────────────────────────
 
+# v186.0 P0 FIX: this scoring rubric applied one CVE/malware-shaped 100-point
+# scale to EVERY intel type. A bare phishing-URL advisory can never carry
+# CVSS/EPSS/KEV (20 pts) or 3-5 MITRE techniques (a phishing URL has exactly
+# one applicable technique, T1566) -- so ~35 of 100 points were structurally
+# unreachable regardless of how legitimate the entry was. A 08:44-09:18 UTC
+# production run confirmed this: 52 real OpenPhish advisories (verified
+# against the actual feed export) averaged 51.6/100 and hard-failed the
+# batch purely from this type mismatch, not from genuine data quality
+# problems. Fix: classify intel type and exclude non-applicable categories
+# from the denominator (score is renormalized to the applicable-points
+# subset), instead of lowering AUTH_SCORE_MIN/AUTH_SCORE_HARD_FAIL/
+# AUTH_POOR_ITEM_RATIO -- those thresholds are unchanged. An item that is
+# genuinely low-quality for ITS OWN type (e.g. an OpenPhish entry missing
+# even its source_url) still scores low and still hard-fails.
+_PHISHING_TYPE_HINTS = ("openphish", "phishtank", "phishing url", "phishing")
+_MALWARE_TYPE_HINTS  = ("malwarebazaar", "urlhaus", "threatfox", "malware",
+                        "ransomware", "trojan", "botnet", "infostealer")
+
+
+def _classify_intel_type(item: Dict) -> str:
+    """Content-derived classification only -- never inferred beyond what the
+    item itself asserts. One of: CVE, PHISHING_URL, MALWARE, GENERIC."""
+    if _cves(item) or item.get("cvss_score") or item.get("cvss"):
+        return "CVE"
+    title = _title(item).lower()
+    feed_source = str(item.get("feed_source") or item.get("source") or "").lower()
+    hay = f"{title} {feed_source}"
+    if any(h in hay for h in _PHISHING_TYPE_HINTS):
+        return "PHISHING_URL"
+    if any(h in hay for h in _MALWARE_TYPE_HINTS):
+        return "MALWARE"
+    return "GENERIC"
+
+
 class AdvisoryAuthenticityScoring:
     """
-    100-point authenticity scoring per advisory.
+    100-point authenticity scoring per advisory, renormalized per intel type
+    to only the categories that type can legitimately carry.
     Penalizes synthetic markers; rewards real-world signals.
     """
 
-    def _score_item(self, item: Dict) -> Tuple[int, List[str]]:
+    def _score_item(self, item: Dict) -> Tuple[int, List[str], str]:
         score = 0
+        possible = 0
         notes = []
+        intel_type = _classify_intel_type(item)
 
-        # Title quality (max 15 pts)
+        # Title quality (max 15 pts) -- applies to every intel type
+        possible += 15
         title = _title(item)
         words = len(title.split()) if title else 0
         if words >= 8:
@@ -860,7 +898,8 @@ class AdvisoryAuthenticityScoring:
         else:
             notes.append("WEAK: Title too short")
 
-        # Source attribution (max 15 pts)
+        # Source attribution (max 15 + 5 bonus) -- applies to every intel type
+        possible += 15
         source = _source(item)
         if source and len(source) > 10:
             score += 15
@@ -874,25 +913,31 @@ class AdvisoryAuthenticityScoring:
         else:
             notes.append("WEAK: Missing source URL")
 
-        # CVE/CVSS enrichment (max 20 pts)
-        cves = _cves(item)
-        cvss = item.get("cvss_score") or item.get("cvss")
-        epss = item.get("epss_score") or item.get("epss")
-        kev  = _kev(item)
+        # CVE/CVSS enrichment (max 20 pts) -- CVE type only. Not applicable to
+        # PHISHING_URL/MALWARE/GENERIC (Section 9: NOT_APPLICABLE, never a
+        # fabricated or penalized absence).
+        if intel_type == "CVE":
+            possible += 20
+            cves = _cves(item)
+            cvss = item.get("cvss_score") or item.get("cvss")
+            epss = item.get("epss_score") or item.get("epss")
+            kev  = _kev(item)
+            if cves:
+                score += 5
+            if cvss and str(cvss) not in ("None", "N/A", "", "Pending"):
+                score += 8
+                notes.append(f"CVSS={cvss}")
+            if epss and str(epss) not in ("None", "N/A", "", "Pending", "0"):
+                score += 5
+                notes.append(f"EPSS={epss}")
+            if kev:
+                score += 7
+                notes.append("KEV=CONFIRMED")
+        else:
+            notes.append(f"NOT_APPLICABLE: {intel_type} intel does not carry CVE/CVSS/EPSS/KEV data")
 
-        if cves:
-            score += 5
-        if cvss and str(cvss) not in ("None", "N/A", "", "Pending"):
-            score += 8
-            notes.append(f"CVSS={cvss}")
-        if epss and str(epss) not in ("None", "N/A", "", "Pending", "0"):
-            score += 5
-            notes.append(f"EPSS={epss}")
-        if kev:
-            score += 7
-            notes.append("KEV=CONFIRMED")
-
-        # IOC richness (max 15 pts)
+        # IOC richness (max 15 pts) -- applies to every intel type
+        possible += 15
         iocs = _iocs(item)
         total_iocs = sum(len(v) if isinstance(v, list) else 1
                          for v in iocs.values() if v)
@@ -905,18 +950,30 @@ class AdvisoryAuthenticityScoring:
         else:
             notes.append("WEAK: No IOCs enriched")
 
-        # MITRE ATT&CK depth (max 15 pts)
+        # MITRE ATT&CK depth (max 15 pts) -- ceiling is type-aware. A bare
+        # phishing URL has exactly one legitimately applicable technique
+        # (T1566); demanding 3-5 techniques for full marks would require
+        # fabricating unrelated techniques, which Section 9 explicitly
+        # forbids. CVE/MALWARE/GENERIC keep the original 5/3/1 ladder.
+        possible += 15
         techniques = _techniques(item)
-        if len(techniques) >= 5:
-            score += 15
-        elif len(techniques) >= 3:
-            score += 10
-        elif len(techniques) >= 1:
-            score += 6
+        if intel_type == "PHISHING_URL":
+            if len(techniques) >= 1:
+                score += 15
+            else:
+                notes.append("WEAK: No MITRE technique mapped (expected T1566)")
         else:
-            notes.append("WEAK: No MITRE techniques mapped")
+            if len(techniques) >= 5:
+                score += 15
+            elif len(techniques) >= 3:
+                score += 10
+            elif len(techniques) >= 1:
+                score += 6
+            else:
+                notes.append("WEAK: No MITRE techniques mapped")
 
-        # Actor attribution (max 10 pts)
+        # Actor attribution (max 10 pts) -- applies to every intel type
+        possible += 10
         actor = _actor_id(item)
         if actor and not SYNTHETIC_ACTOR_RE.search(actor) and actor not in ("UNC-UNKNOWN", ""):
             score += 10
@@ -926,7 +983,8 @@ class AdvisoryAuthenticityScoring:
         else:
             notes.append("WEAK: Generic/synthetic actor label")
 
-        # Risk score diversity (max 10 pts)
+        # Risk score diversity (max 10 pts) -- applies to every intel type
+        possible += 10
         risk = _risk(item)
         if risk is not None:
             # Non-bucket scores = evidence-derived
@@ -937,8 +995,9 @@ class AdvisoryAuthenticityScoring:
                 score += 4
                 notes.append(f"INFO: Risk score at static bucket value ({risk})")
 
-        score = min(score, 100)
-        return score, notes
+        score = min(score, possible)
+        normalized = round((score / possible) * 100) if possible else 0
+        return normalized, notes, intel_type
 
     def check(self, items: List[Dict]) -> Tuple[bool, List[str]]:
         findings: List[str] = []
@@ -950,14 +1009,16 @@ class AdvisoryAuthenticityScoring:
         scores = []
         hard_fail_items = []
         poor_items = []
+        by_type: Dict[str, List[int]] = defaultdict(list)
 
         for item in items:
-            s, notes = self._score_item(item)
+            s, notes, intel_type = self._score_item(item)
             scores.append(s)
+            by_type[intel_type].append(s)
             if s < AUTH_SCORE_HARD_FAIL:
-                hard_fail_items.append((_title(item)[:50], s, notes))
+                hard_fail_items.append((_title(item)[:50], s, notes, intel_type))
             elif s < AUTH_SCORE_MIN:
-                poor_items.append((_title(item)[:50], s, notes))
+                poor_items.append((_title(item)[:50], s, notes, intel_type))
 
         avg_score = sum(scores) / len(scores) if scores else 0
         poor_ratio = (len(hard_fail_items) + len(poor_items)) / len(items)
@@ -967,11 +1028,17 @@ class AdvisoryAuthenticityScoring:
             f"poor (<{AUTH_SCORE_MIN}): {len(poor_items)}, "
             f"hard-fail (<{AUTH_SCORE_HARD_FAIL}): {len(hard_fail_items)}"
         )
+        findings.append(
+            "[F] By intel type — " + ", ".join(
+                f"{t}: n={len(v)} avg={sum(v)/len(v):.1f}"
+                for t, v in sorted(by_type.items())
+            )
+        )
 
         if hard_fail_items:
-            for title, score, notes in hard_fail_items[:5]:
+            for title, score, notes, intel_type in hard_fail_items[:5]:
                 findings.append(
-                    f"[F] HARD-FAIL item (score={score}/100): '{title}' — "
+                    f"[F] HARD-FAIL item (score={score}/100, type={intel_type}): '{title}' — "
                     f"{'; '.join(notes[:3])}"
                 )
             hard_fail = True
