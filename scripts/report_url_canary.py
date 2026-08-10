@@ -59,7 +59,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,6 +69,23 @@ logging.basicConfig(
 log = logging.getLogger("sentinel.report_url_canary")
 
 REPO_ROOT          = Path(__file__).resolve().parent.parent
+
+# v187.0 P0 FIX: reuse the SAME authoritative publication-status query this
+# repo already has (deployment_convergence_validator.py, STAGE 5.8.1c) rather
+# than re-implementing publication-gate awareness here. Before this fix, a
+# 404 on a report the publication gate correctly rejected (P21_BELOW_MINIMUM
+# / P26_REJECTED / etc.) was indistinguishable from a genuine deployment
+# failure, so this canary logged "P0 DEPLOYMENT FAILURE" for expected,
+# by-design rejections. Import failure degrades to "always unknown" (fail
+# closed -- never silently treated as a pass) rather than crashing the gate.
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+try:
+    from deployment_convergence_validator import query_publication_status
+except Exception as _import_exc:  # pragma: no cover - defensive only
+    def query_publication_status(report_id: str) -> Optional[dict]:  # type: ignore
+        return None
 REPORTS_DIR        = REPO_ROOT / "reports"
 DIST_REPORTS_DIR   = REPO_ROOT / "dist" / "reports"
 PAGES_BASE_URL     = os.environ.get("PAGES_BASE_URL", "https://intel.cyberdudebivash.com").rstrip("/")
@@ -279,6 +296,91 @@ def probe_round(report_paths: List[str]) -> Tuple[List[str], List[Tuple[str, int
     return passed, failed
 
 
+# -- v187.0 P0 FIX: publication-gate-aware failure classification ------------
+# A 404 on a report_url is not, by itself, evidence of a deployment failure.
+# It must be classified against the SAME authoritative source the live
+# Worker gates /reports/** on (see query_publication_status() import above):
+#
+#   PUBLISHED (customer_ready=true)  + still 404/invalid -> real P0 failure
+#   REJECTED/BLOCKED (customer_ready=false)              -> expected, non-public
+#   status undeterminable (network/parse error, or the
+#   item cannot be resolved at all)                      -> unknown, fail closed
+#
+# "Pending/still generating" is not modelled as a separate state here: the
+# authoritative publication-status endpoint does not currently expose one
+# (see workers/intel-gateway/src/index.js:handlePublicationStatus -- an
+# unresolvable item returns state="UNKNOWN", not a distinct pending state),
+# and inventing one here would duplicate/guess at publication-gate logic
+# this script must not own. The existing CDN-propagation retry loop above
+# is what actually covers "still generating" -- a URL that is genuinely
+# still propagating will typically succeed on one of those retries before
+# ever reaching this classification step.
+CLASS_PUBLISHED_HTTP_FAILURE = "PUBLISHED_REPORT_HTTP_FAILURE"
+CLASS_EXPECTED_REJECTION     = "EXPECTED_PUBLICATION_REJECTION"
+CLASS_STATUS_UNKNOWN         = "REPORT_STATUS_UNKNOWN"
+
+
+def _extract_report_id(report_path: str) -> Optional[str]:
+    """'/reports/2026/08/intel--<id>.html' -> 'intel--<id>' (matches the id
+    form the publication-status endpoint expects, same as the incoming path
+    param it strips '.html' from)."""
+    name = report_path.rsplit("/", 1)[-1]
+    for suffix in (".html", ".htm"):
+        if name.lower().endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return name if name.startswith("intel--") else None
+
+
+def classify_and_summarize(
+    report_paths: List[str],
+    passed_urls: List[str],
+    failed_tuples: List[Tuple[str, int, str]],
+) -> Dict:
+    """Classifies every probed report URL (not only the failures) against the
+    authoritative publication-status endpoint, producing the structured
+    breakdown required for observability. Never overrides the HTTP pass/fail
+    verdict already computed by probe_round()/run_live() -- purely adds the
+    "why" behind a failure so real deployment failures are never buried
+    inside an "expected rejection" bucket, and expected rejections never get
+    reported as P0 alarms.
+    """
+    passed_paths = {u.replace(PAGES_BASE_URL, "") for u in passed_urls}
+    failed_paths = {u.replace(PAGES_BASE_URL, ""): (code, err) for u, code, err in failed_tuples}
+
+    published_passed = 0
+    published_failed: List[Tuple[str, int, str]] = []
+    expected_rejections: List[str] = []
+    unknown: List[str] = []
+
+    for rp in report_paths:
+        report_id = _extract_report_id(rp)
+        data = query_publication_status(report_id) if report_id else None
+        if data is None:
+            unknown.append(rp)
+            continue
+        customer_ready = data.get("customer_ready")
+        if customer_ready is True:
+            if rp in passed_paths:
+                published_passed += 1
+            else:
+                code, err = failed_paths.get(rp, (0, "unknown"))
+                published_failed.append((rp, code, err))
+        elif customer_ready is False:
+            expected_rejections.append(rp)
+        else:
+            unknown.append(rp)
+
+    return {
+        "published_checked": published_passed + len(published_failed),
+        "published_passed": published_passed,
+        "published_failed": published_failed,
+        "expected_rejections": expected_rejections,
+        "pending": [],  # not distinguishable from unknown via the authoritative endpoint today
+        "unknown": unknown,
+    }
+
+
 def run_live(report_paths: List[str]) -> int:
     if CANARY_WAIT > 0:
         log.info("Waiting %ds for GitHub Pages CDN propagation...", CANARY_WAIT)
@@ -297,13 +399,57 @@ def run_live(report_paths: List[str]) -> int:
     log.info("=" * 70)
     log.info("LIVE CANARY: probed=%d passed=%d failed=%d", len(report_paths), len(passed), len(failed))
     log.info("=" * 70)
-    if failed:
-        log.error("P0 DEPLOYMENT FAILURE: %d report URL(s) non-200 or soft-404 after retries:", len(failed))
-        for url, code, err in failed:
-            log.error("  HTTP %s: %s (%s)", code, url, err or "no detail")
-        return 1
-    log.info("ALL current report URLs GREEN with valid bodies.")
-    return 0
+
+    if not failed:
+        log.info("ALL current report URLs GREEN with valid bodies.")
+        return 0
+
+    # v187.0 P0 FIX: classify every remaining HTTP failure against the
+    # authoritative publication-status endpoint before deciding whether it's
+    # a real deployment failure -- see the classification block above.
+    summary = classify_and_summarize(report_paths, passed, failed)
+    log.info("=" * 70)
+    log.info("PUBLICATION-STATUS CLASSIFICATION:")
+    log.info("  published_checked   = %d", summary["published_checked"])
+    log.info("  published_passed    = %d", summary["published_passed"])
+    log.info("  published_failed    = %d", len(summary["published_failed"]))
+    log.info("  expected_rejections = %d", len(summary["expected_rejections"]))
+    log.info("  pending             = %d", len(summary["pending"]))
+    log.info("  unknown             = %d", len(summary["unknown"]))
+    log.info("=" * 70)
+
+    if summary["expected_rejections"]:
+        log.info(
+            "%s (%d): 404 because the publication gate correctly rejected these "
+            "reports -- NOT a deployment failure:",
+            CLASS_EXPECTED_REJECTION, len(summary["expected_rejections"]),
+        )
+        for rp in summary["expected_rejections"]:
+            log.info("  %s%s", PAGES_BASE_URL, rp)
+
+    real_failures = summary["published_failed"]
+    unknown_failures = summary["unknown"]
+
+    if not real_failures and not unknown_failures:
+        log.info("No genuine deployment failures -- all remaining 404s are expected publication-gate rejections.")
+        return 0
+
+    if real_failures:
+        log.error(
+            "%s (%d): CUSTOMER_READY per the publication gate but returning "
+            "non-200/soft-404 -- genuine P0 deployment failure:",
+            CLASS_PUBLISHED_HTTP_FAILURE, len(real_failures),
+        )
+        for rp, code, err in real_failures:
+            log.error("  HTTP %s: %s%s (%s)", code, PAGES_BASE_URL, rp, err or "no detail")
+    if unknown_failures:
+        log.error(
+            "%s (%d): publication-status could not be determined -- failing closed:",
+            CLASS_STATUS_UNKNOWN, len(unknown_failures),
+        )
+        for rp in unknown_failures:
+            log.error("  %s%s", PAGES_BASE_URL, rp)
+    return 1
 
 
 def main() -> int:
