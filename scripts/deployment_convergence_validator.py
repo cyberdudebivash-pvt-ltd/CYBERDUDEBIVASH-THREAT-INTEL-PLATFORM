@@ -636,6 +636,33 @@ def phase4_convergence_confirmation(feed: List[dict], manifest: dict) -> PhaseRe
 _HIST_REPORT_ID_RE = re.compile(r"(intel--[a-f0-9]+)\.html?$", re.IGNORECASE)
 
 
+def query_publication_status(report_id: str) -> Optional[dict]:
+    """
+    Queries the single authoritative source for a report's publication
+    verdict -- GET /api/v1/reports/{id}/publication-status, backed by the
+    same evaluatePublicationGate() every /reports/** request is gated by
+    (see workers/intel-gateway/src/publication-gate.js). Returns the parsed
+    JSON response (with at least "state" and "customer_ready" fields), or
+    None on any network/parse failure.
+
+    Fail-closed contract: None means "status could not be determined" --
+    callers must never treat None as an implicit pass. This is the shared
+    building block for both this module's historical-continuity check and
+    scripts/report_url_canary.py's live-deployment classification (Single
+    Source of Truth -- neither script re-implements publication-gate logic).
+    """
+    status_url = f"{PAGES_BASE_URL}/api/v1/reports/{report_id}/publication-status"
+    probe = _http_probe(status_url)
+    if not probe.success:
+        return None
+    try:
+        req = urllib.request.Request(status_url, headers={"User-Agent": "SentinelApex-ConvergenceValidator/1.0"})
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            return json.loads(resp.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+
+
 def _is_expected_publication_rejection(url: str) -> bool:
     """
     v186.0 P0 FIX: a 404 on a historical report URL used to always count as
@@ -654,18 +681,10 @@ def _is_expected_publication_rejection(url: str) -> bool:
     m = _HIST_REPORT_ID_RE.search(url)
     if not m:
         return False
-    report_id = m.group(1)
-    status_url = f"{PAGES_BASE_URL}/api/v1/reports/{report_id}/publication-status"
-    probe = _http_probe(status_url)
-    if not probe.success:
+    data = query_publication_status(m.group(1))
+    if data is None:
         return False
-    try:
-        req = urllib.request.Request(status_url, headers={"User-Agent": "SentinelApex-ConvergenceValidator/1.0"})
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-        return data.get("customer_ready") is False
-    except Exception:
-        return False
+    return data.get("customer_ready") is False
 
 
 def phase5_historical_report_audit(feed: List[dict], manifest: dict) -> PhaseResult:

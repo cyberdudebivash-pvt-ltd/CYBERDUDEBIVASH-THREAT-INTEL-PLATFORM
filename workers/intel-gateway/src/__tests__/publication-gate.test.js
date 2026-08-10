@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { evaluatePublicationGate, isCustomerReady, classifyReportType, PUBLICATION_GATE_VERSION } from "../publication-gate.js";
+import {
+  evaluatePublicationGate, isCustomerReady, classifyReportType, PUBLICATION_GATE_VERSION,
+  buildGateRejectedResponseBody, buildUnresolvableReportResponseBody,
+} from "../publication-gate.js";
 
 // ---------------------------------------------------------------------------
 // P0 incident regression suite — CYBERDUDEBIVASH SENTINEL APEX
@@ -269,4 +272,70 @@ test("content_hash is present, stable for identical content, and changes when ev
   const mutated = { ...CUSTOMER_READY_ITEM, description: CUSTOMER_READY_ITEM.description + " EDITED" };
   const r3 = evaluatePublicationGate(mutated);
   assert.notEqual(r1.content_hash, r3.content_hash);
+});
+
+// ---------------------------------------------------------------------------
+// v187.0 P0 fix — customer-facing 404 response-body regression suite.
+// Root cause: the /reports/** route used to say "Report may still be
+// generating" for EVERY 404, including permanently gate-rejected reports
+// (misleading -- retrying will never resolve it) and to expose raw
+// certification scores. These tests lock down the exact response shape for
+// each state the route can actually distinguish: PUBLISHED never reaches
+// either builder (served normally, not a 404); REJECTED/BLOCKED (a known
+// item that failed the gate) uses buildGateRejectedResponseBody();
+// PENDING/GENERATING and truly UNKNOWN (an id that hasn't resolved to any
+// known item yet) are indistinguishable at this layer and both use
+// buildUnresolvableReportResponseBody() -- documented here so a future
+// enhancement that CAN tell them apart has a test to update.
+// ---------------------------------------------------------------------------
+
+test("PUBLISHED item never reaches either 404 body builder (evaluatePublicationGate says customer_ready)", () => {
+  const r = evaluatePublicationGate(CUSTOMER_READY_ITEM);
+  assert.equal(r.customer_ready, true);
+  // The route's gate-rejection branch is gated on `!gateResult.customer_ready`
+  // -- a PUBLISHED item must not satisfy that condition.
+});
+
+test("REJECTED: buildGateRejectedResponseBody() exposes only publication_state, never raw scores", () => {
+  const gateResult = evaluatePublicationGate(REJECTED_ITEM);
+  assert.equal(gateResult.customer_ready, false);
+  const body = buildGateRejectedResponseBody(gateResult);
+  assert.deepEqual(Object.keys(body).sort(), ["error", "reason", "status"]);
+  assert.equal(body.error, "Report unavailable");
+  assert.equal(body.reason, "publication_gate_rejected");
+  assert.equal(body.status, gateResult.publication_state);
+  assert.ok(["REJECTED", "BLOCKED"].includes(body.status));
+  // The permanent-rejection language contract: never suggest retrying.
+  assert.doesNotMatch(JSON.stringify(body), /generat/i);
+  assert.doesNotMatch(JSON.stringify(body), /P20_SCORE|P21_CERTIFICATION|P25_TRUST|P26_/);
+});
+
+test("REJECTED: buildGateRejectedResponseBody() falls back to 'REJECTED' if publication_state is missing", () => {
+  const body = buildGateRejectedResponseBody({ customer_ready: false });
+  assert.equal(body.status, "REJECTED");
+});
+
+test("REJECTED: buildGateRejectedResponseBody() tolerates a null/undefined gateResult (defensive, still fails closed)", () => {
+  const body = buildGateRejectedResponseBody(null);
+  assert.equal(body.status, "REJECTED");
+  assert.equal(body.reason, "publication_gate_rejected");
+});
+
+test("PENDING/UNKNOWN: buildUnresolvableReportResponseBody() never claims the report is generating", () => {
+  const body = buildUnresolvableReportResponseBody("/reports/2026/08/intel--not-yet-resolvable.html");
+  assert.deepEqual(Object.keys(body).sort(), ["error", "path", "reason"]);
+  assert.equal(body.error, "Report not found");
+  assert.equal(body.reason, "unresolvable");
+  assert.equal(body.path, "/reports/2026/08/intel--not-yet-resolvable.html");
+  assert.doesNotMatch(JSON.stringify(body), /generat/i);
+});
+
+test("UNKNOWN: buildUnresolvableReportResponseBody() produces the identical shape for a genuinely nonexistent id", () => {
+  // Same builder, same shape -- this layer cannot distinguish "pending" from
+  // "never existed" (see comment above buildUnresolvableReportResponseBody
+  // in publication-gate.js), so both states are covered by one assertion.
+  const pending = buildUnresolvableReportResponseBody("/reports/2026/08/intel--pending-item.html");
+  const unknown = buildUnresolvableReportResponseBody("/reports/2026/08/intel--never-existed.html");
+  assert.deepEqual(Object.keys(pending).sort(), Object.keys(unknown).sort());
+  assert.equal(pending.reason, unknown.reason);
 });

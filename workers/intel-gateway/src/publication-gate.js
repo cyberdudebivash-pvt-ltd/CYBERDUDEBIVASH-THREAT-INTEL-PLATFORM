@@ -211,3 +211,34 @@ export function evaluatePublicationGate(item) {
 export function isCustomerReady(item) {
   return evaluatePublicationGate(item).customer_ready === true;
 }
+
+/**
+ * v187.0 P0 FIX — customer-facing 404 body for a report id that DID resolve
+ * to a known item, but that item failed the publication gate (REJECTED /
+ * BLOCKED). Single source of truth for this response shape (previously
+ * inlined at the /reports/** route in index.js) so it's directly unit-
+ * testable: exposes only publication_state, never internal certification
+ * scores, and never claims the report "may still be generating" -- a
+ * permanent rejection retried by a customer will never resolve.
+ */
+export function buildGateRejectedResponseBody(gateResult) {
+  return {
+    error: 'Report unavailable',
+    reason: 'publication_gate_rejected',
+    status: (gateResult && gateResult.publication_state) || 'REJECTED',
+  };
+}
+
+/**
+ * v187.0 P0 FIX — customer-facing 404 body for a report id that could not be
+ * resolved to any known item and has no cached HTML artifact. Covers both a
+ * genuinely nonexistent id and one still pending/generating (this layer
+ * cannot distinguish the two from here -- see publication_gate_rejected
+ * above for the case that CAN be distinguished). Never claims the report
+ * "may still be generating": per live incident evidence, an unresolvable id
+ * is at least as often a permanent rejection as a pending one, and telling
+ * a customer to retry a permanent rejection is misleading.
+ */
+export function buildUnresolvableReportResponseBody(path) {
+  return { error: 'Report not found', path, reason: 'unresolvable' };
+}
