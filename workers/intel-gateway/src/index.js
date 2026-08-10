@@ -90,7 +90,7 @@ import { handleP36Quality, handleP36Maturity, handleP36Targets, handleP36Gaps, h
 import { handleP37Hardening, handleP37FeedAudit, handleP37Enrichment, handleP37IQScore, handleP37Detection, handleP37SourceDiversity, handleP37Reliability, handleP37Debt, handleP37Metrics, handleP37Certification, handleP37Dashboard, handleP37Observability } from './p37-handlers.js';
 import { handleP38SchemaRegistry, handleP38FeedGovernance, handleP38SchemaDrift, handleP38EnrichmentAudit, handleP38ConfidenceAudit, handleP38IQIndex, handleP38SourceDiversity, handleP38Certification, handleP38Executive, handleP38Reliability, handleP38Metrics, handleP38Observability } from './p38-handlers.js';
 import { handleP40SourceRegistry, handleP40SourceDetail, handleP40SourceHealth, handleP40Licensing, handleP40Coverage, handleP40Waves, handleP40Certification, handleP40Metrics, handleP40Dashboard, handleP40Observability } from './p40-handlers.js';
-import { evaluatePublicationGate, isCustomerReady } from './publication-gate.js';
+import { evaluatePublicationGate, isCustomerReady, buildGateRejectedResponseBody, buildUnresolvableReportResponseBody } from './publication-gate.js';
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
@@ -3980,9 +3980,20 @@ async function handleRequest(request, env, ctx) {
     // already-cached bad copies matching a resolvable item -- is covered
     // by scripts/publication_gate_scan.py, not by blocking every view.
     // -------------------------------------------------------------------
-    const gateItem = gateSlug ? await findItemBySlug(env, gateSlug) : null;
-    if (gateItem && !evaluatePublicationGate(gateItem).customer_ready) {
-      return jsonResp({ error: "Report not found", path, suggestion: "Report may still be generating. Try again in a few minutes." }, 404);
+    const gateItem   = gateSlug ? await findItemBySlug(env, gateSlug) : null;
+    const gateResult = gateItem ? evaluatePublicationGate(gateItem) : null;
+    if (gateItem && gateResult && !gateResult.customer_ready) {
+      // v187.0 P0 FIX: a report the publication gate permanently rejected
+      // (P21_BELOW_MINIMUM / P26_REJECTED / etc.) is not "still generating"
+      // -- telling a customer to retry a permanent rejection is misleading
+      // and retrying will never resolve it. Distinguish this case
+      // explicitly from a genuinely-unresolvable/unknown report (below);
+      // internal certification scores are deliberately NOT exposed here --
+      // only the publication_state, which callers (and
+      // scripts/report_url_canary.py, scripts/deployment_convergence_
+      // validator.py) already treat as the authoritative, non-sensitive
+      // verdict via /api/v1/reports/{id}/publication-status.
+      return jsonResp(buildGateRejectedResponseBody(gateResult), 404);
     }
 
     if (isLegacyForm) {
@@ -4016,7 +4027,14 @@ async function handleRequest(request, env, ctx) {
         );
         return new Response(html, { status: 200, headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Security-Policy": HTML_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
       }
-      return jsonResp({ error: "Report not found", path, suggestion: "Report may still be generating. Try again in a few minutes." }, 404);
+      // v187.0 P0 FIX: this branch is reached only when the report id could
+    // not be resolved via findItemBySlug at all (not a known-and-rejected
+    // report -- see the publication-gate branch above) and no R2 object
+    // exists under any probed year/month. Genuinely unknown status --
+    // fail closed, and do not claim "still generating" since that cannot
+    // be determined from here (a permanent bad link looks identical to a
+    // not-yet-propagated one at this point).
+    return jsonResp(buildUnresolvableReportResponseBody(path), 404);
     }
 
     // Canonical URL: /reports/YYYY/MM/intel--{hash}.html
@@ -4066,7 +4084,14 @@ async function handleRequest(request, env, ctx) {
       );
       return new Response(html, { status: 200, headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Security-Policy": HTML_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
     }
-    return jsonResp({ error: "Report not found", path, suggestion: "Report may still be generating. Try again in a few minutes." }, 404);
+    // v187.0 P0 FIX: this branch is reached only when the report id could
+    // not be resolved via findItemBySlug at all (not a known-and-rejected
+    // report -- see the publication-gate branch above) and no R2 object
+    // exists under any probed year/month. Genuinely unknown status --
+    // fail closed, and do not claim "still generating" since that cannot
+    // be determined from here (a permanent bad link looks identical to a
+    // not-yet-propagated one at this point).
+    return jsonResp(buildUnresolvableReportResponseBody(path), 404);
   }
 
   // --- /api/v1/cve/live -------------------------------------------------------
