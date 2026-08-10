@@ -452,7 +452,15 @@
     const confTier  = normalizeConfidence(conf);
     const aa        = _obj(raw.apex_ai);
     const apexObj   = _obj(raw.apex);
-    const socPri    = normalizeSocPriority(_str(aa.soc_priority, "P4"));
+    // P0 FIX: the pipeline emits SOC/SLA priority as a top-level `sla_priority`
+    // field (CRITICAL->P1, HIGH->P3, MEDIUM->P3, LOW->P4 -- verified against
+    // live api/feed.json). This adapter was still reading the legacy nested
+    // `apex_ai.soc_priority` path, which no longer exists in the schema, so
+    // every item silently fell through to the "P4" fallback regardless of
+    // actual severity -- CRITICAL/HIGH items rendered as "P4 -- INFORMATIONAL".
+    // `aa.soc_priority` is kept as a secondary fallback for any older data
+    // source that still populates it.
+    const socPri    = normalizeSocPriority(_str(raw.sla_priority, _str(aa.soc_priority, "P4")));
     const socMeta   = getSocPriorityMeta(socPri);
     const aiConf    = _int(aa.ai_confidence, Math.round(conf));
     const aiCat     = _str(aa.threat_category, _str(raw.threat_type, ""));
