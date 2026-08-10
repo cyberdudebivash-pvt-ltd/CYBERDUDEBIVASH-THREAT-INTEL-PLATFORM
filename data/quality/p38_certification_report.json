@@ -1,14 +1,14 @@
 {
   "schema_version": "p38.0",
-  "generated_at": "2026-08-10T04:43:24.630966+00:00",
+  "generated_at": "2026-08-10T11:10:31.143435+00:00",
   "layer": "P38",
   "scope": "enterprise_platform_governance",
-  "release_tier": "WORLDWIDE_RELEASE",
+  "release_tier": "BLOCKED",
   "passed_count": 22,
-  "blocker_count": 0,
-  "warning_count": 4,
+  "blocker_count": 2,
+  "warning_count": 2,
   "total_gates": 26,
-  "p37_tier": "WORLDWIDE_RELEASE",
+  "p37_tier": "BLOCKED",
   "shared_validators": "scripts/p38_shared_validators.py",
   "shared_import_ok": true,
   "feed_registry_count": 12,
@@ -16,18 +16,18 @@
   "feed_type_rules": 9,
   "live_feed": {
     "path": "/home/runner/work/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/api/feed.json",
-    "item_count": 148,
+    "item_count": 42,
     "enrichment": {
-      "cvss_pct": 45.9,
-      "epss_pct": 10.8,
-      "kev_pct": 23.6,
+      "cvss_pct": 45.2,
+      "epss_pct": 38.1,
+      "kev_pct": 78.6,
       "conf_pct": 100.0,
       "actor_pct": 100.0,
-      "ioc_pct": 43.2,
-      "ttp_pct": 37.2,
-      "sigma_pct": 77.0,
-      "desc_pct": 97.3,
-      "cve_ids_pct": 50.7
+      "ioc_pct": 11.9,
+      "ttp_pct": 21.4,
+      "sigma_pct": 21.4,
+      "desc_pct": 95.2,
+      "cve_ids_pct": 50.0
     }
   },
   "governance_deliverables": {
@@ -70,28 +70,28 @@
       "label": "P37 certification report present",
       "severity": "BLOCKER",
       "status": "PASS",
-      "detail": "tier=WORLDWIDE_RELEASE blockers=0"
+      "detail": "tier=BLOCKED blockers=2"
     },
     {
       "gate_id": "G02",
       "label": "P37 release tier = WORLDWIDE_RELEASE",
       "severity": "BLOCKER",
-      "status": "PASS",
-      "detail": "WORLDWIDE_RELEASE"
+      "status": "FAIL_BLOCKER",
+      "detail": "BLOCKED"
     },
     {
       "gate_id": "G03",
       "label": "P37 has zero blockers",
       "severity": "BLOCKER",
-      "status": "PASS",
-      "detail": "blockers=0"
+      "status": "FAIL_BLOCKER",
+      "detail": "blockers=2"
     },
     {
       "gate_id": "G04",
       "label": "P36 certification chain intact",
       "severity": "WARNING",
-      "status": "PASS",
-      "detail": "tier=WORLDWIDE_RELEASE"
+      "status": "FAIL_WARNING",
+      "detail": "tier=BLOCKED"
     },
     {
       "gate_id": "G05",
@@ -182,21 +182,21 @@
       "label": "Live production feed loadable with >= 10 items",
       "severity": "BLOCKER",
       "status": "PASS",
-      "detail": "items=148 path=/home/runner/work/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/api/feed.json"
+      "detail": "items=42 path=/home/runner/work/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/api/feed.json"
     },
     {
       "gate_id": "G18",
-      "label": "Live feed CVSS coverage meets feed-type threshold (50.0% for CVE_FEED)",
+      "label": "Live feed CVSS coverage meets feed-type threshold (20.0% for BROAD_THREAT_INTEL)",
       "severity": "WARNING",
-      "status": "FAIL_WARNING",
-      "detail": "cvss_pct=45.9% threshold=50.0%"
+      "status": "PASS",
+      "detail": "cvss_pct=45.2% threshold=20.0%"
     },
     {
       "gate_id": "G19",
-      "label": "Live feed EPSS coverage meets threshold (30.0%)",
+      "label": "Live feed EPSS coverage meets threshold (0.0%)",
       "severity": "WARNING",
-      "status": "FAIL_WARNING",
-      "detail": "epss_pct=10.8%"
+      "status": "PASS",
+      "detail": "epss_pct=38.1%"
     },
     {
       "gate_id": "G20",
@@ -207,31 +207,31 @@
     },
     {
       "gate_id": "G21",
-      "label": "Source dominance < 98.0% (CVE_FEED)",
+      "label": "Source dominance < 75.0% (BROAD_THREAT_INTEL)",
       "severity": "WARNING",
       "status": "PASS",
-      "detail": "top_src_dom=36.5% threshold=98.0%"
+      "detail": "top_src_dom=35.7% threshold=75.0%"
     },
     {
       "gate_id": "G22",
-      "label": "Distinct sources >= 1 (CVE_FEED)",
+      "label": "Distinct sources >= 3 (BROAD_THREAT_INTEL)",
       "severity": "WARNING",
       "status": "PASS",
-      "detail": "distinct=7 threshold=1"
+      "detail": "distinct=6 threshold=3"
     },
     {
       "gate_id": "G23",
       "label": "No unknown fields in live feed (schema drift = 0)",
       "severity": "WARNING",
       "status": "FAIL_WARNING",
-      "detail": "drift_count=3 unknown=['epss_percentile', 'ghsa_id', 'priority']"
+      "detail": "drift_count=25 unknown=['_invariant_rule', '_invariant_signals', '_invariant_version', '_severity_governance_reason', '_severity_upgraded_from']"
     },
     {
       "gate_id": "G24",
       "label": "Deprecated field usage <= 3 in live feed",
       "severity": "WARNING",
-      "status": "FAIL_WARNING",
-      "detail": "deprecated_count=4 fields=['actor', 'confidence_score', 'cves', 'epss_score']"
+      "status": "PASS",
+      "detail": "deprecated_count=3 fields=['actor', 'confidence_score', 'epss_score']"
     },
     {
       "gate_id": "G25",
