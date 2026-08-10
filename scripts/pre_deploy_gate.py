@@ -10,7 +10,7 @@ Exit codes:
 
 Usage: python scripts/pre_deploy_gate.py
 """
-import sys, ast
+import sys, ast, re
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -110,9 +110,31 @@ gate("V173 renderer block intact",
      'CDB-RENDERER-ENGINE-V173-START' in src and 'CDB-RENDERER-ENGINE-V173-END' in src,
      "V173 renderer block has been removed from index.html")
 
-# ── GATE 9: Script/style tags balanced in index.html ─────────────
+# ── GATE 9: Script tags balanced in index.html ────────────────────
+# Tag-aware, not substring-count: HTML5 parses <script> content as raw
+# text, so once inside an open <script> element only a literal </script>
+# ends it -- text that merely contains "<script"/"</script>" inside a JS
+# comment or string (e.g. prose describing script tags) is inert content,
+# exactly as real browsers treat it. A naive count of the substring
+# '<script' vs '</script>' false-positives on such text.
+_SCRIPT_TAG_RE = re.compile(r'<(/?)script\b[^>]*>', re.IGNORECASE)
+
+def script_tags_balanced(html):
+    inside = False
+    for m in _SCRIPT_TAG_RE.finditer(html):
+        is_close = bool(m.group(1))
+        if not inside:
+            if is_close:
+                return False  # unmatched closing tag
+            inside = True
+        elif is_close:
+            inside = False
+        # else: "<script"-looking text while already inside a script
+        # element is script content (comment/string), not a real tag.
+    return not inside  # False if a script element was left unclosed
+
 gate("index.html script tags balanced",
-     src.count('<script') == src.count('</script>'),
+     script_tags_balanced(src),
      "Unbalanced <script> tags in index.html — syntax error")
 
 gate("index.html style tags balanced",
