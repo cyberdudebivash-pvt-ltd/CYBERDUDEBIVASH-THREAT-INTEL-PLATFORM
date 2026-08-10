@@ -21,8 +21,19 @@ OUTPUTS (all written to OUT_DIR, uploaded by r2_upload.py):
   api/v1/intel/pulse.json         ← NEW (live threat pulse)
   api/v1/intel/darkweb.json       ← NEW (dark web monitor)
   api/v1/intel/cybermap.json      ← NEW (geo heatmap)
-  api/reports/index.json          ← was BROKEN (missing)
-  api/reports/stats.json          ← NEW
+
+  NOTE (F-02 fix): This script previously ALSO wrote api/reports/index.json
+  and api/reports/stats.json. That has been removed -- scripts/build_reports_index.py
+  (sentinel-blogger.yml STAGE 3.3.7) is the sole authoritative writer for the
+  api/reports/* registry: it scans the real reports/ directory on disk and
+  produces report_url values that resolve to actual HTML files. This script's
+  build_reports_index()/build_reports_stats() derived a competing "reports" list
+  from severity-filtered feed items with fabricated /api/reports/{id}.json URLs
+  that never corresponded to a real file, and the two writers (running from two
+  independent, differently-scheduled workflows) raced on the same R2 keys with
+  incompatible schemas. The functions are kept below (unused) rather than
+  deleted, per the platform's deprecate-don't-delete policy, in case a future
+  distinct "dashboard reports summary" endpoint needs them as a starting point.
 
 GOVERNANCE:
   - Never publishes synthetic data as real intel
@@ -659,8 +670,9 @@ def main():
         f"{OUT_DIR}/pulse.json":        build_pulse(items, stats),
         f"{OUT_DIR}/darkweb.json":      build_darkweb(items),
         f"{OUT_DIR}/cybermap.json":     build_cybermap(items, stats),
-        f"{REPORTS_OUT_DIR}/index.json":build_reports_index(items, stats),
-        f"{REPORTS_OUT_DIR}/stats.json":build_reports_stats(items, stats),
+        # F-02 fix: api/reports/index.json and api/reports/stats.json are no
+        # longer written here -- scripts/build_reports_index.py is the sole
+        # authoritative writer for the report registry. See module docstring.
     }
 
     written = 0
@@ -676,7 +688,6 @@ def main():
     log.info("=== COMPLETE: %d files written, %d failed ===", written, failed)
     log.info("  Items in apex.json       : %d", stats["total"])
     log.info("  Items in campaigns.json  : %d", len(outputs[f"{OUT_DIR}/campaigns.json"]["active_campaigns"]))
-    log.info("  Items in reports/index   : %d", outputs[f"{REPORTS_OUT_DIR}/index.json"]["report_count"])
     log.info("  Output directory         : %s", os.path.abspath(OUT_DIR))
 
     if failed > 0:

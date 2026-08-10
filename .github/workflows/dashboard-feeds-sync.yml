@@ -20,8 +20,13 @@
 #   api/v1/intel/pulse.json         (new — live threat pulse)
 #   api/v1/intel/darkweb.json       (new — dark web monitor)
 #   api/v1/intel/cybermap.json      (new — geo heatmap)
-#   api/reports/index.json          (was missing — reports archive)
-#   api/reports/stats.json          (new)
+#
+#   NOTE (F-02 fix): api/reports/index.json and api/reports/stats.json were
+#   removed from this workflow's scope. scripts/build_reports_index.py
+#   (sentinel-blogger.yml STAGE 3.3.7) is the sole authoritative writer for
+#   the report registry; this workflow racing it on the same R2 keys with a
+#   different schema and fabricated report URLs was the root cause of F-02
+#   (flapping/inconsistent api/reports/index.json and latest.json).
 #
 # GOVERNANCE:
 #   - Never publishes synthetic data as real intel
@@ -137,9 +142,7 @@ jobs:
             api/v1/intel/defcon.json \
             api/v1/intel/pulse.json \
             api/v1/intel/darkweb.json \
-            api/v1/intel/cybermap.json \
-            api/reports/index.json \
-            api/reports/stats.json; do
+            api/v1/intel/cybermap.json; do
             if [ ! -f "$f" ]; then
               echo "::error::MISSING: $f"
               ERRORS=$((ERRORS+1))
@@ -162,7 +165,7 @@ jobs:
             echo "::error::$ERRORS feed(s) failed validation — aborting R2 upload"
             exit 1
           fi
-          echo "All 13 feed outputs validated."
+          echo "All 11 feed outputs validated."
 
       - name: "Upload feeds to Cloudflare R2"
         if: github.event.inputs.dry_run != 'true'
@@ -190,9 +193,7 @@ jobs:
             api/v1/intel/defcon.json \
             api/v1/intel/pulse.json \
             api/v1/intel/darkweb.json \
-            api/v1/intel/cybermap.json \
-            api/reports/index.json \
-            api/reports/stats.json; do
+            api/v1/intel/cybermap.json; do
             if [ -f "$FILE" ]; then
               aws s3 cp "$FILE" "s3://${BUCKET}/${FILE}" \
                 --endpoint-url "$ENDPOINT" \
@@ -237,9 +238,7 @@ jobs:
                 "https://intel.cyberdudebivash.com/api/v1/intel/pulse",
                 "https://intel.cyberdudebivash.com/api/v1/intel/darkweb",
                 "https://intel.cyberdudebivash.com/api/v1/intel/cybermap",
-                "https://intel.cyberdudebivash.com/api/v1/news/feed",
-                "https://intel.cyberdudebivash.com/api/reports/index.json",
-                "https://intel.cyberdudebivash.com/api/reports/stats.json"
+                "https://intel.cyberdudebivash.com/api/v1/news/feed"
               ]
             }' | python3 -c "import sys,json; d=json.load(sys.stdin); print('Cache purge:', 'OK' if d.get('success') else 'FAILED', d.get('errors',[]))"
 
@@ -264,9 +263,7 @@ jobs:
             /api/v1/intel/pulse \
             /api/v1/intel/darkweb \
             /api/v1/intel/cybermap \
-            /api/v1/news/feed \
-            /api/reports/index.json \
-            /api/reports/stats.json; do
+            /api/v1/news/feed; do
             HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}${endpoint}" --max-time 10)
             SIZE=$(curl -s "${BASE}${endpoint}" --max-time 10 | wc -c)
             if [ "$HTTP" = "200" ] && [ "$SIZE" -gt 10 ]; then
