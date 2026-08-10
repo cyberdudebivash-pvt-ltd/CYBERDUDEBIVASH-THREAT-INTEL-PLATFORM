@@ -255,6 +255,23 @@ def main() -> int:
         except Exception as exc:
             log.warning("Could not read api/feed.json: %s (non-fatal)", exc)
 
+    # --- Load latest.json up front (needed both to build the check set below
+    #     and to purge it later) so its own entries -- which are not
+    #     guaranteed to be a strict subset of index.json's checked window --
+    #     are actually verified, not just carried along for the ride. v1.1
+    #     FIX: previously latest.json's entries were never added to the
+    #     checked key set at all, so a staleness unique to latest.json
+    #     (e.g. after independent drift between the two files) could never
+    #     be detected or purged by this gate.
+    latest_data: Optional[dict] = None
+    latest_reports_raw: List[dict] = []
+    if LATEST_PATH.exists():
+        try:
+            latest_data = json.loads(LATEST_PATH.read_text(encoding="utf-8"))
+            latest_reports_raw = latest_data.get("reports", [])
+        except Exception as exc:
+            log.warning("Could not read api/reports/latest.json: %s (non-fatal)", exc)
+
     # --- Select entries to check (most recent MAX_CHECK + all current-run) ---
     entries_to_check = all_entries[:MAX_CHECK]
     skipped = len(all_entries) - len(entries_to_check)
@@ -280,6 +297,13 @@ def main() -> int:
                 if candidate_key == ck:
                     entry_key_map[ck] = entry
                     break
+
+    # Also include latest.json's own entries, even if absent from index.json's
+    # checked window (see v1.1 FIX note above).
+    for entry in latest_reports_raw:
+        lk = _path_to_r2_key(entry.get("path", "") or entry.get("url", ""))
+        if lk and lk not in entry_key_map:
+            entry_key_map[lk] = entry
 
     all_keys_to_check = list(entry_key_map.keys())
     log.info("Dispatching %d parallel R2 head-object checks (workers=%d)...",
@@ -334,15 +358,23 @@ def main() -> int:
         else:
             clean_entries.append(entry)
 
+    index_changed  = False
+    latest_changed = False
+
     if purged_count > 0:
         log.info("Purged %d stale entries from api/reports/index.json "
                  "(had no HTML in R2 sentinel-apex-reports)", purged_count)
         log.info("Index: %d entries before -> %d entries after purge",
                  len(all_entries), len(clean_entries))
 
-        # Write back cleaned index
+        # Write back cleaned index. v1.1 FIX: total_reports is reduced by
+        # exactly the purged count so it stays consistent with reports_listed/
+        # reports -- previously it was left untouched after a purge, so a
+        # customer-visible count could silently diverge from what the index
+        # actually lists (F-02 root cause register item).
         index_data["reports"]         = clean_entries
         index_data["reports_listed"]  = len(clean_entries)
+        index_data["total_reports"]   = max(0, int(index_data.get("total_reports", 0)) - purged_count)
         index_data["generated_at"]    = _utc_now()
 
         try:
@@ -353,47 +385,56 @@ def main() -> int:
             )
             os.replace(tmp, INDEX_PATH)
             log.info("OK: api/reports/index.json written with %d clean entries", len(clean_entries))
+            index_changed = True
         except Exception as exc:
             log.error("Failed to write cleaned index: %s (non-fatal)", exc)
-
-        # Also update api/reports/latest.json if it exists
-        if LATEST_PATH.exists():
-            try:
-                latest_data = json.loads(LATEST_PATH.read_text(encoding="utf-8"))
-                latest_reports = latest_data.get("reports", [])
-                clean_latest = [
-                    e for e in latest_reports
-                    if _path_to_r2_key(e.get("path", "") or e.get("url", "")) not in missing_keys
-                ]
-                if len(clean_latest) < len(latest_reports):
-                    latest_data["reports"]        = clean_latest
-                    latest_data["reports_listed"] = len(clean_latest)
-                    latest_data["generated_at"]   = _utc_now()
-                    tmp2 = LATEST_PATH.with_suffix(".integrity_tmp")
-                    tmp2.write_text(
-                        json.dumps(latest_data, indent=2, ensure_ascii=False, default=str),
-                        encoding="utf-8",
-                    )
-                    os.replace(tmp2, LATEST_PATH)
-                    log.info("OK: api/reports/latest.json purged %d stale entries",
-                             len(latest_reports) - len(clean_latest))
-            except Exception as exc:
-                log.warning("Could not update api/reports/latest.json: %s (non-fatal)", exc)
-
-        # Re-upload cleaned index files to R2 sentinel-apex-data
-        if data_key and data_sec:
-            log.info("Re-uploading cleaned index files to R2 (sentinel-apex-data)...")
-            for rel, local_p in [
-                ("api/reports/index.json",  INDEX_PATH),
-                ("api/reports/latest.json", LATEST_PATH),
-            ]:
-                if local_p.exists():
-                    _s3_cp(str(local_p), BUCKET_DATA, rel, endpoint, data_key, data_sec)
-        else:
-            log.warning("WARN: No data bucket credentials -- cannot re-upload cleaned index to R2")
     else:
         log.info("Index is clean -- no stale entries detected in checked range (%d entries)",
                  len(entries_to_check))
+
+    # v1.1 FIX: latest.json is checked/purged independently of index.json's
+    # purge_count. This used to be nested inside `if purged_count > 0`, so a
+    # run that purged 0 index.json entries never checked latest.json at all --
+    # even when latest.json (the newest-first top-50 subset, most likely to
+    # contain this run's own reports) had its own stale entries missing from
+    # R2. That asymmetry was the direct cause of index.json and latest.json
+    # showing different report counts from the same pipeline run (F-02).
+    if latest_data is not None:
+        try:
+            latest_reports = latest_reports_raw
+            clean_latest = [
+                e for e in latest_reports
+                if _path_to_r2_key(e.get("path", "") or e.get("url", "")) not in missing_keys
+            ]
+            latest_purged = len(latest_reports) - len(clean_latest)
+            if latest_purged > 0:
+                latest_data["reports"]        = clean_latest
+                latest_data["reports_listed"] = len(clean_latest)
+                latest_data["total_reports"]  = max(0, int(latest_data.get("total_reports", 0)) - latest_purged)
+                latest_data["generated_at"]   = _utc_now()
+                tmp2 = LATEST_PATH.with_suffix(".integrity_tmp")
+                tmp2.write_text(
+                    json.dumps(latest_data, indent=2, ensure_ascii=False, default=str),
+                    encoding="utf-8",
+                )
+                os.replace(tmp2, LATEST_PATH)
+                log.info("OK: api/reports/latest.json purged %d stale entries", latest_purged)
+                latest_changed = True
+        except Exception as exc:
+            log.warning("Could not update api/reports/latest.json: %s (non-fatal)", exc)
+
+    # Re-upload whichever cleaned file(s) actually changed to R2 sentinel-apex-data
+    if index_changed or latest_changed:
+        if data_key and data_sec:
+            log.info("Re-uploading cleaned index files to R2 (sentinel-apex-data)...")
+            for rel, local_p, changed in [
+                ("api/reports/index.json",  INDEX_PATH,  index_changed),
+                ("api/reports/latest.json", LATEST_PATH, latest_changed),
+            ]:
+                if changed and local_p.exists():
+                    _s3_cp(str(local_p), BUCKET_DATA, rel, endpoint, data_key, data_sec)
+        else:
+            log.warning("WARN: No data bucket credentials -- cannot re-upload cleaned index to R2")
 
     # --- Determine exit status ---
     # HARD FAIL only when ALL current-run reports are missing from R2.
