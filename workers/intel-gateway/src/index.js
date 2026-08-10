@@ -1789,7 +1789,50 @@ async function handleLogout(request, env, ctx, auth) {
 // ADMIN API (/api/admin/*)
 // =============================================================================
 
-async function handleAdmin(request, env, ctx, path, method) {
+export async function handleAdmin(request, env, ctx, path, method) {
+  // -- Cache-bust endpoints (P0 fix): these never had a matching route here.
+  // scripts/bust_kv_cache.py (pipeline STAGE 3.7) has been calling
+  // POST /api/admin/cache/bust[-prefix] with an "X-Admin-Secret" header
+  // carrying WORKER_ADMIN_SECRET since it was written, but this function only
+  // ever read "X-Admin-Key"/"Authorization: Bearer" and compared against the
+  // unrelated ADMIN_SECRET below -- so every call fell through to that check,
+  // found no matching header, and 403'd regardless of what WORKER_ADMIN_SECRET
+  // was set to. No amount of rotating that secret could ever have fixed this;
+  // the route + auth pair it needs simply didn't exist. Authenticated the same
+  // way as the existing WORKER_ADMIN_SECRET consumers (alert-engine.js
+  // handleAlertDispatch, sla-monitor.js handleSLAPing) so no new secret is
+  // required. Cache data for the keys/prefixes this busts lives in
+  // SECURITY_HUB_KV (see fetchReportsIndexExt's "idx:reports" read in
+  // api-extensions.js and kvGet/kvPut in dark-web-monitor.js); deleting a key
+  // that was never written is a harmless no-op, so this is safe for the
+  // several legacy target names in CACHE_KEYS that have no live writer today.
+  if (path === "/api/admin/cache/bust" || path === "/api/admin/cache/bust-prefix") {
+    const cacheSecret = request.headers.get("X-Admin-Secret") || "";
+    if (!env.WORKER_ADMIN_SECRET || !timingSafeEqual(cacheSecret, env.WORKER_ADMIN_SECRET)) {
+      auditLog(ctx, env, { action: "admin_auth_failed", path, method });
+      return jsonResp({ error: "Forbidden: invalid admin credentials" }, 403);
+    }
+    if (method !== "POST") {
+      return jsonResp({ error: "Method not allowed", allowed: ["POST"] }, 405);
+    }
+    const qs = new URL(request.url).searchParams;
+    try {
+      if (path === "/api/admin/cache/bust") {
+        const key = qs.get("key") || "";
+        if (!key) return jsonResp({ error: "Missing 'key' query parameter" }, 400);
+        await env.SECURITY_HUB_KV.delete(key);
+        return jsonResp({ busted: key }, 200);
+      }
+      const prefix = qs.get("prefix") || "";
+      if (!prefix) return jsonResp({ error: "Missing 'prefix' query parameter" }, 400);
+      const listed = await env.SECURITY_HUB_KV.list({ prefix });
+      await Promise.all(listed.keys.map((k) => env.SECURITY_HUB_KV.delete(k.name)));
+      return jsonResp({ busted_prefix: prefix, count: listed.keys.length }, 200);
+    } catch (e) {
+      return jsonResp({ error: `Cache bust failed: ${e.message}` }, 500);
+    }
+  }
+
   const adminKey = (
     request.headers.get("X-Admin-Key") ||
     (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "")

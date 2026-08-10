@@ -1468,7 +1468,15 @@ jobs:
       # R2 is NEVER overwritten with corrupt/small manifests.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.5 - Upload Intel to Cloudflare R2 (MANDATORY)"
-        timeout-minutes: 12
+        # v184.1 fix: was 12 -- r2_upload.py's own HTML-report-upload phase
+        # documents a 45-min internal hard timeout ("50 concurrent requests,
+        # --size-only, 45-min hard timeout" -- see its own log output), so the
+        # 12-min step-level timeout was killing it long before that budget was
+        # reached. Run 31389394501 timed out mid-upload at exactly 12 min,
+        # which made this MANDATORY step fail and skip every downstream HARD
+        # FAIL integrity gate through STAGE 4.04 (STAGE 3.5.1 R2 Reports Index
+        # Integrity Gate, STAGE 3.6 R2 Upload Integrity Verifier, etc.).
+        timeout-minutes: 50
         env:
           CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
           CF_R2_REPORTS_SECRET_KEY: ${{ secrets.CF_R2_REPORTS_SECRET_KEY }}
