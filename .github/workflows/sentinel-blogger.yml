@@ -140,7 +140,14 @@ concurrency:
 jobs:
   generate-and-sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 90   # v184.0: per-step timeouts now enforced; 90min job cap prevents zombie runs
+    # v184.1: raised 90->130. STAGE 3.5's own timeout-minutes went 12->50 (see
+    # that step's comment) to match r2_upload.py's documented 45-min internal
+    # budget; pre-3.5 stages alone observed at ~27min (run 31389394501), so a
+    # 90min cap left too little room for 3.5's worst case plus every
+    # downstream gate (STAGE 3.5.1 through 5.9.6). Per-step timeouts remain
+    # the primary zombie-run guard; this is just the ceiling that must
+    # accommodate their sum.
+    timeout-minutes: 130
     # CI LOOP GUARD (v184.0): Prevent github-actions[bot] push-triggered runs
     # from spawning a new pipeline cycle. schedule + workflow_dispatch always run.
     # This eliminates the CI self-trigger feedback loop on Stage-4 git commits.

@@ -1815,21 +1815,51 @@ export async function handleAdmin(request, env, ctx, path, method) {
     if (method !== "POST") {
       return jsonResp({ error: "Method not allowed", allowed: ["POST"] }, 405);
     }
+    // Canonical cache-key namespace this endpoint is scoped to, mirroring
+    // scripts/bust_kv_cache.py's CACHE_KEYS. SECURITY_HUB_KV also holds
+    // unrelated data (audit:* from auditLog() above, fingerprint:* etc.) --
+    // without this allowlist, an authenticated cache-bust call could be used
+    // to erase that data instead of just cache entries.
+    const ALLOWED_EXACT_KEYS = new Set([
+      "idx:reports", "idx:preview", "ai:index", "ai:analyze", "ai:respond", "ai:correlate",
+    ]);
+    const ALLOWED_PREFIXES = new Set([
+      "darkweb:scan", "darkweb:status", "reports:premium", "reports:list", "checkout",
+    ]);
     const qs = new URL(request.url).searchParams;
     try {
       if (path === "/api/admin/cache/bust") {
         const key = qs.get("key") || "";
         if (!key) return jsonResp({ error: "Missing 'key' query parameter" }, 400);
+        if (!ALLOWED_EXACT_KEYS.has(key)) {
+          return jsonResp({ error: "Unknown cache key", allowed: [...ALLOWED_EXACT_KEYS] }, 400);
+        }
         await env.SECURITY_HUB_KV.delete(key);
         return jsonResp({ busted: key }, 200);
       }
       const prefix = qs.get("prefix") || "";
       if (!prefix) return jsonResp({ error: "Missing 'prefix' query parameter" }, 400);
-      const listed = await env.SECURITY_HUB_KV.list({ prefix });
-      await Promise.all(listed.keys.map((k) => env.SECURITY_HUB_KV.delete(k.name)));
-      return jsonResp({ busted_prefix: prefix, count: listed.keys.length }, 200);
+      if (!ALLOWED_PREFIXES.has(prefix)) {
+        return jsonResp({ error: "Unknown cache prefix", allowed: [...ALLOWED_PREFIXES] }, 400);
+      }
+      // KV list() returns at most 1,000 keys per call; loop on the cursor
+      // until list_complete so a prefix with more entries than that is fully
+      // busted, not silently left partially stale.
+      let cursor;
+      let deleted = 0;
+      for (;;) {
+        const listed = await env.SECURITY_HUB_KV.list({ prefix, cursor });
+        await Promise.all(listed.keys.map((k) => env.SECURITY_HUB_KV.delete(k.name)));
+        deleted += listed.keys.length;
+        if (listed.list_complete) break;
+        cursor = listed.cursor;
+      }
+      return jsonResp({ busted_prefix: prefix, count: deleted }, 200);
     } catch (e) {
-      return jsonResp({ error: `Cache bust failed: ${e.message}` }, 500);
+      // Never return KV/provider exception text to the caller -- log
+      // server-side only (visible via wrangler tail / Logpush).
+      console.error(`[handleAdmin cache-bust] KV operation failed: ${e && e.message ? e.message : e}`);
+      return jsonResp({ error: "Cache bust failed" }, 500);
     }
   }
 
