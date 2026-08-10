@@ -10,9 +10,10 @@ Exit codes:
 
 Usage: python scripts/pre_deploy_gate.py
 """
-import sys, ast, re
+import sys, ast
 from pathlib import Path
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 
 if hasattr(sys.stdout, 'reconfigure'):
     try: sys.stdout.reconfigure(encoding='utf-8')
@@ -111,27 +112,39 @@ gate("V173 renderer block intact",
      "V173 renderer block has been removed from index.html")
 
 # ── GATE 9: Script tags balanced in index.html ────────────────────
-# Tag-aware, not substring-count: HTML5 parses <script> content as raw
-# text, so once inside an open <script> element only a literal </script>
-# ends it -- text that merely contains "<script"/"</script>" inside a JS
-# comment or string (e.g. prose describing script tags) is inert content,
-# exactly as real browsers treat it. A naive count of the substring
-# '<script' vs '</script>' false-positives on such text.
-_SCRIPT_TAG_RE = re.compile(r'<(/?)script\b[^>]*>', re.IGNORECASE)
+# Tag-aware, not substring-count: uses html.parser's built-in
+# CDATA_CONTENT_ELEMENTS handling for <script>, which treats script
+# content as raw text (nested-looking tags/comments inside it are inert),
+# and correctly parses HTML comments and quoted attribute values so
+# "<script"-looking text there is never mistaken for a real tag either --
+# unlike a plain substring or regex count, which false-positives on any
+# of those (e.g. a JS comment, an HTML comment, or an attribute value
+# that merely mentions "<script>" as text).
+class _ScriptTagBalanceParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.depth = 0
+        self.unmatched_close = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            self.depth += 1
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            if self.depth > 0:
+                self.depth -= 1
+            else:
+                self.unmatched_close = True
 
 def script_tags_balanced(html):
-    inside = False
-    for m in _SCRIPT_TAG_RE.finditer(html):
-        is_close = bool(m.group(1))
-        if not inside:
-            if is_close:
-                return False  # unmatched closing tag
-            inside = True
-        elif is_close:
-            inside = False
-        # else: "<script"-looking text while already inside a script
-        # element is script content (comment/string), not a real tag.
-    return not inside  # False if a script element was left unclosed
+    parser = _ScriptTagBalanceParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return False
+    return parser.depth == 0 and not parser.unmatched_close
 
 gate("index.html script tags balanced",
      script_tags_balanced(src),

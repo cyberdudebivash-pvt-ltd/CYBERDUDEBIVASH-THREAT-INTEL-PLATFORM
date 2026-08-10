@@ -10,17 +10,22 @@ index.html has no actual unclosed/unmatched <script> element. The extra
 ("...aborted this entire <script> block on every page load...") -- which the
 naive substring-count check cannot distinguish from a real HTML tag.
 
-Gate 9 was replaced with a tag-aware state machine (script_tags_balanced) that
-mirrors the HTML5 tokenizer's "script data" raw-text mode: once inside an open
-<script> element, only a literal </script> sequence ends it, so "<script"-
-looking text inside a JS comment or string is inert content, exactly as real
-browsers treat it. This test exercises the actual production function (loaded
+Gate 9 was first replaced with a regex-based state machine mirroring the
+HTML5 tokenizer's "script data" raw-text mode, then -- per a valid
+CodeRabbit review finding on the fix PR -- upgraded to use the stdlib
+html.parser.HTMLParser (which natively implements that same raw-text
+handling via CDATA_CONTENT_ELEMENTS) after the regex version was shown to
+still false-positive on "<script"-looking text inside an HTML comment or a
+quoted attribute value *outside* any real script element (e.g.
+`<!-- <script> -->` or `<div data-x="<script>">`), which a plain
+tag-matching regex cannot distinguish from real markup but a real HTML
+parser can. This test exercises the actual production function (loaded
 directly from scripts/pre_deploy_gate.py via AST extraction, so it cannot
-silently drift from what STAGE 5.4.5d really runs) against both the required
-pass/fail matrix and the exact line-5837 failure class.
+silently drift from what STAGE 5.4.5d really runs) against the required
+pass/fail matrix, the exact line-5837 failure class, and the comment/
+attribute false-positive class CodeRabbit flagged.
 """
 import ast
-import re
 import unittest
 from pathlib import Path
 
@@ -29,8 +34,8 @@ GATE_SCRIPT = REPO_ROOT / "scripts" / "pre_deploy_gate.py"
 
 
 def _load_script_tags_balanced():
-    """Extract script_tags_balanced (and its _SCRIPT_TAG_RE dependency) from
-    the real pre_deploy_gate.py source and exec just those nodes in an
+    """Extract _ScriptTagBalanceParser and script_tags_balanced from the
+    real pre_deploy_gate.py source and exec just those nodes in an
     isolated namespace -- pre_deploy_gate.py is a top-level script (runs
     file I/O and sys.exit() at import time), not an importable module, so
     this tests the actual production code without executing the rest of
@@ -39,17 +44,15 @@ def _load_script_tags_balanced():
     tree = ast.parse(src)
     wanted = []
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == "_SCRIPT_TAG_RE" for t in node.targets
-        ):
+        if isinstance(node, ast.ClassDef) and node.name == "_ScriptTagBalanceParser":
             wanted.append(node)
         elif isinstance(node, ast.FunctionDef) and node.name == "script_tags_balanced":
             wanted.append(node)
     assert len(wanted) == 2, (
-        f"expected to find _SCRIPT_TAG_RE and script_tags_balanced in "
+        f"expected to find _ScriptTagBalanceParser and script_tags_balanced in "
         f"{GATE_SCRIPT}, found {len(wanted)} matching nodes -- gate source changed shape"
     )
-    namespace = {"re": re}
+    namespace = {"HTMLParser": __import__("html.parser", fromlist=["HTMLParser"]).HTMLParser}
     module = ast.Module(body=wanted, type_ignores=[])
     exec(compile(module, filename=str(GATE_SCRIPT), mode="exec"), namespace)
     return namespace["script_tags_balanced"]
@@ -77,6 +80,22 @@ class TestScriptTagsBalanced(unittest.TestCase):
     def test_string_literal_containing_script_tag_text(self):
         self.assertTrue(self.script_tags_balanced(
             '<script>\n  const x = "<script>";\n</script>'
+        ))
+
+    def test_html_comment_containing_script_tag_text_outside_script_element(self):
+        """CodeRabbit finding: "<script>"-looking text inside an HTML
+        comment, entirely outside any real <script> element, must not be
+        mistaken for an opening tag."""
+        self.assertTrue(self.script_tags_balanced(
+            "<!-- remove this <script> tag later --><div>ok</div>"
+        ))
+
+    def test_quoted_attribute_containing_script_tag_text_outside_script_element(self):
+        """CodeRabbit finding: "<script>"-looking text inside a quoted
+        HTML attribute value, entirely outside any real <script> element,
+        must not be mistaken for an opening tag."""
+        self.assertTrue(self.script_tags_balanced(
+            '<div data-example="<script>"></div>'
         ))
 
     def test_genuine_missing_closing_tag(self):
