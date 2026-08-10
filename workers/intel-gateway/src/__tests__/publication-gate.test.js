@@ -6,10 +6,10 @@ import {
 } from "../publication-gate.js";
 
 // ---------------------------------------------------------------------------
-// P0 incident regression suite — CYBERDUDEBIVASH SENTINEL APEX
+// P0 incident regression suite  -  CYBERDUDEBIVASH SENTINEL APEX
 // intel--ba996dad34540150b8ea1b5f was served publicly despite P21=4/100
 // (BELOW_MINIMUM), P25=28% (BELOW THRESHOLD), P26=29/100 (REJECTED),
-// P23=4/10 (INCOMPLETE — DO NOT PUBLISH). These tests prove the publication
+// P23=4/10 (INCOMPLETE  -  DO NOT PUBLISH). These tests prove the publication
 // firewall: deny overrides allow, fail closed, no engine's permissive
 // verdict can override another engine's rejection.
 // ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ import {
 // A near-empty item: every certification engine (computeP20QualityScore,
 // getP21CertificationLevel, computeOperationalReadiness,
 // computeEnterpriseTrustScore, computeP26Grade) scores this at/near zero
-// against real, unmocked engine logic — reproducing the incident's actual
+// against real, unmocked engine logic  -  reproducing the incident's actual
 // numbers, not a synthetic mock of "P21 says fail".
 const REJECTED_ITEM = {
   id: "intel--ba996dad34540150b8ea1b5f",
@@ -130,7 +130,7 @@ test("Test 6 (a certification engine throwing): BLOCKED, never 'unknown = approv
   assert.ok(r.error);
 });
 
-test("Test 7 (enrichment incomplete — no IOCs, no MITRE, no detection): BLOCKED", () => {
+test("Test 7 (enrichment incomplete  -  no IOCs, no MITRE, no detection): BLOCKED", () => {
   const r = evaluatePublicationGate(REJECTED_ITEM);
   assert.equal(r.customer_ready, false);
 });
@@ -153,7 +153,7 @@ test("deny overrides allow: a single rejected engine blocks even with otherwise-
   assert.equal(r.customer_ready, r.blocking_gates.length === 0);
 });
 
-test("response schema exposes explicitly-named scores per engine (Section 21) — never an ambiguous bare 'quality'", () => {
+test("response schema exposes explicitly-named scores per engine (Section 21)  -  never an ambiguous bare 'quality'", () => {
   const r = evaluatePublicationGate(CUSTOMER_READY_ITEM);
   for (const key of ["P20_SCORE", "P21_CERTIFICATION", "P23_OPERATIONAL_READINESS_PCT",
                       "P25_TRUST_SCORE", "P25_TRUST_TIER", "P26_COMMERCIAL_SCORE", "P26_GRADE", "P26_CERT_TIER"]) {
@@ -275,7 +275,7 @@ test("content_hash is present, stable for identical content, and changes when ev
 });
 
 // ---------------------------------------------------------------------------
-// v187.0 P0 fix — customer-facing 404 response-body regression suite.
+// v187.0 P0 fix  -  customer-facing 404 response-body regression suite.
 // Root cause: the /reports/** route used to say "Report may still be
 // generating" for EVERY 404, including permanently gate-rejected reports
 // (misleading -- retrying will never resolve it) and to expose raw

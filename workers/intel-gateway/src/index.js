@@ -547,7 +547,7 @@ async function findItemBySlug(env, slug) {
 }
 
 /**
- * GET /api/v1/reports/{id}/publication-status — the source of truth for
+ * GET /api/v1/reports/{id}/publication-status  -  the source of truth for
  * whether a report is customer-accessible (Section 28). Resolves the item
  * the same way /reports/** does (findItemBySlug) and returns the SAME
  * evaluatePublicationGate() verdict that route enforces -- this endpoint
@@ -1876,7 +1876,7 @@ async function handleAdmin(request, env, ctx, path, method) {
     return jsonResp({ message: "API key revoked", key_prefix: key.slice(0, 12) });
   }
 
-  // GET /api/admin/publication-audit — P0 follow-through (Section 16):
+  // GET /api/admin/publication-audit  -  P0 follow-through (Section 16):
   // incremental scanner over the full historical REPORTS_R2 archive. Each
   // page lists up to `limit` objects under reports/ via R2's own cursor
   // (never loads the archive into memory at once), resolves each report id
