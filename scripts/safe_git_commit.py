@@ -528,8 +528,8 @@ def main() -> None:
             # == END P0-FIX v154.0.0 ==
 
             # == P0-FIX v184.2: Generated Customer-Artifact Recovery Guard ==
-            # PROBLEM (confirmed via sentinel-blogger run 31398438288, live
-            # production verification of PR #154): these files ARE staged and
+            # PROBLEM (confirmed via a live production pipeline run during
+            # post-deploy verification): these files ARE staged and
             # committed above (JSON_GUARDED / files_to_stage) before this push
             # loop runs, so `git stash push` never protects them -- unlike an
             # uncommitted working-tree change, a committed file has nothing to
@@ -646,6 +646,42 @@ def main() -> None:
                     except Exception as _write_err:
                         log.error("[manifest-guard] Failed to restore %s: %s",
                                   _mp.name, _write_err)
+
+            # == P0-FIX v184.3: Recovery Commit Guard ==
+            # PROBLEM: every guard above (reports-guard, artifact-guard,
+            # workflow-guard, conflict-cleanup, manifest-guard) restores
+            # content via `git checkout <ref> -- <path>` or a direct file
+            # write -- both update the index/working tree but create no
+            # commit. `git push` publishes commits, not working-tree or
+            # staged state: after `git reset --hard origin/main` above, HEAD
+            # already equals origin/main, so without a commit here the push
+            # below has nothing new to send -- it exits 0 trivially
+            # ("Everything up-to-date") while every restore above only ever
+            # reaches the local runner disk, never origin/main's history.
+            # Harmless for consumers that read local disk directly after
+            # this script runs (e.g. an R2 sync step later in the same
+            # job), but origin/main's tracked history would otherwise never
+            # receive the correction. Commit whatever the guards actually
+            # changed so it reaches the remote too.
+            _recovery_diff = run_git("diff", "--cached", "--quiet")
+            if _recovery_diff.returncode != 0:
+                _recovery_commit = run_git(
+                    "commit", "-m",
+                    "SENTINEL APEX v{} -- conflict-recovery (attempt {}): "
+                    "restore generated artifacts from ORIG_HEAD [skip ci]".format(
+                        PIPELINE_VERSION, attempt
+                    ),
+                )
+                if _recovery_commit.returncode == 0:
+                    log.info("[recovery-commit] Committed restored artifacts "
+                             "so they reach origin/main, not just local disk.")
+                else:
+                    log.warning("[recovery-commit] Commit failed: %s",
+                                _recovery_commit.stderr.strip()[:200])
+            else:
+                log.info("[recovery-commit] Nothing to commit after recovery "
+                         "(restored content already matches origin/main).")
+            # == END P0-FIX v184.3 ==
 
         push_result = run_git("push", "origin", "main")
         if push_result.returncode == 0:
