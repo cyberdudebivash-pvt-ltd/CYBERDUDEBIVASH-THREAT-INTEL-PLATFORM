@@ -6316,6 +6316,20 @@
             }
 
             // ── Metrics helpers ─────────────────────────────────────────────
+            // P0 FIX: `iocs += (it.ioc_count||it.iocs||0)` silently produced an
+            // astronomically wrong total (observed live: "490000...000", 33
+            // digits). Root cause: `it.iocs` on real feed items is an empty
+            // array `[]` -- a truthy value in JS -- so once ioc_count is 0 the
+            // `||` chain picked the array; `0 + []` then coerces to the STRING
+            // "0" (Array.toString() -> ''), and every subsequent `+=` becomes
+            // string concatenation of digit characters instead of numeric
+            // addition. Reproduced exactly against live api/feed.json.
+            function _iocContribution(it){
+                if (typeof it.ioc_count === 'number') return it.ioc_count;
+                if (Array.isArray(it.iocs)) return it.iocs.length;
+                var n = Number(it.iocs);
+                return isNaN(n) ? 0 : n;
+            }
             function fillMetrics(data){
                 var items = data.items || data.advisories || data.data || [];
                 var total    = data.total    || items.length || 0;
@@ -6324,7 +6338,7 @@
                     var sev = (it.severity||it.risk_level||'').toUpperCase();
                     if(sev==='CRITICAL') critical++;
                     if(sev==='HIGH') high++;
-                    iocs += (it.ioc_count||it.iocs||0);
+                    iocs += _iocContribution(it);
                     riskSum += parseFloat(it.risk_score||it.cvss_score||0);
                 });
                 var avgRisk = items.length ? (riskSum/items.length).toFixed(1) : '—';
@@ -6339,7 +6353,10 @@
                 function set(id, val){ var el=document.getElementById(id); if(el) el.textContent=val; }
                 set('eicc-m-total',    total);
                 set('eicc-m-critical', critical);
-                set('eicc-m-iocs',     iocs||'1749');
+                // P0 FIX: was `iocs||'1749'` -- a hardcoded fake number shown
+                // whenever the real total was falsy, including a genuine 0.
+                // `iocs` is now always a real computed number; show it as-is.
+                set('eicc-m-iocs',     iocs);
                 set('eicc-m-risk',     avgRisk);
                 set('eicc-m-feeds',    feeds);
                 set('eicc-m-sync',     syncStr);
