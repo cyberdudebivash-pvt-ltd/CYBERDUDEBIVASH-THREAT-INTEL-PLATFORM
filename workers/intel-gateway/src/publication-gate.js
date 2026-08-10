@@ -1,28 +1,28 @@
 /**
  * workers/intel-gateway/src/publication-gate.js
- * CUSTOMER PUBLICATION AUTHORIZATION GATE — P0 incident remediation.
+ * CUSTOMER PUBLICATION AUTHORIZATION GATE  -  P0 incident remediation.
  *
  * INCIDENT: intel--ba996dad34540150b8ea1b5f was publicly served through
  * /reports/** despite P21=4/100 (BELOW_MINIMUM), P25=28% (BELOW THRESHOLD),
- * P26=29/100 (REJECTED), P23=4/10 (INCOMPLETE — DO NOT PUBLISH). Root cause,
+ * P26=29/100 (REJECTED), P23=4/10 (INCOMPLETE  -  DO NOT PUBLISH). Root cause,
  * traced (not guessed):
  *
  *   1. The /reports/** route (index.js) never consulted ANY certification
  *      result before serving. It resolves an item (via findItemBySlug or a
- *      direct R2 hit), generates/serves HTML, and caches it — the actual
+ *      direct R2 hit), generates/serves HTML, and caches it  -  the actual
  *      P20-P26 verdicts only ever appeared as DISPLAY content inside the
  *      generated report, never as a gate on whether to serve it at all.
  *   2. The one function that superficially resembles a "release gate"
  *      (p32-handlers.js:_computeReleaseGate, "P32.13") only treats 4 basic
  *      data-completeness checks as blockers (title/description/severity/
- *      CVSS-or-severity present) — genuine quality/trust-score failures are
+ *      CVSS-or-severity present)  -  genuine quality/trust-score failures are
  *      demoted to non-blocking warnings, so it reports PUBLICATION_APPROVED
  *      even when P21/P25/P26/P23 all reject the same item. It was also
- *      never wired into the serving decision anywhere — a display block,
+ *      never wired into the serving decision anywhere  -  a display block,
  *      not a gate.
  *   3. Pipeline ordering (.github/workflows/sentinel-blogger.yml): STAGE 3.2
  *      (report generation, scripts/report_generator.py) runs BEFORE STAGE
- *      3.93.15d/h/i (P21/P25/P26 certification) — confirmed by exact line
+ *      3.93.15d/h/i (P21/P25/P26 certification)  -  confirmed by exact line
  *      numbers in that file. Reports can be generated before certification
  *      has even run.
  *
@@ -32,16 +32,16 @@
  * it reuses the canonical engine functions unchanged (computeP20QualityScore,
  * getP21CertificationLevel, the newly-extracted computeOperationalReadiness,
  * computeEnterpriseTrustScore, computeP26Grade) rather than re-implementing
- * any scoring logic. It does NOT consult P32's release gate at all — the
+ * any scoring logic. It does NOT consult P32's release gate at all  -  the
  * most permissive engine must never be allowed to win.
  *
  * SCOPE (documented, not silent): this closes the confirmed, actively
- * exploited path — the Worker's /reports/** synthesis + direct R2 serving.
+ * exploited path  -  the Worker's /reports/** synthesis + direct R2 serving.
  * It does NOT modify scripts/report_generator.py or
  * scripts/generate_intel_reports.py (the Python-side generators that also
  * write into the same reports/ R2 keyspace, per STAGE 3.6.5's own comment:
  * "no shared ownership model"). Reordering that 50+ stage production
- * pipeline safely requires its own dedicated, carefully-tested change — see
+ * pipeline safely requires its own dedicated, carefully-tested change  -  see
  * the incident report's Root Cause / Residual Risk sections.
  */
 
@@ -54,7 +54,7 @@ import { computeP26Grade } from './p26-handlers.js';
 export const PUBLICATION_GATE_VERSION = '1.1.0';
 
 // Below this, P20 is "critically low" per P26's own existing C-P20 warning
-// threshold (p26-handlers.js) — reused here as a blocking condition, not a
+// threshold (p26-handlers.js)  -  reused here as a blocking condition, not a
 // new number invented for this gate.
 const P20_CRITICAL_THRESHOLD = 25;
 
@@ -133,13 +133,13 @@ function _contentFingerprint(item) {
 /**
  * Evaluates the ONE authoritative publication decision for an intelligence
  * item. Fail-closed: any engine erroring, or any single engine rejecting,
- * blocks publication — deny overrides allow, unconditionally.
+ * blocks publication  -  deny overrides allow, unconditionally.
  *
  * Returns:
  *   publication_state:  'CUSTOMER_READY' | 'REJECTED' | 'BLOCKED'
- *   customer_ready:     boolean — the ONLY field callers should branch on
+ *   customer_ready:     boolean  -  the ONLY field callers should branch on
  *   blocking_gates:      reason codes, e.g. ['P21_BELOW_MINIMUM','P26_REJECTED']
- *   plus the individual engine scores/tiers for transparency (Section 21 —
+ *   plus the individual engine scores/tiers for transparency (Section 21  - 
  *   explicit, non-ambiguous names, never a bare "quality: 83").
  */
 export function evaluatePublicationGate(item) {
@@ -162,7 +162,7 @@ export function evaluatePublicationGate(item) {
     readiness  = _typeAdjustedReadiness(p23, reportType);
     contentHash = _contentFingerprint(item);
   } catch (e) {
-    // FAIL CLOSED — a certification engine throwing must never be treated
+    // FAIL CLOSED  -  a certification engine throwing must never be treated
     // as "unknown = approved" (Section 8's explicit prohibition).
     return { ...base, publication_state: 'BLOCKED', customer_ready: false,
              blocking_gates: ['CERTIFICATION_ENGINE_ERROR'],
@@ -213,7 +213,7 @@ export function isCustomerReady(item) {
 }
 
 /**
- * v187.0 P0 FIX — customer-facing 404 body for a report id that DID resolve
+ * v187.0 P0 FIX  -  customer-facing 404 body for a report id that DID resolve
  * to a known item, but that item failed the publication gate (REJECTED /
  * BLOCKED). Single source of truth for this response shape (previously
  * inlined at the /reports/** route in index.js) so it's directly unit-
@@ -230,7 +230,7 @@ export function buildGateRejectedResponseBody(gateResult) {
 }
 
 /**
- * v187.0 P0 FIX — customer-facing 404 body for a report id that could not be
+ * v187.0 P0 FIX  -  customer-facing 404 body for a report id that could not be
  * resolved to any known item and has no cached HTML artifact. Covers both a
  * genuinely nonexistent id and one still pending/generating (this layer
  * cannot distinguish the two from here -- see publication_gate_rejected
