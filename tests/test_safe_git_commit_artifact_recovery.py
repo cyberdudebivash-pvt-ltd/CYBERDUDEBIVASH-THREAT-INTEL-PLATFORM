@@ -1,8 +1,8 @@
 """
 tests/test_safe_git_commit_artifact_recovery.py
 
-Regression test for the P0 customer-facing intelligence staleness bug found
-while live-verifying PR #154 (sentinel-blogger run 31398438288).
+Regression test for a P0 customer-facing intelligence staleness bug found
+during live post-deploy verification of a production pipeline run.
 
 scripts/safe_git_commit.py's conflict-recovery path (git stash -> git reset
 --hard origin/main -> git stash pop) discards the local commit made moments
@@ -12,13 +12,13 @@ committed by this script BEFORE the push loop runs (JSON_GUARDED /
 files_to_stage), so they have nothing to stash: git stash only protects
 uncommitted working-tree changes, not already-committed content. Nothing
 restored these specific paths from ORIG_HEAD afterward, so on every
-concurrent-push conflict (this platform's governance bot commits to main
-roughly every 15 minutes, overlapping with this pipeline's ~40min runtime)
-the freshly generated customer-facing intelligence silently reverted to
-whatever origin/main had -- which Stage 4.1 then re-uploaded to R2,
-overwriting the correct version Stage 3.93.6 had just published moments
-earlier. Live evidence: api/v1/intel/latest.json and apex.json stuck at a
-generation from hours earlier despite multiple successful pipeline runs.
+concurrent-push conflict (this pipeline runs long enough to overlap with
+other automation that also commits to main) the freshly generated
+customer-facing intelligence silently reverted to whatever origin/main had
+-- which a later stage then re-uploaded to the CDN, overwriting the correct
+version an earlier stage had just published moments earlier. Live evidence:
+api/v1/intel/latest.json and apex.json stuck at a generation from hours
+earlier despite multiple successful pipeline runs.
 
 This test builds two real git repositories (a bare "origin" and a working
 clone simulating the CI runner), forces the exact same conflict/recovery
@@ -172,6 +172,37 @@ class TestGeneratedArtifactSurvivesConflictRecovery(unittest.TestCase):
             "REVERTED by reset --hard", proc.stdout,
             "the guard's own log must make a real revert-and-restore visible "
             "(silent rollback is unacceptable)"
+        )
+
+    def test_fix_actually_reaches_origin_main_not_just_local_disk(self):
+        """`git push` publishes commits, not working-tree/staged state. Every
+        restore guard (including the pre-existing reports-guard) only
+        checks out files into the index/working tree -- if nothing commits
+        that afterward, `git reset --hard origin/main` leaves local HEAD
+        identical to origin/main, so the push that follows has nothing new
+        to send and exits 0 trivially ("Everything up-to-date") while the
+        restored content never leaves the runner's disk. This proves the
+        recovery commit actually publishes the correction to the remote,
+        not just the local worktree checked by the test above."""
+        proc = self._run_script()
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("[recovery-commit] Committed restored artifacts", proc.stdout)
+
+        # Refresh the local remote-tracking ref explicitly rather than
+        # relying on git's opportunistic post-push update (version-dependent
+        # behavior) -- read directly from the bare "origin" repo the script
+        # actually pushed to.
+        _git(self.runner, "fetch", "-q", "origin", "main")
+        show = subprocess.run(
+            ["git", "show", "origin/main:api/v1/intel/latest.json"],
+            cwd=self.runner, capture_output=True, text=True,
+        )
+        self.assertEqual(show.returncode, 0, f"could not read the file back from the pushed origin/main: {show.stderr}")
+        published = json.loads(show.stdout)
+        self.assertEqual(
+            published["count"], 5,
+            f"the restored content must actually be pushed to origin/main, not just "
+            f"left on local disk. origin/main has: {published}"
         )
 
     def test_unrelated_governance_style_file_still_survives(self):
