@@ -13,6 +13,7 @@ Usage: python scripts/pre_deploy_gate.py
 import sys, ast
 from pathlib import Path
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 
 if hasattr(sys.stdout, 'reconfigure'):
     try: sys.stdout.reconfigure(encoding='utf-8')
@@ -110,9 +111,43 @@ gate("V173 renderer block intact",
      'CDB-RENDERER-ENGINE-V173-START' in src and 'CDB-RENDERER-ENGINE-V173-END' in src,
      "V173 renderer block has been removed from index.html")
 
-# ── GATE 9: Script/style tags balanced in index.html ─────────────
+# ── GATE 9: Script tags balanced in index.html ────────────────────
+# Tag-aware, not substring-count: uses html.parser's built-in
+# CDATA_CONTENT_ELEMENTS handling for <script>, which treats script
+# content as raw text (nested-looking tags/comments inside it are inert),
+# and correctly parses HTML comments and quoted attribute values so
+# "<script"-looking text there is never mistaken for a real tag either --
+# unlike a plain substring or regex count, which false-positives on any
+# of those (e.g. a JS comment, an HTML comment, or an attribute value
+# that merely mentions "<script>" as text).
+class _ScriptTagBalanceParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.depth = 0
+        self.unmatched_close = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            self.depth += 1
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            if self.depth > 0:
+                self.depth -= 1
+            else:
+                self.unmatched_close = True
+
+def script_tags_balanced(html):
+    parser = _ScriptTagBalanceParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return False
+    return parser.depth == 0 and not parser.unmatched_close
+
 gate("index.html script tags balanced",
-     src.count('<script') == src.count('</script>'),
+     script_tags_balanced(src),
      "Unbalanced <script> tags in index.html — syntax error")
 
 gate("index.html style tags balanced",
