@@ -198,6 +198,21 @@ def main() -> None:
         log.warning("  3. Worker route not matching /api/admin/cache/bust")
         log.warning("")
         log.warning("Non-fatal: Worker KV TTL expiry will serve fresh data within ~60 seconds.")
+        # v143.0.1 FIX: this step runs with `|| true` and always exits 0 by
+        # design (cache-bust failure must never block a deploy), so a 100%
+        # failure rate here was previously invisible outside full step logs --
+        # every run showed green while production silently kept serving
+        # pre-deploy data. Emit a GitHub Actions ::warning:: annotation (shows
+        # in the run summary/PR checks) without changing the exit code, so a
+        # human notices the secret has drifted instead of discovering it only
+        # by independently comparing live output against what the pipeline
+        # just published.
+        print(
+            "::warning::bust_kv_cache.py: ALL cache-bust requests failed "
+            "(WORKER_ADMIN_SECRET likely mismatched between GitHub Actions and "
+            "the Worker). Production may serve stale data until KV TTL expiry. "
+            "Fix: npx wrangler secret put WORKER_ADMIN_SECRET"
+        )
     elif succeeded > 0:
         log.info("✓ Real-time cache invalidation active — dashboard will serve fresh intelligence immediately.")
 
