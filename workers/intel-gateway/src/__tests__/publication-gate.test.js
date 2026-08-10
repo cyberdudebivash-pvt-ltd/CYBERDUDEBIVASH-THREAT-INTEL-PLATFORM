@@ -307,7 +307,7 @@ test("REJECTED: buildGateRejectedResponseBody() exposes only publication_state, 
   assert.ok(["REJECTED", "BLOCKED"].includes(body.status));
   // The permanent-rejection language contract: never suggest retrying.
   assert.doesNotMatch(JSON.stringify(body), /generat/i);
-  assert.doesNotMatch(JSON.stringify(body), /P20_SCORE|P21_CERTIFICATION|P25_TRUST|P26_/);
+  assert.doesNotMatch(JSON.stringify(body), /P20_|P21_|P23_|P25_|P26_|content_hash|blocking_gates/);
 });
 
 test("REJECTED: buildGateRejectedResponseBody() falls back to 'REJECTED' if publication_state is missing", () => {

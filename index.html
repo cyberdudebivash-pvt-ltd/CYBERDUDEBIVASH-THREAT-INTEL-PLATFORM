@@ -5898,8 +5898,17 @@
           function _setReportsBadgeCount(value) {
             var el = document.getElementById('cdb-tab-reports-count');
             if (!el) return;
-            if (typeof value === 'number' && !isNaN(value)) {
+            // Number.isFinite (not typeof+isNaN) so Infinity/-Infinity from a
+            // malformed payload also route to the unavailable state instead
+            // of rendering the literal string "Infinity" in the badge.
+            if (Number.isFinite(value)) {
               el.textContent = value.toLocaleString();
+              // _loadReports() (tab click) and _preloadReportsBadge() (page
+              // load) both write this element independently. Once a real
+              // count has been rendered, a later-arriving preload retry that
+              // ultimately fails must not clobber it back to "unavailable" --
+              // see the guard in _preloadReportsBadge()'s terminal branch.
+              window._cdbReportsBadgeResolved = true;
             } else {
               _setReportsBadgeUnavailable('non-numeric total_reports: ' + JSON.stringify(value));
             }
@@ -5989,7 +5998,11 @@
                   if (attempt < MAX_ATTEMPTS) {
                     console.warn('[CDB-REPORTS] Badge preload attempt ' + attempt + '/' + MAX_ATTEMPTS + ' failed, retrying:', err);
                     _preloadReportsBadge(attempt + 1);
-                  } else {
+                  } else if (!window._cdbReportsBadgeResolved) {
+                    // A real count may already be showing -- e.g. the user
+                    // clicked the REPORTS tab (_loadReports()) while this
+                    // preload's retries were still in flight. Don't clobber
+                    // an already-resolved, genuine count back to "unavailable".
                     _setReportsBadgeUnavailable('preload exhausted ' + MAX_ATTEMPTS + ' attempts: ' + err);
                   }
                 });

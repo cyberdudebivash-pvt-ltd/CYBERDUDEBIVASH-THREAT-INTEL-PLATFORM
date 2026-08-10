@@ -177,6 +177,63 @@ async function runScenario(browser, scenario) {
   await context.close();
 }
 
+// _setReportsBadgeCount() and _setReportsBadgeUnavailable() are written to
+// independently by more than one caller (the preload IIFE here, and
+// _loadReports() on a REPORTS-tab click). Once ANY caller has rendered a
+// real, resolved count, a slower-running _preloadReportsBadge() retry chain
+// that ultimately fails must not clobber it back to "unavailable" --
+// window._cdbReportsBadgeResolved is the guard added for this. This test
+// exercises the guard directly (setting it the same way _setReportsBadgeCount
+// does) rather than through _loadReports()/cdbSwitchTab, since a separate,
+// pre-existing issue in that wiring (a later <script> tag's plain
+// `function cdbSwitchTab(...)` declaration overwrites the earlier wrapper
+// that calls _loadReports()) makes that path unreachable today -- out of
+// scope for this fix, noted for a future, separate pass.
+async function runBadgeResolvedGuardScenario(browser) {
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await context.route('**/*', (route) => {
+    const url = route.request().url();
+    if (!url.startsWith(`http://127.0.0.1:${PORT}/`)) return route.abort();
+    const u = new URL(url);
+    if (u.pathname === '/api/reports/index.json') {
+      // Always fails -- forces _preloadReportsBadge() through all 3 bounded
+      // retries and into its terminal "exhausted" branch.
+      return route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+    }
+    if (u.pathname.startsWith('/api/')) return route.abort();
+    return route.continue();
+  });
+
+  const page = await context.newPage();
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  // Before the preload's first attempt (~500ms), simulate what
+  // _setReportsBadgeCount(483) does: render the real count and set the
+  // resolved flag it sets on every numeric render.
+  await page.waitForTimeout(150);
+  await page.evaluate(() => {
+    document.getElementById('cdb-tab-reports-count').textContent = '483';
+    window._cdbReportsBadgeResolved = true;
+  });
+  const beforeExhaustion = await page.textContent('#cdb-tab-reports-count');
+  // Let the preload's 3 bounded retries (500 + 1500 + 1500 = 3500ms) fully
+  // exhaust and hit its terminal branch.
+  await page.waitForTimeout(4200);
+  const afterPreloadExhausted = await page.textContent('#cdb-tab-reports-count');
+
+  record(
+    'Simulated real count is in place before the preload retry chain exhausts',
+    beforeExhaustion === '483',
+    `badgeText="${beforeExhaustion}"`
+  );
+  record(
+    'A later-exhausted _preloadReportsBadge() retry chain does NOT clobber an already-resolved real count',
+    afterPreloadExhausted === '483',
+    `badgeText="${afterPreloadExhausted}" (expected to still be "483", not "—")`
+  );
+
+  await context.close();
+}
+
 async function main() {
   const server = await startStaticServer();
   let browser;
@@ -185,6 +242,8 @@ async function main() {
     for (const scenario of SCENARIOS) {
       await runScenario(browser, scenario);
     }
+    console.log('\n--- Scenario: An already-resolved real count survives a later-failing _preloadReportsBadge() retry chain ---');
+    await runBadgeResolvedGuardScenario(browser);
   } finally {
     if (browser) await browser.close();
     server.close();

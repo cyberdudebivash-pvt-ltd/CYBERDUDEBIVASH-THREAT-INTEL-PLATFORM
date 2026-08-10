@@ -69,6 +69,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -651,7 +652,11 @@ def query_publication_status(report_id: str) -> Optional[dict]:
     scripts/report_url_canary.py's live-deployment classification (Single
     Source of Truth -- neither script re-implements publication-gate logic).
     """
-    status_url = f"{PAGES_BASE_URL}/api/v1/reports/{report_id}/publication-status"
+    # Percent-encode so a report_id with an unexpected character (e.g. from a
+    # malformed feed entry) can't redirect the request to a different path
+    # segment -- defensive hardening only, report_id is normally already
+    # constrained to intel--[a-f0-9]+ by callers.
+    status_url = f"{PAGES_BASE_URL}/api/v1/reports/{urllib.parse.quote(report_id, safe='')}/publication-status"
     probe = _http_probe(status_url)
     if not probe.success:
         return None

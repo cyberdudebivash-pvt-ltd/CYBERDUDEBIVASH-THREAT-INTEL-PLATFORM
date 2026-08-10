@@ -118,8 +118,15 @@ const MOCK_ITEM = {
 };
 
 // The fabricated path the old (buggy) cdbBuildReportUrl() would have
-// guessed for MOCK_ITEM. Used to assert this exact URL is NEVER produced.
-const FABRICATED_URL_FOR_MOCK_ITEM = '/reports/2026/07/intel--test0000000000000000000000000000.html';
+// guessed for MOCK_ITEM -- derived from MOCK_ITEM's own fields (not a
+// hardcoded literal) so the two can never silently drift apart and leave
+// the negative assertions below testing nothing.
+const FABRICATED_URL_FOR_MOCK_ITEM = (() => {
+  const d = new Date(MOCK_ITEM.published_at);
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  return `/reports/${yr}/${mo}/${MOCK_ITEM.stix_id}.html`;
+})();
 
 // VERIFIED item: identical shape, but carries a backend-confirmed
 // report_url -- the positive-path counterpart, proving the fix didn't
