@@ -13,6 +13,12 @@
 # scripts/r2_reports_integrity.py total_reports/latest.json-purge bugs --
 # see tests/test_report_registry_single_writer.py.
 #
+# Also guards against scripts/safe_git_commit.py silently discarding
+# freshly generated customer-facing intelligence (api/v1/intel/latest.json,
+# apex.json, etc.) during git conflict recovery -- found live-verifying
+# PR #154 (sentinel-blogger run 31398438288) -- see
+# tests/test_safe_git_commit_artifact_recovery.py.
+#
 # Runs on every push and PR to main.
 
 name: Report Generator Regression Gate
@@ -63,3 +69,7 @@ jobs:
       - name: Run cache-bust visibility regression test
         run: |
           python -m pytest tests/test_bust_kv_cache_visibility.py -v --tb=short
+
+      - name: Run git-sync artifact-recovery regression tests
+        run: |
+          python -m pytest tests/test_safe_git_commit_artifact_recovery.py -v --tb=short

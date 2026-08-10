@@ -1,0 +1,193 @@
+"""
+tests/test_safe_git_commit_artifact_recovery.py
+
+Regression test for the P0 customer-facing intelligence staleness bug found
+while live-verifying PR #154 (sentinel-blogger run 31398438288).
+
+scripts/safe_git_commit.py's conflict-recovery path (git stash -> git reset
+--hard origin/main -> git stash pop) discards the local commit made moments
+earlier in the same run -- which includes freshly generated
+api/v1/intel/latest.json, apex.json, etc. Those files are staged and
+committed by this script BEFORE the push loop runs (JSON_GUARDED /
+files_to_stage), so they have nothing to stash: git stash only protects
+uncommitted working-tree changes, not already-committed content. Nothing
+restored these specific paths from ORIG_HEAD afterward, so on every
+concurrent-push conflict (this platform's governance bot commits to main
+roughly every 15 minutes, overlapping with this pipeline's ~40min runtime)
+the freshly generated customer-facing intelligence silently reverted to
+whatever origin/main had -- which Stage 4.1 then re-uploaded to R2,
+overwriting the correct version Stage 3.93.6 had just published moments
+earlier. Live evidence: api/v1/intel/latest.json and apex.json stuck at a
+generation from hours earlier despite multiple successful pipeline runs.
+
+This test builds two real git repositories (a bare "origin" and a working
+clone simulating the CI runner), forces the exact same conflict/recovery
+code path production hit (a delete/modify conflict, which -X ours cannot
+auto-resolve -- the same failure class the production logs showed:
+"Merge failed on attempt 1 -- stash recovery"), and asserts the freshly
+generated api/v1/intel/latest.json survives with its NEW content instead of
+reverting to the OLD origin/main content.
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO_ROOT_REAL = Path(__file__).resolve().parent.parent
+REAL_SCRIPT = REPO_ROOT_REAL / "scripts" / "safe_git_commit.py"
+
+
+def _git(cwd, *args):
+    result = subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)} failed in {cwd}:\n{result.stdout}\n{result.stderr}")
+    return result
+
+
+def _init_repo_with_identity(path: Path):
+    path.mkdir(parents=True, exist_ok=True)
+    _git(path, "init", "-q", "-b", "main")
+    _git(path, "config", "user.email", "test@example.com")
+    _git(path, "config", "user.name", "Test")
+
+
+def _write_json(path: Path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+class TestGeneratedArtifactSurvivesConflictRecovery(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="sgc_test_"))
+        self.bare = self.tmp / "origin.git"
+        self.runner = self.tmp / "runner"
+
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(self.bare)], check=True)
+
+        # Seed the common-ancestor commit via a throwaway clone.
+        seed = self.tmp / "seed"
+        _init_repo_with_identity(seed)
+        _write_json(seed / "api" / "v1" / "intel" / "latest.json",
+                    {"count": 3, "items": [{"id": "a"}, {"id": "b"}, {"id": "c"}]})
+        _write_json(seed / "data" / "health" / "sla_status.json", {"status": "ancestor"})
+        _write_json(seed / "data" / "governance" / "trigger.json", {"v": "ancestor"})
+        (seed / "reports").mkdir(parents=True, exist_ok=True)
+        (seed / "reports" / ".gitkeep").write_text("")
+        _git(seed, "add", "-A")
+        _git(seed, "commit", "-q", "-m", "ancestor")
+        _git(seed, "remote", "add", "origin", str(self.bare))
+        _git(seed, "push", "-q", "origin", "main")
+
+        # "other-actor" clone: simulates the concurrent governance-bot commit
+        # that lands on origin/main while the pipeline run is still working.
+        other = self.tmp / "other-actor"
+        _git(self.tmp, "clone", "-q", str(self.bare), str(other))
+        _git(other, "config", "user.email", "bot@example.com")
+        _git(other, "config", "user.name", "GovernanceBot")
+        _write_json(other / "data" / "governance" / "trigger.json", {"v": "origin-concurrent"})
+        _git(other, "add", "-A")
+        _git(other, "commit", "-q", "-m", "concurrent governance commit")
+        _git(other, "push", "-q", "origin", "main")
+
+        # "runner" clone: simulates the CI runner. Cloned from the ancestor
+        # commit -- has not seen the concurrent push above yet, matching how
+        # the real pipeline checks out main once at the start of a long run.
+        _git(self.tmp, "clone", "-q", str(self.bare), str(self.runner))
+        _git(self.runner, "checkout", "-q", "main")
+        _git(self.runner, "reset", "-q", "--hard", "HEAD~1")  # drop back before the concurrent push
+        _git(self.runner, "config", "user.email", "sentinel@cyberdudebivash.com")
+        _git(self.runner, "config", "user.name", "CDB-Sentinel-Bot")
+
+        # Place the real script under test at <runner>/scripts/, so its own
+        # `Path(__file__).resolve().parent.parent` resolves REPO_ROOT to this
+        # temp repo -- exactly like running `python3 scripts/safe_git_commit.py`
+        # from within the real repo, just pointed at an isolated sandbox.
+        (self.runner / "scripts").mkdir(parents=True, exist_ok=True)
+        shutil.copy(REAL_SCRIPT, self.runner / "scripts" / "safe_git_commit.py")
+
+        # Pipeline "generates" fresh customer-facing intelligence this run.
+        _write_json(self.runner / "api" / "v1" / "intel" / "latest.json",
+                    {"count": 5, "items": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}, {"id": "e"}]})
+        # Pipeline also writes fresh SLA data locally. Left UNSTAGED here
+        # (matching production: an earlier pipeline stage writes this file
+        # directly, safe_git_commit.py never explicitly `git add`s it) so it
+        # exercises the PRE-EXISTING manifest-guard/stash path, not the new
+        # artifact-guard -- proving that mechanism still works alongside the
+        # new one. (Staging it here would accidentally commit it, which
+        # would defeat the point: only uncommitted changes are protected by
+        # `git stash`.)
+        _write_json(self.runner / "data" / "health" / "sla_status.json", {"status": "runner-fresh"})
+        # Delete the trigger file locally and stage only that deletion --
+        # combined with the concurrent commit's edit to the same file, this
+        # is a delete/modify conflict, a class `-X ours` cannot auto-resolve,
+        # forcing the exact same "Merge failed -- stash recovery" path
+        # production hit.
+        (self.runner / "data" / "governance" / "trigger.json").unlink()
+        _git(self.runner, "add", "-A", "--", "data/governance/trigger.json")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run_script(self):
+        env = dict(os.environ)
+        env.pop("GH_TOKEN", None)
+        env.pop("GITHUB_REPOSITORY", None)
+        env["PIPELINE_VERSION"] = "test"
+        proc = subprocess.run(
+            [sys.executable, str(self.runner / "scripts" / "safe_git_commit.py")],
+            cwd=self.runner,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        return proc
+
+    def test_conflict_is_actually_forced(self):
+        """Sanity check: the scenario must actually reproduce a merge failure,
+        otherwise the rest of this test proves nothing."""
+        proc = self._run_script()
+        self.assertIn("stash recovery", proc.stdout,
+                       f"scenario did not force the conflict-recovery path -- test is not "
+                       f"reproducing the production failure mode.\nstdout={proc.stdout}")
+
+    def test_fresh_generated_artifact_survives_conflict_recovery(self):
+        proc = self._run_script()
+        self.assertEqual(proc.returncode, 0, f"script must always exit 0\nstdout={proc.stdout}\nstderr={proc.stderr}")
+
+        latest_path = self.runner / "api" / "v1" / "intel" / "latest.json"
+        latest = json.loads(latest_path.read_text())
+        self.assertEqual(
+            latest["count"], 5,
+            f"freshly generated latest.json (5 items) must survive conflict recovery, "
+            f"not revert to the stale origin/main version (3 items). Got: {latest}"
+        )
+
+        self.assertIn("[artifact-guard]", proc.stdout)
+        self.assertIn(
+            "REVERTED by reset --hard", proc.stdout,
+            "the guard's own log must make a real revert-and-restore visible "
+            "(silent rollback is unacceptable)"
+        )
+
+    def test_unrelated_governance_style_file_still_survives(self):
+        """Proves the new artifact-guard doesn't regress the pre-existing
+        manifest-guard mechanism for files it doesn't own."""
+        proc = self._run_script()
+        self.assertEqual(proc.returncode, 0)
+
+        sla_path = self.runner / "data" / "health" / "sla_status.json"
+        sla = json.loads(sla_path.read_text())
+        self.assertEqual(
+            sla["status"], "runner-fresh",
+            "the runner's own locally-written sla_status.json must survive "
+            "conflict recovery via the pre-existing manifest-guard snapshot"
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

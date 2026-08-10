@@ -527,6 +527,70 @@ def main() -> None:
                              "%d HTML files (no reports lost).", len(_post_reset_reports))
             # == END P0-FIX v154.0.0 ==
 
+            # == P0-FIX v184.2: Generated Customer-Artifact Recovery Guard ==
+            # PROBLEM (confirmed via sentinel-blogger run 31398438288, live
+            # production verification of PR #154): these files ARE staged and
+            # committed above (JSON_GUARDED / files_to_stage) before this push
+            # loop runs, so `git stash push` never protects them -- unlike an
+            # uncommitted working-tree change, a committed file has nothing to
+            # stash. `git reset --hard origin/main` above discards that local
+            # commit wholesale (ORIG_HEAD now points at it, exactly like the
+            # reports/ case above) -- but nothing restored these specific
+            # paths afterward, so on every concurrent-push conflict this run's
+            # freshly generated customer-facing intelligence silently reverted
+            # to whatever origin/main had. Stage 4.1 then re-uploads whatever
+            # is on disk to R2, so the reverted (stale) content overwrote the
+            # correct version Stage 3.93.6 had just published moments earlier.
+            # SOLUTION: same mechanism as the reports-guard above -- these
+            # files are guaranteed correct in ORIG_HEAD (this run's own
+            # pre-reset commit), so restore them the same way.
+            _GENERATED_ARTIFACT_PATHS = [
+                "api/v1/intel/latest.json",
+                "api/v1/intel/top10.json",
+                "api/v1/intel/apex.json",
+                "api/v1/intel/manifest.json",
+                "api/v1/intel/ai_summary.json",
+                "api/feed.json",
+                "feed.json",
+            ]
+
+            def _artifact_item_count(p: Path):
+                try:
+                    d = json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(d, list):
+                        return len(d)
+                    if isinstance(d, dict):
+                        if "items" in d:
+                            return len(d["items"])
+                        if "count" in d:
+                            return d["count"]
+                    return "n/a"
+                except Exception:
+                    return "unreadable"
+
+            for _ga in _GENERATED_ARTIFACT_PATHS:
+                _ga_path = REPO_ROOT / _ga
+                _before = _artifact_item_count(_ga_path) if _ga_path.exists() else "missing"
+                _ga_restore = run_git("checkout", "ORIG_HEAD", "--", _ga)
+                if _ga_restore.returncode == 0:
+                    _after = _artifact_item_count(_ga_path) if _ga_path.exists() else "missing"
+                    if _before != _after:
+                        log.warning(
+                            "[artifact-guard] %s was REVERTED by reset --hard "
+                            "(%s items pre-restore) -- RESTORED from ORIG_HEAD "
+                            "(%s items, this run's generation)",
+                            _ga, _before, _after
+                        )
+                    else:
+                        log.info("[artifact-guard] %s intact after restore (%s items)", _ga, _after)
+                else:
+                    log.warning(
+                        "[artifact-guard] Could not restore %s from ORIG_HEAD: %s "
+                        "(missing from pre-reset commit -- first run for this file?)",
+                        _ga, _ga_restore.stderr.strip()[:120]
+                    )
+            # == END P0-FIX v184.2 ==
+
             # == P0-FIX v145.1.0: Workflow YAML Conflict-Marker Guard ==
             # PROBLEM: git stash pop replays stashed changes on top of origin/main.
             # When .github/workflows/ files changed between the stash base and
