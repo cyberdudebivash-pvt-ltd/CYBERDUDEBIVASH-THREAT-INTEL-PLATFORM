@@ -70,6 +70,25 @@
 
   function getSocPriorityMeta(priority) { return SOC_PRIORITY_MAP[normalizeSocPriority(priority)] || SOC_PRIORITY_MAP["P4"]; }
 
+  // P0 FIX: items are visible on the live feed as soon as the (frequent,
+  // lightweight) ingestion pipeline publishes them, but `sla_priority` /
+  // `apex_ai.soc_priority` are only populated later by the full enrichment
+  // pipeline (confidence_corroboration_engine.py), which runs on its own,
+  // much slower cadence. During that gap, `raw.sla_priority` and
+  // `aa.soc_priority` are BOTH genuinely absent -- not wrong, just not
+  // computed yet -- and blindly defaulting to "P4 -- INFORMATIONAL"
+  // regardless of severity produced a visible contradiction (e.g. a
+  // HIGH-severity item badged P4/INFORMATIONAL). This mirrors the
+  // severity-only floor of build_sla_recommendation() in
+  // confidence_corroboration_engine.py (the "elif severity in (HIGH,
+  // MEDIUM): P3" / final "else: P4" branches) as an interim value only --
+  // it never overrides a real sla_priority/soc_priority once one exists.
+  function fallbackSocPriorityForSeverity(sev) {
+    if (sev === "CRITICAL") return "P2";
+    if (sev === "HIGH" || sev === "MEDIUM") return "P3";
+    return "P4";
+  }
+
   /* ── ACTION RECOMMENDATION ENGINE ─────────────────────────────────────── */
   const ACTION_DEFS = {
     PATCH:       { label: "PATCH IMMEDIATELY",      icon: "🛡",  color: "#ff1a1a", bg: "rgba(220,38,38,0.16)", border: "rgba(220,38,38,0.4)", urgency: "CRITICAL" },
@@ -181,6 +200,55 @@
     "Threat Intelligence":   { icon: "🕵", impact: "Threat actor activity tracked. Monitoring and detection recommended.", surface: "Network perimeter, detection systems" },
     "default":               { icon: "⚠",  impact: "Threat actor activity with potential for system compromise.", surface: "Network perimeter and exposed assets" },
   };
+
+  // P0 FIX: the enrichment pipeline writes a normalized, human-readable
+  // `apex_ai.threat_category` (e.g. "Phishing") that matches the keys above --
+  // but that field is paywall-gated and stripped from the free-tier feed
+  // response, and by the time a free-tier item is served, the top-level
+  // `threat_type`/`threat_category` fields have also been collapsed to the
+  // generic "Threat Intelligence" bucket somewhere downstream of ingestion
+  // (verified live: true_intel_ingestor.py's ingest_openphish() writes
+  // threat_type="PHISHING-URL", but the same item's live-served
+  // api/feed.json has threat_type="Threat Intelligence"). Neither of those
+  // ever matched ATTACK_TYPE_META / VERDICT_NARRATIVE's specific keys, so
+  // every free-tier view of a non-CVE item silently fell through to the
+  // generic "default" narrative and "Threat Intelligence" impact context --
+  // permanently, not just while enrichment is pending.
+  //
+  // `tags` survives that collapse intact (every non-CVE ingester in
+  // true_intel_ingestor.py tags its items with the category keyword, e.g.
+  // ingest_openphish -> ["openphish","phishing"], ingest_ransomware ->
+  // ["ransomware",...], ingest_urlhaus -> ["urlhaus","malware",...]) and is
+  // never paywall-gated, so it is the most reliable available signal for the
+  // free-tier fallback path. `canonicalizeThreatType` is kept as a secondary
+  // fallback for the raw threat_type/threat_category value in case it wasn't
+  // genericized for a given source. Neither ever overrides a real,
+  // already-human-readable `apex_ai.threat_category` when one is present.
+  const TAG_CATEGORY_ALIASES = [
+    ["phishing", "Phishing"], ["ransomware", "Ransomware"], ["malware", "Malware"],
+    ["urlhaus", "Malware"], ["supply-chain", "Supply Chain Attack"],
+    ["rce", "Remote Code Execution"], ["zero-day", "Zero Day Exploit"],
+    ["exfiltration", "Data Exfiltration"], ["cve", "Vulnerability"], ["oss", "Vulnerability"],
+  ];
+  function deriveThreatCategoryFromTags(tags) {
+    const arr = _arr(tags).map(function (t) { return String(t || "").toLowerCase(); });
+    for (var i = 0; i < TAG_CATEGORY_ALIASES.length; i++) {
+      if (arr.indexOf(TAG_CATEGORY_ALIASES[i][0]) !== -1) return TAG_CATEGORY_ALIASES[i][1];
+    }
+    return "";
+  }
+  const RAW_THREAT_TYPE_ALIASES = {
+    "KEV": "Vulnerability", "CVE": "Vulnerability", "OSS-ADVISORY": "Vulnerability",
+    "RANSOMWARE": "Ransomware",
+    "MALWARE-URL": "Malware", "MALWARE": "Malware",
+    "PHISHING-URL": "Phishing", "PHISHING": "Phishing",
+    "THREAT-INTEL": "Threat Intelligence",
+  };
+  function canonicalizeThreatType(raw) {
+    const s = _str(raw, "");
+    if (!s) return "";
+    return RAW_THREAT_TYPE_ALIASES[s.toUpperCase()] || s;
+  }
 
   function buildImpactContext(threatCategory, threatType, severity) {
     const cat   = _str(threatCategory, "Threat Intelligence");
@@ -460,10 +528,13 @@
     // actual severity -- CRITICAL/HIGH items rendered as "P4 -- INFORMATIONAL".
     // `aa.soc_priority` is kept as a secondary fallback for any older data
     // source that still populates it.
-    const socPri    = normalizeSocPriority(_str(raw.sla_priority, _str(aa.soc_priority, "P4")));
+    const rawSocPriority = _str(raw.sla_priority, "") || _str(aa.soc_priority, "");
+    const socPri    = rawSocPriority ? normalizeSocPriority(rawSocPriority) : fallbackSocPriorityForSeverity(sev);
     const socMeta   = getSocPriorityMeta(socPri);
     const aiConf    = _int(aa.ai_confidence, Math.round(conf));
-    const aiCat     = _str(aa.threat_category, _str(raw.threat_type, ""));
+    const aiCat     = _str(aa.threat_category, "")
+      || deriveThreatCategoryFromTags(raw.tags)
+      || canonicalizeThreatType(raw.threat_type);
     const predRisk  = _num(aa.predictive_risk, 0);
     const killChain = _str(aa.kill_chain, "");
     const killLocked = killChain === "PRO_REQUIRED" || killChain === "LOCKED";
@@ -518,7 +589,16 @@
       has_cvss:    cvssObj !== null,
       kev_present: kev,
       action_rec:     actionRec,
-      impact_context: buildImpactContext(aiCat, _str(raw.threat_type,""), sev),
+      // P0 FIX: the raw `raw.threat_type` positional arg used to be passed
+      // here directly and, being an exact-match lookup, resolved before ever
+      // falling through to `aiCat` -- so when threat_type had already been
+      // collapsed to the generic "Threat Intelligence" bucket upstream (see
+      // the P0 FIX note above ATTACK_TYPE_META), that generic value won the
+      // lookup even though `aiCat` had already correctly resolved a specific
+      // category (e.g. "Phishing") via tags. Passing aiCat for both
+      // positions makes buildImpactContext use the same best-available
+      // category signal consistently.
+      impact_context: buildImpactContext(aiCat, aiCat, sev),
       freshness:      freshnessIndicator(raw.published_at || raw.timestamp),
       ai_verdict:     aiVerdict,
       paywall_features: buildPaywallFeatures(_int(raw.ioc_count,0), _int(raw.ttp_count,0)),
