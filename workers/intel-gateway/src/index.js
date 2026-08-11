@@ -91,6 +91,7 @@ import { handleP37Hardening, handleP37FeedAudit, handleP37Enrichment, handleP37I
 import { handleP38SchemaRegistry, handleP38FeedGovernance, handleP38SchemaDrift, handleP38EnrichmentAudit, handleP38ConfidenceAudit, handleP38IQIndex, handleP38SourceDiversity, handleP38Certification, handleP38Executive, handleP38Reliability, handleP38Metrics, handleP38Observability } from './p38-handlers.js';
 import { handleP40SourceRegistry, handleP40SourceDetail, handleP40SourceHealth, handleP40Licensing, handleP40Coverage, handleP40Waves, handleP40Certification, handleP40Metrics, handleP40Dashboard, handleP40Observability } from './p40-handlers.js';
 import { evaluatePublicationGate, isCustomerReady, buildGateRejectedResponseBody, buildUnresolvableReportResponseBody } from './publication-gate.js';
+import { loadCertificationIndex, persistCertificationRecords, resolveCertification, CERTIFICATION_POLICY_VERSION } from './certification-registry.js';
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
@@ -593,39 +594,112 @@ async function handlePublicationStatus(request, env, reportId) {
 }
 
 /**
- * P0 publication gate for pre-built report indexes (Section 14/30): filters
- * a report-index payload's `reports` array to drop any entry whose
- * underlying item is resolvable (via the same feed sources findItemBySlug
- * uses, loaded ONCE here -- not per-entry -- to avoid an R2 round-trip per
- * index row) AND fails evaluatePublicationGate(). An entry that can't be
- * resolved against these feed sources is left untouched, same policy as
- * the /reports/** route: don't newly block what this gate has no way to
- * verify. Returns a shallow-cloned payload; never mutates the input.
+ * Loads the same bounded feed sources findItemBySlug()/the old inline
+ * filter used, merged into one id -> item map, ONCE per call (not per
+ * entry) to avoid an R2 round-trip per index row.
  */
-async function _filterReportsIndexByPublicationGate(env, data) {
-  if (!data || !Array.isArray(data.reports) || data.reports.length === 0) return data;
-
+async function _resolveFeedItemsById(env) {
   const byId = new Map();
-  for (const key of [LATEST_PRO_JSON_KEY, LATEST_JSON_KEY, "api/v1/intel/top10.json", "api/v1/intel/apex.json"]) {
-    try {
-      const feed = await r2Get(env, key);
-      if (!feed) continue;
-      const items = Array.isArray(feed) ? feed : (feed.items || feed.data || []);
-      for (const i of items) {
-        const id = (i.stix_id || i.id || "").replace(/\.html?$/, "");
-        if (id && !byId.has(id)) byId.set(id, i);
-      }
-    } catch (_) { /* continue to next source */ }
+  const keys = [LATEST_PRO_JSON_KEY, LATEST_JSON_KEY, "api/v1/intel/top10.json", "api/v1/intel/apex.json"];
+  // Fetch all four sources concurrently (independent R2 reads), then merge in
+  // `keys` order so first-source-wins priority is unchanged from the
+  // sequential version -- only the wall-clock cost drops.
+  const feeds = await Promise.all(keys.map(k => r2Get(env, k).catch(() => null)));
+  for (const feed of feeds) {
+    if (!feed) continue;
+    const items = Array.isArray(feed) ? feed : (feed.items || feed.data || []);
+    if (!Array.isArray(items)) continue;
+    for (const i of items) {
+      const id = ((i && (i.stix_id || i.id)) || "").replace(/\.html?$/, "");
+      if (id && !byId.has(id)) byId.set(id, i);
+    }
   }
-  if (byId.size === 0) return data;
+  return byId;
+}
 
-  const filtered = data.reports.filter(r => {
-    const item = byId.get((r.id || "").replace(/\.html?$/, ""));
-    if (!item) return true; // unresolvable -- unchanged behavior, not newly blocked
-    return evaluatePublicationGate(item).customer_ready;
+/**
+ * P0 trust-boundary fix (certification-registry.js): builds a customer-ready
+ * reports feed from the full report-catalog pool (REPORTS_KEY, up to 500
+ * entries), not a pre-truncated 50-entry window -- filtering must happen
+ * BEFORE truncation, over a pool large enough that truncating AFTER
+ * filtering still yields up to `limit` genuinely customer-ready entries.
+ * Each entry's certification is looked up in the persisted index first;
+ * only entries with no persisted record AND resolvable in the current feed
+ * windows are freshly evaluated (and then persisted for every future
+ * request, including after the item scrolls out of the feed). An entry
+ * that is neither persisted nor resolvable is NOT_EVALUATED and is never
+ * customer-ready -- replaces the old "unresolvable -- pass through" rule
+ * that let NOT_FOUND_IN_FEED silently become CUSTOMER_READY.
+ *
+ * `ctx` (the Worker's ExecutionContext, optional) lets the certification
+ * write ride on ctx.waitUntil(): the verdicts used for THIS response are
+ * already computed by the time persistCertificationRecords() is called, so
+ * the R2 read-modify-write round trip must not add latency to the request
+ * path. Falls back to awaiting it directly if ctx isn't supplied (e.g. a
+ * unit test harness).
+ */
+async function buildCertifiedReportsFeed(env, ctx, { limit, feedType }) {
+  const raw = await r2Get(env, REPORTS_KEY);
+  if (!raw || !Array.isArray(raw.reports) || raw.reports.length === 0) return null;
+
+  const [certIndex, byId] = await Promise.all([
+    loadCertificationIndex(env),
+    _resolveFeedItemsById(env),
+  ]);
+
+  const toPersist = {};
+  const evaluated = [];
+  for (const r of raw.reports) {
+    const id = (r.id || "").replace(/\.html?$/, "");
+    const { record, isNew } = resolveCertification(certIndex[id], byId.get(id));
+    if (isNew) toPersist[id] = record;
+    evaluated.push({ entry: r, publication_status: record.publication_status });
+  }
+
+  if (Object.keys(toPersist).length > 0) {
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(persistCertificationRecords(env, toPersist));
+    } else {
+      await persistCertificationRecords(env, toPersist);
+    }
+  }
+
+  const customerReady = evaluated.filter(e => e.publication_status === "CUSTOMER_READY").map(e => e.entry);
+  // Deterministic ordering: newest first by timestamp, ties broken by id --
+  // Test Matrix item 26 (no arbitrary/unstable ordering). An unparseable
+  // timestamp yields NaN from getTime(); `|| 0` normalizes it so such
+  // entries sort last (oldest) instead of producing NaN comparator results
+  // (implementation-defined ordering that would silently break determinism).
+  customerReady.sort((a, b) => {
+    const ta = new Date(a.timestamp || 0).getTime() || 0;
+    const tb = new Date(b.timestamp || 0).getTime() || 0;
+    if (tb !== ta) return tb - ta;
+    return String(a.id || "").localeCompare(String(b.id || ""));
   });
-  if (filtered.length === data.reports.length) return data;
-  return { ...data, reports: filtered, total_reports: filtered.length, reports_listed: filtered.length };
+  const listed = customerReady.slice(0, limit);
+
+  return {
+    schema_version: "2.0.0",
+    feed_type: feedType,
+    generated_at: raw.generated_at || null,
+    validated_at: new Date().toISOString(),
+    policy_version: CERTIFICATION_POLICY_VERSION,
+    total_candidates: raw.reports.length,
+    customer_ready_count: customerReady.length,
+    withheld_count: raw.reports.length - customerReady.length,
+    // total_reports: UNCHANGED historical meaning -- the true report-catalog
+    // size (scripts/build_reports_index.py's len(all_report_paths), passed
+    // through from the registry raw.total_reports), NOT the gated count.
+    // index.html reads this for dashboard totals/badges and compares it
+    // against reports_listed to decide whether to show a "view all" link
+    // (data.total_reports > data.reports_listed) -- redefining it to the
+    // customer-ready count would silently break that comparison and regress
+    // the displayed catalogue size. Use customer_ready_count/withheld_count
+    // above for the gated numbers this fix introduces.
+    total_reports: (typeof raw.total_reports === "number") ? raw.total_reports : raw.reports.length,
+    reports_listed: listed.length,
+    reports: listed,
+  };
 }
 
 function generateIntelReport(item, reqPath, items = []) {
@@ -3911,18 +3985,20 @@ async function handleRequest(request, env, ctx) {
 
   // --- /api/reports/latest.json -----------------------------------------------
   if (path === "/api/reports/latest.json") {
-    let data = await r2Get(env, "api/reports/latest.json");
-    if (!data) data = await r2Get(env, REPORTS_KEY);
+    let data = await buildCertifiedReportsFeed(env, ctx, { limit: 50, feedType: "customer_ready_latest" });
     if (!data) {
-      const feedData  = await loadFeedItems(env);
-      // P0 publication gate (Section 14/30): the same firewall as /reports/**
-      // applies to the index -- a rejected report must not be listed even
-      // when this fallback computes the index live from feed items.
-      const critItems = (feedData.items || [])
-        .filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0)
-        .filter(i => evaluatePublicationGate(i).customer_ready);
+      // R2 catalog missing entirely -- fall back to computing directly from
+      // the live feed. Already filters before truncating (Section 7's
+      // correct ordering), so no change needed there.
+      const feedData   = await loadFeedItems(env);
+      const candidates = (feedData.items || [])
+        .filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0);
+      const critItems  = candidates.filter(i => evaluatePublicationGate(i).customer_ready);
       data = {
-        schema_version: "sentinel_apex_reports_v1", generated_at: now(),
+        schema_version: "2.0.0", feed_type: "customer_ready_latest", generated_at: now(),
+        policy_version: CERTIFICATION_POLICY_VERSION,
+        total_candidates: candidates.length, customer_ready_count: critItems.length,
+        withheld_count: candidates.length - critItems.length,
         total_reports: critItems.length, reports_listed: Math.min(critItems.length, 50),
         reports: critItems.slice(0, 50).map(i => ({
           id: i.stix_id || i.id, url: `/reports/2026/06/${i.stix_id || i.id}.html`,
@@ -3930,22 +4006,24 @@ async function handleRequest(request, env, ctx) {
           cve: i.cve_id || (i.cve_ids || [])[0] || null, timestamp: i.published || i.published_at,
         })),
       };
-    } else {
-      data = await _filterReportsIndexByPublicationGate(env, data);
     }
     return jsonResp(data, 200, { "Cache-Control": "public, max-age=300" });
   }
 
   // --- /api/reports/index.json ------------------------------------------------
   if (path === "/api/reports/index.json") {
-    let data = await r2Get(env, REPORTS_KEY);
+    let data = await buildCertifiedReportsFeed(env, ctx, { limit: 500, feedType: "customer_ready_catalog" });
     if (!data) {
-      const feedData  = await loadFeedItems(env);
-      const critItems = (feedData.items || [])
-        .filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0)
-        .filter(i => evaluatePublicationGate(i).customer_ready);
+      const feedData   = await loadFeedItems(env);
+      const candidates = (feedData.items || [])
+        .filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0);
+      const critItems  = candidates.filter(i => evaluatePublicationGate(i).customer_ready);
       data = {
-        schema_version: "sentinel_apex_reports_v1", version: PLATFORM_VERSION, generated_at: now(),
+        schema_version: "2.0.0", feed_type: "customer_ready_catalog",
+        version: PLATFORM_VERSION, generated_at: now(),
+        policy_version: CERTIFICATION_POLICY_VERSION,
+        total_candidates: candidates.length, customer_ready_count: critItems.length,
+        withheld_count: candidates.length - critItems.length,
         total_reports: critItems.length, reports_listed: Math.min(critItems.length, 20),
         reports: critItems.slice(0, 20).map(i => ({
           id: i.stix_id || i.id, url: `/reports/2026/06/${i.stix_id || i.id}.html`,
@@ -3953,8 +4031,6 @@ async function handleRequest(request, env, ctx) {
           cve: i.cve_id || (i.cve_ids || [])[0] || null, timestamp: i.published || i.published_at,
         })),
       };
-    } else {
-      data = await _filterReportsIndexByPublicationGate(env, data);
     }
     return jsonResp(data, 200, { "Cache-Control": "public, max-age=300" });
   }
@@ -3964,9 +4040,23 @@ async function handleRequest(request, env, ctx) {
     const feedData = await loadFeedItems(env);
     const stats    = computeStats(feedData.items || []);
     return jsonResp({
-      total_reports: stats.critical + stats.high, critical_reports: stats.critical,
-      high_reports: stats.high, medium_reports: stats.medium, kev_reports: stats.kev_confirmed,
+      // DEPRECATED (schema_version 1.1.0), no removal date set yet -- despite
+      // the name, this has never been a report-catalog count, it is
+      // critical+high THREAT count from the live feed. Kept unchanged (same
+      // value) for backward compatibility; confirmed via full-repo consumer
+      // audit that nothing currently reads it as a catalog count. Exact
+      // replacements (identical values today, safe to migrate field-by-field):
+      //   total_reports   -> total_active_threats
+      //   critical_reports -> critical_threats
+      //   high_reports     -> high_threats
+      //   medium_reports   -> medium_threats
+      total_reports: stats.critical + stats.high,
+      critical_threats: stats.critical, high_threats: stats.high, medium_threats: stats.medium,
+      total_active_threats: stats.critical + stats.high,
+      critical_reports: stats.critical, high_reports: stats.high, medium_reports: stats.medium,
+      kev_reports: stats.kev_confirmed,
       last_generated: stats.last_sync, generated_at: now(), version: PLATFORM_VERSION,
+      schema_version: "1.1.0",
     }, 200, { "Cache-Control": "public, max-age=300" });
   }
 
