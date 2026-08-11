@@ -331,6 +331,18 @@ def main() -> None:
         "sitemap.xml",
         ".gitignore",
         "reports/",
+        # P0-FIX v184.4: written by build_reports_index.py (Stage 3.3.7) but
+        # never explicitly staged here -- meaning any fresh-generated value
+        # sat as an uncommitted working-tree change. That is only safe if
+        # the file is genuinely stash-protected end to end; live production
+        # showed it reverting to a stale prior-origin/main snapshot instead
+        # (see the matching entry in _GENERATED_ARTIFACT_PATHS below, which
+        # depends on these three being staged+committed here first -- ORIG_HEAD
+        # only contains this run's fresh content if it was staged before the
+        # pre-reset commit).
+        "api/reports/index.json",
+        "api/reports/latest.json",
+        "api/reports/stats.json",
         "data/status/status.json",
         "data/health/guardian_report.json",
         "data/health/apex_engine_report.json",
@@ -544,6 +556,19 @@ def main() -> None:
             # SOLUTION: same mechanism as the reports-guard above -- these
             # files are guaranteed correct in ORIG_HEAD (this run's own
             # pre-reset commit), so restore them the same way.
+            #
+            # P0-FIX v184.4: api/reports/index.json, api/reports/latest.json,
+            # and api/reports/stats.json (written by build_reports_index.py,
+            # Stage 3.3.7) were missing from this list. Confirmed via a live
+            # production pipeline run (2026-08-11, run 31458784542) that hit
+            # this exact concurrent-push conflict: the run's own log showed
+            # build_reports_index.py wrote total_reports=11805 correctly, but
+            # none of the three files were in the artifact-guard restore list
+            # above, so they silently reverted to a stale prior-origin/main
+            # snapshot (production served total_reports=356/21/81 across the
+            # three files -- mutually inconsistent and none matching this
+            # run's actual 11805-file disk scan) while every other generated
+            # artifact was correctly restored and logged.
             _GENERATED_ARTIFACT_PATHS = [
                 "api/v1/intel/latest.json",
                 "api/v1/intel/top10.json",
@@ -552,6 +577,9 @@ def main() -> None:
                 "api/v1/intel/ai_summary.json",
                 "api/feed.json",
                 "feed.json",
+                "api/reports/index.json",
+                "api/reports/latest.json",
+                "api/reports/stats.json",
             ]
 
             def _artifact_item_count(p: Path):
@@ -564,6 +592,8 @@ def main() -> None:
                             return len(d["items"])
                         if "count" in d:
                             return d["count"]
+                        if "total_reports" in d:
+                            return d["total_reports"]
                     return "n/a"
                 except Exception:
                     return "unreadable"
