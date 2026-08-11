@@ -54,21 +54,47 @@
   function getSeverityColors(sev) { return SEVERITY_COLORS[normalizeSeverity(sev)] || SEVERITY_COLORS["LOW"]; }
 
   /* ── SOC PRIORITY SYSTEM ───────────────────────────────────────────────── */
+  // P0 FIX (Dashboard Truth Contract PR-B, 2026-08-11): the pipeline's
+  // confidence_corroboration_engine.py build_sla_recommendation() emits a P0
+  // ("EMERGENCY PATCH") tier for KEV-confirmed critical items -- the platform's
+  // single most urgent classification -- but this whitelist only recognized
+  // P1-P4, so every real P0 value fell through to "P4" and rendered as
+  // "P4 -- INFORMATIONAL". Confirmed live against api/feed.json item
+  // intel--d49e384ea385135d (CRITICAL, kev_present=true, sla_priority="P0").
+  //
+  // Equally important: an unrecognized/malformed value (not just a missing
+  // one) used to collapse to "P4" too, silently presenting a broken or
+  // future/unknown backend classification as "safely informational". A
+  // malformed security classification must never masquerade as low-urgency,
+  // so unrecognized input now normalizes to "UNKNOWN" instead -- matching the
+  // string value of js/dashboard-state.js's SENTINELS.UNKNOWN /
+  // STATES.UNKNOWN.value (that module is not wired in here as a runtime
+  // dependency; the two files independently agree on this exact string by
+  // contract, documented in DASHBOARD_TRUTH_CONTRACT_PHASE0_FORENSIC_CENSUS.md).
+  //
+  // fallbackSocPriorityForSeverity() below is unrelated and unchanged: it is
+  // a deliberate interim estimate for the documented ingest-to-enrichment gap
+  // where sla_priority is genuinely not yet computed (not malformed), and is
+  // only ever invoked when rawSocPriority is empty, never with a real value.
+  const VALID_SOC_PRIORITIES = ["P0", "P1", "P2", "P3", "P4"];
+
   function normalizeSocPriority(raw) {
-    if (!raw) return "P4";
+    if (!raw) return "UNKNOWN";
     const upper = String(raw).toUpperCase().trim();
-    if (["P1","P2","P3","P4"].includes(upper)) return upper;
-    return "P4";
+    if (VALID_SOC_PRIORITIES.includes(upper)) return upper;
+    return "UNKNOWN";
   }
 
   const SOC_PRIORITY_MAP = {
+    P0: { label: "P0 — EMERGENCY PATCH",   shortLabel: "EMERGENCY PATCH",   color: "#ff1a1a", bg: "rgba(220,38,38,0.24)", border: "rgba(220,38,38,0.65)", badge: "🆘", order: -1 },
     P1: { label: "P1 — CRITICAL RESPONSE", shortLabel: "CRITICAL RESPONSE", color: "#ff1a1a", bg: "rgba(220,38,38,0.16)", border: "rgba(220,38,38,0.45)", badge: "🔴", order: 0 },
     P2: { label: "P2 — URGENT RESPONSE",   shortLabel: "URGENT RESPONSE",   color: "#ff6600", bg: "rgba(234,88,12,0.13)", border: "rgba(234,88,12,0.32)", badge: "🟠", order: 1 },
     P3: { label: "P3 — ACTIVE MONITORING", shortLabel: "ACTIVE MONITORING", color: "#f59e0b", bg: "rgba(217,119,6,0.11)", border: "rgba(217,119,6,0.28)", badge: "🟡", order: 2 },
     P4: { label: "P4 — INFORMATIONAL",     shortLabel: "INFORMATIONAL",     color: "#00d4ff", bg: "rgba(0,212,255,0.08)", border: "rgba(0,212,255,0.20)", badge: "🔵", order: 3 },
+    UNKNOWN: { label: "PRIORITY UNKNOWN",  shortLabel: "UNKNOWN",           color: "#9ca3af", bg: "rgba(156,163,175,0.10)", border: "rgba(156,163,175,0.3)", badge: "❓", order: null },
   };
 
-  function getSocPriorityMeta(priority) { return SOC_PRIORITY_MAP[normalizeSocPriority(priority)] || SOC_PRIORITY_MAP["P4"]; }
+  function getSocPriorityMeta(priority) { return SOC_PRIORITY_MAP[normalizeSocPriority(priority)] || SOC_PRIORITY_MAP["UNKNOWN"]; }
 
   // P0 FIX: items are visible on the live feed as soon as the (frequent,
   // lightweight) ingestion pipeline publishes them, but `sla_priority` /
@@ -107,8 +133,11 @@
     if (kevPresent || epssVal >= 15 || cvssVal >= 9.5) {
       return { action: "PATCH", ...ACTION_DEFS.PATCH };
     }
-    // ESCALATE: P1 response or critical severity with high EPSS
-    if (soc === "P1" || (sev === "CRITICAL" && epssVal >= 5)) {
+    // ESCALATE: P0/P1 response or critical severity with high EPSS. A real
+    // P0 item almost always also carries kevPresent=true (P0 is emitted
+    // specifically for KEV-confirmed items) and already hits PATCH above --
+    // this is defense-in-depth for the case where kevPresent isn't populated.
+    if (soc === "P0" || soc === "P1" || (sev === "CRITICAL" && epssVal >= 5)) {
       return { action: "ESCALATE", ...ACTION_DEFS.ESCALATE };
     }
     // INVESTIGATE: P2 / HIGH severity / notable EPSS
@@ -355,12 +384,14 @@
 
     // Action recommendation suffix keyed to SOC priority
     const socSuffix = {
+      P0: "EMERGENCY: Confirmed active exploitation. Activate incident response immediately. Patch or apply mitigations now, do not wait for a maintenance window.",
       P1: "Immediate incident response activation required. Escalate to CISO. Implement emergency mitigations now.",
       P2: "Urgent investigation required within 4 hours. Assign incident owner. Implement compensating controls pending patch.",
       P3: "Active monitoring and detection tuning advised. Schedule patch within 30-day SLA. Review exposure in affected systems.",
       P4: "Log, monitor, and track. No immediate action required. Include in next vulnerability management cycle.",
+      UNKNOWN: "SOC priority has not yet been determined for this item. Review severity and available evidence directly -- do not assume low urgency.",
     };
-    const actionSuffix = socSuffix[soc] || socSuffix["P4"];
+    const actionSuffix = socSuffix[soc] || socSuffix["UNKNOWN"];
 
     // Confidence context
     const confContext = conf >= 80 ? "High-confidence intelligence basis."
@@ -484,10 +515,10 @@
         severity: "LOW", severity_colors: _sc, risk_score: buildRiskScore(0, _sc),
         confidence: 0, confidence_display: "0%",
         epss_score: null, cvss_score: null, has_epss: false, has_cvss: false, kev_present: false,
-        action_rec: generateActionRecommendation("LOW","P4",null,null,false),
+        action_rec: generateActionRecommendation("LOW","UNKNOWN",null,null,false),
         impact_context: buildImpactContext("","","LOW"),
         freshness: freshnessIndicator(null),
-        ai_verdict: buildAiVerdict("","LOW","P4","",0),
+        ai_verdict: buildAiVerdict("","LOW","UNKNOWN","",0),
         paywall_features: buildPaywallFeatures(0,0),
         business_impact: buildBusinessImpact("","","LOW"),
         actor_tag:"", ioc_count:0, ioc_confidence:0, ioc_threat_level:"",
@@ -499,7 +530,7 @@
         source:"", source_url:"", source_host:"", report_url:"",
         stix_bundle_url:"", stix_bundle_locked:false, stix_bundle_upgrade_url:"",
         apex_ai:{
-          soc_priority:"P4", soc_priority_meta:getSocPriorityMeta("P4"),
+          soc_priority:"UNKNOWN", soc_priority_meta:getSocPriorityMeta("UNKNOWN"),
           threat_level:"LOW", threat_category:"", predictive_risk:0, ai_confidence:0,
           threat_confidence_tier:"LOW", threat_confidence_label:"", confidence_tier_meta:normalizeConfidence(0),
           ttp_density:0, campaign_id:"", actor_fingerprint:"", kill_chain:"", kill_chain_primary:"",

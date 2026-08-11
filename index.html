@@ -12359,8 +12359,30 @@ function renderTopThreats(data) {
         if(cvss>=5||risk>=5) return 'P3';
         return 'P4';
     }
+    // P0 FIX (Dashboard Truth Contract PR-B, 2026-08-11): prio(item) now
+    // correctly returns 'P0' for a KEV-confirmed critical item once
+    // js/api_adapter.js's normalizeSocPriority() preserves it (was silently
+    // collapsed to 'P4' before) -- but this function's fallback branch would
+    // then color a P0 (the platform's most urgent tier) with the SAME gray
+    // used for P4/informational, visually re-introducing the exact
+    // contradiction the badge-text fix just closed. P0 gets its own,
+    // most-urgent color; P1-P4 mappings are unchanged.
     function prioColor(p) {
-        return p==='P1'?'#dc2626':p==='P2'?'#ea580c':p==='P3'?'#d97706':'#6b7280';
+        return p==='P0'?'#ff1a1a':p==='P1'?'#dc2626':p==='P2'?'#ea580c':p==='P3'?'#d97706':'#6b7280';
+    }
+    // P0 FIX (Dashboard Truth Contract PR-B, 2026-08-11): the action-strip
+    // label below each TOP10 card special-cased only pr==='P1' for
+    // "PATCH NOW" styling; a P0 item without kev_present set would fall
+    // through to the default 'MONITOR' label -- the same class of
+    // contradiction as the P0->P4 badge bug, one line down. Extracted into a
+    // small named function (matching this file's existing sevInfo()/prio()/
+    // prioColor() pattern) so it can be unit-tested directly instead of only
+    // as an inline ternary duplicated at each call site.
+    function prioActionLabel(pr, kev, epss) {
+        if (kev || epss >= 50) return { color: '#dc2626', text: '&#9888; IMMEDIATE ACTION' };
+        if (pr === 'P0' || pr === 'P1') return { color: '#ea580c', text: '&#9888; PATCH NOW' };
+        if (pr === 'P2') return { color: '#5a6578', text: 'INVESTIGATE' };
+        return { color: '#5a6578', text: 'MONITOR' };
     }
 
     const RANK_ICONS = ['&#127942;','&#129352;','&#129353;','&#9679;','&#9679;','&#9679;','&#9679;','&#9679;','&#9679;','&#9679;'];
@@ -12457,7 +12479,7 @@ function renderTopThreats(data) {
 
             // Action button strip
             '<div style="padding:6px 14px 10px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,0.04);margin-top:2px;">'+
-                '<span style="font-family:var(--font-mono);font-size:8px;color:'+(kev||epss>=50?'#dc2626':pr==='P1'?'#ea580c':'#5a6578')+';font-weight:800;letter-spacing:1px;">'+(kev||epss>=50?'&#9888; IMMEDIATE ACTION':pr==='P1'?'&#9888; PATCH NOW':pr==='P2'?'INVESTIGATE':'MONITOR')+'</span>'+
+                '<span style="font-family:var(--font-mono);font-size:8px;color:'+prioActionLabel(pr,kev,epss).color+';font-weight:800;letter-spacing:1px;">'+prioActionLabel(pr,kev,epss).text+'</span>'+
                 (idx<3?
                     // v187.0 P0 FIX: never render a "FULL INTEL" CTA unless
                     // cdbBuildReportUrl() actually returned a backend-verified
@@ -12550,7 +12572,7 @@ function renderTopThreats(data) {
                     (kcPhase?'<span style="background:rgba(245,158,11,0.08);color:#f59e0b;padding:1px 5px;border-radius:3px;font-size:8px;font-family:var(--font-mono);border:1px solid rgba(245,158,11,.15);">'+kcPhase+'</span>':'')+
                 '</div>'+
                 '<div style="padding:6px 14px 10px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,0.04);margin-top:2px;">'+
-                    '<span style="font-family:var(--font-mono);font-size:8px;color:'+(kev||epss>=50?'#dc2626':pr==='P1'?'#ea580c':'#5a6578')+';font-weight:800;letter-spacing:1px;">'+(kev||epss>=50?'&#9888; IMMEDIATE ACTION':pr==='P1'?'&#9888; PATCH NOW':pr==='P2'?'INVESTIGATE':'MONITOR')+'</span>'+
+                    '<span style="font-family:var(--font-mono);font-size:8px;color:'+prioActionLabel(pr,kev,epss).color+';font-weight:800;letter-spacing:1px;">'+prioActionLabel(pr,kev,epss).text+'</span>'+
                     // v187.0 P0 FIX: same verified-link requirement as the
                     // top-10 list below -- never link "FULL INTEL" to a
                     // report cdbBuildReportUrl() couldn't confirm exists.

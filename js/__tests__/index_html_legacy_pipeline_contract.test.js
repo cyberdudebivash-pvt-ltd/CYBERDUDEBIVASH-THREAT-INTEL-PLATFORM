@@ -135,6 +135,71 @@ test("prio: falls back when __norm exists but has no apex_ai.soc_priority", () =
 });
 
 // ---------------------------------------------------------------------------
+// PR-B (Dashboard Truth Contract, 2026-08-11) -- prio(item) already prefers
+// item.__norm.apex_ai.soc_priority (fixed at js/api_adapter.js's
+// normalizeSocPriority()), so once the adapter preserves a real "P0" value,
+// prio() correctly returns "P0" on TOP10 too. But prioColor() and the
+// action-strip label below each card independently branched on p==='P1'
+// only -- a P0 item would keep the correct "P0" text badge but be colored
+// (and labeled "MONITOR") identically to a P4/informational item, silently
+// re-introducing the same visual contradiction one layer down. These tests
+// extract and execute the real functions straight out of index.html.
+// ---------------------------------------------------------------------------
+
+function loadTopThreatsColorFns() {
+  const prioColorSrc = extractFnByMarker(
+    "function prioColor(p) {",
+    "\n    }"
+  );
+  const prioActionLabelSrc = extractFnByMarker(
+    "function prioActionLabel(pr, kev, epss) {",
+    "\n    }"
+  );
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(
+    `${prioColorSrc}\n${prioActionLabelSrc}\nthis.prioColor = prioColor; this.prioActionLabel = prioActionLabel;`,
+    context
+  );
+  return { prioColor: context.prioColor, prioActionLabel: context.prioActionLabel };
+}
+
+const { prioColor, prioActionLabel } = loadTopThreatsColorFns();
+
+test("prio: CRITICAL/P0 (KEV-confirmed) item reads P0 from the canonical adapter output on TOP10, never P4", () => {
+  const item = { severity: "CRITICAL", kev_present: true, __norm: { apex_ai: { soc_priority: "P0" } } };
+  const result = prio(item);
+  assert.equal(result, "P0");
+  assert.notEqual(result, "P4");
+});
+
+test("prioColor: P0 gets its own color, distinct from P4's gray -- never visually equated with informational", () => {
+  const p0Color = prioColor("P0");
+  const p4Color = prioColor("P4");
+  assert.notEqual(p0Color, p4Color);
+  assert.notEqual(p0Color, "#6b7280", "P0 must not use P4's gray color");
+});
+
+test("prioColor: P1-P4 mappings are unchanged by the P0 fix", () => {
+  assert.equal(prioColor("P1"), "#dc2626");
+  assert.equal(prioColor("P2"), "#ea580c");
+  assert.equal(prioColor("P3"), "#d97706");
+  assert.equal(prioColor("P4"), "#6b7280");
+});
+
+test("prioActionLabel: a P0 item without kev_present set still gets escalated styling, never the default MONITOR label", () => {
+  const label = prioActionLabel("P0", false, 0);
+  assert.notEqual(label.text, "MONITOR");
+});
+
+test("prioActionLabel: existing P1/P2/other behavior is unchanged", () => {
+  assert.equal(prioActionLabel("P1", false, 0).text, "&#9888; PATCH NOW");
+  assert.equal(prioActionLabel("P2", false, 0).text, "INVESTIGATE");
+  assert.equal(prioActionLabel("P4", false, 0).text, "MONITOR");
+  assert.equal(prioActionLabel("P3", true, 0).text, "&#9888; IMMEDIATE ACTION"); // kev always wins
+});
+
+// ---------------------------------------------------------------------------
 // computeMetrics() IOC aggregation -- guards against the exact string-
 // concatenation regression already fixed once (elsewhere) in this codebase.
 // computeMetrics() itself is not cleanly extractable in isolation (it reads
