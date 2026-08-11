@@ -32,7 +32,7 @@
  * recalibrated. No secondary scoring logic is introduced.
  */
 
-import { evaluatePublicationGate } from './publication-gate.js';
+import { evaluatePublicationGate, _contentFingerprint } from './publication-gate.js';
 
 export const CERTIFICATION_INDEX_KEY = 'certification/index.json';
 export const CERTIFICATION_POLICY_VERSION = '1.0.0';
@@ -80,7 +80,8 @@ export async function loadCertificationIndex(env) {
     const parsed = JSON.parse(text);
     return (parsed && typeof parsed === 'object' && parsed.records && typeof parsed.records === 'object')
       ? parsed.records : {};
-  } catch (_) {
+  } catch (e) {
+    console.error(`[certification-registry] index load failed: ${e && e.message ? e.message : e}`);
     return {};
   }
 }
@@ -118,7 +119,21 @@ export async function persistCertificationRecords(env, newRecords) {
  * Returns { record, isNew } -- isNew=true means the caller should persist it.
  */
 export function resolveCertification(existingRecord, item) {
-  if (existingRecord) return { record: existingRecord, isNew: false };
+  if (existingRecord) {
+    // Reuse unconditionally when the item can no longer be resolved -- this
+    // is exactly the historical-provenance case (Section 5): the record is
+    // the only surviving evidence, so it IS the answer. When the item CAN
+    // still be resolved, only reuse if its content hasn't changed since
+    // certification (or predates content_hash tracking) -- otherwise a
+    // corrected/re-enriched item (e.g. a REJECTED report that was later
+    // fixed, or vice versa) would stay pinned to a stale verdict forever.
+    // Comparing the fingerprint is cheap (a sync hash over existing raw
+    // fields, not a P20-P26 re-run) so this never reintroduces the
+    // per-request full-evaluation cost this module exists to eliminate.
+    const stillFresh = !item || !existingRecord.content_hash
+      || existingRecord.content_hash === _contentFingerprint(item);
+    if (stillFresh) return { record: existingRecord, isNew: false };
+  }
 
   if (!item) {
     // Cannot resolve AND nothing persisted: NOT_EVALUATED. This is exactly

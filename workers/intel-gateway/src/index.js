@@ -600,16 +600,19 @@ async function handlePublicationStatus(request, env, reportId) {
  */
 async function _resolveFeedItemsById(env) {
   const byId = new Map();
-  for (const key of [LATEST_PRO_JSON_KEY, LATEST_JSON_KEY, "api/v1/intel/top10.json", "api/v1/intel/apex.json"]) {
-    try {
-      const feed = await r2Get(env, key);
-      if (!feed) continue;
-      const items = Array.isArray(feed) ? feed : (feed.items || feed.data || []);
-      for (const i of items) {
-        const id = (i.stix_id || i.id || "").replace(/\.html?$/, "");
-        if (id && !byId.has(id)) byId.set(id, i);
-      }
-    } catch (_) { /* continue to next source */ }
+  const keys = [LATEST_PRO_JSON_KEY, LATEST_JSON_KEY, "api/v1/intel/top10.json", "api/v1/intel/apex.json"];
+  // Fetch all four sources concurrently (independent R2 reads), then merge in
+  // `keys` order so first-source-wins priority is unchanged from the
+  // sequential version -- only the wall-clock cost drops.
+  const feeds = await Promise.all(keys.map(k => r2Get(env, k).catch(() => null)));
+  for (const feed of feeds) {
+    if (!feed) continue;
+    const items = Array.isArray(feed) ? feed : (feed.items || feed.data || []);
+    if (!Array.isArray(items)) continue;
+    for (const i of items) {
+      const id = ((i && (i.stix_id || i.id)) || "").replace(/\.html?$/, "");
+      if (id && !byId.has(id)) byId.set(id, i);
+    }
   }
   return byId;
 }
@@ -627,8 +630,15 @@ async function _resolveFeedItemsById(env) {
  * that is neither persisted nor resolvable is NOT_EVALUATED and is never
  * customer-ready -- replaces the old "unresolvable -- pass through" rule
  * that let NOT_FOUND_IN_FEED silently become CUSTOMER_READY.
+ *
+ * `ctx` (the Worker's ExecutionContext, optional) lets the certification
+ * write ride on ctx.waitUntil(): the verdicts used for THIS response are
+ * already computed by the time persistCertificationRecords() is called, so
+ * the R2 read-modify-write round trip must not add latency to the request
+ * path. Falls back to awaiting it directly if ctx isn't supplied (e.g. a
+ * unit test harness).
  */
-async function buildCertifiedReportsFeed(env, { limit, feedType }) {
+async function buildCertifiedReportsFeed(env, ctx, { limit, feedType }) {
   const raw = await r2Get(env, REPORTS_KEY);
   if (!raw || !Array.isArray(raw.reports) || raw.reports.length === 0) return null;
 
@@ -647,15 +657,22 @@ async function buildCertifiedReportsFeed(env, { limit, feedType }) {
   }
 
   if (Object.keys(toPersist).length > 0) {
-    await persistCertificationRecords(env, toPersist);
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(persistCertificationRecords(env, toPersist));
+    } else {
+      await persistCertificationRecords(env, toPersist);
+    }
   }
 
   const customerReady = evaluated.filter(e => e.publication_status === "CUSTOMER_READY").map(e => e.entry);
   // Deterministic ordering: newest first by timestamp, ties broken by id --
-  // Test Matrix item 26 (no arbitrary/unstable ordering).
+  // Test Matrix item 26 (no arbitrary/unstable ordering). An unparseable
+  // timestamp yields NaN from getTime(); `|| 0` normalizes it so such
+  // entries sort last (oldest) instead of producing NaN comparator results
+  // (implementation-defined ordering that would silently break determinism).
   customerReady.sort((a, b) => {
-    const ta = new Date(a.timestamp || 0).getTime();
-    const tb = new Date(b.timestamp || 0).getTime();
+    const ta = new Date(a.timestamp || 0).getTime() || 0;
+    const tb = new Date(b.timestamp || 0).getTime() || 0;
     if (tb !== ta) return tb - ta;
     return String(a.id || "").localeCompare(String(b.id || ""));
   });
@@ -670,10 +687,16 @@ async function buildCertifiedReportsFeed(env, { limit, feedType }) {
     total_candidates: raw.reports.length,
     customer_ready_count: customerReady.length,
     withheld_count: raw.reports.length - customerReady.length,
-    // Backward-compat names (Section 8): now genuinely mean "customer-ready
-    // reports returned", not "raw registry rows", closing the semantic gap
-    // this task exists to fix.
-    total_reports: customerReady.length,
+    // total_reports: UNCHANGED historical meaning -- the true report-catalog
+    // size (scripts/build_reports_index.py's len(all_report_paths), passed
+    // through from the registry raw.total_reports), NOT the gated count.
+    // index.html reads this for dashboard totals/badges and compares it
+    // against reports_listed to decide whether to show a "view all" link
+    // (data.total_reports > data.reports_listed) -- redefining it to the
+    // customer-ready count would silently break that comparison and regress
+    // the displayed catalogue size. Use customer_ready_count/withheld_count
+    // above for the gated numbers this fix introduces.
+    total_reports: (typeof raw.total_reports === "number") ? raw.total_reports : raw.reports.length,
     reports_listed: listed.length,
     reports: listed,
   };
@@ -3962,18 +3985,20 @@ async function handleRequest(request, env, ctx) {
 
   // --- /api/reports/latest.json -----------------------------------------------
   if (path === "/api/reports/latest.json") {
-    let data = await buildCertifiedReportsFeed(env, { limit: 50, feedType: "customer_ready_latest" });
+    let data = await buildCertifiedReportsFeed(env, ctx, { limit: 50, feedType: "customer_ready_latest" });
     if (!data) {
       // R2 catalog missing entirely -- fall back to computing directly from
       // the live feed. Already filters before truncating (Section 7's
-      // correct ordering), so no change needed here.
-      const feedData  = await loadFeedItems(env);
-      const critItems = (feedData.items || [])
-        .filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0)
-        .filter(i => evaluatePublicationGate(i).customer_ready);
+      // correct ordering), so no change needed there.
+      const feedData   = await loadFeedItems(env);
+      const candidates = (feedData.items || [])
+        .filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0);
+      const critItems  = candidates.filter(i => evaluatePublicationGate(i).customer_ready);
       data = {
-        schema_version: "sentinel_apex_reports_v1", feed_type: "customer_ready_latest", generated_at: now(),
-        total_candidates: critItems.length, customer_ready_count: critItems.length, withheld_count: 0,
+        schema_version: "2.0.0", feed_type: "customer_ready_latest", generated_at: now(),
+        policy_version: CERTIFICATION_POLICY_VERSION,
+        total_candidates: candidates.length, customer_ready_count: critItems.length,
+        withheld_count: candidates.length - critItems.length,
         total_reports: critItems.length, reports_listed: Math.min(critItems.length, 50),
         reports: critItems.slice(0, 50).map(i => ({
           id: i.stix_id || i.id, url: `/reports/2026/06/${i.stix_id || i.id}.html`,
@@ -3987,16 +4012,18 @@ async function handleRequest(request, env, ctx) {
 
   // --- /api/reports/index.json ------------------------------------------------
   if (path === "/api/reports/index.json") {
-    let data = await buildCertifiedReportsFeed(env, { limit: 500, feedType: "customer_ready_catalog" });
+    let data = await buildCertifiedReportsFeed(env, ctx, { limit: 500, feedType: "customer_ready_catalog" });
     if (!data) {
-      const feedData  = await loadFeedItems(env);
-      const critItems = (feedData.items || [])
-        .filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0)
-        .filter(i => evaluatePublicationGate(i).customer_ready);
+      const feedData   = await loadFeedItems(env);
+      const candidates = (feedData.items || [])
+        .filter(i => (i.severity || "") === "CRITICAL" || parseFloat(i.risk_score || 0) >= 8.0);
+      const critItems  = candidates.filter(i => evaluatePublicationGate(i).customer_ready);
       data = {
-        schema_version: "sentinel_apex_reports_v1", feed_type: "customer_ready_catalog",
+        schema_version: "2.0.0", feed_type: "customer_ready_catalog",
         version: PLATFORM_VERSION, generated_at: now(),
-        total_candidates: critItems.length, customer_ready_count: critItems.length, withheld_count: 0,
+        policy_version: CERTIFICATION_POLICY_VERSION,
+        total_candidates: candidates.length, customer_ready_count: critItems.length,
+        withheld_count: candidates.length - critItems.length,
         total_reports: critItems.length, reports_listed: Math.min(critItems.length, 20),
         reports: critItems.slice(0, 20).map(i => ({
           id: i.stix_id || i.id, url: `/reports/2026/06/${i.stix_id || i.id}.html`,
@@ -4013,12 +4040,16 @@ async function handleRequest(request, env, ctx) {
     const feedData = await loadFeedItems(env);
     const stats    = computeStats(feedData.items || []);
     return jsonResp({
-      // LEGACY/DEPRECATED name: despite the name, this has never been a
-      // report-catalog count -- it is critical+high THREAT count from the
-      // live feed. Kept unchanged (same value) for backward compatibility;
-      // confirmed via full-repo consumer audit that nothing currently reads
-      // it as a catalog count. New consumers should use the explicitly-named
-      // fields below instead.
+      // DEPRECATED (schema_version 1.1.0), no removal date set yet -- despite
+      // the name, this has never been a report-catalog count, it is
+      // critical+high THREAT count from the live feed. Kept unchanged (same
+      // value) for backward compatibility; confirmed via full-repo consumer
+      // audit that nothing currently reads it as a catalog count. Exact
+      // replacements (identical values today, safe to migrate field-by-field):
+      //   total_reports   -> total_active_threats
+      //   critical_reports -> critical_threats
+      //   high_reports     -> high_threats
+      //   medium_reports   -> medium_threats
       total_reports: stats.critical + stats.high,
       critical_threats: stats.critical, high_threats: stats.high, medium_threats: stats.medium,
       total_active_threats: stats.critical + stats.high,

@@ -72,6 +72,20 @@ test("classifyCertification: null/undefined gate result -> CERTIFICATION_ERROR /
   assert.equal(classifyCertification(undefined).publication_status, "WITHHELD");
 });
 
+test("classifyCertification: blocked but not policy-rejected -> BLOCKED / PENDING_ENRICHMENT (distinct from REJECTED)", () => {
+  // Pins the branch directly against a synthetic gate result, independent of
+  // evaluatePublicationGate's own thresholds -- a regression that collapses
+  // PENDING_ENRICHMENT into REJECTED (or vice versa) must fail this test even
+  // if it doesn't happen to flip any real item's engine scores.
+  const c = classifyCertification({
+    customer_ready: false,
+    publication_state: "BLOCKED",
+    blocking_gates: ["P23_OPERATIONAL_READINESS_DO_NOT_PUBLISH"],
+  });
+  assert.equal(c.certification_status, "BLOCKED");
+  assert.equal(c.publication_status, "PENDING_ENRICHMENT");
+});
+
 // --- resolveCertification: the critical trust invariant --------------------
 
 test("CRITICAL INVARIANT: no persisted record + unresolvable item -> NOT_EVALUATED / WITHHELD, never CUSTOMER_READY", () => {
@@ -94,11 +108,53 @@ test("CRITICAL INVARIANT: this is the exact live-production defect reproduced --
   assert.equal(unresolvable.record.certification_status, "NOT_EVALUATED");
 });
 
-test("resolveCertification: existing persisted record is reused verbatim, never re-evaluated", () => {
-  const existing = { certification_status: "CERTIFIED", publication_status: "CUSTOMER_READY", evaluated_at: "2020-01-01T00:00:00Z" };
-  // Even with a resolvable item present, an existing record wins -- proves
-  // "once certified, never re-evaluated" (Section 5 historical provenance).
+test("resolveCertification: existing record with a matching content_hash is reused verbatim, never re-evaluated", () => {
+  const existing = {
+    certification_status: "CERTIFIED", publication_status: "CUSTOMER_READY",
+    evaluated_at: "2020-01-01T00:00:00Z",
+    content_hash: evaluatePublicationGate(CUSTOMER_READY_ITEM).content_hash,
+  };
+  // Even with a resolvable item present, a matching-content existing record
+  // wins -- proves "once certified, never re-evaluated for unchanged content"
+  // (Section 5 historical provenance), while still allowing genuinely stale
+  // records (next test) to be caught.
   const { record, isNew } = resolveCertification(existing, CUSTOMER_READY_ITEM);
+  assert.equal(record, existing);
+  assert.equal(isNew, false);
+});
+
+test("resolveCertification: existing record with no content_hash (pre-fingerprint format) is reused for backward compatibility", () => {
+  const existing = { certification_status: "CERTIFIED", publication_status: "CUSTOMER_READY", evaluated_at: "2020-01-01T00:00:00Z" };
+  const { record, isNew } = resolveCertification(existing, CUSTOMER_READY_ITEM);
+  assert.equal(record, existing);
+  assert.equal(isNew, false);
+});
+
+test("resolveCertification: existing record with a STALE content_hash triggers fresh evaluation, not blind reuse", () => {
+  // The item's content has changed since certification (e.g. re-enriched or
+  // corrected) -- a persisted verdict computed against the OLD content must
+  // not be trusted forever. The fingerprint check is a cheap sync hash over
+  // raw fields, not a P20-P26 re-run, so this never reintroduces the
+  // per-request full-evaluation cost this module exists to eliminate.
+  const stale = {
+    certification_status: "BLOCKED", publication_status: "REJECTED",
+    evaluated_at: "2020-01-01T00:00:00Z", content_hash: "fp_deadbeef",
+  };
+  const { record, isNew } = resolveCertification(stale, CUSTOMER_READY_ITEM);
+  assert.equal(isNew, true);
+  assert.notEqual(record, stale);
+  assert.equal(record.certification_status, "CERTIFIED");
+  assert.equal(record.publication_status, "CUSTOMER_READY");
+  assert.equal(record.content_hash, evaluatePublicationGate(CUSTOMER_READY_ITEM).content_hash);
+});
+
+test("resolveCertification: existing record is always reused when the item can no longer be resolved, regardless of content_hash presence", () => {
+  // Historical-provenance case (Section 5): once the item scrolls out of the
+  // feed, there is no current content to fingerprint against, so the
+  // persisted verdict IS the answer -- this must never flip to NOT_EVALUATED
+  // just because content_hash tracking exists.
+  const existing = { certification_status: "CERTIFIED", publication_status: "CUSTOMER_READY", content_hash: "fp_anything" };
+  const { record, isNew } = resolveCertification(existing, undefined);
   assert.equal(record, existing);
   assert.equal(isNew, false);
 });
