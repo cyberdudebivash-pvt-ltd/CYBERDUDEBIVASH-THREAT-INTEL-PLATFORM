@@ -122,10 +122,87 @@ test("exact live production reproduction: HIGH-severity OpenPhish item with no s
   assert.equal(item.apex_ai.soc_priority, "P3");
 });
 
-test("normalizeSocPriority rejects invalid/unknown priority strings", () => {
-  assert.equal(Adapter.normalizeSocPriority("not-a-priority"), "P4");
-  assert.equal(Adapter.normalizeSocPriority(""), "P4");
-  assert.equal(Adapter.normalizeSocPriority("p1"), "P1"); // case-insensitive
+// ---------------------------------------------------------------------------
+// PR-B (Dashboard Truth Contract, 2026-08-11) -- two defects fixed together:
+//
+// 1. normalizeSocPriority() whitelisted only P1-P4, so the pipeline's KEV-
+//    confirmed emergency tier "P0" (confidence_corroboration_engine.py
+//    build_sla_recommendation()) silently collapsed to "P4 -- INFORMATIONAL".
+//    Confirmed live against api/feed.json item intel--d49e384ea385135d
+//    (CRITICAL, kev_present=true, sla_priority="P0").
+//
+// 2. Separately, ANY unrecognized/malformed value (not just an absent one)
+//    also collapsed to "P4" -- silently presenting a broken or future/
+//    unknown backend classification as "safely informational". A malformed
+//    security classification must never masquerade as low-urgency, so
+//    unrecognized input now normalizes to "UNKNOWN" instead.
+// ---------------------------------------------------------------------------
+
+test("P0 must never downgrade to P4: normalizeSocPriority preserves P0 exactly", () => {
+  assert.equal(Adapter.normalizeSocPriority("P0"), "P0");
+  assert.notEqual(Adapter.normalizeSocPriority("P0"), "P4");
+});
+
+test("normalizeSocPriority preserves every real priority tier unchanged", () => {
+  assert.equal(Adapter.normalizeSocPriority("P0"), "P0");
+  assert.equal(Adapter.normalizeSocPriority("P1"), "P1");
+  assert.equal(Adapter.normalizeSocPriority("P2"), "P2");
+  assert.equal(Adapter.normalizeSocPriority("P3"), "P3");
+  assert.equal(Adapter.normalizeSocPriority("P4"), "P4");
+  assert.equal(Adapter.normalizeSocPriority("p0"), "P0"); // case-insensitive
+});
+
+test("normalizeSocPriority never silently defaults unknown/malformed/absent input to P4", () => {
+  assert.equal(Adapter.normalizeSocPriority("not-a-priority"), "UNKNOWN");
+  assert.notEqual(Adapter.normalizeSocPriority("not-a-priority"), "P4");
+  assert.equal(Adapter.normalizeSocPriority(""), "UNKNOWN");
+  assert.notEqual(Adapter.normalizeSocPriority(""), "P4");
+  assert.equal(Adapter.normalizeSocPriority(null), "UNKNOWN");
+  assert.notEqual(Adapter.normalizeSocPriority(null), "P4");
+  assert.equal(Adapter.normalizeSocPriority(undefined), "UNKNOWN");
+  assert.notEqual(Adapter.normalizeSocPriority(undefined), "P4");
+  assert.equal(Adapter.normalizeSocPriority("P5"), "UNKNOWN"); // out-of-range, not a silent P4
+  assert.equal(Adapter.normalizeSocPriority(0), "UNKNOWN");
+});
+
+test("CRITICAL/P0 item (KEV-confirmed emergency tier) renders P0 through the full normalizer, never P4", () => {
+  const item = Adapter.normalizeIntelItem(
+    rawItem({ severity: "CRITICAL", sla_priority: "P0", kev_present: true }),
+    0
+  );
+  assert.equal(item.severity, "CRITICAL");
+  assert.equal(item.apex_ai.soc_priority, "P0");
+  assert.notEqual(item.apex_ai.soc_priority, "P4");
+});
+
+test("getSocPriorityMeta returns a distinct, non-P4 badge for P0", () => {
+  const p0Meta = Adapter.getSocPriorityMeta("P0");
+  const p4Meta = Adapter.getSocPriorityMeta("P4");
+  assert.equal(p0Meta.label.startsWith("P0"), true);
+  assert.notEqual(p0Meta.label, p4Meta.label);
+  assert.notEqual(p0Meta.color, p4Meta.color);
+});
+
+test("getSocPriorityMeta returns a distinct badge for UNKNOWN, never silently reusing the P4 badge", () => {
+  const unknownMeta = Adapter.getSocPriorityMeta("garbage-input");
+  const p4Meta = Adapter.getSocPriorityMeta("P4");
+  assert.notEqual(unknownMeta.label, p4Meta.label);
+  assert.notEqual(unknownMeta.color, p4Meta.color);
+});
+
+test("generateActionRecommendation treats P0 with at least P1-level urgency (ESCALATE or higher), never MONITOR", () => {
+  // kevPresent=false to isolate the soc-priority branch from the kev/epss/cvss PATCH branch.
+  const rec = Adapter.generateActionRecommendation("CRITICAL", "P0", null, null, false);
+  assert.notEqual(rec.action, "MONITOR");
+  assert.ok(["PATCH", "ESCALATE"].includes(rec.action), `expected PATCH or ESCALATE for P0, got ${rec.action}`);
+});
+
+test("buildAiVerdict never tells an analyst 'no immediate action required' for P0 or UNKNOWN priority", () => {
+  const p0Verdict = Adapter.buildAiVerdict("", "CRITICAL", "P0", "default", 80);
+  assert.equal(p0Verdict.includes("No immediate action required"), false);
+
+  const unknownVerdict = Adapter.buildAiVerdict("", "CRITICAL", "not-a-priority", "default", 80);
+  assert.equal(unknownVerdict.includes("No immediate action required"), false);
 });
 
 test("exact live production item reproduction: Progress LoadMaster CRITICAL/P1", () => {
@@ -153,4 +230,19 @@ test("exact live production item reproduction: Progress LoadMaster CRITICAL/P1",
   assert.equal(item.severity, "CRITICAL");
   assert.equal(item.apex_ai.soc_priority, "P1");
   assert.notEqual(item.apex_ai.soc_priority, "P4");
+});
+
+// ---------------------------------------------------------------------------
+// CodeRabbit finding on PR #168: is_high_priority's predicate checked only
+// P1/P2, so a normalized P0 item (the platform's most urgent tier) reported
+// is_high_priority:false -- contradicting the requirement that P0 carries at
+// least P1-level urgency everywhere it is consumed.
+// ---------------------------------------------------------------------------
+
+test("is_high_priority is true for a CRITICAL/P0 item, not just P1/P2", () => {
+  const item = Adapter.normalizeIntelItem(
+    rawItem({ severity: "CRITICAL", sla_priority: "P0", kev_present: true }),
+    0
+  );
+  assert.equal(item.is_high_priority, true);
 });

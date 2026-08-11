@@ -38,7 +38,19 @@
   /* ── Allowed enums ─────────────────────────────────────────────────────── */
   const VALID_SEVERITIES    = new Set(["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]);
   const VALID_ACTIONS       = new Set(["PATCH", "ESCALATE", "INVESTIGATE", "MONITOR"]);
-  const VALID_SOC_PRIORITIES = new Set(["P1", "P2", "P3", "P4"]);
+  // P0 FIX (Dashboard Truth Contract PR-B, 2026-08-11): this whitelist
+  // independently excluded "P0" (the pipeline's KEV-confirmed emergency
+  // tier), the identical defect found and fixed in js/api_adapter.js's
+  // normalizeSocPriority(). This validator is not currently wired into any
+  // CI workflow (see DASHBOARD_TRUTH_CONTRACT_PHASE0_FORENSIC_CENSUS.md),
+  // but fixing it keeps it from independently disagreeing with the adapter
+  // it is meant to validate the output of -- had it been wired in, it would
+  // have flagged a legitimate P0 value as INVALID_SOC_PRIORITY rather than
+  // catching the adapter's P0->P4 collapse. "UNKNOWN" is also now valid: the
+  // adapter normalizes unrecognized/malformed input to "UNKNOWN" rather than
+  // silently defaulting to "P4", so a normalized item legitimately carrying
+  // "UNKNOWN" is not a contract violation.
+  const VALID_SOC_PRIORITIES = new Set(["P0", "P1", "P2", "P3", "P4", "UNKNOWN"]);
 
   /* ── Prohibited customer-visible strings ───────────────────────────────── */
   const PROHIBITED_STRINGS = [
