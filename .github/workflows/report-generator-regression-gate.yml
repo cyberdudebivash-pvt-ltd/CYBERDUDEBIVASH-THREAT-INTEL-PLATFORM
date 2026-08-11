@@ -34,6 +34,18 @@
 # back empty. Found during live production certification -- see
 # tests/test_build_reports_index_artifact_fallback.py.
 #
+# Also guards against api/reports/index.json, api/reports/latest.json, and
+# api/reports/stats.json (written by build_reports_index.py, Stage 3.3.7)
+# being missing from safe_git_commit.py's staging list and its
+# _GENERATED_ARTIFACT_PATHS conflict-recovery guard -- a concurrent-push
+# merge conflict silently reverted them to a stale prior-origin/main
+# snapshot with no warning, while every sibling artifact (api/feed.json,
+# api/v1/intel/latest.json, etc.) was correctly detected and restored.
+# Found live: production served total_reports=356/21/81 across the three
+# files -- mutually inconsistent and none matching the pipeline run's
+# actual 11,805-file disk scan -- see
+# tests/test_safe_git_commit_artifact_recovery.py.
+#
 # Runs on every push and PR to main.
 
 name: Report Generator Regression Gate
