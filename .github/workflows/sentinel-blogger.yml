@@ -2199,8 +2199,9 @@ jobs:
       # it before STAGE 3.93.5 validates and STAGE 3.93.6 uploads them to R2.
       # Purely additive: no existing stage reordered, removed, or modified;
       # no P20/P21/P23/P25/P26 threshold or scoring logic touched; the script
-      # is deterministic and idempotent (atomic tmp-file writes), so running
-      # it twice is safe.
+      # is safe to rerun -- atomic tmp-file writes prevent partial files, but
+      # each invocation refreshes generated_at and the bundle sha256 hashes
+      # (not byte-for-byte idempotent even when api/feed.json is unchanged).
       # -----------------------------------------------------------------------
       - name: "STAGE 3.93.19 - Re-generate Immutable API Manifests (post-enrichment)"
         timeout-minutes: 5
