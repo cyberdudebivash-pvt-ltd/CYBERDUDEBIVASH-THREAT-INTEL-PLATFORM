@@ -835,8 +835,11 @@ export function applyTierGateV2(item, tier, usageState) {
 // reused, not reinvented, and identical for every tier since there is no
 // additional information being protected.
 function _ttpDensityFromVisibleTtps(item) {
-  const ttps = Array.isArray(item.ttps) ? item.ttps
-             : Array.isArray(item.mitre_tactics) ? item.mitre_tactics
+  // Mirrors compute_ttp_density()'s own `item.get("ttps") or
+  // item.get("mitre_tactics") or []` -- an empty `ttps` array is treated
+  // the same as an absent one and falls through to `mitre_tactics`.
+  const ttps = (Array.isArray(item.ttps) && item.ttps.length > 0) ? item.ttps
+             : (Array.isArray(item.mitre_tactics) && item.mitre_tactics.length > 0) ? item.mitre_tactics
              : [];
   return Math.round(Math.min(10, ttps.length * 1.5) * 10) / 10;
 }

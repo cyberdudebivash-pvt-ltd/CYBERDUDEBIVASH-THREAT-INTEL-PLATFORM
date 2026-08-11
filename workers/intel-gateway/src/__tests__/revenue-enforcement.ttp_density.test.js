@@ -63,8 +63,11 @@ test("density is capped at 10 regardless of how many techniques are mapped", () 
   assert.equal(gated.apex_ai.ttp_density, 10);
 });
 
-test("PRO tier: no longer reads the nonexistent item.apex.ttp_density field (was always 0)", () => {
-  const item = rawItem({ ttps: ["T1190", "T1059"], apex: { priority: "P2" } });
+test("PRO tier: visible ttps data wins even when a conflicting legacy item.apex.ttp_density is present", () => {
+  const item = rawItem({
+    ttps: ["T1190", "T1059"],
+    apex: { priority: "P2", ttp_density: 99 },
+  });
   const gated = applyTierGateV2(item, "pro", null);
   assert.equal(gated.apex_ai.ttp_density, 3);
 });
@@ -78,6 +81,12 @@ test("ENTERPRISE tier: same derivation, not gated further", () => {
 test("falls back to mitre_tactics when ttps is absent", () => {
   const item = rawItem({ ttps: undefined, mitre_tactics: ["TA0001", "TA0002"] });
   delete item.ttps;
+  const gated = applyTierGateV2(item, "free", null);
+  assert.equal(gated.apex_ai.ttp_density, 3);
+});
+
+test("falls back to mitre_tactics when ttps is present but empty (mirrors the Python producer's `or` semantics)", () => {
+  const item = rawItem({ ttps: [], mitre_tactics: ["TA0001", "TA0002"] });
   const gated = applyTierGateV2(item, "free", null);
   assert.equal(gated.apex_ai.ttp_density, 3);
 });
