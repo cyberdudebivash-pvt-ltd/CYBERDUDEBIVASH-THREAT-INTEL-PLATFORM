@@ -255,6 +255,22 @@ jobs:
 
           echo "=== PRE-FLIGHT PASSED ==="
 
+      - name: "GATE — Publication/certification trust-boundary tests (HARD FAIL)"
+        # P0 trust-boundary fix regression gate: certification-registry.js
+        # (persisted certification state) and publication-gate.js (P20/P21/
+        # P23/P25/P26 fail-closed publication firewall) must never regress --
+        # this is the layer that decides what intelligence a customer can
+        # see. Scoped to these two files (not the full __tests__/ suite,
+        # which has 5 pre-existing failures in unrelated subsystems --
+        # architecture-boundary tests in intelligence-platform/knowledge-
+        # platform/product-platform/relationship-framework and one unrelated
+        # admin test -- not run here to avoid blocking this gate on
+        # unrelated, already-broken tests; wiring up the full suite is a
+        # separate follow-up).
+        run: |
+          cd ${WORKER_DIR}
+          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js
+
       - name: " esbuild bundle pre-flight (HARD GATE)"
         run: |
           echo "=== esbuild bundle pre-flight -- HARD GATE ==="
