@@ -75,6 +75,16 @@ class TestGeneratedArtifactSurvivesConflictRecovery(unittest.TestCase):
                     {"count": 3, "items": [{"id": "a"}, {"id": "b"}, {"id": "c"}]})
         _write_json(seed / "data" / "health" / "sla_status.json", {"status": "ancestor"})
         _write_json(seed / "data" / "governance" / "trigger.json", {"v": "ancestor"})
+        # Ancestor also carries a stale api/reports/index.json (written by
+        # build_reports_index.py, Stage 3.3.7) -- this file family was found
+        # missing from _GENERATED_ARTIFACT_PATHS during live production
+        # verification (2026-08-11, run 31458784542): total_reports=11805
+        # was correctly computed on disk but silently reverted to this exact
+        # kind of stale prior-origin/main snapshot after conflict recovery,
+        # because nothing restored it. Seeded here the same way as
+        # api/v1/intel/latest.json above, to prove the fix.
+        _write_json(seed / "api" / "reports" / "index.json",
+                    {"total_reports": 3, "reports_listed": 3, "reports": [{"id": "a"}, {"id": "b"}, {"id": "c"}]})
         (seed / "reports").mkdir(parents=True, exist_ok=True)
         (seed / "reports" / ".gitkeep").write_text("")
         _git(seed, "add", "-A")
@@ -112,6 +122,10 @@ class TestGeneratedArtifactSurvivesConflictRecovery(unittest.TestCase):
         # Pipeline "generates" fresh customer-facing intelligence this run.
         _write_json(self.runner / "api" / "v1" / "intel" / "latest.json",
                     {"count": 5, "items": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}, {"id": "e"}]})
+
+        # Pipeline also "generates" the fresh reports registry this run.
+        _write_json(self.runner / "api" / "reports" / "index.json",
+                    {"total_reports": 11805, "reports_listed": 500, "reports": [{"id": "x"}]})
         # Pipeline also writes fresh SLA data locally. Left UNSTAGED here
         # (matching production: an earlier pipeline stage writes this file
         # directly, safe_git_commit.py never explicitly `git add`s it) so it
@@ -205,6 +219,25 @@ class TestGeneratedArtifactSurvivesConflictRecovery(unittest.TestCase):
             f"left on local disk. origin/main has: {published}"
         )
 
+    def test_reports_registry_survives_conflict_recovery(self):
+        """api/reports/index.json (Stage 3.3.7's build_reports_index.py
+        output) must survive the same conflict-recovery path as
+        api/v1/intel/latest.json -- this file family was the one actually
+        found reverted live (total_reports=356 served instead of the
+        11805 the pipeline run genuinely computed)."""
+        proc = self._run_script()
+        self.assertEqual(proc.returncode, 0, f"script must always exit 0\nstdout={proc.stdout}\nstderr={proc.stderr}")
+
+        index_path = self.runner / "api" / "reports" / "index.json"
+        index_data = json.loads(index_path.read_text())
+        self.assertEqual(
+            index_data["total_reports"], 11805,
+            f"freshly generated api/reports/index.json (total_reports=11805) must "
+            f"survive conflict recovery, not revert to the stale origin/main "
+            f"version (total_reports=3). Got: {index_data}"
+        )
+        self.assertIn("api/reports/index.json", proc.stdout)
+
     def test_unrelated_governance_style_file_still_survives(self):
         """Proves the new artifact-guard doesn't regress the pre-existing
         manifest-guard mechanism for files it doesn't own."""
@@ -218,6 +251,31 @@ class TestGeneratedArtifactSurvivesConflictRecovery(unittest.TestCase):
             "the runner's own locally-written sla_status.json must survive "
             "conflict recovery via the pre-existing manifest-guard snapshot"
         )
+
+
+class TestReportsRegistryInGeneratedArtifactGuard(unittest.TestCase):
+    """Static guard: all three files build_reports_index.py (Stage 3.3.7)
+    writes must be listed in safe_git_commit.py's _GENERATED_ARTIFACT_PATHS,
+    or a future concurrent-push conflict silently reverts them again with
+    no warning at all (exactly what happened live before this fix -- the
+    revert produced zero log output because the file simply wasn't checked)."""
+
+    def test_all_three_reports_registry_files_are_guarded(self):
+        source = REAL_SCRIPT.read_text(encoding="utf-8")
+        start = source.index("_GENERATED_ARTIFACT_PATHS = [")
+        end = source.index("]", start)
+        guard_list_src = source[start:end]
+        for path in (
+            "api/reports/index.json",
+            "api/reports/latest.json",
+            "api/reports/stats.json",
+        ):
+            self.assertIn(
+                f'"{path}"', guard_list_src,
+                f"{path} (written by build_reports_index.py, Stage 3.3.7) is missing "
+                f"from _GENERATED_ARTIFACT_PATHS -- a concurrent-push conflict will "
+                f"silently revert it with no restore and no warning."
+            )
 
 
 if __name__ == "__main__":
