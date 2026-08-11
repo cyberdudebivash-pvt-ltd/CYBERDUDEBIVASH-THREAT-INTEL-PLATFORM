@@ -70,11 +70,56 @@ test("legacy apex_ai.soc_priority path still works when sla_priority is absent (
   assert.equal(item.apex_ai.soc_priority, "P2");
 });
 
-test("item with neither sla_priority nor apex_ai.soc_priority honestly defaults to P4", () => {
-  const raw = rawItem({ severity: "MEDIUM", sla_priority: undefined, apex_ai: {} });
-  delete raw.sla_priority;
+// ---------------------------------------------------------------------------
+// P0 follow-up (2026-08-11) -- live production found HIGH-severity items
+// (OpenPhish-sourced, e.g. intel--53866cd4fffb31f8) rendering as
+// "HIGH severity / P4 -- INFORMATIONAL" on the public dashboard -- a direct
+// contradiction. Root cause: `sla_priority` is written by the full
+// confidence_corroboration_engine.py pipeline, which runs on a much slower
+// cadence (3x/day) than the lightweight ingestion pipeline that makes new
+// items publicly visible. During that gap, both `raw.sla_priority` and
+// `aa.soc_priority` are genuinely absent (not wrong -- not computed yet),
+// and blindly defaulting to "P4" regardless of severity produced the
+// contradiction. The fix is a severity-aware interim floor
+// (fallbackSocPriorityForSeverity) mirroring build_sla_recommendation()'s
+// own severity-only floor in confidence_corroboration_engine.py -- it never
+// overrides a real sla_priority/soc_priority once one exists (covered by
+// every test above, which all supply real values and must keep passing).
+// ---------------------------------------------------------------------------
+
+test("item with neither sla_priority nor apex_ai.soc_priority falls back to a severity-aware interim priority, never blindly P4", () => {
+  const critical = rawItem({ severity: "CRITICAL", sla_priority: undefined, apex_ai: {} });
+  delete critical.sla_priority;
+  assert.equal(Adapter.normalizeIntelItem(critical, 0).apex_ai.soc_priority, "P2");
+
+  const high = rawItem({ severity: "HIGH", sla_priority: undefined, apex_ai: {} });
+  delete high.sla_priority;
+  assert.equal(Adapter.normalizeIntelItem(high, 0).apex_ai.soc_priority, "P3");
+
+  const medium = rawItem({ severity: "MEDIUM", sla_priority: undefined, apex_ai: {} });
+  delete medium.sla_priority;
+  assert.equal(Adapter.normalizeIntelItem(medium, 0).apex_ai.soc_priority, "P3");
+
+  const low = rawItem({ severity: "LOW", sla_priority: undefined, apex_ai: {} });
+  delete low.sla_priority;
+  assert.equal(Adapter.normalizeIntelItem(low, 0).apex_ai.soc_priority, "P4");
+});
+
+test("exact live production reproduction: HIGH-severity OpenPhish item with no sla_priority never renders P4/INFORMATIONAL", () => {
+  // Verbatim shape (trimmed) of a real live api/feed.json item during the
+  // pre-enrichment gap -- id intel--53866cd4fffb31f8.
+  const raw = {
+    id: "intel--53866cd4fffb31f8",
+    title: "[OpenPhish] Phishing URL: https://0c3cfe.icefactory.cl/",
+    severity: "HIGH",
+    risk_score: 7.0883,
+    tags: ["openphish", "phishing"],
+    apex_ai: { predictive_risk: 7.0883, ai_confidence: 20, locked: true },
+  };
   const item = Adapter.normalizeIntelItem(raw, 0);
-  assert.equal(item.apex_ai.soc_priority, "P4");
+  assert.equal(item.severity, "HIGH");
+  assert.notEqual(item.apex_ai.soc_priority, "P4");
+  assert.equal(item.apex_ai.soc_priority, "P3");
 });
 
 test("normalizeSocPriority rejects invalid/unknown priority strings", () => {
