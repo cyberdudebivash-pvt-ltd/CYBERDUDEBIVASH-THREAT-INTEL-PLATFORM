@@ -1,0 +1,129 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX -- Frontend Integrity Registry Sync
+# =============================================================================
+# ROOT CAUSE FIX (P0, 2026-08-11): scripts/frontend_integrity.py's `verify`
+# mode (GATE E "Frontend integrity", in post-deploy-validation.yml,
+# master-deployment-orchestrator.yml, and self-healing.yml) has always
+# compared the 6 TIER-3 protected assets against config/frontend_checksums.json
+# -- but nothing in any workflow ever called `frontend_integrity.py generate`
+# to keep that registry in sync. Every legitimate, reviewed, merged PR that
+# touches index.html or any protected js/css file has silently made the
+# registry stale, so GATE E hard-fails with a false "TAMPERED" verdict against
+# content that was never actually compromised. This recurred at least twice
+# (PR #150 regenerated the registry manually once; it went stale again the
+# moment the next protected-asset PR merged, because no automation existed).
+#
+# FIX: whenever any protected asset changes on main, regenerate the registry
+# from the current, just-merged, legitimate file state and commit it back
+# immediately -- so GATE E always compares against what was actually deployed,
+# not a snapshot from whenever someone last ran `generate` by hand.
+#
+# Deliberately a separate, minimal-permission workflow rather than an
+# addition to deploy-worker.yml: deploy-worker.yml handles CF_API_TOKEN/
+# CDB_JWT_SECRET and is intentionally `permissions: contents: read` with "no
+# git commit/push step" (its own header comment) -- bolting write access onto
+# that pipeline to fix an unrelated registry-staleness problem would expand
+# its blast radius for no reason. This workflow's only job is generate+commit;
+# it never touches Worker deployment, secrets, or the protected files' content.
+#
+# GATE E fires via post-deploy-validation.yml, which only runs after
+# deploy-worker.yml completes (workflow_run trigger) -- deploy-worker.yml's
+# own gate suite (encoding validation, dashboard contract check, esbuild
+# preflight, actual Cloudflare deploy, smoke test) takes several minutes,
+# while this workflow (checkout + generate + commit + push) finishes in well
+# under a minute, so in practice the registry is refreshed long before GATE E
+# ever runs. Residual risk: a push that touches both `workers/intel-gateway/
+# src/**` and a protected frontend asset in the same commit could theoretically
+# race deploy-worker.yml if GitHub Actions runner scheduling is unusually
+# slow -- if that ever produces a stale-registry false positive, the next
+# protected-asset change self-heals it, since `generate` always recomputes
+# from current disk state, not incrementally.
+# =============================================================================
+
+name: frontend-integrity-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'js/api_adapter.js'
+      - 'js/card_renderer.js'
+      - 'js/card_renderer_integration.js'
+      - 'js/sla-monitor.js'
+      - 'css/card_renderer_styles.css'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: frontend-integrity-sync-${{ github.ref }}
+  cancel-in-progress: false  # never cancel a mid-flight registry commit -- let it finish, the next push queues behind it
+
+jobs:
+  sync-registry:
+    name: Regenerate frontend checksum registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.actor != 'github-actions[bot]'  # defense-in-depth: this job's own commit must never retrigger itself
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Regenerate registry from current protected-asset state
+        run: python3 scripts/frontend_integrity.py generate
+
+      - name: Verify the freshly regenerated registry is internally consistent
+        run: python3 scripts/frontend_integrity.py verify
+
+      - name: Commit and push if the registry changed
+        run: |
+          git config user.name "CYBERDUDEBIVASH"
+          git config user.email "bivash@cyberdudebivash.com"
+
+          # The concurrency group above serializes this workflow's own runs,
+          # but main can still move from an unrelated push (a different
+          # workflow, or a human) between checkout and this step. Regenerate
+          # and re-commit fresh on every attempt, not just once up front:
+          # if main moved because *another* protected-asset change landed
+          # (not just an unrelated file), rebasing a commit generated from
+          # the old tree would push a registry that's immediately stale
+          # again for that new change -- silently reintroducing the exact
+          # bug this workflow exists to fix. Resetting to origin/main and
+          # regenerating from current disk state on every attempt guarantees
+          # the pushed registry always reflects whatever is on main at push
+          # time, however many times main moved while this job was retrying.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git reset --hard origin/main
+
+            python3 scripts/frontend_integrity.py generate
+            python3 scripts/frontend_integrity.py verify
+
+            git add config/frontend_checksums.json
+            if git diff --cached --quiet config/frontend_checksums.json; then
+              echo "Registry already up to date -- nothing to commit."
+              exit 0
+            fi
+            git commit -m "ci(frontend-integrity): resync checksum registry after protected-asset change [skip ci]"
+
+            if git push origin HEAD:main; then
+              echo "Pushed on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push attempt ${attempt} failed (main moved again) -- retrying against latest main."
+            sleep $((attempt * 2))
+          done
+
+          # No `|| true` anywhere in this step -- a failed sync is always a
+          # visible workflow failure, never a false green.
+          echo "FATAL: could not push the regenerated registry after 5 attempts." >&2
+          exit 1
