@@ -94,4 +94,28 @@ jobs:
             exit 0
           fi
           git commit -m "ci(frontend-integrity): resync checksum registry after protected-asset change [skip ci]"
-          git push origin HEAD:main
+
+          # The concurrency group above serializes this workflow's own runs,
+          # but main can still move from an unrelated push (a different
+          # workflow, or a human) between checkout and push. Retry against
+          # the latest main a bounded number of times rather than failing
+          # outright on the first non-fast-forward -- each retry regenerates
+          # nothing (the registry commit is already made), it only rebases
+          # this one-file commit onto whatever main now is and re-attempts
+          # the push. A real, non-transient failure (e.g. permissions) still
+          # fails loudly after the retries are exhausted -- no `|| true`
+          # anywhere in this step, so a failed sync is always a visible
+          # workflow failure, never a false green.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              echo "Pushed on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push attempt ${attempt} failed (main moved) -- fetching and rebasing."
+            git fetch origin main
+            git rebase origin/main
+            sleep $((attempt * 2))
+          done
+
+          echo "FATAL: could not push the regenerated registry after 5 attempts." >&2
+          exit 1

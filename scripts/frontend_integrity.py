@@ -133,12 +133,17 @@ def verify(strict: bool = True) -> tuple[int, list[str], list[str]]:
             ok_count += 1
             print(f"  OK: {rel} [{current_sha[:16]}...]")
 
-    # Check for unregistered new files in protected locations
+    # P0 hardening (2026-08-11): a protected asset present on disk but absent
+    # from the registry has no baseline to compare against -- its integrity
+    # is unverifiable, not verified. Treating that as a mere warning (the
+    # prior behavior) meant deleting a file's registry entry silently
+    # disabled tamper detection for it while `verify` still reported PASS.
+    # Fail closed instead: an unregistered protected file is a violation.
     for rel in PROTECTED_ASSETS:
         if rel not in registered_assets:
             path = REPO_ROOT / rel
             if path.exists():
-                warnings.append(f"UNREGISTERED: {rel} exists but not in registry")
+                violations.append(f"UNREGISTERED: {rel} exists but not in registry (integrity unverifiable)")
 
     exit_code = 0
     if violations:
