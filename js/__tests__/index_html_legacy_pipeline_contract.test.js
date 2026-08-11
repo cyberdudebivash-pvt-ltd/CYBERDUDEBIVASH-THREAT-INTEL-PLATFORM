@@ -1,0 +1,204 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import vm from "node:vm";
+
+// ---------------------------------------------------------------------------
+// P0 regression suite -- CYBERDUDEBIVASH SENTINEL APEX
+//
+// Forensic investigation (2026-08-11) found index.html running a second,
+// independent legacy card/metrics pipeline (loadGOCIntel -> renderCards ->
+// {renderTopThreats, computeMetrics, openThreatModal, ...}) alongside the
+// canonical js/api_adapter.js -> js/card_renderer.js pipeline. That legacy
+// pipeline read raw feed fields directly and re-derived severity, SOC
+// priority, and IOC totals independently -- producing up to four different,
+// mutually inconsistent priority computations (including a literal
+// `ai.soc_priority || ap.priority || 'P4'` reproduction of the exact
+// HIGH-severity/P4-badge bug already fixed in the adapter) and an unguarded
+// IOC string-concatenation risk in computeMetrics() (the same bug class
+// already fixed elsewhere, in eiccEngine()'s _iocContribution(), covered by
+// index_html_ioc_total.test.js -- that fix never reached this second,
+// independent aggregator).
+//
+// The fix: loadGOCIntel() now calls window.SentinelApexAdapter.
+// normalizeIntelItem() once, at the same point it already reconciles raw
+// feed schema differences, and attaches the result as item.__norm. Every
+// legacy renderer this file tests now prefers item.__norm.<field> over its
+// own local recomputation, with the original recomputation kept only as a
+// fallback for items that somehow lack __norm.
+//
+// These tests extract and execute the real functions straight out of
+// index.html (not reimplementations), so they cannot silently drift from
+// what the dashboard actually runs.
+// ---------------------------------------------------------------------------
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const INDEX_HTML = path.join(__dirname, "..", "..", "index.html");
+const SRC = readFileSync(INDEX_HTML, "utf-8");
+
+function extractFnByMarker(startMarker, endMarker) {
+  const start = SRC.indexOf(startMarker);
+  assert.ok(start !== -1, `marker not found in index.html: ${startMarker}`);
+  const end = SRC.indexOf(endMarker, start);
+  assert.ok(end !== -1, `end marker not found after ${startMarker}: ${endMarker}`);
+  return SRC.slice(start, end + endMarker.length);
+}
+
+// ---------------------------------------------------------------------------
+// renderTopThreats()'s nested sevInfo()/prio() -- extracted together since
+// prio() is declared right after sevInfo() inside the same function scope.
+// ---------------------------------------------------------------------------
+
+function loadTopThreatsPriorityFns() {
+  const sevInfoSrc = extractFnByMarker(
+    "function sevInfo(canonicalSev, s) {",
+    "\n    }"
+  );
+  const prioSrc = extractFnByMarker(
+    "function prio(item) {\n        if (item.__norm",
+    "\n        return 'P4';\n    }"
+  );
+  const SEV_TIERS_SRC = extractFnByMarker(
+    "const SEV_TIERS = {",
+    "\n    };"
+  );
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(
+    `${SEV_TIERS_SRC}\n${sevInfoSrc}\n${prioSrc}\nthis.sevInfo = sevInfo; this.prio = prio;`,
+    context
+  );
+  return { sevInfo: context.sevInfo, prio: context.prio };
+}
+
+const { sevInfo, prio } = loadTopThreatsPriorityFns();
+
+test("sevInfo: canonical severity from item.__norm wins over the risk-score threshold fallback", () => {
+  // A risk_score of 2 would threshold to LOW on its own, but a real
+  // CRITICAL classification (e.g. KEV-confirmed with a low current CVSS)
+  // must not be downgraded by this display-only heuristic.
+  assert.equal(sevInfo("CRITICAL", 2).l, "CRITICAL");
+  assert.equal(sevInfo("HIGH", 2).l, "HIGH");
+  assert.equal(sevInfo("MEDIUM", 2).l, "MEDIUM");
+  assert.equal(sevInfo("LOW", 9).l, "LOW");
+});
+
+test("sevInfo: falls back to the risk-score threshold when no canonical severity is available", () => {
+  assert.equal(sevInfo(null, 9.5).l, "CRITICAL");
+  assert.equal(sevInfo(null, 7.2).l, "HIGH");
+  assert.equal(sevInfo(null, 5).l, "MEDIUM");
+  assert.equal(sevInfo(null, 1).l, "LOW");
+  assert.equal(sevInfo(undefined, 7).l, "HIGH");
+});
+
+test("prio: exact live production reproduction -- HIGH severity item with canonical P3 never renders P4", () => {
+  // Verbatim shape of the live-reproduction case fixed in js/api_adapter.js
+  // (intel--53866cd4fffb31f8): a HIGH-severity item whose kev/epss/cvss
+  // fields alone would fall through prio()'s own algorithm to P4, but whose
+  // canonical, already-computed priority is P3.
+  const item = {
+    severity: "HIGH",
+    risk_score: 7.0883,
+    kev_present: false,
+    epss_score: null,
+    cvss_score: null,
+    __norm: { apex_ai: { soc_priority: "P3" } },
+  };
+  const result = prio(item);
+  assert.equal(result, "P3");
+  assert.notEqual(result, "P4");
+});
+
+test("prio: canonical priority is used even when it disagrees with the local kev/epss/cvss algorithm", () => {
+  const item = {
+    kev_present: true, // would force P1 under the local algorithm
+    epss_score: 90,
+    cvss_score: 9.9,
+    risk_score: 9.9,
+    __norm: { apex_ai: { soc_priority: "P4" } }, // canonical says otherwise
+  };
+  assert.equal(prio(item), "P4");
+});
+
+test("prio: falls back to the local kev/epss/cvss algorithm when item.__norm is absent", () => {
+  assert.equal(prio({ kev_present: true, epss_score: 0, cvss_score: 0, risk_score: 0 }), "P1");
+  assert.equal(prio({ kev_present: false, epss_score: 0, cvss_score: 8, risk_score: 0 }), "P2");
+  assert.equal(prio({ kev_present: false, epss_score: 0, cvss_score: 6, risk_score: 0 }), "P3");
+  assert.equal(prio({ kev_present: false, epss_score: 0, cvss_score: 0, risk_score: 0 }), "P4");
+});
+
+test("prio: falls back when __norm exists but has no apex_ai.soc_priority", () => {
+  assert.equal(prio({ kev_present: true, epss_score: 0, cvss_score: 0, risk_score: 0, __norm: {} }), "P1");
+});
+
+// ---------------------------------------------------------------------------
+// computeMetrics() IOC aggregation -- guards against the exact string-
+// concatenation regression already fixed once (elsewhere) in this codebase.
+// computeMetrics() itself is not cleanly extractable in isolation (it reads
+// and writes ~10 DOM elements throughout), so this pins the source pattern
+// directly: the vulnerable unguarded `+= d.ioc_count` must not reappear, and
+// the numeric-cast fix must be present.
+// ---------------------------------------------------------------------------
+
+test("computeMetrics(): the unguarded IOC string-concatenation pattern is not present", () => {
+  const fnSrc = extractFnByMarker("function computeMetrics(data) {", "\n            let totalIOCs = 0;");
+  assert.doesNotMatch(
+    fnSrc.replace(/\n[^\n]*$/, ""), // exclude the boundary line itself
+    /totalIOCs \+= d\.ioc_count;(?!.*parseInt)/,
+    "computeMetrics() must not accumulate d.ioc_count without a numeric cast"
+  );
+});
+
+test("computeMetrics(): every totalIOCs accumulation branch casts its input numerically or reads the pre-cast __norm value", () => {
+  const start = SRC.indexOf("let totalIOCs = 0;");
+  assert.ok(start !== -1, "totalIOCs accumulator not found in index.html");
+  const end = SRC.indexOf("\n            });", start);
+  const block = SRC.slice(start, end);
+  assert.match(block, /d\.__norm && typeof d\.__norm\.ioc_count === 'number'/, "must prefer the adapter's pre-cast ioc_count");
+  assert.match(block, /parseInt\(b, 10\) \|\| 0/, "ioc_counts object values must be cast");
+  assert.match(block, /parseInt\(d\.ioc_count, 10\) \|\| 0/, "ioc_count must be cast");
+  assert.match(block, /parseInt\(d\.indicator_count, 10\) \|\| 0/, "indicator_count must be cast");
+});
+
+// ---------------------------------------------------------------------------
+// The canonical normalization hook itself -- guards against the wiring
+// (not just the individual consumer fixes above) silently regressing.
+// ---------------------------------------------------------------------------
+
+test("loadGOCIntel(): the canonical normalization hook is wired at the schema-reconciliation boundary", () => {
+  assert.match(
+    SRC,
+    /window\.SentinelApexAdapter\s*&&\s*typeof window\.SentinelApexAdapter\.normalizeIntelItem === 'function'/,
+    "loadGOCIntel() must feature-detect the canonical adapter before using it"
+  );
+  assert.match(
+    SRC,
+    /item\.__norm = window\.SentinelApexAdapter\.normalizeIntelItem\(item, idx\);/,
+    "loadGOCIntel() must attach the canonical normalized result as item.__norm"
+  );
+});
+
+test("openThreatModal(): the literal ai.soc_priority || ap.priority || 'P4' pattern is no longer reachable without the canonical value first", () => {
+  const occurrences = [...SRC.matchAll(/const prio\s*=[^;]*ai\.soc_priority \|\| ap\.priority \|\| 'P4';/g)];
+  assert.ok(occurrences.length >= 2, "expected the two known apex_ai priority panels in index.html");
+  for (const m of occurrences) {
+    assert.match(
+      m[0],
+      /item\.__norm && item\.__norm\.apex_ai && item\.__norm\.apex_ai\.soc_priority/,
+      "every remaining ai.soc_priority||ap.priority||'P4' fallback chain must be preceded by the canonical item.__norm check"
+    );
+  }
+});
+
+test("openThreatModal(): report-availability is resolved via the single canonical cdbBuildReportUrl(), not a local reimplementation", () => {
+  const modalStart = SRC.indexOf("function openThreatModal(item) {");
+  assert.ok(modalStart !== -1);
+  const modalEnd = SRC.indexOf("\n        function ", modalStart + 40); // next top-level function decl
+  assert.ok(modalEnd !== -1, "could not locate the end of openThreatModal() in index.html");
+  const modalSrc = SRC.slice(modalStart, modalEnd);
+  const reportUrlSites = [...modalSrc.matchAll(/cdbBuildReportUrl\(item\)/g)];
+  assert.ok(reportUrlSites.length >= 2, "expected both report-link sites in the modal to call the canonical builder");
+});
