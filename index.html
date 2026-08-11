@@ -9923,7 +9923,17 @@
            const dedupCountEl = document.getElementById('intel-dedup-count');
 
                if (lastUpdateEl) {
-               lastUpdateEl.textContent = 'Last Sync: ' + new Date().toLocaleTimeString();
+               // P0 FIX: was new Date().toLocaleTimeString() -- the moment this line of
+               // JS executed, not when the underlying data was generated. renderTopThreats()
+               // (called later in this same render chain, index.html ~9939) overwrites this
+               // element with a correct data-derived value when it has items to show, but
+               // that left a stale/misleading flash and an unprotected gap whenever
+               // renderTopThreats() has none. Compute the real value here instead.
+               var _guiNewest = data.reduce(function(best, d){
+                   var t = new Date(d.processed_at||d.timestamp||0).getTime();
+                   return (t && t > best) ? t : best;
+               }, 0);
+               lastUpdateEl.textContent = 'Last Sync: ' + (_guiNewest ? timeSince(_guiNewest) : '—');
                   }
 
              if (newCountEl) {
@@ -10669,7 +10679,15 @@
                             if (!item.apex_ai && !item.apex) return '';
 
                             // ── Priority ───────────────────────────────────────────
-                            const prio      = ai.soc_priority || ap.priority || 'P4';
+                            // P0 FIX: prefer the canonical item.__norm.apex_ai.soc_priority
+                            // (normalizeIntelItem()'s severity-aware computation) over this
+                            // panel's own independent P4 fallback -- this was the same
+                            // ai.soc_priority||ap.priority||'P4' pattern already found and
+                            // fixed as the root cause of the HIGH-severity/P4-badge
+                            // contradiction, just re-implemented a second time here. The
+                            // original fallback chain is kept unchanged for items without
+                            // __norm attached (never worse than before this fix).
+                            const prio      = (item.__norm && item.__norm.apex_ai && item.__norm.apex_ai.soc_priority) || ai.soc_priority || ap.priority || 'P4';
                             const prioClass = prio.toLowerCase();
                             const prioColor = prio==='P1'?'var(--critical)':prio==='P2'?'var(--high)':prio==='P3'?'var(--medium)':'var(--low)';
 
@@ -10985,24 +11003,41 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
         // ── Compute Metrics ──
         function computeMetrics(data) {
             const total = data.length;
+            // P0 FIX: prefer the canonical normalized severity (window.SentinelApexAdapter's
+            // normalizeIntelItem(), attached as item.__norm by loadGOCIntel()) when present --
+            // it is the same computation card_renderer.js's dashboard already uses. The
+            // risk_score-threshold dual-condition below is kept ONLY as a fallback for any
+            // caller that passes data never routed through that normalization (never
+            // recalculated when __norm.severity is available).
+            const _sev = d => (d.__norm && d.__norm.severity) ? d.__norm.severity : null;
             // v136.0 FIX: Dual-condition severity detection \u2014 trust risk_score as primary signal,
             // also accept severity field. getSeverity() was returning item.severity first which
             // caused incorrect counts when backend labeled items differently from score thresholds.
-            const critical = data.filter(d => parseFloat(d.risk_score||0) >= 9.0 || d.severity === 'CRITICAL').length;
-            const high = data.filter(d => { const s=parseFloat(d.risk_score||0); return (s>=7.0&&s<9.0)||(d.severity==='HIGH'&&s<9.0); }).length;
-            const medium = data.filter(d => { const s=parseFloat(d.risk_score||0); return (s>=4.0&&s<7.0)||(d.severity==='MEDIUM'&&s<7.0); }).length;
-            const low = data.filter(d => { const s=parseFloat(d.risk_score||0); return s<4.0&&d.severity!=='CRITICAL'&&d.severity!=='HIGH'&&d.severity!=='MEDIUM'; }).length;
+            const critical = data.filter(d => _sev(d) ? _sev(d)==='CRITICAL' : (parseFloat(d.risk_score||0) >= 9.0 || d.severity === 'CRITICAL')).length;
+            const high = data.filter(d => { if (_sev(d)) return _sev(d)==='HIGH'; const s=parseFloat(d.risk_score||0); return (s>=7.0&&s<9.0)||(d.severity==='HIGH'&&s<9.0); }).length;
+            const medium = data.filter(d => { if (_sev(d)) return _sev(d)==='MEDIUM'; const s=parseFloat(d.risk_score||0); return (s>=4.0&&s<7.0)||(d.severity==='MEDIUM'&&s<7.0); }).length;
+            const low = data.filter(d => { if (_sev(d)) return _sev(d)==='LOW'||_sev(d)==='INFO'; const s=parseFloat(d.risk_score||0); return s<4.0&&d.severity!=='CRITICAL'&&d.severity!=='HIGH'&&d.severity!=='MEDIUM'; }).length;
             const kev = data.filter(d => d.kev_present).length;
             const avgRisk = total ? (data.reduce((s, d) => s + (parseFloat(d.risk_score) || 0), 0) / total).toFixed(1) : '\u2014';
+            // P0 FIX: numeric-only IOC aggregation. Every branch previously accumulated an
+            // unvalidated raw field directly (`totalIOCs += d.ioc_count`); a single string-typed
+            // value anywhere in the feed silently turns every subsequent `+=` into string
+            // concatenation, producing an astronomically large "total" (the exact bug class
+            // already found and fixed in eiccEngine()'s _iocContribution() -- this was the
+            // same bug in a second, independent aggregator that fix never reached). Cast every
+            // input explicitly; prefer the adapter's already-`_int()`-cast item.__norm.ioc_count
+            // when present.
             let totalIOCs = 0;
             data.forEach(d => {
-                if (d.ioc_counts) {
-                    totalIOCs += Object.values(d.ioc_counts).reduce((a, b) => a + b, 0);
+                if (d.__norm && typeof d.__norm.ioc_count === 'number') {
+                    totalIOCs += d.__norm.ioc_count;
+                } else if (d.ioc_counts && typeof d.ioc_counts === 'object') {
+                    totalIOCs += Object.values(d.ioc_counts).reduce((a, b) => a + (parseInt(b, 10) || 0), 0);
                 } else if (d.ioc_count) {
                     // v135.0 FIX: api/feed.json uses ioc_count (singular integer)
-                    totalIOCs += d.ioc_count;
+                    totalIOCs += parseInt(d.ioc_count, 10) || 0;
                 } else if (d.indicator_count) {
-                    totalIOCs += d.indicator_count;
+                    totalIOCs += parseInt(d.indicator_count, 10) || 0;
                 } else if (d.iocs && Array.isArray(d.iocs) && d.iocs.length) {
                     // Fallback: raw iocs array is guaranteed present in all normalised items
                     totalIOCs += d.iocs.length;
@@ -11443,7 +11478,18 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
             const prevCount = manifestData.length;
             window.__DATA_LOADED__ = false; window.__INTEL_RENDERED__ = false; // P6: manual refresh reset
             await loadGOCIntel();
-            document.getElementById('last-loaded').textContent = 'LAST SYNC: ' + new Date().toLocaleTimeString();
+            // P0 FIX: was new Date().toLocaleTimeString() -- this write runs on every
+            // manual/auto refresh AFTER loadGOCIntel() already sets #last-loaded correctly
+            // in its own success path, so it was silently reverting that fix back to the
+            // browser clock on every refresh cycle. Use the same data-derived computation.
+            (function() {
+                var _mrNewest = (manifestData || []).reduce(function(best, d){
+                    var t = new Date(d.published_at||d.timestamp||d.processed_at||0).getTime();
+                    return (t && t > best) ? t : best;
+                }, 0);
+                var _mrEl = document.getElementById('last-loaded');
+                if (_mrEl) _mrEl.textContent = 'LAST SYNC: ' + (_mrNewest ? timeSince(_mrNewest) : 'just now');
+            })();
             if (prevCount > 0 && manifestData.length > prevCount) {
                 const newCount = manifestData.length - prevCount;
                 showToast(`🔴 ${newCount} NEW THREAT${newCount > 1 ? 'S' : ''} DETECTED \u2014 Feed updated`, 'critical', 6000);
@@ -11525,7 +11571,10 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
         function openThreatModal(item) {
             _activeModalItem = item;
             if (!item || typeof item !== 'object') return;
-            const sev = getSeverity(item.risk_score, item);
+            // P0 FIX: prefer the canonical item.__norm.severity over getSeverity()'s own
+            // independent risk_score-threshold recomputation, so the modal can no longer
+            // show a different severity than the card the user clicked to open it.
+            const sev = (item.__norm && item.__norm.severity) || getSeverity(item.risk_score, item);
             const sevColor = getSevColor(sev);
             const tlp = getTlpLabel(item);
             const tlpColor = getTlpColor(tlp);
@@ -11633,7 +11682,10 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                         const ai = item.apex_ai || {};
                         const ap = item.apex   || {};
                         if (!item.apex_ai && !item.apex) return '';
-                        const prio      = ai.soc_priority || ap.priority || 'P4';
+                        // P0 FIX: same fix as the other apex_ai panel above -- prefer the
+                        // canonical item.__norm.apex_ai.soc_priority over this block's own
+                        // independent P4 fallback.
+                        const prio      = (item.__norm && item.__norm.apex_ai && item.__norm.apex_ai.soc_priority) || ai.soc_priority || ap.priority || 'P4';
                         const prioColor = prio==='P1'?'#ff3b3b':prio==='P2'?'#ff8c00':prio==='P3'?'#00c2ff':'#4ade80';
                         const predRisk  = ai.predictive_risk != null ? parseFloat(ai.predictive_risk).toFixed(1) : '\u2014';
                         const aiConf    = ai.ai_confidence   != null ? ai.ai_confidence : '\u2014';
@@ -11705,8 +11757,14 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                                 return srcLink + upgradeLink;
                             }
                             // PRO+ tier: full dossier link
-                            let ru = (item.report_url||item.internal_report_url||'').replace('https://reports.cyberdudebivash.com','https://intel.cyberdudebivash.com');
-                            const hasReport = ru && item.validation_status !== 'quality_fail' && item.validation_status !== 'write_error' && item.validation_status !== 'file_missing' && item.validation_status !== 'brand_skip';
+                            // P0 FIX: was a 3rd independent reimplementation of report-
+                            // availability logic inside this same function (see the other
+                            // two fixed below/above) -- checked 4 validation_status
+                            // fail-states (a stricter, disagreeing set from the canonical
+                            // cdbBuildReportUrl()'s 2) and never validated the URL was
+                            // actually internal. Use the single canonical builder instead.
+                            const ru = cdbBuildReportUrl(item);
+                            const hasReport = !!ru;
                             const u = hasReport ? ru : su;
                             const lbl = hasReport ? 'View Full Tactical Dossier' : 'View Source Article';
                             return u ? `<a href="${u}" target="_blank" rel="noopener" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);border-bottom:1px solid rgba(0,212,170,0.3);width:fit-content;"><i class="fas fa-external-link-alt"></i> ${lbl}</a>` : '';
@@ -11723,7 +11781,12 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                         const _mdTier = (window._platformTiers && window._platformTiers.current) || 'free';
                         const _mdPro = _mdTier==='pro'||_mdTier==='PRO'||_mdTier==='premium'||_mdTier==='PREMIUM'||_mdTier==='enterprise'||_mdTier==='ENTERPRISE'||_mdTier==='mssp'||_mdTier==='MSSP';
                         if (_mdPro) {
-                            const _mdr = ((r,s)=>{ const ru=(r||'').replace('https://reports.cyberdudebivash.com','https://intel.cyberdudebivash.com'); const hasR=ru&&item.validation_status!=='quality_fail'&&item.validation_status!=='write_error'; return hasR?ru:(s||'#'); })(item.report_url||item.internal_report_url,item.source_url);
+                            // P0 FIX: was a 4th independent reimplementation of the same
+                            // report-availability check (this one lacked the URL-is-internal
+                            // validation cdbBuildReportUrl() has) -- use the single canonical
+                            // builder so this button can no longer disagree with the "View
+                            // Full Tactical Dossier" link above about whether a report exists.
+                            const _mdr = cdbBuildReportUrl(item) || (item.source_url || '#');
                             return `<a href="${_mdr}" target="_blank" rel="noopener" style="padding:10px 20px;background:var(--accent);color:var(--bg);border-radius:3px;font-family:var(--font-mono);font-size:11px;font-weight:900;text-decoration:none;">VIEW DOSSIER →</a>`;
                         }
                         return `<a href="/upgrade.html?plan=pro&utm_source=modal-dossier-gate" target="_blank" rel="noopener" style="padding:10px 20px;background:rgba(139,92,246,0.15);color:#8b5cf6;border:1px solid rgba(139,92,246,0.3);border-radius:3px;font-family:var(--font-mono);font-size:11px;font-weight:900;text-decoration:none;">🔒 UPGRADE FOR DOSSIER</a>`;
@@ -12253,17 +12316,42 @@ function renderTopThreats(data) {
         if (dfEl) dfEl.textContent='Filtered: '+data.length;
     } catch(e){}
 
-    function sevInfo(s) {
-        if(s>=9) return {l:'CRITICAL',c:'#dc2626',bg:'rgba(220,38,38,0.12)',glow:'rgba(220,38,38,0.4)'};
-        if(s>=7) return {l:'HIGH',    c:'#ea580c',bg:'rgba(234,88,12,0.12)', glow:'rgba(234,88,12,0.3)'};
-        if(s>=4) return {l:'MEDIUM',  c:'#d97706',bg:'rgba(217,119,6,0.12)', glow:'rgba(217,119,6,0.25)'};
-        return           {l:'LOW',    c:'#16a34a',bg:'rgba(22,163,74,0.12)', glow:'rgba(22,163,74,0.2)'};
+    // P0 FIX: SEV_TIERS is the single set of tier colors; which tier a card
+    // uses now prefers the canonical item.__norm.severity (the same
+    // normalizeIntelItem() computation card_renderer.js's dashboard uses)
+    // over an independently re-derived risk_score threshold, so the TOP10/
+    // "SOC PRIORITY FEED" section can no longer disagree with the canonical
+    // dashboard about an item's severity. The threshold fallback is kept
+    // only for the case where __norm is unavailable.
+    const SEV_TIERS = {
+        CRITICAL: {l:'CRITICAL',c:'#dc2626',bg:'rgba(220,38,38,0.12)',glow:'rgba(220,38,38,0.4)'},
+        HIGH:     {l:'HIGH',    c:'#ea580c',bg:'rgba(234,88,12,0.12)', glow:'rgba(234,88,12,0.3)'},
+        MEDIUM:   {l:'MEDIUM',  c:'#d97706',bg:'rgba(217,119,6,0.12)', glow:'rgba(217,119,6,0.25)'},
+        LOW:      {l:'LOW',     c:'#16a34a',bg:'rgba(22,163,74,0.12)', glow:'rgba(22,163,74,0.2)'},
+    };
+    function sevInfo(canonicalSev, s) {
+        if (canonicalSev && SEV_TIERS[canonicalSev]) return SEV_TIERS[canonicalSev];
+        if(s>=9) return SEV_TIERS.CRITICAL;
+        if(s>=7) return SEV_TIERS.HIGH;
+        if(s>=4) return SEV_TIERS.MEDIUM;
+        return SEV_TIERS.LOW;
     }
     function ago(ts) {
         if(!ts) return ''; const d=Math.floor((Date.now()-new Date(ts).getTime())/60000);
         if(d<1) return 'Now'; if(d<60) return d+'m'; if(d<1440) return Math.floor(d/60)+'h'; return Math.floor(d/1440)+'d';
     }
+    // P0 FIX: prefer the canonical item.__norm.apex_ai.soc_priority (the
+    // adapter's severity-aware, backend-sla_priority-first computation)
+    // over this function's own independent kev/epss/cvss/risk algorithm --
+    // previously a FOURTH, mutually-inconsistent priority computation
+    // alongside card_renderer.js's, the click-through modal's, and
+    // window.computePriority()'s. Kept as a fallback only for items that
+    // somehow reach this function without having gone through
+    // loadGOCIntel()'s normalization hook.
     function prio(item) {
+        if (item.__norm && item.__norm.apex_ai && item.__norm.apex_ai.soc_priority) {
+            return item.__norm.apex_ai.soc_priority;
+        }
         const kev=item.kev_present, epss=parseFloat(item.epss_score)||0, cvss=parseFloat(item.cvss_score)||0, risk=parseFloat(item.risk_score)||0;
         if(kev||epss>=50) return 'P1';
         if(cvss>=9||risk>=9) return 'P1';
@@ -12279,7 +12367,7 @@ function renderTopThreats(data) {
 
     const cards = top.map((item,idx) => {
         const sc = parseFloat(item.risk_score)||0;
-        const sv = sevInfo(sc);
+        const sv = sevInfo(item.__norm ? item.__norm.severity : null, sc);
         const cve = (item.title||'').match(/CVE-\d{4}-\d{4,}/i);
         const tacs = (item.mitre_tactics||[]).slice(0,3);
         const actor = (item.actor_tag&&item.actor_tag!=='UNC-CDB-99'&&item.actor_tag!=='UNC-UNKNOWN')?item.actor_tag:null;
@@ -12434,7 +12522,7 @@ function renderTopThreats(data) {
         // TOP 3 \u2014 fully visible
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:16px;">' +
             top.slice(0,3).map(function(item,idx){
-                var sc=parseFloat(item.risk_score)||0,sv=sevInfo(sc),cve=(item.title||'').match(/CVE-\d{4}-\d{4,}/i),tacs=(item.mitre_tactics||[]).slice(0,3),actor=(item.actor_tag&&item.actor_tag!=='UNC-CDB-99'&&item.actor_tag!=='UNC-UNKNOWN')?item.actor_tag:null,kev=item.kev_present,epss=parseFloat(item.epss_score)||0,cvss=parseFloat(item.cvss_score)||0,pr=prio(item),prC=prioColor(pr),iocCount=item.ioc_count||(item.ioc_counts?Object.values(item.ioc_counts).reduce(function(a,b){return a+b;},0):0),barW=Math.min(sc*10,100),kcPhase=(item.mitre_tactics&&item.mitre_tactics.length)?(item.mitre_tactics[0]||'').toUpperCase().split('.')[0]:'',_its2=item.processed_at||item.timestamp||'',_iD2=_its2?new Date(_its2):null,_iyr2=_iD2?_iD2.getFullYear():'',_imo2=_iD2?String(_iD2.getMonth()+1).padStart(2,'0'):'',_sid2=item.stix_id||item.id||'',_verifiedReportUrl2=cdbBuildReportUrl(item),hasVerifiedReport2=!!_verifiedReportUrl2,intelUrl2=_verifiedReportUrl2||(item.source_url||'https://intel.cyberdudebivash.com');
+                var sc=parseFloat(item.risk_score)||0,sv=sevInfo(item.__norm?item.__norm.severity:null,sc),cve=(item.title||'').match(/CVE-\d{4}-\d{4,}/i),tacs=(item.mitre_tactics||[]).slice(0,3),actor=(item.actor_tag&&item.actor_tag!=='UNC-CDB-99'&&item.actor_tag!=='UNC-UNKNOWN')?item.actor_tag:null,kev=item.kev_present,epss=parseFloat(item.epss_score)||0,cvss=parseFloat(item.cvss_score)||0,pr=prio(item),prC=prioColor(pr),iocCount=item.ioc_count||(item.ioc_counts?Object.values(item.ioc_counts).reduce(function(a,b){return a+b;},0):0),barW=Math.min(sc*10,100),kcPhase=(item.mitre_tactics&&item.mitre_tactics.length)?(item.mitre_tactics[0]||'').toUpperCase().split('.')[0]:'',_its2=item.processed_at||item.timestamp||'',_iD2=_its2?new Date(_its2):null,_iyr2=_iD2?_iD2.getFullYear():'',_imo2=_iD2?String(_iD2.getMonth()+1).padStart(2,'0'):'',_sid2=item.stix_id||item.id||'',_verifiedReportUrl2=cdbBuildReportUrl(item),hasVerifiedReport2=!!_verifiedReportUrl2,intelUrl2=_verifiedReportUrl2||(item.source_url||'https://intel.cyberdudebivash.com');
                 return '<div style="position:relative;background:linear-gradient(135deg,var(--bg-card) 0%,rgba(220,38,38,0.03) 100%);border:1px solid '+sv.c+'44;overflow:hidden;transition:all 0.25s;border-radius:4px;box-shadow:0 0 16px '+sv.glow+';" onmouseover="this.style.borderColor=\''+sv.c+'66\';this.style.transform=\'translateY(-3px)\';this.style.boxShadow=\'0 8px 32px '+sv.glow+'\'" onmouseout="this.style.borderColor=\''+sv.c+'44\';this.style.transform=\'none\';this.style.boxShadow=\'0 0 16px '+sv.glow+'\'">'+
                 '<div style="height:3px;background:linear-gradient(90deg,'+sv.c+' '+barW+'%,rgba(255,255,255,0.04) '+barW+'%);"></div>'+
                 '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px 6px;">'+
@@ -12502,7 +12590,7 @@ function renderTopThreats(data) {
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;position:relative;">' +
             '<style>.t10-blur-card{filter:blur(5px);pointer-events:none;user-select:none;opacity:0.5;}</style>'+
             top.slice(3).map(function(item,i){
-                var idx=i+3,sc=parseFloat(item.risk_score)||0,sv=sevInfo(sc),cve=(item.title||'').match(/CVE-\d{4}-\d{4,}/i),kev=item.kev_present,epss=parseFloat(item.epss_score)||0,cvss=parseFloat(item.cvss_score)||0,pr=prio(item),prC=prioColor(pr),barW=Math.min(sc*10,100);
+                var idx=i+3,sc=parseFloat(item.risk_score)||0,sv=sevInfo(item.__norm?item.__norm.severity:null,sc),cve=(item.title||'').match(/CVE-\d{4}-\d{4,}/i),kev=item.kev_present,epss=parseFloat(item.epss_score)||0,cvss=parseFloat(item.cvss_score)||0,pr=prio(item),prC=prioColor(pr),barW=Math.min(sc*10,100);
                 return '<div style="position:relative;">' +
                     '<div class="t10-blur-card" style="background:linear-gradient(135deg,var(--bg-card),rgba(220,38,38,0.02));border:1px solid var(--border);border-radius:4px;overflow:hidden;">'+
                         '<div style="height:3px;background:linear-gradient(90deg,'+sv.c+' '+barW+'%,rgba(255,255,255,0.04) '+barW+'%);"></div>'+
@@ -12796,6 +12884,30 @@ function renderTopThreats(data) {
                     });
                     // ── END SCHEMA NORMALIZATION ──────────────────────────────────────────
 
+                    // ── P0 FIX: CANONICAL NORMALIZATION HOOK ────────────────────────────────
+                    // js/api_adapter.js's normalizeIntelItem() is the same function
+                    // js/card_renderer.js's dashboard already uses and that was already
+                    // verified correct against live production data. Every OTHER dashboard
+                    // rendering path in this file (computeMetrics, renderTopThreats,
+                    // cdbRenderSOC, openThreatModal, ...) independently re-derives severity,
+                    // SOC priority, risk, confidence, and freshness from these same raw items
+                    // instead of calling it -- producing up to four different, mutually
+                    // inconsistent priority computations and the HIGH-severity/P4-priority
+                    // contradiction previously found live. Attaching the canonical result here,
+                    // once, at the single point where every legacy renderer's raw item list is
+                    // built, lets those renderers read item.__norm.<field> instead of
+                    // recalculating -- additive only: item.__norm is a new property, no
+                    // existing raw field is removed or renamed, so any renderer not yet
+                    // migrated keeps working exactly as before.
+                    if (window.SentinelApexAdapter && typeof window.SentinelApexAdapter.normalizeIntelItem === 'function') {
+                        entries = entries.map(function(item, idx) {
+                            try { item.__norm = window.SentinelApexAdapter.normalizeIntelItem(item, idx); }
+                            catch (e) { console.warn('[SENTINEL-APEX] normalizeIntelItem failed for', item && item.id, e); }
+                            return item;
+                        });
+                    }
+                    // ── END CANONICAL NORMALIZATION HOOK ────────────────────────────────────
+
                     var liveNewest = Math.max.apply(null, entries.map(function(i){
                         return new Date(i.published_at || i.timestamp || i.processed_at || 0).getTime();  // v117.0.0
                     }));
@@ -12809,7 +12921,9 @@ function renderTopThreats(data) {
                         _liveDataLoaded = true;
                         if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--accent);animation:new-glow 1.5s ease-in-out infinite alternate;">&#x26A1; LIVE</span>';
                         if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge integrity-ok"><i class="fas fa-shield-check"></i> MANIFEST VERIFIED</span>';
-                        if (lastLoadedEl) lastLoadedEl.textContent = 'SYNCED: ' + new Date().toLocaleTimeString() + ' \u00b7 EMBEDDED LIVE';
+                        // P0 FIX: was new Date().toLocaleTimeString(); embeddedNewest (the actual
+                        // data timestamp this branch just compared against) is already computed above.
+                        if (lastLoadedEl) lastLoadedEl.textContent = 'SYNCED: ' + (embeddedNewest ? timeSince(embeddedNewest) : 'just now') + ' \u00b7 EMBEDDED LIVE';
                         document.querySelectorAll('.metric-card').forEach(function(c){ c.classList.remove('syncing'); });
                         if (aiPulse) aiPulse.style.display = 'none';
                         // APEX FINAL: single-source render \u2014 embedded wins freshness gate
@@ -12892,7 +13006,15 @@ function renderTopThreats(data) {
                     var _displayCount = (data.preview && data.preview.total_in_feed)
                                       || data.total_in_feed || data.total_count || data.count || entries.length;
                     var _srcLabel = isApiSource ? 'API LIVE' : 'MANIFEST';
-                    if (lastLoadedEl) lastLoadedEl.textContent = 'SYNCED: ' + new Date().toLocaleTimeString() + ' \u00b7 ' + _displayCount + ' advisories \u00b7 ' + _srcLabel;
+                    // P0 FIX: was new Date().toLocaleTimeString() -- a browser-clock reading
+                    // labeled "SYNCED", indistinguishable to the user from real data freshness
+                    // regardless of how stale the underlying feed actually is. Prefer the
+                    // server's own generated_at (_genAt, computed above for API sources) or
+                    // the newest item timestamp in the data actually received.
+                    var _syncedAt = _genAt || (entries.length ? Math.max.apply(null, entries.map(function(i){
+                        return new Date(i.published_at||i.timestamp||i.processed_at||0).getTime();
+                    })) : 0);
+                    if (lastLoadedEl) lastLoadedEl.textContent = 'SYNCED: ' + (_syncedAt ? timeSince(_syncedAt) : 'just now') + ' \u00b7 ' + _displayCount + ' advisories \u00b7 ' + _srcLabel;
                     document.querySelectorAll('.metric-card').forEach(function(c){ c.classList.remove('syncing'); });
                     if (aiPulse) aiPulse.style.display = 'none';
                 // v110.1: Update version display from Worker API gateway
@@ -12939,7 +13061,13 @@ function renderTopThreats(data) {
                 // Show LIVE \u2014 EMBEDDED_INTEL IS the current gh-pages data
                 if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--accent);animation:new-glow 1.5s ease-in-out infinite alternate;">&#x26A1; LIVE</span>';
                 if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge integrity-ok"><i class="fas fa-shield-check"></i> MANIFEST VERIFIED</span>';
-                if (lastLoadedEl) lastLoadedEl.textContent = 'SYNCED: ' + new Date().toLocaleTimeString() + ' \u00b7 ' + EMBEDDED_INTEL.length + ' advisories';
+                // P0 FIX: was new Date().toLocaleTimeString() -- compute the real newest
+                // timestamp from EMBEDDED_INTEL itself instead of the browser clock.
+                var _embNewest = EMBEDDED_INTEL.reduce(function(best, d){
+                    var t = new Date(d.published_at||d.timestamp||d.processed_at||0).getTime();
+                    return (t && t > best) ? t : best;
+                }, 0);
+                if (lastLoadedEl) lastLoadedEl.textContent = 'SYNCED: ' + (_embNewest ? timeSince(_embNewest) : 'just now') + ' \u00b7 ' + EMBEDDED_INTEL.length + ' advisories';
                 document.querySelectorAll('.metric-card').forEach(function(c){ c.classList.remove('syncing'); });
                 if (aiPulse) aiPulse.style.display = 'none';
                 console.log('[GOC v77.4] EMBEDDED_INTEL active (network unavailable):', EMBEDDED_INTEL.length, 'items');
