@@ -1,0 +1,214 @@
+{
+  "type": "bundle",
+  "id": "bundle--3572c553-b244-49c3-8cfa-14e1669412a4",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "name": "CyberDudeBivash SENTINEL APEX",
+      "description": "CyberDudeBivash Pvt. Ltd. - Global Cybersecurity Intelligence Infrastructure",
+      "identity_class": "organization",
+      "sectors": [
+        "technology"
+      ],
+      "contact_information": "enterprise@cyberdudebivash.com",
+      "created": "2024-01-01T00:00:00Z",
+      "modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "type": "marking-definition",
+      "spec_version": "2.1",
+      "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+      "created": "2017-01-20T00:00:00.000Z",
+      "definition_type": "tlp",
+      "definition": {
+        "tlp": "amber"
+      }
+    },
+    {
+      "type": "intrusion-set",
+      "spec_version": "2.1",
+      "id": "intrusion-set--30e0da73-40ec-4fc9-92ee-fcf35675e8e5",
+      "name": "CDB-UNATTR-RAN Campaign",
+      "description": "CISA Warns of SonicWall SMA1000 Vulnerabilities Exploited in Attacks to Deploy Ransomware",
+      "created": "2026-08-11T13:08:18Z",
+      "modified": "2026-08-11T13:08:18Z",
+      "confidence": 85,
+      "aliases": [
+        "CDB-UNATTR-RAN"
+      ],
+      "extensions": {
+        "x-cdb-apex-1": {
+          "predictive_score": 6.3,
+          "campaign_id": "UNCLASSIFIED",
+          "campaign_confidence": 6.3,
+          "threat_category": "Remote Code Execution",
+          "behavioral_tags": [],
+          "ai_summary": "Initial access via rce → execution chain: initial access → persistence → impact",
+          "risk_factors": [
+            "EPSS_score",
+            "CISA_KEV",
+            "IOC_density",
+            "MITRE_coverage",
+            "exploitation_context"
+          ],
+          "soc_priority": "P3",
+          "threat_level": "HIGH",
+          "recommended_action": "Risk 7.5/10 — CISA KEV-confirmed active exploitation; 78% EPSS exploitation probability",
+          "x_cdb_published_at": "2026-08-11T08:35:34Z"
+        }
+      },
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--c0382680-831a-42d0-bec2-ae45ad389e9b",
+      "name": "Malicious Artifact: conf.js",
+      "pattern": "[file:name = 'conf.js']",
+      "pattern_type": "stix",
+      "valid_from": "2026-08-11T13:08:18Z",
+      "created": "2026-08-11T13:08:18Z",
+      "modified": "2026-08-11T13:08:18Z",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "confidence": 85,
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--9c125a06-1ab6-4f42-87b0-341a8052505f",
+      "relationship_type": "indicates",
+      "source_ref": "indicator--c0382680-831a-42d0-bec2-ae45ad389e9b",
+      "target_ref": "intrusion-set--30e0da73-40ec-4fc9-92ee-fcf35675e8e5",
+      "created": "2026-08-11T13:08:18Z",
+      "modified": "2026-08-11T13:08:18Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--a28cde68-00aa-484f-8cb4-77145c01aa5a",
+      "name": "Data Encrypted for Impact",
+      "created": "2026-08-11T13:08:18Z",
+      "modified": "2026-08-11T13:08:18Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1486",
+          "url": "https://attack.mitre.org/techniques/T1486/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--decb2e9c-6d90-4ad6-a299-46ef082aa3a5",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--30e0da73-40ec-4fc9-92ee-fcf35675e8e5",
+      "target_ref": "attack-pattern--a28cde68-00aa-484f-8cb4-77145c01aa5a",
+      "created": "2026-08-11T13:08:18Z",
+      "modified": "2026-08-11T13:08:18Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--a8a2c637-f023-46c8-809f-a2dd1db91043",
+      "name": "Valid Accounts",
+      "created": "2026-08-11T13:08:18Z",
+      "modified": "2026-08-11T13:08:18Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1078",
+          "url": "https://attack.mitre.org/techniques/T1078/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--e37919c8-2c29-48be-87a1-bbc1b81fe38e",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--30e0da73-40ec-4fc9-92ee-fcf35675e8e5",
+      "target_ref": "attack-pattern--a8a2c637-f023-46c8-809f-a2dd1db91043",
+      "created": "2026-08-11T13:08:18Z",
+      "modified": "2026-08-11T13:08:18Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--1dad7fd9-641d-42c2-b042-96ba64738bbf",
+      "name": "Exploitation of Remote Services",
+      "created": "2026-08-11T13:08:18Z",
+      "modified": "2026-08-11T13:08:18Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1210",
+          "url": "https://attack.mitre.org/techniques/T1210/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--330a3381-1283-4518-ab7a-edd00f71100e",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--30e0da73-40ec-4fc9-92ee-fcf35675e8e5",
+      "target_ref": "attack-pattern--1dad7fd9-641d-42c2-b042-96ba64738bbf",
+      "created": "2026-08-11T13:08:18Z",
+      "modified": "2026-08-11T13:08:18Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "course-of-action",
+      "spec_version": "2.1",
+      "id": "course-of-action--6b1ee5ff-2637-46c5-b396-8893a16fc9d4",
+      "name": "Remediation: CRITICAL - Patch immediately",
+      "description": "Remediation guidance for: CISA Warns of SonicWall SMA1000 Vulnerabilities Exploited in Attacks to Deploy Ransomware\nPriority: CRITICAL - Patch immediately\nCISA KEV confirmed - treat as immediate emergency.\nNVD Reference: https://nvd.nist.gov/vuln/detail/CVE-2026-15409",
+      "created": "2026-08-11T13:08:18Z",
+      "modified": "2026-08-11T13:08:18Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    }
+  ]
+}
