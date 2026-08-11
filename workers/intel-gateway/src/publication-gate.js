@@ -115,7 +115,7 @@ function _typeAdjustedReadiness(p23, reportType) {
  * It is a stable fingerprint sufficient to detect "certified A, served B"
  * drift; it is not a tamper-proof signature.
  */
-function _contentFingerprint(item) {
+export function _contentFingerprint(item) {
   const canonical = JSON.stringify({
     id: item.id, title: item.title, description: item.description,
     severity: item.severity, cvss_score: item.cvss_score, cve_id: item.cve_id,
