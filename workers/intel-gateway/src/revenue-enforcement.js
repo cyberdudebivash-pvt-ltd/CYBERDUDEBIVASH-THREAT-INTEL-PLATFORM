@@ -820,6 +820,27 @@ export function applyTierGateV2(item, tier, usageState) {
   return gated;
 }
 
+// P0 fix (dashboard truth contract, 2026-08-11): ttp_density is a
+// deterministic function of the `ttps`/`mitre_tactics` array -- and that
+// array is already unlocked/customer-visible at every tier (only `iocs`,
+// `stix_bundle`, detection rules, and actor attribution are tier-gated
+// above). Nulling ttp_density for FREE tier hid a number derivable from
+// data the same response already exposes, and for PAID tiers it read
+// `item.apex.ttp_density` -- a field enrich_feed_apex.py never writes
+// (the real value lives at `item.apex_ai.ttp_density`, itself stripped by
+// public_api_sanitizer.py before any manifest is written) -- so it was
+// silently 0 for every tier, not just FREE. Recomputed here from the same
+// always-visible source and the same formula scripts/enrich_feed_apex.py's
+// compute_ttp_density() already uses (len(ttps) * 1.5, capped at 10) --
+// reused, not reinvented, and identical for every tier since there is no
+// additional information being protected.
+function _ttpDensityFromVisibleTtps(item) {
+  const ttps = Array.isArray(item.ttps) ? item.ttps
+             : Array.isArray(item.mitre_tactics) ? item.mitre_tactics
+             : [];
+  return Math.round(Math.min(10, ttps.length * 1.5) * 10) / 10;
+}
+
 // Minimal computeApexAIGated  mirrors existing but enforces AI gate
 function computeApexAIGated(item, tier) {
   const isFree = !tier || String(tier).toUpperCase() === "FREE";
@@ -830,6 +851,7 @@ function computeApexAIGated(item, tier) {
     // as-is, tagged for discoverability alongside the other sites that used
     // to disagree with it.
     ai_confidence:   typeof item.confidence === "number" ? Math.min(100, item.confidence * 100) : 50,
+    ttp_density:     _ttpDensityFromVisibleTtps(item),
   };
   if (isFree) {
     return {
@@ -837,7 +859,6 @@ function computeApexAIGated(item, tier) {
       ai_summary:     (item.apex?.ai_summary || item.description || "").slice(0, 120) + " [Full AI analysis requires Pro]",
       actor_fingerprint: null,
       kill_chain:     null,
-      ttp_density:    null,
       locked:         true,
       upgrade:        buildUpgradeTrigger("ai", tier),
     };
@@ -847,7 +868,6 @@ function computeApexAIGated(item, tier) {
     ai_summary:       item.apex?.ai_summary || item.description || "",
     actor_fingerprint: item.apex?.actor_fingerprint || null,
     kill_chain:       item.apex?.kill_chain        || null,
-    ttp_density:      item.apex?.ttp_density       || 0,
     locked:           false,
   };
 }

@@ -202,3 +202,26 @@ test("openThreatModal(): report-availability is resolved via the single canonica
   const reportUrlSites = [...modalSrc.matchAll(/cdbBuildReportUrl\(item\)/g)];
   assert.ok(reportUrlSites.length >= 2, "expected both report-link sites in the modal to call the canonical builder");
 });
+
+// ---------------------------------------------------------------------------
+// P0 (dashboard truth contract, 2026-08-11) -- the TOP10 list's two report-
+// link fallback templates unconditionally labeled an unresolved report link
+// "PROCESSING" / "Full report is still processing", regardless of whether
+// the item was genuinely still generating, permanently WITHHELD, or
+// REJECTED by certification -- cdbBuildReportUrl() returns '' identically
+// for all three (documented in its own v187.0 comment), so the frontend
+// has no data to distinguish them and must not assert a specific one.
+// ---------------------------------------------------------------------------
+
+test('TOP10: the false "still processing" claim is not shown when a report link is unresolved', () => {
+  assert.doesNotMatch(
+    SRC,
+    /Full report is still processing/,
+    'no code path may claim a report is "still processing" when cdbBuildReportUrl() cannot distinguish that from a permanent withholding/rejection'
+  );
+});
+
+test("TOP10: both hasVerifiedReport fallback sites use the honest, state-neutral unavailable label", () => {
+  const occurrences = [...SRC.matchAll(/No verified report link is currently available for this item">&#8226; UNAVAILABLE<\/span>/g)];
+  assert.equal(occurrences.length, 2, "expected both TOP10 report-link fallback templates (main + minified duplicate) to use the same honest label");
+});
