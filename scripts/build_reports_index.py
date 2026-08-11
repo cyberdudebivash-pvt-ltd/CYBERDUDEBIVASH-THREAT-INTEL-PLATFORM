@@ -55,9 +55,11 @@ INSERTION POINT: sentinel-blogger.yml STAGE 3.1.8 (after STAGE 3.1.7)
 """
 from __future__ import annotations
 
+import html as html_lib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -156,6 +158,63 @@ def _fmt_ts(path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Artifact-embedded metadata fallback
+#
+# api/feed.json only ever holds the current run's rolling window (observed:
+# ~40-55 items), while reports/ retains every report ever generated
+# (observed: 11,398+). A report whose originating intel item has scrolled
+# out of that window gets {} from feed_map, and title/severity/risk_score
+# silently degrade to the id/"UNKNOWN"/null placeholders -- affecting the
+# large majority of the catalogue (measured live: 96-99.8% of listed
+# reports). generate_intel_reports.py embeds this same title/severity/risk
+# permanently in each report's own <title> and description meta tags at
+# generation time (public SEO/social-share metadata -- no paywalled
+# content), so it survives independently of the feed window and is exactly
+# as authoritative as the original feed item was. Used ONLY when the feed
+# lookup has nothing; never overrides a real feed match.
+# ---------------------------------------------------------------------------
+_TITLE_TAG_RE = re.compile(r"<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_TITLE_SUFFIX_RE = re.compile(r"\s*[·—-]\s*(?:CyberDudeBivash\s+)?SENTINEL APEX.*$", re.IGNORECASE)
+_OG_DESC_RE = re.compile(r"""og:description['"]\s+content=['"]([^'"]*)['"]""")
+_META_DESC_RE = re.compile(r"""name=['"]description['"]\s+content=['"]([^'"]*)['"]""")
+_SEV_RISK_RE = re.compile(r"Severity\s+(\w+).*?Risk\s+([\d.]+)/10", re.IGNORECASE)
+_VALID_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
+
+
+def _extract_artifact_metadata(path: Path) -> Dict[str, Any]:
+    """Best-effort deterministic parse of title/severity/risk_score from a
+    report's own embedded HTML head. Returns only keys it actually found --
+    never fabricates a value."""
+    try:
+        head = path.read_text(encoding="utf-8", errors="replace")[:4000]
+    except Exception:
+        return {}
+
+    result: Dict[str, Any] = {}
+
+    m_title = _TITLE_TAG_RE.search(head)
+    if m_title:
+        title = html_lib.unescape(m_title.group(1)).strip()
+        title = _TITLE_SUFFIX_RE.sub("", title).strip()
+        if title:
+            result["title"] = title
+
+    m_meta = _OG_DESC_RE.search(head) or _META_DESC_RE.search(head)
+    if m_meta:
+        m_sr = _SEV_RISK_RE.search(html_lib.unescape(m_meta.group(1)))
+        if m_sr:
+            sev = m_sr.group(1).upper()
+            if sev in _VALID_SEVERITIES:
+                result["severity"] = sev
+            try:
+                result["risk_score"] = float(m_sr.group(2))
+            except ValueError:
+                pass
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main() -> int:
@@ -245,7 +304,24 @@ def main() -> int:
             elif _rs >= 4.0: severity = "MEDIUM"
             elif _rs > 0.0:  severity = "LOW"
             else:            severity = "UNKNOWN"
-        title      = str(feed_item.get("title") or report_id)
+        title      = str(feed_item.get("title") or "")
+
+        # Fallback for reports whose originating intel item has scrolled out
+        # of api/feed.json's current window (see _extract_artifact_metadata
+        # docstring): parse the report's own permanently-embedded metadata.
+        # Only fills gaps left by the feed lookup above -- never overrides a
+        # real feed value, never fabricates one that isn't found anywhere.
+        if not title or severity == "UNKNOWN" or risk_score is None:
+            _artifact_meta = _extract_artifact_metadata(path)
+            if not title:
+                title = _artifact_meta.get("title", "")
+            if severity == "UNKNOWN" and "severity" in _artifact_meta:
+                severity = _artifact_meta["severity"]
+            if risk_score is None and "risk_score" in _artifact_meta:
+                risk_score = _artifact_meta["risk_score"]
+
+        if not title:
+            title = report_id
         cve_list   = feed_item.get("cve") or []
         if not isinstance(cve_list, list):
             cve_list = [str(cve_list)] if cve_list else []
