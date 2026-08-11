@@ -681,7 +681,9 @@
       apex: apexObj,
       validation_status: buildValidationStatus(raw.validation_status),
       stix_object_count: _int(raw.stix_object_count, 0),
-      is_high_priority:  (sev === "CRITICAL" || sev === "HIGH") && (socPri === "P1" || socPri === "P2"),
+      // CodeRabbit PR-B: P0 (KEV-confirmed emergency tier) omitted here would
+      // report is_high_priority:false for the platform's most urgent items.
+      is_high_priority:  (sev === "CRITICAL" || sev === "HIGH") && (socPri === "P0" || socPri === "P1" || socPri === "P2"),
       paywall_active:    paywallActive,
       has_ai_intel:      aiConf > 0 || _str(aa.ai_summary,"").length > 5,
       has_ttps:          ttps.length > 0,

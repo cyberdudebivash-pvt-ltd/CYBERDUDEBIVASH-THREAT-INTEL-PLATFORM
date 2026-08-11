@@ -231,3 +231,18 @@ test("exact live production item reproduction: Progress LoadMaster CRITICAL/P1",
   assert.equal(item.apex_ai.soc_priority, "P1");
   assert.notEqual(item.apex_ai.soc_priority, "P4");
 });
+
+// ---------------------------------------------------------------------------
+// CodeRabbit finding on PR #168: is_high_priority's predicate checked only
+// P1/P2, so a normalized P0 item (the platform's most urgent tier) reported
+// is_high_priority:false -- contradicting the requirement that P0 carries at
+// least P1-level urgency everywhere it is consumed.
+// ---------------------------------------------------------------------------
+
+test("is_high_priority is true for a CRITICAL/P0 item, not just P1/P2", () => {
+  const item = Adapter.normalizeIntelItem(
+    rawItem({ severity: "CRITICAL", sla_priority: "P0", kev_present: true }),
+    0
+  );
+  assert.equal(item.is_high_priority, true);
+});

@@ -200,6 +200,33 @@ test("prioActionLabel: existing P1/P2/other behavior is unchanged", () => {
 });
 
 // ---------------------------------------------------------------------------
+// CodeRabbit finding on PR #168: the original prioColor()/prioActionLabel()
+// default branches caught P4 AND 'UNKNOWN' identically -- a malformed
+// priority would render with the same gray color and "MONITOR" label as a
+// genuinely-low-urgency P4 item, re-introducing the "unknown masquerading as
+// informational" anti-pattern this PR exists to eliminate.
+// ---------------------------------------------------------------------------
+
+test("prioColor: UNKNOWN gets its own neutral color, distinct from P3's and P4's", () => {
+  const unknownColor = prioColor("UNKNOWN");
+  assert.notEqual(unknownColor, prioColor("P4"));
+  assert.notEqual(unknownColor, prioColor("P3"));
+  assert.equal(unknownColor, "#9ca3af");
+});
+
+test("prioActionLabel: UNKNOWN never renders as MONITOR -- a malformed priority must not look low-urgency", () => {
+  const label = prioActionLabel("UNKNOWN", false, 0);
+  assert.notEqual(label.text, "MONITOR");
+  assert.equal(label.text, "REVIEW PRIORITY");
+  assert.equal(label.color, "#9ca3af");
+});
+
+test("prioActionLabel: P3 and P4 both still render MONITOR (unchanged) -- only UNKNOWN and other non-priority values changed", () => {
+  assert.equal(prioActionLabel("P3", false, 0).text, "MONITOR");
+  assert.equal(prioActionLabel("P4", false, 0).text, "MONITOR");
+});
+
+// ---------------------------------------------------------------------------
 // computeMetrics() IOC aggregation -- guards against the exact string-
 // concatenation regression already fixed once (elsewhere) in this codebase.
 // computeMetrics() itself is not cleanly extractable in isolation (it reads
