@@ -2176,7 +2176,36 @@ jobs:
             echo "::warning::advisory_immutability.json not written — check advisory_immutability_engine.py execution"
           fi
 
-   
+      # -----------------------------------------------------------------------
+      # STAGE 3.93.19: RE-GENERATE IMMUTABLE API MANIFESTS (POST-ENRICHMENT)
+      # ROOT CAUSE FIX (P0 -- customer_ready_count=0 investigation):
+      # STAGE 3.93 (generate_api_manifests.py, above) runs BEFORE the P20-P30
+      # enrichment/certification stages (3.93.15b-3.93.15m) that write
+      # evidence_chain, hardened IOCs, and certification metadata into
+      # api/feed.json. Traced live (2026-08-11): api/v1/intel/latest.json was
+      # frozen from a pre-enrichment snapshot, so 0/266 live items carried
+      # evidence_chain -- silently zeroing P20's 25-pt evidence sub-score for
+      # every item. That alone was enough to push P20 below P21's 38-pt
+      # BELOW_MINIMUM floor, which in turn is P26's only BLOCKER-class check
+      # (p26-handlers.js _computeCertFlags' C-P21 flag) -- so every item that
+      # missed evidence_chain was rejected by BOTH P21 and P26 in lockstep,
+      # and independently failed P23's own "Evidence Chain" gate. Confirmed
+      # live via /api/v1/reports/{id}/publication-status (the real gate path,
+      # reading raw R2 data -- not the tier-gated public feed).
+      #
+      # FIX: re-run the same, unchanged generate_api_manifests.py a second
+      # time here, once api/feed.json carries the full enrichment/certification
+      # metadata, so latest.json/latest_pro.json/top10.json/apex.json reflect
+      # it before STAGE 3.93.5 validates and STAGE 3.93.6 uploads them to R2.
+      # Purely additive: no existing stage reordered, removed, or modified;
+      # no P20/P21/P23/P25/P26 threshold or scoring logic touched; the script
+      # is safe to rerun -- atomic tmp-file writes prevent partial files, but
+      # each invocation refreshes generated_at and the bundle sha256 hashes
+      # (not byte-for-byte idempotent even when api/feed.json is unchanged).
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.93.19 - Re-generate Immutable API Manifests (post-enrichment)"
+        timeout-minutes: 5
+        run: python3 scripts/generate_api_manifests.py
 
       # -----------------------------------------------------------------------
       # STAGE 3.93.2: DAILY BRIEF GENERATOR (v184.0 -- NON-BLOCKING)
