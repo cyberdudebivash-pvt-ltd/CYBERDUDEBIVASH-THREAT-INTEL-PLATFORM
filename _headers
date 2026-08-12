@@ -17,9 +17,16 @@
   X-Sentinel-Platform: CYBERDUDEBIVASH-SENTINEL-APEX
   X-Robots-Tag: index, follow
 
+# P0 FIX: connect-src did not whitelist api.allorigins.win / corsproxy.io /
+# api.rss2json.com, the 3 CORS-proxy domains index.html's
+# initLiveCyberNews() (Real-Time Cybersecurity Intelligence Feed) has always
+# used to fetch external RSS sources -- every fetch was blocked at the
+# browser network layer before it left, so the feature could never reach
+# LIVE regardless of retries. Now whitelisted so it can actually attempt
+# what it was built to do.
 /*.html
   Cache-Control: no-cache, must-revalidate
-  Content-Security-Policy: default-src 'self' https://intel.cyberdudebivash.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://intel.cyberdudebivash.com https://www.cyberdudebivash.in https://formspree.io https://api.stripe.com https://api.convertkit.com; frame-ancestors 'none'; form-action 'self' https://formspree.io https://checkout.stripe.com https://app.convertkit.com; base-uri 'self'; upgrade-insecure-requests; block-all-mixed-content;
+  Content-Security-Policy: default-src 'self' https://intel.cyberdudebivash.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://intel.cyberdudebivash.com https://www.cyberdudebivash.in https://formspree.io https://api.stripe.com https://api.convertkit.com https://api.allorigins.win https://corsproxy.io https://api.rss2json.com; frame-ancestors 'none'; form-action 'self' https://formspree.io https://checkout.stripe.com https://app.convertkit.com; base-uri 'self'; upgrade-insecure-requests; block-all-mixed-content;
   X-Sentinel-Version: 145.0
 
 # V172 RC12 FIX: Engine JS files must never be served from browser HTTP cache.
