@@ -1,6 +1,7 @@
 # ============================================================================
 # CYBERDUDEBIVASH(R) SENTINEL APEX -- SBOM Generation
-# v47.5 -- P0 fix: Eliminate Docker Hub BuildKit network dependency
+# v47.6 -- P0 fix: Replace curl|sh Syft/Grype installers with Anchore's
+#          maintained download-syft / download-grype GitHub Actions
 #
 # BUG FIX HISTORY:
 #
@@ -275,33 +276,26 @@ jobs:
           echo "=== Disk after Docker build ==="
           df -h /
 
-      # ── v47.4 FIX: Resilient Syft install (same CDN risk as Grype) ──────────
+      # ── v47.6 FIX (run #337, 2026-08-12): curl|sh install.sh depends on
+      # raw.githubusercontent.com + github.com/anchore/syft/releases/<tag>
+      # resolution. Both v47.4's retry loop (3 attempts, 30/60s backoff) and
+      # curl's own --retry 3 were exhausted: HTTP 503, 000, 503 across all 3
+      # attempts (transient GitHub CDN/release-API outage). Replaced with
+      # Anchore's maintained download-syft GitHub Action, which installs via
+      # GitHub Actions' own toolcache/download path instead of a piped shell
+      # script -- eliminating this exact failure surface. Same SYFT_VERSION
+      # pin (v1.3.0) preserved; syft is invoked via the action's `cmd` output
+      # per its documented usage, not a bare `syft` on PATH.
       - name: Install Syft
-        run: |
-          SYFT_VERSION="v1.3.0"
-          for attempt in 1 2 3; do
-            echo "[syft-install] Attempt ${attempt}/3 (${SYFT_VERSION})..."
-            if curl -sSfL --retry 3 --retry-delay 5 --retry-connrefused \
-                "https://raw.githubusercontent.com/anchore/syft/main/install.sh" \
-                | sh -s -- -b /usr/local/bin "${SYFT_VERSION}"; then
-              syft version
-              echo "[syft-install] Success on attempt ${attempt}"
-              break
-            fi
-            if [ "${attempt}" -lt 3 ]; then
-              WAIT=$(( attempt * 30 ))
-              echo "[syft-install] Attempt ${attempt} failed, sleeping ${WAIT}s..."
-              sleep "${WAIT}"
-            else
-              echo "::error::[syft-install] All 3 attempts failed. GitHub CDN unavailable."
-              exit 1
-            fi
-          done
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        id: syft-install
+        with:
+          syft-version: v1.3.0
 
       - name: Generate Docker SBOM (CycloneDX + SPDX)
         run: |
           mkdir -p "${{ env.SBOM_DIR }}"
-          syft cdb-sentinel-apex:sbom-scan \
+          ${{ steps.syft-install.outputs.cmd }} cdb-sentinel-apex:sbom-scan \
             --output "cyclonedx-json=${{ env.SBOM_DIR }}/sbom-docker-cyclonedx.json" \
             --output "spdx-json=${{ env.SBOM_DIR }}/sbom-docker-spdx.json"
 
@@ -328,33 +322,17 @@ jobs:
             exit 1
           fi
 
-      # ── v47.4 FIX: Resilient Grype install (P0 — run #175 root cause) ───────
-      # Root cause: HTTP 504 on grype_0.77.0_checksums.txt from GitHub CDN.
-      # Fix: (1) upgraded v0.77.0 -> v0.87.0 (2+ year old pin eliminated),
-      #      (2) 3-attempt retry with exponential backoff handles transient CDN.
-      #      (3) curl --retry 3 on install.sh script download itself.
+      # ── v47.6 FIX: same curl|sh -> GitHub Action swap as Syft above, applied
+      # for consistency. Grype's install.sh already failed once via this exact
+      # pattern (run #175, HTTP 504); v47.4's retry loop only masked the
+      # underlying fragility rather than removing it. Anchore's maintained
+      # download-grype action removes the same piped-shell-script dependency.
+      # GRYPE_VERSION pin (v0.87.0) preserved unchanged.
       - name: Install Grype
-        env:
-          GRYPE_VERSION: "v0.87.0"
-        run: |
-          for attempt in 1 2 3; do
-            echo "[grype-install] Attempt ${attempt}/3 (${GRYPE_VERSION})..."
-            if curl -sSfL --retry 3 --retry-delay 5 --retry-connrefused \
-                "https://raw.githubusercontent.com/anchore/grype/main/install.sh" \
-                | sh -s -- -b /usr/local/bin "${GRYPE_VERSION}"; then
-              grype version
-              echo "[grype-install] Success on attempt ${attempt}"
-              break
-            fi
-            if [ "${attempt}" -lt 3 ]; then
-              WAIT=$(( attempt * 30 ))
-              echo "[grype-install] Attempt ${attempt} failed, sleeping ${WAIT}s..."
-              sleep "${WAIT}"
-            else
-              echo "::error::[grype-install] All 3 attempts failed. GitHub CDN unavailable."
-              exit 1
-            fi
-          done
+        uses: anchore/scan-action/download-grype@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        id: grype-install
+        with:
+          grype-version: v0.87.0
 
       # v48.0 FIX: Run Grype with .grype.yaml policy.
       # Policy: fail only on CRITICAL CVEs that have an available fix.
@@ -365,7 +343,7 @@ jobs:
       # fixed by requirements.txt updates in this commit.
       - name: Run Grype CVE scan against SBOM
         run: |
-          grype "sbom:${{ env.SBOM_DIR }}/sbom-docker-cyclonedx.json" \
+          ${{ steps.grype-install.outputs.cmd }} "sbom:${{ env.SBOM_DIR }}/sbom-docker-cyclonedx.json" \
             --config .grype.yaml \
             --output json \
             --file "${{ env.SBOM_DIR }}/grype-vulnerabilities.json" \
