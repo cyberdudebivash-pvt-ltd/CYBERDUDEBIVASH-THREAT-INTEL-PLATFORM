@@ -1,0 +1,10 @@
+{
+  "threat_id": "thr-e7b5653f6106",
+  "title": "CVE-2026-72535: A missing authentication vulnerability in Chaskiq through commit",
+  "scripts": [
+    {
+      "type": "hardening_bash",
+      "content": "#!/bin/bash\n# CDB APEX v37.0 - Emergency Hardening Script\n# Threat: CVE-2026-72535: A missing authentication vulnerability in Ch\n# Generated: 2026-08-12T09:42:42.212627+00:00\n\necho \"[*] Updating system packages...\"\napt-get update && apt-get upgrade -y 2>/dev/null || yum update -y 2>/dev/null\n\necho \"[*] Enabling firewall...\"\nufw enable 2>/dev/null || firewall-cmd --set-default-zone=drop 2>/dev/null\n\necho \"[*] Disabling unnecessary services...\"\nsystemctl disable --now telnet.socket 2>/dev/null\nsystemctl disable --now rsh.socket 2>/dev/null\n\necho \"[*] Setting secure SSH configuration...\"\nsed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config\nsed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config\nsystemctl restart sshd\n\necho \"[+] Hardening complete for threat: thr-e7b5653f6106\"\n"
+    }
+  ]
+}
