@@ -9,25 +9,26 @@ import CardRenderer from "../card_renderer.js";
 // ---------------------------------------------------------------------------
 // PR-C regression suite -- CYBERDUDEBIVASH SENTINEL APEX
 //
-// Live production investigation of the main LIVE intelligence grid
-// (#sapx-card-grid, rendered by js/card_renderer.js from js/api_adapter.js's
+// Investigation of the main LIVE intelligence grid (#sapx-card-grid,
+// rendered by js/card_renderer.js from js/api_adapter.js's
 // normalizeIntelItem() -- confirmed via hermetic Playwright reproduction to
 // be the sole customer-visible card grid; #threat-grid stays display:none)
 // found three concrete truth-contract defects, each reproduced against real
-// production api/feed.json records:
+// production data:
 //
-//  1. Confidence scale bug: raw.confidence is stored as a 0-1 fraction
-//     (live: confidence:0.2) but was read directly into a value later
-//     formatted as a percentage, rendering "0.2%" for records whose real
-//     confidence_score was ~20-25%.
+//  1. Confidence scale bug: the raw confidence field is stored as a 0-1
+//     fraction but was read directly into a value later formatted as a
+//     percentage, rendering e.g. "0.2%" for a record whose real confidence
+//     was ~20%.
 //  2. IOC count / confidence visual-adjacency bug: a bare IOC count number
-//     immediately followed by "97% conf" with only a 4px gap reads as
-//     "497% conf" (live: ioc_count:4, ioc_confidence:97 on the same record).
+//     immediately followed by a confidence percentage with only a small gap
+//     and no unit label can be misread as one concatenated number (e.g. a
+//     count of 4 next to "97% conf" reading as "497% conf").
 //  3. validation_status vocabulary bug: buildValidationStatus() only
-//     recognized the literal strings "valid"/"invalid"; live production
-//     never emits those -- it emits "ok" (121/182 sampled) and "enriched"
-//     (50/182 sampled) -- so 100% of live records rendered the customer-
-//     facing trust badge as "? PENDING" regardless of actual state.
+//     recognized the literal strings "valid"/"invalid"; production emits a
+//     wider vocabulary that never matched either, so those records rendered
+//     the customer-facing trust badge as "? PENDING" regardless of actual
+//     state.
 //
 // These tests exercise the real, exported normalizeIntelItem()/
 // buildValidationStatus() and the real renderIntelCore() card markup so
@@ -80,6 +81,18 @@ test("confidence tier now varies with real confidence instead of always collapsi
   assert.equal(highConf.apex_ai.confidence_tier_meta.tier, "CRITICAL");
 });
 
+test("a malformed confidence_score (non-finite, negative, or over 100) never reaches the customer as a broken display value", () => {
+  const infinite = Adapter.normalizeIntelItem(rawItem({ confidence: 0.3, confidence_score: Infinity }), 0);
+  assert.equal(infinite.confidence, 30);
+  assert.doesNotMatch(infinite.confidence_display, /Infinity/);
+
+  const negative = Adapter.normalizeIntelItem(rawItem({ confidence: 0, confidence_score: -5 }), 0);
+  assert.equal(negative.confidence, 0);
+
+  const overHundred = Adapter.normalizeIntelItem(rawItem({ confidence: 0, confidence_score: 150 }), 0);
+  assert.equal(overHundred.confidence, 100);
+});
+
 /* ── Defect C: IOC count / confidence visual adjacency ─────────────────── */
 
 test("IOC count renders with an explicit unit suffix so it cannot be misread as leading digits of the confidence percentage", () => {
@@ -102,10 +115,12 @@ test("singular IOC count does not render a trailing s (1 IOC, not 1 IOCs)", () =
   assert.match(html, /1 IOC(?!s)/);
 });
 
-test("zero IOC count still renders the explicit No IOCs state, not a confidence percentage", () => {
+test("zero IOC count renders only the explicit No IOCs state in the INTELLIGENCE CORE cell, never a duplicate count badge alongside it", () => {
   const item = Adapter.normalizeIntelItem(rawItem({ ioc_count: 0, ioc_confidence: 0 }), 0);
   const html = CardRenderer.buildCard(item);
-  assert.match(html, /No IOCs/);
+  const iocCell = html.slice(html.indexOf("IOC COUNT"), html.indexOf("IOC COUNT") + 900);
+  assert.match(iocCell, /No IOCs/);
+  assert.doesNotMatch(iocCell, /sapx-ioc-num/);
 });
 
 /* ── Defect E: validation_status vocabulary ─────────────────────────────── */
