@@ -9897,8 +9897,23 @@
                 // Callers must treat '' as "no verified report yet" and render
                 // a non-link state, not fall back to constructing their own URL.
                 const _internalUrl = _iru || (_ruIsInternal ? _ru : '');
+                if (_internalUrl && !_isFail) return _internalUrl;
+                if (_isFail) return '';
 
-                return (_internalUrl && !_isFail) ? _internalUrl : '';
+                // P0 FIX: report_url/internal_report_url on the feed item are
+                // populated by a separate sync step (scripts/sync_report_urls.py)
+                // that can lag behind the actual report registry -- a report can
+                // already exist and be customer-ready while these fields are
+                // still empty, rendering a real, working report as UNAVAILABLE.
+                // js/sentinel-live-feeds.js's loadReports() populates
+                // window._cdbReportRegistry (id -> url) from the same backend
+                // registry (/api/reports/index.json) this fallback consults; if
+                // that registry hasn't loaded yet, or doesn't have this item,
+                // this still correctly returns '' (no verified report), same as
+                // before -- it only ever ADDS a link, never removes one that the
+                // primary check already found.
+                const _reg = (window._cdbReportRegistry || {})[item.id];
+                return _reg || '';
             } catch (e) { return ''; }
         }
 
