@@ -15,6 +15,17 @@
   function txt(id,v){var e=sel(id);if(e)e.textContent=v;}
   function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+  /* First finite numeric value among candidates, falling back to `dflt` only
+     when none of them are usable -- `a||b||dflt` would wrongly replace a
+     legitimate 0 with the next candidate, skewing anomaly mean/variance and
+     SOC composite scores for genuinely zero-risk items. */
+  function firstScore(candidates,dflt){
+    for(var i=0;i<candidates.length;i++){
+      var n=parseFloat(candidates[i]);
+      if(Number.isFinite(n))return n;
+    }
+    return dflt;
+  }
 
   /* ── Severity palette ──────────────────────────────────────────────────── */
   var SEV={CRITICAL:'#ef4444',HIGH:'#f97316',MEDIUM:'#f59e0b',LOW:'#6b7280',INFO:'#3b82f6'};
@@ -78,7 +89,18 @@
   function buildCampaigns(intel){
     var map={};
     intel.forEach(function(t,idx){
-      var actor=(t.threat_actor||t.actor||t.family||t.type||'UNKNOWN ACTOR').toUpperCase().trim();
+      /* Real feed schema carries genuine attribution in primary_actor /
+         actor_display_name / mitre_group_name. actor / actor_tag are often the
+         backend's internal "CDB-UNATTR-*" placeholder meaning "not attributed" --
+         showing that raw token as if it were a group name would mislead customers,
+         so it is normalized to the same UNKNOWN ACTOR bucket as a null actor. */
+      var actorCandidates=[t.primary_actor,t.actor_display_name,t.mitre_group_name,t.actor];
+      var rawActor='';
+      for(var ai=0;ai<actorCandidates.length;ai++){
+        if(typeof actorCandidates[ai]==='string'&&actorCandidates[ai]){rawActor=actorCandidates[ai];break;}
+      }
+      if(/^CDB-UNATTR-/.test(rawActor))rawActor='';
+      var actor=(rawActor||'UNKNOWN ACTOR').toUpperCase().trim();
       if(!map[actor]){
         map[actor]={
           name:actor,count:0,severity:'LOW',cvssMax:0,
@@ -93,13 +115,14 @@
       c.items.push(t);
       var s=(t.severity||t.risk_level||'LOW').toUpperCase();
       if(sevRank(s)>sevRank(c.severity)){c.severity=s;c.sample=t;}
-      var cvss=parseFloat(t.cvss||t.cvss_score||0);
+      var cvss=parseFloat(t.cvss_score||t.cvss||0);
       if(cvss>c.cvssMax)c.cvssMax=cvss;
-      if(t.kev||t.cisa_kev)c.kevCount++;
-      if(t.exploit_status==='ACTIVE_CONFIRMED'||t.exploit_status==='ZERO_DAY')c.exploitActive++;
-      if(t.exploit_status==='ZERO_DAY')c.zerodays++;
-      if(t.sector)c.sectors.add(t.sector);
-      if(t.tactic||t.mitre_tactic)c.tactics.add(t.tactic||t.mitre_tactic);
+      if(window.CDB_NORMALIZE.kevState(t)===true)c.kevCount++;
+      if(t.exploit_maturity==='WEAPONIZED'||t.exploit_maturity==='FUNCTIONAL')c.exploitActive++;
+      if(t.exploit_maturity==='WEAPONIZED')c.zerodays++;
+      if(Array.isArray(t.actor_sectors))t.actor_sectors.forEach(function(sec){if(sec)c.sectors.add(sec);});
+      var tacticsSrc=Array.isArray(t.mitre_tactics)?t.mitre_tactics:(Array.isArray(t.ttps)?t.ttps:[]);
+      tacticsSrc.forEach(function(tt){if(tt&&tt.tactic)c.tactics.add(tt.tactic);});
       var d=t.date||t.discovered||null;
       if(d){
         if(!c.firstSeen||d<c.firstSeen)c.firstSeen=d;
@@ -134,24 +157,27 @@
      ══════════════════════════════════════════════════════════════════════════ */
   function buildAnomalies(intel){
     if(!intel.length)return[];
-    /* Compute mean/stddev of priority_score / cvss */
-    var scores=intel.map(function(t){return parseFloat(t.priority_score||t.cvss||5);});
+    /* Real feed schema exposes risk_score / cvss_score / kev_present /
+       exploit_maturity -- priority_score, cvss, kev, cisa_kev and the
+       ACTIVE_CONFIRMED/ZERO_DAY exploit_status vocabulary never exist on a
+       live item. */
+    var scores=intel.map(function(t){return firstScore([t.risk_score,t.cvss_score],5);});
     var mean=scores.reduce(function(a,b){return a+b;},0)/scores.length;
     var variance=scores.reduce(function(a,v){return a+(v-mean)*(v-mean);},0)/scores.length;
     var std=Math.sqrt(variance)||1;
 
     var anomalies=intel.map(function(t,idx){
-      var score=parseFloat(t.priority_score||t.cvss||5);
+      var score=firstScore([t.risk_score,t.cvss_score],5);
       var zScore=Math.abs(score-mean)/std;
       /* Boost for KEV, zero-day, active exploit */
       var boost=0;
-      if(t.kev||t.cisa_kev)boost+=0.4;
-      if(t.exploit_status==='ZERO_DAY')boost+=0.5;
-      if(t.exploit_status==='ACTIVE_CONFIRMED')boost+=0.3;
-      if(parseFloat(t.cvss||0)>=9.0)boost+=0.3;
+      if(window.CDB_NORMALIZE.kevState(t)===true)boost+=0.4;
+      if(t.exploit_maturity==='WEAPONIZED')boost+=0.5;
+      if(t.exploit_maturity==='FUNCTIONAL')boost+=0.3;
+      if(parseFloat(t.cvss_score||0)>=9.0)boost+=0.3;
       var anomalyScore=clamp((zScore/4)*0.6+boost,0,1);
       var type='NORMAL';
-      if(t.exploit_status==='ZERO_DAY')type='ZERO_DAY_CANDIDATE';
+      if(t.exploit_maturity==='WEAPONIZED')type='ZERO_DAY_CANDIDATE';
       else if(anomalyScore>=0.80)type='APT_SIGNAL';
       else if(boost>=0.6)type='CRITICAL_ANOMALY';
       else if(anomalyScore>=0.60)type='BEHAVIORAL_OUTLIER';
@@ -174,14 +200,20 @@
     var SECTORS={
       'Energy':0,'Healthcare':0,'Government':0,'Finance':0,
       'Technology':0,'Manufacturing':0,'Critical Infrastructure':0,
-      'Education':0,'Retail':0,'Telecommunications':0
+      'Education':0,'Retail':0,'Telecommunications':0,'Unclassified':0
     };
     var sectorCounts={};
     intel.forEach(function(t){
-      var s=t.sector||'Technology';
-      if(!SECTORS.hasOwnProperty(s))s='Technology';
-      var w=1+(t.kev?2:0)+(t.exploit_status==='ACTIVE_CONFIRMED'?1.5:0)+
-            (parseFloat(t.cvss||0)>=9?1.5:parseFloat(t.cvss||0)>=7?0.8:0);
+      /* No live feed item carries a scalar `sector` field -- the real
+         per-item signal is actor_sectors (an array, populated only when
+         actor attribution exists). Defaulting every unattributed item into
+         'Technology' fabricated a false 100%-Technology concentration;
+         items with no real sector evidence land in an honestly-labeled
+         'Unclassified' bucket instead of a named vertical. */
+      var s=(Array.isArray(t.actor_sectors)&&t.actor_sectors[0])||'Unclassified';
+      if(!SECTORS.hasOwnProperty(s))s='Unclassified';
+      var w=1+(window.CDB_NORMALIZE.kevState(t)===true?2:0)+((t.exploit_maturity==='FUNCTIONAL'||t.exploit_maturity==='WEAPONIZED')?1.5:0)+
+            (parseFloat(t.cvss_score||0)>=9?1.5:parseFloat(t.cvss_score||0)>=7?0.8:0);
       SECTORS[s]=(SECTORS[s]||0)+w;
       sectorCounts[s]=(sectorCounts[s]||0)+1;
     });
@@ -191,7 +223,8 @@
       'Government':'Spear-Phishing / APT','Finance':'Credential Stuffing / BEC',
       'Technology':'Zero-Day / Supply Chain','Manufacturing':'Ransomware / OT',
       'Critical Infrastructure':'ICS/SCADA','Education':'Ransomware',
-      'Retail':'PoS Skimming / Fraud','Telecommunications':'SS7 / SIM Swap'
+      'Retail':'PoS Skimming / Fraud','Telecommunications':'SS7 / SIM Swap',
+      'Unclassified':'Multi-Vector / Unattributed'
     };
 
     var total=Object.values(SECTORS).reduce(function(a,b){return a+b;},1);
@@ -264,13 +297,14 @@
   function buildSOCQueue(intel){
     return intel
       .filter(function(t){
-        return (t.kev||t.cisa_kev||t.exploit_status==='ACTIVE_CONFIRMED'
-          ||t.exploit_status==='ZERO_DAY'||parseFloat(t.cvss||0)>=8.5);
+        return (window.CDB_NORMALIZE.kevState(t)===true||t.exploit_maturity==='FUNCTIONAL'
+          ||t.exploit_maturity==='WEAPONIZED'||parseFloat(t.cvss_score||0)>=8.5);
       })
       .map(function(t){
-        var score=parseFloat(t.priority_score||t.cvss||0);
-        var urgency=t.exploit_status==='ZERO_DAY'?'IMMEDIATE'
-          :t.kev||t.cisa_kev?'CRITICAL'
+        var kevConfirmed=window.CDB_NORMALIZE.kevState(t)===true;
+        var score=firstScore([t.risk_score,t.cvss_score],0);
+        var urgency=t.exploit_maturity==='WEAPONIZED'?'IMMEDIATE'
+          :kevConfirmed?'CRITICAL'
           :score>=9?'CRITICAL'
           :score>=7?'HIGH'
           :'MEDIUM';
@@ -279,11 +313,11 @@
           :urgency==='HIGH'?'24–72h'
           :'72–168h';
         return{
-          title:t.title||t.id,cvss:parseFloat(t.cvss||0),
-          kev:!!(t.kev||t.cisa_kev),
-          exploitStatus:t.exploit_status||'UNKNOWN',
+          title:t.title||t.id,cvss:parseFloat(t.cvss_score||0),
+          kev:kevConfirmed,
+          exploitStatus:t.exploit_maturity||'UNKNOWN',
           urgency:urgency,sla:sla,
-          composite:score+(t.kev?15:0)+(t.exploit_status==='ZERO_DAY'?20:0)
+          composite:score+(kevConfirmed?15:0)+(t.exploit_maturity==='WEAPONIZED'?20:0)
         };
       })
       .sort(function(a,b){return b.composite-a.composite;})
@@ -366,9 +400,13 @@
   /* ══════════════════════════════════════════════════════════════════════════
      RENDER ENGINE — ANOMALY PANEL
      ══════════════════════════════════════════════════════════════════════════ */
-  function renderAnomalies(anomalies,actors){
+  function renderAnomalies(anomalies,actors,totalAnalyzed){
     if(!anomalies.length){
-      set('ai-anomaly-body','<p style="color:#94a3b8;text-align:center;padding:20px">Awaiting analysis...</p>');
+      /* A completed Isolation-Forest-style pass that legitimately finds no
+         statistical outliers is real intelligence, not a stuck pipeline --
+         it must not render identically to the pre-fetch "still loading"
+         state customers see before intel.length>0 (see runAIBrain()). */
+      set('ai-anomaly-body','<p style="color:#94a3b8;text-align:center;padding:20px">0 anomalies detected across '+(totalAnalyzed||0)+' advisories analyzed — no statistical outliers found.</p>');
       return;
     }
     txt('ai-anomaly-count', anomalies.length+' Anomal'+(anomalies.length>1?'ies':'y')+' Flagged');
@@ -382,13 +420,13 @@
         +'<div style="flex:1;min-width:0">'
         +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap">'
         +'<span style="font-size:8px;padding:1px 5px;font-weight:700;letter-spacing:0.5px;border-radius:2px;background:'+typeCol+'22;color:'+typeCol+';border:1px solid '+typeCol+'44">'+esc(a.type.replace(/_/g,' '))+'</span>'
-        +(t.kev||t.cisa_kev?'<span style="font-size:8px;padding:1px 4px;border-radius:2px;background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3)">CISA KEV</span>':'')
-        +(t.exploit_status?'<span style="font-size:8px;padding:1px 4px;border-radius:2px;background:rgba(248,113,113,0.08);color:#94a3b8">'+esc(t.exploit_status)+'</span>':'')
+        +(window.CDB_NORMALIZE.kevState(t)===true?'<span style="font-size:8px;padding:1px 4px;border-radius:2px;background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3)">CISA KEV</span>':'')
+        +(t.exploit_maturity?'<span style="font-size:8px;padding:1px 4px;border-radius:2px;background:rgba(248,113,113,0.08);color:#94a3b8">'+esc(t.exploit_maturity)+'</span>':'')
         +'</div>'
         +'<div style="color:#e2e8f0;font-size:11px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px">'+esc((t.title||t.id||'').substring(0,65))+'</div>'
         +'<div style="display:flex;gap:12px;margin-top:3px">'
-        +(t.cvss?'<span style="color:#94a3b8;font-size:9px">CVSS <span style="color:'+typeCol+';font-weight:700">'+t.cvss+'</span></span>':'')
-        +(t.priority_score?'<span style="color:#94a3b8;font-size:9px">SCORE <span style="color:#e2e8f0;font-weight:700">'+t.priority_score+'</span></span>':'')
+        +(t.cvss_score?'<span style="color:#94a3b8;font-size:9px">CVSS <span style="color:'+typeCol+';font-weight:700">'+t.cvss_score+'</span></span>':'')
+        +(t.risk_score?'<span style="color:#94a3b8;font-size:9px">SCORE <span style="color:#e2e8f0;font-weight:700">'+t.risk_score+'</span></span>':'')
         +'<span style="color:#94a3b8;font-size:9px">z='+a.zScore.toFixed(2)+'</span>'
         +'</div>'
         +'</div>'
@@ -769,7 +807,7 @@
     /* Render original panels */
     renderTacticalHeader(summary,intel);
     renderCampaigns(campaigns,socQueue);
-    renderAnomalies(anomalies,actors);
+    renderAnomalies(anomalies,actors,intel.length);
     renderForecasts(forecasts,socQueue);
 
     /* v149.0 — Render enhanced panels (graceful: no-op if elements absent) */
@@ -872,9 +910,20 @@
       }).catch(function(){});
     });
   }
+  // P0 FIX (PR-D1): refreshNews() (the "Global Cyber Intel — LIVE"
+  // #cdb-news-grid section) was only ever called from boot()/bootEnterprise()
+  // at DOMContentLoaded -- but window.__GOC_LIVE_INTEL is essentially always
+  // still unset at that instant (these async fetches haven't resolved yet)
+  // and window.EMBEDDED_INTEL is permanently [] by design, so
+  // `if(intel.length){...refreshNews();}` never fired. Once _fetchLiveIntel
+  // genuinely populates window.__GOC_LIVE_INTEL with real data (here, or on
+  // the 30s poll), nothing ever re-invoked refreshNews() -- the section
+  // stayed on its initial shimmer placeholder forever. refreshNews() already
+  // no-ops when the cached item count hasn't changed, so calling it here on
+  // every successful fetch is safe and does not cause redundant re-renders.
   function _startAIBrainPoller(){
-    _fetchLiveIntel(function(){runAIBrain();injectEnterpriseSignals(window.__GOC_LIVE_INTEL||window.EMBEDDED_INTEL||[]);});
-    setInterval(function(){_fetchLiveIntel(function(){runAIBrain();});},30000);
+    _fetchLiveIntel(function(){runAIBrain();injectEnterpriseSignals(window.__GOC_LIVE_INTEL||window.EMBEDDED_INTEL||[]);refreshNews();});
+    setInterval(function(){_fetchLiveIntel(function(){runAIBrain();refreshNews();});},30000);
   }
   window.CDB_AI={runBrain:runAIBrain,fetchLive:_fetchLiveIntel};
   if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',_startAIBrainPoller);}
