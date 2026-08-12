@@ -37,6 +37,7 @@ try:
         generate_context_aware_technical_narrative as _cane_technical,
         generate_context_aware_executive_summary   as _cane_executive,
         CLS_CVE_GENERIC, CLS_THREAT_INTEL,
+        _kev_confirmed                          as _cane_kev_confirmed,
     )
     _CANE_AVAILABLE = True
 except Exception as _cane_import_err:
@@ -465,7 +466,14 @@ def generate_technical_narrative(item: Dict[str, Any]) -> str:
         iocs = item.get("iocs") or []
         ioc_count = len(iocs)
         cvss = item.get("cvss_score") or item.get("cvss")
-        kev = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+        # bool(item.get("kev") or ...) treated any non-empty string as truthy,
+        # so a legacy value like "NO" or "false" read as KEV-confirmed. Reuse
+        # the canonical parser (already fixed for the same defect class in
+        # context_aware_narrative_engine.py and js/metric-normalize.js) so
+        # this fallback path can't disagree with the CANE-routed path above.
+        # If CANE itself is unavailable, default to unconfirmed rather than
+        # re-deriving the same truthy-string bug locally.
+        kev = _cane_kev_confirmed(item) if _CANE_AVAILABLE else False
         cve_id = ""
         m = re.search(r'CVE-\d{4}-\d+', title + " " + desc, re.I)
         if m:
@@ -1585,7 +1593,9 @@ def generate_campaign_intelligence(item: Dict[str, Any]) -> str:
         # this file from real TTP/CVSS/KEV/IOC signals -- that one is a
         # genuine formula, not a bare fallback, and is left untouched.
         ai_conf = float(item.get("ai_confidence") or item.get("confidence") or 50.0)
-        kev = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+        # See generate_technical_narrative() above — bool(item.get("kev") or
+        # ...) misreads a legacy "NO"/"false" string as KEV-confirmed.
+        kev = _cane_kev_confirmed(item) if _CANE_AVAILABLE else False
 
         # Derive operation name
         if not campaign or campaign.upper() in ("UNCLASSIFIED", "NONE", "N/A", ""):
@@ -1752,7 +1762,9 @@ def generate_ai_insight_premium(item: Dict[str, Any]) -> str:
         ttps = item.get("ttps") or []
         iocs = item.get("iocs") or []
         actor = str(item.get("actor_cluster") or item.get("actor") or "")
-        kev = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+        # See generate_technical_narrative() above — bool(item.get("kev") or
+        # ...) misreads a legacy "NO"/"false" string as KEV-confirmed.
+        kev = _cane_kev_confirmed(item) if _CANE_AVAILABLE else False
         cvss = item.get("cvss_score") or item.get("cvss")
         epss = item.get("epss_score") or item.get("epss")
         threat_type = str(item.get("threat_type") or "").lower()
@@ -2565,7 +2577,9 @@ def generate_executive_summary(item):
         desc   = str(item.get("description") or item.get("summary") or "")
         sev    = str(item.get("severity") or "MEDIUM").upper()
         risk   = float(item.get("risk_score") or 5.0)
-        kev    = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+        # See generate_technical_narrative() above — bool(item.get("kev") or
+        # ...) misreads a legacy "NO"/"false" string as KEV-confirmed.
+        kev    = _cane_kev_confirmed(item) if _CANE_AVAILABLE else False
         cvss   = item.get("cvss_score") or item.get("cvss")
         epss   = item.get("epss_score") or item.get("epss")
         ttps   = item.get("ttps") or []

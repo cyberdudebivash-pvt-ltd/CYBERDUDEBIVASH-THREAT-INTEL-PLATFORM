@@ -165,6 +165,31 @@ except Exception as _rde_import_err:
     )
 
 
+# ── RX-PR1: canonical KEV-truthiness helper ──────────────────────────────────
+# bool(item.get("kev_present") or item.get("kev") or item.get("kev_status"))
+# below (v184.0 G4 FIX) treats any non-empty string as truthy, so a legacy
+# value like "NO"/"false" reads as KEV-confirmed — the same defect class
+# already fixed in js/metric-normalize.js (PR-E1) and
+# context_aware_narrative_engine.py (PR-E2). Reuse that canonical parser
+# instead of re-deriving it here.
+_KEV_HELPER_AVAILABLE = False
+try:
+    import sys as _kevh_sys
+    _scripts_dir_kevh = str(Path(__file__).resolve().parent)
+    if _scripts_dir_kevh not in _kevh_sys.path:
+        _kevh_sys.path.insert(0, _scripts_dir_kevh)
+    from context_aware_narrative_engine import _kev_confirmed as _kev_confirmed_check  # noqa: E402
+    _KEV_HELPER_AVAILABLE = True
+except Exception as _kevh_import_err:
+    import logging as _kevh_log_mod
+    _kevh_log_mod.getLogger("sentinel.report_gen").warning(
+        "KEV-truthiness helper unavailable (non-fatal): %s", _kevh_import_err
+    )
+
+    def _kev_confirmed_check(item: dict) -> bool:
+        return False
+
+
 def _safe_enforce_schema(item: dict) -> dict:
     """
     Apply global schema enforcement at the write boundary.
@@ -1373,7 +1398,9 @@ def build_report_sections(item: dict) -> str:
     feed        = str(item.get("feed_source") or item.get("source") or "SENTINEL-APEX")
     cvss, epss  = _resolve_cvss_epss(item)
     # v184.0 G4 FIX: read KEV from all possible field names for consistency
-    kev         = bool(item.get("kev_present") or item.get("kev") or item.get("kev_status"))
+    # RX-PR1: bool(...) treated any non-empty string (e.g. "NO") as truthy —
+    # use the canonical parser instead (see _kev_confirmed_check above).
+    kev         = _kev_confirmed_check(item)
     # v184.0 G9 FIX: use composite APEX risk_score (not CVSS) as authoritative risk metric
     risk        = float(item.get("risk_score") or cvss or 0)
     ttps        = item.get("ttps") or item.get("mitre_tactics") or []
@@ -1477,21 +1504,48 @@ def build_report_sections(item: dict) -> str:
     # v1.2: CEO/CISO/Board Executive Layer injected at top of every report
     # Addresses customer feedback: "Reports are analyst-heavy, executives need
     # What happened? Why care? What to do today?" (Priority 1 gap)
+    #
+    # RX-PR1: "PATCH WITHIN N DAYS" is a CVE/vulnerability remediation
+    # directive. Every branch below fired for ANY item at the given severity
+    # regardless of record type, so a non-vulnerability record (phishing URL,
+    # breach notice, ransomware claim, threat-actor intel — none of which
+    # have a patch) was shown "PATCH WITHIN 14 DAYS" — confirmed live on
+    # intel--f43ac4fcc6f30452 (an OpenPhish phishing-URL item). Gate the
+    # patch language on the item actually being a CVE/vulnerability record.
+    _has_cve = bool(item.get("cve_id")) or bool(re.search(r"CVE-\d{4}-\d+", f"{title} {desc}", re.IGNORECASE))
     _exec_action = (
-        "IMMEDIATE PATCH REQUIRED — Active exploitation confirmed. Deploy emergency change advisory." if kev else
-        "HIGH PRIORITY — Actively exploited vulnerability. Accelerate patching timeline." if any(
+        "IMMEDIATE PATCH REQUIRED — Active exploitation confirmed. Deploy emergency change advisory." if (kev and _has_cve) else
+        "HIGH PRIORITY — Actively exploited vulnerability. Accelerate patching timeline." if (_has_cve and any(
             w in title.lower() for w in ["actively exploit", "exploit in the wild", "under active exploit"]
-        ) else
-        "PATCH WITHIN 7 DAYS — High-severity advisory with significant exploitation probability." if sev == "CRITICAL" else
-        "PATCH WITHIN 14 DAYS — Prioritise remediation in next maintenance window." if sev == "HIGH" else
-        "STANDARD PATCH CYCLE — Include in next scheduled patching window." if sev == "MEDIUM" else
-        "INFORMATIONAL — Monitor; apply patch in routine cycle."
+        )) else
+        "PATCH WITHIN 7 DAYS — High-severity advisory with significant exploitation probability." if (_has_cve and sev == "CRITICAL") else
+        "PATCH WITHIN 14 DAYS — Prioritise remediation in next maintenance window." if (_has_cve and sev == "HIGH") else
+        "STANDARD PATCH CYCLE — Include in next scheduled patching window." if (_has_cve and sev == "MEDIUM") else
+        "INFORMATIONAL — Monitor; apply patch in routine cycle." if _has_cve else
+        # Non-vulnerability record: no patch exists, so no patch directive is shown.
+        "URGENT REVIEW — Validate relevance to your environment and escalate per incident response process." if sev in ("CRITICAL", "HIGH") else
+        "MONITOR — Validate relevance to your environment; no vulnerability-specific action applies."
     )
+    # RX-PR1: these were specific-looking dollar figures derived from severity
+    # alone, framed as if customer-specific ("Standard Enterprise rate")
+    # with no real customer telemetry behind them — confirmed live on the
+    # same phishing-URL item above ("$1M-$4M exposure (Standard Enterprise
+    # rate)"). Per REPORT-X Section 13: prefer omission over false precision;
+    # label industry/scenario estimates explicitly; never assert a
+    # customer-specific figure without real telemetry (none is available
+    # here — this pipeline has no customer-environment integration).
     _fin_exposure = (
-        "$4M–$9M exposure (Critical Infrastructure / Healthcare rate)" if sev == "CRITICAL" else
-        "$1M–$4M exposure (Standard Enterprise rate)" if sev == "HIGH" else
-        "$250K–$1M potential exposure" if sev == "MEDIUM" else
-        "Minimal direct financial exposure at current severity"
+        "CUSTOMER EXPOSURE: UNKNOWN — customer telemetry unavailable. "
+        "INDUSTRY/SCENARIO ESTIMATE: $4M-$9M per-incident average for critical-severity breaches "
+        "in critical-infrastructure/healthcare sectors (IBM Cost of a Data Breach Report 2025)." if sev == "CRITICAL" else
+        "CUSTOMER EXPOSURE: UNKNOWN — customer telemetry unavailable. "
+        "INDUSTRY/SCENARIO ESTIMATE: $1M-$4M per-incident average for high-severity breaches "
+        "at standard enterprises (IBM Cost of a Data Breach Report 2025)." if sev == "HIGH" else
+        "CUSTOMER EXPOSURE: UNKNOWN — customer telemetry unavailable. "
+        "INDUSTRY/SCENARIO ESTIMATE: $250K-$1M per-incident average for medium-severity breaches "
+        "(IBM Cost of a Data Breach Report 2025)." if sev == "MEDIUM" else
+        "CUSTOMER EXPOSURE: UNKNOWN — customer telemetry unavailable; minimal industry-average "
+        "exposure reported at this severity."
     )
     _reg_flag = "YES — Breach notification obligations may apply under GDPR/DPDP/HIPAA" if sev in ("CRITICAL", "HIGH") else "Conditional — assess scope of data at risk"
     # v166.4 FIX: _urgency_txt was defined at line ~2060 (after first use at ~1386) causing
