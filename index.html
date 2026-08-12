@@ -7696,31 +7696,22 @@
                 _set('cdb-kc-tactics', kcTactics.size || _rand(8, 18));
             }
 
+            // P0 FIX: window.EMBEDDED_INTEL is permanently forced to [] elsewhere
+            // in this file ("Worker API is authoritative" -- see its assignment
+            // site) in the current R2/Worker-only architecture, so the branch
+            // below always took the "else" path -- meaning every customer saw
+            // Math.random()-generated ransomware/APT/dark-web numbers
+            // (mislabeled "realistic defaults while feed loads") that could
+            // never be replaced, since the retry loop waited on a condition
+            // that can never become true. js/sentinel-live-feeds.js's
+            // loadRansomware()/loadAPT()/loadDarkweb()/loadKillChain() are the
+            // real, live-API-backed owners of these same DOM ids (fixed in the
+            // same change that removed this fabrication) -- this function no
+            // longer writes placeholder numbers and simply leaves the markup's
+            // own "—" until real data arrives.
             function init() {
-                // Use EMBEDDED_INTEL if available, otherwise use feed counts
                 if (window.EMBEDDED_INTEL && window.EMBEDDED_INTEL.length) {
                     populateFromFeed(window.EMBEDDED_INTEL);
-                } else {
-                    // Realistic defaults while feed loads
-                    _set('cdb-rw-groups', _rand(18, 26));
-                    _set('cdb-rw-victims', _rand(12, 54));
-                    _set('cdb-apt-count', _rand(22, 38));
-                    _set('cdb-apt-sectors', _rand(11, 17));
-                    _set('cdb-apt-ttps', _rand(210, 380));
-                    _set('cdb-dw-count', _rand(19, 47));
-                    _set('cdb-dw-sources', _rand(7, 14));
-                    _set('cdb-dw-creds', _rand(28, 97) + 'K+');
-                    _set('cdb-kc-campaigns', _rand(5, 14));
-                    _set('cdb-kc-tactics', _rand(9, 22));
-                    // Wait for feed and retry
-                    var tries = 0;
-                    var iv = setInterval(function() {
-                        tries++;
-                        if ((window.EMBEDDED_INTEL && window.EMBEDDED_INTEL.length) || tries > 20) {
-                            clearInterval(iv);
-                            if (window.EMBEDDED_INTEL && window.EMBEDDED_INTEL.length) populateFromFeed(window.EMBEDDED_INTEL);
-                        }
-                    }, 500);
                 }
             }
 
