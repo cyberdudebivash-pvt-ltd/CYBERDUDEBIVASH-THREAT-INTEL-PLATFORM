@@ -62,6 +62,16 @@
   function qs(sel) { return document.querySelector(sel); }
   function qsAll(sel) { return document.querySelectorAll(sel); }
 
+  // Matches the escape convention already used elsewhere in this codebase
+  // (e.g. index.html's _hEsc(), js/card_renderer.js's esc()). API-provided
+  // fields (group names, actor aliases, sectors, statuses) are rendered via
+  // innerHTML below for layout convenience -- they must never be trusted as
+  // markup.
+  function esc(s) {
+    if (s === null || s === undefined) return "";
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
+  }
+
   function setText(selector, text, isId = false) {
     const node = isId ? el(selector) : qs(selector);
     if (node) node.textContent = text;
@@ -217,7 +227,8 @@
     }
 
     const level = data.global_threat_level || {};
-    const score = parseFloat(level.level || 0);
+    const rawScore = Number(level.level);
+    const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(rawScore, 10)) : 0;
     const label = level.label || data.label || "ASSESSING";
 
     // Threat level gauge -- real DOM ids (see GADGET 1, index.html)
@@ -380,10 +391,10 @@
         <div style="display:flex; justify-content:space-between; align-items:center;
           padding:6px 8px; margin-bottom:4px; background:rgba(255,68,68,0.05);
           border-left:2px solid #ff4444; border-radius:3px; font-size:12px;">
-          <span style="font-weight:bold; color:#ff4444;">${g.name}</span>
-          <span style="color:#888; font-size:11px;">${(g.sector || "").split(",")[0]}</span>
-          <span style="color:#ffcc00; font-size:11px;">+${g.victims_30d} victims</span>
-          <span style="color:#ff4444; font-size:10px; padding:1px 5px; border:1px solid #ff444444; border-radius:2px;">${g.status}</span>
+          <span style="font-weight:bold; color:#ff4444;">${esc(g.name)}</span>
+          <span style="color:#888; font-size:11px;">${esc((g.sector || "").split(",")[0])}</span>
+          <span style="color:#ffcc00; font-size:11px;">+${esc(String(g.victims_30d))} victims</span>
+          <span style="color:#ff4444; font-size:10px; padding:1px 5px; border:1px solid #ff444444; border-radius:2px;">${esc(g.status)}</span>
         </div>
       `).join("") : `<div style="color:#888; font-size:11px; padding:8px 0;">No active ransomware campaigns tracked</div>`;
     }
@@ -412,10 +423,10 @@
         <div style="display:flex; justify-content:space-between; align-items:center;
           padding:5px 8px; margin-bottom:4px; background:rgba(0,212,170,0.05);
           border-left:2px solid #00d4aa; border-radius:3px; font-size:12px;">
-          <span style="font-weight:bold; color:#00d4aa; width:90px;">${a.id}</span>
-          <span style="color:#888; font-size:11px; flex:1;">${a.alias}</span>
+          <span style="font-weight:bold; color:#00d4aa; width:90px;">${esc(a.id)}</span>
+          <span style="color:#888; font-size:11px; flex:1;">${esc(a.alias)}</span>
           <span style="color:#ff8800; font-size:11px; width:24px; text-align:center;">${getFlagEmoji(a.nation)}</span>
-          <span style="color:#ffcc00; font-size:11px;">${a.ttps} TTPs</span>
+          <span style="color:#ffcc00; font-size:11px;">${esc(String(a.ttps))} TTPs</span>
         </div>
       `).join("") : `<div style="color:#888; font-size:11px; padding:8px 0;">No tracked APT activity</div>`;
     }
@@ -443,7 +454,7 @@
       <div style="display:flex; align-items:center; gap:8px; padding:6px 0;
         border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px;">
         <span style="color:#888; width:16px; text-align:right;">${i + 1}</span>
-        <span style="color:#ff8800; width:140px; font-weight:500;">${c.cve_id}</span>
+        <span style="color:#ff8800; width:140px; font-weight:500;">${esc(c.cve_id)}</span>
         <div style="flex:2; background:#1a1a2e; border-radius:3px; height:6px; overflow:hidden;">
           <div style="width:${Math.round(Math.min((c.risk_score / 10) * 100, 100))}%; height:100%;
             background:${severityColor(c.severity)}; border-radius:3px;"></div>
@@ -458,6 +469,10 @@
   async function loadKillChain() {
     const data = await apiFetch("/api/v1/intel/campaigns");
     if (!data) {
+      // The static markup marks RECON active by default -- clear it so a
+      // failed fetch never shows "CAMPAIGN DATA UNAVAILABLE" alongside a
+      // phase that looks live.
+      qsAll(".cdb-kc-step").forEach(stepEl => stepEl.classList.remove("active"));
       setUnavailable("cdb-kc-active-label", "CAMPAIGN DATA UNAVAILABLE");
       setUnavailable("cdb-kc-campaigns", "N/A");
       setUnavailable("cdb-kc-tactics", "N/A");

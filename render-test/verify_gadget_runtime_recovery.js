@@ -68,7 +68,8 @@ function startStaticServer() {
     let urlPath = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
     if (urlPath.endsWith('/')) urlPath += 'index.html';
     const filePath = path.join(REPO_ROOT, urlPath);
-    if (!filePath.startsWith(REPO_ROOT)) { res.writeHead(403); res.end(); return; }
+    const rel = path.relative(REPO_ROOT, filePath);
+    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) { res.writeHead(403); res.end(); return; }
     fs.readFile(filePath, (err, data) => {
       if (err) { res.writeHead(404); res.end('Not found'); return; }
       const ext = path.extname(filePath);
