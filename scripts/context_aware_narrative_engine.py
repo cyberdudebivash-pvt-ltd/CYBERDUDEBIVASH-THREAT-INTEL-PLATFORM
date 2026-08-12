@@ -352,6 +352,32 @@ def _get_kev_context(kev: bool) -> str:
     )
 
 
+def _kev_confirmed(item: Dict[str, Any]) -> bool:
+    """True only when KEV status is explicitly confirmed.
+
+    ``bool(item.get("kev") or ...)`` treats any non-empty string as truthy,
+    so a legacy string value like ``"NO"`` was being read as KEV-confirmed.
+    This parses the actual value instead of relying on raw truthiness --
+    mirrors js/metric-normalize.js's CDB_NORMALIZE.kevState() fix (PR-E1) on
+    the content-pipeline side.
+    """
+    kp = item.get("kev_present")
+    if isinstance(kp, bool):
+        return kp
+    for key in ("kev", "in_kev", "cisa_kev", "KEV"):
+        raw = item.get(key)
+        if raw is None or raw == "":
+            continue
+        if isinstance(raw, bool):
+            return raw
+        s = str(raw).strip().upper()
+        if s in ("YES", "TRUE", "1"):
+            return True
+        if s in ("NO", "FALSE", "0"):
+            return False
+    return False
+
+
 def _get_cvss_context(cvss: Any) -> str:
     """Build CVSS severity context."""
     if cvss is None:
@@ -382,7 +408,7 @@ def _narrative_threat_actor(item: Dict[str, Any]) -> str:
     ttps       = item.get("ttps") or []
     iocs       = item.get("iocs") or []
     ioc_count  = len(iocs)
-    kev        = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev        = _kev_confirmed(item)
     epss       = item.get("epss_score")
     sectors    = _get_sector_context(item)
     sev        = str(item.get("severity") or "HIGH").upper()
@@ -467,7 +493,7 @@ def _narrative_ransomware(item: Dict[str, Any]) -> str:
     actor     = _get_actor_display(item)
     iocs      = item.get("iocs") or []
     ioc_count = len(iocs)
-    kev       = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev       = _kev_confirmed(item)
     sectors   = _get_sector_context(item)
     ttps      = item.get("ttps") or []
     sev       = str(item.get("severity") or "HIGH").upper()
@@ -534,7 +560,7 @@ def _narrative_apt_espionage(item: Dict[str, Any]) -> str:
     title      = str(item.get("title") or "")
     actor      = _get_actor_display(item)
     ioc_count  = len(item.get("iocs") or [])
-    kev        = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev        = _kev_confirmed(item)
     sectors    = _get_sector_context(item)
     ttps       = item.get("ttps") or []
     cvss       = item.get("cvss_score")
@@ -598,7 +624,7 @@ def _narrative_ics_ot(item: Dict[str, Any]) -> str:
     """ICS/OT narrative — operational continuity and industrial impact focus."""
     actor     = _get_actor_display(item)
     ioc_count = len(item.get("iocs") or [])
-    kev       = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev       = _kev_confirmed(item)
     cvss      = item.get("cvss_score")
     cvss_str  = _get_cvss_context(cvss)
 
@@ -635,7 +661,7 @@ def _narrative_cloud_saas(item: Dict[str, Any]) -> str:
     """Cloud/SaaS narrative — tenant exposure and identity compromise focus."""
     actor     = _get_actor_display(item)
     ioc_count = len(item.get("iocs") or [])
-    kev       = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev       = _kev_confirmed(item)
     cvss      = item.get("cvss_score")
     desc      = str(item.get("description") or "")
     kev_block = f"<div class='callout critical'>{_get_kev_context(kev)}</div>" if kev else ""
@@ -675,7 +701,7 @@ def _narrative_cloud_saas(item: Dict[str, Any]) -> str:
 def _narrative_supply_chain(item: Dict[str, Any]) -> str:
     """Supply chain compromise narrative."""
     ioc_count = len(item.get("iocs") or [])
-    kev       = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev       = _kev_confirmed(item)
     kev_block = f"<div class='callout critical'>{_get_kev_context(kev)}</div>" if kev else ""
 
     return (
@@ -707,7 +733,7 @@ def _narrative_phishing(item: Dict[str, Any]) -> str:
     """Phishing campaign narrative — credential harvesting and BEC focus."""
     actor     = _get_actor_display(item)
     ioc_count = len(item.get("iocs") or [])
-    kev       = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev       = _kev_confirmed(item)
     sectors   = _get_sector_context(item)
     kev_block = f"<div class='callout critical'>{_get_kev_context(kev)}</div>" if kev else ""
 
@@ -742,7 +768,7 @@ def _narrative_malware(item: Dict[str, Any]) -> str:
     title     = str(item.get("title") or "")
     actor     = _get_actor_display(item)
     ioc_count = len(item.get("iocs") or [])
-    kev       = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev       = _kev_confirmed(item)
     kev_block = f"<div class='callout critical'>{_get_kev_context(kev)}</div>" if kev else ""
 
     # Detect malware type from title
@@ -790,7 +816,14 @@ def _narrative_zero_day(item: Dict[str, Any]) -> str:
     product = _extract_product_from_title(title)
     ioc_count = len(item.get("iocs") or [])
     cvss    = item.get("cvss_score")
-    kev     = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev     = _kev_confirmed(item)
+    exploit_maturity = str(item.get("exploit_maturity") or "").upper()
+    # "zero-day" here is a topical classification (the source article's own
+    # framing, matched by title/description regex in classify_intelligence())
+    # -- it is NOT itself evidence of confirmed active exploitation. Only KEV
+    # confirmation or a validated WEAPONIZED/FUNCTIONAL exploit_maturity
+    # signal justifies asserting exploitation is actually happening.
+    exploitation_confirmed = kev or exploit_maturity in ("WEAPONIZED", "FUNCTIONAL")
     cvss_str = _get_cvss_context(cvss)
     kev_block = f"<div class='callout critical'>{_get_kev_context(kev)}</div>" if kev else (
         "<div class='callout critical'>"
@@ -800,14 +833,26 @@ def _narrative_zero_day(item: Dict[str, Any]) -> str:
         "Monitor vendor advisory channels for emergency patch release."
         "</div>"
     )
+    if exploitation_confirmed:
+        opening = (
+            f"This advisory documents a <strong>zero-day vulnerability</strong> in "
+            f"<strong>{_h(product)}</strong> with active exploitation confirmed before "
+            f"a vendor patch is available.{cvss_str} "
+            f"Zero-day exploitation windows are measured in hours — adversaries with "
+            f"prior knowledge of the vulnerability have already begun targeting exposed systems."
+        )
+    else:
+        opening = (
+            f"This advisory documents a <strong>zero-day vulnerability</strong> in "
+            f"<strong>{_h(product)}</strong> with no vendor patch currently available.{cvss_str} "
+            f"SENTINEL APEX has not independently confirmed active exploitation at this time — "
+            f"exposure reduction should not wait for that confirmation, since zero-day "
+            f"exploitation windows, once active, are measured in hours."
+        )
 
     return (
         f"<div class='apex-narrative'>"
-        f"<p>This advisory documents a <strong>zero-day vulnerability</strong> in "
-        f"<strong>{_h(product)}</strong> with active exploitation confirmed before "
-        f"a vendor patch is available.{cvss_str} "
-        f"Zero-day exploitation windows are measured in hours — adversaries with "
-        f"prior knowledge of the vulnerability have already begun targeting exposed systems.</p>"
+        f"<p>{opening}</p>"
         f"{kev_block}"
         f"<div class='apex-intel-grid'>"
         f"<div class='apex-intel-item'><span class='apex-label'>Exposure Reduction Priority</span>"
@@ -832,7 +877,7 @@ def _narrative_cve_rce(item: Dict[str, Any]) -> str:
     title     = str(item.get("title") or "")
     product   = _extract_product_from_title(title)
     ioc_count = len(item.get("iocs") or [])
-    kev       = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev       = _kev_confirmed(item)
     cvss      = item.get("cvss_score")
     cvss_str  = _get_cvss_context(cvss)
     kev_block = f"<div class='callout critical'>{_get_kev_context(kev)}</div>" if kev else ""
@@ -868,7 +913,7 @@ def _narrative_cve_auth_bypass(item: Dict[str, Any]) -> str:
     title    = str(item.get("title") or "")
     product  = _extract_product_from_title(title)
     ioc_count = len(item.get("iocs") or [])
-    kev      = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev      = _kev_confirmed(item)
     cvss     = item.get("cvss_score")
     cvss_str = _get_cvss_context(cvss)
     kev_block = f"<div class='callout critical'>{_get_kev_context(kev)}</div>" if kev else ""
@@ -905,7 +950,7 @@ def _narrative_cve_generic(item: Dict[str, Any]) -> str:
     title    = str(item.get("title") or "")
     product  = _extract_product_from_title(title)
     ioc_count = len(item.get("iocs") or [])
-    kev      = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev      = _kev_confirmed(item)
     cvss     = item.get("cvss_score")
     epss     = item.get("epss_score")
     sev      = str(item.get("severity") or "MEDIUM").upper()
@@ -963,7 +1008,7 @@ def _narrative_threat_intel(item: Dict[str, Any]) -> str:
     actor     = _get_actor_display(item)
     ioc_count = len(item.get("iocs") or [])
     feed      = str(item.get("feed_source") or "threat intelligence source")
-    kev       = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev       = _kev_confirmed(item)
     sectors   = _get_sector_context(item)
     sev       = str(item.get("severity") or "MEDIUM").upper()
     kev_block = f"<div class='callout critical'>{_get_kev_context(kev)}</div>" if kev else ""
@@ -1071,7 +1116,9 @@ def generate_context_aware_executive_summary(item: Dict[str, Any]) -> str:
         title    = str(item.get("title") or "Unknown Advisory")
         intel_class = item.get("_intel_class") or classify_intelligence(item)
         sev      = str(item.get("severity") or "HIGH").upper()
-        kev      = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+        kev      = _kev_confirmed(item)
+        exploit_maturity = str(item.get("exploit_maturity") or "").upper()
+        exploitation_confirmed = kev or exploit_maturity in ("WEAPONIZED", "FUNCTIONAL")
         cvss     = item.get("cvss_score")
         epss     = item.get("epss_score")
         risk     = float(item.get("risk_score") or 0)
@@ -1170,10 +1217,17 @@ def generate_context_aware_executive_summary(item: Dict[str, Any]) -> str:
                 f"Immediate identity telemetry review and tenant audit are required.{cve_str}"
             ),
             CLS_ZERO_DAY: (
-                f"CYBERDUDEBIVASH SENTINEL APEX has identified a <strong>{sev}</strong>-severity "
-                f"<strong>zero-day vulnerability</strong> with active exploitation confirmed "
-                f"before a vendor patch is available.{cve_str} "
-                f"The exploitation window is open now — immediate exposure reduction is the only available defence."
+                (
+                    f"CYBERDUDEBIVASH SENTINEL APEX has identified a <strong>{sev}</strong>-severity "
+                    f"<strong>zero-day vulnerability</strong> with active exploitation confirmed "
+                    f"before a vendor patch is available.{cve_str} "
+                    f"The exploitation window is open now — immediate exposure reduction is the only available defence."
+                ) if exploitation_confirmed else (
+                    f"CYBERDUDEBIVASH SENTINEL APEX has identified a <strong>{sev}</strong>-severity "
+                    f"<strong>zero-day vulnerability</strong> with no vendor patch currently available.{cve_str} "
+                    f"Active exploitation has not been independently confirmed at this time — "
+                    f"exposure reduction should not wait for that confirmation."
+                )
             ),
             CLS_CVE_RCE: (
                 f"CYBERDUDEBIVASH SENTINEL APEX has identified a <strong>{sev}</strong>-severity "
