@@ -6296,6 +6296,11 @@
                 if(!s) return '';
                 return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
             }
+            // Exposed globally so other, independently-scoped <script> IIFEs
+            // later in this document (which execute after this one, in
+            // source order) can reuse this single implementation instead of
+            // each defining their own copy.
+            window._hEsc = _hEsc;
             // ── Ticker helpers ──────────────────────────────────────────────
             function buildTicker(items){
                 var ticker = document.getElementById('eicc-ticker-inner');
@@ -6991,12 +6996,10 @@
             // "ReferenceError: _hEsc is not defined" and aborted the rest of this
             // IIFE -- _loadAll(1) and the auto-refresh setInterval below were
             // never reached, so this feature never even attempted a live fetch,
-            // regardless of network/CSP conditions. Local helper, matching the
-            // same escaping convention used elsewhere in this codebase.
-            function _hEsc(s){
-                if(!s) return '';
-                return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
-            }
+            // regardless of network/CSP conditions. Reuses the eiccEngine IIFE's
+            // implementation (exposed via window._hEsc, that script block runs
+            // earlier in document order) instead of maintaining a second copy.
+            var _hEsc = window._hEsc;
             var PROXY_CHAIN = [
                 function(u) { return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u); },
                 function(u) { return 'https://corsproxy.io/?' + encodeURIComponent(u); },
