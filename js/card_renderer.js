@@ -320,9 +320,14 @@
         <div class="sapx-intel-cell">
           <div class="sapx-ic-label">IOC COUNT</div>
           <div class="sapx-ic-val">
-            <span class="sapx-ioc-num">${esc(String(item.ioc_count))}</span>
+            <!-- P0 FIX: bare "4" immediately adjacent to "97% conf" reads as
+                 "497% conf" at a glance (verified live, e.g. ioc_count:4 +
+                 ioc_confidence:97). An explicit unit suffix on the count plus
+                 a visible separator before the percentage prevents the two
+                 numbers from being misread as one. -->
+            <span class="sapx-ioc-num">${esc(String(item.ioc_count))} IOC${item.ioc_count === 1 ? "" : "s"}</span>
             ${item.ioc_count > 0
-              ? `<span class="sapx-ioc-conf">${esc(item.ioc_confidence.toFixed(0))}% conf</span>`
+              ? `<span class="sapx-ioc-sep">&middot;</span><span class="sapx-ioc-conf">${esc(item.ioc_confidence.toFixed(0))}% conf</span>`
               : `<span class="sapx-ioc-none">No IOCs</span>`}
           </div>
         </div>

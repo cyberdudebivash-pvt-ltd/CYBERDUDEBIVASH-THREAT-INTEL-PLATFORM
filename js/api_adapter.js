@@ -498,11 +498,23 @@
   }
 
   /* ── VALIDATION STATUS ─────────────────────────────────────────────────── */
+  // P0 FIX: live api/feed.json emits "ok" and "enriched" as its actual
+  // validation_status values (verified: 121/182 "ok", 50/182 "enriched",
+  // 11/182 missing, 0/182 the literal "valid"/"invalid" this function
+  // recognized) -- every genuinely validated/enriched production record was
+  // falling through to the "? PENDING" branch, permanently misrepresenting
+  // completed intelligence as still-in-progress on the customer-facing trust
+  // badge (js/card_renderer.js renderTrustFooter()). "ok"/"enriched" both
+  // indicate the pipeline's validation step completed successfully. A
+  // genuinely missing/unrecognized value now renders UNKNOWN --
+  // css/card_renderer_styles.css already defines .sapx-val-unknown, unused
+  // until now -- rather than "PENDING", which falsely implies resolution is
+  // imminent for a value that may simply never be populated for this record.
   function buildValidationStatus(raw) {
     const s = _str(raw, "").toLowerCase();
-    if (s === "valid")   return { label: "✓ VALID",   color: "#22c55e", class: "valid"   };
+    if (s === "valid" || s === "ok" || s === "enriched") return { label: "✓ VALID",   color: "#22c55e", class: "valid"   };
     if (s === "invalid") return { label: "✗ INVALID", color: "#ef4444", class: "invalid" };
-    return                      { label: "? PENDING", color: "#f59e0b", class: "pending" };
+    return                      { label: "? UNKNOWN", color: "#64748b", class: "unknown" };
   }
 
   /* ── MAIN ITEM NORMALIZER ──────────────────────────────────────────────── */
@@ -547,7 +559,19 @@
     const stixShort = stixId.substring(0, 16);
     const sev       = normalizeSeverity(raw.severity);
     const sevColors = getSeverityColors(sev);
-    const conf      = _num(raw.confidence, 0);
+    // P0 FIX: raw.confidence is stored as a 0-1 fraction (verified live:
+    // confidence:0.2 alongside confidence_score:24.3 on the same record) but
+    // was being read directly into `conf`, which is later formatted as a
+    // percentage (`conf.toFixed(1) + "%"` below) -- rendering "0.2%" for a
+    // genuine ~20-24% confidence value on every live record. The pipeline
+    // emits a dedicated 0-100-scale `confidence_score` field for this exact
+    // purpose; prefer it when present. When absent, normalize the legacy
+    // fraction field using the same mixed-scale pattern already established
+    // in buildEpssScore() above (n > 1.0 ? n : n * 100 -- treat a value over
+    // 1.0 as already a percentage).
+    const confScoreRaw = _nullableNum(raw.confidence_score);
+    const confFrac  = _num(raw.confidence, 0);
+    const conf      = confScoreRaw !== null ? confScoreRaw : (confFrac > 1.0 ? confFrac : confFrac * 100);
     const confTier  = normalizeConfidence(conf);
     const aa        = _obj(raw.apex_ai);
     const apexObj   = _obj(raw.apex);
@@ -804,6 +828,7 @@
     normalizeSocPriority:         normalizeSocPriority,
     getSocPriorityMeta:           getSocPriorityMeta,
     normalizeConfidence:          normalizeConfidence,
+    buildValidationStatus:        buildValidationStatus,
     formatTimestamp:              formatTimestamp,
     relativeTime:                 relativeTime,
   };
