@@ -1,7 +1,13 @@
 # ============================================================================
 # CYBERDUDEBIVASH(R) SENTINEL APEX -- SBOM Generation
-# v47.6 -- P0 fix: Replace curl|sh Syft/Grype installers with Anchore's
-#          maintained download-syft / download-grype GitHub Actions
+# v47.7 -- P0 fix: Restore 3-attempt retry (30/60s backoff) around the
+#          v47.6 Anchore download-syft/download-grype actions -- confirmed
+#          live (run #339) that those actions have no retry logic of their
+#          own and fail immediately on a single transient HTTP 503 from
+#          GitHub's release-asset CDN. Implemented via GitHub Actions'
+#          native continue-on-error + conditional-step retry idiom, since
+#          `uses:` steps cannot be wrapped by nick-fields/retry (verified:
+#          shell-command-only) or looped inline in bash.
 #
 # BUG FIX HISTORY:
 #
@@ -283,14 +289,72 @@ jobs:
       # attempts (transient GitHub CDN/release-API outage). Replaced with
       # Anchore's maintained download-syft GitHub Action, which installs via
       # GitHub Actions' own toolcache/download path instead of a piped shell
-      # script -- eliminating this exact failure surface. Same SYFT_VERSION
-      # pin (v1.3.0) preserved; syft is invoked via the action's `cmd` output
-      # per its documented usage, not a bare `syft` on PATH.
-      - name: Install Syft
+      # script -- eliminating the ORIGINAL failure surface (install.sh's own
+      # multi-round-trip tag resolution). Same SYFT_VERSION pin (v1.3.0)
+      # preserved; syft is invoked via the action's `cmd` output per its
+      # documented usage, not a bare `syft` on PATH.
+      #
+      # v47.7 FIX (run #339, 2026-08-12): the Anchore action itself has NO
+      # retry logic -- confirmed live: run #339's Grype install (same action
+      # family, same v47.6 fix) failed on a single HTTP 503 from
+      # github.com/.../releases/download/, right after this Syft step
+      # succeeded in the same run. `uses:` steps can't be wrapped by
+      # nick-fields/retry (shell-command-only, verified) or looped inline in
+      # bash, so this restores the same 3-attempt/30s-60s-backoff resilience
+      # v47.4 proved effective, applied to the action invocation itself via
+      # GitHub Actions' native continue-on-error + conditional-step idiom.
+      # Applied to both Syft and Grype for the identical, symmetric risk.
+      - name: Install Syft (attempt 1)
+        id: syft-1
+        continue-on-error: true
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-        id: syft-install
         with:
           syft-version: v1.3.0
+
+      - name: Wait before Syft retry 1
+        if: steps.syft-1.outcome == 'failure'
+        run: |
+          echo "::warning::[syft-install] Attempt 1 failed, sleeping 30s..."
+          sleep 30
+
+      - name: Install Syft (attempt 2)
+        id: syft-2
+        if: steps.syft-1.outcome == 'failure'
+        continue-on-error: true
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          syft-version: v1.3.0
+
+      - name: Wait before Syft retry 2
+        if: steps.syft-1.outcome == 'failure' && steps.syft-2.outcome == 'failure'
+        run: |
+          echo "::warning::[syft-install] Attempt 2 failed, sleeping 60s..."
+          sleep 60
+
+      - name: Install Syft (attempt 3)
+        id: syft-3
+        if: steps.syft-1.outcome == 'failure' && steps.syft-2.outcome == 'failure'
+        continue-on-error: true
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          syft-version: v1.3.0
+
+      - name: Resolve Syft install result
+        id: syft-install
+        run: |
+          if [ "${{ steps.syft-1.outcome }}" = "success" ]; then
+            echo "cmd=${{ steps.syft-1.outputs.cmd }}" >> "$GITHUB_OUTPUT"
+            echo "[syft-install] Success on attempt 1"
+          elif [ "${{ steps.syft-2.outcome }}" = "success" ]; then
+            echo "cmd=${{ steps.syft-2.outputs.cmd }}" >> "$GITHUB_OUTPUT"
+            echo "[syft-install] Success on attempt 2"
+          elif [ "${{ steps.syft-3.outcome }}" = "success" ]; then
+            echo "cmd=${{ steps.syft-3.outputs.cmd }}" >> "$GITHUB_OUTPUT"
+            echo "[syft-install] Success on attempt 3"
+          else
+            echo "::error::[syft-install] All 3 attempts failed. GitHub release CDN unavailable."
+            exit 1
+          fi
 
       - name: Generate Docker SBOM (CycloneDX + SPDX)
         run: |
@@ -328,11 +392,66 @@ jobs:
       # underlying fragility rather than removing it. Anchore's maintained
       # download-grype action removes the same piped-shell-script dependency.
       # GRYPE_VERSION pin (v0.87.0) preserved unchanged.
-      - name: Install Grype
+      #
+      # v47.7 FIX (run #339, 2026-08-12): CONFIRMED LIVE -- this exact step
+      # (the v47.6 action-based install, no retry loop) failed with a single
+      # HTTP 503 from github.com/anchore/grype/releases/download/..., right
+      # after Install Syft succeeded in the same run using the identical
+      # action family. See the v47.7 note on Install Syft above for why the
+      # fix is a native continue-on-error + conditional-step retry (3
+      # attempts, 30/60s backoff) rather than a wrapper action -- applied
+      # here symmetrically.
+      - name: Install Grype (attempt 1)
+        id: grype-1
+        continue-on-error: true
         uses: anchore/scan-action/download-grype@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
-        id: grype-install
         with:
           grype-version: v0.87.0
+
+      - name: Wait before Grype retry 1
+        if: steps.grype-1.outcome == 'failure'
+        run: |
+          echo "::warning::[grype-install] Attempt 1 failed, sleeping 30s..."
+          sleep 30
+
+      - name: Install Grype (attempt 2)
+        id: grype-2
+        if: steps.grype-1.outcome == 'failure'
+        continue-on-error: true
+        uses: anchore/scan-action/download-grype@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          grype-version: v0.87.0
+
+      - name: Wait before Grype retry 2
+        if: steps.grype-1.outcome == 'failure' && steps.grype-2.outcome == 'failure'
+        run: |
+          echo "::warning::[grype-install] Attempt 2 failed, sleeping 60s..."
+          sleep 60
+
+      - name: Install Grype (attempt 3)
+        id: grype-3
+        if: steps.grype-1.outcome == 'failure' && steps.grype-2.outcome == 'failure'
+        continue-on-error: true
+        uses: anchore/scan-action/download-grype@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          grype-version: v0.87.0
+
+      - name: Resolve Grype install result
+        id: grype-install
+        run: |
+          if [ "${{ steps.grype-1.outcome }}" = "success" ]; then
+            echo "cmd=${{ steps.grype-1.outputs.cmd }}" >> "$GITHUB_OUTPUT"
+            echo "[grype-install] Success on attempt 1"
+          elif [ "${{ steps.grype-2.outcome }}" = "success" ]; then
+            echo "cmd=${{ steps.grype-2.outputs.cmd }}" >> "$GITHUB_OUTPUT"
+            echo "[grype-install] Success on attempt 2"
+          elif [ "${{ steps.grype-3.outcome }}" = "success" ]; then
+            echo "cmd=${{ steps.grype-3.outputs.cmd }}" >> "$GITHUB_OUTPUT"
+            echo "[grype-install] Success on attempt 3"
+          else
+            echo "::error::[grype-install] All 3 attempts failed. GitHub release CDN unavailable."
+            exit 1
+          fi
 
       # v48.0 FIX: Run Grype with .grype.yaml policy.
       # Policy: fail only on CRITICAL CVEs that have an available fix.
