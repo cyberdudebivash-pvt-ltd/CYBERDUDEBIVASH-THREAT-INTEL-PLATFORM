@@ -35,6 +35,17 @@ log = logging.getLogger("persistent_campaign_graph")
 
 _VERSION = "1.0.0"
 
+# bool(item.get("kev") or ...) below misreads a legacy string value like
+# "NO"/"false" as KEV-confirmed. Reuse the canonical parser already fixed
+# for this defect class in context_aware_narrative_engine.py rather than
+# re-deriving it here. Optional import (never raises) so a knowledge-graph
+# feature can't take down report generation if the sibling module changes.
+try:
+    from context_aware_narrative_engine import _kev_confirmed as _kev_confirmed_check
+except Exception:
+    def _kev_confirmed_check(item: Dict[str, Any]) -> bool:
+        return False
+
 # ---------------------------------------------------------------------------
 # Graph Node + Edge Schemas
 # ---------------------------------------------------------------------------
@@ -331,7 +342,7 @@ class CampaignGraph:
                 stix_id=advisory_id,
                 severity=_safe_str(item.get("severity")),
                 risk_score=item.get("risk_score"),
-                kev=bool(item.get("kev") or item.get("in_kev") or item.get("kev_present")),
+                kev=_kev_confirmed_check(item),
                 date=dt.isoformat() if dt else None,
                 source=_safe_str(item.get("source") or item.get("feed_source"), 80),
             )
@@ -360,7 +371,7 @@ class CampaignGraph:
             for cve_id in cve_ids[:20]:  # cap per advisory
                 cve_node_id = _node_id(NODE_CVE, cve_id)
                 self._add_node(NODE_CVE, cve_node_id, label=cve_id,
-                                kev=bool(item.get("kev") or item.get("kev_present")))
+                                kev=_kev_confirmed_check(item))
                 self._add_edge(adv_node_id, EDGE_EXPLOITS_CVE, cve_node_id,
                                 advisory_id=advisory_id)
                 self._cve_index[cve_id].append(adv_node_id)
