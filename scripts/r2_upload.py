@@ -408,6 +408,20 @@ def main() -> None:
     #   2. --size-only skips per-file MD5 checksum (reports already in R2 skip fast)
     #   3. subprocess timeout=2700 (45 min) -- non-fatal hard cap, pipeline continues
     #
+    # v184.2 FIX (P0): --size-only silently skips re-uploading a report whose
+    # content changed but total byte size happened to land close enough to the
+    # previous upload -- confirmed live: a report-template/content fix (RX-PR1)
+    # was merged, the regenerated local HTML was provably correct (verified via
+    # direct CLI reproduction), but the R2-served page kept serving pre-fix
+    # content indefinitely because size-only sync saw "no size delta" and never
+    # re-uploaded it. There is no bounded, safe way to re-derive which past
+    # syncs were silently skipped -- so this reverts to real content comparison
+    # (MD5-based, awscli's sync default) for the reports sync only. Accepted
+    # cost: sync duration returns toward the pre-v143.5.1 measured ~35 min for
+    # the full report corpus at 50 concurrent requests, within the existing
+    # 45-min non-fatal timeout (unchanged) -- a partial/timed-out sync still
+    # leaves existing R2 content valid and retries whole-corpus on the next run.
+    #
     # Credentials: uses dedicated CF_R2_REPORTS_KEY_ID / CF_R2_REPORTS_SECRET_KEY
     # for sentinel-apex-reports bucket (scoped R2 token, injected via step-level env).
     # Falls back to job-level AWS credentials if per-bucket secrets absent.
@@ -415,7 +429,7 @@ def main() -> None:
     if reports_dir.is_dir() and any(reports_dir.rglob("*.html")):
         log.info("Uploading HTML reports to R2 (sentinel-apex-reports)...")
         log.info(
-            "Performance: 50 concurrent requests, --size-only, 45-min hard timeout."
+            "Performance: 50 concurrent requests, full content comparison, 45-min hard timeout."
         )
 
         # Swap in per-bucket credentials if available
@@ -436,7 +450,7 @@ def main() -> None:
                 "reports/", BUCKET_REPORTS, "reports/", endpoint,
                 content_type="text/html; charset=utf-8",
                 cache_control="public, max-age=300",
-                size_only=True,                       # Skip MD5 -- use file size comparison
+                size_only=False,                      # v184.2: real content comparison -- see fix note above
                 timeout_seconds=REPORTS_SYNC_TIMEOUT_SECONDS,  # 45-min hard cap
             )
         finally:
@@ -503,7 +517,7 @@ def main() -> None:
         "source":           "sentinel-blogger",
         "pipeline_version": PIPELINE_VERSION,
         "run_id":           os.environ.get("GITHUB_RUN_ID", "local"),
-        "p0_fix":           "v143.5.1 -- r2_timeout_fix, awscli_perf, size_only_sync",
+        "p0_fix":           "v184.2 -- r2_timeout_fix, awscli_perf, full_content_sync",
     }
     sync_meta_path = "/tmp/sync_meta.json"
     with open(sync_meta_path, "w", encoding="utf-8") as fh:
