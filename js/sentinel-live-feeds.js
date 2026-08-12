@@ -618,8 +618,25 @@
   // ── 13. Reports Archive ───────────────────────────────────────────────────────
   async function loadReports() {
     const data = await apiFetch("/api/reports/index.json");
+    if (!data) return;
+
+    // P0 FIX: cdbBuildReportUrl() (index.html) is the single canonical
+    // report-link resolver used by the TOP10 feed and card renderers, but it
+    // only ever trusts report_url/internal_report_url on the feed item
+    // itself -- fields written by a separate sync step (sync_report_urls.py)
+    // that can lag or miss an item. A report can therefore already exist and
+    // be customer-ready in the backend's own report registry while the feed
+    // item's own fields are still empty, rendering a real report as
+    // UNAVAILABLE. This registry (built from the same /api/reports/index.json
+    // this function already fetches for the Reports Archive panel) gives
+    // cdbBuildReportUrl() a same-origin fallback lookup by id, independent of
+    // whether that DOM panel exists on the current page.
+    const registry = {};
+    (data.reports || []).forEach(r => { if (r && r.id && r.url) registry[r.id] = r.url; });
+    window._cdbReportRegistry = registry;
+
     const container = qs(".reports-list, #reports-list, [data-section='reports']");
-    if (!container || !data) return;
+    if (!container) return;
 
     const reports = (data.reports || []).slice(0, 10);
     if (!reports.length) {
@@ -648,49 +665,56 @@
   }
 
   // ── 14. IOC Lookup ────────────────────────────────────────────────────────────
-  function initIOCLookup() {
-    const inputs   = qsAll(".ioc-input, #ioc-input, input[type='text'][placeholder*='IP']");
-    const buttons  = qsAll(".ioc-scan, #ioc-scan, button[data-action='scan']");
-    const results  = qsAll(".ioc-results, #ioc-results, [data-ioc='results']");
-
-    async function doLookup(query) {
-      if (!query || query.trim().length < 2) return;
-      results.forEach(r => { r.innerHTML = `<div style="color:#888;">Scanning for "${query}"...</div>`; });
-      const data = await apiFetch(`/api/v1/ioc/lookup?q=${encodeURIComponent(query)}`);
-      if (!data) {
-        results.forEach(r => { r.innerHTML = `<div style="color:#ff4444;">Lookup failed — API unavailable</div>`; });
-        return;
-      }
-      if (!data.found || !data.results.length) {
-        results.forEach(r => {
-          r.innerHTML = `<div style="color:#888; padding:8px;">
-            No matches for "${query}" in ${(data.total_iocs_checked || 0).toLocaleString()} IOCs
-          </div>`;
-        });
-        return;
-      }
-      const html = data.results.map(r => `
-        <div style="padding:6px 8px; margin-bottom:4px; background:rgba(255,136,0,0.1);
-          border-left:3px solid #ff8800; border-radius:3px; font-size:12px;">
-          <div style="font-weight:bold; color:#ff8800;">${r.severity} — RISK ${fmtRisk(r.risk_score)}</div>
-          <div style="color:#e0e0e0;">${r.title}</div>
-          <div style="color:#888; font-size:11px; margin-top:2px;">
-            IOCs: ${r.ioc_count || 0} · ${r.source} · ${fmtRelTime(r.published)}
-          </div>
-        </div>
-      `).join("");
-      results.forEach(r => { r.innerHTML = html; });
+  // P0 FIX: index.html's GADGET 3 markup calls window.CDB_GADGETS.iocLookup()
+  // directly from inline onclick/onkeydown handlers (#cdb-ioc-query,
+  // #cdb-ioc-btn) -- that namespace was never defined anywhere in the
+  // codebase, so every click/Enter threw "CDB_GADGETS is not defined" and the
+  // feature was 100% non-functional. This wires the same real, already-tested
+  // /api/v1/ioc/lookup endpoint to the real DOM ids.
+  async function doIOCLookup() {
+    const input = el("cdb-ioc-query");
+    const result = el("cdb-ioc-result");
+    const query = input ? input.value : "";
+    if (!result) return;
+    if (!query || query.trim().length < 2) {
+      result.className = "cdb-ioc-result wait";
+      result.textContent = "Enter at least 2 characters to scan.";
+      return;
     }
+    result.className = "cdb-ioc-result wait";
+    result.textContent = `Scanning for "${query}"...`;
+    const data = await apiFetch(`/api/v1/ioc/lookup?q=${encodeURIComponent(query)}`);
+    if (!data) {
+      result.className = "cdb-ioc-result wait";
+      result.textContent = "Lookup failed — IOC lookup API unavailable";
+      return;
+    }
+    if (!data.found || !(data.results || []).length) {
+      result.className = "cdb-ioc-result miss";
+      result.textContent = `No matches for "${query}" in ${(data.total_iocs_checked || 0).toLocaleString()} IOCs`;
+      return;
+    }
+    result.className = "cdb-ioc-result hit";
+    result.innerHTML = data.results.map(r => `
+      <div style="padding:6px 8px; margin-bottom:4px; background:rgba(255,136,0,0.1);
+        border-left:3px solid #ff8800; border-radius:3px; font-size:12px; text-align:left;">
+        <div style="font-weight:bold; color:#ff8800;">${esc(r.severity)} — RISK ${fmtRisk(r.risk_score)}</div>
+        <div style="color:#e0e0e0;">${esc(r.title)}</div>
+        <div style="color:#888; font-size:11px; margin-top:2px;">
+          IOCs: ${r.ioc_count || 0} · ${esc(r.source)} · ${fmtRelTime(r.published)}
+        </div>
+      </div>
+    `).join("");
+  }
 
-    inputs.forEach(inp => {
-      inp.addEventListener("keydown", e => { if (e.key === "Enter") doLookup(inp.value); });
-    });
-    buttons.forEach(btn => {
-      btn.addEventListener("click", () => {
-        const q = (inputs[0] || {}).value || "";
-        doLookup(q);
-      });
-    });
+  function initIOCLookup() {
+    window.CDB_GADGETS = window.CDB_GADGETS || {};
+    window.CDB_GADGETS.iocLookup = doIOCLookup;
+
+    const totalEl = el("cdb-ioc-total");
+    if (totalEl && window._apexStats && window._apexStats.total_iocs != null) {
+      totalEl.textContent = Number(window._apexStats.total_iocs).toLocaleString();
+    }
   }
 
   // ── 15. NEXUS Stats Panel ─────────────────────────────────────────────────────
