@@ -22,6 +22,64 @@ live-production evidence):
   Metasploit module") purely from EPSS >= 50%, with zero actual exploit-code
   evidence. Live sample: all 10 current FUNCTIONAL items had
   metasploit_available:false, poc_github_count:0.
+
+- scripts/exploit_maturity_enricher.py's _determine_maturity() also ignored
+  kev_present/in_kev entirely and read only kev/KEV/cisa_kev without the
+  kev_present-takes-precedence rule _kev_confirmed() already established in
+  the sibling file -- so {"kev_present": True} (no legacy kev field) fell
+  through to UNPROVEN, and {"kev_present": False, "kev": "YES"} (a stale
+  legacy field disagreeing with the authoritative boolean) was wrongly
+  classified WEAPONIZED. Fixed via the new local _kev_evidence_confirmed(),
+  mirroring _kev_confirmed()'s precedence rules.
+
+PR-E2 change-control summary (CYBERDUDEBIVASH SENTINEL APEX Engineering
+Constitution, Proof Before Change):
+
+  Objective                 Stop the content pipeline from asserting
+                             "active exploitation confirmed" without KEV or
+                             evidenced exploit-maturity backing it, and stop
+                             exploit_maturity:FUNCTIONAL from being inferred
+                             from EPSS alone.
+  Affected files             scripts/context_aware_narrative_engine.py,
+                             scripts/exploit_maturity_enricher.py,
+                             tests/test_narrative_evidence_grounding.py (new)
+  Existing engine reused      None re-implemented -- consumes the same
+                             kev_present/kev/exploit_maturity fields the
+                             pipeline already writes; mirrors (does not
+                             import, to avoid a cross-module coupling wider
+                             than this fix needs) the KEV-precedence pattern
+                             CDB_NORMALIZE.kevState() established on the
+                             frontend in PR-E1.
+  Evidence modification required  PHASE0_SEMANTIC_INTEGRITY_REPORT.md rows
+                             26-28, re-verified this session with exact
+                             file:line citations and one live, public,
+                             self-contradicting report page (cited above).
+  Risk classification         MEDIUM. Backend content-generation pipeline
+                             (sentinel-blogger.yml), 16 downstream consumers
+                             of exploit_maturity verified to only check
+                             value membership (no distribution/count
+                             assertions broken by values becoming more
+                             accurate). No frontend/schema/route/auth
+                             changes.
+  Regression risk             exploit_maturity FUNCTIONAL/POC counts
+                             decrease (only genuinely evidenced items
+                             qualify now) -- intended, not a regression.
+                             Applies to newly generated content only; does
+                             not retroactively rewrite already-published
+                             report HTML.
+  Rollback plan                Revert this PR's single commit; both files
+                             return to their prior state; exploit_maturity
+                             remains the same string field/enum, no data
+                             migration needed.
+
+Reuse Report: 0 duplicate engines introduced, 0 duplicate routes (none
+touched), backward compatibility preserved (exploit_maturity's possible
+values are unchanged; only which items qualify became more accurate),
+certification chain intact (p33 WORLDWIDE_RELEASE, 0 blockers, re-run after
+these changes), regression suite 21/21 PASS
+(scripts/regression_tests.py), full existing pytest suite unaffected
+(1007/1007 pre-existing passing tests still pass; 19 pre-existing failures
+are unrelated environment/dependency gaps in this container).
 """
 import pytest
 
@@ -149,6 +207,20 @@ class TestExploitMaturityEvidenceOnly:
     def test_kev_yields_weaponized(self):
         item = {"kev": "YES", "cve_ids": ["CVE-2026-1"]}
         assert _determine_maturity(item, {"poc_count": 0}, set()) == "WEAPONIZED"
+
+    def test_kev_present_true_yields_weaponized_with_no_legacy_field(self):
+        """CodeRabbit-flagged regression: a clean kev_present:True with no
+        legacy kev/KEV/cisa_kev string field must not fall through to
+        UNPROVEN."""
+        item = {"kev_present": True, "cve_ids": ["CVE-2026-1"]}
+        assert _determine_maturity(item, {"poc_count": 0}, set()) == "WEAPONIZED"
+
+    def test_kev_present_false_overrides_disagreeing_legacy_kev_string(self):
+        """CodeRabbit-flagged regression: kev_present:False (the
+        authoritative boolean) must override a stale/wrong legacy kev:"YES"
+        string, not get promoted to WEAPONIZED."""
+        item = {"kev_present": False, "kev": "YES", "cve_ids": ["CVE-2026-1"]}
+        assert _determine_maturity(item, {"poc_count": 0}, set()) == "UNPROVEN"
 
     def test_metasploit_module_yields_functional(self):
         item = {"cve_ids": ["CVE-2026-1"]}
