@@ -20097,6 +20097,17 @@ a:focus-visible {
   function txt(id,v){var e=sel(id);if(e)e.textContent=v;}
   function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+  /* First finite numeric value among candidates, falling back to `dflt` only
+     when none of them are usable -- `a||b||dflt` would wrongly replace a
+     legitimate 0 with the next candidate, skewing anomaly mean/variance and
+     SOC composite scores for genuinely zero-risk items. */
+  function firstScore(candidates,dflt){
+    for(var i=0;i<candidates.length;i++){
+      var n=parseFloat(candidates[i]);
+      if(Number.isFinite(n))return n;
+    }
+    return dflt;
+  }
 
   /* ── Severity palette ──────────────────────────────────────────────────── */
   var SEV={CRITICAL:'#ef4444',HIGH:'#f97316',MEDIUM:'#f59e0b',LOW:'#6b7280',INFO:'#3b82f6'};
@@ -20165,7 +20176,11 @@ a:focus-visible {
          backend's internal "CDB-UNATTR-*" placeholder meaning "not attributed" --
          showing that raw token as if it were a group name would mislead customers,
          so it is normalized to the same UNKNOWN ACTOR bucket as a null actor. */
-      var rawActor=t.primary_actor||t.actor_display_name||t.mitre_group_name||t.actor||'';
+      var actorCandidates=[t.primary_actor,t.actor_display_name,t.mitre_group_name,t.actor];
+      var rawActor='';
+      for(var ai=0;ai<actorCandidates.length;ai++){
+        if(typeof actorCandidates[ai]==='string'&&actorCandidates[ai]){rawActor=actorCandidates[ai];break;}
+      }
       if(/^CDB-UNATTR-/.test(rawActor))rawActor='';
       var actor=(rawActor||'UNKNOWN ACTOR').toUpperCase().trim();
       if(!map[actor]){
@@ -20188,7 +20203,8 @@ a:focus-visible {
       if(t.exploit_maturity==='WEAPONIZED'||t.exploit_maturity==='FUNCTIONAL')c.exploitActive++;
       if(t.exploit_maturity==='WEAPONIZED')c.zerodays++;
       if(Array.isArray(t.actor_sectors))t.actor_sectors.forEach(function(sec){if(sec)c.sectors.add(sec);});
-      (t.mitre_tactics||t.ttps||[]).forEach(function(tt){if(tt&&tt.tactic)c.tactics.add(tt.tactic);});
+      var tacticsSrc=Array.isArray(t.mitre_tactics)?t.mitre_tactics:(Array.isArray(t.ttps)?t.ttps:[]);
+      tacticsSrc.forEach(function(tt){if(tt&&tt.tactic)c.tactics.add(tt.tactic);});
       var d=t.date||t.discovered||null;
       if(d){
         if(!c.firstSeen||d<c.firstSeen)c.firstSeen=d;
@@ -20227,13 +20243,13 @@ a:focus-visible {
        exploit_maturity -- priority_score, cvss, kev, cisa_kev and the
        ACTIVE_CONFIRMED/ZERO_DAY exploit_status vocabulary never exist on a
        live item. */
-    var scores=intel.map(function(t){return parseFloat(t.risk_score||t.cvss_score||5);});
+    var scores=intel.map(function(t){return firstScore([t.risk_score,t.cvss_score],5);});
     var mean=scores.reduce(function(a,b){return a+b;},0)/scores.length;
     var variance=scores.reduce(function(a,v){return a+(v-mean)*(v-mean);},0)/scores.length;
     var std=Math.sqrt(variance)||1;
 
     var anomalies=intel.map(function(t,idx){
-      var score=parseFloat(t.risk_score||t.cvss_score||5);
+      var score=firstScore([t.risk_score,t.cvss_score],5);
       var zScore=Math.abs(score-mean)/std;
       /* Boost for KEV, zero-day, active exploit */
       var boost=0;
@@ -20368,7 +20384,7 @@ a:focus-visible {
       })
       .map(function(t){
         var kevConfirmed=window.CDB_NORMALIZE.kevState(t)===true;
-        var score=parseFloat(t.risk_score||t.cvss_score||0);
+        var score=firstScore([t.risk_score,t.cvss_score],0);
         var urgency=t.exploit_maturity==='WEAPONIZED'?'IMMEDIATE'
           :kevConfirmed?'CRITICAL'
           :score>=9?'CRITICAL'

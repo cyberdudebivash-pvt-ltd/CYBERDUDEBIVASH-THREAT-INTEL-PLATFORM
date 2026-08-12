@@ -190,8 +190,8 @@ async function runEpssWidgetDomScenario(browser) {
     domText.includes('42.0%') && domText.includes('87.0%') && !domText.includes('9.01') && !domText.includes('8.86'),
     `domText="${domText.slice(0, 200)}"`);
 
-  record('EPSS widget honestly shows "EPSS N/A" for the item whose real epss_score is 0 (a valid zero-probability reading, not an error, but distinct from the two nonzero ones)',
-    domText.includes('KEV') , // CVE-2026-68820 (epss_score:0, kev_present:true) should still render with a KEV badge
+  record('EPSS widget shows 0.0% for a valid zero-probability EPSS value, not "EPSS N/A" (0 is a real reading, not an error) -- and CVE-2026-68820 (epss_score:0, kev_present:true) still renders its KEV badge',
+    domText.includes('0.0%') && domText.includes('KEV'),
     `domText="${domText.slice(0, 300)}"`);
 
   await context.close();

@@ -31,10 +31,24 @@
   'use strict';
 
   function normalizeEpss(raw) {
-    if (raw === null || raw === undefined || raw === '') {
+    if (raw === null || raw === undefined) {
       return { probability: null, percent: null, state: 'UNKNOWN' };
     }
-    var n = typeof raw === 'number' ? raw : parseFloat(raw);
+    var n;
+    if (typeof raw === 'number') {
+      n = raw;
+    } else if (typeof raw === 'string') {
+      var trimmed = raw.trim();
+      if (trimmed === '') {
+        return { probability: null, percent: null, state: 'UNKNOWN' };
+      }
+      // Strict numeric conversion -- parseFloat("42invalid") would silently
+      // return 42 and mark a malformed value OK. Number() rejects any
+      // trailing non-numeric characters.
+      n = Number(trimmed);
+    } else {
+      n = NaN;
+    }
     if (!Number.isFinite(n) || n < 0 || n > 100) {
       return { probability: null, percent: null, state: 'INVALID' };
     }

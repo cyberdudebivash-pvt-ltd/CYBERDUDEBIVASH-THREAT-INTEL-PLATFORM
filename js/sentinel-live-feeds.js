@@ -471,7 +471,7 @@
             background:${severityColor(c.severity)}; border-radius:3px;"></div>
         </div>
         <span style="width:52px; text-align:right; color:${severityColor(c.severity)};">${epssLabel}</span>
-        ${c.kev_present ? '<span style="color:#ff4444; font-size:10px; padding:1px 4px; border:1px solid #ff444444; border-radius:2px;">KEV</span>' : ""}
+        ${window.CDB_NORMALIZE.kevState(c) === true ? '<span style="color:#ff4444; font-size:10px; padding:1px 4px; border:1px solid #ff444444; border-radius:2px;">KEV</span>' : ""}
       </div>
     `;
     }).join("");

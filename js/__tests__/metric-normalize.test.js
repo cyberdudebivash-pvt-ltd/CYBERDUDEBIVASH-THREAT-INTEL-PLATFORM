@@ -64,6 +64,20 @@ test("epss(): NaN / non-numeric string -> INVALID, never silently clamped", () =
   assert.equal(r.probability, null);
 });
 
+test("epss(): partially-numeric strings (e.g. '42invalid') -> INVALID, never truncated to a plausible number", () => {
+  // parseFloat("42invalid") === 42, which would silently mark a malformed
+  // value OK. Number("42invalid") is NaN, correctly rejecting it.
+  const r = CDB_NORMALIZE.epss("42invalid");
+  assert.equal(r.state, "INVALID");
+  assert.equal(r.probability, null);
+});
+
+test("epss(): whitespace-only string -> UNKNOWN, not INVALID and not 0", () => {
+  const r = CDB_NORMALIZE.epss("   ");
+  assert.equal(r.state, "UNKNOWN");
+  assert.equal(r.probability, null);
+});
+
 test("epss(): >100 -> INVALID, never silently divided into a plausible-looking value", () => {
   const r = CDB_NORMALIZE.epss(101);
   assert.equal(r.state, "INVALID");
