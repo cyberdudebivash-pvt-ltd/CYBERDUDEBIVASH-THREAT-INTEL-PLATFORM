@@ -6383,9 +6383,11 @@
                     var _rawSev = (it.severity||it.risk_level||'INFO').toUpperCase();
                     var sev = _rawSev;
                     if (_rawSev === 'CRITICAL') {
-                        var _kev  = !!(it.kev_present || it.kev);
+                        // P0 FIX: same canonical KEV/EPSS normalization as getSeverity()
+                        var _kev  = window.CDB_NORMALIZE.kevState(it) === true;
                         var _cvss = parseFloat(it.cvss_score || 0);
-                        var _epss = parseFloat(it.epss_score || 0);
+                        var _epssNorm = window.CDB_NORMALIZE.epss(it.epss_score);
+                        var _epss = _epssNorm.state === 'OK' ? _epssNorm.probability : 0;
                         var _risk = parseFloat(it.risk_score || 0);
                         if (!(_kev || _cvss >= 9.0 || _epss >= 0.70 || _risk >= 8.5)) {
                             sev = _risk >= 6.5 ? 'HIGH' : _risk >= 4.0 ? 'MEDIUM' : 'LOW';
@@ -9714,9 +9716,13 @@
                 // v184.0 G7 FIX: enforce v149 False-CRITICAL rule on frontend
                 // CRITICAL requires KEV=True OR CVSS>=9.0 OR EPSS>=70% OR risk>=8.5
                 if (item.severity === 'CRITICAL') {
-                    const kev  = !!(item.kev_present || item.kev);
+                    // P0 FIX: item.kev could be the string "NO" (truthy in JS) and
+                    // item.epss_score can be 0-100 or 0-1 scale depending on source --
+                    // use the canonical normalizer (js/metric-normalize.js) for both.
+                    const kev  = window.CDB_NORMALIZE.kevState(item) === true;
                     const cvss = parseFloat(item.cvss_score || 0);
-                    const epss = parseFloat(item.epss_score || 0);
+                    const epssNorm = window.CDB_NORMALIZE.epss(item.epss_score);
+                    const epss = epssNorm.state === 'OK' ? epssNorm.probability : 0;
                     const risk = parseFloat(item.risk_score || 0);
                     if (!(kev || cvss >= 9.0 || epss >= 0.70 || risk >= 8.5)) {
                         if (risk >= 6.5) return 'HIGH';
@@ -10176,14 +10182,16 @@
 
                 // v46.0 Threat Characteristic Badges
                 // v76.1: exploit badge \u2014 aligned threshold (EPSS>=50% = HIGH, not 70%)
-                // v184.0 EPSS normalizer: FIRST.org returns 0.0-1.0 decimal; some legacy entries
-                // were stored as 0-100 or mis-multiplied (e.g. 3355 = 33.55 * 100). Normalize
-                // to 0-100 percentage scale for all display and threshold comparisons.
-                const _epssRaw = item.epss_score != null ? parseFloat(item.epss_score) : null;
-                const epssNorm = _epssRaw == null ? null
-                    : _epssRaw > 100  ? Math.min(_epssRaw / 100, 100)
-                    : _epssRaw <= 1.0 ? _epssRaw * 100
-                    : _epssRaw;
+                // P0 FIX: this normalizer previously silently divided any value >100 by
+                // 100 (e.g. 3355 -> 33.55) instead of flagging it invalid, and had no
+                // floor check for negative values -- a malformed upstream value could
+                // silently produce a plausible-looking but fabricated percentage.
+                // window.CDB_NORMALIZE.epss() (js/metric-normalize.js) is the single
+                // canonical normalizer: values in (1,100] are treated as an
+                // already-percentage EPSS reading, values outside 0-100 are INVALID
+                // (null here), never silently clamped.
+                const _epssResult = window.CDB_NORMALIZE.epss(item.epss_score);
+                const epssNorm = _epssResult.state === 'OK' ? _epssResult.percent : null;
 
                 const exploitBadge = (item.exploit_available || (epssNorm != null && epssNorm >= 50) || item.kev_present)
                     ? '<span class="badge badge-exploit">⚡ EXPLOIT AVAIL</span>' : '';
@@ -10275,7 +10283,11 @@
 
                 // ═══ v65.3 SINGLE SOURCE OF TRUTH \u2014 FINAL CORRECTED ═══
                 const _cvss = item.cvss_score != null ? parseFloat(item.cvss_score) : null;
-                const _epss = item.epss_score != null ? parseFloat(item.epss_score) : null;
+                // P0 FIX: raw epss_score is inconsistently 0-1 or 0-100 scale across live
+                // items; the >=50/>=1 thresholds below assume a 0-100 percent value, so
+                // normalize via the canonical helper rather than comparing the raw field.
+                const _epssResult3 = window.CDB_NORMALIZE.epss(item.epss_score);
+                const _epss = _epssResult3.state === 'OK' ? _epssResult3.percent : null;
                 const _kev = !!item.kev_present;
                 // v76.1: unified exploit signal \u2014 EPSS>=50% aligned with badge threshold
                 const _exploit = !!(item.exploit_available || _kev || (_epss != null && _epss >= 50));
@@ -10607,7 +10619,12 @@
                     <div class="cdb-scan-bar">${_scanExploit}${_scanPrio}${_scanImpact}</div>
                     ${(()=>{
                         const _cvss = item.cvss_score != null ? parseFloat(item.cvss_score) : null;
-                        const _epss = item.epss_score != null ? parseFloat(item.epss_score) : null;
+                        // P0 FIX: epss_score is 0-1 scale for most live items and 0-100 for
+                        // others -- use the canonical normalizer's 0-100 percent form (this
+                        // bar is already scaled against max=100) instead of the raw value,
+                        // which rendered a typical 87%-probability item as a ~1%-wide bar.
+                        const _epssResult2 = window.CDB_NORMALIZE.epss(item.epss_score);
+                        const _epss = _epssResult2.state === 'OK' ? _epssResult2.percent : null;
                         const _risk = item.risk_score != null ? parseFloat(item.risk_score) : null;
                         if (!_cvss && !_epss && !_risk) return '';
                         const _bar = (val,max,color,label,fmt) => val!=null?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-family:var(--font-mono);font-size:8px;color:#5a6578;letter-spacing:1px;width:34px;text-align:right;flex-shrink:0;">${label}</span><div style="flex:1;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;"><div style="width:${Math.min(100,(val/max)*100).toFixed(1)}%;height:100%;background:linear-gradient(90deg,${color},${color}aa);border-radius:2px;transition:width 0.6s ease;"></div></div><span style="font-family:var(--font-mono);font-size:9px;color:${color};font-weight:700;width:30px;flex-shrink:0;">${fmt(val)}</span></div>`:''
@@ -10875,8 +10892,11 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                         try {
                             const hasFlat = item.detect || item.analyze || item.respond || item.mitigation;
                             if (!hasFlat) return '';
-                            // ISSUE 2 FIX: use computePriority() \u2014 single source of truth
-                            const pri = (window.computePriority && window.computePriority(item)) || item.priority || 'P4';
+                            // P0 FIX: never silently coalesce a genuinely-unknown priority
+                            // into P4 -- window.CDB_NORMALIZE.priority() (js/metric-normalize.js)
+                            // prefers sla_priority/apex_ai.soc_priority/priority, falls back to
+                            // computePriority(), and only returns 'UNKNOWN' when none resolve.
+                            const pri = window.CDB_NORMALIZE.priority(item);
                             const priClass = pri.toLowerCase();
                             const priColors = (window.PRIORITY_COLORS)
                                 ? {p1:window.PRIORITY_COLORS.P1,p2:window.PRIORITY_COLORS.P2,p3:window.PRIORITY_COLORS.P3,p4:window.PRIORITY_COLORS.P4}
@@ -11242,9 +11262,11 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                     var r = parseFloat(rs || 0);
                     // v184.0 G7 FIX: enforce v149 False-CRITICAL rule in GOD MODE
                     if (item && item.severity === 'CRITICAL') {
-                        var kev  = !!(item.kev_present || item.kev);
+                        // P0 FIX: same canonical KEV/EPSS normalization as getSeverity()
+                        var kev  = window.CDB_NORMALIZE.kevState(item) === true;
                         var cvss = parseFloat(item.cvss_score || 0);
-                        var epss = parseFloat(item.epss_score || 0);
+                        var epssNorm = window.CDB_NORMALIZE.epss(item.epss_score);
+                        var epss = epssNorm.state === 'OK' ? epssNorm.probability : 0;
                         if (kev || cvss >= 9.0 || epss >= 0.70 || r >= 8.5) return 'CRITICAL';
                         if (r >= 6.5) return 'HIGH';
                         if (r >= 4.0) return 'MEDIUM';
@@ -12316,8 +12338,12 @@ function getThreatPriorityScore(item) {
         score += 50;
     }
 
-    if (item.epss_score) {
-        score += item.epss_score;
+    // P0 FIX: raw epss_score is inconsistently 0-1 or 0-100 scale; adding it
+    // unnormalized let a mis-scaled value (e.g. 32 meaning 32%) dominate the
+    // composite score. Add the canonical 0-100 percent instead.
+    const _epssTps = window.CDB_NORMALIZE.epss(item.epss_score);
+    if (_epssTps.state === 'OK') {
+        score += _epssTps.percent;
     }
 
     if (item.severity === "CRITICAL") score += 40;
@@ -15133,8 +15159,8 @@ function renderTopThreats(data) {
                         severity:   i.severity || 'MEDIUM',
                         actor:      i.actor_tag || i.actor || 'UNC-UNKNOWN',
                         ttps:       i.mitre_tactics || i.tags || [],
-                        kev:        !!(i.kev_present || i.kev),
-                        priority:   window.computePriority ? window.computePriority(i) : 'P4',
+                        kev:        window.CDB_NORMALIZE.kevState(i) === true,
+                        priority:   window.CDB_NORMALIZE.priority(i),
                     })),
                     generated_at: new Date().toISOString(),
                     source: 'live_synthesis_v123',
@@ -15143,7 +15169,7 @@ function renderTopThreats(data) {
                 // ── respond.json equivalent (SOAR queue) ──
                 const respond = {
                     response_queue: sorted.slice(0, 6).map(i => {
-                        const pri = window.computePriority ? window.computePriority(i) : 'P4';
+                        const pri = window.CDB_NORMALIZE.priority(i);
                         const riskScore = parseFloat(i.risk_score)||0;
                         return {
                             incident_title: (i.title||'').substring(0, 80),
@@ -15276,8 +15302,14 @@ function renderTopThreats(data) {
                     const tt = document.getElementById('ai-top-threats');
                     if (tt && analyze && analyze.top_threats) {
                         tt.innerHTML = analyze.top_threats.slice(0, 8).map(t => {
-                            // SINGLE SOURCE OF TRUTH: computePriority determines priority
-                            const pri = (window.computePriority && window.computePriority(t)) || t.priority || 'P4';
+                            // P0 FIX: t.priority was already resolved via
+                            // window.CDB_NORMALIZE.priority() against the full raw item
+                            // when `analyze` was built above -- do not recompute from `t`
+                            // itself, which is a slimmed synthetic object missing
+                            // kev_present/cvss_score/epss_score (computePriority(t) would
+                            // silently lose the KEV signal since t only carries `kev`, not
+                            // `kev_present`). Never fall back to 'P4'.
+                            const pri = t.priority || 'UNKNOWN';
                             const priColor = (window.PRIORITY_COLORS && window.PRIORITY_COLORS[pri]) ||
                                 (pri==='P1'?'#ef4444':pri==='P2'?'#f97316':pri==='P3'?'#fbbf24':'#4ade80');
                             const kevBadge = t.kev ? ' <span style="background:#ef444422;color:#ef4444;font-size:7px;padding:1px 4px;border-radius:2px;">⚡ KEV</span>' : '';
@@ -15299,8 +15331,10 @@ function renderTopThreats(data) {
                     const rq = document.getElementById('ai-response-queue');
                     if (rq && respond && respond.response_queue) {
                         rq.innerHTML = respond.response_queue.slice(0, 6).map(a => {
-                            // Use computePriority if available, else fall back to stored priority
-                            const pri = (window.computePriority && window.computePriority(a)) || a.priority || 'P4';
+                            // P0 FIX: a.priority was already resolved via
+                            // window.CDB_NORMALIZE.priority() when `respond` was built
+                            // above -- never fall back to 'P4'.
+                            const pri = a.priority || 'UNKNOWN';
                             const pColor = (window.PRIORITY_COLORS && window.PRIORITY_COLORS[pri]) ||
                                 (pri==='P1'?'#ef4444':pri==='P2'?'#f97316':'#fbbf24');
                             return `<div style="padding:6px;margin-bottom:4px;background:rgba(249,115,22,0.06);border:1px solid rgba(249,115,22,0.12);border-radius:3px;">
@@ -16240,6 +16274,7 @@ function renderTopThreats(data) {
      Load order: api_adapter → card_renderer → card_renderer_integration
      DO NOT reorder. DO NOT overwrite via CI/CD pipeline.
      ═══════════════════════════════════════════════════════════════════════ -->
+<script src="/js/metric-normalize.js"></script>
 <script src="/js/api_adapter.js"></script>
 <script src="/js/card_renderer.js"></script>
 <script src="/js/card_renderer_integration.js"></script>
@@ -20046,7 +20081,7 @@ a:focus-visible {
 <!-- CDB-AI-BRAIN-INIT-v145 -->
 <script>
 /* ============================================================================
-   CYBERDUDEBIVASH® SENTINEL APEX v184.0 — AI CYBER BRAIN ENTERPRISE ENGINE
+   CYBERDUDEBIVASH® SENTINEL APEX v148.0 — AI CYBER BRAIN ENTERPRISE ENGINE
    World-class operational AI intelligence: campaign clustering, anomaly scoring,
    predictive attack-chain modeling, actor attribution, confidence scoring,
    behavioral analytics, risk trajectory forecasting, IOC correlation,
@@ -20125,7 +20160,14 @@ a:focus-visible {
   function buildCampaigns(intel){
     var map={};
     intel.forEach(function(t,idx){
-      var actor=(t.threat_actor||t.actor||t.family||t.type||'UNKNOWN ACTOR').toUpperCase().trim();
+      /* Real feed schema carries genuine attribution in primary_actor /
+         actor_display_name / mitre_group_name. actor / actor_tag are often the
+         backend's internal "CDB-UNATTR-*" placeholder meaning "not attributed" --
+         showing that raw token as if it were a group name would mislead customers,
+         so it is normalized to the same UNKNOWN ACTOR bucket as a null actor. */
+      var rawActor=t.primary_actor||t.actor_display_name||t.mitre_group_name||t.actor||'';
+      if(/^CDB-UNATTR-/.test(rawActor))rawActor='';
+      var actor=(rawActor||'UNKNOWN ACTOR').toUpperCase().trim();
       if(!map[actor]){
         map[actor]={
           name:actor,count:0,severity:'LOW',cvssMax:0,
@@ -20140,13 +20182,13 @@ a:focus-visible {
       c.items.push(t);
       var s=(t.severity||t.risk_level||'LOW').toUpperCase();
       if(sevRank(s)>sevRank(c.severity)){c.severity=s;c.sample=t;}
-      var cvss=parseFloat(t.cvss||t.cvss_score||0);
+      var cvss=parseFloat(t.cvss_score||t.cvss||0);
       if(cvss>c.cvssMax)c.cvssMax=cvss;
-      if(t.kev||t.cisa_kev)c.kevCount++;
-      if(t.exploit_status==='ACTIVE_CONFIRMED'||t.exploit_status==='ZERO_DAY')c.exploitActive++;
-      if(t.exploit_status==='ZERO_DAY')c.zerodays++;
-      if(t.sector)c.sectors.add(t.sector);
-      if(t.tactic||t.mitre_tactic)c.tactics.add(t.tactic||t.mitre_tactic);
+      if(window.CDB_NORMALIZE.kevState(t)===true)c.kevCount++;
+      if(t.exploit_maturity==='WEAPONIZED'||t.exploit_maturity==='FUNCTIONAL')c.exploitActive++;
+      if(t.exploit_maturity==='WEAPONIZED')c.zerodays++;
+      if(Array.isArray(t.actor_sectors))t.actor_sectors.forEach(function(sec){if(sec)c.sectors.add(sec);});
+      (t.mitre_tactics||t.ttps||[]).forEach(function(tt){if(tt&&tt.tactic)c.tactics.add(tt.tactic);});
       var d=t.date||t.discovered||null;
       if(d){
         if(!c.firstSeen||d<c.firstSeen)c.firstSeen=d;
@@ -20181,24 +20223,27 @@ a:focus-visible {
      ══════════════════════════════════════════════════════════════════════════ */
   function buildAnomalies(intel){
     if(!intel.length)return[];
-    /* Compute mean/stddev of priority_score / cvss */
-    var scores=intel.map(function(t){return parseFloat(t.priority_score||t.cvss||5);});
+    /* Real feed schema exposes risk_score / cvss_score / kev_present /
+       exploit_maturity -- priority_score, cvss, kev, cisa_kev and the
+       ACTIVE_CONFIRMED/ZERO_DAY exploit_status vocabulary never exist on a
+       live item. */
+    var scores=intel.map(function(t){return parseFloat(t.risk_score||t.cvss_score||5);});
     var mean=scores.reduce(function(a,b){return a+b;},0)/scores.length;
     var variance=scores.reduce(function(a,v){return a+(v-mean)*(v-mean);},0)/scores.length;
     var std=Math.sqrt(variance)||1;
 
     var anomalies=intel.map(function(t,idx){
-      var score=parseFloat(t.priority_score||t.cvss||5);
+      var score=parseFloat(t.risk_score||t.cvss_score||5);
       var zScore=Math.abs(score-mean)/std;
       /* Boost for KEV, zero-day, active exploit */
       var boost=0;
-      if(t.kev||t.cisa_kev)boost+=0.4;
-      if(t.exploit_status==='ZERO_DAY')boost+=0.5;
-      if(t.exploit_status==='ACTIVE_CONFIRMED')boost+=0.3;
-      if(parseFloat(t.cvss||0)>=9.0)boost+=0.3;
+      if(window.CDB_NORMALIZE.kevState(t)===true)boost+=0.4;
+      if(t.exploit_maturity==='WEAPONIZED')boost+=0.5;
+      if(t.exploit_maturity==='FUNCTIONAL')boost+=0.3;
+      if(parseFloat(t.cvss_score||0)>=9.0)boost+=0.3;
       var anomalyScore=clamp((zScore/4)*0.6+boost,0,1);
       var type='NORMAL';
-      if(t.exploit_status==='ZERO_DAY')type='ZERO_DAY_CANDIDATE';
+      if(t.exploit_maturity==='WEAPONIZED')type='ZERO_DAY_CANDIDATE';
       else if(anomalyScore>=0.80)type='APT_SIGNAL';
       else if(boost>=0.6)type='CRITICAL_ANOMALY';
       else if(anomalyScore>=0.60)type='BEHAVIORAL_OUTLIER';
@@ -20221,14 +20266,20 @@ a:focus-visible {
     var SECTORS={
       'Energy':0,'Healthcare':0,'Government':0,'Finance':0,
       'Technology':0,'Manufacturing':0,'Critical Infrastructure':0,
-      'Education':0,'Retail':0,'Telecommunications':0
+      'Education':0,'Retail':0,'Telecommunications':0,'Unclassified':0
     };
     var sectorCounts={};
     intel.forEach(function(t){
-      var s=t.sector||'Technology';
-      if(!SECTORS.hasOwnProperty(s))s='Technology';
-      var w=1+(t.kev?2:0)+(t.exploit_status==='ACTIVE_CONFIRMED'?1.5:0)+
-            (parseFloat(t.cvss||0)>=9?1.5:parseFloat(t.cvss||0)>=7?0.8:0);
+      /* No live feed item carries a scalar `sector` field -- the real
+         per-item signal is actor_sectors (an array, populated only when
+         actor attribution exists). Defaulting every unattributed item into
+         'Technology' fabricated a false 100%-Technology concentration;
+         items with no real sector evidence land in an honestly-labeled
+         'Unclassified' bucket instead of a named vertical. */
+      var s=(Array.isArray(t.actor_sectors)&&t.actor_sectors[0])||'Unclassified';
+      if(!SECTORS.hasOwnProperty(s))s='Unclassified';
+      var w=1+(window.CDB_NORMALIZE.kevState(t)===true?2:0)+((t.exploit_maturity==='FUNCTIONAL'||t.exploit_maturity==='WEAPONIZED')?1.5:0)+
+            (parseFloat(t.cvss_score||0)>=9?1.5:parseFloat(t.cvss_score||0)>=7?0.8:0);
       SECTORS[s]=(SECTORS[s]||0)+w;
       sectorCounts[s]=(sectorCounts[s]||0)+1;
     });
@@ -20238,7 +20289,8 @@ a:focus-visible {
       'Government':'Spear-Phishing / APT','Finance':'Credential Stuffing / BEC',
       'Technology':'Zero-Day / Supply Chain','Manufacturing':'Ransomware / OT',
       'Critical Infrastructure':'ICS/SCADA','Education':'Ransomware',
-      'Retail':'PoS Skimming / Fraud','Telecommunications':'SS7 / SIM Swap'
+      'Retail':'PoS Skimming / Fraud','Telecommunications':'SS7 / SIM Swap',
+      'Unclassified':'Multi-Vector / Unattributed'
     };
 
     var total=Object.values(SECTORS).reduce(function(a,b){return a+b;},1);
@@ -20311,13 +20363,14 @@ a:focus-visible {
   function buildSOCQueue(intel){
     return intel
       .filter(function(t){
-        return (t.kev||t.cisa_kev||t.exploit_status==='ACTIVE_CONFIRMED'
-          ||t.exploit_status==='ZERO_DAY'||parseFloat(t.cvss||0)>=8.5);
+        return (window.CDB_NORMALIZE.kevState(t)===true||t.exploit_maturity==='FUNCTIONAL'
+          ||t.exploit_maturity==='WEAPONIZED'||parseFloat(t.cvss_score||0)>=8.5);
       })
       .map(function(t){
-        var score=parseFloat(t.priority_score||t.cvss||0);
-        var urgency=t.exploit_status==='ZERO_DAY'?'IMMEDIATE'
-          :t.kev||t.cisa_kev?'CRITICAL'
+        var kevConfirmed=window.CDB_NORMALIZE.kevState(t)===true;
+        var score=parseFloat(t.risk_score||t.cvss_score||0);
+        var urgency=t.exploit_maturity==='WEAPONIZED'?'IMMEDIATE'
+          :kevConfirmed?'CRITICAL'
           :score>=9?'CRITICAL'
           :score>=7?'HIGH'
           :'MEDIUM';
@@ -20326,11 +20379,11 @@ a:focus-visible {
           :urgency==='HIGH'?'24–72h'
           :'72–168h';
         return{
-          title:t.title||t.id,cvss:parseFloat(t.cvss||0),
-          kev:!!(t.kev||t.cisa_kev),
-          exploitStatus:t.exploit_status||'UNKNOWN',
+          title:t.title||t.id,cvss:parseFloat(t.cvss_score||0),
+          kev:kevConfirmed,
+          exploitStatus:t.exploit_maturity||'UNKNOWN',
           urgency:urgency,sla:sla,
-          composite:score+(t.kev?15:0)+(t.exploit_status==='ZERO_DAY'?20:0)
+          composite:score+(kevConfirmed?15:0)+(t.exploit_maturity==='WEAPONIZED'?20:0)
         };
       })
       .sort(function(a,b){return b.composite-a.composite;})
@@ -20413,9 +20466,13 @@ a:focus-visible {
   /* ══════════════════════════════════════════════════════════════════════════
      RENDER ENGINE — ANOMALY PANEL
      ══════════════════════════════════════════════════════════════════════════ */
-  function renderAnomalies(anomalies,actors){
+  function renderAnomalies(anomalies,actors,totalAnalyzed){
     if(!anomalies.length){
-      set('ai-anomaly-body','<p style="color:#94a3b8;text-align:center;padding:20px">Awaiting analysis...</p>');
+      /* A completed Isolation-Forest-style pass that legitimately finds no
+         statistical outliers is real intelligence, not a stuck pipeline --
+         it must not render identically to the pre-fetch "still loading"
+         state customers see before intel.length>0 (see runAIBrain()). */
+      set('ai-anomaly-body','<p style="color:#94a3b8;text-align:center;padding:20px">0 anomalies detected across '+(totalAnalyzed||0)+' advisories analyzed — no statistical outliers found.</p>');
       return;
     }
     txt('ai-anomaly-count', anomalies.length+' Anomal'+(anomalies.length>1?'ies':'y')+' Flagged');
@@ -20429,13 +20486,13 @@ a:focus-visible {
         +'<div style="flex:1;min-width:0">'
         +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap">'
         +'<span style="font-size:8px;padding:1px 5px;font-weight:700;letter-spacing:0.5px;border-radius:2px;background:'+typeCol+'22;color:'+typeCol+';border:1px solid '+typeCol+'44">'+esc(a.type.replace(/_/g,' '))+'</span>'
-        +(t.kev||t.cisa_kev?'<span style="font-size:8px;padding:1px 4px;border-radius:2px;background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3)">CISA KEV</span>':'')
-        +(t.exploit_status?'<span style="font-size:8px;padding:1px 4px;border-radius:2px;background:rgba(248,113,113,0.08);color:#94a3b8">'+esc(t.exploit_status)+'</span>':'')
+        +(window.CDB_NORMALIZE.kevState(t)===true?'<span style="font-size:8px;padding:1px 4px;border-radius:2px;background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3)">CISA KEV</span>':'')
+        +(t.exploit_maturity?'<span style="font-size:8px;padding:1px 4px;border-radius:2px;background:rgba(248,113,113,0.08);color:#94a3b8">'+esc(t.exploit_maturity)+'</span>':'')
         +'</div>'
         +'<div style="color:#e2e8f0;font-size:11px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px">'+esc((t.title||t.id||'').substring(0,65))+'</div>'
         +'<div style="display:flex;gap:12px;margin-top:3px">'
-        +(t.cvss?'<span style="color:#94a3b8;font-size:9px">CVSS <span style="color:'+typeCol+';font-weight:700">'+t.cvss+'</span></span>':'')
-        +(t.priority_score?'<span style="color:#94a3b8;font-size:9px">SCORE <span style="color:#e2e8f0;font-weight:700">'+t.priority_score+'</span></span>':'')
+        +(t.cvss_score?'<span style="color:#94a3b8;font-size:9px">CVSS <span style="color:'+typeCol+';font-weight:700">'+t.cvss_score+'</span></span>':'')
+        +(t.risk_score?'<span style="color:#94a3b8;font-size:9px">SCORE <span style="color:#e2e8f0;font-weight:700">'+t.risk_score+'</span></span>':'')
         +'<span style="color:#94a3b8;font-size:9px">z='+a.zScore.toFixed(2)+'</span>'
         +'</div>'
         +'</div>'
@@ -20816,7 +20873,7 @@ a:focus-visible {
     /* Render original panels */
     renderTacticalHeader(summary,intel);
     renderCampaigns(campaigns,socQueue);
-    renderAnomalies(anomalies,actors);
+    renderAnomalies(anomalies,actors,intel.length);
     renderForecasts(forecasts,socQueue);
 
     /* v149.0 — Render enhanced panels (graceful: no-op if elements absent) */
@@ -20919,9 +20976,20 @@ a:focus-visible {
       }).catch(function(){});
     });
   }
+  // P0 FIX (PR-D1): refreshNews() (the "Global Cyber Intel — LIVE"
+  // #cdb-news-grid section) was only ever called from boot()/bootEnterprise()
+  // at DOMContentLoaded -- but window.__GOC_LIVE_INTEL is essentially always
+  // still unset at that instant (these async fetches haven't resolved yet)
+  // and window.EMBEDDED_INTEL is permanently [] by design, so
+  // `if(intel.length){...refreshNews();}` never fired. Once _fetchLiveIntel
+  // genuinely populates window.__GOC_LIVE_INTEL with real data (here, or on
+  // the 30s poll), nothing ever re-invoked refreshNews() -- the section
+  // stayed on its initial shimmer placeholder forever. refreshNews() already
+  // no-ops when the cached item count hasn't changed, so calling it here on
+  // every successful fetch is safe and does not cause redundant re-renders.
   function _startAIBrainPoller(){
-    _fetchLiveIntel(function(){runAIBrain();injectEnterpriseSignals(window.__GOC_LIVE_INTEL||window.EMBEDDED_INTEL||[]);});
-    setInterval(function(){_fetchLiveIntel(function(){runAIBrain();});},30000);
+    _fetchLiveIntel(function(){runAIBrain();injectEnterpriseSignals(window.__GOC_LIVE_INTEL||window.EMBEDDED_INTEL||[]);refreshNews();});
+    setInterval(function(){_fetchLiveIntel(function(){runAIBrain();refreshNews();});},30000);
   }
   window.CDB_AI={runBrain:runAIBrain,fetchLive:_fetchLiveIntel};
   if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',_startAIBrainPoller);}

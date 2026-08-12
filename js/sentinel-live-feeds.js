@@ -450,19 +450,31 @@
       return;
     }
 
-    container.innerHTML = cves.map((c, i) => `
+    // P0 FIX: this widget is titled "TOP CVE EXPLOIT PROBABILITY (EPSS)" but
+    // previously rendered c.risk_score (Sentinel's 0-10 composite) formatted
+    // to 2 decimals -- fmtRisk(9.0127) === "9.01", matching exactly what
+    // customers saw under an EPSS-branded label, even though the real
+    // epss_score field was present in the same API response and unused.
+    // window.CDB_NORMALIZE.epss() is the single canonical EPSS normalizer
+    // (js/metric-normalize.js) -- do not read c.risk_score for this display.
+    container.innerHTML = cves.map((c, i) => {
+      const epss = window.CDB_NORMALIZE.epss(c.epss_score);
+      const epssLabel = epss.state === 'OK' ? epss.percent.toFixed(1) + '%' : 'EPSS N/A';
+      const barPct = epss.state === 'OK' ? Math.round(Math.min(epss.percent, 100)) : 0;
+      return `
       <div style="display:flex; align-items:center; gap:8px; padding:6px 0;
         border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px;">
         <span style="color:#888; width:16px; text-align:right;">${i + 1}</span>
         <span style="color:#ff8800; width:140px; font-weight:500;">${esc(c.cve_id)}</span>
         <div style="flex:2; background:#1a1a2e; border-radius:3px; height:6px; overflow:hidden;">
-          <div style="width:${Math.round(Math.min((c.risk_score / 10) * 100, 100))}%; height:100%;
+          <div style="width:${barPct}%; height:100%;
             background:${severityColor(c.severity)}; border-radius:3px;"></div>
         </div>
-        <span style="width:36px; text-align:right; color:${severityColor(c.severity)};">${fmtRisk(c.risk_score)}</span>
+        <span style="width:52px; text-align:right; color:${severityColor(c.severity)};">${epssLabel}</span>
         ${c.kev_present ? '<span style="color:#ff4444; font-size:10px; padding:1px 4px; border:1px solid #ff444444; border-radius:2px;">KEV</span>' : ""}
       </div>
-    `).join("");
+    `;
+    }).join("");
   }
 
   // ── 9. Kill Chain Activity ─────────────────────────────────────────────────────
