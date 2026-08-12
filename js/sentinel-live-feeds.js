@@ -62,9 +62,33 @@
   function qs(sel) { return document.querySelector(sel); }
   function qsAll(sel) { return document.querySelectorAll(sel); }
 
+  // Matches the escape convention already used elsewhere in this codebase
+  // (e.g. index.html's _hEsc(), js/card_renderer.js's esc()). API-provided
+  // fields (group names, actor aliases, sectors, statuses) are rendered via
+  // innerHTML below for layout convenience -- they must never be trusted as
+  // markup.
+  function esc(s) {
+    if (s === null || s === undefined) return "";
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
+  }
+
   function setText(selector, text, isId = false) {
     const node = isId ? el(selector) : qs(selector);
     if (node) node.textContent = text;
+  }
+
+  // P0 FIX: several loaders below previously wrote fetched data into DOM
+  // selectors that do not exist anywhere in index.html (a leftover from an
+  // earlier DOM naming scheme), so a successful fetch had nowhere to land
+  // and the widget's initial "COMPUTING.../ASSESSING.../LOADING..." text
+  // stayed on screen forever regardless of backend health. setUnavailable()
+  // gives every fixed loader below a bounded, honest failure state instead
+  // of silently leaving that placeholder in place when a fetch genuinely
+  // fails (apiFetch() already times out at FETCH_TIMEOUT_MS and returns
+  // null on any error).
+  function setUnavailable(id, label) {
+    const node = el(id);
+    if (node) node.textContent = label || "UNAVAILABLE";
   }
 
   function setHTML(selector, html, isId = false) {
@@ -196,50 +220,43 @@
   // ── 2. Global Threat Level ────────────────────────────────────────────────────
   async function loadThreatLevel() {
     const data = await apiFetch("/api/v1/intel/defcon");
-    if (!data) return;
+    if (!data) {
+      setUnavailable("cdb-gauge-label", "THREAT LEVEL UNAVAILABLE");
+      setUnavailable("cdb-defcon-status", "DEFCON UNAVAILABLE");
+      return;
+    }
 
     const level = data.global_threat_level || {};
-    const score = parseFloat(level.level || 0);
+    const rawScore = Number(level.level);
+    const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(rawScore, 10)) : 0;
     const label = level.label || data.label || "ASSESSING";
 
-    // Threat level gauge
-    setStatEl([".threat-level-value", "#threat-level", "[data-threat='level']"], score.toFixed(1));
-    setStatEl([".threat-level-label", "#threat-label", "[data-threat='label']"], label);
-
-    // Color the gauge based on level
-    const gaugeEl = qs(".threat-gauge, .global-threat-gauge, #global-threat-level");
-    if (gaugeEl) {
-      gaugeEl.style.color = score >= 8 ? "#ff4444" : score >= 6 ? "#ff8800" : score >= 4 ? "#ffcc00" : "#00d4aa";
+    // Threat level gauge -- real DOM ids (see GADGET 1, index.html)
+    setText("cdb-gauge-val", score.toFixed(1), true);
+    setText("cdb-gauge-label", label, true);
+    const arcEl = el("cdb-gauge-arc");
+    if (arcEl) {
+      // dasharray=157 spans the full 0-10 gauge sweep
+      arcEl.setAttribute("stroke-dashoffset", String(157 - Math.min(score, 10) / 10 * 157));
+      arcEl.setAttribute("stroke", score >= 8 ? "#ff4444" : score >= 6 ? "#ff8800" : score >= 4 ? "#ffcc00" : "#00d4aa");
     }
 
-    // The —/10 COMPUTING... area
-    const computingEl = qs(".threat-computing, [data-gauge='threat']");
-    if (computingEl) {
-      computingEl.textContent = `${score.toFixed(1)}/10`;
-    }
-
-    // DEFCON
+    // DEFCON -- real DOM ids (see GADGET 2, index.html)
     const defconLvl = data.level || 5;
-    const defconStatus = data.status || "FADE OUT";
-    setStatEl([".defcon-level", "#defcon-level", "[data-defcon='level']"], `DC${defconLvl}`);
-    setStatEl([".defcon-status", "#defcon-status", "[data-defcon='status']"], defconStatus);
+    const defconStatus = data.status || "UNKNOWN";
+    const stats = data.stats || {};
+    setText("cdb-defcon-status", defconStatus, true);
+    setText("cdb-defcon-detail",
+      `${label} · ${stats.critical || 0} critical, ${stats.kev_confirmed || 0} KEV confirmed`, true);
 
-    // Light up the DEFCON indicators
+    // Light up the DEFCON indicators (cdb-dc1..cdb-dc5)
     for (let i = 1; i <= 5; i++) {
-      const dcEl = qs(`.defcon-${i}, #dc${i}, [data-dc='${i}']`);
+      const dcEl = el(`cdb-dc${i}`);
       if (dcEl) {
         dcEl.classList.toggle("active", i === defconLvl);
         dcEl.style.opacity = i === defconLvl ? "1" : "0.3";
       }
     }
-
-    // Update loading spinners
-    qsAll("[data-loading='defcon'], .defcon-loading").forEach(n => {
-      n.textContent = `DC${defconLvl} — ${defconStatus}`;
-    });
-    qsAll("[data-loading='threat'], .threat-loading").forEach(n => {
-      n.textContent = `${score.toFixed(1)}/10 — ${label}`;
-    });
   }
 
   function setStatEl(selectors, value) {
@@ -340,85 +357,104 @@
   // ── 5. Live Threat Pulse ──────────────────────────────────────────────────────
   async function loadPulse() {
     const data = await apiFetch("/api/v1/intel/pulse");
-    if (!data) return;
+    if (!data) {
+      setUnavailable("cdb-pulse-rate", "N/A");
+      setUnavailable("cdb-pulse-today", "N/A");
+      setUnavailable("cdb-pulse-total", "N/A");
+      return;
+    }
 
-    setStatEl([".pulse-rate, #pulse-rate, [data-pulse='rate']"], data.rate_hr || 0);
-    setStatEl([".pulse-today, #pulse-today, [data-pulse='today']"], data.today || 0);
-    setStatEl([".pulse-total, #pulse-total, [data-pulse='total']"], data.total || 0);
-
-    // The RATE/HR: — TODAY: — TOTAL: — pattern
-    qsAll(".pulse-widget .pulse-val, .threat-pulse [data-val]").forEach((n, i) => {
-      const vals = [data.rate_hr, data.today, data.total];
-      if (vals[i] !== undefined) n.textContent = vals[i];
-    });
+    // Real DOM ids (see GADGET 6, index.html)
+    setText("cdb-pulse-rate", data.rate_hr != null ? data.rate_hr : 0, true);
+    setText("cdb-pulse-today", data.today != null ? data.today : 0, true);
+    setText("cdb-pulse-total", data.total != null ? data.total : 0, true);
   }
 
   // ── 6. Ransomware Tracker ─────────────────────────────────────────────────────
   async function loadRansomware() {
     const data = await apiFetch("/api/v1/intel/ransomware");
-    if (!data) return;
+    if (!data) {
+      setUnavailable("cdb-rw-groups", "N/A");
+      setUnavailable("cdb-rw-victims", "N/A");
+      setUnavailable("cdb-rw-list", "RANSOMWARE DATA UNAVAILABLE");
+      return;
+    }
 
-    setStatEl([".ransom-groups, #ransom-groups, [data-ransom='groups']"], data.active_groups || 0);
-    setStatEl([".ransom-victims, #ransom-victims, [data-ransom='victims']"], data.new_victims_30d || 0);
+    // Real DOM ids (see GADGET 7, index.html)
+    setText("cdb-rw-groups", data.active_groups || 0, true);
+    setText("cdb-rw-victims", data.new_victims_30d || 0, true);
 
-    // Clear "LOADING ACTIVE CAMPAIGNS..." text
-    const container = qs(".ransomware-tracker, #ransomware-content, [data-section='ransomware']");
-    if (container && (container.textContent || "").includes("LOADING")) {
+    const container = el("cdb-rw-list");
+    if (container) {
       const groups = (data.top_groups || []).slice(0, 5);
-      container.innerHTML = groups.map(g => `
+      container.innerHTML = groups.length ? groups.map(g => `
         <div style="display:flex; justify-content:space-between; align-items:center;
           padding:6px 8px; margin-bottom:4px; background:rgba(255,68,68,0.05);
           border-left:2px solid #ff4444; border-radius:3px; font-size:12px;">
-          <span style="font-weight:bold; color:#ff4444;">${g.name}</span>
-          <span style="color:#888; font-size:11px;">${g.sector.split(",")[0]}</span>
-          <span style="color:#ffcc00; font-size:11px;">+${g.victims_30d} victims</span>
-          <span style="color:#ff4444; font-size:10px; padding:1px 5px; border:1px solid #ff444444; border-radius:2px;">${g.status}</span>
+          <span style="font-weight:bold; color:#ff4444;">${esc(g.name)}</span>
+          <span style="color:#888; font-size:11px;">${esc((g.sector || "").split(",")[0])}</span>
+          <span style="color:#ffcc00; font-size:11px;">+${esc(String(g.victims_30d))} victims</span>
+          <span style="color:#ff4444; font-size:10px; padding:1px 5px; border:1px solid #ff444444; border-radius:2px;">${esc(g.status)}</span>
         </div>
-      `).join("");
+      `).join("") : `<div style="color:#888; font-size:11px; padding:8px 0;">No active ransomware campaigns tracked</div>`;
     }
   }
 
   // ── 7. APT Actor Radar ────────────────────────────────────────────────────────
   async function loadAPT() {
     const data = await apiFetch("/api/v1/intel/apt");
-    if (!data) return;
+    if (!data) {
+      setUnavailable("cdb-apt-count", "N/A");
+      setUnavailable("cdb-apt-sectors", "N/A");
+      setUnavailable("cdb-apt-ttps", "N/A");
+      setUnavailable("cdb-apt-list", "APT DATA UNAVAILABLE");
+      return;
+    }
 
-    setStatEl([".apt-count, #apt-count, [data-apt='count']"], data.tracked_apts || 0);
-    setStatEl([".apt-sectors, #apt-sectors, [data-apt='sectors']"], data.active_sectors || 0);
-    setStatEl([".apt-ttps, #apt-ttps, [data-apt='ttps']"], data.total_ttps || 0);
+    // Real DOM ids (see GADGET 8, index.html)
+    setText("cdb-apt-count", data.tracked_apts || 0, true);
+    setText("cdb-apt-sectors", data.active_sectors || 0, true);
+    setText("cdb-apt-ttps", data.total_ttps || 0, true);
 
-    const container = qs(".apt-radar, #apt-content, [data-section='apt']");
-    if (container && (container.textContent || "").includes("SCANNING")) {
+    const container = el("cdb-apt-list");
+    if (container) {
       const actors = (data.top_actors || []).slice(0, 5);
-      container.innerHTML = actors.map(a => `
+      container.innerHTML = actors.length ? actors.map(a => `
         <div style="display:flex; justify-content:space-between; align-items:center;
           padding:5px 8px; margin-bottom:4px; background:rgba(0,212,170,0.05);
           border-left:2px solid #00d4aa; border-radius:3px; font-size:12px;">
-          <span style="font-weight:bold; color:#00d4aa; width:90px;">${a.id}</span>
-          <span style="color:#888; font-size:11px; flex:1;">${a.alias}</span>
+          <span style="font-weight:bold; color:#00d4aa; width:90px;">${esc(a.id)}</span>
+          <span style="color:#888; font-size:11px; flex:1;">${esc(a.alias)}</span>
           <span style="color:#ff8800; font-size:11px; width:24px; text-align:center;">${getFlagEmoji(a.nation)}</span>
-          <span style="color:#ffcc00; font-size:11px;">${a.ttps} TTPs</span>
+          <span style="color:#ffcc00; font-size:11px;">${esc(String(a.ttps))} TTPs</span>
         </div>
-      `).join("");
+      `).join("") : `<div style="color:#888; font-size:11px; padding:8px 0;">No tracked APT activity</div>`;
     }
   }
 
   // ── 8. EPSS Top CVEs ──────────────────────────────────────────────────────────
   async function loadEPSS() {
     const data = await apiFetch("/api/v1/intel/epss");
-    if (!data) return;
-
-    const container = qs(".epss-container, #epss-content, [data-section='epss']");
+    const container = el("cdb-epss-list");
     if (!container) return;
 
+    if (!data) {
+      container.innerHTML = `<div style="font-family:var(--font-mono);font-size:9px;color:#888;padding:12px 0;text-align:center;letter-spacing:2px;">EPSS DATA UNAVAILABLE</div>`;
+      return;
+    }
+
     const cves = (data.top_cves || []).filter(c => c.cve_id).slice(0, 8);
-    if (!cves.length) return;
+    if (!cves.length) {
+      // A successful fetch with zero qualifying CVEs is a valid result, not a stuck load.
+      container.innerHTML = `<div style="font-family:var(--font-mono);font-size:9px;color:#888;padding:12px 0;text-align:center;letter-spacing:2px;">0 high-probability exploits detected</div>`;
+      return;
+    }
 
     container.innerHTML = cves.map((c, i) => `
       <div style="display:flex; align-items:center; gap:8px; padding:6px 0;
         border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px;">
         <span style="color:#888; width:16px; text-align:right;">${i + 1}</span>
-        <span style="color:#ff8800; width:140px; font-weight:500;">${c.cve_id}</span>
+        <span style="color:#ff8800; width:140px; font-weight:500;">${esc(c.cve_id)}</span>
         <div style="flex:2; background:#1a1a2e; border-radius:3px; height:6px; overflow:hidden;">
           <div style="width:${Math.round(Math.min((c.risk_score / 10) * 100, 100))}%; height:100%;
             background:${severityColor(c.severity)}; border-radius:3px;"></div>
@@ -427,87 +463,47 @@
         ${c.kev_present ? '<span style="color:#ff4444; font-size:10px; padding:1px 4px; border:1px solid #ff444444; border-radius:2px;">KEV</span>' : ""}
       </div>
     `).join("");
-
-    qsAll("[data-loading='epss'], .epss-loading").forEach(n => {
-      n.textContent = `TOP ${cves.length} CVEs BY EXPLOIT PROBABILITY`;
-    });
   }
 
-  // ── 9. Kill Chain Coverage + Active Campaigns ─────────────────────────────────
+  // ── 9. Kill Chain Activity ─────────────────────────────────────────────────────
   async function loadKillChain() {
     const data = await apiFetch("/api/v1/intel/campaigns");
-    if (!data) return;
+    if (!data) {
+      // The static markup marks RECON active by default -- clear it so a
+      // failed fetch never shows "CAMPAIGN DATA UNAVAILABLE" alongside a
+      // phase that looks live.
+      qsAll(".cdb-kc-step").forEach(stepEl => stepEl.classList.remove("active"));
+      setUnavailable("cdb-kc-active-label", "CAMPAIGN DATA UNAVAILABLE");
+      setUnavailable("cdb-kc-campaigns", "N/A");
+      setUnavailable("cdb-kc-tactics", "N/A");
+      return;
+    }
 
-    const phases = data.phases || {};
-    const phaseLabels = {
-      recon: "RECON", weaponize: "WEAPON", deliver: "DELIVER",
-      exploit: "EXPLOIT", install: "INSTALL", c2: "C2", action: "ACTION",
-    };
+    // Real DOM ids (see GADGET 5, index.html). cdb-kc-campaigns/cdb-kc-tactics
+    // are this loader's sole owner -- do not also set them elsewhere.
+    const campaigns = data.active_campaigns || [];
+    setText("cdb-kc-campaigns", campaigns.length, true);
+    setText("cdb-kc-tactics", data.total_tactics || 0, true);
 
-    // NEXUS Kill Chain coverage bars
-    Object.entries(phaseLabels).forEach(([key, label]) => {
-      const count = phases[key] || 0;
-      const pct   = count > 0 ? Math.min(Math.round((count / Math.max(...Object.values(phases))) * 100), 100) : 0;
-
-      setStatEl([`.kc-${key}, #kc-${key}, [data-kc='${key}']`], count);
-
-      const bar = qs(`.kc-bar-${key}, #kc-bar-${key}, [data-kc-bar='${key}']`);
-      if (bar) {
-        bar.style.width = `${pct}%`;
-        bar.textContent = count || "";
-      }
-    });
-
-    // Active Kill Chain display (the 7-phase chain with animated icons)
-    const kcContainer = qs(".killchain-activity, #killchain-activity, [data-section='killchain']");
-    if (kcContainer && (kcContainer.textContent || "").includes("Analyzing")) {
-      const campaigns = data.active_campaigns || [];
+    const labelEl = el("cdb-kc-active-label");
+    if (labelEl) {
       if (campaigns.length > 0) {
-        const topCampaign = campaigns[0];
-        const kc = topCampaign.kill_chain || [];
-        kcContainer.innerHTML = `
-          <div style="font-size:11px; color:#888; margin-bottom:8px;">
-            TOP CAMPAIGN: <strong style="color:#ff4444;">${topCampaign.title.slice(0, 60)}${topCampaign.title.length > 60 ? "…" : ""}</strong>
-          </div>
-          <div style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px;">
-            ${["Recon", "Weaponize", "Deliver", "Exploit", "Install", "C2", "Actions"].map((phase, i) => {
-              const active = kc.some(k => k.toLowerCase().includes(phase.toLowerCase().slice(0, 4)));
-              return `<span style="padding:4px 8px; font-size:11px; border-radius:3px; font-weight:bold;
-                background:${active ? severityColor(topCampaign.severity) + "33" : "rgba(255,255,255,0.05)"};
-                color:${active ? severityColor(topCampaign.severity) : "#666"};
-                border:1px solid ${active ? severityColor(topCampaign.severity) + "66" : "transparent"};">
-                ${phase.toUpperCase()}
-              </span>`;
-            }).join("")}
-          </div>
-          <div style="font-size:11px; color:#888;">
-            CAMPAIGNS: <strong style="color:#00d4aa;">${campaigns.length}</strong>  ·
-            TACTICS: <strong style="color:#00d4aa;">${data.total_tactics || 0}</strong>  ·
-            COVERAGE: <strong style="color:#${data.coverage_pct >= 70 ? "00d4aa" : "ff8800"};">${data.coverage_pct || 0}%</strong>
-          </div>
-        `;
+        const top = campaigns[0];
+        const title = (top.title || "").slice(0, 70) + ((top.title || "").length > 70 ? "…" : "");
+        labelEl.textContent = `TOP: ${title} (${top.severity || "UNKNOWN"})`;
+      } else {
+        // A successful fetch with zero active campaigns is a valid result.
+        labelEl.textContent = "0 active campaigns tracked";
       }
     }
 
-    // Correlated campaigns list
-    const corrContainer = qs(".correlated-campaigns, #correlated-campaigns, [data-section='correlated']");
-    if (corrContainer) {
-      const campaigns = (data.active_campaigns || []).slice(0, 5);
-      if (campaigns.length) {
-        corrContainer.innerHTML = campaigns.map(c => `
-          <div style="padding:8px; margin-bottom:6px; background:rgba(0,0,0,0.3);
-            border-left:3px solid ${severityColor(c.severity)}; border-radius:3px; font-size:12px;">
-            <div style="font-weight:500; color:#e0e0e0;">${c.title.slice(0, 70)}${c.title.length > 70 ? "…" : ""}</div>
-            <div style="display:flex; gap:12px; margin-top:4px; color:#888; font-size:11px;">
-              <span style="color:${severityColor(c.severity)};">${c.severity}</span>
-              <span>RISK: ${fmtRisk(c.risk_score)}</span>
-              <span>${fmtRelTime(c.published)}</span>
-              ${(c.cve_ids || []).length ? `<span style="color:#ff8800;">${c.cve_ids[0]}</span>` : ""}
-            </div>
-          </div>
-        `).join("");
-      }
-    }
+    // Highlight the kill-chain phase steps this top campaign actually touched
+    const topKc = (campaigns[0] && campaigns[0].kill_chain) || [];
+    qsAll(".cdb-kc-step").forEach(stepEl => {
+      const phase = stepEl.getAttribute("data-phase") || "";
+      const active = topKc.some(k => String(k).toLowerCase().includes(phase.slice(0, 4)));
+      stepEl.classList.toggle("active", active);
+    });
   }
 
   // ── 10. AI Cyber Brain ────────────────────────────────────────────────────────
@@ -550,13 +546,26 @@
   }
 
   // ── 11. Dark Web Monitor ──────────────────────────────────────────────────────
+  // NOTE: computeDarkweb() (workers/intel-gateway/src/index.js) derives
+  // breach_detections_24h from real feed content, but sources_monitored and
+  // credentials_exposed are currently fixed backend constants, not a live
+  // measurement -- that is a backend authenticity gap, documented and
+  // deliberately out of scope for this frontend wiring fix (see PR
+  // description). This loader renders whatever the API returns; it does not
+  // fabricate anything client-side.
   async function loadDarkweb() {
     const data = await apiFetch("/api/v1/intel/darkweb");
-    if (!data) return;
+    if (!data) {
+      setUnavailable("cdb-dw-count", "N/A");
+      setUnavailable("cdb-dw-sources", "N/A");
+      setUnavailable("cdb-dw-creds", "N/A");
+      return;
+    }
 
-    setStatEl([".dw-breaches, #dw-breaches, [data-dw='breaches']"],  data.breach_detections_24h || 0);
-    setStatEl([".dw-sources, #dw-sources, [data-dw='sources']"],     data.sources_monitored || 0);
-    setStatEl([".dw-creds, #dw-creds, [data-dw='creds']"],           data.credentials_exposed || "0");
+    // Real DOM ids (see GADGET 9, index.html)
+    setText("cdb-dw-count", data.breach_detections_24h || 0, true);
+    setText("cdb-dw-sources", data.sources_monitored || 0, true);
+    setText("cdb-dw-creds", data.credentials_exposed || "0", true);
   }
 
   // ── 12. Global Cyber News Feed ────────────────────────────────────────────────
