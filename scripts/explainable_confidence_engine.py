@@ -33,6 +33,19 @@ log = logging.getLogger("explainable_confidence")
 
 _VERSION = "1.0.0"
 
+# bool(item.get("kev") or ...) below misreads a legacy string value like
+# "NO"/"false" as KEV-confirmed, which would award kev_confirmed confidence
+# points for an item that isn't actually KEV-listed. Reuse the canonical
+# parser already fixed for this defect class in
+# context_aware_narrative_engine.py. Optional import (never raises) so a
+# confidence-scoring feature can't take down report generation if the
+# sibling module changes.
+try:
+    from context_aware_narrative_engine import _kev_confirmed as _kev_confirmed_check
+except Exception:
+    def _kev_confirmed_check(item: Dict[str, Any]) -> bool:
+        return False
+
 # ---------------------------------------------------------------------------
 # Source Trust Tiers
 # ---------------------------------------------------------------------------
@@ -391,7 +404,7 @@ def compute_confidence_breakdown(item: Dict[str, Any]) -> Dict[str, Any]:
         running_score += pts  # negative
 
     # ── KEV confirmation ───────────────────────────────────────────────────────
-    kev = bool(item.get("kev") or item.get("in_kev") or item.get("kev_present"))
+    kev = _kev_confirmed_check(item)
     if kev:
         pts = _CONTRIBUTOR_SCHEMA["kev_confirmed"]["max"]
         contributors.append({
