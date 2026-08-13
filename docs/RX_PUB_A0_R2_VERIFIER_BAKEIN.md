@@ -44,11 +44,68 @@ on STAGE 3.6a is not authorized until:
 
 | Run ID | Date | R2 layer summary | Public HTTP layer summary | `run_deadline_exceeded` | Notes |
 |---|---|---|---|---|---|
-| _(none recorded yet)_ | | | | | Awaiting the next real STAGE 3.6a run's output after PR #183/#184 land on `main`. |
+| [31713054946](https://github.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/actions/runs/31713054946) | 2026-08-13 15:50-15:54 UTC | **INVALID -- tooling bug, not real evidence.** 314 in-window, 0 REMOTE_VERIFIED, 314 FAILED ("R2 object does not exist"), 0 UNKNOWN. | N/A (commit predates the public-HTTP layer, PR #184) | false | See "Run A: root-caused as a credential-wiring bug" below. Struck from consideration -- does not count toward the 2-3 clean runs required for `--enforce`. |
+
+### Run A: root-caused as a credential-wiring bug, not a production incident
+
+Run 31713054946 (STAGE 3.6a at commit `51ff48f0`, PR #183's merge commit)
+reported **100% of in-window reports as "R2 object does not exist."** Taken
+at face value this would be a catastrophic finding -- but in the same job,
+moments earlier, **STAGE 3.5.1 (R2 Reports Index Integrity Gate, a separate,
+already-proven gate using the same bucket)** reported `500 clean` objects.
+Two gates checking overlapping data in the same run cannot both be right --
+this was correctly treated as a signal to investigate the newer, unproven
+tool rather than accept it as a real incident (mission Section 30's
+HISTORICAL-vs-ACTIVE-defect discipline, applied here to
+tooling-bug-vs-real-defect instead).
+
+**Root cause, confirmed by reading the actual code paths:**
+
+- `scripts/r2_reports_verifier.py` supports an *optional* dedicated
+  reports-bucket credential pair (`CF_R2_REPORTS_KEY_ID` /
+  `CF_R2_REPORTS_SECRET_KEY`) that, when present, swaps in for the
+  job-level data-bucket-scoped `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+  before every R2 call -- the same pattern `scripts/r2_upload.py` and
+  `scripts/r2_reports_integrity.py` already use.
+- `.github/workflows/sentinel-blogger.yml`'s STAGE 3.5 and STAGE 3.5.1 steps
+  both explicitly set those two env vars. The STAGE 3.6a step this mission
+  added (PR #183) did not -- it had no `env:` block at all.
+- With both vars empty, `r2_reports_verifier.py`'s swap check
+  (`if _reports_key_id and _reports_secret:`) is false, so it silently used
+  the job-level DATA-bucket-scoped credentials against the REPORTS bucket
+  instead.
+- `r2_upload_verifier.py`'s reused `_s3api_head_object()` classifies *any*
+  AWS CLI exit code `254` as "object not found" (`elif "NoSuchKey" in
+  result.stderr or result.returncode == 254:`) without confirming the error
+  was actually `NoSuchKey` -- awscli returns the same generic exit code for
+  `AccessDenied`/`403` as it does for a real 404. A credential/permission
+  mismatch is therefore indistinguishable from "genuinely missing" through
+  this path.
+
+**Fix applied**: added the missing `env:` block to STAGE 3.6a
+(`.github/workflows/sentinel-blogger.yml`), mirroring STAGE 3.5 /
+STAGE 3.5.1 exactly. New regression test
+`tests/test_r2_reports_verifier.py::TestWorkflowStepHasReportsBucketCredentials`
+parses the workflow YAML and asserts both env vars are present on the
+STAGE 3.6a step; confirmed to fail against the pre-fix workflow via
+`git stash`.
+
+**Deliberately not touched in this same fix**: the `returncode == 254`
+ambiguity in `r2_upload_verifier.py`'s `_s3api_head_object()` is pre-existing
+shared code (also used successfully by STAGE 3.6, which has correct
+credentials and has not exhibited this failure mode). Per this repo's
+Zero Unnecessary Modification principle, changing shared/proven engine code
+requires its own evidence of a defect in *its* actual usage, not just a
+theoretical ambiguity exposed by a misconfiguration elsewhere. Flagged here
+as a known latent risk worth a future dedicated look (it means a real R2
+outage or expired credential would also currently misreport as
+"content missing" rather than "unable to verify") -- not fixed in this pass.
 
 ## Next update
 
-This table is updated as real runs complete -- see
+Awaiting a fresh real STAGE 3.6a run against the credential fix above (next
+`main`-branch `sentinel-blogger.yml` run once this fix lands). That run is
+"Run A" of the 2-3 required for `--enforce` sign-off. See
 `docs/RX_PUB_A0_PRODUCTION_CERTIFICATION.md` (RX-PUB-A0.4's final
 deliverable, not yet written) for the point-in-time enforcement-readiness
 verdict once this evidence is gathered.

@@ -1546,6 +1546,9 @@ jobs:
       - name: "STAGE 3.6a - RX-PUB-A0 Reports Artifact Identity Verifier (observability bake-in)"
         timeout-minutes: 15
         if: always()
+        env:
+          CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
+          CF_R2_REPORTS_SECRET_KEY: ${{ secrets.CF_R2_REPORTS_SECRET_KEY }}
         run: python3 scripts/r2_reports_verifier.py || true
 
       # -----------------------------------------------------------------------
