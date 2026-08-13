@@ -108,13 +108,12 @@ closed. Closing it requires: (1) a run history from real CI executions
 
 ## What this does NOT yet do
 
-- Does not verify `PUBLIC_HTTP_SHA256` (the customer-facing HTTP response) --
-  only `R2_SHA256` (the object store). Section 23's four-layer chain
-  (SOURCE → GENERATED → CERTIFIED → LIVE) is only partially closed: this
-  closes GENERATED-vs-R2, not R2-vs-LIVE. Given `docs/RX_PUB_A0_EXECUTION_PATH.md`
-  §4 already established the Worker serves R2 objects directly with no
-  observed caching layer, R2-vs-LIVE divergence is a lower-probability gap
-  than GENERATED-vs-R2 was, but it remains unverified by automation.
+- ~~Does not verify `PUBLIC_HTTP_SHA256`~~ **Closed in RX-PUB-A0.4 Phase 2**
+  -- see `docs/RX_PUB_A0_PUBLIC_HTTP_IDENTITY_SPEC.md`. `verify_one()` now
+  also fetches the public customer-facing response and compares its
+  SHA-256, classified as `live_state`. Section 23's four-layer chain
+  (SOURCE → GENERATED → CERTIFIED → LIVE) is now fully instrumented,
+  observability-only (not yet `--enforce`d) like the R2 layer.
 - Does not implement the golden-fixture corpus (A0-1..A0-8, Section 27) --
   it verifies whatever is actually in the active window on a given run, not
   a fixed, curated regression set.

@@ -41,6 +41,17 @@ Environment variables consumed (same names r2_upload.py already uses):
     same dedicated-token swap pattern as r2_upload.py's reports-upload phase)
 
 No secrets are logged.
+
+RX-PUB-A0.4 Phase 2 extension (Sections 12-16): also fetches the
+customer-facing public HTTP URL for each in-window report and computes its
+SHA-256, closing the R2-vs-CUSTOMER half of the identity chain PR #183 left
+open (it only closed LOCAL-vs-R2). Per Section 4's reuse mandate this is an
+extension of this same script/manifest, not a new parallel verifier --
+public fetches need no R2 credentials at all, so they run independently of
+whether the R2 credential-gated checks above ran. Distinguishes "R2 object
+correct but customer response stale" from "R2 object itself wrong" by
+capturing both facts per report rather than conflating them into one
+pass/fail bit.
 """
 from __future__ import annotations
 
@@ -50,6 +61,8 @@ import logging
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -85,10 +98,18 @@ logging.basicConfig(
 )
 log = logging.getLogger("sentinel.rx_pub_a0_reports_verifier")
 
-MANIFEST_PATH  = REPO_ROOT / "data" / "stix" / "feed_manifest.json"
-OUTPUT_PATH    = REPO_ROOT / "data" / "quality" / "rx_pub_a0_reports_artifact_manifest.json"
-BUCKET_REPORTS = _r2_upload.BUCKET_REPORTS
-GENERATOR_NAME = "generate_intel_reports.py"
+MANIFEST_PATH   = REPO_ROOT / "data" / "stix" / "feed_manifest.json"
+OUTPUT_PATH     = REPO_ROOT / "data" / "quality" / "rx_pub_a0_reports_artifact_manifest.json"
+BUCKET_REPORTS  = _r2_upload.BUCKET_REPORTS
+GENERATOR_NAME  = "generate_intel_reports.py"
+PUBLIC_BASE_URL = os.environ.get("RX_PUB_A0_PUBLIC_BASE_URL", "https://intel.cyberdudebivash.com")
+PUBLIC_TIMEOUT  = 15
+PUBLIC_MAX_RETRIES = 3
+PUBLIC_RETRY_DELAY = 3
+_SAFE_RESPONSE_HEADERS = (
+    "cf-ray", "cache-control", "age", "etag", "last-modified",
+    "cf-cache-status", "content-length", "content-type",
+)
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -127,7 +148,34 @@ def _r2_key_for(local_path: Path) -> str:
     return str(local_path.relative_to(REPO_ROOT)).replace(os.sep, "/")
 
 
-def verify_one(local_path: Path, r2_key: str) -> dict:
+def _fetch_public(url: str) -> dict:
+    """GET the customer-facing public URL. Returns a dict with 'bytes' (or
+    None on failure), 'status', and safe response headers only -- never logs
+    or returns the raw response body beyond what the caller hashes in
+    memory. Bounded retries, matching the R2 helpers' retry policy."""
+    last_status = None
+    last_error = None
+    for attempt in range(1, PUBLIC_MAX_RETRIES + 1):
+        req = urllib.request.Request(url, headers={"User-Agent": "SentinelApex-RX-PUB-A0-Verifier/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=PUBLIC_TIMEOUT) as resp:
+                body = resp.read()
+                headers = {k.lower(): v for k, v in resp.getheaders() if k.lower() in _SAFE_RESPONSE_HEADERS}
+                return {"bytes": body, "status": resp.status, "headers": headers, "error": None}
+        except urllib.error.HTTPError as e:
+            last_status = e.code
+            headers = {k.lower(): v for k, v in (e.headers.items() if e.headers else []) if k.lower() in _SAFE_RESPONSE_HEADERS}
+            if e.code == 404:
+                return {"bytes": None, "status": 404, "headers": headers, "error": "HTTP 404"}
+            last_error = f"HTTP {e.code}"
+        except Exception as e:
+            last_error = str(e)
+        if attempt < PUBLIC_MAX_RETRIES:
+            time.sleep(PUBLIC_RETRY_DELAY)
+    return {"bytes": None, "status": last_status, "headers": {}, "error": last_error or "fetch failed"}
+
+
+def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict:
     local_bytes = local_path.read_bytes()
     local_sha256 = _sha256_bytes(local_bytes)
     result = {
@@ -138,8 +186,13 @@ def verify_one(local_path: Path, r2_key: str) -> dict:
         "remote_sha256":  None,
         "remote_verified_at": None,
         "publication_state": "PENDING",
+        "public_sha256":  None,
+        "public_verified_at": None,
+        "live_state":     "PENDING",
+        "public_response_headers": {},
     }
 
+    # -- R2 layer (LOCAL vs R2) -----------------------------------------
     head = _verifier._s3api_head_object(BUCKET_REPORTS, r2_key)
     if head is None:
         head = _verifier._boto3_head_object(BUCKET_REPORTS, r2_key)
@@ -147,32 +200,54 @@ def verify_one(local_path: Path, r2_key: str) -> dict:
     if head is None:
         result["publication_state"] = "UNKNOWN"
         result["error"] = "head-object failed via both awscli and boto3"
-        return result
-
-    if head["status"] == 404:
+    elif head["status"] == 404:
         result["publication_state"] = "FAILED"
         result["error"] = "R2 object does not exist"
-        return result
-
-    remote_bytes = _get_object_bytes(BUCKET_REPORTS, r2_key)
-
-    if remote_bytes is None:
-        result["publication_state"] = "UNKNOWN"
-        result["error"] = "get-object failed -- could not fetch remote bytes for SHA-256 comparison"
-        return result
-
-    remote_sha256 = _sha256_bytes(remote_bytes)
-    result["remote_sha256"] = remote_sha256
-    result["remote_verified_at"] = _verifier._utc_now()
-
-    if remote_sha256 == local_sha256:
-        result["publication_state"] = "REMOTE_VERIFIED"
     else:
-        result["publication_state"] = "STALE_OR_DIVERGENT"
-        result["error"] = (
-            f"artifact_sha256 ({local_sha256[:16]}...) != remote_sha256 "
-            f"({remote_sha256[:16]}...) -- local and R2 bytes diverge"
-        )
+        remote_bytes = _get_object_bytes(BUCKET_REPORTS, r2_key)
+        if remote_bytes is None:
+            result["publication_state"] = "UNKNOWN"
+            result["error"] = "get-object failed -- could not fetch remote bytes for SHA-256 comparison"
+        else:
+            remote_sha256 = _sha256_bytes(remote_bytes)
+            result["remote_sha256"] = remote_sha256
+            result["remote_verified_at"] = _verifier._utc_now()
+            if remote_sha256 == local_sha256:
+                result["publication_state"] = "REMOTE_VERIFIED"
+            else:
+                result["publication_state"] = "STALE_OR_DIVERGENT"
+                result["error"] = (
+                    f"artifact_sha256 ({local_sha256[:16]}...) != remote_sha256 "
+                    f"({remote_sha256[:16]}...) -- local and R2 bytes diverge"
+                )
+
+    # -- Public HTTP layer (R2 vs CUSTOMER) -- runs independently of the --
+    # R2 credential-gated checks above; needs no R2 credentials at all.
+    if skip_public:
+        return result
+    public_url = f"{PUBLIC_BASE_URL}/{r2_key}"
+    public = _fetch_public(public_url)
+    result["public_response_headers"] = public["headers"]
+
+    if public["status"] == 404:
+        result["live_state"] = "LIVE_MISSING"
+        result["public_error"] = "public HTTP GET returned 404"
+    elif public["bytes"] is None:
+        result["live_state"] = "LIVE_FETCH_FAILED"
+        result["public_error"] = public.get("error") or "public HTTP GET failed"
+    else:
+        public_sha256 = _sha256_bytes(public["bytes"])
+        result["public_sha256"] = public_sha256
+        result["public_verified_at"] = _verifier._utc_now()
+        if public_sha256 == local_sha256:
+            result["live_state"] = "LIVE_VERIFIED"
+        else:
+            result["live_state"] = "LIVE_STALE_OR_DIVERGENT"
+            result["public_error"] = (
+                f"artifact_sha256 ({local_sha256[:16]}...) != public_sha256 "
+                f"({public_sha256[:16]}...) -- local and customer-served bytes diverge"
+            )
+
     return result
 
 
@@ -228,42 +303,57 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--enforce", action="store_true",
-        help="Hard-fail (nonzero exit) on any STALE_OR_DIVERGENT/FAILED report. "
-             "Not passed in CI yet -- observability-only bake-in period, matching "
-             "the same rollout pattern scripts/report_engine_consistency_gate.py "
-             "already established for a new gate on this exact keyspace. Once a "
-             "run history exists showing zero false positives, add --enforce to "
-             "the STAGE 3.6a workflow step to make this a real HARD FAIL gate "
-             "(RX-PUB-A0 Section 25 requires this eventually)."
+        help="Hard-fail (nonzero exit) on any STALE_OR_DIVERGENT/FAILED R2 report or "
+             "LIVE_STALE_OR_DIVERGENT public report. Not passed in CI yet -- "
+             "observability-only bake-in period, matching the same rollout pattern "
+             "scripts/report_engine_consistency_gate.py already established for a new "
+             "gate on this exact keyspace. Once a run history exists showing zero "
+             "false positives, add --enforce to the STAGE 3.6a workflow step to make "
+             "this a real HARD FAIL gate (RX-PUB-A0 Section 25 requires this eventually)."
+    )
+    parser.add_argument(
+        "--skip-public", action="store_true",
+        help="Skip the public HTTP fetch/SHA-256 layer (R2-only, PR #183's original "
+             "scope). Escape hatch for cost governance (Section 37) if public "
+             "verification duration becomes a measured problem; not used by default."
     )
     args = parser.parse_args()
+
+    r2_creds_present = bool(_verifier.CF_ACCOUNT_ID and _verifier.ACCESS_KEY and _verifier.SECRET_KEY)
 
     log.info("=" * 70)
     log.info("RX-PUB-A0 Reports Artifact Identity Verifier")
     log.info("Bucket: %s  |  in-window manifest: %s", BUCKET_REPORTS, MANIFEST_PATH)
+    log.info("Public base URL: %s  |  public checks: %s", PUBLIC_BASE_URL, "OFF" if args.skip_public else "ON")
+    log.info("R2 credentials: %s", "configured" if r2_creds_present else "missing")
     log.info("Mode: %s", "ENFORCE (hard fail on mismatch)" if args.enforce else "observability-only (bake-in)")
     log.info("=" * 70)
     t0 = time.time()
 
-    if not (_verifier.CF_ACCOUNT_ID and _verifier.ACCESS_KEY and _verifier.SECRET_KEY):
-        msg = (
-            "R2 credentials absent (CF_ACCOUNT_ID / AWS_ACCESS_KEY_ID / "
-            "AWS_SECRET_ACCESS_KEY) -- skipping. Trusting Stage 3.5 exit code "
-            "as source of truth for this run (same soft-pass posture as "
-            "r2_upload_verifier.py's own credential-absent path)."
+    if not r2_creds_present and args.skip_public:
+        log.warning(
+            "R2 credentials absent and --skip-public set -- nothing to verify. "
+            "Trusting Stage 3.5 exit code as source of truth for this run (same "
+            "soft-pass posture as r2_upload_verifier.py's own credential-absent path)."
         )
-        log.warning(msg)
         return 0
+    if not r2_creds_present:
+        log.warning(
+            "R2 credentials absent (CF_ACCOUNT_ID / AWS_ACCESS_KEY_ID / "
+            "AWS_SECRET_ACCESS_KEY) -- R2 layer will classify every report UNKNOWN. "
+            "Public HTTP layer needs no R2 credentials and still runs."
+        )
 
     entries = _load_in_window_entries()
     log.info("In-window manifest entries: %d", len(entries))
 
     manifest_out: dict = {
-        "schema_version": "1",
+        "schema_version": "2",
         "generated_at":   _verifier._utc_now(),
         "pipeline_run_id": os.environ.get("GITHUB_RUN_ID", "local"),
         "release_sha":    os.environ.get("GITHUB_SHA", "unknown"),
         "bucket":         BUCKET_REPORTS,
+        "public_base_url": PUBLIC_BASE_URL,
         "reports":        {},
     }
 
@@ -271,6 +361,9 @@ def main() -> int:
     mismatched = 0
     missing_local = 0
     unknown = 0
+    live_verified = 0
+    live_mismatched = 0
+    live_unknown = 0
 
     for entry in entries:
         intel_id = entry.get("id") or entry.get("stix_id")
@@ -281,12 +374,13 @@ def main() -> int:
             missing_local += 1
             manifest_out["reports"][intel_id] = {
                 "publication_state": "FAILED",
+                "live_state": "UNKNOWN",
                 "error": "no local HTML artifact found for an in-window manifest entry",
             }
             continue
 
         r2_key = _r2_key_for(local_path)
-        result = verify_one(local_path, r2_key)
+        result = verify_one(local_path, r2_key, skip_public=args.skip_public)
         result["source_record_id"] = intel_id
         result["source_updated_at"] = entry.get("processed_at") or entry.get("timestamp") or ""
         result["path"] = str(local_path.relative_to(REPO_ROOT))
@@ -302,6 +396,16 @@ def main() -> int:
             unknown += 1
             log.warning("[%s] %s: %s", state, intel_id, result.get("error", ""))
 
+        live_state = result["live_state"]
+        if live_state == "LIVE_VERIFIED":
+            live_verified += 1
+        elif live_state in ("LIVE_STALE_OR_DIVERGENT", "LIVE_MISSING"):
+            live_mismatched += 1
+            log.error("[%s] %s: %s", live_state, intel_id, result.get("public_error", ""))
+        elif live_state != "PENDING":
+            live_unknown += 1
+            log.warning("[%s] %s: %s", live_state, intel_id, result.get("public_error", ""))
+
     elapsed = round(time.time() - t0, 2)
     manifest_out["summary"] = {
         "total_in_window":  len(entries),
@@ -309,6 +413,9 @@ def main() -> int:
         "stale_or_divergent_or_failed": mismatched,
         "unknown":          unknown,
         "missing_local":    missing_local,
+        "live_verified":    live_verified,
+        "live_stale_or_divergent_or_missing": live_mismatched,
+        "live_unknown":     live_unknown,
         "elapsed_seconds":  elapsed,
     }
 
@@ -319,25 +426,30 @@ def main() -> int:
     log.info("Wrote %s", OUTPUT_PATH)
 
     log.info(
-        "Summary: %d in-window, %d REMOTE_VERIFIED, %d STALE_OR_DIVERGENT/FAILED, "
+        "R2 summary: %d in-window, %d REMOTE_VERIFIED, %d STALE_OR_DIVERGENT/FAILED, "
         "%d UNKNOWN, %d missing-local, %.2fs",
         len(entries), verified, mismatched, unknown, missing_local, elapsed,
     )
+    log.info(
+        "Public HTTP summary: %d LIVE_VERIFIED, %d LIVE_STALE_OR_DIVERGENT/MISSING, %d UNKNOWN",
+        live_verified, live_mismatched, live_unknown,
+    )
 
-    if mismatched > 0:
+    total_failures = mismatched + live_mismatched
+    if total_failures > 0:
         log.error("=" * 70)
         log.error(
-            "%s -- %d in-window report(s) have a proven local/remote "
-            "SHA-256 mismatch or missing R2 object. A changed, certified "
-            "commercial artifact must be remotely verified before this run "
-            "can be treated as production-certified (RX-PUB-A0 Section 25).",
+            "%s -- %d R2 mismatch/missing + %d public HTTP mismatch/missing report(s). "
+            "A changed, certified commercial artifact must be remotely AND "
+            "publicly verified before this run can be treated as "
+            "production-certified (RX-PUB-A0 Sections 12, 25).",
             "HARD FAIL" if args.enforce else "WOULD HARD FAIL (--enforce not set)",
-            mismatched,
+            mismatched, live_mismatched,
         )
         log.error("=" * 70)
         return 1 if args.enforce else 0
 
-    log.info("PASS -- every in-window report's remote SHA-256 matches its local artifact.")
+    log.info("PASS -- every in-window report's R2 and public HTTP SHA-256 match its local artifact.")
     return 0
 
 
