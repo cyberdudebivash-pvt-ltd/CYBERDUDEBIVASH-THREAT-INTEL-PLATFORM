@@ -90,6 +90,7 @@ import { handleP36Quality, handleP36Maturity, handleP36Targets, handleP36Gaps, h
 import { handleP37Hardening, handleP37FeedAudit, handleP37Enrichment, handleP37IQScore, handleP37Detection, handleP37SourceDiversity, handleP37Reliability, handleP37Debt, handleP37Metrics, handleP37Certification, handleP37Dashboard, handleP37Observability } from './p37-handlers.js';
 import { handleP38SchemaRegistry, handleP38FeedGovernance, handleP38SchemaDrift, handleP38EnrichmentAudit, handleP38ConfidenceAudit, handleP38IQIndex, handleP38SourceDiversity, handleP38Certification, handleP38Executive, handleP38Reliability, handleP38Metrics, handleP38Observability } from './p38-handlers.js';
 import { handleP40SourceRegistry, handleP40SourceDetail, handleP40SourceHealth, handleP40Licensing, handleP40Coverage, handleP40Waves, handleP40Certification, handleP40Metrics, handleP40Dashboard, handleP40Observability } from './p40-handlers.js';
+import { handleRxPubA0ReportsIdentity, handleRxPubA0Observability } from './rx-pub-a0-handlers.js';
 import { evaluatePublicationGate, isCustomerReady, buildGateRejectedResponseBody, buildUnresolvableReportResponseBody } from './publication-gate.js';
 import { loadCertificationIndex, persistCertificationRecords, resolveCertification, CERTIFICATION_POLICY_VERSION } from './certification-registry.js';
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
@@ -4728,6 +4729,9 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/v1/p40/metrics")            return await handleP40Metrics(request, env);
   if (path === "/api/v1/p40/dashboard")          return await handleP40Dashboard(request, env);
   if (path === "/api/v1/p40/observability")      return await handleP40Observability(request, env);
+
+  if (path === "/api/v1/rx-pub-a0/reports-identity") return await handleRxPubA0ReportsIdentity(request, env);
+  if (path === "/api/v1/rx-pub-a0/observability")    return await handleRxPubA0Observability(request, env);
 
   // --- P0 publication authorization gate (incident: intel--ba996dad34540150b8ea1b5f) ---
   // Supports both /api/v1/reports/{id}/publication-status (path form) and
