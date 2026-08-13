@@ -11,6 +11,7 @@ each case the mission's Section 12 case table requires.
 """
 import hashlib
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -222,6 +223,123 @@ class TestPublicHttpLayer(unittest.TestCase):
 
         self.assertEqual(result["publication_state"], "UNKNOWN")  # R2 layer: no credentials
         self.assertEqual(result["live_state"], "LIVE_VERIFIED")   # Public layer: independent, still works
+
+
+class TestPublicUrlAllowlist(unittest.TestCase):
+    """CodeRabbit finding (CWE-918 SSRF): RX_PUB_A0_PUBLIC_BASE_URL is
+    CI-environment-controlled, not end-user input, but urlopen() with a
+    request-influenced URL and no scheme/host restriction is still worth
+    closing defensively."""
+
+    def test_https_production_host_is_allowed(self):
+        rrv._validate_public_url("https://intel.cyberdudebivash.com/reports/2026/08/x.html")  # must not raise
+
+    def test_http_scheme_is_rejected(self):
+        with self.assertRaises(rrv.PublicFetchConfigError):
+            rrv._validate_public_url("http://intel.cyberdudebivash.com/reports/x.html")
+
+    def test_arbitrary_host_is_rejected(self):
+        with self.assertRaises(rrv.PublicFetchConfigError):
+            rrv._validate_public_url("https://169.254.169.254/latest/meta-data/")
+
+    def test_extra_allowed_host_env_var_is_honored(self):
+        with patch.dict(os.environ, {"RX_PUB_A0_PUBLIC_ALLOWED_HOSTS": "test.example.com"}):
+            rrv._validate_public_url("https://test.example.com/reports/x.html")  # must not raise
+
+    def test_fetch_public_config_error_classifies_as_live_fetch_failed_not_verified(self):
+        """A misconfigured/rejected target must surface as an explicit
+        failure through verify_one(), never silently skip the public layer
+        or (worse) read as verified."""
+        import tempfile
+        tmp = Path(tempfile.mkdtemp(prefix="rrv_ssrf_test_"))
+        try:
+            p = tmp / "intel--ssrftest0000000.html"
+            p.write_bytes(b"<!DOCTYPE html><html>x</html>")
+            with patch.object(rrv, "PUBLIC_BASE_URL", "http://not-https.example.com"), \
+                 patch.object(rrv._verifier, "_s3api_head_object", return_value=None), \
+                 patch.object(rrv._verifier, "_boto3_head_object", return_value=None):
+                result = rrv.verify_one(p, "reports/2026/08/intel--ssrftest0000000.html")
+            self.assertEqual(result["live_state"], "LIVE_FETCH_FAILED")
+            self.assertIsNone(result["public_sha256"])
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestFinalFailureHeaderPreservation(unittest.TestCase):
+    """CodeRabbit finding: a final (retries-exhausted) non-404 HTTP error
+    must not lose the cache/response evidence headers Section 15 requires
+    capturing."""
+
+    def test_headers_from_final_http_error_are_preserved(self):
+        import email.message
+
+        class _FakeHTTPError(Exception):
+            pass
+
+        call_count = {"n": 0}
+
+        def _fake_urlopen(*args, **kwargs):
+            call_count["n"] += 1
+            headers = email.message.Message()
+            headers["CF-Ray"] = "abc123-IAD"
+            headers["Cache-Control"] = "no-cache"
+            import urllib.error as ue
+            raise ue.HTTPError(
+                url="https://intel.cyberdudebivash.com/reports/x.html",
+                code=503, msg="Service Unavailable", hdrs=headers, fp=None,
+            )
+
+        with patch.object(rrv, "PUBLIC_RETRY_DELAY", 0), \
+             patch.object(rrv._PUBLIC_OPENER, "open", side_effect=_fake_urlopen):
+            result = rrv._fetch_public("https://intel.cyberdudebivash.com/reports/x.html")
+
+        self.assertEqual(call_count["n"], rrv.PUBLIC_MAX_RETRIES)
+        self.assertEqual(result["status"], 503)
+        self.assertEqual(result["headers"].get("cf-ray"), "abc123-IAD")
+        self.assertEqual(result["headers"].get("cache-control"), "no-cache")
+
+
+class TestFailOpenGuard(unittest.TestCase):
+    """CodeRabbit finding: LIVE_FETCH_FAILED (and the equivalent R2-layer
+    UNKNOWN state) must block a PASS/success claim exactly like a confirmed
+    mismatch -- "could not verify" must never read as "verified"."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="rrv_failopen_test_"))
+        self.manifest_path = self.tmp / "feed_manifest.json"
+        self.reports_base = self.tmp / "reports"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_all_public_fetches_failing_blocks_enforce_pass(self):
+        entry_id = "intel--failopentest00000"
+        report_path = self.reports_base / "2026" / "08" / f"{entry_id}.html"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("<!DOCTYPE html><html>content</html>", encoding="utf-8")
+        self.manifest_path.write_text(json.dumps([
+            {"id": entry_id, "internal_report_url": f"/reports/2026/08/{entry_id}.html"}
+        ]), encoding="utf-8")
+
+        with patch.object(rrv, "MANIFEST_PATH", self.manifest_path), \
+             patch.object(rrv, "REPO_ROOT", self.tmp), \
+             patch.object(rrv._verifier, "CF_ACCOUNT_ID", "test"), \
+             patch.object(rrv._verifier, "ACCESS_KEY", "test"), \
+             patch.object(rrv._verifier, "SECRET_KEY", "test"), \
+             patch.object(rrv._verifier, "_s3api_head_object", return_value=None), \
+             patch.object(rrv._verifier, "_boto3_head_object", return_value=None), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": None, "status": 503, "headers": {}, "error": "HTTP 503"}), \
+             patch.object(sys, "argv", ["r2_reports_verifier.py", "--enforce"]):
+            exit_code = rrv.main()
+
+        self.assertEqual(
+            exit_code, 1,
+            "a total public-HTTP outage (every report LIVE_FETCH_FAILED) must "
+            "exit nonzero under --enforce, not silently PASS"
+        )
 
 
 if __name__ == "__main__":

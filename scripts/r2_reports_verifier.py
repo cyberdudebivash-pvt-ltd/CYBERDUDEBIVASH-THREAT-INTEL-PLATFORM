@@ -62,6 +62,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,6 +107,17 @@ PUBLIC_BASE_URL = os.environ.get("RX_PUB_A0_PUBLIC_BASE_URL", "https://intel.cyb
 PUBLIC_TIMEOUT  = 15
 PUBLIC_MAX_RETRIES = 3
 PUBLIC_RETRY_DELAY = 3
+# CodeRabbit finding: worst case (every report exhausts retries) is
+# PUBLIC_MAX_RETRIES * (PUBLIC_TIMEOUT + PUBLIC_RETRY_DELAY) per report --
+# at 150+ in-window reports that can exceed STAGE 3.6a's workflow timeout
+# (deploy-worker.yml / sentinel-blogger.yml, 15 min) before this script ever
+# reaches its own manifest write, losing ALL results for the run rather than
+# just the unreachable ones. RUN_DEADLINE_SECONDS bounds total wall-clock
+# time across the whole in-window loop (both R2 and public layers) well
+# under that limit; any report not yet started when the deadline is hit is
+# recorded explicitly (not silently dropped) and the manifest is still
+# written with everything processed so far.
+RUN_DEADLINE_SECONDS = 600
 _SAFE_RESPONSE_HEADERS = (
     "cf-ray", "cache-control", "age", "etag", "last-modified",
     "cf-cache-status", "content-length", "content-type",
@@ -148,31 +160,76 @@ def _r2_key_for(local_path: Path) -> str:
     return str(local_path.relative_to(REPO_ROOT)).replace(os.sep, "/")
 
 
+class PublicFetchConfigError(ValueError):
+    """PUBLIC_BASE_URL (or RX_PUB_A0_PUBLIC_BASE_URL override) failed the
+    scheme/host allowlist check. Raised at call time, not import time, so a
+    bad override fails the specific fetch loudly rather than silently
+    falling through to an unrestricted request."""
+
+
+def _validate_public_url(url: str) -> None:
+    """CodeRabbit SSRF finding (CWE-918): RX_PUB_A0_PUBLIC_BASE_URL is
+    CI-environment-controlled, not end-user input, so the practical exposure
+    is low -- but urlopen() with a request-influenced URL and no host/scheme
+    restriction is exactly the ast-grep urlopen-unsanitized-data pattern, and
+    costs nothing to close. HTTPS-only, plus an explicit allowlist covering
+    the real production host and RX_PUB_A0_PUBLIC_ALLOWED_HOSTS-provided test
+    hosts (comma-separated, e.g. for local/dev overrides) -- never a wildcard
+    fallback that would defeat the allowlist's purpose."""
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https":
+        raise PublicFetchConfigError(f"public fetch URL must be https, got scheme={parsed.scheme!r}: {url}")
+    extra_hosts = {
+        h.strip().lower() for h in os.environ.get("RX_PUB_A0_PUBLIC_ALLOWED_HOSTS", "").split(",") if h.strip()
+    }
+    allowed_hosts = {"intel.cyberdudebivash.com"} | extra_hosts
+    if (parsed.hostname or "").lower() not in allowed_hosts:
+        raise PublicFetchConfigError(
+            f"public fetch host {parsed.hostname!r} not in allowlist {sorted(allowed_hosts)} "
+            f"(set RX_PUB_A0_PUBLIC_ALLOWED_HOSTS to add test hosts): {url}"
+        )
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Disables following redirects entirely for the public fetch opener --
+    simpler and strictly safer than validating each redirect hop against the
+    allowlist, and this endpoint family has no legitimate reason to redirect."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_PUBLIC_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _fetch_public(url: str) -> dict:
     """GET the customer-facing public URL. Returns a dict with 'bytes' (or
     None on failure), 'status', and safe response headers only -- never logs
     or returns the raw response body beyond what the caller hashes in
-    memory. Bounded retries, matching the R2 helpers' retry policy."""
+    memory. Bounded retries, matching the R2 helpers' retry policy. Redirects
+    are not followed (see _NoRedirect) and the target is validated against an
+    HTTPS+host allowlist before every attempt (see _validate_public_url)."""
+    _validate_public_url(url)
     last_status = None
     last_error = None
+    last_headers: dict = {}
     for attempt in range(1, PUBLIC_MAX_RETRIES + 1):
         req = urllib.request.Request(url, headers={"User-Agent": "SentinelApex-RX-PUB-A0-Verifier/1.0"})
         try:
-            with urllib.request.urlopen(req, timeout=PUBLIC_TIMEOUT) as resp:
+            with _PUBLIC_OPENER.open(req, timeout=PUBLIC_TIMEOUT) as resp:
                 body = resp.read()
                 headers = {k.lower(): v for k, v in resp.getheaders() if k.lower() in _SAFE_RESPONSE_HEADERS}
                 return {"bytes": body, "status": resp.status, "headers": headers, "error": None}
         except urllib.error.HTTPError as e:
             last_status = e.code
-            headers = {k.lower(): v for k, v in (e.headers.items() if e.headers else []) if k.lower() in _SAFE_RESPONSE_HEADERS}
+            last_headers = {k.lower(): v for k, v in (e.headers.items() if e.headers else []) if k.lower() in _SAFE_RESPONSE_HEADERS}
             if e.code == 404:
-                return {"bytes": None, "status": 404, "headers": headers, "error": "HTTP 404"}
+                return {"bytes": None, "status": 404, "headers": last_headers, "error": "HTTP 404"}
             last_error = f"HTTP {e.code}"
         except Exception as e:
             last_error = str(e)
         if attempt < PUBLIC_MAX_RETRIES:
             time.sleep(PUBLIC_RETRY_DELAY)
-    return {"bytes": None, "status": last_status, "headers": {}, "error": last_error or "fetch failed"}
+    return {"bytes": None, "status": last_status, "headers": last_headers, "error": last_error or "fetch failed"}
 
 
 def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict:
@@ -226,7 +283,12 @@ def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict
     if skip_public:
         return result
     public_url = f"{PUBLIC_BASE_URL}/{r2_key}"
-    public = _fetch_public(public_url)
+    try:
+        public = _fetch_public(public_url)
+    except PublicFetchConfigError as e:
+        result["live_state"] = "LIVE_FETCH_FAILED"
+        result["public_error"] = f"public fetch target rejected by allowlist: {e}"
+        return result
     result["public_response_headers"] = public["headers"]
 
     if public["status"] == 404:
@@ -365,10 +427,33 @@ def main() -> int:
     live_mismatched = 0
     live_unknown = 0
 
-    for entry in entries:
+    deadline_hit = False
+    for _loop_idx, entry in enumerate(entries):
         intel_id = entry.get("id") or entry.get("stix_id")
         if not intel_id:
             continue
+
+        if not deadline_hit and (time.time() - t0) > RUN_DEADLINE_SECONDS:
+            deadline_hit = True
+            log.error(
+                "Run deadline (%ds) exceeded after %d/%d reports -- stopping "
+                "and recording the rest as UNVERIFIED_DEADLINE rather than "
+                "silently dropping them or letting the workflow step timeout "
+                "kill this process before it writes the manifest.",
+                RUN_DEADLINE_SECONDS, _loop_idx, len(entries),
+            )
+
+        if deadline_hit:
+            manifest_out["reports"][intel_id] = {
+                "publication_state": "UNKNOWN",
+                "live_state": "UNKNOWN",
+                "error": f"run deadline ({RUN_DEADLINE_SECONDS}s) exceeded before this "
+                         f"report was reached -- not processed this run",
+            }
+            unknown += 1
+            live_unknown += 1
+            continue
+
         local_path = _local_report_path(entry)
         if not local_path:
             missing_local += 1
@@ -417,6 +502,7 @@ def main() -> int:
         "live_stale_or_divergent_or_missing": live_mismatched,
         "live_unknown":     live_unknown,
         "elapsed_seconds":  elapsed,
+        "run_deadline_exceeded": deadline_hit,
     }
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -435,21 +521,31 @@ def main() -> int:
         live_verified, live_mismatched, live_unknown,
     )
 
-    total_failures = mismatched + live_mismatched
+    # CodeRabbit finding (RX-PUB-A0 Section 27 "do not fail-open"): an
+    # unverifiable report (retries exhausted, auth/config error) is NOT the
+    # same claim as a verified-matching report. Both `unknown` (R2 layer)
+    # and `live_unknown` (public layer, includes LIVE_FETCH_FAILED) must
+    # block a PASS/success claim exactly like a confirmed mismatch does --
+    # "could not verify" must never silently read as "verified".
+    total_failures = mismatched + live_mismatched + unknown + live_unknown
     if total_failures > 0:
         log.error("=" * 70)
         log.error(
-            "%s -- %d R2 mismatch/missing + %d public HTTP mismatch/missing report(s). "
-            "A changed, certified commercial artifact must be remotely AND "
-            "publicly verified before this run can be treated as "
-            "production-certified (RX-PUB-A0 Sections 12, 25).",
+            "%s -- %d R2 mismatch/missing + %d public HTTP mismatch/missing + "
+            "%d R2 unverifiable + %d public unverifiable report(s). A changed, "
+            "certified commercial artifact must be remotely AND publicly "
+            "verified before this run can be treated as production-certified "
+            "(RX-PUB-A0 Sections 12, 25, 27).",
             "HARD FAIL" if args.enforce else "WOULD HARD FAIL (--enforce not set)",
-            mismatched, live_mismatched,
+            mismatched, live_mismatched, unknown, live_unknown,
         )
         log.error("=" * 70)
         return 1 if args.enforce else 0
 
-    log.info("PASS -- every in-window report's R2 and public HTTP SHA-256 match its local artifact.")
+    if args.skip_public:
+        log.info("PASS (R2-only -- --skip-public was set) -- every in-window report's R2 SHA-256 matches its local artifact.")
+    else:
+        log.info("PASS -- every in-window report's R2 and public HTTP SHA-256 match its local artifact.")
     return 0
 
 

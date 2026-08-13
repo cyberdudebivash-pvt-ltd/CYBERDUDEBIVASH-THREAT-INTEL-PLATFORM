@@ -25,7 +25,7 @@ Reuses the mission's suggested shape, scoped to the fields
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "generated_at": "2026-08-13T...Z",
   "pipeline_run_id": "<GITHUB_RUN_ID>",
   "release_sha": "<GITHUB_SHA>",
@@ -41,7 +41,11 @@ Reuses the mission's suggested shape, scoped to the fields
       "artifact_sha256": "<sha256 of the local file>",
       "remote_sha256": "<sha256 of the fetched R2 object, or null>",
       "remote_verified_at": "<timestamp, or null>",
-      "publication_state": "REMOTE_VERIFIED | STALE_OR_DIVERGENT | FAILED | UNKNOWN | PENDING"
+      "publication_state": "REMOTE_VERIFIED | STALE_OR_DIVERGENT | FAILED | UNKNOWN | PENDING",
+      "public_sha256": "<sha256 of the fetched public HTTP response, or null>",
+      "public_verified_at": "<timestamp, or null>",
+      "live_state": "LIVE_VERIFIED | LIVE_STALE_OR_DIVERGENT | LIVE_MISSING | LIVE_FETCH_FAILED | PENDING",
+      "public_response_headers": {"cf-ray": "...", "cache-control": "...", "...": "..."}
     }
   },
   "summary": {
@@ -50,10 +54,19 @@ Reuses the mission's suggested shape, scoped to the fields
     "stale_or_divergent_or_failed": 0,
     "unknown": 0,
     "missing_local": 0,
-    "elapsed_seconds": 0.0
+    "live_verified": 0,
+    "live_stale_or_divergent_or_missing": 0,
+    "live_unknown": 0,
+    "elapsed_seconds": 0.0,
+    "run_deadline_exceeded": false
   }
 }
 ```
+
+The `public_sha256` / `public_verified_at` / `live_state` / `public_response_headers`
+fields (and the `summary.live_*` / `run_deadline_exceeded` counters) were added in
+Phase 2 (Sections 12-16) -- see `docs/RX_PUB_A0_PUBLIC_HTTP_IDENTITY_SPEC.md` for
+the public HTTP layer this schema bump documents.
 
 `certification_version` / `certification_state` from the mission's original
 suggested schema are intentionally omitted here -- they belong to the
