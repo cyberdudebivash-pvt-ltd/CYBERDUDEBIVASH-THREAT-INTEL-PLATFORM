@@ -489,14 +489,40 @@ def main() -> None:
             #   2. After stash pop, detect if any HTML reports are missing.
             #   3. Restore lost reports from ORIG_HEAD (set by git reset --hard)
             #      which points to our pre-reset local commit containing all reports.
+            #
+            # RX-PUB-A0 FIX (content-reversion blind spot -- confirmed via forensic
+            # investigation of a live stale customer-facing report):
+            #   The existence-only check above catches reports that VANISH but is
+            #   blind to reports that ALREADY EXIST on origin/main (any report from
+            #   a prior run) whose CONTENT gets silently reverted by
+            #   `git reset --hard origin/main` -- the file path survives (it's
+            #   present in both pre- and post-reset scans) so `_lost_reports` is
+            #   empty and this guard reports "intact", even though the bytes now
+            #   match stale origin/main instead of this run's freshly regenerated
+            #   content. This is the exact same failure class the [artifact-guard]
+            #   block below already fixes for JSON artifacts (P0-FIX v184.2,
+            #   before/after item-count comparison) -- that fix was never extended
+            #   to reports/*.html. Fixed the same way: hash every report before
+            #   reset, and after stash-pop, treat a same-path/different-hash file
+            #   exactly like a lost one (single whole-tree restore already handles
+            #   both cases).
             # ──────────────────────────────────────────────────────────────────
+            import hashlib as _reports_guard_hashlib
+
+            def _sha256_of(_p: Path) -> str:
+                try:
+                    return _reports_guard_hashlib.sha256(_p.read_bytes()).hexdigest()
+                except Exception:
+                    return ""
+
             _reports_dir = REPO_ROOT / "reports"
             _pre_reset_reports: set = set()
+            _pre_reset_hashes: dict = {}
             if _reports_dir.is_dir():
-                _pre_reset_reports = {
-                    str(f.relative_to(REPO_ROOT))
-                    for f in _reports_dir.rglob("*.html")
-                }
+                for _f in _reports_dir.rglob("*.html"):
+                    _rel = str(_f.relative_to(REPO_ROOT))
+                    _pre_reset_reports.add(_rel)
+                    _pre_reset_hashes[_rel] = _sha256_of(_f)
                 log.info("[reports-guard] Pre-reset snapshot: %d HTML report(s)",
                          len(_pre_reset_reports))
 
@@ -504,7 +530,7 @@ def main() -> None:
             run_git("reset", "--hard", "origin/main")
             run_git("stash", "pop")
 
-            # Restore any HTML reports wiped by reset --hard
+            # Restore any HTML reports wiped OR content-reverted by reset --hard
             if _pre_reset_reports:
                 _post_reset_reports: set = set()
                 if _reports_dir.is_dir():
@@ -513,11 +539,23 @@ def main() -> None:
                         for f in _reports_dir.rglob("*.html")
                     }
                 _lost_reports = _pre_reset_reports - _post_reset_reports
-                if _lost_reports:
+                _reverted_reports = {
+                    _rel for _rel in (_pre_reset_reports & _post_reset_reports)
+                    if _sha256_of(REPO_ROOT / _rel) != _pre_reset_hashes.get(_rel)
+                }
+                if _reverted_reports:
                     log.warning(
-                        "[reports-guard] %d HTML report(s) LOST by reset --hard "
-                        "(concurrent origin/main lacked them). Restoring from "
-                        "ORIG_HEAD (pre-reset commit).", len(_lost_reports)
+                        "[reports-guard] %d HTML report(s) CONTENT-REVERTED by "
+                        "reset --hard (path survived, bytes reverted to stale "
+                        "origin/main) -- e.g. %s",
+                        len(_reverted_reports),
+                        sorted(_reverted_reports)[:5],
+                    )
+                if _lost_reports or _reverted_reports:
+                    log.warning(
+                        "[reports-guard] %d lost + %d content-reverted HTML "
+                        "report(s). Restoring from ORIG_HEAD (pre-reset commit).",
+                        len(_lost_reports), len(_reverted_reports),
                     )
                     # ORIG_HEAD is set by git reset --hard to our pre-reset commit
                     _restore_result = run_git("checkout", "ORIG_HEAD", "--", "reports/")
@@ -525,19 +563,23 @@ def main() -> None:
                         _restored_count = sum(1 for f in _reports_dir.rglob("*.html"))
                         log.info(
                             "[reports-guard] RESTORED reports/ from ORIG_HEAD: "
-                            "%d total HTML reports (recovered %d lost files).",
-                            _restored_count, len(_lost_reports)
+                            "%d total HTML reports (recovered %d lost + %d "
+                            "content-reverted files).",
+                            _restored_count, len(_lost_reports), len(_reverted_reports),
                         )
                     else:
                         log.error(
                             "[reports-guard] CRITICAL: Could not restore reports/ "
-                            "from ORIG_HEAD: %s -- deploying without %d reports!",
-                            _restore_result.stderr.strip()[:200], len(_lost_reports)
+                            "from ORIG_HEAD: %s -- deploying with %d lost/reverted "
+                            "reports!",
+                            _restore_result.stderr.strip()[:200],
+                            len(_lost_reports) + len(_reverted_reports),
                         )
                 else:
-                    log.info("[reports-guard] Report count intact after stash recovery: "
-                             "%d HTML files (no reports lost).", len(_post_reset_reports))
-            # == END P0-FIX v154.0.0 ==
+                    log.info("[reports-guard] Report count and content intact after "
+                             "stash recovery: %d HTML files (no reports lost or "
+                             "reverted).", len(_post_reset_reports))
+            # == END P0-FIX v154.0.0 (+ RX-PUB-A0 content-reversion extension) ==
 
             # == P0-FIX v184.2: Generated Customer-Artifact Recovery Guard ==
             # PROBLEM (confirmed via a live production pipeline run during
