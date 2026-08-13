@@ -342,5 +342,51 @@ class TestFailOpenGuard(unittest.TestCase):
         )
 
 
+class TestWorkflowStepHasReportsBucketCredentials(unittest.TestCase):
+    """
+    RX-PUB-A0.4 Phase 1 real-run finding: the first real STAGE 3.6a run
+    (workflow run 31713054946) reported 314/314 in-window reports as
+    "R2 object does not exist" -- 100% FAILED -- while STAGE 3.5.1 (a
+    separate, already-proven gate that runs moments earlier in the same job)
+    reported 500 objects "clean" in the same R2 bucket. Root cause: unlike
+    STAGE 3.5 and STAGE 3.5.1 (both of which explicitly set
+    CF_R2_REPORTS_KEY_ID/CF_R2_REPORTS_SECRET_KEY at the step level), the
+    STAGE 3.6a step this mission added had no `env:` block at all, so
+    r2_reports_verifier.py's optional reports-bucket-credential swap
+    (scripts/r2_reports_verifier.py's "_reports_key_id and _reports_secret"
+    check) silently found both empty and fell back to the job-level
+    DATA-bucket-scoped credentials against the REPORTS bucket -- which
+    r2_upload_verifier.py's reused _s3api_head_object() then misclassified
+    as "object not found" (its returncode==254 check does not distinguish
+    AccessDenied from NoSuchKey). Not a real production incident: it never
+    reflected the actual state of the reports bucket.
+    """
+
+    def test_stage_3_6a_step_has_reports_bucket_credentials_wired(self):
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github" / "workflows" / "sentinel-blogger.yml"
+        with open(workflow_path, encoding="utf-8") as f:
+            workflow = yaml.safe_load(f)
+
+        job = next(iter(workflow["jobs"].values()))
+        steps = job["steps"]
+        matches = [s for s in steps if "STAGE 3.6a" in s.get("name", "")]
+        self.assertEqual(
+            len(matches), 1,
+            "expected exactly one STAGE 3.6a step in sentinel-blogger.yml"
+        )
+        step = matches[0]
+        env = step.get("env", {})
+        self.assertIn(
+            "CF_R2_REPORTS_KEY_ID", env,
+            "STAGE 3.6a must set CF_R2_REPORTS_KEY_ID (same as STAGE 3.5 / "
+            "STAGE 3.5.1) or r2_reports_verifier.py silently falls back to "
+            "the wrong bucket's credentials and every report is misreported "
+            "as missing from R2"
+        )
+        self.assertIn("CF_R2_REPORTS_SECRET_KEY", env)
+
+
 if __name__ == "__main__":
     unittest.main()
