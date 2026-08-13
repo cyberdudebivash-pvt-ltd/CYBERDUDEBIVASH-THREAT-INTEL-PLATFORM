@@ -1525,6 +1525,25 @@ jobs:
         run: python3 scripts/r2_upload_verifier.py
 
       # -----------------------------------------------------------------------
+      # STAGE 3.6a: RX-PUB-A0 REPORTS ARTIFACT IDENTITY VERIFIER (NEW --
+      # observability bake-in, same rollout pattern as STAGE 3.6.5 below)
+      # STAGE 3.6 above verifies only the single data-bucket manifest object
+      # (sentinel-apex-data/intel/feed_manifest.json). It has never checked a
+      # single reports/*.html object. This closes that gap: for every report
+      # in the active generation window, fetches the R2 object and compares
+      # its SHA-256 against the local artifact -- the proof a clean
+      # `aws s3 sync` exit code alone can never provide (RX-PUB-A0 Section 3).
+      # Writes data/quality/rx_pub_a0_reports_artifact_manifest.json.
+      # Bake-in period: --enforce is deliberately NOT passed yet. Add it once
+      # a run history shows zero false positives (RX-PUB-A0 Section 25
+      # requires this to become a real HARD FAIL gate eventually).
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.6a - RX-PUB-A0 Reports Artifact Identity Verifier (observability bake-in)"
+        timeout-minutes: 10
+        if: always()
+        run: python3 scripts/r2_reports_verifier.py || true
+
+      # -----------------------------------------------------------------------
       # STAGE 3.6.5: REPORT ENGINE CONSISTENCY GATE (NEW v1.0 -- observability)
       # generate_intel_reports.py, report_generator.py, and the Worker's
       # generateIntelReport() fallback all write into the same reports/
