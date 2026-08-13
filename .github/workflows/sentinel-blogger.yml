@@ -1530,16 +1530,21 @@ jobs:
       # STAGE 3.6 above verifies only the single data-bucket manifest object
       # (sentinel-apex-data/intel/feed_manifest.json). It has never checked a
       # single reports/*.html object. This closes that gap: for every report
-      # in the active generation window, fetches the R2 object and compares
-      # its SHA-256 against the local artifact -- the proof a clean
-      # `aws s3 sync` exit code alone can never provide (RX-PUB-A0 Section 3).
+      # in the active generation window, fetches the R2 object AND the public
+      # customer-facing HTTP response, comparing both SHA-256 hashes against
+      # the local artifact -- the proof a clean `aws s3 sync` exit code alone
+      # can never provide (RX-PUB-A0 Section 3), covering both the
+      # LOCAL-vs-R2 identity chain and the R2-vs-CUSTOMER identity chain
+      # (RX-PUB-A0.4 Phase 2).
       # Writes data/quality/rx_pub_a0_reports_artifact_manifest.json.
       # Bake-in period: --enforce is deliberately NOT passed yet. Add it once
       # a run history shows zero false positives (RX-PUB-A0 Section 25
       # requires this to become a real HARD FAIL gate eventually).
+      # timeout-minutes raised 10->15: each report now does one additional
+      # public HTTPS GET on top of the existing R2 HEAD+GET pair.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.6a - RX-PUB-A0 Reports Artifact Identity Verifier (observability bake-in)"
-        timeout-minutes: 10
+        timeout-minutes: 15
         if: always()
         run: python3 scripts/r2_reports_verifier.py || true
 

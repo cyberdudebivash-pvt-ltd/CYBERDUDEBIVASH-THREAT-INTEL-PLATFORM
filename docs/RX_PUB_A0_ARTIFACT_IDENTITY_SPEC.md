@@ -25,7 +25,7 @@ Reuses the mission's suggested shape, scoped to the fields
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "generated_at": "2026-08-13T...Z",
   "pipeline_run_id": "<GITHUB_RUN_ID>",
   "release_sha": "<GITHUB_SHA>",
@@ -41,7 +41,11 @@ Reuses the mission's suggested shape, scoped to the fields
       "artifact_sha256": "<sha256 of the local file>",
       "remote_sha256": "<sha256 of the fetched R2 object, or null>",
       "remote_verified_at": "<timestamp, or null>",
-      "publication_state": "REMOTE_VERIFIED | STALE_OR_DIVERGENT | FAILED | UNKNOWN | PENDING"
+      "publication_state": "REMOTE_VERIFIED | STALE_OR_DIVERGENT | FAILED | UNKNOWN | PENDING",
+      "public_sha256": "<sha256 of the fetched public HTTP response, or null>",
+      "public_verified_at": "<timestamp, or null>",
+      "live_state": "LIVE_VERIFIED | LIVE_STALE_OR_DIVERGENT | LIVE_MISSING | LIVE_FETCH_FAILED | PENDING",
+      "public_response_headers": {"cf-ray": "...", "cache-control": "...", "...": "..."}
     }
   },
   "summary": {
@@ -50,10 +54,19 @@ Reuses the mission's suggested shape, scoped to the fields
     "stale_or_divergent_or_failed": 0,
     "unknown": 0,
     "missing_local": 0,
-    "elapsed_seconds": 0.0
+    "live_verified": 0,
+    "live_stale_or_divergent_or_missing": 0,
+    "live_unknown": 0,
+    "elapsed_seconds": 0.0,
+    "run_deadline_exceeded": false
   }
 }
 ```
+
+The `public_sha256` / `public_verified_at` / `live_state` / `public_response_headers`
+fields (and the `summary.live_*` / `run_deadline_exceeded` counters) were added in
+Phase 2 (Sections 12-16) -- see `docs/RX_PUB_A0_PUBLIC_HTTP_IDENTITY_SPEC.md` for
+the public HTTP layer this schema bump documents.
 
 `certification_version` / `certification_state` from the mission's original
 suggested schema are intentionally omitted here -- they belong to the
@@ -108,13 +121,12 @@ closed. Closing it requires: (1) a run history from real CI executions
 
 ## What this does NOT yet do
 
-- Does not verify `PUBLIC_HTTP_SHA256` (the customer-facing HTTP response) --
-  only `R2_SHA256` (the object store). Section 23's four-layer chain
-  (SOURCE → GENERATED → CERTIFIED → LIVE) is only partially closed: this
-  closes GENERATED-vs-R2, not R2-vs-LIVE. Given `docs/RX_PUB_A0_EXECUTION_PATH.md`
-  §4 already established the Worker serves R2 objects directly with no
-  observed caching layer, R2-vs-LIVE divergence is a lower-probability gap
-  than GENERATED-vs-R2 was, but it remains unverified by automation.
+- ~~Does not verify `PUBLIC_HTTP_SHA256`~~ **Closed in RX-PUB-A0.4 Phase 2**
+  -- see `docs/RX_PUB_A0_PUBLIC_HTTP_IDENTITY_SPEC.md`. `verify_one()` now
+  also fetches the public customer-facing response and compares its
+  SHA-256, classified as `live_state`. Section 23's four-layer chain
+  (SOURCE → GENERATED → CERTIFIED → LIVE) is now fully instrumented,
+  observability-only (not yet `--enforce`d) like the R2 layer.
 - Does not implement the golden-fixture corpus (A0-1..A0-8, Section 27) --
   it verifies whatever is actually in the active window on a given run, not
   a fixed, curated regression set.
