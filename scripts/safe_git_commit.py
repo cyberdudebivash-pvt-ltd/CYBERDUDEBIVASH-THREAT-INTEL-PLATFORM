@@ -377,6 +377,33 @@ def main() -> None:
     for path in files_to_stage:
         run_git("add", "-f", path)
 
+    # --- P0 FIX (2026-08-13): keep config/frontend_checksums.json atomic
+    # with every commit that touches index.html (staged unconditionally
+    # above). frontend-integrity-sync.yml (PR #166) already regenerates the
+    # registry on `push`, but every commit this script makes carries
+    # "[skip ci]" in its message (see commit_msg below) to avoid
+    # re-triggering sentinel-blogger.yml -- and GitHub's [skip ci]
+    # convention suppresses *every* push-triggered workflow for that
+    # commit, including frontend-integrity-sync.yml. That left the registry
+    # silently stale after each automated index.html regeneration until the
+    # next non-skip-ci push happened to touch a protected asset, producing
+    # false "TAMPERED: index.html" failures on GATE E (Post-Deploy
+    # Validation) in the interim. Regenerating the registry here -- via the
+    # existing frontend_integrity.py CLI, unchanged -- and staging it in the
+    # same commit as the asset it certifies closes the gap unconditionally;
+    # it no longer depends on a second workflow run firing at all.
+    _fi_result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "frontend_integrity.py"), "generate"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=False,
+    )
+    if _fi_result.returncode == 0:
+        run_git("add", "-f", "config/frontend_checksums.json")
+        log.info("[frontend-integrity] Registry resynced atomically with this commit")
+    else:
+        log.warning("[frontend-integrity] Registry resync failed (exit %d): %s -- "
+                    "GATE E may see a stale registry until the next resync",
+                    _fi_result.returncode, _fi_result.stderr.strip()[:300])
+
     # --- v141.7.0 Phase 5: Pre-commit reports/ existence check ---
     reports_dir = REPO_ROOT / "reports"
     if reports_dir.is_dir():
