@@ -1549,7 +1549,17 @@ jobs:
         env:
           CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
           CF_R2_REPORTS_SECRET_KEY: ${{ secrets.CF_R2_REPORTS_SECRET_KEY }}
-        run: python3 scripts/r2_reports_verifier.py || true
+        run: |
+          python3 scripts/r2_reports_verifier.py || true
+          if [ -f "data/quality/rx_pub_a0_reports_artifact_manifest.json" ]; then
+            read -r VERIFIED MISMATCH UNK LVERIFIED LMISMATCH LUNK <<< "$(python3 scripts/ci_stats_extract.py rx_pub_a0 2>/dev/null || echo '0 0 0 0 0 0')"
+            echo "[RX-PUB-A0] R2: verified=${VERIFIED} mismatch/missing=${MISMATCH} unverifiable=${UNK} | Public HTTP: verified=${LVERIFIED} mismatch/missing=${LMISMATCH} unverifiable=${LUNK}"
+            if [ "${MISMATCH}" = "0" ] && [ "${UNK}" = "0" ] && [ "${LMISMATCH}" = "0" ] && [ "${LUNK}" = "0" ]; then
+              echo "::notice::RX-PUB-A0 STAGE 3.6a: all in-window reports verified (R2 verified=${VERIFIED}, public verified=${LVERIFIED}). Observability-only -- see docs/RX_PUB_A0_R2_VERIFIER_BAKEIN.md."
+            else
+              echo "::warning::RX-PUB-A0 STAGE 3.6a: ${MISMATCH} R2 + ${LMISMATCH} public mismatch/missing, ${UNK} R2 + ${LUNK} public unverifiable. Observability-only (--enforce not set) -- see data/quality/rx_pub_a0_reports_artifact_manifest.json and docs/RX_PUB_A0_R2_VERIFIER_BAKEIN.md."
+            fi
+          fi
 
       # -----------------------------------------------------------------------
       # STAGE 3.6.5: REPORT ENGINE CONSISTENCY GATE (NEW v1.0 -- observability)

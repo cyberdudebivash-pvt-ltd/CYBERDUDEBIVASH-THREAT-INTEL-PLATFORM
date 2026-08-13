@@ -1,0 +1,110 @@
+/**
+ * workers/intel-gateway/src/rx-pub-a0-handlers.js
+ * RX-PUB-A0 Reports Artifact Identity -- observability API surface.
+ *
+ * Closes GitHub issue #185: STAGE 3.6a (scripts/r2_reports_verifier.py,
+ * PR #183/#184) writes data/quality/rx_pub_a0_reports_artifact_manifest.json
+ * on every pipeline run, but until now the only way to see its output was
+ * to read the CI log or the file in git. This exposes it the same way P40
+ * exposes its own late-generated reports: Python writes JSON -> R2 -> Worker
+ * reads via env.INTEL_R2.get() (p40-handlers.js's own file header documents
+ * this as the shared pattern every P-layer reading feed-adjacent data
+ * already uses; replicated here rather than introducing a new access
+ * pattern).
+ *
+ * Read-only. Does not affect STAGE 3.6a's own enforcement behavior in any
+ * way -- that remains --enforce-gated per docs/RX_PUB_A0_R2_VERIFIER_BAKEIN.md,
+ * unaffected by whether anything reads the manifest afterward.
+ *
+ * 2 exported handlers / 2 API routes:
+ *   /api/v1/rx-pub-a0/reports-identity  - manifest summary (+ optional
+ *                                          per-report detail via ?full=1)
+ *   /api/v1/rx-pub-a0/observability     - observability health endpoint
+ */
+
+const RX_PUB_A0_VERSION = 'a0.4';
+const MANIFEST_KEY = 'intel/rx_pub_a0_reports_artifact_manifest.json';
+
+async function _loadR2Json(env, key) {
+  try {
+    const obj = await env.INTEL_R2?.get(key);
+    if (!obj) return null;
+    const text = await obj.text();
+    if (!text || !text.trim()) return null;
+    return JSON.parse(text);
+  } catch (_) {
+    return null;
+  }
+}
+
+function _json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'X-RX-PUB-A0-Version': RX_PUB_A0_VERSION },
+  });
+}
+
+function _manifestUnavailable() {
+  return _json({
+    error: 'RX-PUB-A0 reports artifact manifest not yet synced to R2',
+    hint: 'Run scripts/r2_reports_verifier.py (STAGE 3.6a), then scripts/r2_upload.py, '
+        + 'or check the sentinel-blogger.yml STAGE 3.6a log for the last run.',
+    version: RX_PUB_A0_VERSION,
+  }, 503);
+}
+
+export async function handleRxPubA0ReportsIdentity(request, env) {
+  const manifest = await _loadR2Json(env, MANIFEST_KEY);
+  if (!manifest) return _manifestUnavailable();
+
+  const url = new URL(request.url);
+  const full = url.searchParams.get('full') === '1';
+
+  const generatedAtMs = manifest.generated_at ? Date.parse(manifest.generated_at) : NaN;
+  const ageSeconds = Number.isFinite(generatedAtMs)
+    ? Math.max(0, Math.floor((Date.now() - generatedAtMs) / 1000))
+    : null;
+
+  const base = {
+    schema_version: manifest.schema_version ?? null,
+    generated_at: manifest.generated_at ?? null,
+    age_seconds: ageSeconds,
+    pipeline_run_id: manifest.pipeline_run_id ?? null,
+    release_sha: manifest.release_sha ?? null,
+    bucket: manifest.bucket ?? null,
+    public_base_url: manifest.public_base_url ?? null,
+    summary: manifest.summary ?? null,
+    enforced: false,
+    enforcement_note: 'Observability-only bake-in per docs/RX_PUB_A0_R2_VERIFIER_BAKEIN.md -- '
+                     + 'this endpoint never blocks anything; STAGE 3.6a itself decides --enforce.',
+  };
+
+  // Per-report detail (reports: {intel_id: {...}}) can be a few hundred
+  // entries -- omitted by default to keep the common case (dashboard/CI
+  // summary read) small; available on request for deeper investigation.
+  if (full) base.reports = manifest.reports ?? {};
+
+  return _json(base);
+}
+
+export async function handleRxPubA0Observability(request, env) {
+  return _json({
+    schema_version: RX_PUB_A0_VERSION,
+    layer: 'RX-PUB-A0',
+    status: 'OPERATIONAL',
+    endpoints: [
+      '/api/v1/rx-pub-a0/reports-identity',
+      '/api/v1/rx-pub-a0/observability',
+    ],
+    data_sources: {
+      manifest: 'data/quality/rx_pub_a0_reports_artifact_manifest.json '
+              + '(R2 key: intel/rx_pub_a0_reports_artifact_manifest.json)',
+    },
+    generators: [
+      'scripts/r2_reports_verifier.py',
+    ],
+    engines_reused: [
+      'r2_upload_verifier.py (_s3api_head_object / _boto3_head_object -- R2 identity checks)',
+    ],
+  });
+}
