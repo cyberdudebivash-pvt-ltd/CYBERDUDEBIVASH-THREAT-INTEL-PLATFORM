@@ -102,6 +102,40 @@ test("handleRxPubA0ReportsIdentity: never claims enforcement is active", async (
   );
 });
 
+test("handleRxPubA0ReportsIdentity: status is HEALTHY for a recently-generated manifest", async () => {
+  const env = mockEnv({ [MANIFEST_KEY]: { ...FAKE_MANIFEST, generated_at: new Date().toISOString() } });
+  const res = await handleRxPubA0ReportsIdentity(
+    new Request("https://x/api/v1/rx-pub-a0/reports-identity"), env,
+  );
+  const body = await res.json();
+  assert.equal(body.status, "HEALTHY");
+});
+
+test("handleRxPubA0ReportsIdentity: status is STALE past the freshness threshold (RX-PUB-A0.5 Section 16)", async () => {
+  const twentyHoursAgo = new Date(Date.now() - 20 * 3600 * 1000).toISOString();
+  const env = mockEnv({ [MANIFEST_KEY]: { ...FAKE_MANIFEST, generated_at: twentyHoursAgo } });
+  const res = await handleRxPubA0ReportsIdentity(
+    new Request("https://x/api/v1/rx-pub-a0/reports-identity"), env,
+  );
+  const body = await res.json();
+  assert.equal(
+    body.status, "STALE",
+    "a manifest generated 20h ago (past the 16h freshness threshold) must never read as current-healthy"
+  );
+});
+
+test("handleRxPubA0ReportsIdentity: status is UNKNOWN (not HEALTHY) when generated_at is missing/unparseable", async () => {
+  const env = mockEnv({ [MANIFEST_KEY]: { ...FAKE_MANIFEST, generated_at: null } });
+  const res = await handleRxPubA0ReportsIdentity(
+    new Request("https://x/api/v1/rx-pub-a0/reports-identity"), env,
+  );
+  const body = await res.json();
+  assert.equal(
+    body.status, "UNKNOWN",
+    "an unparseable generated_at must never default to HEALTHY -- unknown age is not evidence of freshness"
+  );
+});
+
 // ---------------------------------------------------------------------------
 // handleRxPubA0Observability
 // ---------------------------------------------------------------------------
