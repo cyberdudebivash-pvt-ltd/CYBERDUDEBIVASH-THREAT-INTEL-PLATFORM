@@ -388,5 +388,91 @@ class TestWorkflowStepHasReportsBucketCredentials(unittest.TestCase):
         self.assertIn("CF_R2_REPORTS_SECRET_KEY", env)
 
 
+class TestManifestR2Sync(unittest.TestCase):
+    """
+    GitHub issue #185: the manifest STAGE 3.6a writes locally must also be
+    synced to R2 (BUCKET_DATA, intel/ prefix -- the same "Python writes JSON
+    -> R2 -> Worker reads via env.INTEL_R2.get()" pattern P40 uses) so
+    workers/intel-gateway/src/rx-pub-a0-handlers.js can actually serve it.
+    Must use the DATA-bucket-scoped credentials directly from os.environ,
+    NOT r2_upload.get_credentials() (which sys.exit(1)s on absence -- this
+    stage must never crash over a missing/wrong credential).
+    """
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="rrv_r2sync_test_"))
+        self.manifest_path = self.tmp / "feed_manifest.json"
+        self.manifest_path.write_text("[]", encoding="utf-8")
+        self.reports_base = self.tmp / "reports"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_uploads_manifest_to_r2_when_data_credentials_present(self):
+        env_patch = {
+            "CF_ACCOUNT_ID": "test-account",
+            "AWS_ACCESS_KEY_ID": "test-data-key",
+            "AWS_SECRET_ACCESS_KEY": "test-data-secret",
+        }
+        with patch.object(rrv, "MANIFEST_PATH", self.manifest_path), \
+             patch.object(rrv, "REPO_ROOT", self.tmp), \
+             patch.object(rrv, "OUTPUT_PATH", self.tmp / "manifest_out.json"), \
+             patch.dict(os.environ, env_patch), \
+             patch.object(rrv._verifier, "CF_ACCOUNT_ID", "test"), \
+             patch.object(rrv._verifier, "ACCESS_KEY", "test"), \
+             patch.object(rrv._verifier, "SECRET_KEY", "test"), \
+             patch.object(rrv._r2_upload, "s3_cp", return_value=True) as mock_cp, \
+             patch.object(sys, "argv", ["r2_reports_verifier.py", "--skip-public"]):
+            rrv.main()
+
+        self.assertEqual(mock_cp.call_count, 1)
+        _src, dst_bucket, dst_key, _endpoint = mock_cp.call_args[0]
+        self.assertEqual(dst_bucket, rrv._r2_upload.BUCKET_DATA)
+        self.assertEqual(dst_key, "intel/rx_pub_a0_reports_artifact_manifest.json")
+
+    def test_no_crash_and_no_upload_attempt_when_data_credentials_absent(self):
+        env_clear = {k: "" for k in ("CF_ACCOUNT_ID", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")}
+        with patch.object(rrv, "MANIFEST_PATH", self.manifest_path), \
+             patch.object(rrv, "REPO_ROOT", self.tmp), \
+             patch.object(rrv, "OUTPUT_PATH", self.tmp / "manifest_out.json"), \
+             patch.dict(os.environ, env_clear), \
+             patch.object(rrv._verifier, "CF_ACCOUNT_ID", "test"), \
+             patch.object(rrv._verifier, "ACCESS_KEY", "test"), \
+             patch.object(rrv._verifier, "SECRET_KEY", "test"), \
+             patch.object(rrv._r2_upload, "s3_cp") as mock_cp, \
+             patch.object(sys, "argv", ["r2_reports_verifier.py", "--skip-public"]):
+            # Must not raise (in particular, must not call the real
+            # r2_upload.get_credentials(), which would sys.exit(1) here).
+            exit_code = rrv.main()
+
+        self.assertEqual(exit_code, 0)
+        mock_cp.assert_not_called()
+
+    def test_upload_failure_does_not_crash_or_change_exit_code(self):
+        env_patch = {
+            "CF_ACCOUNT_ID": "test-account",
+            "AWS_ACCESS_KEY_ID": "test-data-key",
+            "AWS_SECRET_ACCESS_KEY": "test-data-secret",
+        }
+        with patch.object(rrv, "MANIFEST_PATH", self.manifest_path), \
+             patch.object(rrv, "REPO_ROOT", self.tmp), \
+             patch.object(rrv, "OUTPUT_PATH", self.tmp / "manifest_out.json"), \
+             patch.dict(os.environ, env_patch), \
+             patch.object(rrv._verifier, "CF_ACCOUNT_ID", "test"), \
+             patch.object(rrv._verifier, "ACCESS_KEY", "test"), \
+             patch.object(rrv._verifier, "SECRET_KEY", "test"), \
+             patch.object(rrv._r2_upload, "s3_cp", side_effect=RuntimeError("boom")), \
+             patch.object(sys, "argv", ["r2_reports_verifier.py", "--skip-public"]):
+            exit_code = rrv.main()
+
+        self.assertEqual(
+            exit_code, 0,
+            "an R2 upload failure must not change the run's own exit code -- "
+            "local file + git history remain authoritative either way"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

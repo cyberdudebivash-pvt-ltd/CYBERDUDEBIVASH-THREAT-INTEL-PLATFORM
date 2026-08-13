@@ -511,6 +511,36 @@ def main() -> int:
     tmp.replace(OUTPUT_PATH)
     log.info("Wrote %s", OUTPUT_PATH)
 
+    # Sync the manifest to R2 (BUCKET_DATA, intel/ prefix) so it's observable
+    # via GitHub issue #185's /api/v1/rx-pub-a0/reports-identity endpoint
+    # (workers/intel-gateway/src/rx-pub-a0-handlers.js reads this exact key)
+    # without waiting for the *next* pipeline run's STAGE 3.5 pass -- this
+    # stage runs AFTER STAGE 3.5, so nothing else would upload it this run
+    # otherwise. Same "generated late, needs its own sync" situation
+    # scripts/r2_upload.py's upload_p40_artifacts() exists for. Uses the
+    # current (DATA-bucket-scoped, already restored above) os.environ
+    # credentials directly rather than r2_upload.get_credentials(), which
+    # sys.exit(1)s on absence -- unacceptable here, this stage must never
+    # crash over a missing/wrong credential; best-effort only, and local
+    # file + git history remain the source of truth either way.
+    _data_account = os.environ.get("CF_ACCOUNT_ID", "").strip()
+    _data_key_id  = os.environ.get("AWS_ACCESS_KEY_ID", "").strip()
+    _data_secret  = os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()
+    if _data_account and _data_key_id and _data_secret:
+        try:
+            _endpoint = f"https://{_data_account}.r2.cloudflarestorage.com"
+            if _r2_upload.s3_cp(
+                str(OUTPUT_PATH), _r2_upload.BUCKET_DATA,
+                "intel/rx_pub_a0_reports_artifact_manifest.json", _endpoint,
+            ):
+                log.info("Synced manifest to R2 (intel/rx_pub_a0_reports_artifact_manifest.json)")
+            else:
+                log.warning("Manifest R2 sync failed -- local file/git history remain authoritative")
+        except Exception as e:
+            log.warning("Manifest R2 sync raised %r -- local file/git history remain authoritative", e)
+    else:
+        log.warning("DATA-bucket R2 credentials absent -- manifest not synced to R2 this run")
+
     log.info(
         "R2 summary: %d in-window, %d REMOTE_VERIFIED, %d STALE_OR_DIVERGENT/FAILED, "
         "%d UNKNOWN, %d missing-local, %.2fs",

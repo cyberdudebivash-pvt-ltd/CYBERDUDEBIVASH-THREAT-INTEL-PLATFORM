@@ -193,6 +193,17 @@ _REPORTS: dict = {
             d.get("source_registry", {}).get("total_sources", 0),
         ],
     ),
+    "rx_pub_a0": (
+        _ROOT / "data" / "quality" / "rx_pub_a0_reports_artifact_manifest.json",
+        lambda d: [
+            d.get("summary", {}).get("remote_verified", 0),
+            d.get("summary", {}).get("stale_or_divergent_or_failed", 0),
+            d.get("summary", {}).get("unknown", 0),
+            d.get("summary", {}).get("live_verified", 0),
+            d.get("summary", {}).get("live_stale_or_divergent_or_missing", 0),
+            d.get("summary", {}).get("live_unknown", 0),
+        ],
+    ),
 }
 
 _FALLBACKS = {
@@ -210,6 +221,7 @@ _FALLBACKS = {
     "p37": "UNKNOWN 0 0 0 0",
     "p38": "UNKNOWN 0 0 0 0",
     "p40": "UNKNOWN 0 0 0 0 0",
+    "rx_pub_a0": "0 0 0 0 0 0",
 }
 
 
