@@ -1,10 +1,81 @@
 # RX_PUB_A0_INCIDENT_ROOT_CAUSE
 
-Status: **IN PROGRESS — ROOT_CAUSE_NOT_FULLY_PROVEN.** This document will be
-completed once Phases 1-5's credentialed R2 evidence (see §5 below) has been
-captured. It is published now, incomplete, because Phase 0 forensics produced
-a material correction to the incident's classification that changes what the
-remaining evidence-gathering should target.
+Status: **HIGH-CONFIDENCE MECHANISM IDENTIFIED, EMPIRICALLY REPRODUCED, AND
+FIXED. Not yet elevated to fully proven** because that would require direct
+R2/CI-run evidence tying this exact mechanism to this exact incident, which
+is still blocked on credentials this environment does not have (§5). This
+document will be finalized once Phases 1-5's credentialed R2 evidence closes
+that last gap.
+
+## §0 — Root-cause mechanism found via code forensics, not speculation
+
+`scripts/safe_git_commit.py`'s conflict-recovery path (`git stash push` →
+`git reset --hard origin/main` → `git stash pop`, fired whenever a
+concurrent push to `main` causes `git merge origin/main -X ours` to fail —
+this pipeline runs long enough to routinely overlap with other automation
+that also commits to `main`) discards the run's own locally-committed
+changes and replaces them with `origin/main`'s state. A pre-existing safety
+net ("reports-guard", P0-FIX v154.0.0) already protects against this
+wiping HTML reports that don't exist yet on `origin/main` — but it detects
+loss with a **path-set difference only** (`pre_reset_paths - post_reset_paths`).
+For any report whose path already exists on `origin/main` (i.e. essentially
+every report after its first run, since reports/ retains recent history),
+`git reset --hard origin/main` does not remove the file — it silently
+overwrites its *content* back to whatever `origin/main` had. The path
+survives, so the guard's set-difference is empty, it logs "intact", and the
+freshly regenerated (correct) bytes are gone with zero warning anywhere in
+the pipeline. The exact same failure class was already found and fixed for
+several JSON artifacts (`[artifact-guard]`, P0-FIX v184.2 — before/after
+item-count comparison, restore from `ORIG_HEAD` on mismatch) but that fix
+was never extended to `reports/*.html`.
+
+**This was verified empirically, not just read from the code**: a new test,
+`tests/test_safe_git_commit_artifact_recovery.py::TestHtmlReportContentReversionSurvivesConflictRecovery`,
+builds a real two-repo git scenario (bare "origin" + a "runner" clone) that
+forces this exact conflict/recovery path, with an HTML report present in
+both the stale ancestor commit and the runner's fresh local commit under
+the same path. Run against the pre-fix code, it reproduces the live
+incident's exact symptom — the test's stale fixture text
+(`"PATCH WITHIN 14 DAYS"`, chosen to match the real incident's observed
+text) survives in `origin/main` after the script runs, and the freshly
+regenerated content is gone, silently, with no error and exit code 0. Run
+against the fix (see §0.1), the fresh content survives and the guard logs
+`[reports-guard] ... CONTENT-REVERTED ...` making the event visible.
+
+## §0.1 — Fix applied
+
+`scripts/safe_git_commit.py`'s reports-guard now hashes every HTML report
+(SHA-256) before the reset, and after `stash pop` treats a same-path/
+different-hash report exactly like a lost one (both trigger the existing
+whole-tree `git checkout ORIG_HEAD -- reports/` restore, and both are logged
+by name). This closes the silent-divergence gap using the same restore
+mechanism already proven correct for the lost-file case, extended with the
+same before/after comparison pattern the `[artifact-guard]` block already
+uses for JSON artifacts — no new recovery mechanism was introduced.
+Regression tests: `tests/test_safe_git_commit_artifact_recovery.py`, all 8
+cases (5 pre-existing + 3 new) pass; the 2 new negative-control assertions
+were confirmed to fail against the pre-fix code before the fix was applied,
+proving the tests actually exercise the bug rather than passing trivially.
+
+## §0.2 — What this does and does not prove for this specific incident
+
+**Proven:** this exact mechanism exists in the current (pre-fix) codebase,
+is reachable via a documented, previously-hit trigger condition (concurrent
+pushes to `main`, which the file's own comments document as a recurring
+production occurrence, not a hypothetical), and is capable of producing
+byte-for-byte the class of symptom observed live (a report whose engine
+marker and text pattern match a pre-fix generation, persisting after the
+generator was fixed and re-verified, with zero missing-file signal anywhere
+in the pipeline).
+
+**Not yet proven:** that this specific mechanism (rather than, e.g., a
+distinct `AWS_SYNC_DECISION_DEFECT`) is what actually happened to
+`intel--20282e88b1f49bf2` on the real CI runners, since this environment
+cannot inspect real GitHub Actions run logs for "Merge failed -- stash
+recovery" / "[reports-guard]" lines from the runs that touched this fixture,
+nor real R2 object history. Both would make this conclusive. Per the
+mission's own standard, this is recorded as **the leading, evidenced
+hypothesis with a shipped fix**, not as a certified closure.
 
 ## Section 43 — Incident fixture acceptance, answered to the extent evidence allows
 
