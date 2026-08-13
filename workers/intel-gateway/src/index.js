@@ -4180,15 +4180,20 @@ async function handleRequest(request, env, ctx) {
         // P31 campaign/entity blocks) cross-reference it for attribution.
         const maskedLegacyItem  = applyTierGateV2(legacyItem, "free", null);
         const maskedLegacyItems = (legacyFeed.items || []).map(i => applyTierGateV2(i, "free", null));
+        // RX-PUB-A0 FIX: this Worker-side JS render is a distinct, independent
+        // implementation from the authoritative Python generator
+        // (scripts/generate_intel_reports.py) -- no engine marker, no
+        // certification tie-in, no artifact-identity tracking. It previously
+        // persisted straight into the canonical R2 key on ordinary customer/
+        // crawler traffic, giving unauthenticated requests unmediated write
+        // authority over the same keyspace the certified pipeline owns (see
+        // docs/REPORT_WRITER_OWNERSHIP_MATRIX.md, Writer C). Still serve the
+        // live-rendered response so an approved item never hard-404s while
+        // waiting for its canonical artifact -- just never write it into the
+        // canonical key. Only scripts/generate_intel_reports.py may populate
+        // reports/*.html in R2.
         const html = generateIntelReport(maskedLegacyItem, path, maskedLegacyItems);
-        const _lDate = new Date(legacyItem.published_at || legacyItem.timestamp || Date.now());
-        const _lYr = _lDate.getFullYear();
-        const _lMo = String(_lDate.getMonth() + 1).padStart(2, "0");
-        const r2Key = `reports/${_lYr}/${_lMo}/${fn}`;
-        if (ctx) ctx.waitUntil(
-          env.REPORTS_R2.put(r2Key, html, { httpMetadata: { contentType: "text/html; charset=utf-8" } }).catch(() => {})
-        );
-        return new Response(html, { status: 200, headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Security-Policy": HTML_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
+        return new Response(html, { status: 200, headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Security-Policy": HTML_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
       }
       // v187.0 P0 FIX: this branch is reached only when the report id could
     // not be resolved via findItemBySlug at all (not a known-and-rejected
@@ -4241,11 +4246,11 @@ async function handleRequest(request, env, ctx) {
       // cached HTML with no per-viewer variation -- always mask.
       const maskedFallbackItem  = applyTierGateV2(fallbackItem, "free", null);
       const maskedFallbackItems = (fallbackFeed.items || []).map(i => applyTierGateV2(i, "free", null));
+      // RX-PUB-A0 FIX: see matching comment in the legacy-slug branch above --
+      // this Worker-side JS render must never write into the canonical R2
+      // key. Serve it directly, don't persist it.
       const html = generateIntelReport(maskedFallbackItem, path, maskedFallbackItems);
-      if (ctx) ctx.waitUntil(
-        env.REPORTS_R2.put(key, html, { httpMetadata: { contentType: "text/html; charset=utf-8" } }).catch(() => {})
-      );
-      return new Response(html, { status: 200, headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Security-Policy": HTML_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
+      return new Response(html, { status: 200, headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Security-Policy": HTML_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
     }
     // v187.0 P0 FIX: this branch is reached only when the report id could
     // not be resolved via findItemBySlug at all (not a known-and-rejected

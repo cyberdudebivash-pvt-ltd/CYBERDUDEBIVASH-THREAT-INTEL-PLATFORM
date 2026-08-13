@@ -260,16 +260,23 @@ jobs:
         # (persisted certification state) and publication-gate.js (P20/P21/
         # P23/P25/P26 fail-closed publication firewall) must never regress --
         # this is the layer that decides what intelligence a customer can
-        # see. Scoped to these two files (not the full __tests__/ suite,
+        # see. Scoped to these files (not the full __tests__/ suite,
         # which has 5 pre-existing failures in unrelated subsystems --
         # architecture-boundary tests in intelligence-platform/knowledge-
         # platform/product-platform/relationship-framework and one unrelated
         # admin test -- not run here to avoid blocking this gate on
         # unrelated, already-broken tests; wiring up the full suite is a
         # separate follow-up).
+        #
+        # RX-PUB-A0: reports-canonical-write-guard.test.js added -- static
+        # regression guard proving index.js never writes into the canonical
+        # reports/*.html R2 keyspace from a live request handler (ordinary
+        # customer/crawler traffic must not have unmediated write authority
+        # over the same key the certified pipeline owns). See
+        # docs/RX_PUB_A0_INCIDENT_ROOT_CAUSE.md.
         run: |
           cd ${WORKER_DIR}
-          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js
+          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js
 
       - name: " esbuild bundle pre-flight (HARD GATE)"
         run: |
