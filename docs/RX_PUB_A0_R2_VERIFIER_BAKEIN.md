@@ -8,6 +8,16 @@ code review alone.
 
 ## Status: bake-in evidence collection in progress. Not yet enforcement-safe.
 
+**Update (2026-08-13, Run 1 below): the first real post-credential-fix run
+surfaced a second, more fundamental gap than the one this doc originally
+tracked.** The R2 layer (LOCAL-vs-R2) is now confirmed clean. The public-HTTP
+layer (R2-vs-CUSTOMER) is not simply "clean" or "dirty" -- sample-based
+investigation shows its 192/192 non-`LIVE_VERIFIED` result is explained by
+**three distinct causes, none of which are LOCAL/R2 data corruption**, but
+two of which mean the verifier itself is currently asserting the wrong thing.
+See "Run 1" below before reading the exit criteria, which predate this
+finding and are now known to be incomplete.
+
 This document is created as part of PR #184 (RX-PUB-A0.4B) to fix a dangling
 reference: `docs/RX_PUB_A0_PUBLIC_HTTP_IDENTITY_SPEC.md` cited this file
 before it existed. It is a stub, honestly reflecting that no real
@@ -39,12 +49,27 @@ on STAGE 3.6a is not authorized until:
    600-second run-level deadline (added in RX-PUB-A0.4B) is regularly being
    hit, the workflow's 15-minute STAGE 3.6a timeout needs revisiting before
    `--enforce` can be trusted to finish within it.
+5. **(Added after Run 1, 2026-08-13.)** The public-HTTP layer's
+   `LIVE_STALE_OR_DIVERGENT` / `LIVE_MISSING` classification must not fire
+   for a report the platform's own publication gate (`evaluatePublicationGate`
+   in `workers/intel-gateway/src/index.js`, surfaced at
+   `/api/v1/reports/{id}/publication-status`) currently reports as
+   `customer_ready: false`. As written today, `r2_reports_verifier.py`
+   compares every in-window LOCAL artifact against the public HTTP response
+   with no awareness of the gate's verdict -- so a report the gate is
+   *correctly* refusing to serve (below certification threshold, or "do not
+   publish") is indistinguishable, in the manifest, from a report that is
+   wrongly stale or missing. Turning on `--enforce` against the verifier as
+   it exists today would hard-fail STAGE 3.6a on every run that has even one
+   gate-rejected in-window item -- which Run 1 shows is the common case, not
+   an edge case.
 
 ## Evidence log
 
 | Run ID | Date | R2 layer summary | Public HTTP layer summary | `run_deadline_exceeded` | Notes |
 |---|---|---|---|---|---|
 | [31713054946](https://github.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/actions/runs/31713054946) | 2026-08-13 15:50-15:54 UTC | **INVALID -- tooling bug, not real evidence.** 314 in-window, 0 REMOTE_VERIFIED, 314 FAILED ("R2 object does not exist"), 0 UNKNOWN. | N/A (commit predates the public-HTTP layer, PR #184) | false | See "Run A: root-caused as a credential-wiring bug" below. Struck from consideration -- does not count toward the 2-3 clean runs required for `--enforce`. |
+| [31727337104](https://github.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/actions/runs/31727337104) (STAGE 3.6a: 18:29:31-18:39:34 UTC) | 2026-08-13 | **VALID, credential fix confirmed working.** 293 in-window, 192 REMOTE_VERIFIED, 0 STALE_OR_DIVERGENT/FAILED, 101 UNKNOWN (run-deadline remainder, not errors). | **VALID data, but not clean -- see Run 1 below.** 0 LIVE_VERIFIED, 125 LIVE_STALE_OR_DIVERGENT, 67 LIVE_MISSING, 101 UNKNOWN (same remainder). | **true** (600s budget exhausted at 192/293 reports) | First real post-#187 run. Disqualifies on criterion 4 (`run_deadline_exceeded`) by itself; deeper investigation also surfaced the new criterion 5 gap. Does not count toward the 2-3 clean runs required for `--enforce`. |
 
 ### Run A: root-caused as a credential-wiring bug, not a production incident
 
@@ -101,11 +126,80 @@ as a known latent risk worth a future dedicated look (it means a real R2
 outage or expired credential would also currently misreport as
 "content missing" rather than "unable to verify") -- not fixed in this pass.
 
+### Run 1: R2 layer clean; public-HTTP layer traced to three non-corruption causes
+
+Run [31727337104](https://github.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/actions/runs/31727337104)
+(STAGE 3.6a, commit `3ce22c9d`) is the first real production run after the
+PR #187 credential fix. Raw manifest, fetched live from
+`GET /api/v1/rx-pub-a0/reports-identity?full=1`:
+
+```text
+R2 layer:          293 in-window, 192 REMOTE_VERIFIED, 0 STALE_OR_DIVERGENT/FAILED, 101 UNKNOWN
+Public HTTP layer:  0 LIVE_VERIFIED, 125 LIVE_STALE_OR_DIVERGENT, 67 LIVE_MISSING, 101 UNKNOWN
+run_deadline_exceeded: true (600s budget exhausted at 192/293 reports)
+```
+
+**R2 layer is clean and confirms the PR #187 fix.** Zero mismatches across
+192 checked reports -- the credential-wiring bug from the earlier INVALID
+run is genuinely fixed. The remaining 101 are the run-deadline remainder
+(never reached within the 600s budget), not errors -- exactly the documented
+`UNVERIFIED_DEADLINE` behavior, not a silent drop.
+
+**Public HTTP layer: 0/192 `LIVE_VERIFIED` at first looked catastrophic.**
+It is not. A stratified sample of 20 non-verified reports (7 `LIVE_MISSING`,
+13 `LIVE_STALE_OR_DIVERGENT`, `random.seed(42)` over the full population)
+was cross-referenced against each report's own
+`/api/v1/reports/{id}/publication-status` -- the platform's live, independent
+publication-gate verdict -- plus a direct re-fetch of one `LIVE_STALE_OR_DIVERGENT`
+report about an hour after the run, to distinguish three causes:
+
+| Cause | Evidence | Sample share | Real defect? |
+|---|---|---|---|
+| **Publication gate correctly rejects the report** (`customer_ready: false`, e.g. `P25_BELOW_THRESHOLD`, `P23_OPERATIONAL_READINESS_DO_NOT_PUBLISH`) | 7/7 sampled `LIVE_MISSING` + 2/13 sampled `LIVE_STALE_OR_DIVERGENT` were gate-rejected | 9/20 (45%) | **No.** The Worker is doing exactly what `workers/intel-gateway/src/index.js`'s "P0 CUSTOMER PUBLICATION AUTHORIZATION GATE" (line ~4130) is designed to do -- refuse to serve a below-threshold report. `generate_intel_reports.py`'s Zero-skip policy regenerates the LOCAL artifact for every in-window item regardless of certification score, so a gate-rejected item will *always* have a LOCAL/R2 artifact that the public endpoint correctly refuses to serve byte-for-byte (it 404s, or in a race with a still-cached older approved copy, serves stale bytes -- see next row). The verifier has no knowledge of `customer_ready` and flags both outcomes as "divergence." |
+| **Item not resolvable by `findItemBySlug` in the Worker's current feed search window** (`reason_codes: ["ITEM_NOT_RESOLVABLE"]`) | 3/13 sampled `LIVE_STALE_OR_DIVERGENT` | 3/20 (15%) | **Possibly a real, separate gap** -- not investigated further in this pass. `findItemBySlug`'s search window is apparently narrower than the report generator's in-window set. Needs its own root-cause pass before it can be ruled non-blocking; flagged here, not fixed. |
+| **Genuine CDN edge-cache staleness for a gate-approved report** (`customer_ready: true`, empty `reason_codes`, bytes still diverge) | 8/13 sampled `LIVE_STALE_OR_DIVERGENT` | 8/20 (40%) | **Yes, real -- and directly confirmed.** `intel--3e0d80c18f56f5ed`: manifest shows `remote_sha256` (R2, correct) == `artifact_sha256` (LOCAL) at `18:33:21Z`, but `public_sha256` (fetched one second later, `18:33:22Z`) was a *different* hash, served with `cache-control: public, max-age=86400, stale-while-revalidate=3600` from Cloudflare POP `ORD`. Re-fetching the same URL ~54 minutes later (this session, POP `IAD`) returned the *current, correct* bytes matching `artifact_sha256` exactly. `workers/intel-gateway/src/index.js`'s canonical `/reports/**` handler (line ~4212) sets `max-age=86400` on every 200 response and there is no corresponding purge: `scripts/bust_kv_cache.py`'s `CACHE_KEYS` list (`idx:reports`, `ai:*`, `reports:premium:*`, `checkout:*`) has no entry for the per-report `/reports/**` HTML cache. A report regenerated with new content (score/exec-summary/freshness fields; source records do get re-scored between runs) can be served stale to whichever Cloudflare POP cached the prior version, for up to 24h, with no active invalidation -- self-healing only via natural TTL expiry or an uncached POP. |
+
+None of the three causes are LOCAL-vs-R2 corruption -- the canonical artifact
+in R2 is correct in every sampled case. But two of the three
+(publication-gate rejection, and -- pending its own investigation --
+`ITEM_NOT_RESOLVABLE`) are the verifier asserting an identity requirement
+that the platform never intended to hold, and the third (edge-cache
+staleness) is a real, evidenced, currently-unmitigated gap between "R2 is
+correct" and "every customer request gets the correct bytes immediately."
+Turning on `--enforce` today would hard-fail on the common case, not the
+exceptional one -- see new exit criterion 5 above.
+
+**This run does not count toward the 2-3 clean runs required for `--enforce`**,
+both because `run_deadline_exceeded: true` already disqualifies it under
+criterion 4, and because it fails the newly-added criterion 5.
+
 ## Next update
 
-Awaiting a fresh real STAGE 3.6a run against the credential fix above (next
-`main`-branch `sentinel-blogger.yml` run once this fix lands). That run is
-"Run A" of the 2-3 required for `--enforce` sign-off. See
-`docs/RX_PUB_A0_PRODUCTION_CERTIFICATION.md` (RX-PUB-A0.4's final
-deliverable, not yet written) for the point-in-time enforcement-readiness
-verdict once this evidence is gathered.
+Run 1 changed what "clean" needs to mean before further runs are worth
+collecting toward the 2-3 required for `--enforce` -- collecting Run 2/3
+against the verifier exactly as it exists today would keep reproducing the
+same ~65% non-`LIVE_VERIFIED` rate for the same non-corruption reasons, not
+converge toward zero. Before more bake-in runs are meaningful, the verifier
+itself needs to close (at minimum) the criterion-5 gap:
+
+1. Have `r2_reports_verifier.py` consult each report's
+   `/api/v1/reports/{id}/publication-status` (or the same
+   `evaluatePublicationGate` logic, called directly rather than duplicated)
+   and classify a gate-rejected report as its own state -- e.g.
+   `GATE_BLOCKED` -- distinct from `LIVE_STALE_OR_DIVERGENT` / `LIVE_MISSING`,
+   so `--enforce` can exempt it correctly instead of hard-failing on expected
+   behavior.
+2. Investigate the `ITEM_NOT_RESOLVABLE` cause (15% of the sample) to confirm
+   whether it is a second instance of the same gap or something new.
+3. Decide, with the CDN-cache-staleness evidence in hand, whether the fix is
+   (a) an active purge of the specific `/reports/**` key on every
+   regeneration (extending `bust_kv_cache.py` or a dedicated step), (b) a
+   grace-period exemption in the verifier (e.g. don't flag divergence for a
+   report regenerated within the last N minutes, since propagation is
+   expected, bounded latency, not corruption), or (c) both. This is a design
+   decision, not yet made.
+
+None of this is authorized to happen silently as part of routine bake-in
+monitoring -- it changes the verifier's own classification logic and is
+scoped as its own RX-PUB-A0.5C/D follow-up work, not folded into this
+tracking document's routine evidence-log updates.
