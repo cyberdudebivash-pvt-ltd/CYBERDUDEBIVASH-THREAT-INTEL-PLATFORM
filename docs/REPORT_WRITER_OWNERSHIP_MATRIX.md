@@ -116,7 +116,7 @@ Independent re-verification against `origin/main` at `750ea3e0` (after PRs
 matrix's prior conclusions, a fresh repo-wide search for every pattern the
 mission's own audit checklist specifies:
 
-```
+```text
 generate_report(          generateIntelReport(     REPORTS_R2.put(
 .write_text(               open(                    r2.put(
 reports/                   .html
@@ -127,12 +127,19 @@ Findings:
 - `generate_report(` — only production-reachable definition is
   `scripts/report_generator.py`'s (confirmed non-authoritative, batch path
   logs `[not-authoritative]` and never calls it — see the Writers table
-  above). Its lone active *caller*, `scripts/report_generator.py:1804`, is
-  gated behind `if args.entry:` — a `--entry` CLI flag used only for manual
-  single-item testing (per its own `--help` text), never passed by any
-  `.github/workflows/*.yml` invocation (confirmed: CI calls
+  above). Its lone other *caller*, `scripts/report_generator.py:1804`
+  (`generate_report(entry, reports_base=args.reports_base, force=args.force)`),
+  is gated behind `if args.entry:` — a `--entry` CLI flag used only for
+  manual single-item testing (per its own `--help` text), never passed by
+  any `.github/workflows/*.yml` invocation (confirmed: CI calls
   `python3 scripts/report_generator.py --manifest data/stix/feed_manifest.json`
-  only, STAGE 3.2). All other `generate_report(`/`generate_report(self`
+  only, STAGE 3.2). It is not merely unreached by CI: `generate_report()`'s
+  actual signature (`entry, stix_bundle_path=None, reports_base=None`) has
+  no `force` parameter at all, so this call would raise `TypeError:
+  generate_report() got an unexpected keyword argument 'force'` before ever
+  reaching `_generate_internal()` if anyone did invoke it manually --
+  confirming it is not an active rendering path under any circumstance, not
+  just an unused one. All other `generate_report(`/`generate_report(self`
   matches repo-wide belong to unrelated tools (tenant isolation reports, SOC
   incident reports, bug-hunter reports, SOC2 compliance reports, a
   `diagnose_sync.py` CLI report) — different artifact classes entirely, not
@@ -163,7 +170,7 @@ Findings:
 
 **Required final invariant — confirmed:**
 
-```
+```text
 CANONICAL_RENDERING_IMPLEMENTATIONS = 1   (scripts/generate_intel_reports.py)
 CANONICAL_PERSISTENT_WRITERS        = 1   (scripts/generate_intel_reports.py)
 ```
@@ -174,3 +181,16 @@ holds its required preconditions: `workers/intel-gateway/src/index.js`'s
 (unaffected by this audit), performs no R2 persistence of any kind
 (confirmed above), and serves with `Cache-Control: no-store` (PR #182),
 so it cannot masquerade as canonical state.
+
+**Reuse Report (this audit's own conclusion):**
+
+| Metric | Result |
+|---|---|
+| Existing P-layer engines reused (called, not re-implemented) | 0 — this is a read-only source audit, no runtime code was written |
+| Existing routes/dashboards extended | 0 — none |
+| New engines introduced | 0 |
+| Duplicate engines introduced | 0 |
+| Duplicate routes introduced | 0 |
+| Backward compatibility preserved | PASS — no code changed, only this doc |
+| Certification chain intact | PASS — `python3 scripts/regression_tests.py`: 21/21 (sanity-check; no code touched) |
+| Regression suite result | 21/21 PASS |
