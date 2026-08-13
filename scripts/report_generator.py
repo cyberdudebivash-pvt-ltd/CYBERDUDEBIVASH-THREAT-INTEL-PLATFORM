@@ -1579,7 +1579,8 @@ def generate_reports_from_manifest(
     Generate God Mode HTML reports for all advisories in the manifest.
     Safe to call from pipeline or standalone CLI.
     """
-    results: Dict[str, Any] = {"success": 0, "skipped": 0, "failed": 0, "errors": []}
+    results: Dict[str, Any] = {"success": 0, "skipped": 0, "failed": 0, "errors": [],
+                                "not_authoritative": 0}
 
     if not os.path.exists(manifest_path):
         msg = f"Manifest not found: {manifest_path}"
@@ -1734,24 +1735,39 @@ def generate_reports_from_manifest(
             if is_valid_html and is_large_enough:
                 results["skipped"] += 1
                 continue
-            # Existing report is malformed — fall through to regenerate it
-            logger.info(
-                "Re-generating malformed existing report: %s (valid_html=%s, size=%d)",
-                expected, is_valid_html, expected.stat().st_size if expected.exists() else 0,
-            )
 
-        stix_bundle = entry.get("stix_bundle") or entry.get("stix_file") or None
-        ok, path_or_err = generate_report(entry, stix_bundle, reports_base)
-        if ok:
-            results["success"] += 1
-        else:
-            results["failed"] += 1
-            results["errors"].append(f"{intel_id}: {path_or_err}")
-            logger.warning("Failed: %s — %s", intel_id, path_or_err)
+        # RX-PUB-A0 Section 16: report_generator.py is no longer an
+        # authoritative report writer. Every path that reaches this point --
+        # missing report, malformed report, below God Mode size/age
+        # threshold -- previously fell through to generate_report(), which
+        # renders with its own separate template (_build_html(), engine
+        # marker "report_generator.py vN.x") entirely independent from the
+        # canonical generator (scripts/generate_intel_reports.py,
+        # "Zero-skip" -- already unconditionally regenerates every manifest
+        # item, including this one, earlier in the same pipeline run). Two
+        # independent engines writing the same canonical key is exactly the
+        # Single-Source-of-Truth violation documented in
+        # docs/REPORT_WRITER_OWNERSHIP_MATRIX.md ("Writer B"). If the
+        # canonical generator's own output for this item is missing,
+        # malformed, or under the God Mode size threshold, that is signal
+        # about the canonical generator or this item's content, not
+        # something a second engine should silently paper over -- STAGE 3.3
+        # (validate_reports.py, HARD FAIL) is the correct place for a
+        # genuinely missing/malformed report to surface. This function now
+        # only validates and reports; it never writes reports/*.html.
+        logger.info(
+            "[not-authoritative] %s (%s) — missing, malformed, or below God "
+            "Mode threshold; not regenerating (only "
+            "scripts/generate_intel_reports.py may write reports/*.html; "
+            "see docs/REPORT_WRITER_OWNERSHIP_MATRIX.md).",
+            intel_id, expected,
+        )
+        results["not_authoritative"] += 1
 
     logger.info(
-        "Complete — success=%d  skipped=%d  failed=%d",
-        results["success"], results["skipped"], results["failed"],
+        "Complete — skipped=%d (god mode intact)  not_authoritative=%d (below threshold, "
+        "left for scripts/generate_intel_reports.py)  failed=%d",
+        results["skipped"], results["not_authoritative"], results["failed"],
     )
     return results
 
