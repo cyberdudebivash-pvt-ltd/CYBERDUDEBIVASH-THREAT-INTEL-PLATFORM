@@ -1274,135 +1274,36 @@ class STIXExporter:
         # FIX-05: classify threat_type at write-time — prevents Worker "General" fallback
         _threat_type = self._classify_threat_type(title, _tags)
 
-        # v134.0 P0 FIX — INLINE REPORT GENERATION (HARD FAIL)
-        # Root cause of previous failure: 'metadata' and '_effective_flat_iocs'
-        # were referenced but are NOT in scope inside _update_manifest() —
-        # they belong to create_bundle(). Fixed by using only _update_manifest()
-        # parameters: iocs_flat, mitre_tactics, feed_source, etc.
+        # RX-PUB-A0.4 Phase 3 (was: "v134.0 P0 FIX — INLINE REPORT GENERATION"):
+        # this block used to synchronously call report_generator.generate_report()
+        # here -- a second, independent HTML render engine from the canonical one
+        # (scripts/generate_intel_reports.py) -- with a HARD FAIL if it failed,
+        # to guarantee a physical file existed before this entry reached the
+        # manifest. Removed: this is the "Writer B" Single-Source-of-Truth
+        # violation documented in docs/REPORT_WRITER_OWNERSHIP_MATRIX.md, and it
+        # is provably unnecessary for the availability guarantee it existed for.
         #
-        # Architecture: this block generates the physical HTML dossier BEFORE
-        # the manifest entry is written. If generation fails for ANY reason,
-        # RuntimeError is raised and the pipeline STOPS. There is NO silent
-        # failure, NO fallback continuation, NO partial publish.
+        # This ingestion path (agent/sentinel_blogger.py, "Stage 2" per
+        # .github/workflows/sentinel-blogger.yml's own architecture comment) runs
+        # BEFORE "Stage 3.6 html_reports" (generate_intel_reports.py's
+        # stage_html_reports(), scripts/run_pipeline.py) in the SAME pipeline
+        # run. generate_intel_reports.py's "Zero-skip" policy unconditionally
+        # regenerates every manifest entry, including this brand-new one, moments
+        # later in that same run -- so the canonical engine produces the real,
+        # correct, certified HTML regardless of what this block did or didn't do.
+        # For the narrow window before that later stage runs (or the rarer case
+        # a customer requests the URL before the run even completes),
+        # workers/intel-gateway/src/index.js's live-render fallback (RX-PUB-A0
+        # Section 17, PR #182) already serves a live-rendered response for any
+        # publication-gate-approved item with no R2 object yet -- without
+        # persisting it, so it never competes with the canonical writer. Removing
+        # this block does not reintroduce the 404 regression the original P0 fix
+        # addressed; it relies on mechanisms this mission's earlier PRs already
+        # proved handle that case.
         #
-        # Every advisory MUST have a valid HTML report file on disk. Non-negotiable.
-        import sys as _rg_sys, os as _rg_os
-        _rg_scripts_dir = _rg_os.path.normpath(
-            _rg_os.path.join(_rg_os.path.dirname(__file__), "..", "scripts")
-        )
-        if _rg_scripts_dir not in _rg_sys.path:
-            _rg_sys.path.insert(0, _rg_scripts_dir)
-
-        try:
-            from report_generator import generate_report as _gen_report
-        except ImportError as _rg_imp_err:
-            raise RuntimeError(
-                f"P0: cannot import report_generator for entry '{_intel_id}': "
-                f"{_rg_imp_err!r}. "
-                "Ensure scripts/report_generator.py is present and syntax-clean. "
-                "Pipeline stopped — every advisory MUST have a valid HTML report."
-            ) from _rg_imp_err
-
-        # Build entry preview using ONLY parameters available in _update_manifest().
-        # 'metadata' and '_effective_flat_iocs' are NOT in scope here —
-        # use 'iocs_flat' (the parameter name) and construct description inline.
-        _rg_iocs = iocs_flat if isinstance(iocs_flat, list) else []
-        _rg_ttp_count = len(mitre_tactics) if mitre_tactics else 0
-        _rg_description = (
-            f"{title} "
-            f"[{len(_rg_iocs)} IOC(s) | {_rg_ttp_count} TTP(s) | Source: {feed_source or 'SENTINEL-APEX'}]"
-        )
-
-        _report_entry_for_gen = {
-            "id":                  _intel_id,
-            "stix_id":             _intel_id,
-            "title":               title,
-            "severity":            severity,
-            "risk_score":          float(risk_score),
-            "description":         _rg_description,
-            "tlp":                 (tlp_label or "TLP:CLEAR").upper(),
-            "actor_tag":           actor_tag or "UNC",
-            "mitre_tactics":       sanitize_mitre_techniques(list(mitre_tactics[:5])) if mitre_tactics else [],
-            "confidence":          float(confidence),
-            "confidence_score":    float(confidence),
-            "feed_source":         feed_source or "SENTINEL-APEX",
-            "source":              feed_source or "SENTINEL-APEX",
-            "threat_type":         _threat_type,
-            "source_url":          _source_url,
-            "iocs":                _rg_iocs,
-            "ioc_count":           len(_rg_iocs),
-            "stix_bundle_url":     stix_bundle_url or "",
-            "stix_bundle":         stix_bundle_url or stix_file or "",
-            "stix_file":           stix_file or "",
-            "processed_at":        _ts_now,                   # pipeline generation time
-            "published_at":        published_at or "",         # P0 FIX: source article date
-            "timestamp":           published_at or _ts_now,   # P0 FIX: prefer source date for dedup fingerprint
-            "internal_report_url": _report_url,
-            "report_url":          _report_url,
-            "cvss_score":          cvss_score,
-            "epss_score":          epss_score,
-            "kev_present":         kev_present,
-        }
-
-        try:
-            _rg_ok, _rg_result = _gen_report(
-                _report_entry_for_gen,
-                stix_file or None,
-            )
-        except Exception as _rg_call_err:
-            raise RuntimeError(
-                f"P0: report_generator.generate_report() raised exception for "
-                f"'{_intel_id}': {_rg_call_err!r}. "
-                "Pipeline stopped — fix report_generator.py."
-            ) from _rg_call_err
-
-        # HARD FAIL: generation function reported failure
-        if not _rg_ok:
-            raise RuntimeError(
-                f"P0: report generation returned failure for entry '{_intel_id}': "
-                f"{_rg_result}. "
-                "Pipeline stopped — every advisory MUST have a valid HTML report."
-            )
-
-        # HARD FAIL: verify physical file existence
-        _rg_file_path = _rg_result
-        if not _rg_os.path.exists(_rg_file_path):
-            raise RuntimeError(
-                f"P0: report file does not exist after generation: '{_rg_file_path}'. "
-                f"Entry: '{_intel_id}'. Pipeline stopped."
-            )
-
-        # HARD FAIL: verify non-empty file
-        _rg_file_size = _rg_os.path.getsize(_rg_file_path)
-        if _rg_file_size < 500:
-            raise RuntimeError(
-                f"P0: report file is too small ({_rg_file_size} bytes) — likely "
-                f"truncated or corrupted: '{_rg_file_path}'. "
-                f"Entry: '{_intel_id}'. Pipeline stopped."
-            )
-
-        # HARD FAIL: verify valid HTML structure
-        try:
-            with open(_rg_file_path, "r", encoding="utf-8", errors="replace") as _rg_f:
-                _rg_head = _rg_f.read(512)
-        except Exception as _rg_read_err:
-            raise RuntimeError(
-                f"P0: cannot read report file '{_rg_file_path}': {_rg_read_err!r}. "
-                f"Entry: '{_intel_id}'. Pipeline stopped."
-            ) from _rg_read_err
-
-        _rg_head_lower = _rg_head.lower()
-        if "<!doctype html" not in _rg_head_lower and "<html" not in _rg_head_lower:
-            raise RuntimeError(
-                f"P0: report file '{_rg_file_path}' does not start with valid HTML "
-                f"(got: {_rg_head[:80]!r}). "
-                f"Entry: '{_intel_id}'. Pipeline stopped — file may be JSON or corrupted."
-            )
-
-        logger.info(
-            "[REPORT] ✔ Generated and verified: %s (%d bytes) → %s",
-            _intel_id, _rg_file_size, _rg_file_path
-        )
+        # report_url / internal_report_url below are the same prospective
+        # /reports/YYYY/MM/<id>.html path this block always computed before
+        # (see _report_url above) -- unaffected by this removal.
 
         entry = {
             # v134.0 SCHEMA CONTRACT (required)
@@ -1452,13 +1353,19 @@ class STIXExporter:
             "schema_version":   "v134.0",
             # v134.0: always published — Blogger permanently disabled
             "published":        True,
-            # v134.0: validation_status is set to 'valid' here because the
-            # HTML dossier at _rg_file_path has already passed the 4 HARD-FAIL
-            # checks above (exists, size > 500 bytes, starts with HTML sig).
-            # scripts/update_validation_status.py performs an additional
-            # post-pipeline sweep as a safety net.
-            "validation_status": "valid",
-            "validated_at":     _ts_now,
+            # RX-PUB-A0.4 Phase 3: was hardcoded "valid" here, back when this
+            # function synchronously generated and verified the HTML file
+            # itself before reaching this point. That generation call was
+            # removed (see the block comment above) -- the physical file does
+            # not exist yet at this point now, so "valid" would be a false
+            # claim. "pending" is the correct, already-supported value:
+            # scripts/update_validation_status.py's whole purpose (STAGE 3.3.5)
+            # is flipping validation_status from "pending" to "valid" once
+            # Stage 3.3 (validate_reports.py) has confirmed the file exists on
+            # disk -- i.e. after generate_intel_reports.py's later pass in this
+            # same run has actually generated it.
+            "validation_status": "pending",
+            "validated_at":     None,
             # v134.0 P0 FIX: actual IOC flat list — ioc_count ALWAYS == len(iocs)
             # iocs_flat is the authoritative flat list computed by the IOC engine.
             # ioc_count is derived from it (never from ioc_counts dict which was
