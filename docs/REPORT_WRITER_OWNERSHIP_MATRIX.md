@@ -108,3 +108,89 @@ in this matrix** as of this writing. Direct R2 object-metadata inspection
 `Last-Modified` timestamp predates or postdates the STAGE 3.5 sync window
 (2026-08-12 20:08:01-20:19:52 UTC) — see the RX-PUB-1 certification report's
 incident section once that check is complete.
+
+## RX-PUB-A0.5 Section 4 — Final Writer Ownership Re-Audit (2026-08-13)
+
+Independent re-verification against `origin/main` at `750ea3e0` (after PRs
+#181, #182, #183, #184, #186, #187, #188 all merged) — not a re-read of this
+matrix's prior conclusions, a fresh repo-wide search for every pattern the
+mission's own audit checklist specifies:
+
+```text
+generate_report(          generateIntelReport(     REPORTS_R2.put(
+.write_text(               open(                    r2.put(
+reports/                   .html
+```
+
+Findings:
+
+- `generate_report(` — only production-reachable definition is
+  `scripts/report_generator.py`'s (confirmed non-authoritative, batch path
+  logs `[not-authoritative]` and never calls it — see the Writers table
+  above). Its lone other *caller*, `scripts/report_generator.py:1804`
+  (`generate_report(entry, reports_base=args.reports_base, force=args.force)`),
+  is gated behind `if args.entry:` — a `--entry` CLI flag used only for
+  manual single-item testing (per its own `--help` text), never passed by
+  any `.github/workflows/*.yml` invocation (confirmed: CI calls
+  `python3 scripts/report_generator.py --manifest data/stix/feed_manifest.json`
+  only, STAGE 3.2). It is not merely unreached by CI: `generate_report()`'s
+  actual signature (`entry, stix_bundle_path=None, reports_base=None`) has
+  no `force` parameter at all, so this call would raise `TypeError:
+  generate_report() got an unexpected keyword argument 'force'` before ever
+  reaching `_generate_internal()` if anyone did invoke it manually --
+  confirming it is not an active rendering path under any circumstance, not
+  just an unused one. All other `generate_report(`/`generate_report(self`
+  matches repo-wide belong to unrelated tools (tenant isolation reports, SOC
+  incident reports, bug-hunter reports, SOC2 compliance reports, a
+  `diagnose_sync.py` CLI report) — different artifact classes entirely, not
+  the `reports/{yyyy}/{mm}/{id}.html` keyspace.
+- A same-named `generate_report()` exists in
+  `agent/v70_apex_upgrade/blog/report_generator.py` — traced its only
+  reference repo-wide to `tests/test_v70_full.py`; no production script or
+  workflow imports or calls it. Dead/isolated, not a live writer.
+- `generateIntelReport(` — only `workers/intel-gateway/src/index.js`
+  (Worker live-render fallback, PR #182). Confirmed zero
+  `REPORTS_R2.put(` call sites anywhere in the file (grep, whole-file).
+- `REPORTS_R2.put(` — zero matches anywhere in the repo.
+- `.put(` (broadened to catch any bucket, not just `REPORTS_R2`) — every
+  match writes JSON, not HTML, to `INTEL_R2` (the DATA bucket) or a KV
+  namespace: `certification-registry.js` (certification index),
+  `index.js` (CVE live bundle/stats, latest-feed cache),
+  `premium-reports.js` (premium report *JSON* product under its own
+  `R2_PREFIX` key, not the `reports/` HTML keyspace). None target
+  `sentinel-apex-reports` or write `.html`.
+- `.write_text(`/`open(...).write` broad sweep across `scripts/`, `agent/`,
+  `workers/` (~55 files reference `reports/`-adjacent paths in some form)
+  narrowed to the 2 files that write actual `.html` content:
+  `scripts/generate_executive_briefing.py` (an "Executive Briefing" PDF
+  fallback's HTML sidecar — different artifact class, different filename
+  pattern, not `reports/{yyyy}/{mm}/{id}.html`) and `scripts/run_pipeline.py`
+  (patches `index.html`, the dashboard homepage, for version-string sync —
+  not the report keyspace at all). Neither is a canonical report writer.
+
+**Required final invariant — confirmed:**
+
+```text
+CANONICAL_RENDERING_IMPLEMENTATIONS = 1   (scripts/generate_intel_reports.py)
+CANONICAL_PERSISTENT_WRITERS        = 1   (scripts/generate_intel_reports.py)
+```
+
+The one permitted exception — temporary non-persistent Worker rendering —
+holds its required preconditions: `workers/intel-gateway/src/index.js`'s
+`generateIntelReport()` fires only behind the existing publication gate
+(unaffected by this audit), performs no R2 persistence of any kind
+(confirmed above), and serves with `Cache-Control: no-store` (PR #182),
+so it cannot masquerade as canonical state.
+
+**Reuse Report (this audit's own conclusion):**
+
+| Metric | Result |
+|---|---|
+| Existing P-layer engines reused (called, not re-implemented) | 0 — this is a read-only source audit, no runtime code was written |
+| Existing routes/dashboards extended | 0 — none |
+| New engines introduced | 0 |
+| Duplicate engines introduced | 0 |
+| Duplicate routes introduced | 0 |
+| Backward compatibility preserved | PASS — no code changed, only this doc |
+| Certification chain intact | PASS — `python3 scripts/regression_tests.py`: 21/21 (sanity-check; no code touched) |
+| Regression suite result | 21/21 PASS |
