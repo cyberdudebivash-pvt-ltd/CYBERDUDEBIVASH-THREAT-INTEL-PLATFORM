@@ -59,8 +59,10 @@ import concurrent.futures
 import hashlib
 import json
 import logging
+import math
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -108,6 +110,27 @@ PUBLIC_BASE_URL = os.environ.get("RX_PUB_A0_PUBLIC_BASE_URL", "https://intel.cyb
 PUBLIC_TIMEOUT  = 15
 PUBLIC_MAX_RETRIES = 3
 PUBLIC_RETRY_DELAY = 3
+
+# RX-PUB-A0.6D follow-up: real production evidence (sentinel-blogger.yml run
+# 31786632126, the first run with 6D's bounded R2-layer concurrency) showed
+# VERIFY_MAX_WORKERS=8 driving public-origin HTTP 429s from 3.2% (5/155,
+# baseline rate observed even at the old ~1-at-a-time sequential pacing --
+# run 31773568022) up to 36% (184/507) -- an order-of-magnitude increase
+# from bursting up to 16 simultaneous requests (8 workers x up to 2 calls
+# each: one publication-status lookup, one report-body fetch) at the same
+# shared origin. The R2 layer's own 8-way concurrency is NOT implicated --
+# that run's R2 summary was 495/507 REMOTE_VERIFIED, 0 mismatches -- R2 and
+# the public origin are different hosts/services entirely. This constant
+# throttles ONLY the public-HTTP layer via a semaphore inside _fetch_public
+# (shared by both call sites: report-body fetches and
+# _fetch_publication_status, which itself calls _fetch_public), independent
+# of VERIFY_MAX_WORKERS, rather than reducing R2-layer concurrency that is
+# already proven to work cleanly at 8. 2 is a deliberately conservative
+# choice pending confirmation on a subsequent bake-in run -- not a tuned
+# optimum, just a large, evidenced cut from the ~16-way burst that caused
+# the regression.
+PUBLIC_FETCH_MAX_CONCURRENCY = 2
+_public_fetch_semaphore = threading.Semaphore(PUBLIC_FETCH_MAX_CONCURRENCY)
 # CodeRabbit finding: worst case (every report exhausts retries) is
 # PUBLIC_MAX_RETRIES * (PUBLIC_TIMEOUT + PUBLIC_RETRY_DELAY) per report --
 # at 150+ in-window reports that can exceed STAGE 3.6a's workflow timeout
@@ -145,6 +168,10 @@ VERIFY_MAX_WORKERS = 8
 _SAFE_RESPONSE_HEADERS = (
     "cf-ray", "cache-control", "age", "etag", "last-modified",
     "cf-cache-status", "content-length", "content-type",
+    # RX-PUB-A0.6D follow-up: needed so _retry_after_seconds() can read a
+    # 429 response's own backoff hint instead of always using the fixed
+    # PUBLIC_RETRY_DELAY.
+    "retry-after",
 )
 
 # RX-PUB-A0.6B: same Cloudflare zone-level cache-purge secrets
@@ -235,34 +262,70 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _PUBLIC_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
+def _retry_after_seconds(headers: dict) -> float | None:
+    """Parses a Retry-After header value (seconds form only -- the HTTP-date
+    form exists but every 429 observed from this origin has used the seconds
+    form, and misparsing a date as garbage is worse than falling back to the
+    fixed delay). Returns None if absent, unparseable, negative, or
+    non-finite -- CodeRabbit finding: float() accepts "-1" and "inf", and
+    the prior max(0.0, ...) clamp turned a negative value into an immediate
+    retry (worse than the fixed delay it was meant to replace) while an
+    infinite value would reach time.sleep() and hang that worker thread
+    indefinitely."""
+    raw = headers.get("retry-after")
+    if not raw:
+        return None
+    try:
+        delay = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(delay) or delay < 0:
+        return None
+    return delay
+
+
 def _fetch_public(url: str) -> dict:
     """GET the customer-facing public URL. Returns a dict with 'bytes' (or
     None on failure), 'status', and safe response headers only -- never logs
     or returns the raw response body beyond what the caller hashes in
     memory. Bounded retries, matching the R2 helpers' retry policy. Redirects
     are not followed (see _NoRedirect) and the target is validated against an
-    HTTPS+host allowlist before every attempt (see _validate_public_url)."""
+    HTTPS+host allowlist before every attempt (see _validate_public_url).
+
+    RX-PUB-A0.6D follow-up: every network attempt is gated by
+    _public_fetch_semaphore (see PUBLIC_FETCH_MAX_CONCURRENCY above) so the
+    bounded worker pool's parallelism doesn't translate into a burst of
+    simultaneous requests against the shared public origin -- confirmed root
+    cause of a real HTTP 429 spike on the first 6D-inclusive production run.
+    A 429 response also backs off using the origin's own Retry-After header
+    when present, rather than always waiting the fixed PUBLIC_RETRY_DELAY."""
     _validate_public_url(url)
     last_status = None
     last_error = None
     last_headers: dict = {}
     for attempt in range(1, PUBLIC_MAX_RETRIES + 1):
         req = urllib.request.Request(url, headers={"User-Agent": "SentinelApex-RX-PUB-A0-Verifier/1.0"})
-        try:
-            with _PUBLIC_OPENER.open(req, timeout=PUBLIC_TIMEOUT) as resp:
-                body = resp.read()
-                headers = {k.lower(): v for k, v in resp.getheaders() if k.lower() in _SAFE_RESPONSE_HEADERS}
-                return {"bytes": body, "status": resp.status, "headers": headers, "error": None}
-        except urllib.error.HTTPError as e:
-            last_status = e.code
-            last_headers = {k.lower(): v for k, v in (e.headers.items() if e.headers else []) if k.lower() in _SAFE_RESPONSE_HEADERS}
-            if e.code == 404:
-                return {"bytes": None, "status": 404, "headers": last_headers, "error": "HTTP 404"}
-            last_error = f"HTTP {e.code}"
-        except Exception as e:
-            last_error = str(e)
+        with _public_fetch_semaphore:
+            try:
+                with _PUBLIC_OPENER.open(req, timeout=PUBLIC_TIMEOUT) as resp:
+                    body = resp.read()
+                    headers = {k.lower(): v for k, v in resp.getheaders() if k.lower() in _SAFE_RESPONSE_HEADERS}
+                    return {"bytes": body, "status": resp.status, "headers": headers, "error": None}
+            except urllib.error.HTTPError as e:
+                last_status = e.code
+                last_headers = {k.lower(): v for k, v in (e.headers.items() if e.headers else []) if k.lower() in _SAFE_RESPONSE_HEADERS}
+                if e.code == 404:
+                    return {"bytes": None, "status": 404, "headers": last_headers, "error": "HTTP 404"}
+                last_error = f"HTTP {e.code}"
+            except Exception as e:
+                last_error = str(e)
         if attempt < PUBLIC_MAX_RETRIES:
-            time.sleep(PUBLIC_RETRY_DELAY)
+            delay = PUBLIC_RETRY_DELAY
+            if last_status == 429:
+                retry_after = _retry_after_seconds(last_headers)
+                if retry_after is not None:
+                    delay = retry_after
+            time.sleep(delay)
     return {"bytes": None, "status": last_status, "headers": last_headers, "error": last_error or "fetch failed"}
 
 
