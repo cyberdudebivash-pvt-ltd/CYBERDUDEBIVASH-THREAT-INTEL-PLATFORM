@@ -72,6 +72,9 @@ GH_TOKEN       = os.environ.get("GITHUB_TOKEN", os.environ.get("GH_TOKEN", ""))
 OTX_KEY        = os.environ.get("OTX_API_KEY", "")
 MAX_PER_SOURCE = int(os.environ.get("MAX_PER_SOURCE", "20"))
 DRY_RUN        = os.environ.get("DRY_RUN", "").lower() == "true"
+# Matches output_validation_gate.py's API_FEED_CAP and run_pipeline.py's
+# stage_sync_root_feed_json() cap -- the platform-wide api/feed.json contract.
+API_FEED_CAP   = 500
 
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.I)
 
@@ -671,9 +674,21 @@ def run():
     deduped = _dedup_against_feed(all_new, existing)
     log.info("After dedup: %d new items to add", len(deduped))
 
-    if not deduped:
+    if not deduped and len(existing) <= API_FEED_CAP:
         log.info("No new items to add -- feed is current")
+        updated = existing
     else:
+        if not deduped:
+            # Self-heal: no new items this run, but a prior run left the feed
+            # over the cap (e.g. before this cap-enforcement fix existed).
+            # Still worth a sort+cap+write so the file recovers even on a
+            # run that finds nothing new, rather than waiting indefinitely
+            # for the next run that happens to find a dedup'd item.
+            log.info(
+                "No new items to add, but existing feed already exceeds the "
+                "%d-item cap (%d items) -- self-healing on this run",
+                API_FEED_CAP, len(existing),
+            )
         updated = list(existing) + deduped
 
         # ── SORT ENFORCEMENT (permanent fix — v173.1) ─────────────────────────
@@ -699,6 +714,31 @@ def run():
         )
         # ── END SORT ENFORCEMENT ───────────────────────────────────────────────
 
+        # ── CAP ENFORCEMENT (P0 fix) ────────────────────────────────────────
+        # Root cause: this was the only api/feed.json writer that appended new
+        # items without re-applying the 500-item contract that every other
+        # writer already enforces (output_validation_gate.py's API_FEED_CAP=500
+        # HARD FAILs above it; run_pipeline.py's stage_sync_root_feed_json()
+        # already does `out_count = min(len(manifest_items), 500)` before its
+        # own write). Any run that found even one new deduped item pushed
+        # api/feed.json's count above 500 with no way back down, hard-failing
+        # STAGE 3.9 (Output Validation Gate) on every subsequent pipeline run
+        # and skipping ~40 downstream certification/deployment stages gated
+        # behind it. Feed is already sorted DESC above, so slicing to the cap
+        # keeps the newest entries -- older entries remain fully preserved in
+        # data/stix/feed_manifest.json (the full-history superset) and the
+        # STIX bundle archive; only the live top-500 API/dashboard feed is
+        # capped, matching its documented "quality-filtered top 500" contract.
+        if len(updated) > API_FEED_CAP:
+            trimmed = len(updated) - API_FEED_CAP
+            updated = updated[:API_FEED_CAP]
+            log.info(
+                "[CAP] Feed capped at %d items (%d oldest entries trimmed) — "
+                "matches output_validation_gate.py's API_FEED_CAP contract",
+                API_FEED_CAP, trimmed,
+            )
+        # ── END CAP ENFORCEMENT ─────────────────────────────────────────────
+
         if not DRY_RUN:
             _atomic_write(FEED_PATH, updated)
             log.info("Wrote %d total items to %s", len(updated), FEED_PATH)
@@ -708,7 +748,7 @@ def run():
     telemetry = {
         "run_at": _now(),
         "new_items": len(deduped),
-        "total_items": len(updated) if deduped else len(existing),
+        "total_items": len(updated),
         "sources": source_counts,
         "dry_run": DRY_RUN,
     }
