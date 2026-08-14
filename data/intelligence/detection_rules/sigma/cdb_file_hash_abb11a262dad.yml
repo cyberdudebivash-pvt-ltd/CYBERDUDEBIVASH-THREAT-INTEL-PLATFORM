@@ -1,0 +1,31 @@
+title: CDB SENTINEL APEX - Malicious File Hash Detection [abb11a262dad]
+id: cdb-hash-abb11a262dad
+status: production
+description: >
+    Auto-generated detection rule for 7 malicious file hashes
+    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.
+author: CyberDudeBivash SENTINEL APEX v51
+date: 2026-08-14
+tags:
+    - attack.execution
+    - attack.t1204
+    - attack.defense_evasion
+logsource:
+    category: file_event
+    product: any
+detection:
+    selection:
+        Hashes|contains:
+            - '45766572797468696e67206973206e6f742077686174206974207365656d730a'
+            - '52a7e9a969cab5410dc28fb4df75bebd103b961b'
+            - 'e89aa79efe629ae90f59dcdf8847c117d9a7da86'
+            - 'eaf2af9fc2d1daf9373855e3650b65e6'
+            - '28004710692762680520098075779654'
+            - 'e37c5c5d7e3032146d0232666470732d'
+            - '99382535900423182128231632453729'
+    condition: selection
+level: critical
+falsepositives:
+    - Hash collision (negligible probability)
+references:
+    - https://intel.cyberdudebivash.com
