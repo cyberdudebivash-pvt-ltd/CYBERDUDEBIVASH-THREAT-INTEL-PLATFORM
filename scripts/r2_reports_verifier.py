@@ -887,6 +887,24 @@ def main() -> int:
         )
         log.error("!" * 70)
 
+    # RX-PUB-A0.6A / mission Section 9: a publication-gate bypass is the
+    # single most severe outcome this verifier can observe -- a report the
+    # platform's own gate says must not be served was served anyway. Always
+    # surfaced with its own block, distinct from and in addition to the
+    # general failure summary below, and never silently folded into an
+    # ordinary mismatch count (mission Section 52 lists this as an automatic
+    # mission blocker).
+    if publication_gate_bypass > 0:
+        log.error("!" * 70)
+        log.error(
+            "PUBLICATION_GATE_BYPASS x%d -- a report the platform's publication gate "
+            "denied (customer_ready=false) was served with a real HTML body at its "
+            "public URL. This is a customer-facing access-control defect, not a byte "
+            "divergence (RX-PUB-A0.6 mission Section 9).",
+            publication_gate_bypass,
+        )
+        log.error("!" * 70)
+
     # CodeRabbit finding (RX-PUB-A0 Section 27 "do not fail-open"): an
     # unverifiable report (retries exhausted, auth/config error) is NOT the
     # same claim as a verified-matching report. "could not verify" must
