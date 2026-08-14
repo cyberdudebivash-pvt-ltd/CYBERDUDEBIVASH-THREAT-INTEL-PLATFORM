@@ -1,7 +1,7 @@
 // CYBERDUDEBIVASH SENTINEL APEX — KQL Detection Queries Bundle
-// Version: 185.0 | Generated: 2026-08-14T09:36:45.913519+00:00
+// Version: 185.0 | Generated: 2026-08-14T18:36:20.573120+00:00
 // Platform: https://intel.cyberdudebivash.com
-// Total queries: 307
+// Total queries: 335
 // Import: Microsoft Sentinel Analytics Rules, Defender Advanced Hunting
 
 // ═══════════════════════════════════════════════════════════════════
@@ -298,6 +298,38 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-54249", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
+// ── [GOLD] CVE-2026-19845 TOTOLINK A800R lan.so cstecgi.cgi setStaticDhcpConfig stack-based
+// CVE: CVE-2026-19845
+// Risk: 1.04 | Severity: LOW
+// STIX ID: intel--cac432f86e4626a87b06db1c
+// SENTINEL APEX — CVE-2026-19845 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-19845", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-49826 - Concourse login flow has an open redirect issue
+// CVE: CVE-2026-49826
+// Risk: 0.53 | Severity: LOW
+// STIX ID: intel--8c9f96ad32c73047f7588e1a
+// SENTINEL APEX — CVE-2026-49826 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-49826", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
 // ── [GOLD] CISA Warns of Windows Ancillary Function 0-Day Vulnerability Exploited in Attack
 // Risk: 9.00 | Severity: CRITICAL
 // STIX ID: intel--fef90feaef3d3794fd73232f
@@ -491,6 +523,24 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "Fortinet Patches Multiple Authentication Vulnerabilities in FortiWeb, FortiManager, and FortiClient", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
+// ── [GOLD] Apple warned hundreds of users of mercenary spyware attacks
+// Risk: 2.51 | Severity: LOW
+// STIX ID: intel--f956f73d7e28eb9ef5d7b892
+// SENTINEL APEX — Apple warned hundreds of users of mercenary spyware attacks Remote Code Execution Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+// Deploy to: Microsoft Sentinel / Defender XDR
+let lookback = 1d;
+DeviceProcessEvents
+| where Timestamp > ago(lookback)
+| where (InitiatingProcessFileName in~ ("w3wp.exe", "httpd.exe", "nginx.exe", "tomcat.exe", "java.exe")
+    and FileName in~ ("cmd.exe", "powershell.exe", "bash", "sh", "python.exe", "python3"))
+    or (ProcessCommandLine has_any ("wget http", "curl http", "certutil -urlcache", "bitsadmin /transfer"))
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine,
+          InitiatingProcessFileName, InitiatingProcessCommandLine
+| where not(ProcessCommandLine has_any ("update", "install", "backup", "deploy"))  // filter known-good
+| extend Severity = "HIGH", CVE = "Apple warned hundreds of users of mercenary spyware attacks", RuleSource = "SENTINEL-APEX"
+| order by Timestamp desc
+
 // ── [GOLD] Download More RAM Attack Bypasses Windows VBS and Disables Defender Through Memo
 // Risk: 2.40 | Severity: LOW
 // STIX ID: intel--b057d0b10715a7cf1eeed9a5
@@ -589,6 +639,22 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-13610", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-47192 kas's late signature validation may allow unnoticed repository ma
+// CVE: CVE-2026-47192
+// Risk: 1.60 | Severity: LOW
+// STIX ID: intel--e3a301df9bdb710c9b9901cc
+// SENTINEL APEX — CVE-2026-47192 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-47192", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [GOLD] CVE-2026-16739 - Epeken All Kurir <= 2.1.2 - Unauthenticated Order Payment Confi
@@ -774,6 +840,76 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-13328", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-19628 Remote Code Execution
+// CVE: CVE-2026-19628
+// Risk: 1.16 | Severity: LOW
+// STIX ID: intel--caea46d2ce3fa210ba4826c9
+// SENTINEL APEX — CVE-2026-19628 Remote Code Execution Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+// Deploy to: Microsoft Sentinel / Defender XDR
+let lookback = 1d;
+DeviceProcessEvents
+| where Timestamp > ago(lookback)
+| where (InitiatingProcessFileName in~ ("w3wp.exe", "httpd.exe", "nginx.exe", "tomcat.exe", "java.exe")
+    and FileName in~ ("cmd.exe", "powershell.exe", "bash", "sh", "python.exe", "python3"))
+    or (ProcessCommandLine has_any ("wget http", "curl http", "certutil -urlcache", "bitsadmin /transfer"))
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine,
+          InitiatingProcessFileName, InitiatingProcessCommandLine
+| where not(ProcessCommandLine has_any ("update", "install", "backup", "deploy"))  // filter known-good
+| extend Severity = "HIGH", CVE = "CVE-2026-19628", RuleSource = "SENTINEL-APEX"
+| order by Timestamp desc
+
+// ── [GOLD] CVE-2026-19626 Remote Code Execution
+// CVE: CVE-2026-19626
+// Risk: 1.16 | Severity: LOW
+// STIX ID: intel--e2c48edda21f5c06f65f1fd5
+// SENTINEL APEX — CVE-2026-19626 Remote Code Execution Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+// Deploy to: Microsoft Sentinel / Defender XDR
+let lookback = 1d;
+DeviceProcessEvents
+| where Timestamp > ago(lookback)
+| where (InitiatingProcessFileName in~ ("w3wp.exe", "httpd.exe", "nginx.exe", "tomcat.exe", "java.exe")
+    and FileName in~ ("cmd.exe", "powershell.exe", "bash", "sh", "python.exe", "python3"))
+    or (ProcessCommandLine has_any ("wget http", "curl http", "certutil -urlcache", "bitsadmin /transfer"))
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine,
+          InitiatingProcessFileName, InitiatingProcessCommandLine
+| where not(ProcessCommandLine has_any ("update", "install", "backup", "deploy"))  // filter known-good
+| extend Severity = "HIGH", CVE = "CVE-2026-19626", RuleSource = "SENTINEL-APEX"
+| order by Timestamp desc
+
+// ── [GOLD] CVE-2026-66271 - Dell Wyse Management Suite Unrestricted File Upload Vulnerabili
+// CVE: CVE-2026-66271
+// Risk: 1.16 | Severity: LOW
+// STIX ID: intel--d0129f6e47e6704a6349d80e
+// SENTINEL APEX — CVE-2026-66271 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-66271", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-66270 - Dell Wyse Management Suite Unrestricted File Upload Vulnerabili
+// CVE: CVE-2026-66270
+// Risk: 1.16 | Severity: LOW
+// STIX ID: intel--ea77238d6aa7a1a85f6cf825
+// SENTINEL APEX — CVE-2026-66270 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-66270", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [GOLD] CVE-2026-12949 - Wishlist Member X <= 3.34.1 - Unauthenticated Account Takeover 
@@ -968,6 +1104,70 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-70460", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
+// ── [GOLD] CVE-2026-19844 TOTOLINK A800R ipv6.so cstecgi.cgi setRadvdCfg stack-based overfl
+// CVE: CVE-2026-19844
+// Risk: 1.04 | Severity: LOW
+// STIX ID: intel--108bf38db435bdb8989af797
+// SENTINEL APEX — CVE-2026-19844 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-19844", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-19841 - TRENDNET TEW-813DRU vsftpd vsftpd.conf default permission
+// CVE: CVE-2026-19841
+// Risk: 1.04 | Severity: LOW
+// STIX ID: intel--83c7878fa25e1c99e7a564f4
+// SENTINEL APEX — CVE-2026-19841 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-19841", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-66272 - Dell Wyse Management Suite Missing Authentication for Critical 
+// CVE: CVE-2026-66272
+// Risk: 1.04 | Severity: LOW
+// STIX ID: intel--a27b1abe70e5297ef825067c
+// SENTINEL APEX — CVE-2026-66272 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-66272", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-57469 - Cross-Site Request Forgery (CSRF) in KUNBUS PiCtory
+// CVE: CVE-2026-57469
+// Risk: 1.04 | Severity: LOW
+// STIX ID: intel--756f3b3af2f53bb16d2b248f
+// SENTINEL APEX — CVE-2026-57469 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-57469", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
 // ── [GOLD] CVE-2026-19790 - Tenda G0 httpd Web Management module formSetPortMirror stack-ba
 // CVE: CVE-2026-19790
 // Risk: 1.04 | Severity: LOW
@@ -1143,6 +1343,89 @@ SecurityEvent
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-3835", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-73844 CKAN MCP Server: Information disclosure via verbose error reflect
+// CVE: CVE-2026-73844
+// Risk: 0.74 | Severity: LOW
+// STIX ID: intel--0ebdaa00666201a2303d2a60
+// SENTINEL APEX — CVE-2026-73844 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-73844", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-49989 - CrateDB's Blob HTTP handler bypasses authorization
+// CVE: CVE-2026-49989
+// Risk: 0.74 | Severity: LOW
+// STIX ID: intel--2846b1d8b129f04f64b3cd33
+// SENTINEL APEX — CVE-2026-49989 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-49989", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-57472 - Improper Limitation of a Pathname to a Restricted Directory ('P
+// CVE: CVE-2026-57472
+// Risk: 0.74 | Severity: LOW
+// STIX ID: intel--c2ae2e7d785bd44077830466
+// SENTINEL APEX — CVE-2026-57472 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-57472", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-57471 - Improper Limitation of a Pathname to a Restricted Directory ('P
+// CVE: CVE-2026-57471
+// Risk: 0.74 | Severity: LOW
+// STIX ID: intel--142488e14d1e394e2d150900
+// SENTINEL APEX — CVE-2026-57471 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-57471", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-53970 - ZeroBrew version 0.3.1 and prior Missing Checksum Verification 
+// CVE: CVE-2026-53970
+// Risk: 0.74 | Severity: LOW
+// STIX ID: intel--39249343338c2b7911f36275
+// SENTINEL APEX — CVE-2026-53970 Remote Code Execution Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+// Deploy to: Microsoft Sentinel / Defender XDR
+let lookback = 1d;
+DeviceProcessEvents
+| where Timestamp > ago(lookback)
+| where (InitiatingProcessFileName in~ ("w3wp.exe", "httpd.exe", "nginx.exe", "tomcat.exe", "java.exe")
+    and FileName in~ ("cmd.exe", "powershell.exe", "bash", "sh", "python.exe", "python3"))
+    or (ProcessCommandLine has_any ("wget http", "curl http", "certutil -urlcache", "bitsadmin /transfer"))
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine,
+          InitiatingProcessFileName, InitiatingProcessCommandLine
+| where not(ProcessCommandLine has_any ("update", "install", "backup", "deploy"))  // filter known-good
+| extend Severity = "HIGH", CVE = "CVE-2026-53970", RuleSource = "SENTINEL-APEX"
+| order by Timestamp desc
 
 // ── [GOLD] CVE-2026-19794 - WP-Stats <= 2.56 - Unauthenticated Stored Cross-Site Scripting
 // CVE: CVE-2026-19794
@@ -1439,6 +1722,137 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-66691", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-63701 - Dell Wyse Management Suite Improper Deserialization of Untruste
+// CVE: CVE-2026-63701
+// Risk: 0.66 | Severity: LOW
+// STIX ID: intel--c773dbd17f1225b0700061d8
+// SENTINEL APEX — CVE-2026-63701 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-63701", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-63700 - Dell Wyse Management Suite Incorrect Default Permission Vulnera
+// CVE: CVE-2026-63700
+// Risk: 0.66 | Severity: LOW
+// STIX ID: intel--111762c89f920a54abf9e680
+// SENTINEL APEX — CVE-2026-63700 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-63700", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-49986 - Cortex has Untrusted Project Bootstrap Code Execution via `CLAU
+// CVE: CVE-2026-49986
+// Risk: 0.53 | Severity: LOW
+// STIX ID: intel--a61f6a171890eabeead26789
+// SENTINEL APEX — CVE-2026-49986 Remote Code Execution Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+// Deploy to: Microsoft Sentinel / Defender XDR
+let lookback = 1d;
+DeviceProcessEvents
+| where Timestamp > ago(lookback)
+| where (InitiatingProcessFileName in~ ("w3wp.exe", "httpd.exe", "nginx.exe", "tomcat.exe", "java.exe")
+    and FileName in~ ("cmd.exe", "powershell.exe", "bash", "sh", "python.exe", "python3"))
+    or (ProcessCommandLine has_any ("wget http", "curl http", "certutil -urlcache", "bitsadmin /transfer"))
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine,
+          InitiatingProcessFileName, InitiatingProcessCommandLine
+| where not(ProcessCommandLine has_any ("update", "install", "backup", "deploy"))  // filter known-good
+| extend Severity = "HIGH", CVE = "CVE-2026-49986", RuleSource = "SENTINEL-APEX"
+| order by Timestamp desc
+
+// ── [GOLD] CVE-2026-63702 - Dell Wyse Management Suite Use of Hard-coded Credentials Vulner
+// CVE: CVE-2026-63702
+// Risk: 0.53 | Severity: LOW
+// STIX ID: intel--e520a33bed13f699b2e3cb67
+// SENTINEL APEX — CVE-2026-63702 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-63702", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-19884 - Eclipse Theia Git Extension Arbitrary Command Execution Vulnera
+// CVE: CVE-2026-19884
+// Risk: 0.53 | Severity: LOW
+// STIX ID: intel--1f05398c2fb9f90c129878de
+// SENTINEL APEX — CVE-2026-19884 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-19884", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-19836 - Webkul Bagisto Backend Customer Detail Feature view authorizati
+// CVE: CVE-2026-19836
+// Risk: 0.53 | Severity: LOW
+// STIX ID: intel--d3fc8c587b42d17862073917
+// SENTINEL APEX — CVE-2026-19836 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-19836", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-19835 - Webkul Bagisto Customer Item Deletion Endpoint access control
+// CVE: CVE-2026-19835
+// Risk: 0.53 | Severity: LOW
+// STIX ID: intel--8a9cfda94c2ab8ac61a3fa85
+// SENTINEL APEX — CVE-2026-19835 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-19835", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-19837 - Webkul Bagisto Customer Search search information disclosure
+// CVE: CVE-2026-19837
+// Risk: 0.53 | Severity: LOW
+// STIX ID: intel--39caaf16d14979c3b3ba813c
+// SENTINEL APEX — CVE-2026-19837 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-19837", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [GOLD] CVE-2026-19812 - TOTOLINK A800R product.so cstecgi.cgi UploadCustomModule stack-
@@ -4101,6 +4515,38 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-66693", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
+// ── [SILVER] CVE-2026-73846 CKAN MCP Server: Cache-key canonicalization collision enables cac
+// CVE: CVE-2026-73846
+// Risk: 0.74 | Severity: LOW
+// STIX ID: intel--90983927bc54212bb113aedc
+// SENTINEL APEX — CVE-2026-73846 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-73846", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [SILVER] CVE-2026-73845 CKAN MCP Server: MQA server allowlist bypass via unanchored regex
+// CVE: CVE-2026-73845
+// Risk: 0.74 | Severity: LOW
+// STIX ID: intel--dac0aa739f31c0548bda66b8
+// SENTINEL APEX — CVE-2026-73845 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-73845", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
 // ── [SILVER] CVE-2026-73403 - WordPress User Registration plugin <= 5.2.6 - Broken Access Con
 // CVE: CVE-2026-73403
 // Risk: 0.74 | Severity: LOW
@@ -4163,6 +4609,22 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-66689", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [SILVER] CVE-2026-46603 - Excessive memory allocation during VP8L decoding in golang.org/
+// CVE: CVE-2026-46603
+// Risk: 0.53 | Severity: LOW
+// STIX ID: intel--4b6f0bd6b524b27848bd3741
+// SENTINEL APEX — CVE-2026-46603 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-14T18:35:19Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-46603", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [SILVER] CVE-2026-73841 - OpenChoreo: Cross-project command execution and wirelog view ac
