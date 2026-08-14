@@ -676,6 +676,19 @@ class TestPublicFetchThrottling(unittest.TestCase):
         # the fixed delay, never raise.
         self.assertIsNone(rrv._retry_after_seconds({"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"}))
 
+    def test_retry_after_seconds_returns_none_for_negative_value(self):
+        # CodeRabbit finding: float("-1") parses fine, and the prior
+        # max(0.0, ...) clamp turned it into an immediate retry -- worse
+        # than the fixed delay it was meant to replace when an origin (or a
+        # misbehaving proxy) sends a negative value.
+        self.assertIsNone(rrv._retry_after_seconds({"retry-after": "-1"}))
+
+    def test_retry_after_seconds_returns_none_for_non_finite_value(self):
+        # CodeRabbit finding: float("inf") parses fine too, and would have
+        # reached time.sleep() and hung that worker thread indefinitely.
+        self.assertIsNone(rrv._retry_after_seconds({"retry-after": "inf"}))
+        self.assertIsNone(rrv._retry_after_seconds({"retry-after": "nan"}))
+
     def test_429_response_waits_for_retry_after_instead_of_fixed_delay(self):
         import email.message
 

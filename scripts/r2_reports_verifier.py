@@ -59,6 +59,7 @@ import concurrent.futures
 import hashlib
 import json
 import logging
+import math
 import os
 import sys
 import threading
@@ -265,14 +266,22 @@ def _retry_after_seconds(headers: dict) -> float | None:
     """Parses a Retry-After header value (seconds form only -- the HTTP-date
     form exists but every 429 observed from this origin has used the seconds
     form, and misparsing a date as garbage is worse than falling back to the
-    fixed delay). Returns None if absent or unparseable."""
+    fixed delay). Returns None if absent, unparseable, negative, or
+    non-finite -- CodeRabbit finding: float() accepts "-1" and "inf", and
+    the prior max(0.0, ...) clamp turned a negative value into an immediate
+    retry (worse than the fixed delay it was meant to replace) while an
+    infinite value would reach time.sleep() and hang that worker thread
+    indefinitely."""
     raw = headers.get("retry-after")
     if not raw:
         return None
     try:
-        return max(0.0, float(raw))
+        delay = float(raw)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(delay) or delay < 0:
+        return None
+    return delay
 
 
 def _fetch_public(url: str) -> dict:
