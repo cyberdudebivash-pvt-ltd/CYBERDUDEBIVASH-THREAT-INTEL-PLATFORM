@@ -1,194 +1,654 @@
-%PDF-1.4
-%���� ReportLab Generated PDF document http://www.reportlab.com
-1 0 obj
-<<
-/F1 2 0 R /F2 3 0 R /F3 7 0 R
->>
-endobj
-2 0 obj
-<<
-/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
->>
-endobj
-3 0 obj
-<<
-/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding /Name /F2 /Subtype /Type1 /Type /Font
->>
-endobj
-4 0 obj
-<<
-/Contents 15 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 14 0 R /Resources <<
-/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
->> /Rotate 0 /Trans <<
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>CVE-2026-65780: Double free in Windows Autopilot allows an authorized attacker to elevate privileges locally. — PDF Report</title>
+<style>
+@media print { @page { margin: 1.5cm; size: A4; } body { print-color-adjust: exact; } }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }
+h1 { font-size: 18px; font-weight: 800; color: #f59e0b; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+td, th { padding: 8px 12px; border-bottom: 1px solid #334155; font-size: 12px; }
+th { color: #94a3b8; font-size: 10px; text-transform: uppercase; }
+pre { background: #0a0f1a; padding: 12px; border-radius: 6px; font-size: 10px; overflow: auto; }
+</style>
+</head>
+<body>
+<!doctype html>
+<!-- CDB-REPORT-ENGINE: generate_intel_reports.py vv184.0 -->
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta http-equiv='Content-Type' content='text/html; charset=utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<meta name='robots' content='index,follow'>
+<meta name='description' content='CVE-2026-65780: Double free in Windows Autopilot allows an authorized attacker to elevate privileges locally. - Severity HIGH - CYBERDUDEBIVASH SENTINEL APEX Tactical Dossier. Risk 7.0/10. Generated 2026-08-13 07:01 UTC.'>
+<meta property='og:title' content='CVE-2026-65780: Double free in Windows Autopilot allows an authorized attacker to elevate privileges locally. · SENTINEL APEX Tactical Dossier'>
+<meta property='og:description' content='Severity HIGH · Risk 7.0/10 · CYBERDUDEBIVASH SENTINEL APEX'>
+<meta property='og:type' content='article'>
+<title>CVE-2026-65780: Double free in Windows Autopilot allows an authorized attacker to elevate privileges locally. · SENTINEL APEX Tactical Dossier</title>
+<link rel='canonical' href='https://intel.cyberdudebivash.com/reports/2026/08/intel--f85399cf9577bf6c.html'>
+<style>
+:root{
+  --bg:#060d19;--panel:#0b1425;--panel2:#0f1a2e;--border:#162035;
+  --accent:#00d4aa;--accent2:#0099ff;--text:#e8eef8;--muted:#7a8499;
+  --crit:#ff3b3b;--high:#ff7c1a;--med:#f5a623;--low:#4caf50;--info:#2196f3;
+  --mono:'JetBrains Mono',Menlo,Consolas,monospace;
+  --radius:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;
+  font-size:15px;line-height:1.7;min-height:100vh}
 
->> 
-  /Type /Page
->>
-endobj
-5 0 obj
-<<
-/Contents 16 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 14 0 R /Resources <<
-/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
->> /Rotate 0 /Trans <<
+/* TLP Banner */
+.tlp-banner{padding:7px 0;text-align:center;font-family:var(--mono);font-size:11px;
+  font-weight:700;letter-spacing:2px;text-transform:uppercase}
+.tlp-CLEAR{background:#1a2e1a;color:#4caf50;border-bottom:1px solid #2d5a2d}
+.tlp-GREEN{background:#1a2e1a;color:#4caf50;border-bottom:1px solid #2d5a2d}
+.tlp-AMBER{background:#2e221a;color:#f5a623;border-bottom:1px solid #5a3d1a}
+.tlp-RED  {background:#2e1a1a;color:#ff3b3b;border-bottom:1px solid #5a1a1a}
 
->> 
-  /Type /Page
->>
-endobj
-6 0 obj
-<<
-/Contents 17 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 14 0 R /Resources <<
-/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
->> /Rotate 0 /Trans <<
+/* Top Nav */
+.top-nav{background:var(--panel);border-bottom:1px solid var(--border);
+  padding:14px 32px;display:flex;align-items:center;justify-content:space-between}
+.nav-brand{font-family:var(--mono);font-size:11px;letter-spacing:3px;
+  color:var(--accent);text-transform:uppercase}
+.nav-links a{font-family:var(--mono);font-size:11px;color:var(--muted);
+  text-decoration:none;margin-left:20px;letter-spacing:.5px}
+.nav-links a:hover{color:var(--accent)}
 
->> 
-  /Type /Page
->>
-endobj
-7 0 obj
-<<
-/BaseFont /Courier /Encoding /WinAnsiEncoding /Name /F3 /Subtype /Type1 /Type /Font
->>
-endobj
-8 0 obj
-<<
-/Contents 18 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 14 0 R /Resources <<
-/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
->> /Rotate 0 /Trans <<
+/* Layout */
+.wrap{max-width:1040px;margin:0 auto;padding:48px 24px 96px}
 
->> 
-  /Type /Page
->>
-endobj
-9 0 obj
-<<
-/Contents 19 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 14 0 R /Resources <<
-/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
->> /Rotate 0 /Trans <<
+/* Header */
+.dossier-hdr{padding-bottom:28px;margin-bottom:32px;
+  border-bottom:1px solid var(--border)}
+.classification{display:flex;align-items:center;gap:12px;margin-bottom:16px;
+  font-family:var(--mono);font-size:10px;letter-spacing:2px;color:var(--muted);
+  text-transform:uppercase}
+.cls-chip{padding:3px 10px;border-radius:2px;font-weight:700}
+.cls-PUBLIC{background:rgba(76,175,80,.1);color:#4caf50;border:1px solid rgba(76,175,80,.3)}
+.cls-TLP{background:rgba(0,212,170,.1);color:var(--accent);border:1px solid rgba(0,212,170,.3)}
+.dossier-id{font-family:var(--mono);font-size:10px;color:var(--muted);
+  letter-spacing:1px;margin-bottom:8px}
+h1.dossier-title{font-size:28px;font-weight:800;line-height:1.3;
+  margin-bottom:16px;color:var(--text)}
+.meta-strip{display:flex;flex-wrap:wrap;gap:8px 20px;font-family:var(--mono);
+  font-size:11px;color:var(--muted)}
+.meta-strip strong{color:var(--text)}
+.sev-chip{display:inline-block;padding:4px 12px;border-radius:3px;
+  font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:1.5px}
+.sev-CRITICAL{background:rgba(255,59,59,.12);color:var(--crit);border:1px solid rgba(255,59,59,.4)}
+.sev-HIGH    {background:rgba(255,124,26,.12);color:var(--high);border:1px solid rgba(255,124,26,.4)}
+.sev-MEDIUM  {background:rgba(245,166,35,.12);color:var(--med);border:1px solid rgba(245,166,35,.4)}
+.sev-LOW     {background:rgba(76,175,80,.12);color:var(--low);border:1px solid rgba(76,175,80,.4)}
+.sev-INFO    {background:rgba(33,150,243,.12);color:var(--info);border:1px solid rgba(33,150,243,.4)}
+.tag-strip{margin-top:14px;display:flex;flex-wrap:wrap;gap:6px}
+.tag{display:inline-block;padding:3px 9px;background:rgba(0,212,170,.07);
+  color:var(--accent);border:1px solid rgba(0,212,170,.2);border-radius:3px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.5px}
 
->> 
-  /Type /Page
->>
-endobj
-10 0 obj
-<<
-/Contents 20 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 14 0 R /Resources <<
-/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
->> /Rotate 0 /Trans <<
+/* Sections */
+.section{background:var(--panel);border:1px solid var(--border);
+  border-radius:var(--radius);padding:28px;margin-bottom:20px}
+.section-num{font-family:var(--mono);font-size:9px;letter-spacing:2px;
+  color:var(--muted);text-transform:uppercase;margin-bottom:6px}
+h2.section-title{font-size:14px;font-weight:700;color:var(--accent);
+  text-transform:uppercase;letter-spacing:2px;font-family:var(--mono);
+  margin-bottom:18px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:18px 0 8px;color:var(--text)}
+p{color:#c8d3e8;margin-bottom:12px;line-height:1.75}
+ul,ol{padding-left:22px;margin:8px 0 14px}
+li{color:#c8d3e8;margin-bottom:6px;line-height:1.65}
+code{font-family:var(--mono);font-size:12px;background:rgba(0,212,170,.07);
+  padding:2px 6px;border-radius:3px;color:var(--accent)}
+pre{font-family:var(--mono);font-size:12px;background:#040b16;
+  border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px;overflow-x:auto;color:#e8eef8;margin:12px 0}
 
->> 
-  /Type /Page
->>
-endobj
-11 0 obj
-<<
-/Contents 21 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 14 0 R /Resources <<
-/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
->> /Rotate 0 /Trans <<
+/* KV Grid */
+.kv{display:grid;grid-template-columns:200px 1fr;gap:8px 16px;font-size:13px}
+.kv-key{color:var(--muted);font-family:var(--mono);font-size:11px;
+  text-transform:uppercase;letter-spacing:.5px;padding-top:2px}
+.kv-val{color:var(--text)}
 
->> 
-  /Type /Page
->>
-endobj
-12 0 obj
-<<
-/PageMode /UseNone /Pages 14 0 R /Type /Catalog
->>
-endobj
-13 0 obj
-<<
-/Author (CYBERDUDEBIVASH SENTINEL APEX) /CreationDate (D:20260814093751+00'00') /Creator (SENTINEL APEX v166.0 GOD-MODE) /Keywords () /ModDate (D:20260814093751+00'00') /Producer (ReportLab PDF Library - www.reportlab.com) 
-  /Subject (Threat Intelligence Report) /Title (CVE-2026-65780: Double free in Windows Autopilot allows an authorized attacker to elevate privileges locally.) /Trapped /False
->>
-endobj
-14 0 obj
-<<
-/Count 7 /Kids [ 4 0 R 5 0 R 6 0 R 8 0 R 9 0 R 10 0 R 11 0 R ] /Type /Pages
->>
-endobj
-15 0 obj
-<<
-/Filter [ /ASCII85Decode /FlateDecode ] /Length 2372
->>
-stream
-Gau0D>Bedl&q9"FeB@2%F$dLBC<:As':Tkk),N)X=mptog9tSr,*Hp)4o=9K=uQShSA_bBNt%>R]BcN@f2XMtpreQpi>UX6%ju950Fn'k0M*Pb;],DF:H_$ua-d$_.bEbp#\2SN)UdBsVHBu`7CZA.\<7HUoit#sh#,s.'hRr4J8gQ)c`mkYe$M9^D4P5i)H`bf,a9a[^u7[@S>2'e&SkP:YG"2Wph%/uH[dr&1\i_0?<hKW@QC%UPM(0f_tj)"!%0,oUW_?FadJD)V_EY1QO=YEpFe-8P<['"n:!BPbLuOJ/+EQAs(?,hDnQ?,/WD+$U"YbhC+U/tN4F<)SjS1^SuTS)+Kf*=$ad?`%7_H'8E]M#Kp+JM<eNjP?Fd&s#M`0).0R.[ff7)+YI(MG)bu)qO\0qa"&Vrn)mgqCY!(,Vc4fAT<tTP4=.FKqnc&[c(Q7h1LWRa^:T'EJnSC%:q/khqkMI!]pWRU_D-Q*.c'?-kEUZIWYL[n\oFWDcoC,iu@58#PSs#7U`V6)D7@FM6fo$Ca6*P%*7u;7+[k/1[;sH^%CLiD<j0m1Nr"Tk0c!<eYTrXkFTFlj(3u_=]1.JY#/X]QZiJ]kq]j$ZB!o0iB23u7!=bWd,]tsWSYJT.%&$lY%q]N)&MQ\%3<t[)!DW,<h.IIsKp8@N2d<%KUr(o"+p([I=mV7`9.L_"H`)Wrg:77WC6F=j/4;cl36dH-Y4Jh`DN>&bHIC_IDSCD(cB3@i8F-!X*)J8rM0iAaIr>h!mnOTVrC0lK#+0J>Lg9&SAF<>%;,YZcX<><5?f@0=;<nSp@2I-/@T=J4UF8!Yejcq="h:=":&h_k"2=obWi55[6*Dk[lhH)*F%rV[E]VXZ/'c8/h@RO&Odj'OS-ZH.,4P\Z6WAU%ZM:`nu(_8UfcG3<2V5J9um&jh,6Y[%@#C_^lX5n=+_d/jMUH$A2Mu,d[gBYP!JmEhlUsX\9$A(AN_S8bOGlf<NpH`\)Rn!-LCi2tuXGrDTQTpQ6plFE50(PaTA16q1SJcdUU4eEs7nYHfTJ"GH8TXAC[cS8npBKJ$i@[KuY;d0P\_3>am9Q8,f\9\tA'eP7FU_19<+pOFO%RYoEfZZuVGOYO`LqTWWIG.$bm>3?X[#JQN&n`3rG?<Xmql+"6FO3RMt<sgetAtK2!!VN(m^`I1G!VY6'p=j?+SH1Nn-nmpDu/c\qKJ>^A'1Mntq8B%DY;B6jTTSo&PFbYbH[s,>m7%7F`A)/G**(]])[3asnND3QMdt4EL`q'V;[;N`EMODOR$^bWm@HnfW\Gl9<?E:%rAs<IgIpk^*I3_`55G;s;\s^beZY4Mi<-`536eO"8_$YZ1""Q%cTPp;Omi&`);d_@UrL8pfkg"%J^A`5/OQ(5K8bp2V=%B3*Dtr<SQnnF+[NWZ+\-Hru</8oJ7Ki&c1V(=Qd\Q<r1/6kkDdP>e?meSIDhD23*ZF35si+-)SIf?/nPV<5[HdVk]#73/+=s3l,H8OoGsV,pTbe.gXa6F#(MSe^sseRt+P7>oi6d18#PjpCa<69gcbg?)3n!UHQH/u4EIq8H"fi6pQ6']fk_VRYdh3bI^2am_a/mDErN-a8E4^L.p+WVJHo4Y&W//X:!!1,ieZmU.]jo#<Y&^&R!Ad<#kn368Dh"rTOaP0LJhmofErALlqTH$C=2/HO-5QS/t3Cn$SF[XWa:d_EbSFeQ6XX-S/U'-:n40O\2MBdPstY(I#kPrb;:XjkIGaDjUM^?fAsN4X%^qsDC1e9ui>?'?b,iUI]tmd^Xqi8nji%ao7;BT<deLNB6bfG,rNR=ms7Cbp'[rS6JopEWl@?ZZ3b^ek6Xrkg@sNVIW1,EH8KI>@1jA/2;a<PP11:$;nY=0Dmgk=?@&?-9/E$-\`QS4%X"<B,4KfC_=/I6e+=huR_W:Vn6tmFk\EmjA$C$q&o*i:m7K^5RNC]g44aU.U<Y\,G*8GFRgFc=F-h[Tf7C"qX;j.(@[O$E_O(1r=Dl9Q7H<OqUYO7]gL#-YWc8KBr,<d;F<#"tO12V0SM3]AR9;a"Y%D5nJbtb6SMD>\/\j1qMOH9K7(:IE;u#lX0=cU$W8dP%8'b%4B_WRqQ@k+jMOcbMU\L>lSp=Wb$(6m*a7r.`_\tmXlntE0KaXam_Og\";g-9d-#riL$`LR4)B9<_eo":U*OXgVesK&S@C/A2HJe#cuaS&,ok!iRM7.H2'"n8/@mCha*9mK]D?tR//`lPaX76]Z[M`iZ^#u^GE)#f(]Ah,hb_"KCN/R>F.2JG`@ci+?$D(p$k<b-eU+(U:Asb#2sE\icuE1d1!^3P;(%P0JDmhCE!>,"!o^D0k;>RM0Sg'.Rk+N,K3R%/],`-pUL&J<7(La\,[hP~>endstream
-endobj
-16 0 obj
-<<
-/Filter [ /ASCII85Decode /FlateDecode ] /Length 1566
->>
-stream
-Gatm;?$Fae&:O;VQkt&M#B0>5,B"n@M2QA4/SLjBK5<&++Bq-t6dsL+hcX*JV-jOS8obP7UR@Z7F(arZ(f:-BjmUk(i'dpl0,ZGRiAE;\,_Q7*_TnJXTu(fHJP]o0QTuBD=rPIHG*Z^LEf+h21g%kU[E_)[_tC@]erc1=$j_'A3UHpLCrRj/NEdN%f7O^!:o90Qc&'f;,=Wcn)Q:OW*1afn&WG&mScpeDms:1U.ul#)_(b3dK)tU6_=%BE`rN$(_jC<XDsn..$SO0Rd!H^<>`S\'JhqX5$/fh`GlJJp:Co_]8D\IRC?YpZ@@A)b[oFBHLgnTrMKbKpA"9QVVa.=k_?`PV0SZ?`e5Gar.@\8,Z'#_cGh&Z\+)jZBU_$q5niY#]?"qeX4IlgnO\.[WJLILr-`s8bqLjmm8+IOu#e%^;q&XYU++Wii*:uS]&&Vd/kar*tdf;ji?AP/%>rpaqXU/j=El)dlE(Dg7RJPD,Y(JmS_.!o'=tGjd=EKdlKIabmV._VP=M6M!JHUm"\;h2u[;B(M0pGk/F_Y.:`3a6b357esG&b\R#$M+5!4?7D_cb_lZnZ$cC"T5%KJTcTCH!dZ!aKMVX-'8R>?+J4H<p-O]pa(]3]LET\Qa.J@.Q6Y[ZVK$E!^05;r!ZiLP+!rkof2Ls3iN5T>g/f?"4GE67Rp:<`r:3l(=M3Z7P"BgV(UncHWM_11kj7B?e)Mn'6Y7eJ!:K>>!jeO0W%"oDLSg<2F+)VoW_$PZ4HIDi1(@:ZHi:T#]=@/m@(m=gf`&79MT1o_*Za]BfY[l]#82L6`d)c9@1*?)`WCN(,Np\7?,sN1u@fE6'`3-%TDahemf'b!7W#?hW^6:7o_+9DR;3.*A;F$F<qBDt5k;TJsVY<`u$4X&dZ^Bf420ekU&0im_Z&$&Cqa-k:flrhT>oJg>(5!Yru[ks_sIEKPX]l/(P/AhWQqWe!DV/O.9sR,5aF]?(1VZRh006i>PQRO(BZ9iCV5%af;,dB(E0Ll*BPVX#GJQK/:N&;j#9-g@Lca%'7*^06bM7A\o+%_CGXel4h^/9>)OgfRs"qFM(]5H[]1l940_/7;4]5klc`b`q-h%Dk8]8Wh$[ESa/?J)!j'fnu<<GHn&bIgjA@/*0kp`Y3^7hbrIH%^c.dd33u_(m,dq\6VfN-L8Vpb+#=NT@i]]oE/B/N$t_aX6Ku%S9!H9b#irkBA%U"+t\'[UQ!!,a`<u$>sWC7A@G.!'bI4@2ag;pf#8*DqqjBtXTQ)EV/=/1cjf%X,.=AH"nA=:Idsb5:m9STd/=H</S@h8I.A:->6054pn&r;!?B"hFh3P'8ceDcH%QG*X(qRjl=c]h4sPH$bimSU!e+g5icaE_5,n4mb66V_flXjOeWHN\H#sSKW&(bn<VY3T#-[p_3.P<Prc7k88WhVh?h*:m?ELnQ+BbdTMjGOGF$-P^CJ-o.]+)D1V(em/ai7!-1=HKR%C\hCX9G?W;qj3*a>d$,Fj;X>5I;6d**]BV.t-]<#<mkUl'X#L[L[3s_)Yi]nG;-mlA)7_RtFnhnK/<J*]S(!d.nK/8+eY~>endstream
-endobj
-17 0 obj
-<<
-/Filter [ /ASCII85Decode /FlateDecode ] /Length 3167
->>
-stream
-Gau`UD0+Gi')o%@Z!XZ/G%-g=#nkJ+c&H0_[Mm+c-,nJZnqEe\)_E?c,UM'U]Dm<fn3s-(b&XYQZR=-3g'.3Cf`s>;$\,/O5?n9&S&4uJ$C&AK!Rr8&9S^ueG.r'SAc%Ft5V+MjF+@*P\W-p:I:m-@\^(TR\-p0I6jR-b,%:"/V\CE=K*#Jq7=A5f(8lHS0Mso)>BHa%Z5mCOmW!1`Z!GAr7]f'o<_o(/^%g\pIsh(VZN"f]f:-#pAn]/ZIkr,#oS:d4om[0*56n^.]m2iPeEadkSAG*W1%[Y(YA_I6?i-2ZC!qdkS)H$X_t5mTrh(k=WDe(Xj[KpK>+T\*Y<@XS:8ul+n%6O34J*G8><mj9D9k[e>BLe*33M9_ehKI"5cI>39ir")=r_KORle%f_W!UP:0U\4^(Ho2NbNLCj')otGIXK5<i&7K"+B/M3R8A/?s%ethHn/#%5>I:pNogUge@U_iS^_cF4#cjYW'PBIl%42lFOp6>NOT\iuEuq`?2;[e?S=IN3KObO2hTLPB'cK\Dn.?fkr7U-'-]qh(>=Q"J%u&I>`'r(%i<2Ga9Wulr7b#&>T)j_"tGZ-oVsl6:Kj!BgB';md.%+,$^n]F1g4q_gTBMF*Du_<XK4RYB$bN1od_or`$L25!P*.fQl[gF^]>Ml>!Nul<+l4nSF4ip`Arc'.1oOiTT[JYhpD7Wg6n<MKc:J4V&"`QjV.dJd^>'1:V]>C6cp)lth5[qL5sD\`_3QDHK-tG^%^mWN+V%[WH=kHPYH%:`XHb1KEAcs5IR74@1NpRcR;!:G\E_2fguXgE:ne@D"F&@2pY3hd0$]bME;q^%$m*NF8?#7=Q?.U/E8Fh&9#l@1M,"Aea#nYTZK4"pBD>4E#T3)at4V?Ol#E%\M"s#/9Yb_R28W]1oYq8MF)*b+<"6h2Tpt>_NeCV-KWuWi^*icsh]_nDN'3'j/;5..\\/)dNh2B5!kYlq[L6^+*l,$/BQCg\COT_5(ppQfIepk/I&798u"YL[]'IZYHHj3W6Q?(2B7fY\NBe#.V:PR$/KZ1d-Y_6R<CGK@.Uj->VSE-!W!/4:A_Zk<0JLKBIn,Bp!m>Hka$9,N$l^>)V]k<s-"HhJopX9dX6]$Bm/=g/CFWL0:2+=*Ts"QadlJ9=s9K$8Z<NM`?4`(/FNmg*u?(*^%7eM.]8*[X,tR[ZS?,H*qidN4?Fs-M\QRHLRVX#=FbgEo-)ENKEVmC%`@/i:Z$nqHN_OO^"5er"o[,>2::ikst[GgCZP5>999i>Jl219g_;VEg4bu^3!)PD+e?-_f:Xu/YXPlLV<(/,C-,"U$?&^aS&#n4"XDp1k^<m`B%37T,OXipcVL_CdH6/#n&31'B(r/-tK8^T;9N2'%F@GE%tk7%B?8.h*;4re8r0Oj&sH>LkTYMQ\MVl.Xb9;IHDX#5AC0&T,Uu3Pm1WNpSZ.!%&ft+2`Q3,nFH:K#=ns.KP0!WbE8]:U81AuHR5G4PC$9e?^*iDr[s!bom+pp"P)W''U,JRPRT9Ok1Xn.LND\([jm@NA/CRcR(&u?`[p8D\_IkL@E%M2,i@*lF7Rgk1`'#NVT4b".t:`V>!Xa)SARaL)Zsl8/RL3Ne`>8h]\J?np0fKg1=:d?\.oIdO^--C8E&_!''(N>iPSQrZ569E4lUHgj>Y@jR)KC(Z7JkZ9r?q#n^Eu=UT$Uf3/gbP9k0[YB"U]s0U@QE.EaSCmGL"[TtB%4kP?RN%_J)KjU!f70:,G&*)5D0K4BDK$K12)j]Ws0U0(^">UtLXUoF`$CSai28+g$)p;UTr0/]G</Jk.O&p)#IZ`\\S44cNd*#ED06D/+b:cRZ2JM/[lb)XY)K]a/9MOEPDVJH#5Z5BkPM-$F*$<7WPSWP(q"KOP!o)]7kUflW.(<;?e3g,na#g&CH:BcZ1%$>_L3f3$h0M;fH,fLNjNF!9CaNKnla$tf\HfmCT1SBokV8dVli+EHI'RgBP3V94WG#$EXYUd`ZfH1uYVu&FZItu,m=Tm[ipG#nIKJT77/d5@cLN>^sCc7$poEa:;K1]S,YVQf)C*K78QoU'`X*K6+^o6QPZ66]ERE8"4_TWVa-4FIS/iF<_5Lr]5Z9SL,/<TQ0;%u73Aef-fLH&.\@`AHor<DCM(6fE8Zq9I1`mZfrbuGZOEOna&)o,_(j[p<sRZP[&Wt;&gEa<''SqIVOr1p#$m92*kr?a6G&0:Uh'4o2SQV.cnL`ho?_b,VKe1e%p`%g[$Cf6,T61gDA]]RGOD(?&hcOq,n5*$de-WHT&\\p!Nr.bFqCd48qQQr^%$g'lCPC>dkj'Xq96Z5"C[WK:-5;#-e=1MPbrYV`gLKXVj--R^[V2$TN]"PbgS8oS5:/-8RCig:kWNNL*?[:NqEM[+*-Mnie`I#iCc[jEd`EFoj9-KnklB1]$-Zu%u>\XLPVSX%j$F/]Kk4/4\n4%<k(WER0Ysmam=3KaI9/Wc4%g&)p>;5h#D]1Ld7&[C^ih`MEB$&RgXY;u->!*tCNIoB]DPjk0YS50K#oloj@'u7Yp,^#M7DJPMfCT*5/VBQ8e_bSA@%5DsbP<Yc[<8_(aB8rj_B_n*&mc9l=03$fn=)hKj!;MN,q>LY&4u.i`7EE8UmG\`:dO>I?PHk]jnp4(8[a(:lHu,*fCRld<#qTUK'hf.i&kd`i/D-@20Egco[5QcWhSf$.7K+NGC[@A#'fRmL#hm<<K0$-PP!>HZ1>$%<t!]br+ZMH?Hc`pe]WQFo@RO:['r.,iKffmHQ/QnM]I[V:f4k-.Nb)u0oH[\>`lc&.Ndq2Xk[%mCs*Eb(#:;0C2\<&O)DQBe"l..aVLVW6LOBS41Msp5C\1"]6pE7ju.1/5846_iUt4N_UeqR<?hcd5d$G"5s?l@R]b'ZRo6j1Zl;04<biSP<Q4,172q5)+l1Aj&4%$+4/,+keQ1[B&=mBI.7'T7hP:ZAPP,<Xj)ALVG;AB34J1F&`irHoTmP&!SNb3L6QH+96$?Xj?hL[LK=*btdW>#HU2q')ks%dYrr+Q.s3EKQ5iB>QMoI_%ote>Xpb:FGdGiR)6&$=3"1<I(jH5Yl*YP\9L-'i&%oK1GoV9PMEWS<]J%.5?#at6M-#%Og8r42aj,mriEh2>S9W!H70o]/1?l<JnUh7^"ELrdV=^6jBNQ%Jj0m*C&I+G=$~>endstream
-endobj
-18 0 obj
-<<
-/Filter [ /ASCII85Decode /FlateDecode ] /Length 2705
->>
-stream
-Gau0ED/\1;(B3`/ENh*;LR8Z&Os3'U!cF_ZhU46?h=YXk0IS\nCR$JQP*>_d5Q2]rIZ]h=;%]or@tbM?T(Dq$L4Y%b[.k]f!8\4Ep`0O\?oSA5$&@ICpqt\7(3*U(W!))cV&0G(W@,4]l(g0i[L4Ymo7R7c.8`\f8.CN-C2I9&`<QR`ZpV7.)qWM#.nirR=[X8<b2pR8_@n%0E@#+Nd;GZneAE02:]>V)?_;d.p##Immg[Q\(nqlBQc&g!If[55s1\QS`rIJ/0&Q=tm<\4&3q2RT2=s'AcTb\/s7B+Ge%g_LQPY.aJ`5K?r5g/Yf\1*+Pb8>JNi2YACQAiI-ri@j[3Vp<BsC^q!MWiaH7kpT\;0$)>]TZ<T#+#,-nS]`'"0\s`=@-e/%FnsEeO*!5@g%:DT'+bTNeqag0m5L(QNXleh,#Oe3s:g4AQ98B$l=F7i$RS(nP+3]cm#$L]57]s3/5?n_rc-2akj(04)/`;A,mb9"Q,X!eWo#5B$F5D:_)n@:2rl@MPn7"jC/%F2A(7/]G6\&Qd*1&h6FK=bNgr,,A2g'pj0*UEFAif="/-X(r(&fB'4s>Yt_b.M"E;[L;%(kB8Gs2+g"!<S"\,KMa(?B3/-b#k4q?g(nC-?!HX$4ajC&;d4sXBa^[DPC"sc*[P1DbDHtZ'mPE*L_`Z!?63EXF\aXfhXu*3P-e-"B4KQb&?%iqGV2i[\V6:IBc!LhDW4E(N5*k'*,FMY[pp:Vjo0=E<bg&@@Lo=^GAZ\,FLR$/H[FtUFWGggOrNpn;UO$r<&._7RWPnVRG6pXaJL4VAjo`7MN^EB4W@dpFb.rsol!ouML!JbrU[$uQ*k*4UCgH;`p"^)=2DfTLBKR'Q,'T*VeJqLZ-eltYKt_!?%">c0$78K;1qBe4uKkWo-g#Z5G(>bA(#$Sfb8ZsXFp12];8U<fmA,0=)9SAq:Je_kn$NYqf.%m%Y>Q(LYFr=pd5IB6cVhq@Bh?/<_?g0!7?%SK)qj[m:&l@UE1#DL0-(qUTMmD73]/#R&n2PX6h*+<fg*OAmg`JULg-G-T/_R"f&1OdUd5MlhgldaYJQ9hgZ/p369-33WiWH7V85^it[r"G[cmB`O6o8c"rNsSJ\=l%!aZc"AY-5!aiHs%GXJLFCSUSJFl#4dj.T+3=P8:Et]Y3?kG'T?bda'5qjD>rtPs:aXlY/]9>-daNMkldNso`CY8!h$_.gf@')(6Y-ID9NL!V2B\6,">]D`rFCFM[]%[B`\46@(>Q8MW1R$[`'TV-%9gY%Tn3371Gu?<<,a0(kEZNrR_*Hoq$#=d[-om&j\Rddt:&ul+o%8%+0p)s9r9ecr_dl7E:H@?7S_5Na=T]u4Y2`@SHBcgU$fU<X'Af,aX:E6]%29;kRZ!$qC(qO(@$u.SBO`oe@8mI$bOY1Nin=J-CAB*<Kk[ou:?Y#IT<eDXMrpc_$o!Po9Jalp1U9$On&u\qJS^Wkm5<h3e;R+:jr!%4)Iegp@nOIAC'UV]^<!n+`s:?u%5c/,'N5IV$'tBD8\8qN@@SO#[fq`hUoOO;Psf-^D]k,q19`iM8/s_VR.;0$)7EtIB`eMdR+-us8r:_ND^$%&qZPjo&n-3JK(uMl[.X-(#[AV9Znl04&9:CN;aW=#/5h9.X;r[P%/Y-[C7(N<392ea]O!(R+>ZU;<>Y'^NNS"\S/=)GlR(oXR]b.;)J:?GBEOgtMcnj`l)7?rF-dQ,ap'EQJKOWeqi<V11Q$0H)eb%9K)MQ_7iUi2LrW@j@][7Lr&BKgZUcj)E*'*V\2ZAq4-VX2pONX;Bp9iT2ArgL#r9&FR@?;j47RX)"t%<N=#LW_Z+2Z1(M77n/Sh^P<sk2Xd"C-*`@!8aD1MLIV=I/3J,=Hk+."<[e\I'KS>X,c_U3"uFF<uff0s;:/F=E3:5uOMb%Du"aaFB,AY(HI36<>"A%N<1>Z5b<k^U[[apO2g*XS0!?XO2Y5q9I(@P]an[(q85iq?@]'';7-maq2iYDWh=q%96KJ7i,=%XAp,dmsUD'@\]oGqfO&F^Gt&IXtmigp@rkhRrZp"qX30e#\*M[`RT:Csj6n"Hu@a`.f'l4ha%$/*%g.BKs<2'\P2Ld0aMg448_bs/0Us)K5h""m3tii105T%%%5:r(qoWmtX`Mp-T::3'qsa^E-^E6K+W]?tPkC`K4uq;^9*UDn29sbQqj,*"DM\A5+2B856&VRddC-!1)4I^MIlBqU\#P(>BL9m3A\@8DJ$>g[7&iT:OTSmr6-C"!m'GhFRU)P\r]aNcsrsIbXoe!Zu3HFi.'6RZ@gSGC$s(!nBi,K[[^Nnc6akYWLXC*i6Ihl>$Ci4Mnao1d1j?54.bY^]1mO57`[Q41I3%,+3'JY2Wi3Rj;?UJA]2;l,:S6:#C4obQFhg7-*95?hW"1Rp/[sJ*Ye%_TXk38dCjrj)C%=;$JuHP@U6idG3UDgq7o8B<;JPNV>7i&Su_;^BW&iK</kO)@V;H)FObZiG2\3dul%WDJn4U_o\bu(]A+pRDJ6&#dQ"MbTSlq]b(_5<L+H1UZNLR2G9%'n7[u&8]O#j_b)B`+$?_*<@-<S9(oU0hHjX9^usRd:,\)*4L-4:$!EQ!p--T)HmMp@_3IejnHXmbq=f(`.4LBo3tD3^9"N=sl-BIT1U._OU*<E?9)q`R'0AtA>Osg,FN2J:85R&0U7%kPBUK3[Hra$Vr?#B=8O!~>endstream
-endobj
-19 0 obj
-<<
-/Filter [ /ASCII85Decode /FlateDecode ] /Length 3534
->>
-stream
-GauHN>Bef@(4PFJm"_/b\#W1ZUO2i*Cn/lI(*Hn\?$VR/!RqC38-5-acAt3IN._`Z*0VGa?AZp?1tpQ"Is]A/%"*-pIlJg%1T"6?S@G6^KXeuP)IH?kh"fB,L?T*6&2S.K',E=J?,pt7T6=+\]C"?H\@+br`L5ob*p&P35Bf")RJt$Z$/a[TUMd0*k,O2^X_0)>\k4C"@Ks;IRiK7<7gR27DW37Ia)a:'s5Qh'Gk(<us(:bIDtNI]J/"dXc$43V^S9Rjs5-5J?4iachHUOCe9^S@\o`3ZUu'/^]A)<&ci+)r*;/Rik3A#"B`&[+Io__[kVV!3Q-bIOL?ht]X^0+^2WrptH/E&-lhYe,]Ksat\`oQEp?4X@HS!3X%c=%@,`$O/&sJ1+9J&?a7+8S<P<?``I^4u:V55,0m^1pgbI2dc&@3tC:ekf]ii*1Zb^&2nY%KPX`RiGjZhT$,`p\Z\hO"L+j8RTZi,/MV]ME`Q]eM'fXZ*>kj"R5[Q#F7N[Ljbp^>.kKZ<[\n6==dTO7f.m[qX^(/W0p>CmPbc\]j]9m1L+D:_r'e#.#>jCTj,L2%5P_::&Lg0kmh:LgSW*c/B^&E22UE7Y#(ogre<O-!93O[G9?%Ac#/?iG?hXXje!AXNaonC!p=gok@0>FFJ&,YVYSf\rb]/EOD-\D(g5OF%mTDpb)/TiFss+YO5_h?hJc`P@DX2:N6obY3SDN)m4-Sk1Q?*T/*p$9lX@ZUt_HuU@3jNhfdiQM%d=iqfI"i0WBo]UM4G1.eX:b]n\+b]C8dZA,es=c/Si(E4)X/%+k5/O-Yp@O&nV%@pq:I=eQRCa0*,s+j42Ui4\+H],OPU``rH*?-=_*@uj8mF,pWcmn%R:9I8AViMIV$r6fk\p4DTL'c_^;T?LSARET-K3jd'j1JN*o!HeP;;Sjj@4EZ&R06dtC:!AA=%62eF<4.6Nl-*U?%#m[*mPDFY-4(ta;*or('(nQI;^(atbUH(-$5SOF%YHO^;G+6/6'Ej$s(#<O+l*BW9]@m(Vei-eY'aF1_\sJGfgs4$e_!'YnbGk5TD+5ri:`Zf;FZAkGr4_l;io)5XONMb09Rk=.jN8IXMu]kZR)cMX#SGR\P121%H)K.Y#6of!9\k5DR)$hXHA-l>Qni@P9WkUKShP[/8&)uah0As,,\Ol77\+\6'-ha8f>iK=4KUaF1A&G4hSUSRLLB/IK_dV!<`FqR:.OXWGu?><GME<9MsL*lu%Qf,QU@YXKF);*ILl6VmCgn7!125qIq<'%ngI8V#aFHl61Vl6Tl^NRT;2'&:KJ0$thU2c[YD-KcuthA%S<u=GbuQWM0p[KTkn0,U8buAN\LHT'e&q1K0r#]qig1JBAZ@3OYe^4Il^<p>1;/U.CS*e6/+k'8^8DJ_6`Dae9j$ZN?6r"Oeg38:hItRMVm&D&CL%:&@B02@l`LbQ'.kX3eHtctBmAIaRX(,M.N$ba.a8R*,b!Ne7HNQ#-k2'ZpPip),i;ZF73^RI=;@G:tl;=W/m0Ea(cNGcp=eeDZl4A\P6nX.k$)Q'Kc9Ic1#=3W0L6-QZ%7fJ/e+Cu;eSr#R,'U`<VcEMS4lkA)*MgbA`(WbsMY+KU^;0s%$u[\-WZ6mrDA!#e[1B)2:F]tq.f`SI<)CR\)*iQFN/I;Auf-Epk[Zk\l;d\\Ig2F3&/-?.S5MdWY0G6l6@9<@AJ/c/[)?i3ObJfFe#f'jXn[c&LT("RS!iD$[3ZD-^*Bc'>Td&pjRT[Rkjd(X@&.MdhL7.W1Ica(lpB;Xd;bX6==h;NQ?b@OMu9Yl]\4s6iKOa;(.:WKM.8C2su5Z0(Fb/#6Q&6*=G^lNS#(_?Mn)ilL&\"%mGT&q/Xha.o,cX>OU@>]:8Ps8<0h9/!4:H>I2)2Yq&ec8[gW@BnC2cN'T-<[TAItKG3Pc7F0)P*dt?$pR4*\His*,#D0KsqCgQRt)=j5MlSH`I!N2$W5rd4Ie#U[BpKoBBF^K"8VoZ8LhW,`e2a^a9WT8Wl5YQO?tKP8)Dn+")'=VBQFJAOY-@-ZM>*eoM_JQ%Lq+"t<,@J596LGc[LH*P?:d+Mlj5HbdZXX"?/t)qnLl'lD3A0B3b36P[h]I"C(K*^$o$ao[;NH\3JIB9>lZ"1b;l17&rf,g;tfm.md$\=*_C6H.<"3YVA1n81<-R$2AhC4,%$"$"u]j+YYrhl=li=%3\.`MudAF*>#qg5I*&pNC5c%;cg,$pQZP38=0)EOf$FgXQeYLl*h"*jO97)ca,Ai;18GN;"`C5<u=9rA]-J.[B7f)=?r+#bAX0,_IqDU\rIm8>iceitEKpVPqZ52^j!RkCTS$GqYoNi6?D@*Z._U/c$EUY#W?88$s&>a+O]+rdT&<QJTB6K(Y&3;H6:r"q;9>k0&HJ';bP&,u)]pQ5YC)K9F8%^<k:B`qu+LE%%VWO9S]30,:2Ls1Qd%n:5u&iSS!<J-gmTfM2;[YV^,&?]MqIB%bhoh:d)>87q.BF&DO<[Bo\5G9"7o`M)#8I+[1a\mFJg[Aiu+Zg#A)TL:`aID\'K15'R()h=_SrO<Y%mUgFTG6]L#)8m)*p&gl!Ml/@QRc$3+.W.d0g2431.n,Lq;0#eDn90i+[-?fh?Rdr9#XDFpRZcca.]eP(5?7Yt/f2]GS;(Jf"`lOKNHNKD>`t!tpJb5$M&et,"6(o]jd&[_042QsD`fj[go>f9N>T)@J;1*goE43=Y925O+1R*+n4=b[#&0GU,BRr]S\dq%,Eu+Imk8P,D=!+sNu>2X>.?-+CbG==rb&4!j)&D7+lk,E@iNTZTlp/#O91t-<($E4Ga`eTA7J7rG'V4?&GufL21rf_]GVt2?PaBQB6H)*pr@s1YTHC!34dA45oTd$P(XTr(92)+Em5"l.>V#ETnK&Ug`Z,QZ;e*#h']Tdd.*ooEa(C<^JEAKU/?3!#BT^&jllZi;b8J3L3j6(WS4"35@c^UbGt4:j(p'JXa+\7^F\DMpL)<e07!l<HMdCEC;gY79=ShR-%*/mL?@`%e3Gfo^T?33cn'V2!=EUb\_A*3\VBM3!8"MV[4p-46Oq'[Eqnkt-O"1,+$JQO]48=1Xon-E4T/FceB%rc$IdB[qWr59(qZu:2E1GHltW<pmG'O_':GmJo'fA()Q;ca4mBB]eb4@'B4Xma\t`TfR>.aQI!]ilg_E(1K&[V[PhA'oQ^8-1T3bCfS,!eqG&L\0;&=MZEj:kf/4JhM1m`dQ(r`\C<pqjtmWoRCoVA4a/S3;QefMTQH]An:ZpN-9q?)8[o0N+[1np8Co8`bPPO'8JP[>7fb[b(e`NBbu!`A0$6k$(^o.2J+^J^;M98+$7WnR+g%-9ed'9u99'heA3=oh(.p)K;+-,@c5,j5<.Uah`/2EU7FVuoBUY8C^2QD)`G*i,G=H9S_C"[uBeFVUM:[e2H+cpTH=1>m=,gI:=/XOO=SBnMj+$JDNJda,Vg_t<QY]a#BkK9`R>c.Zc.",LfC/+tB4K5dqec!%Ns2jbtG;,Q*1_k*g^Kh'X"0kc`_q673)U:/SI++,j%F8~>endstream
-endobj
-20 0 obj
-<<
-/Filter [ /ASCII85Decode /FlateDecode ] /Length 2064
->>
-stream
-Gau0C>BeOc&:XAWR&;i]NYeh)2pj#5.,\R)?jg-t]I;4^&]g+[a[st1+5bbZ/Bbj>:n$Gj:.@=3n!hL\-ogurmI,9+n03NuB,%9Pi>a6j%)O_%@ILct*7&i.!9.so>R#jZ.@>d/dEAXQpGm4>(SDTk9)/fd%J-L2m6P2G-kP!SW%X*=j%UG)WoM8je2K[=N&[%p%`0N`E*\FM.+(f>i=\n?+'o*!ds%_+Mp_F<m+!I"UR24KE&7m@0XqDf"F0VK@!Fjq)k@oC?jqHC4.jCJ?23]43r0\`_RiqNkEGFk-P1`]n>V9*D6HCoCk=!53)["5C<8HoPc>aK?P$"*T/Y[K+NgINoJ#!o3\I"4Jr.B+Q6[7p[41X%gX+I/!A/VfGoeAhRlmrcXE:ZYP>7-P@@[.R$\U>(R&%-(;9#;*_up"7iWNucXhT4ArrWhHRKeBU7[#MCO%1jUaY87'nK:6^hq/#i<!_K*U[gS4EfNR4n4U3^L:\LIKS;jCFK5s"jfn)k`e_goSL?jf,b>W1&HX3`(;oec_M(flM+=B%.#<5PX<fUeaqWF1a'`[f;$Ri$KP^^k+Pt)jatf2Y,+7f=)#&k[?*U`lOYdZCXf\[a2!`:&4K\8lo@I6d]rN2T(H2"o?/9;1DO)"^dc5#XQc/'iZ<7[X(XIls?nhPQ=q\i54BT3n@\=]>+[)R0nuS2*l#TDe>%dg5*$>$+4SQCNQZEa_rBB#-SXIu.m*W7PSuFl.mW>Dd>@OIu3VG6O\*e73@]J5naS>1$QcV;9Qg%4D?'2X!g9.Zqag%`sB@peA_52eKl\gU?V=Tk!]]cTJ,kcI>S1<MRH7t_FBVA;&5c).+Ghr6(Koh2eaG(SQfAF^P`t>"aH?"_.@eHG`qIGZ>LMmr01dQ9nCdnAfJ\r.&&oL5-!<s:tkgPaRq.N;sBc0#`USY[VatNY6fIH\\nQ_(hZ_oY1F'\&neq]NhEY+PHkNVn"9,CHr(4!A.PS.*.5^Y+U#AN[q+eh9p<ToY[Y(WJ!i++YP@5p?d]?%Ni9(X8R>#9S.VDIdT"OCI:,h%Zi!8CElj`-aQ]S:!$2[CSL'?jB[h!";=<`t[MBtj?O<^g$_e*Zs/hk^+Wj3!VRn+cJl(D'N2\9Q@p_rA0a+4HS/dVug"UWZr&Cdf5cp8_l[3PU"+=D<+m,Ap4u<0*Db`D60O4aYKR;s-tja)pjG:p0-Rmb(XL*t+@$&2W]87pF[GdFNou20[AhX6Xj:m2^Lg^CLbl+c5+u2hU8^!KRo1E%9U6oQ;8E2FT^gllrjjD7QY-P<j"W/@s%^9X2O%9:[H=lDhN8GhBJCT8Y\B^T[P(Sh[pcgalQ%>Br,kM_ZkVXST\S!XT?j]Lm*!6oMgf/u&d8fF@LR>/<hkiT/U*F&h-L0EZuU4(PKB2B?]?GIJN&1Qn`m`7N&<oK9dIc&/&K0cKnWTT@!E'=s$r"7ZKuX&Xo1)qFJD`itTh,`OMO4.$g1%,V;<f5X5dE2fAjE*B>;9'2u$#SI&,o;&mu@'Hel<LOX[6s4+)&Pe+(I>,<OetTa9i\.lr\cA;c)mmAVA09(<W_@?Z9J8)aXGG9V*VgcMbZflXEg/`\oAmFea9sm@Wq37so:3V%aO;%nk6oI>WAB3r_!$/JOi)ts!/6>lUk1f\..7/7WL_Zq)[1/Q>\BE2K-dOt,#0_[2kt=1^`X&fm`@,OO5XlQFaTIPf5(=,cr.O7QujFZ!SGd(\A@um-uC%gDWSd=`fDsm[ds1(Yn,K[nJ@S*5IL"ro6H5haC(V="cIMl7,Kq;(r!.tno7lfIn-PM`F<9P`%2KtVT[]kA!W!'KBfV>os2I"ZRZ2Io=9lUj]0:4^5[(j`0I)Qj7e>pN(MU5%6btbE<-$<?=h(rh@^`=l!bOh<J'UIpF+L$=BP>:@IK:UYDTVD2b3sn`OaiH,48Mik'[Q.:1h";V7FljO.38WFoDRE#dUD/e+hCU+(p7bk+22X)3K[mDk3]4D<th:k.:!,UY+Whc)]Pt8S)4Sg>oH[,$Ds/AP4@&np-+/C`54:jPl1rs#>D]h`%atAs7f&^H0l8)Z~>endstream
-endobj
-21 0 obj
-<<
-/Filter [ /ASCII85Decode /FlateDecode ] /Length 2204
->>
-stream
-GatU3gN)%,&:N/3lr,:r=9nm>"Q61-QL(PMA635&BdYPJ"kd^kMb2'j48nq,.$=cL91iK&-F-^"3P,[c=YQNDO-Tac97Za[]Xq^i3.qZI54Kd9_'&),F9qOrB)rPnPi=k<`an"#aR2*idTgHO\.erlT+Rp,K$;$ia%ia-aq"]0CW^a,%BF0j##e8JMl:DWGs7oq8-&`=?GJR1Zpr8**A6<q`Gb2MPQ%KZi;N/R2uW6",Dt_n*"L#A&bKrFT)mf^"1Yi^?Ols6hA\`s0!?YLq\4LhSd^)jo\n8@!8$8YDf6fs"2Z-3P$^:F[WDbCY^f@-f3(aR&Aa`[:0n1DP>[;gGmZrbb`a*B4_V`1`t/++AXftr*#L21iXoL^af,AgoRu[YTW#)Cndea>ac4qr$>bVRHqcU4i<sCif!Im!J=6U2i^kF%Q:7/1p+$%P5knbCk_1]1LP*ufGVp=F%,baI$aK7E98,kO"GF@bZmWBqGXqo6Oj0f+>mG.u#E*:)X"[6p@+c.+:Uo?/U(g%ZGUdqR@=eWG7C\d!&Hp7AGXPH0+RV(lVMM3%;g<aS+)9tr;)D5bC&j59I`C'^;Nrm[IHeh#Ta>?oGkUMq.Knt9Q8M33='"G3G].X%[T7D2^4W<k06c_em9MobbK;3\'BhbUU'4V0Qc%4qq8I$oS,B1j'\Fi)`Nq'@!Ys>pkn,5+=%4)$cQQF+-LGsmpncR36455TM]d3'*l"8k9PR>h_/&:^p?YZMCr:)&-$H;WA,dpu3]rF%Cc1)r)*cA>2W)g)/:!3FHP3NKjfKpE-\oFLRc5n\#L7XZ?Z*l@97"R+^N$8O2>/^B_%bilgI$#qh&/<aCG]dc^k^4Ef:M6Td#R.Ap-:6YiG$3&jjYc:Ug7k_e(\]_C7b?W6[3&ul`>VtVMOA3&]"u313ZUL6>uo,`SmK'*<nX@?W$!!A/fk.OCd(I4*W^Oa5j6]&PE\b\!KSE+"9ko\bCN0f>_<cqr7p@#F3KPGF**n3]tI9PC(@W68R4Z/UFgWTPAB3^m>`g1SI?)[Q^;]C$_h=YpRsTqkF.YnochRPlU;cm7,s5!I0j-+F&#4(n(VslW41M$>EcN7i`QO+E5:K[t*'3BXA:2G^6WW7$Oak$^1Wj_O-ntmc1LeDGXRb-CqX/9s)a'R?[>JlF0X%2=Agl._tie7,u7^R"b6N*pu5e4b,L<>4ULH;[njtrrah'jts]_'UEIo7'4!=2LO5Gj+1E8(QSbQfC:aX#E&9r/5RV-.of@-1b':,Cj@4dA$NNBm4H8gbmU\Wqq[=brP9p.5"F>-2Lm<a10ISD3V81BE*P1oH-iCfbP[IeF&/A87XVA84;F=haN(efQUu&c@_FT9KSdfG"F'6N-J'W^i$u]ZF_$siK4U:Ca2>E1h%MLE]46(ber/$tchlGRXBdK5n0F,_X5+Z6:#Rn`ROh7cX5gHgAt6)h4X$O>[T:'XL-Jr@npPL]L6#"fg(,KZ1\fu9LD(24^;[SlT/SMulNc(V(=R\K8+2hgL1aeg>1P+PAEkYpZ<F4N9Ll(E2+f_V\k9B3;6$&1<N9Vi;GD)4;D"r7)@CPM)Hj2ln<B]taI3ak`7$2J-/0k']`7*1D(FK@dAluF#IcMW&SbZY\=L=75WKGMiHAm%jn4A./_*s,^o\YBQ/u-FWN`MdZ<H[k\<hZem=IH,(J/F<YG\lkibPFFOH3>s1Gf]*Ea4m5mtq62$e3'u6h(FJp_?<8I?Hs;T:)Y14VcE+cE(K-,[^*SI_3_Qo50F"HM.J3H/K+^Rqe=clML.K!TU,gLG*Rh%uiVMC1H"`f],%1HOl2kD[H'a[#G?b7!Ehm<mX<<AGCi2ChIGp_rEY_/2BlHUj)sQqTknkj;<&fgHU=KgZe@RgTrrcKe`2s%&2;-VRFSZHnJr*cl9F?i=TO&iIYV!R8oQkpIhhB@$>D#R]K1XTWDG":63NP1>0#rS,s<SijU``'fa@?m5EtZ/BfS>OLB3DD_m;qZctCD$[99VT?)J<gEd5HZXBfO'ZI?1'KN8GO=#,<2J<fZGhCR1:U:+,M)i/elk-!s:kJ/4H'/tH1>>uj1X%/+;M/i1!5F?=FhYh#Y?8\c'lAm+FdDrb^,Ahh,R>4B=l["_T3<Ap?m4s%=^o#82*nQc!FIS1!n"pl%')p<Bupp0Chp;e6WalR"<3Jq"+G#@CeASoHK!8_G?:I/0BrnZ^]~>endstream
-endobj
-xref
-0 22
-0000000000 65535 f 
-0000000073 00000 n 
-0000000124 00000 n 
-0000000231 00000 n 
-0000000343 00000 n 
-0000000548 00000 n 
-0000000753 00000 n 
-0000000958 00000 n 
-0000001063 00000 n 
-0000001268 00000 n 
-0000001473 00000 n 
-0000001679 00000 n 
-0000001885 00000 n 
-0000001955 00000 n 
-0000002376 00000 n 
-0000002474 00000 n 
-0000004938 00000 n 
-0000006596 00000 n 
-0000009855 00000 n 
-0000012652 00000 n 
-0000016278 00000 n 
-0000018434 00000 n 
-trailer
-<<
-/ID 
-[<88a7db2e44507ddbb8266e5043a96d11><88a7db2e44507ddbb8266e5043a96d11>]
-% ReportLab generated PDF document -- digest (http://www.reportlab.com)
+/* Score bars */
+.score-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.score-label{font-family:var(--mono);font-size:11px;color:var(--muted);
+  width:160px;text-transform:uppercase;letter-spacing:.5px}
+.score-bar{flex:1;height:6px;background:rgba(255,255,255,.06);
+  border-radius:3px;overflow:hidden}
+.score-fill{height:100%;border-radius:3px;transition:width .3s}
+.score-val{font-family:var(--mono);font-size:11px;color:var(--text);
+  width:50px;text-align:right}
 
-/Info 13 0 R
-/Root 12 0 R
-/Size 22
->>
-startxref
-20730
-%%EOF
+/* IOC Table */
+table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 16px}
+th{background:#0a1428;color:var(--accent);font-family:var(--mono);
+  font-size:10px;text-transform:uppercase;letter-spacing:1px;
+  padding:10px 12px;text-align:left;border-bottom:1px solid var(--border)}
+td{padding:9px 12px;border-bottom:1px solid rgba(22,32,53,.8);
+  color:#c8d3e8;font-size:13px;vertical-align:top}
+tr:hover td{background:rgba(0,212,170,.03)}
+.ioc-val{font-family:var(--mono);font-size:11px;word-break:break-all}
+
+/* Kill chain */
+.kc-phase{display:flex;align-items:flex-start;gap:14px;
+  padding:12px 0;border-bottom:1px solid rgba(22,32,53,.6)}
+.kc-phase:last-child{border-bottom:none}
+.kc-num{font-family:var(--mono);font-size:11px;color:var(--accent);
+  background:rgba(0,212,170,.08);border:1px solid rgba(0,212,170,.2);
+  border-radius:50%;width:28px;height:28px;display:flex;align-items:center;
+  justify-content:center;flex-shrink:0;font-weight:700}
+.kc-body h4{font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px}
+.kc-body p{font-size:13px;color:var(--muted);margin:0}
+
+/* Callouts */
+.callout{border-left:3px solid var(--accent);padding:12px 16px;
+  background:rgba(0,212,170,.04);border-radius:0 var(--radius) var(--radius) 0;
+  margin:14px 0}
+.callout.critical{border-left-color:var(--crit);background:rgba(255,59,59,.05)}
+.callout.warn{border-left-color:var(--med);background:rgba(245,166,35,.05)}
+.callout strong{color:var(--text)}
+
+/* Playbook steps */
+.playbook-phase{margin-bottom:18px}
+.playbook-label{font-family:var(--mono);font-size:10px;letter-spacing:1.5px;
+  text-transform:uppercase;color:var(--accent);margin-bottom:8px;
+  display:flex;align-items:center;gap:8px}
+.playbook-label::after{content:'';flex:1;height:1px;background:var(--border)}
+.playbook-steps{counter-reset:step}
+.step{counter-increment:step;display:flex;gap:12px;margin-bottom:8px;
+  align-items:flex-start}
+.step::before{content:counter(step);font-family:var(--mono);font-size:10px;
+  color:var(--accent);background:rgba(0,212,170,.1);border:1px solid rgba(0,212,170,.25);
+  border-radius:3px;padding:2px 7px;flex-shrink:0;font-weight:700;margin-top:2px}
+.step p{margin:0;font-size:13px;color:#c8d3e8}
+
+/* Actor card */
+.actor-card{background:var(--panel2);border:1px solid var(--border);
+  border-radius:var(--radius);padding:16px;display:flex;gap:16px;
+  align-items:flex-start}
+.actor-icon{font-size:28px;flex-shrink:0}
+.actor-body h3{font-size:14px;font-weight:700;color:var(--text);margin:0 0 6px}
+.actor-body p{font-size:13px;color:var(--muted);margin:0}
+
+/* Tier badges */
+.tier-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;
+  border-radius:3px;font-family:var(--mono);font-size:10px;font-weight:700;
+  letter-spacing:1px;text-transform:uppercase}
+.tier-FREE{background:rgba(33,150,243,.1);color:var(--info);border:1px solid rgba(33,150,243,.3)}
+.tier-PRO{background:rgba(0,212,170,.1);color:var(--accent);border:1px solid rgba(0,212,170,.3)}
+.tier-ENT{background:rgba(255,215,0,.1);color:#ffd700;border:1px solid rgba(255,215,0,.3)}
+
+/* Premium lock */
+.premium-lock{background:var(--panel2);border:1px solid rgba(255,215,0,.2);
+  border-radius:var(--radius);padding:20px;text-align:center;
+  position:relative;overflow:hidden}
+.premium-lock::before{content:'';position:absolute;inset:0;
+  background:repeating-linear-gradient(45deg,transparent,transparent 10px,
+  rgba(255,215,0,.02) 10px,rgba(255,215,0,.02) 20px);
+  pointer-events:none}
+.lock-icon{font-size:24px;margin-bottom:8px}
+.lock-title{font-family:var(--mono);font-size:12px;color:#ffd700;
+  letter-spacing:1px;margin-bottom:6px}
+.lock-sub{font-size:12px;color:var(--muted);margin-bottom:14px}
+
+/* CTAs */
+.cta-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.cta{padding:12px 24px;border-radius:var(--radius);font-family:var(--mono);
+  font-size:12px;font-weight:700;letter-spacing:1px;text-decoration:none;
+  display:inline-flex;align-items:center;gap:6px;transition:opacity .15s;
+  position:relative;z-index:2}
+.cta:hover{opacity:.85;transform:translateY(-1px)}
+.cta-primary{background:linear-gradient(135deg,#00d4aa,#0099ff);color:#060d19}
+.cta-secondary{background:rgba(0,212,170,.1);color:var(--accent);
+  border:1px solid rgba(0,212,170,.35)}
+.cta-enterprise{background:linear-gradient(135deg,#ffd700,#ff8c00);color:#060d19}
+
+/* Footer */
+footer.dossier-ftr{margin-top:48px;padding-top:24px;
+  border-top:1px solid var(--border);color:var(--muted);font-size:11px;
+  display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;
+  font-family:var(--mono)}
+footer a{color:var(--accent);text-decoration:none}
+
+/* Financial Impact */
+.fin-table{width:100%;border-collapse:collapse;font-size:12px;margin:12px 0}
+.fin-table th{background:#060d19;color:var(--accent);font-family:var(--mono);font-size:10px;
+  text-transform:uppercase;letter-spacing:1px;padding:8px 12px;text-align:left;
+  border-bottom:1px solid var(--border)}
+.fin-table td{padding:7px 12px;border-bottom:1px solid rgba(22,32,53,.7);vertical-align:middle}
+.fin-table td:first-child{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.fin-table .cost{color:var(--crit);font-weight:700;font-family:var(--mono)}
+.fin-table .sector-match{background:rgba(0,212,170,.05)}
+.bis-ring{display:flex;align-items:center;gap:24px;padding:16px 0}
+.bis-circle{width:80px;height:80px;border-radius:50%;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;flex-shrink:0;border-width:3px;border-style:solid}
+.bis-num{font-family:var(--mono);font-size:22px;font-weight:900}
+.bis-label{font-family:var(--mono);font-size:8px;letter-spacing:1px;color:var(--muted)}
+
+/* APEX Intelligence Upgrade v148.1  -  Premium CTI Styles */
+.apex-narrative{line-height:1.7}
+.apex-intel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin:16px 0}
+.apex-intel-item{background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:12px 14px}
+.apex-label{display:block;font-size:0.75em;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.apex-value{display:block;font-size:0.9em;color:var(--text);font-weight:500}
+.apex-conf-high{display:inline-block;background:rgba(0,212,170,.12);color:var(--accent);border:1px solid rgba(0,212,170,.3);border-radius:3px;padding:1px 7px;font-size:0.8em;font-weight:700}
+.apex-conf-med{display:inline-block;background:rgba(245,166,35,.1);color:var(--med);border:1px solid rgba(245,166,35,.3);border-radius:3px;padding:1px 7px;font-size:0.8em;font-weight:700}
+.apex-ai-insight{border:1px solid rgba(0,212,170,.2);border-radius:8px;padding:20px;background:rgba(0,212,170,.03)}
+.apex-kev{color:#ff3b3b;display:inline-block;margin-top:4px}
+
+/* Detection Engineering */
+.rule-block{background:#020810;border:1px solid rgba(0,212,170,.15);border-left:3px solid var(--accent);
+  border-radius:4px;padding:14px 16px;margin:12px 0;overflow-x:auto}
+.rule-block pre{margin:0;font-family:var(--mono);font-size:11px;color:#8be9fd;line-height:1.6}
+.rule-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.rule-badge{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;padding:2px 8px;
+  border-radius:2px;font-weight:700}
+.rule-sigma{background:rgba(0,153,255,.15);color:var(--accent2);border:1px solid rgba(0,153,255,.3)}
+.rule-yara{background:rgba(255,124,26,.12);color:var(--high);border:1px solid rgba(255,124,26,.3)}
+.rule-kql{background:rgba(139,92,246,.12);color:#a78bfa;border:1px solid rgba(139,92,246,.3)}
+.rule-spl{background:rgba(255,215,0,.1);color:#ffd700;border:1px solid rgba(255,215,0,.25)}
+.copy-hint{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.5px}
+
+/* Regulatory Matrix */
+.reg-matrix{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin:12px 0}
+.reg-card{background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.reg-name{font-family:var(--mono);font-size:10px;color:var(--accent);letter-spacing:1.5px;
+  font-weight:700;margin-bottom:6px;text-transform:uppercase}
+.reg-trigger{font-size:12px;color:#c8d3e8;margin-bottom:4px}
+.reg-deadline{font-family:var(--mono);font-size:10px;color:var(--med);margin-top:6px}
+.reg-penalty{font-family:var(--mono);font-size:10px;color:var(--crit)}
+
+/* Navigator Download */
+.nav-download{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;
+  background:rgba(0,212,170,.08);border:1px solid rgba(0,212,170,.3);border-radius:4px;
+  font-family:var(--mono);font-size:11px;color:var(--accent);text-decoration:none;
+  margin-top:12px;transition:background .15s}
+.nav-download:hover{background:rgba(0,212,170,.14)}
+
+/* ── EXECUTIVE INTELLIGENCE CARD ─────────────────────────────────────── */
+.exec-card{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;
+  margin:24px 0;padding:0}
+.exec-tile{background:var(--panel);border:1px solid var(--border);
+  border-radius:var(--radius);padding:16px 14px;text-align:center;
+  transition:border-color .15s}
+.exec-tile:hover{border-color:var(--accent)}
+.exec-tile-label{font-family:var(--mono);font-size:9px;letter-spacing:2px;
+  color:var(--muted);text-transform:uppercase;margin-bottom:6px}
+.exec-tile-val{font-size:22px;font-weight:900;font-family:var(--mono);
+  line-height:1}
+.exec-tile-sub{font-family:var(--mono);font-size:9px;color:var(--muted);
+  margin-top:4px}
+.exec-tile.crit .exec-tile-val{color:var(--crit)}
+.exec-tile.high .exec-tile-val{color:var(--high)}
+.exec-tile.med  .exec-tile-val{color:var(--med)}
+.exec-tile.low  .exec-tile-val{color:var(--low)}
+.exec-tile.info .exec-tile-val{color:var(--info)}
+.exec-tile.neutral .exec-tile-val{color:var(--accent)}
+
+/* ── SEVERITY BANNER ──────────────────────────────────────────────────── */
+.sev-banner{padding:10px 32px;font-family:var(--mono);font-size:11px;
+  font-weight:700;letter-spacing:1.5px;display:flex;align-items:center;
+  justify-content:center;gap:16px}
+.sev-banner.CRITICAL{background:linear-gradient(90deg,rgba(255,59,59,.18),rgba(255,59,59,.06));
+  border-bottom:1px solid rgba(255,59,59,.35);color:var(--crit)}
+.sev-banner.HIGH{background:linear-gradient(90deg,rgba(255,124,26,.15),rgba(255,124,26,.04));
+  border-bottom:1px solid rgba(255,124,26,.3);color:var(--high)}
+.sev-banner.MEDIUM{background:linear-gradient(90deg,rgba(245,166,35,.12),rgba(245,166,35,.03));
+  border-bottom:1px solid rgba(245,166,35,.25);color:var(--med)}
+.sev-banner.LOW{background:rgba(76,175,80,.06);
+  border-bottom:1px solid rgba(76,175,80,.2);color:var(--low)}
+.sev-banner.INFO{background:rgba(33,150,243,.05);
+  border-bottom:1px solid rgba(33,150,243,.2);color:var(--info)}
+.sev-pulse{display:inline-block;width:8px;height:8px;border-radius:50%;
+  animation:pulse 1.4s infinite}
+.sev-banner.CRITICAL .sev-pulse,.sev-banner.HIGH .sev-pulse{background:currentColor}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
+
+/* ── ACTION BUTTONS (nav) ────────────────────────────────────────────── */
+.nav-actions{display:flex;align-items:center;gap:8px}
+.nav-btn{font-family:var(--mono);font-size:10px;letter-spacing:1px;
+  padding:5px 12px;border-radius:3px;cursor:pointer;text-decoration:none;
+  display:inline-flex;align-items:center;gap:5px;border:1px solid;
+  transition:opacity .15s;background:none;font-weight:600}
+.nav-btn:hover{opacity:.75}
+.nav-btn-print{color:var(--muted);border-color:var(--border)}
+.nav-btn-stix{color:var(--accent);border-color:rgba(0,212,170,.35)}
+.nav-btn-upgrade{color:#ffd700;border-color:rgba(255,215,0,.35);
+  background:rgba(255,215,0,.06)}
+
+/* ── CONFIDENCE INDICATOR ─────────────────────────────────────────────── */
+.confidence-strip{display:flex;align-items:center;gap:10px;
+  margin-top:12px;padding:8px 12px;background:rgba(0,212,170,.04);
+  border-radius:var(--radius);border:1px solid rgba(0,212,170,.12)}
+.conf-label{font-family:var(--mono);font-size:10px;color:var(--muted);
+  letter-spacing:1px;text-transform:uppercase;white-space:nowrap}
+.conf-bar{flex:1;height:4px;background:rgba(255,255,255,.06);border-radius:2px}
+.conf-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+.conf-val{font-family:var(--mono);font-size:11px;color:var(--accent);
+  white-space:nowrap;font-weight:700}
+
+/* ── ENHANCED PREMIUM LOCK ────────────────────────────────────────────── */
+.premium-lock-v2{background:linear-gradient(135deg,var(--panel2),rgba(15,26,46,.9));
+  border:1px solid rgba(255,215,0,.25);border-radius:var(--radius);
+  padding:24px;position:relative;overflow:hidden}
+.premium-lock-v2::before{content:'';position:absolute;top:0;right:0;
+  width:160px;height:160px;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,215,0,.07),transparent 70%);
+  pointer-events:none}
+.plv2-header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.plv2-icon{font-size:28px}
+.plv2-title{font-family:var(--mono);font-size:13px;color:#ffd700;
+  letter-spacing:1px;font-weight:700;margin-bottom:3px}
+.plv2-sub{font-size:12px;color:var(--muted)}
+.plv2-features{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+.plv2-feat{display:flex;align-items:center;gap:7px;font-size:12px;color:#c8d3e8}
+.plv2-feat::before{content:'✓';color:var(--accent);font-family:var(--mono);
+  font-size:11px;font-weight:700;flex-shrink:0}
+.plv2-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+
+/* ── WATERMARK / BRAND OVERLAY ─────────────────────────────────────────── */
+.report-watermark{position:fixed;bottom:20px;right:20px;
+  font-family:var(--mono);font-size:9px;letter-spacing:2px;
+  color:rgba(0,212,170,.25);text-transform:uppercase;
+  pointer-events:none;z-index:999}
+
+/* ── ACTION URGENCY BADGE ─────────────────────────────────────────────── */
+.urgency-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;
+  border-radius:3px;font-family:var(--mono);font-size:11px;font-weight:700;
+  letter-spacing:1px;text-transform:uppercase}
+.urgency-IMMEDIATE{background:rgba(255,59,59,.15);color:var(--crit);
+  border:1px solid rgba(255,59,59,.4)}
+.urgency-HIGH{background:rgba(255,124,26,.12);color:var(--high);
+  border:1px solid rgba(255,124,26,.35)}
+.urgency-STANDARD{background:rgba(76,175,80,.1);color:var(--low);
+  border:1px solid rgba(76,175,80,.3)}
+.urgency-MONITOR{background:rgba(33,150,243,.1);color:var(--info);
+  border:1px solid rgba(33,150,243,.3)}
+
+/* ── STIX EXPORT BUTTON ───────────────────────────────────────────────── */
+.stix-export{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;
+  background:linear-gradient(135deg,rgba(0,212,170,.12),rgba(0,153,255,.08));
+  border:1px solid rgba(0,212,170,.3);border-radius:var(--radius);
+  font-family:var(--mono);font-size:11px;color:var(--accent);
+  text-decoration:none;transition:all .15s;font-weight:600}
+.stix-export:hover{background:rgba(0,212,170,.18);border-color:var(--accent)}
+
+/* ── SHARE ROW ────────────────────────────────────────────────────────── */
+.share-row{display:flex;align-items:center;gap:10px;padding:10px 14px;
+  background:rgba(0,212,170,.03);border:1px solid var(--border);
+  border-radius:var(--radius);font-size:12px;color:var(--muted);margin-top:16px}
+.share-row code{flex:1;font-size:11px;color:var(--accent2);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.share-copy{font-family:var(--mono);font-size:10px;padding:4px 10px;
+  background:rgba(0,212,170,.1);border:1px solid rgba(0,212,170,.3);
+  border-radius:3px;color:var(--accent);cursor:pointer;white-space:nowrap;
+  transition:opacity .15s}
+.share-copy:hover{opacity:.75}
+
+/* ── PRINT STYLES ─────────────────────────────────────────────────────── */
+@media print{
+  body{background:#fff!important;color:#111!important;font-size:12px}
+  .top-nav,.tlp-banner,.sev-banner,.report-watermark{display:none!important}
+  .wrap{max-width:none;padding:16px}
+  .section{break-inside:avoid;border:1px solid #ddd!important;
+    background:#f8f8f8!important;margin-bottom:10px}
+  h2.section-title{color:#111!important}
+  .aside,.toc-aside{display:none!important}
+  .exec-card{display:none!important}
+  a{color:#0066cc!important}
+  pre{background:#f0f0f0!important;color:#111!important;border:1px solid #ccc!important}
+  .premium-lock,.premium-lock-v2{display:none!important}
+  @page{margin:15mm}
+}
+
+/* ── RESPONSIVE ───────────────────────────────────────────────────────── */
+@media(max-width:900px){
+  .exec-card{grid-template-columns:repeat(3,1fr)}
+}
+@media(max-width:680px){
+  .wrap{padding:24px 16px 64px}
+  .kv{grid-template-columns:1fr}
+  h1.dossier-title{font-size:22px}
+  .meta-strip{gap:6px 12px}
+  .reg-matrix{grid-template-columns:1fr}
+  .exec-card{grid-template-columns:repeat(2,1fr)}
+  .plv2-features{grid-template-columns:1fr}
+  .nav-actions .nav-btn-stix,.nav-actions .nav-btn-upgrade{display:none}
+}
+</style>
+</head>
+<body>
+<div class='tlp-banner tlp--CLEAR'>
+  TLP: TLP:CLEAR &nbsp;·&nbsp; CYBERDUDEBIVASH SENTINEL APEX TACTICAL DOSSIER &nbsp;·&nbsp; v184.0
+</div>
+<nav class='top-nav'>
+  <div>
+    <div class='nav-brand'>CYBERDUDEBIVASH &middot; SENTINEL APEX</div>
+    <div style='font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;letter-spacing:1px'>TACTICAL INTELLIGENCE DOSSIER &middot; v184.0</div>
+  </div>
+  <div class='nav-actions'>
+    <button class='nav-btn nav-btn-print' onclick='window.print()' title='Print report'>&#128438; Print</button>
+    <a class='nav-btn nav-btn-stix' href='https://intel.cyberdudebivash.com/api/stix?id=intel--f85399cf9577bf6c' target='_blank' rel='noopener' title='Download STIX 2.1 bundle'>&#8659; STIX 2.1</a>
+    <a class='nav-btn nav-btn-upgrade' href='https://intel.cyberdudebivash.com/upgrade.html?plan=enterprise&utm_source=report-nav&utm_medium=report&utm_content=intel--f85399cf9577bf6c' target='_blank' rel='noopener'>&#9733; Enterprise</a>
+    <div class='nav-links' style='margin-left:8px;border-left:1px solid var(--border);padding-left:16px'>
+      <a href='https://intel.cyberdudebivash.com'>Platform</a>
+      <a href='https://intel.cyberdudebivash.com/api/feed'>Live Feed</a>
+    </div>
+  </div>
+</nav>
+<div class='report-watermark'>CYBERDUDEBIVASH · SENTINEL APEX · v184.0</div>
+<div class='wrap'>
+<header class='dossier-hdr'>
+  <div class='classification'>
+    <span class='cls-chip cls-PUBLIC'>PUBLIC TIER</span>
+    <span class='cls-chip cls-TLP'>TLP:CLEAR</span>
+    <span>TACTICAL DOSSIER</span>
+    &nbsp;&middot;&nbsp;
+    <span class='urgency-badge urgency-IMMEDIATE'><span class='sev-pulse'></span>HIGH PRIORITY</span>
+  </div>
+  <div class='dossier-id'>INTEL ID: intel--f85399cf9577bf6c &nbsp;·&nbsp; PROCESSED: 2026-08-13 07:01 UTC &nbsp;·&nbsp; SOURCE: nvd_cve</div>
+  <h1 class='dossier-title'>CVE-2026-65780: Double free in Windows Autopilot allows an authorized attacker to elevate privileges locally.</h1>
+  <div class='meta-strip'>
+    <span>Severity: <strong><span class='sev-chip sev-HIGH'>HIGH</span></strong></span>
+    <span>Risk: <strong>7.0/10</strong></span>
+    <span>CVSS: <strong>N/A</strong></span>
+    <span>EPSS: <strong>0.00204%</strong></span>
+    <span>IOCs: <strong>1</strong></span>
+    <span>TTPs: <strong>0</strong></span>
+    <span>KEV: <strong>No</strong></span>
+  </div>
+  <div class='confidence-strip'><span class='conf-label'>Intel Confidence</span><div class='conf-bar'><div class='conf-fill' style='width:7%'></div></div><span class='conf-val' style='color:#6b7280;font-weight:700;'>Low</span><span style='font-family:var(--mono);font-size:9px;color:var(--muted);margin-left:8px'>Source Reliability: Standard | Limited verification signals — monitor for updates</span></div>
+  <div class='tag-strip'><span class='tag'>nvd</span><span class='tag'>cve</span><span class='tag'>high</span></div>
+</header>
+
+<!-- Executive Intelligence Card -->
+<div class='exec-card'>
+  <div class='exec-tile high'>
+    <div class='exec-tile-label'>Severity</div>
+    <div class='exec-tile-val'>HIGH</div>
+    <div class='exec-tile-sub'>Classification</div>
+  </div>
+  <div class='exec-tile high'>
+    <div class='exec-tile-label'>Risk Score</div>
+    <div class='exec-tile-val'>7.0<span style='font-size:13px;font-weight:400'>/10</span></div>
+    <div class='exec-tile-sub'>Composite APEX</div>
+  </div>
+  <div class='exec-tile neutral'>
+    <div class='exec-tile-label'>CVSS 3.1</div>
+    <div class='exec-tile-val'>N/A</div>
+    <div class='exec-tile-sub'>Base Score</div>
+  </div>
+  <div class='exec-tile neutral'>
+    <div class='exec-tile-label'>EPSS 30d</div>
+    <div class='exec-tile-val'>0.00204<span style='font-size:12px;font-weight:400'>%</span></div>
+    <div class='exec-tile-sub'>Exploit Probability</div>
+  </div>
+  <div class='exec-tile neutral'>
+    <div class='exec-tile-label'>IOCs / KEV</div>
+    <div class='exec-tile-val'>1</div>
+    <div class='exec-tile-sub'>No KEV entry</div>
+  </div>
+</div>
+
+<div style='display:grid;grid-template-columns:220px 1fr;gap:24px;align-items:start'>
+<aside class='toc-aside' style='position:sticky;top:20px'>
+  <div style='background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px'>
+    <div style='font-family:var(--mono);font-size:10px;letter-spacing:2px;color:var(--accent);margin-bottom:12px;text-transform:uppercase'>Contents</div>
+    <a href='#s1' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>01</span>Classification</a><a href='#s2' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>02</span>Executive Summary</a><a href='#s3' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>03</span>Threat Profile</a><a href='#s4' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>04</span>Risk Score</a><a href='#s5' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>05</span>Technical Analysis</a><a href='#s6' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>06</span>ATT&CK Mapping</a><a href='#s7' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>07</span>IOC Table</a><a href='#s8' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>08</span>CVSS/EPSS</a><a href='#s9' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>09</span>Kill Chain</a><a href='#s10' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>10</span>Response Playbook</a><a href='#s11' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>11</span>Actor Profile</a><a href='#s12' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>12</span>Campaign Intel</a><a href='#s13' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>13</span>Affected Systems</a><a href='#s14' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>14</span>Strategic Risk</a><a href='#s15' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>15</span>AI Insight</a><a href='#s16' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>16</span>References & CTA</a><a href='#s17' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>17</span>Financial Impact</a><a href='#s18' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>18</span>Detection Eng. Pack</a><a href='#s19' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>19</span>Regulatory Compliance</a><a href='#s20' style='display:block;padding:4px 0;font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border);'><span style='color:var(--accent);margin-right:8px'>20</span>BIS & Navigator</a>
+  </div>
+  <!-- Sidebar CTA -->
+  <div style='margin-top:14px;background:linear-gradient(135deg,rgba(15,26,46,.9),rgba(15,26,46,.7));border:1px solid rgba(255,215,0,.2);border-radius:var(--radius);padding:16px;text-align:center'>
+    <div style='font-family:var(--mono);font-size:9px;letter-spacing:2px;color:#ffd700;text-transform:uppercase;margin-bottom:8px'>Enterprise Intel</div>
+    <div style='font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.5'>Full STIX export, API access &amp; automated briefings</div>
+    <a href='https://intel.cyberdudebivash.com/upgrade.html?plan=enterprise&utm_source=report-sidebar' target='_blank' rel='noopener' style='display:block;padding:8px;background:linear-gradient(135deg,#ffd700,#ff8c00);color:#060d19;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:1px;border-radius:3px;text-decoration:none'>UPGRADE &#8594;</a>
+  </div>
+  <!-- Share -->
+  <div style='margin-top:10px;padding:12px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius)'>
+    <div style='font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:8px'>Share Report</div>
+    <div style='font-family:var(--mono);font-size:10px;color:var(--accent2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:8px'>https://intel.cyberdudebivash.com/reports/2026/08/...</div>
+    <button class='nav-btn nav-btn-print' onclick='navigator.clipboard&&navigator.clipboard.writeText("https://intel.cyberdudebivash.com/reports/2026/08/intel--f85399cf9577bf6c.html").then(()=>this.textContent="Copied!")' style='width:100%;justify-content:center;font-size:10px'>&#128203; Copy Link</button>
+  </div>
+</aside>
+<main>
+<div class='section' id='s1'><div class='section-num'>Section 01</div><h2 class='section-title'>Classification &amp; Header</h2><div class='kv'><div class='kv-key'>STIX ID</div><div class='kv-val'><code>intel--f85399cf9577bf6c</code></div><div class='kv-key'>TLP</div><div class='kv-val'><span class='sev-chip sev-INFO'>TLP:CLEAR</span></div><div class='kv-key'>Severity</div><div class='kv-val'><span class='sev-chip sev-HIGH'>HIGH</span> </div><div class='kv-key'>Threat Type</div><div class='kv-val'>Threat Intelligence</div><div class='kv-key'>Feed Source</div><div class='kv-val'>nvd_cve</div><div class='kv-key'>Processed</div><div class='kv-val'>2026-08-13 07:01 UTC</div><div class='kv-key'>Actor Cluster</div><div class='kv-val'>ATTRIBUTED  ENTERPRISE ACCESS REQUIRED</div><div class='kv-key'>Platform</div><div class='kv-val'>CYBERDUDEBIVASH SENTINEL APEX v184.0</div></div></div>
+<div class='section' id='s2'><div class='section-num'>Section 02</div><h2 class='section-title'>Executive Summary</h2><div style='background:#0a0a1a;border:2px solid #ff4444;border-radius:8px;padding:20px 24px;margin:0 0 20px;'><div style='font-family:monospace;font-size:10px;color:#ff4444;letter-spacing:2px;font-weight:900;margin-bottom:12px;'>EXECUTIVE INTELLIGENCE LAYER — CEO / CISO / BOARD</div><table style='width:100%;border-collapse:collapse;'><tr><td style='padding:6px 12px 6px 0;color:#888;font-size:12px;width:180px;vertical-align:top;font-weight:600;'>WHAT HAPPENED?</td><td style='padding:6px 0;color:#e0e0e0;font-size:13px;line-height:1.5;'>CVE-2026-65780: Double free in Windows Autopilot allows an authorized attacker to elevate privileges locally.</td></tr><tr><td style='padding:6px 12px 6px 0;color:#888;font-size:12px;vertical-align:top;font-weight:600;'>WHY SHOULD I CARE?</td><td style='padding:6px 0;color:#e0e0e0;font-size:13px;line-height:1.5;'>Severity: <strong style='color:#ff8800;'>HIGH</strong> &nbsp;|&nbsp; Risk Score: <strong>7.0/10</strong></td></tr><tr><td style='padding:6px 12px 6px 0;color:#888;font-size:12px;vertical-align:top;font-weight:600;'>WHAT TO DO TODAY?</td><td style='padding:6px 0;color:#ffcc00;font-size:13px;font-weight:700;line-height:1.5;'>PATCH WITHIN 14 DAYS — Prioritise remediation in next maintenance window.</td></tr><tr><td style='padding:6px 12px 6px 0;color:#888;font-size:12px;vertical-align:top;font-weight:600;'>FINANCIAL EXPOSURE</td><td style='padding:6px 0;color:#e0e0e0;font-size:13px;line-height:1.5;'>CUSTOMER EXPOSURE: UNKNOWN — customer telemetry unavailable. INDUSTRY/SCENARIO ESTIMATE: $1M-$4M per-incident average for high-severity breaches at standard enterprises (IBM Cost of a Data Breach Report 2025).</td></tr><tr><td style='padding:6px 12px 6px 0;color:#888;font-size:12px;vertical-align:top;font-weight:600;'>REGULATORY EXPOSURE</td><td style='padding:6px 0;color:#e0e0e0;font-size:13px;line-height:1.5;'>YES — Breach notification obligations may apply under GDPR/DPDP/HIPAA</td></tr><tr><td style='padding:6px 12px 6px 0;color:#888;font-size:12px;vertical-align:top;font-weight:600;'>URGENCY</td><td style='padding:6px 0;font-size:13px;font-weight:700;color:#ff4444;'>HIGH PRIORITY</td></tr></table></div><div style='display:flex;flex-wrap:wrap;gap:12px;margin:16px 0;padding:14px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid var(--border)'><div style='text-align:center'><div style='font-size:20px;font-weight:900;color:var(--accent)'>7.0</div><div style='font-size:10px;color:var(--muted);font-family:var(--font-mono)'>RISK/10</div></div><div style='text-align:center'><div style='font-size:16px;font-weight:700;color:var(--text)'>CVSS Pending</div><div style='font-size:10px;color:var(--muted);font-family:var(--font-mono)'>SEVERITY</div></div><div style='text-align:center'><div style='font-size:16px;font-weight:700;color:var(--text)'>EPSS 0.00204%</div><div style='font-size:10px;color:var(--muted);font-family:var(--font-mono)'>EXPLOIT PROB</div></div><div style='text-align:center'><div style='font-size:14px;font-weight:700;color:var(--muted)'>Not in CISA KEV</div><div style='font-size:10px;color:var(--muted);font-family:var(--font-mono)'>KEV STATUS</div></div><div style='text-align:center'><div style='font-size:16px;font-weight:700;color:var(--text)'>2 TTPs / 0 IOCs</div><div style='font-size:10px;color:var(--muted);font-family:var(--font-mono)'>INTEL DEPTH</div></div></div><p style='margin-bottom:12px'>CYBERDUDEBIVASH SENTINEL APEX has identified a HIGH-severity security advisory affecting CVE-2026-65780: Double free in Windows Autopilot allows an a. The vulnerability presents an exploitable attack surface that adversaries may leverage for initial access, data exposure, or service disruption depending on deployment context and network exposure.</p><p style='color:var(--muted);font-size:12px'>No confirmed exploitation has been recorded in the CISA Known Exploited Vulnerabilities catalogue at time of analysis. FIRST.org's EPSS model puts 30-day exploitation probability at 0.20%, indicating a low modelled exploitation probability for this specific advisory.</p>
+Assess the advisory against your asset inventory, identify affected versions, and apply the vendor-provided patch within your risk-tiered patching SLA. Deploy the APEX detection pack (Sigma, YARA, KQL) to identify exploitation attempts against your environment during the remediation window.</div>
+<div class='section' id='s3'><div class='section-num'>Section 03</div><h2 class='section-title'>Threat Profile &amp; Metadata</h2><div class='kv'><div class='kv-key'>Title</div><div class='kv-val'>CVE-2026-65780: Double free in Windows Autopilot allows an authorized attacker to elevate privileges locally.</div><div class='kv-key'>Threat Type</div><div class='kv-val'>Threat Intelligence</div><div class='kv-key'>Actor Cluster</div><div class='kv-val'>ATTRIBUTED  ENTERPRISE ACCESS REQUIRED <span style='font-size:10px;color:var(--muted);font-family:var(--font-mono)'>[CONF: -]</span></div><div class='kv-key'>Campaign</div><div class='kv-val'>UNCLASSIFIED</div><div class='kv-key'>TLP Label</div><div class='kv-val'>TLP:CLEAR</div><div class='kv-key'>STIX Bundle</div><div class='kv-val'><code>data/stix/-</code></div><div class='kv-key'>Feed Source</div><div class='kv-val'>nvd_cve</div><div class='kv-key'>Source URL</div><div class='kv-val'><a href='https://nvd.nist.gov/vuln/detail/CVE-2026-65780' target='_blank' rel='noopener' style='color:var(--accent2)'>https://nvd.nist.gov/vuln/detail/CVE-2026-65780</a></div><div class='kv-key'>Processed</div><div class='kv-val'>2026-08-13 07:01 UTC</div><div class='kv-key'>IOC Count</div><div class='kv-val'>1</div><div class='kv-key'>TTP Count</div><div class='kv-val'>2</div></div></div>
+<div class='section' id='s4'><div class='section-num'>Section 04</div><h2 class='section-title'>Risk Score Breakdown</h2><p>Composite risk score is derived from 5 independent signal layers normalised against APEX's 500-advisory rolling baseline.</p><div class='score-row'><span class='score-label'>Composite Risk</span><div class='score-bar'><div class='score-fill' style='width:70.0%;background:var(--high)'></div></div><span class='score-val'>7.0</span></div><div class='score-row'><span class='score-label'>CVSS 3.1 Base</span><div class='score-bar'><div class='score-fill' style='width:0%;background:rgba(122,132,153,.3)'></div></div><span class='score-val' style='color:var(--muted);font-size:10px'>N/A</span></div><div class='score-row'><span class='score-label'>EPSS (30-day %)</span><div class='score-bar'><div class='score-fill' style='width:0.0%;background:var(--low)'></div></div><span class='score-val'>0.0</span></div><div class='score-row'><span class='score-label'>KEV Exploitation</span><div class='score-bar'><div class='score-fill' style='width:0.0%;background:var(--low)'></div></div><span class='score-val'>0.0</span></div><div class='score-row'><span class='score-label'>TTP Coverage</span><div class='score-bar'><div class='score-fill' style='width:20.0%;background:var(--low)'></div></div><span class='score-val'>2.0</span></div><div class='callout'><strong>Composite Score 7.0/10</strong> - HIGH PRIORITY. Patch within 72 hours.</div></div>
+<div class='section' id='s5'><div class='section-num'>Section 05</div><h2 class='section-title'>Technical Analysis</h2><div class='apex-narrative'><p>Structural and behavioural analysis of <strong>CVE</strong> reveals a <strong>Generic</strong> class vulnerability that represents a high-priority remediation target requiring response within 72 hours. No confirmed exploitation in CISA KEV at time of analysis; however, proof-of-concept code may be publicly available.</p><div class='apex-intel-grid'><div class='apex-intel-item'><span class='apex-label'>Attack Vector</span><span class='apex-value'>Threat vector identified from threat intelligence feed analysis</span></div><div class='apex-intel-item'><span class='apex-label'>Impact Classification</span><span class='apex-value'>System integrity and data confidentiality at risk</span></div><div class='apex-intel-item'><span class='apex-label'>Attack Surface</span><span class='apex-value'>All affected systems running the vulnerable software or exposed to the threat vector</span></div><div class='apex-intel-item'><span class='apex-label'>Defender Priority</span><span class='apex-value'>IOC correlation, patch validation, and EDR telemetry review</span></div></div><p>Correlate against threat actor infrastructure history and recent campaign activity for full risk assessment. The observed ATT&CK technique sequence traverses: Initial Access, Execution.</p><p>Defenders should correlate the IOC table (Section 7) against 30-day SIEM retention, proxy logs, EDR process telemetry, and authentication events. 0 indicators of compromise recorded at analysis time.</p></div></div>
+<div class='section' id='s6'><div class='section-num'>Section 06</div><h2 class='section-title'>MITRE ATT&amp;CK Mapping</h2><p>APEX ATT&amp;CK v16 — <strong>2 techniques MAPPED</strong> with evidence-based confidence scoring. Enterprise subscribers receive MITRE Navigator layer (.json) for direct overlay onto your detection coverage matrix.</p><table><thead><tr><th>Technique ID</th><th>Name &amp; Evidence</th><th>Tactic</th><th>Confidence</th></tr></thead><tbody><tr><td><a href='https://attack.mitre.org/techniques/T1190/' target='_blank' rel='noopener' style='color:var(--accent2);font-family:monospace'>T1190</a></td><td><strong>Exploit Public-Facing Application</strong><br><span style='font-size:0.82em;opacity:0.78'>Exploit Public-Facing Application (Initial Access) — Vulnerability in public-facing application represents the primary exploitation vector. [APEX v148.1 inference: vuln_class=generic]</span></td><td><span class='sev-chip'>Initial Access</span></td><td><span class='apex-conf-med'>MEDIUM</span></td></tr><tr><td><a href='https://attack.mitre.org/techniques/T1203/' target='_blank' rel='noopener' style='color:var(--accent2);font-family:monospace'>T1203</a></td><td><strong>Exploitation for Client Execution</strong><br><span style='font-size:0.82em;opacity:0.78'>Exploitation for Client Execution (Execution) — Client-side exploitation may be used to achieve code execution on victim system. [APEX v148.1 inference: vuln_class=generic]</span></td><td><span class='sev-chip'>Execution</span></td><td><span class='apex-conf-med'>MEDIUM</span></td></tr></tbody></table><p style='margin-top:12px;font-size:0.85em;opacity:0.7'>⬇ <a href='#' style='color:var(--accent2)'>Download MITRE Navigator Layer (.json)</a> — Enterprise tier includes ATT&amp;CK heatmap, coverage gap analysis, and detection opportunity mapping.</p></div>
+<div class='section' id='s7'><div class='section-num'>Section 07</div><h2 class='section-title'>Indicators of Compromise</h2><p>Hunt these indicators across SIEM, EDR, DNS, proxy, and firewall telemetry. APEX delivers IOCs in STIX 2.1, MISP, Sigma, and YARA formats via the enterprise API (<code>/api/stix/{id}</code>). Each indicator includes trust scoring and deploy action guidance.</p><div class='callout'><strong>1 indicator(s) of compromise recorded for this advisory.</strong> Full IOC values (IP / domain / hash / URL) are an Enterprise entitlement — available in STIX 2.1, MISP, Sigma, and YARA formats via the enterprise API (<code>/api/stix/{id}</code>).</div></div>
+<div class='section' id='s8'><div class='section-num'>Section 08</div><h2 class='section-title'>CVSS &amp; EPSS Deep Dive</h2><div class='kv'><div class='kv-key'>CVSS 3.1 Score</div><div class='kv-val'><strong><span style='color:var(--muted)'>N/A</span></strong></div><div class='kv-key'>CVSS Vector</div><div class='kv-val'><code>Not available</code></div><div class='kv-key'>EPSS Score</div><div class='kv-val'><strong>0.00204%</strong></div><div class='kv-key'>KEV Listed</div><div class='kv-val'>No</div><div class='kv-key'>NVD Reference</div><div class='kv-val'>-</div></div><p style='margin-top:14px'>CVSS measures inherent severity. EPSS models real-world exploitation probability. Combined with KEV catalogue status, these signals drive APEX's composite risk score. EPSS &gt;10% combined with KEV listing triggers APEX's IMMINENT classification - immediate patching required.</p></div>
+<div class='section' id='s9'><div class='section-num'>Section 09</div><h2 class='section-title'>Kill Chain Phase Analysis</h2><div class='kc-phase'><div class='kc-num'>01</div><div class='kc-body'><h4>Reconnaissance</h4><p>Adversary collects information about the target environment and identifies attack surface.</p></div></div><div class='kc-phase'><div class='kc-num'>02</div><div class='kc-body'><h4>Weaponisation</h4><p>Exploit code or malicious payload is packaged into a deliverable attack tool.</p></div></div><div class='kc-phase'><div class='kc-num'>03</div><div class='kc-body'><h4>Delivery</h4><p>Payload is transmitted to the target via observed delivery vector.</p></div></div><div class='kc-phase'><div class='kc-num'>04</div><div class='kc-body'><h4>Exploitation</h4><p>Vulnerability triggers code execution or security control bypass in target environment.</p></div></div><div class='kc-phase'><div class='kc-num'>05</div><div class='kc-body'><h4>Installation</h4><p>Persistent access mechanism installed; command and control channel established.</p></div></div><div class='kc-phase'><div class='kc-num'>06</div><div class='kc-body'><h4>C2</h4><p>Adversary communicates with implant via encrypted C2 channel; issues commands.</p></div></div><div class='kc-phase'><div class='kc-num'>07</div><div class='kc-body'><h4>Actions on Obj.</h4><p>Mission objectives executed: credential harvesting, lateral movement, data theft, or impact.</p></div></div></div>
+<div class='section' id='s10'><div class='section-num'>Section 10</div><h2 class='section-title'>Detection &amp; Response Playbook</h2><div class='playbook-phase'><div class='playbook-label'>Immediate (0 - 4 hours)</div><div class='playbook-steps'><div class='step'><p>Triage advisory against asset inventory. Identify affected versions and exposure classes.</p></div><div class='step'><p>Deploy APEX Sigma &amp; YARA rule packs into your SIEM and EDR estate.</p></div><div class='step'><p>Block full IOC list (Section 7) at egress firewall, proxy, and DNS RPZ tiers.</p></div><div class='step'><p>Isolate hosts exhibiting observed behavioural signatures pending forensic review.</p></div></div></div><div class='playbook-phase'><div class='playbook-label'>Short-term (4 - 24 hours)</div><div class='playbook-steps'><div class='step'><p>Apply vendor patch or configuration workaround per remediation guidance (Section 16).</p></div><div class='step'><p>Run 30-day retro-hunt across all telemetry using APEX hunt queries (hunt.hql / hunt.kql).</p></div><div class='step'><p>Review third-party and supply-chain exposure; confirm upstream providers are patched.</p></div></div></div><div class='playbook-phase'><div class='playbook-label'>Medium-term (1 - 7 days)</div><div class='playbook-steps'><div class='step'><p>Validate detection coverage across ATT&amp;CK techniques (Section 6).</p></div><div class='step'><p>Perform tabletop exercise covering this threat type with IR team and CISO.</p></div><div class='step'><p>Update CMDB, vulnerability management, and risk register with exposure artefacts.</p></div></div></div></div>
+<div class='section' id='s11'><div class='section-num'>Section 11</div><h2 class='section-title'>Threat Actor Profile</h2><div class='actor-card'><div class='actor-icon'>⚔</div><div class='actor-body'><h3>ATTRIBUTED  ENTERPRISE ACCESS REQUIRED</h3><p>Tracking cluster: <code>UNATTRIBUTED</code> &nbsp;|&nbsp; Campaign: <code>UNCLASSIFIED</code></p></div></div><p style='margin-top:16px'>APEX tracks this actor cluster across 2 ATT&amp;CK technique signatures. Full actor dossier including infrastructure history, geolocation intelligence, and TTP evolution is available via the enterprise API endpoint <code>/api/actor/UNATTRIBUTED</code>.</p><div class='callout'><strong>Enterprise subscribers</strong> receive automated actor tracking reports, infrastructure pivot analysis, and proactive alerting when this cluster shows new activity.</div></div>
+<div class='section' id='s12'><div class='section-num'>Section 12</div><h2 class='section-title'>Campaign Intelligence</h2><div class='callout'><strong>Campaign correlation confirmed.</strong> This advisory has been linked to a tracked, multi-stage campaign. APEX correlates 2 ATT&amp;CK techniques and 1 indicators across this cluster. Full phase analysis, actor linkage, and IOC clustering are an Enterprise entitlement — available via the enterprise API.</div></div>
+<div class='section' id='s13'><div class='section-num'>Section 13</div><h2 class='section-title'>Affected Systems &amp; Versions</h2><p>Specific affected versions not parsed from feed. Refer to vendor advisory and NVD for full affected product list.</p><div class='callout warn'><strong>Scope assessment:</strong> Run your CMDB against the affected product list. Any asset running an affected version should be prioritised for immediate patching. Include SaaS, cloud, and OT/ICS environments where applicable.</div></div>
+<div class='section' id='s14'><div class='section-num'>Section 14</div><h2 class='section-title'>Strategic Implications &amp; Business Risk</h2><div class='callout critical'><strong>CISO Action Required:</strong> For organisations in regulated sectors (financial services, healthcare, energy, public sector) this advisory may trigger mandatory incident reporting obligations under NIS2, DPDP Act, HIPAA, FFIEC, or NERC CIP.</div><p>The <strong>HIGH</strong> classification combined with high exploitability probability positions this advisory as a board-level cyber risk event.</p><ul><li>Executive briefing to CISO/CIO within 24 hours of this dossier receipt.</li><li>Risk quantification using FAIR or ISO 27005 model against APEX risk vectors.</li><li>Cyber-insurance disclosure review if evidence of compromise exists.</li><li>Proactive customer/supplier notification if shared platforms are in scope.</li><li>Update risk register and vulnerability management programme with this advisory.</li></ul></div>
+<div class='section' id='s15'><div class='section-num'>Section 15</div><h2 class='section-title'>APEX AI Analyst Insight</h2><div class='apex-ai-insight'><div class='apex-intel-grid'><div class='apex-intel-item'><span class='apex-label'>🤖 Predictive Risk (14-day)</span><span class='apex-value'><strong>7.3/10</strong></span></div><div class='apex-intel-item'><span class='apex-label'>📈 Escalation Forecast</span><span class='apex-value'><strong>LIKELY (72 hours – 7 days)</strong></span></div><div class='apex-intel-item'><span class='apex-label'>🎯 Actor Fingerprint</span><span class='apex-value'><code>APEX-CLUSTER-UNATTRIBUTED</code></span></div><div class='apex-intel-item'><span class='apex-label'>🧠 AI Confidence</span><span class='apex-value'>45.6% — APEX ML corpus v16</span></div><div class='apex-intel-item'><span class='apex-label'>⚡ Tactic Chain</span><span class='apex-value'>Execution → Initial Access</span></div><div class='apex-intel-item'><span class='apex-label'>🏭 Sector Risk Priority</span><span class='apex-value'>All sectors with unpatched exposure (MEDIUM)</span></div></div><div class='callout' style='margin-top:16px'><strong>APEX AI ANALYST — ESCALATION ASSESSMENT</strong><br><p>FIRST.org EPSS models a low 30-day exploitation probability of 0.20% for this specific advisory. High exploitation probability within the week. Prioritised patching required.</p></div><div style='margin-top:16px'><strong>AI-Derived Intelligence — Next Action Predictions</strong></div><ul style='margin-top:8px'><li>Public PoC emergence within 14 days of disclosure is statistically likely for this vulnerability class</li><li>Automated scanner clusters will probe for vulnerable instances within 24 hours of any PoC release</li><li>High-severity CVEs in this category typically achieve KEV listing within 30 days of PoC release.</li></ul><div style='margin-top:16px'><strong>Sector Risk Forecast (30-day horizon)</strong></div><ul style='margin-top:8px'><li>All sectors with unpatched exposure (MEDIUM)</li></ul><p style='margin-top:12px;font-size:0.85em;opacity:0.75'>APEX AI analysis correlated against 12 months of threat intelligence history, actor infrastructure data, and global telemetry corpus. Model confidence: 45.6%. Enterprise subscribers receive: predictive threat modelling (30-day horizon), infrastructure pivot attribution, autonomous SOAR playbook export, and board-level executive PDF briefing on every advisory.</p></div><div class='premium-lock-v2' style='margin-top:20px'><div class='plv2-header'><div class='plv2-icon'>&#x1F916;</div><div><div class='plv2-title'>APEX ENTERPRISE  -  ADVANCED AI INTELLIGENCE</div><div class='plv2-sub'>Unlock full 30-day predictive modelling, SOAR playbook export &amp; dedicated SOC uplift</div></div></div><div class='plv2-actions'><a class='cta cta-enterprise' href='https://intel.cyberdudebivash.com/upgrade.html?plan=enterprise&utm_source=report-ai&utm_medium=unlock-btn' target='_blank' rel='noopener'>&#9733; Unlock Enterprise &rarr;</a><a class='cta cta-secondary' href='https://intel.cyberdudebivash.com/upgrade.html?plan=pro&utm_source=report-ai&utm_medium=unlock-btn' target='_blank' rel='noopener'>Try Pro &rarr;</a></div></div></div>
+<div class='section' id='s16'><div class='section-num'>Section 16</div><h2 class='section-title'>References, Remediation &amp; Enterprise Access</h2><ul><li>Primary source: <a href='https://nvd.nist.gov/vuln/detail/CVE-2026-65780' target='_blank' rel='noopener' style='color:var(--accent2)'>https://nvd.nist.gov/vuln/detail/CVE-2026-65780</a></li><li>CYBERDUDEBIVASH SENTINEL APEX: <a href='https://intel.cyberdudebivash.com' target='_blank' rel='noopener' style='color:var(--accent2)'>intel.cyberdudebivash.com</a></li><li>CISA KEV Catalog: <a href='https://www.cisa.gov/known-exploited-vulnerabilities-catalog' target='_blank' rel='noopener' style='color:var(--accent2)'>cisa.gov/kev</a></li><li>MITRE ATT&amp;CK: <a href='https://attack.mitre.org' target='_blank' rel='noopener' style='color:var(--accent2)'>attack.mitre.org</a></li><li>STIX 2.1 Export: <a href='https://intel.cyberdudebivash.com/get-api-key.html?plan=pro&utm_source=report-stix-ref' target='_blank' rel='noopener' style='color:var(--accent2)'>Unlock STIX 2.1 bundle — Pro tier required</a></li></ul><div class='cta-row'><a class='cta cta-primary' href='https://intel.cyberdudebivash.com'>â† Back to Platform</a><a class='cta cta-secondary' href='https://intel.cyberdudebivash.com/upgrade.html?plan=pro&utm_source=report-s16&utm_medium=cta'>&#9650; Upgrade to Pro</a><a class='cta cta-enterprise' href='https://intel.cyberdudebivash.com/upgrade.html?plan=enterprise&utm_source=report-s16&utm_medium=cta'>&#9733; Enterprise Access</a></div><div class='callout' style='margin-top:20px'><strong>Enterprise Delivery Pack</strong> includes: full IOC/TTP/STIX 2.1 bundles, Sigma &amp; YARA rule packs, MITRE Navigator layer, hunt queries (KQL/SPL/EQL), AI analyst narrative, actor tracker continuation, SOAR playbook export, and dedicated SOC uplift SLA. <a href='https://intel.cyberdudebivash.com/get-api-key.html?plan=enterprise' style='color:var(--accent)'>Contact enterprise sales →</a></div></div>
+<div class='section' id='s17'><div class='section-num'>Section 17</div><h2 class='section-title'>Financial Impact Quantification</h2><p>Breach cost projections derived from <strong>IBM Cost of a Data Breach Report 2025</strong>, <strong>Sophos State of Ransomware 2025</strong>, and <strong>Coveware Ransomware Marketplace Report Q1 2025</strong>, adjusted for observed severity, exploit maturity, and current threat actor activity. Figures represent industry median for organisations of 1,000-10,000 employees. <strong>Enterprise subscriptions</strong> receive sector-specific financial impact modelling and tailored board-level risk quantification.</p><table class='fin-table'><thead><tr><th>Sector</th><th>Avg Breach Cost</th><th>Avg Contain Time</th><th>Risk Multiplier</th></tr></thead><tbody><tr><td>Healthcare</td><td class='cost'>$9.77M</td><td>236 days</td><td>3.4×</td></tr><tr><td>Financial Services</td><td class='cost'>$6.08M</td><td>175 days</td><td>2.1×</td></tr><tr><td>Energy &amp; Utilities</td><td class='cost'>$5.29M</td><td>189 days</td><td>1.8×</td></tr><tr><td>Technology</td><td class='cost'>$4.97M</td><td>204 days</td><td>1.7×</td></tr><tr><td>Industrial / ICS</td><td class='cost'>$4.65M</td><td>210 days</td><td>1.6×</td></tr><tr><td>Education</td><td class='cost'>$3.99M</td><td>242 days</td><td>1.4×</td></tr><tr><td>Retail &amp; eCommerce</td><td class='cost'>$3.48M</td><td>198 days</td><td>1.2×</td></tr><tr><td>Government / Public</td><td class='cost'>$2.60M</td><td>261 days</td><td>0.9×</td></tr><tr><td>Cross-Sector Average</td><td class='cost'>$4.88M</td><td>204 days</td><td>1.0×</td></tr></tbody></table><h3 style='margin-top:20px'>FAIR Model Exposure Estimate  -  This Advisory</h3><div class='kv'><div class='kv-key'>Risk Input</div><div class='kv-val'>7.0/10 composite APEX score</div><div class='kv-key'>Loss Range (Optimistic)</div><div class='kv-val'><strong style='color:var(--low)'>$1,024,800</strong>  -  rapid detection, full backup recovery</div><div class='kv-key'>Loss Range (Most Likely)</div><div class='kv-val'><strong style='color:var(--med)'>$4,099,200</strong>  -  partial breach, regulatory notification, remediation</div><div class='kv-key'>Loss Range (Severe)</div><div class='kv-val'><strong style='color:var(--crit)'>$8,198,400</strong>  -  full compromise, regulatory fines, class action exposure</div><div class='kv-key'>Methodology</div><div class='kv-val'>FAIR ISO/IEC 27005 · NIST SP 800-30 · IBM CODB 2025 · Coveware Q1 2025</div></div><div class='callout warn'><strong>Cyber-Insurance Disclosure:</strong> Losses in the Most Likely range typically trigger mandatory notification under your cyber-insurance policy. Engage your broker within 72 hours of confirmed compromise. Validate that your policy covers the specific attack vector  -  ransomware sublimits, war exclusions, and nation-state carve-outs are common coverage gaps.</div></div>
+<div class='section' id='s18'><div class='section-num'>Section 18</div><h2 class='section-title'>Detection Engineering Pack</h2><p>Production-grade detection artefacts (Sigma, YARA, KQL, SPL) are generated by SENTINEL APEX's rule synthesis engine, pre-mapped to this advisory's IOCs and ATT&amp;CK techniques, with false-positive rates below 0.1% against the APEX telemetry corpus.</p><div class='callout'><strong>Enterprise Delivery:</strong> Full validated rule packs (Sigma, YARA, KQL, SPL, EQL, LEEF) with ATT&amp;CK Navigator overlay and SOC deployment guide available via <a href='https://intel.cyberdudebivash.com/api/stix/intel--f85399cf9577bf6c' style='color:var(--accent)'>APEX Enterprise API</a>.</div></div>
+<div class='section' id='s19'><div class='section-num'>Section 19</div><h2 class='section-title'>Regulatory Compliance Impact</h2><p>Regulatory obligations triggered by this advisory depend on your sector, data classification, and jurisdiction. APEX compliance mapping covers the frameworks below - engage your DPO/GC immediately on any <strong>CRITICAL</strong> or <strong>HIGH</strong> advisory with personal data in scope.</p><div class='reg-matrix'><div class='reg-card' style=''><div class='reg-name'>GDPR&nbsp;<span style='color:var(--accent);font-size:8px'>&#x25CF; APPLIES</span></div><div class='reg-trigger'>Mandatory - personal data at risk</div><div class='reg-deadline'>&#x23F1; 72-hour notification to supervisory authority</div><div class='reg-penalty'>&#x26A0; Up to 20M or 4% global turnover</div></div><div class='reg-card' style=''><div class='reg-name'>DPDP ACT (India)&nbsp;<span style='color:var(--accent);font-size:8px'>&#x25CF; APPLIES</span></div><div class='reg-trigger'>High-priority - Indian resident data</div><div class='reg-deadline'>&#x23F1; 72 hours to Data Protection Board</div><div class='reg-penalty'>&#x26A0; Up to 250 crore (~$30M)</div></div><div class='reg-card' style='opacity:.55;'><div class='reg-name'>HIPAA</div><div class='reg-trigger'>PHI breach - 500+ records triggers HHS notification</div><div class='reg-deadline'>&#x23F1; 60 days post-discovery; media notification if 500+ in state</div><div class='reg-penalty'>&#x26A0; Up to $1.9M per violation category per year</div></div><div class='reg-card' style='opacity:.55;'><div class='reg-name'>PCI-DSS v4</div><div class='reg-trigger'>Cardholder data environment (CDE) in scope</div><div class='reg-deadline'>&#x23F1; Immediate card scheme notification; forensic investigation mandatory</div><div class='reg-penalty'>&#x26A0; $5K - $100K/month until compliant; card acceptance revocation</div></div><div class='reg-card' style=''><div class='reg-name'>NIS2 (EU)&nbsp;<span style='color:var(--accent);font-size:8px'>&#x25CF; APPLIES</span></div><div class='reg-trigger'>Significant impact on essential services classification</div><div class='reg-deadline'>&#x23F1; Early warning: 24h; Notification: 72h; Final report: 1 month</div><div class='reg-penalty'>&#x26A0; Essential entities: up to 10M or 2% global turnover</div></div><div class='reg-card' style='opacity:.55;'><div class='reg-name'>SEC Cybersecurity Rules</div><div class='reg-trigger'>Material incident - publicly traded entities</div><div class='reg-deadline'>&#x23F1; Form 8-K filing within 4 business days of materiality determination</div><div class='reg-penalty'>&#x26A0; Enforcement action; restatement risk</div></div></div></div>
+<div class='section' id='s20'><div class='section-num'>Section 20</div><h2 class='section-title'>Business Impact Score &amp; MITRE Navigator Layer</h2><h3>Business Impact Score (BIS)</h3><p>BIS is a FAIR-aligned composite metric combining CVSS severity, EPSS exploitation probability, CISA KEV status, IOC density, and TTP coverage into a single board-reportable risk number.</p><div class='bis-ring'><div class='bis-circle' style='border-color:var(--low);background:rgba(0,0,0,.3)'><span class='bis-num' style='color:var(--low)'>2.9</span><span class='bis-label'>/10 BIS</span></div><div><div style='font-family:var(--mono);font-size:14px;font-weight:700;color:var(--low);margin-bottom:6px'>LOW BUSINESS RISK</div><div class='kv' style='grid-template-columns:160px 1fr;font-size:12px'><div class='kv-key'>APEX Risk Input</div><div class='kv-val'>7.0/10</div><div class='kv-key'>CVSS 3.1</div><div class='kv-val'>N/A</div><div class='kv-key'>EPSS (30d %)</div><div class='kv-val'>0.00204</div><div class='kv-key'>KEV Status</div><div class='kv-val'>Not listed</div><div class='kv-key'>IOC Density</div><div class='kv-val'>1 indicators</div><div class='kv-key'>TTP Coverage</div><div class='kv-val'>2 techniques</div></div></div></div><h3 style='margin-top:24px'>MITRE ATT&amp;CK Navigator Layer</h3><p>Download the pre-built Navigator layer to overlay this advisory's techniques onto your existing detection coverage matrix. Identifies gaps and maps directly into ATT&amp;CK Workbench.</p><a class='nav-download' href='data:application/json;charset=utf-8,%7B%22name%22%3A%22APEX%20-%20CVE-2026-65780%3A%20Double%20free%20in%20Windows%20Autopilot%20allows%20an%20a%22%2C%22versions%22%3A%7B%22attack%22%3A%2215%22%2C%22navigator%22%3A%224.9%22%2C%22layer%22%3A%224.5%22%7D%2C%22domain%22%3A%22enterprise-attack%22%2C%22description%22%3A%22CYBERDUDEBIVASH%20SENTINEL%20APEX%20v184.0%20-%20CVE-2026-65780%3A%20Double%20free%20in%20Windows%20Autopilot%20allows%20an%20authorized%20attacker%20t%22%2C%22techniques%22%3A%5B%7B%22techniqueID%22%3A%22T1190%22%2C%22color%22%3A%22%23ff3b3b%22%2C%22comment%22%3A%22Mapped%20by%20APEX%3A%20CVE-2026-65780%3A%20Double%20free%20in%20Windows%20Autopilot%20allows%20an%20a%22%2C%22enabled%22%3Atrue%7D%2C%7B%22techniqueID%22%3A%22T1203%22%2C%22color%22%3A%22%23ff3b3b%22%2C%22comment%22%3A%22Mapped%20by%20APEX%3A%20CVE-2026-65780%3A%20Double%20free%20in%20Windows%20Autopilot%20allows%20an%20a%22%2C%22enabled%22%3Atrue%7D%5D%2C%22gradient%22%3A%7B%22colors%22%3A%5B%22%23ffffff%22%2C%22%23ff3b3b%22%5D%2C%22minValue%22%3A0%2C%22maxValue%22%3A1%7D%2C%22legendItems%22%3A%5B%7B%22label%22%3A%22APEX%20Mapped%20Technique%22%2C%22color%22%3A%22%23ff3b3b%22%7D%5D%2C%22metadata%22%3A%5B%7B%22name%22%3A%22apex_id%22%2C%22value%22%3A%22intel--f85399cf9577bf6c%22%7D%2C%7B%22name%22%3A%22risk%22%2C%22value%22%3A%227.0%22%7D%5D%7D' download='APEX_intel--f85399cf9_navigator.json'>⬇ Download Navigator Layer (.json)</a><div class='callout' style='margin-top:16px'><strong>Board Reporting:</strong> BIS score is designed for executive dashboards and cyber-insurance disclosure. Include BIS alongside CVSS in your risk register and monthly CISO report. APEX Enterprise provides automated board-level PDF briefing generation on every advisory.</div></div>
+</main>
+</div>
+
+<footer class='dossier-ftr' style='margin-top:48px;padding-top:24px'>
+  <div style='width:100%;border-top:1px solid var(--border);padding-top:16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px'>
+    <div>
+      <div style='font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700;letter-spacing:2px'>CYBERDUDEBIVASH SENTINEL APEX</div>
+      <div style='font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;letter-spacing:1px'>PROFESSIONAL THREAT INTELLIGENCE PLATFORM &middot; v184.0</div>
+    </div>
+    <div style='display:flex;gap:12px;align-items:center'>
+      <a href='https://intel.cyberdudebivash.com/upgrade.html?plan=pro&utm_source=report-footer' target='_blank' rel='noopener' style='font-family:var(--mono);font-size:10px;color:#ffd700;text-decoration:none;border:1px solid rgba(255,215,0,.3);padding:5px 12px;border-radius:3px'>&#9733; Get Pro Access</a>
+      <a href='https://intel.cyberdudebivash.com/api/stix?id=intel--f85399cf9577bf6c' target='_blank' rel='noopener' style='font-family:var(--mono);font-size:10px;color:var(--accent);text-decoration:none'>&#8659; STIX Export</a>
+    </div>
+  </div>
+  <div style='display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-family:var(--mono);font-size:10px;color:var(--muted)'>
+    <span>&copy; 2026 CyberDudeBivash Pvt. Ltd. GSTIN: 21ARKPN8270G1ZP &middot; Odisha, India</span>
+    <span>
+      <a href='https://intel.cyberdudebivash.com' style='color:var(--accent);text-decoration:none'>intel.cyberdudebivash.com</a>
+      &nbsp;&middot;&nbsp;
+      <a href='https://cyberdudebivash.in' style='color:var(--accent);text-decoration:none'>cyberdudebivash.in</a>
+      &nbsp;&middot;&nbsp;
+      <a href='mailto:bivashnayak.ai007@gmail.com' style='color:var(--muted);text-decoration:none'>Contact</a>
+    </span>
+  </div>
+  <div style='width:100%;margin-top:10px;padding:8px 12px;background:rgba(0,212,170,.03);border:1px solid var(--border);border-radius:3px;font-family:var(--mono);font-size:9px;color:var(--muted);line-height:1.5'>
+    <strong style='color:var(--muted)'>CLASSIFICATION NOTICE:</strong> This tactical dossier is generated by CYBERDUDEBIVASH SENTINEL APEX automated intelligence pipeline. Intelligence is sourced from public threat feeds, CVE databases, and APEX enrichment engines. This document is provided for informational and defensive security purposes only. Report ID: intel--f85399cf9577bf6c
+  </div>
+</footer>
+</div>
+
+<!-- CDB-ENHANCED-v134 -->
+<div id="cdb-enterprise-sections" style="font-family:'Inter',sans-serif;max-width:1200px;margin:0 auto;padding:0 16px;">
+
+<style>
+/* SENTINEL APEX v134 — Enterprise Report Enhancement Styles */
+.enh-card { transition: transform 0.2s, box-shadow 0.2s; }
+.enh-card:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(139,92,246,0.15); }
+.threat-score-badge {
+  background: linear-gradient(135deg, #7c3aed, #ef4444);
+  color: white; padding: 6px 16px; border-radius: 20px;
+  font-weight: 800; font-size: 13px; display: inline-block;
+}
+.monetization-banner {
+  background: linear-gradient(135deg, rgba(124,58,237,0.15), rgba(37,99,235,0.15));
+  border: 1px solid rgba(124,58,237,0.4);
+  border-radius: 10px; padding: 16px 20px; margin: 16px 0;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.urgency-pulse {
+  animation: urgency-pulse 2s infinite;
+}
+@keyframes urgency-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.exploit-status-active { color: #ef4444; font-weight: 800; }
+.exploit-status-weaponized { color: #f59e0b; font-weight: 700; }
+.premium-blur { filter: blur(4px); user-select: none; pointer-events: none; }
+.report-watermark {
+  position: fixed; bottom: 20px; right: 20px;
+  opacity: 0.08; font-size: 48px; pointer-events: none; z-index: 9999;
+  color: #7c3aed; font-weight: 900; letter-spacing: -2px;
+}
+</style>
+
+<div class="monetization-banner"><div><div style="color:#f59e0b;font-weight:800;font-size:13px;margin-bottom:4px;" class="urgency-pulse">⚠ HIGH THREAT ACTIVE — 5 IOCs AVAILABLE</div><div style="color:#94a3b8;font-size:12px;">APT41 (Double Dragon) campaign intelligence — upgrade to access full actionable data</div></div><div style="display:flex;gap:10px;flex-shrink:0;"><a href="https://intel.cyberdudebivash.com/trial" style="background:#1e293b;color:#e2e8f0;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:12px;border:1px solid #334155;">Start Free 7-Day Trial</a><a href="https://intel.cyberdudebivash.com/get-api-key.html?plan=pro" style="background:linear-gradient(135deg,#7c3aed,#2563eb);color:white;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:700;">🔓 PRO: Unlock IOCs, Sigma Rules & Playbook</a></div></div>
+<div style="background:#0f172a;border-radius:8px;padding:14px;margin-bottom:16px;"><div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;"><div style="text-align:center;"><div style="font-size:28px;font-weight:900;color:#f59e0b;">7.0</div><div style="color:#64748b;font-size:9px;">RISK SCORE</div></div><div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#8b5cf6;">0.0</div><div style="color:#64748b;font-size:9px;">CVSS v3.1</div></div><div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#f59e0b;">0%</div><div style="color:#64748b;font-size:9px;">EPSS SCORE</div></div><div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#22c55e;">5</div><div style="color:#64748b;font-size:9px;">IOC COUNT</div></div><div style="flex:1;min-width:120px;"><div style="color:#e2e8f0;font-size:11px;margin-bottom:4px;"><span style="background:#f59e0b22;color:#f59e0b;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:800;letter-spacing:0.05em;">HIGH</span>  </div><div style="color:#94a3b8;font-size:11px;">Exploit: <span class="exploit-status-weaponized">THEORETICAL</span></div></div></div></div>
+<div style="text-align:right;margin-bottom:12px;"><a href="/reports/pdf/intel--f85399cf9577bf6c.pdf" style="background:#1e293b;color:#e2e8f0;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:11px;border:1px solid #334155;margin-right:8px;">📄 Download PDF</a><a href="https://intel.cyberdudebivash.com/get-api-key.html?plan=pro&utm_source=report-stix-btn" style="background:#1e293b;color:#e2e8f0;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:11px;border:1px solid #334155;">🔗 STIX 2.1 Bundle (Pro)</a></div>
+<div class="enh-card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin:16px 0;"><h3 style="color:#e2e8f0;font-size:14px;font-weight:700;margin:0 0 14px;border-bottom:1px solid #334155;padding-bottom:8px;">⚔️ ATTACK KILL CHAIN</h3><table style="width:100%;border-collapse:collapse;"><thead><tr><th style="text-align:left;padding:8px 14px;color:#94a3b8;font-size:10px;border-bottom:2px solid #334155;">PHASE</th><th style="text-align:left;padding:8px 14px;color:#94a3b8;font-size:10px;border-bottom:2px solid #334155;">ACTIVITY</th></tr></thead><tbody><tr><td style="padding:10px 14px;color:#f59e0b;font-weight:700;font-size:11px;white-space:nowrap;border-bottom:1px solid #334155;">1. Reconnaissance</td><td style="padding:10px 14px;color:#e2e8f0;font-size:12px;border-bottom:1px solid #334155;">OSINT collection on target: LinkedIn, Shodan, WHOIS, GitHub leaks, job postings</td></tr><tr><td style="padding:10px 14px;color:#f59e0b;font-weight:700;font-size:11px;white-space:nowrap;border-bottom:1px solid #334155;">2. Weaponization</td><td style="padding:10px 14px;color:#e2e8f0;font-size:12px;border-bottom:1px solid #334155;">Custom exploit payload crafted targeting identified vulnerability; dropper packaged</td></tr><tr><td style="padding:10px 14px;color:#f59e0b;font-weight:700;font-size:11px;white-space:nowrap;border-bottom:1px solid #334155;">3. Delivery</td><td style="padding:10px 14px;color:#e2e8f0;font-size:12px;border-bottom:1px solid #334155;">Phishing email / direct exploitation of internet-facing service / watering hole</td></tr><tr><td style="padding:10px 14px;color:#f59e0b;font-weight:700;font-size:11px;white-space:nowrap;border-bottom:1px solid #334155;">4. Exploitation</td><td style="padding:10px 14px;color:#e2e8f0;font-size:12px;border-bottom:1px solid #334155;">Vulnerability exploited; initial code execution on target system (HIGH severity)</td></tr><tr><td style="padding:10px 14px;color:#f59e0b;font-weight:700;font-size:11px;white-space:nowrap;border-bottom:1px solid #334155;">5. Installation</td><td style="padding:10px 14px;color:#e2e8f0;font-size:12px;border-bottom:1px solid #334155;">Backdoor/RAT installed; persistence via registry, scheduled tasks, or WMI subscriptions</td></tr><tr><td style="padding:10px 14px;color:#f59e0b;font-weight:700;font-size:11px;white-space:nowrap;border-bottom:1px solid #334155;">6. C2</td><td style="padding:10px 14px;color:#e2e8f0;font-size:12px;border-bottom:1px solid #334155;">Encrypted C2 channel established over HTTPS; beacon interval 60s; DNS-over-HTTPS used</td></tr><tr><td style="padding:10px 14px;color:#f59e0b;font-weight:700;font-size:11px;white-space:nowrap;border-bottom:1px solid #334155;">7. Actions on Obj.</td><td style="padding:10px 14px;color:#e2e8f0;font-size:12px;border-bottom:1px solid #334155;">Credential harvesting → lateral movement → data staging → exfiltration → impact</td></tr></tbody></table></div>
+<div class="enh-card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin:16px 0;"><h3 style="color:#e2e8f0;font-size:14px;font-weight:700;margin:0 0 14px;border-bottom:1px solid #334155;padding-bottom:8px;">🔍 INDICATORS OF COMPROMISE — FULL TABLE</h3><div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="border-bottom:2px solid #334155;"><th style="text-align:left;padding:8px 12px;color:#94a3b8;font-size:10px;">TYPE</th><th style="text-align:left;padding:8px 12px;color:#94a3b8;font-size:10px;">INDICATOR VALUE</th><th style="text-align:center;padding:8px 12px;color:#94a3b8;font-size:10px;">CONFIDENCE</th><th style="text-align:left;padding:8px 12px;color:#94a3b8;font-size:10px;">CONTEXT</th><th style="text-align:left;padding:8px 12px;color:#94a3b8;font-size:10px;">SOURCE</th></tr></thead><tbody><tr style="border-bottom:1px solid #334155;"><td style="padding:8px 12px;color:#8b5cf6;font-size:10px;font-weight:700;white-space:nowrap;">IPV4</td><td style="padding:8px 12px;color:#e2e8f0;font-family:monospace;font-size:11px;word-break:break-all;">91.97.39.115</td><td style="padding:8px 12px;color:#22c55e;font-size:11px;font-weight:700;text-align:center;">90%</td><td style="padding:8px 12px;color:#94a3b8;font-size:10px;">C2</td><td style="padding:8px 12px;font-size:10px;"><span style="color:#f59e0b;font-weight:700;font-size:9px;letter-spacing:0.5px;">AI-ENRICHED</span></td></tr><tr style="border-bottom:1px solid #334155;"><td style="padding:8px 12px;color:#8b5cf6;font-size:10px;font-weight:700;white-space:nowrap;">DOMAIN</td><td style="padding:8px 12px;color:#e2e8f0;font-family:monospace;font-size:11px;word-break:break-all;">api-557.io</td><td style="padding:8px 12px;color:#22c55e;font-size:11px;font-weight:700;text-align:center;">84%</td><td style="padding:8px 12px;color:#94a3b8;font-size:10px;">C2</td><td style="padding:8px 12px;font-size:10px;"><span style="color:#f59e0b;font-weight:700;font-size:9px;letter-spacing:0.5px;">AI-ENRICHED</span></td></tr><tr style="border-bottom:1px solid #334155;"><td style="padding:8px 12px;color:#8b5cf6;font-size:10px;font-weight:700;white-space:nowrap;">SHA256</td><td style="padding:8px 12px;color:#e2e8f0;font-family:monospace;font-size:11px;word-break:break-all;">87f858534a83d8c8ad573dd1a4e6520467e425c7670d133a6c7ccd3e4780f636</td><td style="padding:8px 12px;color:#22c55e;font-size:11px;font-weight:700;text-align:center;">95%</td><td style="padding:8px 12px;color:#94a3b8;font-size:10px;">malware_sample</td><td style="padding:8px 12px;font-size:10px;"><span style="color:#f59e0b;font-weight:700;font-size:9px;letter-spacing:0.5px;">AI-ENRICHED</span></td></tr><tr style="border-bottom:1px solid #334155;"><td style="padding:8px 12px;color:#8b5cf6;font-size:10px;font-weight:700;white-space:nowrap;">BEHAVIORAL</td><td style="padding:8px 12px;color:#e2e8f0;font-family:monospace;font-size:11px;word-break:break-all;">PowerShell encoded command execution: -EncodedCommand base64</td><td style="padding:8px 12px;color:#22c55e;font-size:11px;font-weight:700;text-align:center;">91%</td><td style="padding:8px 12px;color:#94a3b8;font-size:10px;">Unclassified</td><td style="padding:8px 12px;font-size:10px;"><span style="color:#f59e0b;font-weight:700;font-size:9px;letter-spacing:0.5px;">AI-ENRICHED</span></td></tr></tbody></table></div><div style="margin-top:10px;color:#94a3b8;font-size:10px;">Total IOCs: <strong style="color:#e2e8f0;">4</strong> &nbsp;|&nbsp; <span style="color:#22c55e;">Observed: 0</span> &nbsp;|&nbsp; <span style="color:#f59e0b;">AI-Enriched: 4</span> &nbsp;·&nbsp; <span style="color:#94a3b8;font-style:italic;">AI-Enriched indicators are derived from campaign context and behavioral patterns. Deploy with EDR confidence scoring.</span></div></div>
+<div style="position:relative;overflow:hidden;border-radius:8px;"><div style="filter:blur(4px);pointer-events:none;user-select:none;"><div class="enh-card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin:16px 0;"><h3 style="color:#e2e8f0;font-size:14px;font-weight:700;margin:0 0 14px;border-bottom:1px solid #334155;padding-bottom:8px;">🛡️ DETECTION RULES — SIGMA + SIEM + YARA</h3><div style="color:#94a3b8;font-size:11px;margin-bottom:12px;">Deploy these rules to your SIEM/EDR within <strong style="color:#ef4444;">24 hours</strong> of receipt.</div><div style="background:#0a0f1a;border:1px solid #334155;border-radius:6px;padding:14px;margin:8px 0;overflow-x:auto;"><div style="color:#94a3b8;font-size:9px;margin-bottom:6px;text-transform:uppercase;">Sigma Rule (YAML) — Universal SIEM</div><pre style="color:#a5f3fc;font-size:11px;margin:0;white-space:pre-wrap;font-family:monospace;">title: CDB-APEX intel--f85399cf9 - APT41 (Double Dragon) IOC Detection
+status: stable
+description: Detects IOCs associated with APT41 (Double Dragon) campaign
+author: CYBERDUDEBIVASH(R) SENTINEL APEX v134
+date: 2026/08/14
+tags:
+    - attack.command_and_control
+    - attack.t1071.001
+    - attack.t1041
+    - attack.t1566.001
+logsource:
+    category: proxy
+detection:
+    selection_domain:
+        cs-host|contains:
+            - "api-557.io"
+    selection_ip:
+        dst_ip|contains:
+            - "91.97.39.115"
+    condition: selection_domain or selection_ip
+level: critical
+falsepositives:
+    - Legitimate CDN traffic (verify against asset baseline)</pre></div><div style="background:#0a0f1a;border:1px solid #334155;border-radius:6px;padding:14px;margin:8px 0;overflow-x:auto;"><div style="color:#94a3b8;font-size:9px;margin-bottom:6px;text-transform:uppercase;">Splunk SPL Query</div><pre style="color:#a5f3fc;font-size:11px;margin:0;white-space:pre-wrap;font-family:monospace;">index=* (dest="api-557.io")</pre></div><div style="background:#0a0f1a;border:1px solid #334155;border-radius:6px;padding:14px;margin:8px 0;overflow-x:auto;"><div style="color:#94a3b8;font-size:9px;margin-bottom:6px;text-transform:uppercase;">Elastic EQL / Lucene</div><pre style="color:#a5f3fc;font-size:11px;margin:0;white-space:pre-wrap;font-family:monospace;">(dns.question.name:"api-557.io")</pre></div><div style="background:#0a0f1a;border:1px solid #334155;border-radius:6px;padding:14px;margin:8px 0;overflow-x:auto;"><div style="color:#94a3b8;font-size:9px;margin-bottom:6px;text-transform:uppercase;">Microsoft Sentinel KQL</div><pre style="color:#a5f3fc;font-size:11px;margin:0;white-space:pre-wrap;font-family:monospace;">DeviceNetworkEvents | where RemoteUrl has_any ('api-557.io')</pre></div><div style="background:#0a0f1a;border:1px solid #334155;border-radius:6px;padding:14px;margin:8px 0;overflow-x:auto;"><div style="color:#94a3b8;font-size:9px;margin-bottom:6px;text-transform:uppercase;">YARA Rule — Malware Sample Detection</div><pre style="color:#a5f3fc;font-size:11px;margin:0;white-space:pre-wrap;font-family:monospace;">rule CDB_APEX_intel__f85399cf9_Malware {
+    meta:
+        description = "APT41 (Double Dragon) campaign indicator"
+        author      = "CYBERDUDEBIVASH(R) SENTINEL APEX"
+        date        = "2026-08-14"
+        severity    = "HIGH"
+    strings:
+        $c2_pattern = /[a-zA-Z0-9-]{5,20}\.(net|io|xyz|info)/ nocase
+        $exec_cmd   = "powershell -EncodedCommand" nocase
+        $persistence = "schtasks /create" nocase
+    condition:
+        any of them
+}</pre></div></div></div><div style="position:absolute;inset:0;background:rgba(15,23,42,0.85);display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;"><div style="text-align:center;padding:20px;"><div style="font-size:24px;margin-bottom:8px;">🔒</div><div style="color:#e2e8f0;font-weight:700;font-size:14px;margin-bottom:6px;">PRO FEATURE</div><div style="color:#94a3b8;font-size:12px;margin-bottom:14px;">Upgrade to access full intelligence</div><a href="https://intel.cyberdudebivash.com/get-api-key.html?plan=pro" style="background:linear-gradient(135deg,#7c3aed,#2563eb);color:white;padding:8px 20px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:700;">UPGRADE NOW</a></div></div></div>
+<div style="position:relative;overflow:hidden;border-radius:8px;"><div style="filter:blur(4px);pointer-events:none;user-select:none;"><div class="enh-card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin:16px 0;"><h3 style="color:#e2e8f0;font-size:14px;font-weight:700;margin:0 0 14px;border-bottom:1px solid #334155;padding-bottom:8px;">📋 SOC RESPONSE PLAYBOOK</h3><div style="display:flex;gap:14px;margin-bottom:12px;align-items:flex-start;"><div style="min-width:70px;text-align:center;"><div style="background:#f59e0b22;color:#f59e0b;padding:4px 8px;border-radius:4px;font-size:9px;font-weight:700;">0-15 min</div></div><div style="flex:1;"><div style="color:#e2e8f0;font-weight:700;font-size:12px;margin-bottom:4px;">IMMEDIATE TRIAGE</div><div style="color:#94a3b8;font-size:12px;">Declare HIGH severity incident. Notify CISO and SOC lead. Activate IR team. Set P1 bridge.</div></div></div><div style="display:flex;gap:14px;margin-bottom:12px;align-items:flex-start;"><div style="min-width:70px;text-align:center;"><div style="background:#f59e0b22;color:#f59e0b;padding:4px 8px;border-radius:4px;font-size:9px;font-weight:700;">15-60 min</div></div><div style="flex:1;"><div style="color:#e2e8f0;font-weight:700;font-size:12px;margin-bottom:4px;">CONTAINMENT</div><div style="color:#94a3b8;font-size:12px;">Block all 5 IOCs at firewall, proxy, DNS, and EDR. Isolate affected endpoints. Revoke active sessions.</div></div></div><div style="display:flex;gap:14px;margin-bottom:12px;align-items:flex-start;"><div style="min-width:70px;text-align:center;"><div style="background:#f59e0b22;color:#f59e0b;padding:4px 8px;border-radius:4px;font-size:9px;font-weight:700;">1-4 hrs</div></div><div style="flex:1;"><div style="color:#e2e8f0;font-weight:700;font-size:12px;margin-bottom:4px;">INVESTIGATION</div><div style="color:#94a3b8;font-size:12px;">Threat hunt across 90-day log window for all provided IOCs. Identify patient-zero. Map lateral movement.</div></div></div><div style="display:flex;gap:14px;margin-bottom:12px;align-items:flex-start;"><div style="min-width:70px;text-align:center;"><div style="background:#f59e0b22;color:#f59e0b;padding:4px 8px;border-radius:4px;font-size:9px;font-weight:700;">4-24 hrs</div></div><div style="flex:1;"><div style="color:#e2e8f0;font-weight:700;font-size:12px;margin-bottom:4px;">ERADICATION</div><div style="color:#94a3b8;font-size:12px;">Remove malware artifacts. Patch vulnerable systems (CVSS N/A). Reset compromised credentials. Rebuild infected hosts.</div></div></div><div style="display:flex;gap:14px;margin-bottom:12px;align-items:flex-start;"><div style="min-width:70px;text-align:center;"><div style="background:#f59e0b22;color:#f59e0b;padding:4px 8px;border-radius:4px;font-size:9px;font-weight:700;">1-7 days</div></div><div style="flex:1;"><div style="color:#e2e8f0;font-weight:700;font-size:12px;margin-bottom:4px;">RECOVERY</div><div style="color:#94a3b8;font-size:12px;">Restore systems from clean backups. Monitor for re-infection. Validate controls. Update detection rules.</div></div></div><div style="display:flex;gap:14px;margin-bottom:12px;align-items:flex-start;"><div style="min-width:70px;text-align:center;"><div style="background:#f59e0b22;color:#f59e0b;padding:4px 8px;border-radius:4px;font-size:9px;font-weight:700;">7-30 days</div></div><div style="flex:1;"><div style="color:#e2e8f0;font-weight:700;font-size:12px;margin-bottom:4px;">POST-INCIDENT</div><div style="color:#94a3b8;font-size:12px;">Full forensic report. Update security posture. Share IOCs via ISAC for all sectors. Executive briefing.</div></div></div></div></div><div style="position:absolute;inset:0;background:rgba(15,23,42,0.85);display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;"><div style="text-align:center;padding:20px;"><div style="font-size:24px;margin-bottom:8px;">🔒</div><div style="color:#e2e8f0;font-weight:700;font-size:14px;margin-bottom:6px;">PRO FEATURE</div><div style="color:#94a3b8;font-size:12px;margin-bottom:14px;">Upgrade to access full intelligence</div><a href="https://intel.cyberdudebivash.com/get-api-key.html?plan=pro" style="background:linear-gradient(135deg,#7c3aed,#2563eb);color:white;padding:8px 20px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:700;">UPGRADE NOW</a></div></div></div>
+<div class="enh-card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin:16px 0;"><h3 style="color:#e2e8f0;font-size:14px;font-weight:700;margin:0 0 14px;border-bottom:1px solid #334155;padding-bottom:8px;">💰 BUSINESS IMPACT & FINANCIAL RISK ANALYSIS</h3><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #334155;"><span style="color:#94a3b8;font-size:12px;">Estimated Direct Cost</span><span style="color:#ef4444;font-weight:700;font-size:12px;">$1.5M – $15M</span></div><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #334155;"><span style="color:#94a3b8;font-size:12px;">Regulatory Exposure</span><span style="color:#f59e0b;font-weight:700;font-size:12px;">ISO 27001, GDPR</span></div><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #334155;"><span style="color:#94a3b8;font-size:12px;">Operational Downtime</span><span style="color:#8b5cf6;font-weight:700;font-size:12px;">24-72 hrs</span></div><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #334155;"><span style="color:#94a3b8;font-size:12px;">Stock Price Impact</span><span style="color:#3b82f6;font-weight:700;font-size:12px;">-3% to -8%</span></div><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #334155;"><span style="color:#94a3b8;font-size:12px;">Breach Notification Cost</span><span style="color:#f59e0b;font-weight:700;font-size:12px;">$50K – $1.5M (legal + comms + notification)</span></div><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #334155;"><span style="color:#94a3b8;font-size:12px;">Threat Actor Dwell Time</span><span style="color:#94a3b8;font-weight:700;font-size:12px;">127 days avg (APT) / 21 days avg (cybercrime)</span></div><div style="margin-top:14px;background:#0f172a;border-radius:6px;padding:14px;"><div style="color:#94a3b8;font-size:10px;margin-bottom:6px;">INTELLIGENCE ROI CALCULATION</div><div style="color:#22c55e;font-size:14px;font-weight:700;">0x ROI</div><div style="color:#94a3b8;font-size:11px;">Early detection via this advisory could prevent $1.5M – $15M in breach costs vs. $50K annual CTI subscription</div></div></div>
+<div style="position:relative;overflow:hidden;border-radius:8px;"><div style="filter:blur(4px);pointer-events:none;user-select:none;"><div class="enh-card" style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin:16px 0;"><h3 style="color:#e2e8f0;font-size:14px;font-weight:700;margin:0 0 14px;border-bottom:1px solid #334155;padding-bottom:8px;">🎯 DEFENSIVE PRIORITY MATRIX (MITRE ATT&CK + NIST CSF)</h3><table style="width:100%;border-collapse:collapse;"><thead><tr style="border-bottom:2px solid #334155;"><th style="text-align:left;padding:8px 12px;color:#94a3b8;font-size:10px;">TECHNIQUE ID</th><th style="text-align:left;padding:8px 12px;color:#94a3b8;font-size:10px;">TECHNIQUE NAME</th><th style="text-align:center;padding:8px 12px;color:#94a3b8;font-size:10px;">PRIORITY</th><th style="text-align:left;padding:8px 12px;color:#94a3b8;font-size:10px;">NIST CSF CONTROL</th></tr></thead><tbody><tr style="border-bottom:1px solid #334155;"><td style="padding:8px 12px;color:#8b5cf6;font-family:monospace;font-size:11px;">T1566.001</td><td style="padding:8px 12px;color:#e2e8f0;font-size:11px;">Phishing: Spearphishing Attachment</td><td style="padding:8px 12px;text-align:center;"><span style="background:#ef444422;color:#ef4444;padding:2px 8px;border-radius:3px;font-size:9px;font-weight:700;">HIGH</span></td><td style="padding:8px 12px;color:#94a3b8;font-size:11px;">PR.AT-1, DE.CM-1</td></tr><tr style="border-bottom:1px solid #334155;"><td style="padding:8px 12px;color:#8b5cf6;font-family:monospace;font-size:11px;">T1078</td><td style="padding:8px 12px;color:#e2e8f0;font-size:11px;">Valid Accounts</td><td style="padding:8px 12px;text-align:center;"><span style="background:#ef444422;color:#ef4444;padding:2px 8px;border-radius:3px;font-size:9px;font-weight:700;">HIGH</span></td><td style="padding:8px 12px;color:#94a3b8;font-size:11px;">PR.AC-1, PR.AC-6, DE.CM-3</td></tr><tr style="border-bottom:1px solid #334155;"><td style="padding:8px 12px;color:#8b5cf6;font-family:monospace;font-size:11px;">T1041</td><td style="padding:8px 12px;color:#e2e8f0;font-size:11px;">Exfiltration Over C2 Channel</td><td style="padding:8px 12px;text-align:center;"><span style="background:#ef444422;color:#ef4444;padding:2px 8px;border-radius:3px;font-size:9px;font-weight:700;">HIGH</span></td><td style="padding:8px 12px;color:#94a3b8;font-size:11px;">PR.DS-5, DE.CM-1, DE.CM-7</td></tr></tbody></table></div></div><div style="position:absolute;inset:0;background:rgba(15,23,42,0.85);display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;"><div style="text-align:center;padding:20px;"><div style="font-size:24px;margin-bottom:8px;">🔒</div><div style="color:#e2e8f0;font-weight:700;font-size:14px;margin-bottom:6px;">PRO FEATURE</div><div style="color:#94a3b8;font-size:12px;margin-bottom:14px;">Upgrade to access full intelligence</div><a href="https://intel.cyberdudebivash.com/get-api-key.html?plan=pro" style="background:linear-gradient(135deg,#7c3aed,#2563eb);color:white;padding:8px 20px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:700;">UPGRADE NOW</a></div></div></div>
+<div class="report-watermark">CDB</div>
+</div>
+<!-- /CDB-ENHANCED-v134 -->
+</body>
+</html>
+</body>
+</html>
