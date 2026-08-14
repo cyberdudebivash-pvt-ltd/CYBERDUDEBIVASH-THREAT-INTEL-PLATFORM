@@ -1549,6 +1549,11 @@ jobs:
         env:
           CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
           CF_R2_REPORTS_SECRET_KEY: ${{ secrets.CF_R2_REPORTS_SECRET_KEY }}
+          # RX-PUB-A0.6B: same optional secrets dashboard-feeds-sync.yml's
+          # "Purge Cloudflare cache" step already uses -- not new
+          # credentials. Absent -> purge is skipped, never a hard failure.
+          CF_ZONE_ID:          ${{ secrets.CF_ZONE_ID }}
+          CF_CACHE_PURGE_TOKEN: ${{ secrets.CF_CACHE_PURGE_TOKEN }}
         run: |
           python3 scripts/r2_reports_verifier.py || true
           if [ -f "data/quality/rx_pub_a0_reports_artifact_manifest.json" ]; then
