@@ -203,3 +203,65 @@ None of this is authorized to happen silently as part of routine bake-in
 monitoring -- it changes the verifier's own classification logic and is
 scoped as its own RX-PUB-A0.5C/D follow-up work, not folded into this
 tracking document's routine evidence-log updates.
+
+## RX-PUB-A0.6 update (6A-6D shipped)
+
+The three items above were closed by the RX-PUB-A0.6 sub-mission, each as
+its own PR: **6A** (#193) made the verifier publication-gate-aware,
+directly addressing item 1 (gate-rejected reports now classify as
+`LIVE_EXPECTED_DENIAL`, never folded into a failure count) and added the
+`PUBLICATION_GATE_BYPASS` hard-defect class. **6B** (#194, bundled with 6C)
+added a precise Cloudflare cache purge-and-reverify, addressing item 3(a).
+**6C** (also #194) closed a confirmed resolver gap -- `findItemBySlug`
+wasn't checking `data/stix/feed_manifest.json`, the broader in-window
+population this verifier itself treats as authoritative -- answering item 2
+(yes, `ITEM_NOT_RESOLVABLE` was a second, real instance of the same
+root-shape gap, not something new). **6D** (#195) replaced the sequential
+per-report loop with a bounded 8-worker pool, targeting the
+`run_deadline_exceeded` disqualifier directly.
+
+### Interim evidence: 6C confirmed on a real run, 6D not yet observed
+
+Run [31773568022](https://github.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/actions/runs/31773568022)
+(STAGE 3.6a, commit `628a8da2` -- contains 6A+6B+6C, but predates 6D/#195)
+was the first real production run to reach STAGE 3.6a after 6C merged:
+
+```text
+In-window manifest entries: 494
+R2 summary:         494 in-window, 155 REMOTE_VERIFIED, 0 STALE_OR_DIVERGENT/FAILED, 339 UNKNOWN, 0 missing-local, 602.96s
+Public HTTP summary: 0 LIVE_VERIFIED, 127 LIVE_EXPECTED_DENIAL, 5 LIVE_STALE_OR_DIVERGENT/MISSING_UNEXPECTED,
+                     0 LIVE_RESOLUTION_FAILED, 5 LIVE_FETCH_FAILED, 339 LIVE_NOT_PROCESSED_DEADLINE, 18 UNKNOWN
+gate-bypass: 0
+run_deadline_exceeded: true (600s budget exhausted at 155/494 reports)
+```
+
+**6C confirmed**: `LIVE_RESOLUTION_FAILED = 0` across all 155 reports the
+run actually reached, versus the Phase 0 baseline (`docs/RX_PUB_A0_6_PROOF_BEFORE_CHANGE.md`)
+where 4/4 sampled reports were confirmed unresolvable before the fix. Every
+processed report got a real gate verdict -- verified, expected-denial, or a
+genuine divergence -- never "the gate couldn't be evaluated." `gate-bypass: 0`
+also confirms no `PUBLICATION_GATE_BYPASS` in the processed subset.
+
+**6D not yet observed**: this run predates commit `73b3c341e` (#195), so it
+still hit the sequential-loop deadline as expected -- 339/494 reports (69%)
+`LIVE_NOT_PROCESSED_DEADLINE`, consistent with the pre-6D baseline
+(170/518 in the original evidence run). This is the expected, unfixed
+behavior for this specific commit, not a regression.
+
+**This run does not count as Run 2 or Run 3 toward the `--enforce` bake-in
+requirement** -- `run_deadline_exceeded: true` disqualifies it under
+criterion 4, same as Run 1 above, and it does not include the 6D fix this
+disqualification requires. It is recorded here as supplementary evidence
+that 6C's fix is working, independent of 6D's still-pending validation.
+
+The push that would have produced the first 6A-6D-inclusive run
+(workflow run [31778226404](https://github.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/actions/runs/31778226404),
+commit `73b3c341e`, triggered directly by the #195 merge) was cancelled
+before any job started -- no evidence obtained. `sentinel-blogger.yml`'s
+schedule was deliberately cut to 3x/day (`0 0,8,16 * * *`) after a SEV-1
+Actions-minutes cost audit (see the workflow file's own comment at the
+`schedule:` block); per that explicit, founder-directed cost-conservation
+decision, this mission does not manually trigger extra `workflow_dispatch`
+runs solely to accelerate its own bake-in evidence collection. Run 2 and
+Run 3 will be the next two runs (schedule or path-filtered push) that reach
+STAGE 3.6a against a commit at or after `73b3c341e`.
