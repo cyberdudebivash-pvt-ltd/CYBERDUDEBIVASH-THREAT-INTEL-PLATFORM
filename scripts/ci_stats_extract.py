@@ -202,6 +202,15 @@ _REPORTS: dict = {
             d.get("summary", {}).get("live_verified", 0),
             d.get("summary", {}).get("live_stale_or_divergent_or_missing", 0),
             d.get("summary", {}).get("live_unknown", 0),
+            # RX-PUB-A0.6A: appended, not inserted -- existing positional
+            # consumers (sentinel-blogger.yml's `read -r ... <<<`) keep
+            # working unchanged; a consumer that wants the new fields reads
+            # further positions.
+            d.get("summary", {}).get("live_expected_denial", 0),
+            d.get("summary", {}).get("live_resolution_failed", 0),
+            d.get("summary", {}).get("live_fetch_failed", 0),
+            d.get("summary", {}).get("live_not_processed_deadline", 0),
+            d.get("summary", {}).get("publication_gate_bypass", 0),
         ],
     ),
 }
@@ -221,7 +230,7 @@ _FALLBACKS = {
     "p37": "UNKNOWN 0 0 0 0",
     "p38": "UNKNOWN 0 0 0 0",
     "p40": "UNKNOWN 0 0 0 0 0",
-    "rx_pub_a0": "0 0 0 0 0 0",
+    "rx_pub_a0": "0 0 0 0 0 0 0 0 0 0 0",
 }
 
 

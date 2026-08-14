@@ -114,6 +114,9 @@ class TestManifestSchema(unittest.TestCase):
             "remote_sha256", "remote_verified_at", "publication_state",
             "public_sha256", "public_verified_at", "live_state",
             "public_response_headers",
+            # RX-PUB-A0.6A
+            "publication_gate_state", "customer_ready",
+            "expected_live_behavior", "publication_gate_bypass",
         }
         import tempfile
         tmp = Path(tempfile.mkdtemp(prefix="rrv_schema_"))
@@ -155,22 +158,33 @@ class TestPublicHttpLayer(unittest.TestCase):
         return patch.object(rrv._verifier, "_s3api_head_object", return_value=None), \
                patch.object(rrv._verifier, "_boto3_head_object", return_value=None)
 
+    def _gate_approved(self):
+        """RX-PUB-A0.6A: publication-status mock for a report the gate says
+        should be served -- expected_live_behavior == SERVE_CANONICAL_ARTIFACT."""
+        return patch.object(
+            rrv, "_fetch_publication_status",
+            return_value={"customer_ready": True, "state": "CUSTOMER_READY", "reason_codes": [], "fetch_error": None},
+        )
+
     def test_matching_public_bytes_is_live_verified(self):
         data = self._write("<!DOCTYPE html><html>correct content</html>")
         p1, p2 = self._no_r2()
-        with p1, p2, patch.object(rrv, "_fetch_public", return_value={"bytes": data, "status": 200, "headers": {"cf-ray": "abc"}, "error": None}):
+        with p1, p2, self._gate_approved(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": data, "status": 200, "headers": {"cf-ray": "abc", "content-type": "text/html; charset=utf-8"}, "error": None}):
             result = rrv.verify_one(self.report_path, "reports/2026/08/intel--publictest00000.html")
 
         self.assertEqual(result["live_state"], "LIVE_VERIFIED")
+        self.assertEqual(result["expected_live_behavior"], "SERVE_CANONICAL_ARTIFACT")
         self.assertEqual(result["public_sha256"], _sha256(data))
         self.assertIsNotNone(result["public_verified_at"])
-        self.assertEqual(result["public_response_headers"], {"cf-ray": "abc"})
+        self.assertEqual(result["public_response_headers"]["cf-ray"], "abc")
 
     def test_divergent_public_bytes_is_live_stale_or_divergent(self):
         local_data = self._write("<!DOCTYPE html><html>LOCAL fixed content</html>")
         remote_data = b"<!DOCTYPE html><html>STALE customer-served content</html>"
         p1, p2 = self._no_r2()
-        with p1, p2, patch.object(rrv, "_fetch_public", return_value={"bytes": remote_data, "status": 200, "headers": {}, "error": None}):
+        with p1, p2, self._gate_approved(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": remote_data, "status": 200, "headers": {"content-type": "text/html"}, "error": None}):
             result = rrv.verify_one(self.report_path, "reports/2026/08/intel--publictest00000.html")
 
         self.assertEqual(result["live_state"], "LIVE_STALE_OR_DIVERGENT")
@@ -178,13 +192,16 @@ class TestPublicHttpLayer(unittest.TestCase):
         self.assertNotEqual(result["artifact_sha256"], result["public_sha256"])
         self.assertIn("diverge", result["public_error"])
 
-    def test_public_404_is_live_missing(self):
+    def test_public_404_when_gate_expects_serving_is_live_missing_unexpected(self):
+        """A gate-approved report that 404s at its public URL is a genuine,
+        unexpected delivery defect -- distinct from a gate-driven denial."""
         self._write("<!DOCTYPE html><html>content</html>")
         p1, p2 = self._no_r2()
-        with p1, p2, patch.object(rrv, "_fetch_public", return_value={"bytes": None, "status": 404, "headers": {}, "error": "HTTP 404"}):
+        with p1, p2, self._gate_approved(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": None, "status": 404, "headers": {}, "error": "HTTP 404"}):
             result = rrv.verify_one(self.report_path, "reports/2026/08/intel--publictest00000.html")
 
-        self.assertEqual(result["live_state"], "LIVE_MISSING")
+        self.assertEqual(result["live_state"], "LIVE_MISSING_UNEXPECTED")
         self.assertIsNone(result["public_sha256"])
 
     def test_public_fetch_failure_is_live_fetch_failed_not_verified(self):
@@ -218,11 +235,175 @@ class TestPublicHttpLayer(unittest.TestCase):
         (no CF_ACCOUNT_ID) and confirming the two layers are independent."""
         data = self._write("<!DOCTYPE html><html>content</html>")
         p1, p2 = self._no_r2()
-        with p1, p2, patch.object(rrv, "_fetch_public", return_value={"bytes": data, "status": 200, "headers": {}, "error": None}):
+        with p1, p2, self._gate_approved(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": data, "status": 200, "headers": {"content-type": "text/html"}, "error": None}):
             result = rrv.verify_one(self.report_path, "reports/2026/08/intel--publictest00000.html")
 
         self.assertEqual(result["publication_state"], "UNKNOWN")  # R2 layer: no credentials
         self.assertEqual(result["live_state"], "LIVE_VERIFIED")   # Public layer: independent, still works
+
+
+class TestPublicationGateAwareness(unittest.TestCase):
+    """RX-PUB-A0.6A (mission Section 9/38): the public HTTP layer must
+    distinguish a publication gate's intended denial from a genuine
+    customer-delivery defect, and must hard-flag the one case that must
+    never happen silently -- a gate-rejected report whose public route
+    serves the protected body anyway."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="rrv_gate_test_"))
+        self.report_path = self.tmp / "intel--gatetest000000.html"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write(self, content: str) -> bytes:
+        data = content.encode("utf-8")
+        self.report_path.write_bytes(data)
+        return data
+
+    def _no_r2(self):
+        return patch.object(rrv._verifier, "_s3api_head_object", return_value=None), \
+               patch.object(rrv._verifier, "_boto3_head_object", return_value=None)
+
+    def _gate_rejected(self, reason_codes=None):
+        return patch.object(
+            rrv, "_fetch_publication_status",
+            return_value={
+                "customer_ready": False, "state": "REJECTED",
+                "reason_codes": reason_codes or ["P25_BELOW_THRESHOLD"], "fetch_error": None,
+            },
+        )
+
+    def _gate_unresolvable(self):
+        return patch.object(
+            rrv, "_fetch_publication_status",
+            return_value={"customer_ready": False, "state": "UNKNOWN", "reason_codes": ["ITEM_NOT_RESOLVABLE"], "fetch_error": None},
+        )
+
+    def test_gate_rejected_and_public_route_correctly_denies_is_expected_denial(self):
+        """The common, correct case: a below-threshold report's public route
+        returns its own non-HTML denial body (e.g. the gate's JSON 404).
+        Must never be counted as a failure."""
+        self._write("<!DOCTYPE html><html>full canonical content</html>")
+        p1, p2 = self._no_r2()
+        with p1, p2, self._gate_rejected(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": None, "status": 404, "headers": {}, "error": "HTTP 404"}):
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--gatetest000000.html")
+
+        self.assertEqual(result["expected_live_behavior"], "DENY_PUBLICATION_GATE")
+        self.assertEqual(result["live_state"], "LIVE_EXPECTED_DENIAL")
+        self.assertFalse(result["publication_gate_bypass"])
+
+    def test_gate_rejected_and_public_route_serves_json_denial_body_is_expected_denial(self):
+        """A 200 status is also a correct denial as long as the body is not
+        the protected HTML -- e.g. the gate's own JSON block response."""
+        self._write("<!DOCTYPE html><html>full canonical content</html>")
+        deny_body = json.dumps({"error": "Report unavailable", "status": "BLOCKED"}).encode("utf-8")
+        p1, p2 = self._no_r2()
+        with p1, p2, self._gate_rejected(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": deny_body, "status": 200, "headers": {"content-type": "application/json; charset=utf-8"}, "error": None}):
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--gatetest000000.html")
+
+        self.assertEqual(result["live_state"], "LIVE_EXPECTED_DENIAL")
+        self.assertFalse(result["publication_gate_bypass"])
+
+    def test_gate_rejected_but_public_route_serves_html_body_is_publication_gate_bypass(self):
+        """THE critical hard-defect test (mission Section 9/38, verbatim):
+        customer_ready=false + public route serves an HTML body -> HARD
+        DEFECT, regardless of whether the served bytes happen to match the
+        canonical artifact. Never folded into LIVE_STALE_OR_DIVERGENT."""
+        local_data = self._write("<!DOCTYPE html><html>full canonical content</html>")
+        p1, p2 = self._no_r2()
+        with p1, p2, self._gate_rejected(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": local_data, "status": 200, "headers": {"content-type": "text/html; charset=utf-8"}, "error": None}):
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--gatetest000000.html")
+
+        self.assertEqual(result["live_state"], "PUBLICATION_GATE_BYPASS")
+        self.assertTrue(result["publication_gate_bypass"])
+        self.assertIn("bypass", result["public_error"].lower())
+
+    def test_gate_rejected_and_public_route_serves_different_html_body_is_still_bypass(self):
+        """The bypass classification does not depend on hash equality --
+        serving ANY HTML body when the gate says no is the defect."""
+        self._write("<!DOCTYPE html><html>full canonical content</html>")
+        different_html = b"<!DOCTYPE html><html>some other HTML entirely</html>"
+        p1, p2 = self._no_r2()
+        with p1, p2, self._gate_rejected(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": different_html, "status": 200, "headers": {"content-type": "text/html"}, "error": None}):
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--gatetest000000.html")
+
+        self.assertEqual(result["live_state"], "PUBLICATION_GATE_BYPASS")
+        self.assertTrue(result["publication_gate_bypass"])
+
+    def test_resolver_miss_is_live_resolution_failed_not_a_hash_verdict(self):
+        """ITEM_NOT_RESOLVABLE means the gate never evaluated this report --
+        byte equality is not a meaningful question (mission Section 30,
+        Question B unanswerable). Must not be counted as verified or as
+        divergent either way, even when the served bytes exactly match the
+        canonical artifact (RX-PUB-A0.6 Phase 0's confirmed live finding)."""
+        local_data = self._write("<!DOCTYPE html><html>full canonical content</html>")
+        p1, p2 = self._no_r2()
+        with p1, p2, self._gate_unresolvable(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": local_data, "status": 200, "headers": {"content-type": "text/html"}, "error": None}):
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--gatetest000000.html")
+
+        self.assertEqual(result["expected_live_behavior"], "UNKNOWN_EXPECTATION")
+        self.assertEqual(result["live_state"], "LIVE_RESOLUTION_FAILED")
+        self.assertFalse(result["publication_gate_bypass"])
+
+    def test_own_publication_status_fetch_failure_is_live_unknown_not_resolution_failed(self):
+        """Distinct from a resolver miss: here OUR OWN call to
+        publication-status failed (network/parse), which is a verifier-side
+        transient, not evidence the platform's resolver has a gap."""
+        local_data = self._write("<!DOCTYPE html><html>content</html>")
+        p1, p2 = self._no_r2()
+        with p1, p2, \
+             patch.object(rrv, "_fetch_publication_status", return_value={"customer_ready": None, "state": None, "reason_codes": [], "fetch_error": "HTTP 503"}), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": local_data, "status": 200, "headers": {"content-type": "text/html"}, "error": None}):
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--gatetest000000.html")
+
+        self.assertEqual(result["live_state"], "LIVE_UNKNOWN")
+        self.assertFalse(result["publication_gate_bypass"])
+
+
+class TestExpectedLiveBehavior(unittest.TestCase):
+    """Unit-level coverage of the pure classification helpers, independent
+    of the HTTP mocking in TestPublicationGateAwareness above."""
+
+    def test_customer_ready_true_is_serve_canonical_artifact(self):
+        self.assertEqual(
+            rrv._expected_live_behavior({"customer_ready": True, "state": "CUSTOMER_READY", "reason_codes": [], "fetch_error": None}),
+            "SERVE_CANONICAL_ARTIFACT",
+        )
+
+    def test_customer_ready_false_with_real_reason_is_deny_publication_gate(self):
+        self.assertEqual(
+            rrv._expected_live_behavior({"customer_ready": False, "state": "REJECTED", "reason_codes": ["P26_REJECTED"], "fetch_error": None}),
+            "DENY_PUBLICATION_GATE",
+        )
+
+    def test_item_not_resolvable_is_unknown_expectation_even_though_customer_ready_is_false(self):
+        """The distinguishing case this whole PR exists for: customer_ready
+        being false does NOT always mean the gate made a real decision."""
+        self.assertEqual(
+            rrv._expected_live_behavior({"customer_ready": False, "state": "UNKNOWN", "reason_codes": ["ITEM_NOT_RESOLVABLE"], "fetch_error": None}),
+            "UNKNOWN_EXPECTATION",
+        )
+
+    def test_fetch_error_is_unknown_expectation_regardless_of_other_fields(self):
+        self.assertEqual(
+            rrv._expected_live_behavior({"customer_ready": True, "state": "CUSTOMER_READY", "reason_codes": [], "fetch_error": "timeout"}),
+            "UNKNOWN_EXPECTATION",
+        )
+
+    def test_missing_customer_ready_is_unknown_expectation(self):
+        self.assertEqual(
+            rrv._expected_live_behavior({"customer_ready": None, "state": None, "reason_codes": [], "fetch_error": None}),
+            "UNKNOWN_EXPECTATION",
+        )
 
 
 class TestPublicUrlAllowlist(unittest.TestCase):
