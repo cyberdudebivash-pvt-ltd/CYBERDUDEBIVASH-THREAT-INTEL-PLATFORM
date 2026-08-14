@@ -235,12 +235,21 @@ gate-bypass: 0
 run_deadline_exceeded: true (600s budget exhausted at 155/494 reports)
 ```
 
-**6C confirmed**: `LIVE_RESOLUTION_FAILED = 0` across all 155 reports the
-run actually reached, versus the Phase 0 baseline (`docs/RX_PUB_A0_6_PROOF_BEFORE_CHANGE.md`)
-where 4/4 sampled reports were confirmed unresolvable before the fix. Every
-processed report got a real gate verdict -- verified, expected-denial, or a
-genuine divergence -- never "the gate couldn't be evaluated." `gate-bypass: 0`
-also confirms no `PUBLICATION_GATE_BYPASS` in the processed subset.
+**6C confirmed, precisely**: `LIVE_RESOLUTION_FAILED = 0` across all 155
+reports the run actually reached, versus the Phase 0 baseline
+(`docs/RX_PUB_A0_6_PROOF_BEFORE_CHANGE.md`) where 4/4 sampled reports were
+confirmed unresolvable before the fix -- zero reports fell into the specific
+"the resolver couldn't find this item to evaluate its gate at all" class 6C
+targets. This does **not** mean all 155 reached a gate verdict: 5 came back
+`LIVE_FETCH_FAILED` and 18 `UNKNOWN` (the verifier's own public-HTTP fetch
+or publication-status lookup failing, or an `UNKNOWN_EXPECTATION` case
+distinct from a resolver miss) -- 23 reports with no gate verdict either
+way, not evidence of a resolver failure. The remaining 132 did reach a real
+verdict: 127 `LIVE_EXPECTED_DENIAL` + 5 `LIVE_STALE_OR_DIVERGENT/MISSING_UNEXPECTED`
+(0 `LIVE_VERIFIED`, consistent with 6B's Section 13 finding that a
+newly-approved report can still be mid-propagation to the edge at check
+time). `gate-bypass: 0` also confirms no `PUBLICATION_GATE_BYPASS` in the
+processed subset.
 
 **6D not yet observed**: this run predates commit `73b3c341e` (#195), so it
 still hit the sequential-loop deadline as expected -- 339/494 reports (69%)
