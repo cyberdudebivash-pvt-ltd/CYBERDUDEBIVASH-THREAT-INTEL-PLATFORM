@@ -825,5 +825,180 @@ class TestManifestR2Sync(unittest.TestCase):
         )
 
 
+class TestBoundedConcurrencyAndDeadline(unittest.TestCase):
+    """RX-PUB-A0.6D: real production evidence (sentinel-blogger.yml run
+    31761997953) showed the pre-6D sequential loop covering only 170/518
+    in-window reports before RUN_DEADLINE_SECONDS cut it off -- the normal
+    case, not a tail case. These tests exercise the bounded-worker-pool
+    replacement directly through rrv.main(), mocking verify_one() itself
+    (rather than the deeper R2/public-HTTP primitives TestVerifyOne already
+    covers) so timing is the only variable under test."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="rrv_concurrency_test_"))
+        self.manifest_path = self.tmp / "feed_manifest.json"
+        self.reports_base = self.tmp / "reports"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _make_entries(self, n: int) -> list[str]:
+        ids = [f"intel--concurtest{i:08d}" for i in range(n)]
+        entries = []
+        for entry_id in ids:
+            report_path = self.reports_base / "2026" / "08" / f"{entry_id}.html"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text("<!DOCTYPE html><html>content</html>", encoding="utf-8")
+            entries.append({"id": entry_id, "internal_report_url": f"/reports/2026/08/{entry_id}.html"})
+        self.manifest_path.write_text(json.dumps(entries), encoding="utf-8")
+        return ids
+
+    def _enter_base_patches(self, stack):
+        stack.enter_context(patch.object(rrv, "MANIFEST_PATH", self.manifest_path))
+        stack.enter_context(patch.object(rrv, "REPO_ROOT", self.tmp))
+        stack.enter_context(patch.object(rrv, "OUTPUT_PATH", self.tmp / "manifest_out.json"))
+        stack.enter_context(patch.object(rrv._r2_upload, "s3_cp", return_value=True))
+        # r2_creds_present gates whether main() even enters the per-report
+        # loop -- must be truthy here even though verify_one() itself is
+        # mocked below, since these tests are exercising main()'s dispatch/
+        # deadline logic, not the real R2 primitives (already covered by
+        # TestVerifyOne).
+        stack.enter_context(patch.object(rrv._verifier, "CF_ACCOUNT_ID", "test"))
+        stack.enter_context(patch.object(rrv._verifier, "ACCESS_KEY", "test"))
+        stack.enter_context(patch.object(rrv._verifier, "SECRET_KEY", "test"))
+        stack.enter_context(patch.object(sys, "argv", ["r2_reports_verifier.py", "--skip-public"]))
+
+    def test_deadline_exceeded_before_any_report_finishes_marks_all_not_processed_deadline(self):
+        import contextlib
+        import time as _time
+
+        def _slow_verify_one(local_path, r2_key, skip_public=False):
+            _time.sleep(0.3)
+            return {"publication_state": "REMOTE_VERIFIED", "live_state": "LIVE_VERIFIED"}
+
+        ids = self._make_entries(3)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(rrv, "RUN_DEADLINE_SECONDS", 0))
+            stack.enter_context(patch.object(rrv, "verify_one", side_effect=_slow_verify_one))
+            self._enter_base_patches(stack)
+            exit_code = rrv.main()
+
+        self.assertEqual(exit_code, 0)  # --enforce not set
+        manifest = json.loads((self.tmp / "manifest_out.json").read_text())
+        self.assertTrue(manifest["summary"]["run_deadline_exceeded"])
+        self.assertEqual(manifest["summary"]["live_not_processed_deadline"], 3)
+        for entry_id in ids:
+            report = manifest["reports"][entry_id]
+            self.assertEqual(report["publication_state"], "NOT_PROCESSED_DEADLINE")
+            self.assertEqual(report["live_state"], "LIVE_NOT_PROCESSED_DEADLINE")
+
+    def test_deadline_exceeded_preserves_reports_that_already_finished(self):
+        import contextlib
+        import time as _time
+
+        def _selective_verify_one(local_path, r2_key, skip_public=False):
+            if "slowpoke" in str(local_path):
+                _time.sleep(2.0)
+            return {"publication_state": "REMOTE_VERIFIED", "live_state": "LIVE_VERIFIED"}
+
+        fast_id = "intel--fastreport00000"
+        slow_id = "intel--slowpoke00000000"
+        for entry_id in (fast_id, slow_id):
+            report_path = self.reports_base / "2026" / "08" / f"{entry_id}.html"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text("<!DOCTYPE html><html>content</html>", encoding="utf-8")
+        self.manifest_path.write_text(json.dumps([
+            {"id": fast_id, "internal_report_url": f"/reports/2026/08/{fast_id}.html"},
+            {"id": slow_id, "internal_report_url": f"/reports/2026/08/{slow_id}.html"},
+        ]), encoding="utf-8")
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(rrv, "RUN_DEADLINE_SECONDS", 0.2))
+            stack.enter_context(patch.object(rrv, "verify_one", side_effect=_selective_verify_one))
+            self._enter_base_patches(stack)
+            rrv.main()
+
+        manifest = json.loads((self.tmp / "manifest_out.json").read_text())
+        self.assertTrue(manifest["summary"]["run_deadline_exceeded"])
+        self.assertEqual(
+            manifest["reports"][fast_id]["publication_state"], "REMOTE_VERIFIED",
+            "a report that finished well within the deadline must keep its real "
+            "result, not be discarded just because a sibling report ran long"
+        )
+        self.assertEqual(
+            manifest["reports"][slow_id]["publication_state"], "NOT_PROCESSED_DEADLINE",
+        )
+
+    def test_a_single_report_exception_does_not_abort_the_other_reports_in_the_batch(self):
+        import contextlib
+
+        good_id = "intel--goodreport000000"
+        bad_id = "intel--crashreport000000"
+
+        def _one_raises(local_path, r2_key, skip_public=False):
+            if "crashreport" in str(local_path):
+                raise RuntimeError("simulated verify_one crash")
+            return {"publication_state": "REMOTE_VERIFIED", "live_state": "LIVE_VERIFIED"}
+
+        for entry_id in (good_id, bad_id):
+            report_path = self.reports_base / "2026" / "08" / f"{entry_id}.html"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text("<!DOCTYPE html><html>content</html>", encoding="utf-8")
+        self.manifest_path.write_text(json.dumps([
+            {"id": good_id, "internal_report_url": f"/reports/2026/08/{good_id}.html"},
+            {"id": bad_id, "internal_report_url": f"/reports/2026/08/{bad_id}.html"},
+        ]), encoding="utf-8")
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(rrv, "verify_one", side_effect=_one_raises))
+            self._enter_base_patches(stack)
+            exit_code = rrv.main()
+
+        self.assertEqual(exit_code, 0)
+        manifest = json.loads((self.tmp / "manifest_out.json").read_text())
+        self.assertEqual(manifest["reports"][good_id]["publication_state"], "REMOTE_VERIFIED")
+        crashed = manifest["reports"][bad_id]
+        self.assertEqual(crashed["publication_state"], "UNKNOWN")
+        self.assertEqual(crashed["live_state"], "LIVE_UNKNOWN")
+        self.assertIn("simulated verify_one crash", crashed["error"])
+
+    def test_verify_max_workers_bounds_true_concurrency_without_serializing_it(self):
+        import contextlib
+        import threading
+        import time as _time
+
+        lock = threading.Lock()
+        state = {"current": 0, "max_seen": 0}
+
+        def _tracked_verify_one(local_path, r2_key, skip_public=False):
+            with lock:
+                state["current"] += 1
+                state["max_seen"] = max(state["max_seen"], state["current"])
+            _time.sleep(0.05)
+            with lock:
+                state["current"] -= 1
+            return {"publication_state": "REMOTE_VERIFIED", "live_state": "LIVE_VERIFIED"}
+
+        self._make_entries(20)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(rrv, "VERIFY_MAX_WORKERS", 4))
+            stack.enter_context(patch.object(rrv, "verify_one", side_effect=_tracked_verify_one))
+            self._enter_base_patches(stack)
+            rrv.main()
+
+        self.assertLessEqual(
+            state["max_seen"], 4,
+            "must never run more concurrent verify_one() calls than VERIFY_MAX_WORKERS -- "
+            "an unbounded pool could overwhelm the public origin / R2 / Cloudflare API"
+        )
+        self.assertGreater(
+            state["max_seen"], 1,
+            "with 20 independent reports and 4 workers, genuine overlap is expected -- "
+            "if this is 1, the pool silently degenerated back into sequential processing"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -55,6 +55,7 @@ pass/fail bit.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -118,6 +119,29 @@ PUBLIC_RETRY_DELAY = 3
 # recorded explicitly (not silently dropped) and the manifest is still
 # written with everything processed so far.
 RUN_DEADLINE_SECONDS = 600
+
+# RX-PUB-A0.6D: real production evidence (sentinel-blogger.yml run
+# 31761997953, 2026-08-14, pre-6D code) showed this deadline being hit hard
+# under real load -- sequential processing covered only 170 of 518 in-window
+# reports (~3.53s/report: one R2 head + one R2 get-object + a Worker
+# publication-status fetch + a public HTTPS GET, each independent
+# subprocess/HTTP I/O) before RUN_DEADLINE_SECONDS cut it off, leaving 348
+# reports (67%) as LIVE_NOT_PROCESSED_DEADLINE every single run -- not a
+# tail case, the normal case. Each report's checks are independent (no
+# shared mutable state between them; verify_one() reads only the read-only
+# module-level R2 credential constants captured once at import time), so
+# they parallelize safely with a bounded worker pool -- same
+# ThreadPoolExecutor(max_workers=...) + future-map idiom
+# scripts/r2_reports_integrity.py's own parallel R2 existence-check loop
+# already established (Reuse Before Build / Single Source of Truth for the
+# concurrency pattern, not just the R2 primitives). 8 workers keeps this a
+# small, bounded number of concurrent connections against this platform's
+# own production origin and Cloudflare/R2 endpoints -- nowhere near load or
+# rate-limit territory -- while cutting the ~1830s sequential-equivalent
+# cost for 518 reports (518 * 3.53s) to a projected ~230s, leaving
+# substantial margin under RUN_DEADLINE_SECONDS instead of running the full
+# budget out on every single run.
+VERIFY_MAX_WORKERS = 8
 _SAFE_RESPONSE_HEADERS = (
     "cf-ray", "cache-control", "age", "etag", "last-modified",
     "cf-cache-status", "content-length", "content-type",
@@ -674,54 +698,17 @@ def main() -> int:
     public_verified_after_invalidation = 0
     public_still_stale = 0
 
-    deadline_hit = False
-    for _loop_idx, entry in enumerate(entries):
-        intel_id = entry.get("id") or entry.get("stix_id")
-        if not intel_id:
-            continue
-
-        if not deadline_hit and (time.time() - t0) > RUN_DEADLINE_SECONDS:
-            deadline_hit = True
-            log.error(
-                "Run deadline (%ds) exceeded after %d/%d reports -- stopping "
-                "and recording the rest as UNVERIFIED_DEADLINE rather than "
-                "silently dropping them or letting the workflow step timeout "
-                "kill this process before it writes the manifest.",
-                RUN_DEADLINE_SECONDS, _loop_idx, len(entries),
-            )
-
-        if deadline_hit:
-            # RX-PUB-A0.6A: explicit deadline classification (mission Section
-            # 26/27) -- distinct from a genuine fetch/resolution failure so a
-            # future --enforce pass can treat "never reached" differently
-            # from "reached and failed" if that distinction ever matters,
-            # and so this never silently reads as an ordinary UNKNOWN.
-            manifest_out["reports"][intel_id] = {
-                "publication_state": "NOT_PROCESSED_DEADLINE",
-                "live_state": "LIVE_NOT_PROCESSED_DEADLINE",
-                "error": f"run deadline ({RUN_DEADLINE_SECONDS}s) exceeded before this "
-                         f"report was reached -- not processed this run",
-            }
-            unknown += 1
-            live_not_processed_deadline += 1
-            continue
-
-        local_path = _local_report_path(entry)
-        if not local_path:
-            missing_local += 1
-            manifest_out["reports"][intel_id] = {
-                "publication_state": "FAILED",
-                "live_state": "UNKNOWN",
-                "error": "no local HTML artifact found for an in-window manifest entry",
-            }
-            continue
-
-        r2_key = _r2_key_for(local_path)
-        result = verify_one(local_path, r2_key, skip_public=args.skip_public)
-        result["source_record_id"] = intel_id
-        result["source_updated_at"] = entry.get("processed_at") or entry.get("timestamp") or ""
-        result["path"] = str(local_path.relative_to(REPO_ROOT))
-        manifest_out["reports"][intel_id] = result
+    def _classify_result(intel_id: str, result: dict) -> None:
+        # RX-PUB-A0.6D: unchanged classification logic, only relocated so it
+        # can run once per completed future below instead of once per loop
+        # iteration -- every branch and counter here is identical to the
+        # pre-6D sequential version.
+        nonlocal verified, mismatched, unknown, live_verified, live_mismatched
+        nonlocal live_unknown, live_expected_denial, live_resolution_failed
+        nonlocal live_fetch_failed, publication_gate_bypass
+        nonlocal cache_invalidations_attempted, cache_invalidations_succeeded
+        nonlocal cache_invalidations_failed, public_verified_after_invalidation
+        nonlocal public_still_stale
 
         if result.get("cache_purge_attempted"):
             cache_invalidations_attempted += 1
@@ -775,6 +762,89 @@ def main() -> int:
         elif live_state != "PENDING":
             live_unknown += 1
             log.warning("[%s] %s: %s", live_state, intel_id, result.get("public_error", ""))
+
+    # RX-PUB-A0.6D: build the work list first (cheap, local-only checks --
+    # no network I/O), then dispatch every report's verify_one() call to a
+    # bounded worker pool instead of one report at a time. See
+    # VERIFY_MAX_WORKERS above for the measured evidence driving this.
+    work_items: list[tuple[str, dict, Path, str]] = []
+    for entry in entries:
+        intel_id = entry.get("id") or entry.get("stix_id")
+        if not intel_id:
+            continue
+        local_path = _local_report_path(entry)
+        if not local_path:
+            missing_local += 1
+            manifest_out["reports"][intel_id] = {
+                "publication_state": "FAILED",
+                "live_state": "UNKNOWN",
+                "error": "no local HTML artifact found for an in-window manifest entry",
+            }
+            continue
+        work_items.append((intel_id, entry, local_path, _r2_key_for(local_path)))
+
+    deadline_hit = False
+    if work_items:
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=VERIFY_MAX_WORKERS)
+        future_map = {
+            pool.submit(verify_one, local_path, r2_key, skip_public=args.skip_public): (intel_id, entry, local_path)
+            for intel_id, entry, local_path, r2_key in work_items
+        }
+        remaining_budget = max(0.0, RUN_DEADLINE_SECONDS - (time.time() - t0))
+        done, not_done = concurrent.futures.wait(future_map.keys(), timeout=remaining_budget)
+        # Stop any not-yet-started work immediately and don't block on it --
+        # already-running threads (bounded by their own internal per-call
+        # timeouts) finish on their own after this function returns; we
+        # simply don't wait for or use their results (mission Section 26/27:
+        # "not yet started" and "started but unresolved" are both honestly
+        # NOT_PROCESSED_DEADLINE, never silently dropped or misread as PASS).
+        pool.shutdown(wait=False, cancel_futures=True)
+
+        for future in done:
+            intel_id, entry, local_path = future_map[future]
+            try:
+                result = future.result()
+            except Exception as e:
+                # A report whose own check crashed must never silently read
+                # as verified (same "never fail-open" posture as every other
+                # error path in this script) -- record it as unresolved
+                # rather than letting one bad report abort the whole run.
+                result = {
+                    "publication_state": "UNKNOWN",
+                    "live_state": "LIVE_UNKNOWN",
+                    "error": f"verify_one raised: {e!r}",
+                }
+            result["source_record_id"] = intel_id
+            result["source_updated_at"] = entry.get("processed_at") or entry.get("timestamp") or ""
+            result["path"] = str(local_path.relative_to(REPO_ROOT))
+            manifest_out["reports"][intel_id] = result
+            _classify_result(intel_id, result)
+
+        if not_done:
+            deadline_hit = True
+            log.error(
+                "Run deadline (%ds) exceeded -- %d/%d in-window reports finished, "
+                "%d did not (still in flight or never started) -- stopping and "
+                "recording the rest as NOT_PROCESSED_DEADLINE rather than "
+                "silently dropping them or letting the workflow step timeout "
+                "kill this process before it writes the manifest.",
+                RUN_DEADLINE_SECONDS, len(done), len(work_items), len(not_done),
+            )
+        for future in not_done:
+            intel_id, _entry, _local_path = future_map[future]
+            # RX-PUB-A0.6A: explicit deadline classification (mission Section
+            # 26/27) -- distinct from a genuine fetch/resolution failure so a
+            # future --enforce pass can treat "never reached" differently
+            # from "reached and failed" if that distinction ever matters,
+            # and so this never silently reads as an ordinary UNKNOWN.
+            manifest_out["reports"][intel_id] = {
+                "publication_state": "NOT_PROCESSED_DEADLINE",
+                "live_state": "LIVE_NOT_PROCESSED_DEADLINE",
+                "error": f"run deadline ({RUN_DEADLINE_SECONDS}s) exceeded before this "
+                         f"report finished processing -- not processed this run",
+            }
+            unknown += 1
+            live_not_processed_deadline += 1
 
     elapsed = round(time.time() - t0, 2)
     manifest_out["summary"] = {
