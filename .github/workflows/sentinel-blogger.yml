@@ -1552,12 +1552,20 @@ jobs:
         run: |
           python3 scripts/r2_reports_verifier.py || true
           if [ -f "data/quality/rx_pub_a0_reports_artifact_manifest.json" ]; then
-            read -r VERIFIED MISMATCH UNK LVERIFIED LMISMATCH LUNK <<< "$(python3 scripts/ci_stats_extract.py rx_pub_a0 2>/dev/null || echo '0 0 0 0 0 0')"
-            echo "[RX-PUB-A0] R2: verified=${VERIFIED} mismatch/missing=${MISMATCH} unverifiable=${UNK} | Public HTTP: verified=${LVERIFIED} mismatch/missing=${LMISMATCH} unverifiable=${LUNK}"
-            if [ "${MISMATCH}" = "0" ] && [ "${UNK}" = "0" ] && [ "${LMISMATCH}" = "0" ] && [ "${LUNK}" = "0" ]; then
-              echo "::notice::RX-PUB-A0 STAGE 3.6a: all in-window reports verified (R2 verified=${VERIFIED}, public verified=${LVERIFIED}). Observability-only -- see docs/RX_PUB_A0_R2_VERIFIER_BAKEIN.md."
-            else
-              echo "::warning::RX-PUB-A0 STAGE 3.6a: ${MISMATCH} R2 + ${LMISMATCH} public mismatch/missing, ${UNK} R2 + ${LUNK} public unverifiable. Observability-only (--enforce not set) -- see data/quality/rx_pub_a0_reports_artifact_manifest.json and docs/RX_PUB_A0_R2_VERIFIER_BAKEIN.md."
+            # RX-PUB-A0.6A: 5 fields appended after the original 6 -- LEXPDENY
+            # (gate correctly denying, not a failure), LRESFAIL (resolver
+            # never evaluated the gate), LFETCHFAIL, LDEADLINE, and BYPASS
+            # (the one class that must always be loud regardless of anything
+            # else -- see docs/RX_PUB_A0_6_PROOF_BEFORE_CHANGE.md).
+            read -r VERIFIED MISMATCH UNK LVERIFIED LMISMATCH LUNK LEXPDENY LRESFAIL LFETCHFAIL LDEADLINE BYPASS <<< "$(python3 scripts/ci_stats_extract.py rx_pub_a0 2>/dev/null || echo '0 0 0 0 0 0 0 0 0 0 0')"
+            echo "[RX-PUB-A0] R2: verified=${VERIFIED} mismatch/missing=${MISMATCH} unverifiable=${UNK} | Public HTTP: verified=${LVERIFIED} expected-denial=${LEXPDENY} mismatch/missing=${LMISMATCH} resolution-failed=${LRESFAIL} fetch-failed=${LFETCHFAIL} not-processed-deadline=${LDEADLINE} | gate-bypass=${BYPASS}"
+            if [ "${BYPASS}" != "0" ]; then
+              echo "::error::RX-PUB-A0 STAGE 3.6a: ${BYPASS} PUBLICATION_GATE_BYPASS -- a report the publication gate denied was served with a real HTML body at its public URL. See data/quality/rx_pub_a0_reports_artifact_manifest.json and docs/RX_PUB_A0_6_PROOF_BEFORE_CHANGE.md."
+            fi
+            if [ "${MISMATCH}" = "0" ] && [ "${UNK}" = "0" ] && [ "${LMISMATCH}" = "0" ] && [ "${LUNK}" = "0" ] && [ "${LRESFAIL}" = "0" ] && [ "${LFETCHFAIL}" = "0" ] && [ "${LDEADLINE}" = "0" ] && [ "${BYPASS}" = "0" ]; then
+              echo "::notice::RX-PUB-A0 STAGE 3.6a: all in-window reports verified or correctly gate-denied (R2 verified=${VERIFIED}, public verified=${LVERIFIED}, expected-denial=${LEXPDENY}). Observability-only -- see docs/RX_PUB_A0_R2_VERIFIER_BAKEIN.md."
+            elif [ "${BYPASS}" = "0" ]; then
+              echo "::warning::RX-PUB-A0 STAGE 3.6a: ${MISMATCH} R2 + ${LMISMATCH} public mismatch/missing, ${UNK} R2 + ${LRESFAIL} resolution-failed + ${LFETCHFAIL} fetch-failed + ${LDEADLINE} not-processed-by-deadline unverifiable (gate-expected-denial=${LEXPDENY} not counted as a failure). Observability-only (--enforce not set) -- see data/quality/rx_pub_a0_reports_artifact_manifest.json and docs/RX_PUB_A0_R2_VERIFIER_BAKEIN.md."
             fi
           fi
 

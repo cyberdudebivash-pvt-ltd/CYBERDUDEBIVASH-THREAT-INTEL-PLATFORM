@@ -232,6 +232,71 @@ def _fetch_public(url: str) -> dict:
     return {"bytes": None, "status": last_status, "headers": last_headers, "error": last_error or "fetch failed"}
 
 
+# RX-PUB-A0.6A: publication-gate awareness. Calls the platform's own,
+# already-live /api/v1/reports/{id}/publication-status endpoint -- the same
+# HTTP-boundary-reuse pattern _fetch_public already uses for report bodies --
+# rather than re-deriving a P20/P21/P23/P25/P26 verdict in Python (mission
+# Section 5's explicit prohibition on duplicating that logic).
+PUBLICATION_STATUS_PATH_TEMPLATE = "api/v1/reports/{intel_id}/publication-status"
+
+
+def _fetch_publication_status(intel_id: str) -> dict:
+    """Returns {"customer_ready": bool|None, "state": str|None,
+    "reason_codes": list, "fetch_error": str|None}. A None customer_ready
+    always means "we could not determine this," never "false" -- callers
+    must not treat a fetch failure as an implicit denial verdict."""
+    url = f"{PUBLIC_BASE_URL}/{PUBLICATION_STATUS_PATH_TEMPLATE.format(intel_id=intel_id)}"
+    try:
+        resp = _fetch_public(url)
+    except PublicFetchConfigError as e:
+        return {"customer_ready": None, "state": None, "reason_codes": [], "fetch_error": str(e)}
+    if resp["bytes"] is None:
+        return {
+            "customer_ready": None, "state": None, "reason_codes": [],
+            "fetch_error": resp.get("error") or f"HTTP {resp.get('status')}",
+        }
+    try:
+        data = json.loads(resp["bytes"])
+    except Exception as e:
+        return {"customer_ready": None, "state": None, "reason_codes": [], "fetch_error": f"invalid JSON: {e}"}
+    return {
+        "customer_ready": data.get("customer_ready"),
+        "state":          data.get("state"),
+        "reason_codes":   data.get("reason_codes") or [],
+        "fetch_error":    None,
+    }
+
+
+def _expected_live_behavior(pub_status: dict) -> str:
+    """Maps a publication-status result to what the public HTTP layer SHOULD
+    do, per mission Section 6. PENDING_PUBLICATION / HISTORICAL_POLICY are
+    reserved for future extension -- the live publication-status API does not
+    yet return either, so they are never produced here; adding them later is
+    additive (new elif branch), not a breaking change to this function."""
+    if pub_status.get("fetch_error"):
+        return "UNKNOWN_EXPECTATION"
+    customer_ready = pub_status.get("customer_ready")
+    if customer_ready is True:
+        return "SERVE_CANONICAL_ARTIFACT"
+    if customer_ready is False:
+        if "ITEM_NOT_RESOLVABLE" in (pub_status.get("reason_codes") or []):
+            return "UNKNOWN_EXPECTATION"
+        return "DENY_PUBLICATION_GATE"
+    return "UNKNOWN_EXPECTATION"
+
+
+def _unresolvable_live_state(pub_status: dict) -> str:
+    """Distinguishes, within UNKNOWN_EXPECTATION, a platform-side resolver
+    gap (LIVE_RESOLUTION_FAILED -- RX-PUB-A0.6C's target) from this
+    verifier's own inability to reach/parse publication-status
+    (LIVE_UNKNOWN -- a verifier-side transient, not a platform defect)."""
+    if pub_status.get("fetch_error"):
+        return "LIVE_UNKNOWN"
+    if "ITEM_NOT_RESOLVABLE" in (pub_status.get("reason_codes") or []):
+        return "LIVE_RESOLUTION_FAILED"
+    return "LIVE_UNKNOWN"
+
+
 def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict:
     local_bytes = local_path.read_bytes()
     local_sha256 = _sha256_bytes(local_bytes)
@@ -247,6 +312,12 @@ def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict
         "public_verified_at": None,
         "live_state":     "PENDING",
         "public_response_headers": {},
+        # RX-PUB-A0.6A: publication-gate-aware fields (see _fetch_publication_status /
+        # _expected_live_behavior below). None until the public-HTTP layer runs.
+        "publication_gate_state": None,
+        "customer_ready": None,
+        "expected_live_behavior": None,
+        "publication_gate_bypass": False,
     }
 
     # -- R2 layer (LOCAL vs R2) -----------------------------------------
@@ -282,6 +353,24 @@ def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict
     # R2 credential-gated checks above; needs no R2 credentials at all.
     if skip_public:
         return result
+
+    # RX-PUB-A0.6A: before judging byte identity, determine what the
+    # platform's own publication gate says SHOULD happen for this report.
+    # Reuses the already-live, already-authoritative
+    # /api/v1/reports/{id}/publication-status endpoint (wrapping
+    # evaluatePublicationGate) -- per mission Section 5, never reimplements
+    # P20/P21/P23/P25/P26 logic in Python. RX-PUB-A0.5 Run 1 (PR #192) and
+    # RX-PUB-A0.6's Phase 0 (docs/RX_PUB_A0_6_PROOF_BEFORE_CHANGE.md) showed
+    # that treating every non-matching byte comparison as "divergence" was
+    # wrong: most of them were the gate correctly denying a below-threshold
+    # report, or a resolver miss the gate never got to evaluate at all.
+    intel_id = Path(r2_key).stem
+    pub_status = _fetch_publication_status(intel_id)
+    result["publication_gate_state"] = pub_status.get("state")
+    result["customer_ready"] = pub_status.get("customer_ready")
+    expected = _expected_live_behavior(pub_status)
+    result["expected_live_behavior"] = expected
+
     public_url = f"{PUBLIC_BASE_URL}/{r2_key}"
     try:
         public = _fetch_public(public_url)
@@ -290,10 +379,19 @@ def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict
         result["public_error"] = f"public fetch target rejected by allowlist: {e}"
         return result
     result["public_response_headers"] = public["headers"]
+    served_is_html = "text/html" in (public["headers"].get("content-type") or "")
 
     if public["status"] == 404:
-        result["live_state"] = "LIVE_MISSING"
-        result["public_error"] = "public HTTP GET returned 404"
+        if expected == "DENY_PUBLICATION_GATE":
+            result["live_state"] = "LIVE_EXPECTED_DENIAL"
+        elif expected == "SERVE_CANONICAL_ARTIFACT":
+            result["live_state"] = "LIVE_MISSING_UNEXPECTED"
+            result["public_error"] = (
+                "publication gate says customer_ready=true but public HTTP GET returned 404"
+            )
+        else:
+            result["live_state"] = _unresolvable_live_state(pub_status)
+            result["public_error"] = "public HTTP GET returned 404; publication gate could not evaluate this report"
     elif public["bytes"] is None:
         result["live_state"] = "LIVE_FETCH_FAILED"
         result["public_error"] = public.get("error") or "public HTTP GET failed"
@@ -301,13 +399,44 @@ def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict
         public_sha256 = _sha256_bytes(public["bytes"])
         result["public_sha256"] = public_sha256
         result["public_verified_at"] = _verifier._utc_now()
-        if public_sha256 == local_sha256:
-            result["live_state"] = "LIVE_VERIFIED"
-        else:
-            result["live_state"] = "LIVE_STALE_OR_DIVERGENT"
+        served_matches_canonical = public_sha256 == local_sha256
+
+        if expected == "DENY_PUBLICATION_GATE" and public["status"] == 200 and served_is_html:
+            # HARD DEFECT (mission RX-PUB-A0.6 Section 9, verbatim): the
+            # publication gate says this report must not be served, but the
+            # public route returned a real HTML body anyway -- regardless of
+            # whether that body happens to match the canonical artifact.
+            # Never silently folded into LIVE_STALE_OR_DIVERGENT.
+            result["live_state"] = "PUBLICATION_GATE_BYPASS"
+            result["publication_gate_bypass"] = True
             result["public_error"] = (
-                f"artifact_sha256 ({local_sha256[:16]}...) != public_sha256 "
-                f"({public_sha256[:16]}...) -- local and customer-served bytes diverge"
+                "HARD DEFECT: publication gate says customer_ready=false but the public "
+                "route served an HTML body -- publication gate bypass"
+            )
+        elif expected == "DENY_PUBLICATION_GATE":
+            # 200 but not an HTML body (e.g. the gate's own JSON denial
+            # response) -- correct, expected behavior.
+            result["live_state"] = "LIVE_EXPECTED_DENIAL"
+        elif expected == "SERVE_CANONICAL_ARTIFACT":
+            if served_matches_canonical:
+                result["live_state"] = "LIVE_VERIFIED"
+            else:
+                result["live_state"] = "LIVE_STALE_OR_DIVERGENT"
+                result["public_error"] = (
+                    f"artifact_sha256 ({local_sha256[:16]}...) != public_sha256 "
+                    f"({public_sha256[:16]}...) -- local and customer-served bytes diverge"
+                )
+        else:
+            # UNKNOWN_EXPECTATION: the gate never evaluated this report (a
+            # resolver miss / ITEM_NOT_RESOLVABLE), or our own fetch of its
+            # verdict failed -- byte equality is not a meaningful question
+            # when we don't know what SHOULD be served (mission Section 30,
+            # Question B unanswerable). Never counted as a hash match or a
+            # divergence either way.
+            result["live_state"] = _unresolvable_live_state(pub_status)
+            result["public_error"] = (
+                "publication gate could not evaluate this report -- serving status not "
+                "verifiable against an expectation"
             )
 
     return result
@@ -426,6 +555,14 @@ def main() -> int:
     live_verified = 0
     live_mismatched = 0
     live_unknown = 0
+    # RX-PUB-A0.6A: distinct counters per mission Section 32 -- an expected
+    # denial must never be combined with a genuine failure, and a bypass
+    # must never be silently absorbed into either.
+    live_expected_denial = 0
+    live_resolution_failed = 0
+    live_fetch_failed = 0
+    live_not_processed_deadline = 0
+    publication_gate_bypass = 0
 
     deadline_hit = False
     for _loop_idx, entry in enumerate(entries):
@@ -444,14 +581,19 @@ def main() -> int:
             )
 
         if deadline_hit:
+            # RX-PUB-A0.6A: explicit deadline classification (mission Section
+            # 26/27) -- distinct from a genuine fetch/resolution failure so a
+            # future --enforce pass can treat "never reached" differently
+            # from "reached and failed" if that distinction ever matters,
+            # and so this never silently reads as an ordinary UNKNOWN.
             manifest_out["reports"][intel_id] = {
-                "publication_state": "UNKNOWN",
-                "live_state": "UNKNOWN",
+                "publication_state": "NOT_PROCESSED_DEADLINE",
+                "live_state": "LIVE_NOT_PROCESSED_DEADLINE",
                 "error": f"run deadline ({RUN_DEADLINE_SECONDS}s) exceeded before this "
                          f"report was reached -- not processed this run",
             }
             unknown += 1
-            live_unknown += 1
+            live_not_processed_deadline += 1
             continue
 
         local_path = _local_report_path(entry)
@@ -484,9 +626,31 @@ def main() -> int:
         live_state = result["live_state"]
         if live_state == "LIVE_VERIFIED":
             live_verified += 1
-        elif live_state in ("LIVE_STALE_OR_DIVERGENT", "LIVE_MISSING"):
+        elif live_state == "PUBLICATION_GATE_BYPASS":
+            # Never combined with any other counter (mission Section 32) --
+            # this is the single most severe outcome this verifier can
+            # observe: a report the platform's own gate says must not be
+            # served was served anyway.
+            publication_gate_bypass += 1
+            log.error("[PUBLICATION_GATE_BYPASS] %s: %s", intel_id, result.get("public_error", ""))
+        elif live_state == "LIVE_EXPECTED_DENIAL":
+            # Correct, intended behavior -- the gate denied and the public
+            # route correctly withheld the body. Not a failure; tracked
+            # separately so it can never inflate a failure count.
+            live_expected_denial += 1
+        elif live_state in ("LIVE_STALE_OR_DIVERGENT", "LIVE_MISSING_UNEXPECTED"):
             live_mismatched += 1
             log.error("[%s] %s: %s", live_state, intel_id, result.get("public_error", ""))
+        elif live_state == "LIVE_RESOLUTION_FAILED":
+            # Gate never evaluated this report (resolver miss) -- a real,
+            # separate defect class (RX-PUB-A0.6C), but not evidence of
+            # divergent bytes, since there is no expectation to compare
+            # against yet.
+            live_resolution_failed += 1
+            log.warning("[LIVE_RESOLUTION_FAILED] %s: %s", intel_id, result.get("public_error", ""))
+        elif live_state == "LIVE_FETCH_FAILED":
+            live_fetch_failed += 1
+            log.warning("[LIVE_FETCH_FAILED] %s: %s", intel_id, result.get("public_error", ""))
         elif live_state != "PENDING":
             live_unknown += 1
             log.warning("[%s] %s: %s", live_state, intel_id, result.get("public_error", ""))
@@ -498,9 +662,25 @@ def main() -> int:
         "stale_or_divergent_or_failed": mismatched,
         "unknown":          unknown,
         "missing_local":    missing_local,
+        # Unchanged names/semantics -- scripts/ci_stats_extract.py's existing
+        # "rx_pub_a0" extractor and any other consumer keep working exactly
+        # as before (Backward Compatibility principle). live_verified is
+        # unaffected by this PR's changes; live_stale_or_divergent_or_missing
+        # and live_unknown now mean something narrower and more correct than
+        # before (gate-expected-denials and gate-unresolvable reports are no
+        # longer folded into them -- see the new fields below), which can
+        # only ever make these two numbers smaller, never larger, for the
+        # same underlying data.
         "live_verified":    live_verified,
         "live_stale_or_divergent_or_missing": live_mismatched,
         "live_unknown":     live_unknown,
+        # RX-PUB-A0.6A: new, distinct semantic classes (mission Section 32) --
+        # never combined with the failure counters above.
+        "live_expected_denial":   live_expected_denial,
+        "live_resolution_failed": live_resolution_failed,
+        "live_fetch_failed":      live_fetch_failed,
+        "live_not_processed_deadline": live_not_processed_deadline,
+        "publication_gate_bypass": publication_gate_bypass,
         "elapsed_seconds":  elapsed,
         "run_deadline_exceeded": deadline_hit,
     }
@@ -547,27 +727,57 @@ def main() -> int:
         len(entries), verified, mismatched, unknown, missing_local, elapsed,
     )
     log.info(
-        "Public HTTP summary: %d LIVE_VERIFIED, %d LIVE_STALE_OR_DIVERGENT/MISSING, %d UNKNOWN",
-        live_verified, live_mismatched, live_unknown,
+        "Public HTTP summary: %d LIVE_VERIFIED, %d LIVE_EXPECTED_DENIAL (gate-correct, "
+        "not a failure), %d LIVE_STALE_OR_DIVERGENT/MISSING_UNEXPECTED, "
+        "%d LIVE_RESOLUTION_FAILED, %d LIVE_FETCH_FAILED, %d LIVE_NOT_PROCESSED_DEADLINE, "
+        "%d UNKNOWN",
+        live_verified, live_expected_denial, live_mismatched,
+        live_resolution_failed, live_fetch_failed, live_not_processed_deadline, live_unknown,
     )
+
+    # RX-PUB-A0.6A / mission Section 9: a publication-gate bypass is the
+    # single most severe outcome this verifier can observe -- a report the
+    # platform's own gate says must not be served was served anyway. Always
+    # surfaced with its own block, distinct from and in addition to the
+    # general failure summary below, and never silently folded into an
+    # ordinary mismatch count (mission Section 52 lists this as an automatic
+    # mission blocker).
+    if publication_gate_bypass > 0:
+        log.error("!" * 70)
+        log.error(
+            "PUBLICATION_GATE_BYPASS x%d -- a report the platform's publication gate "
+            "denied (customer_ready=false) was served with a real HTML body at its "
+            "public URL. This is a customer-facing access-control defect, not a byte "
+            "divergence (RX-PUB-A0.6 mission Section 9).",
+            publication_gate_bypass,
+        )
+        log.error("!" * 70)
 
     # CodeRabbit finding (RX-PUB-A0 Section 27 "do not fail-open"): an
     # unverifiable report (retries exhausted, auth/config error) is NOT the
-    # same claim as a verified-matching report. Both `unknown` (R2 layer)
-    # and `live_unknown` (public layer, includes LIVE_FETCH_FAILED) must
-    # block a PASS/success claim exactly like a confirmed mismatch does --
-    # "could not verify" must never silently read as "verified".
-    total_failures = mismatched + live_mismatched + unknown + live_unknown
+    # same claim as a verified-matching report. "could not verify" must
+    # never silently read as "verified" -- so every failure/unresolved/
+    # unprocessed class below blocks a PASS claim, exactly as before this
+    # PR. LIVE_EXPECTED_DENIAL is deliberately excluded: it is the gate
+    # working correctly, not a failure (mission Section 32).
+    total_failures = (
+        mismatched + unknown
+        + live_mismatched + live_unknown
+        + live_resolution_failed + live_fetch_failed + live_not_processed_deadline
+        + publication_gate_bypass
+    )
     if total_failures > 0:
         log.error("=" * 70)
         log.error(
-            "%s -- %d R2 mismatch/missing + %d public HTTP mismatch/missing + "
-            "%d R2 unverifiable + %d public unverifiable report(s). A changed, "
+            "%s -- %d R2 mismatch/missing + %d R2 unverifiable + %d public HTTP "
+            "mismatch/missing + %d public resolution-failed + %d public fetch-failed + "
+            "%d not-processed-by-deadline + %d publication-gate bypass(es). A changed, "
             "certified commercial artifact must be remotely AND publicly "
             "verified before this run can be treated as production-certified "
-            "(RX-PUB-A0 Sections 12, 25, 27).",
+            "(RX-PUB-A0 Sections 12, 25, 27; RX-PUB-A0.6 Sections 9, 26-27).",
             "HARD FAIL" if args.enforce else "WOULD HARD FAIL (--enforce not set)",
-            mismatched, live_mismatched, unknown, live_unknown,
+            mismatched, unknown, live_mismatched, live_resolution_failed,
+            live_fetch_failed, live_not_processed_deadline, publication_gate_bypass,
         )
         log.error("=" * 70)
         return 1 if args.enforce else 0
@@ -575,7 +785,11 @@ def main() -> int:
     if args.skip_public:
         log.info("PASS (R2-only -- --skip-public was set) -- every in-window report's R2 SHA-256 matches its local artifact.")
     else:
-        log.info("PASS -- every in-window report's R2 and public HTTP SHA-256 match its local artifact.")
+        log.info(
+            "PASS -- every in-window report's R2 SHA-256 matches its local artifact, and "
+            "every public HTTP response matches either the canonical artifact "
+            "(LIVE_VERIFIED) or the publication gate's expected denial (LIVE_EXPECTED_DENIAL)."
+        )
     return 0
 
 
