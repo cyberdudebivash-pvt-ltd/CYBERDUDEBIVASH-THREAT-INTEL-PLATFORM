@@ -10,7 +10,14 @@
  * here by editing numbers based on inference; it requires a supplied,
  * business-approved figure (tracked separately).
  */
-import pricingData from './pricing-data.json';
+// RX-PUB-A0.6C: explicit import attribute -- required by Node's native ESM
+// loader (which `node --test` uses) since Node 22; esbuild/Wrangler's
+// bundler (the actual Workers deploy path) has always accepted this syntax
+// too, so this is not a behavior change for production, only what makes a
+// direct `node --test` import of this module (or anything importing it,
+// e.g. index.js) work at all. Never triggered before this PR because no
+// existing test imported index.js or pricing.js directly.
+import pricingData from './pricing-data.json' with { type: 'json' };
 
 // Same shape/keys as the constant this replaces, so existing call sites
 // (handleRazorpayCreateOrder, etc.) need no changes beyond the import.

@@ -123,6 +123,16 @@ _SAFE_RESPONSE_HEADERS = (
     "cf-cache-status", "content-length", "content-type",
 )
 
+# RX-PUB-A0.6B: same Cloudflare zone-level cache-purge secrets
+# .github/workflows/dashboard-feeds-sync.yml already uses for its own static
+# URL list (Section 4 reuse mandate) -- not a new credential. Both optional:
+# if unset, purge is skipped (never attempted, never a hard failure) exactly
+# like that workflow's own "[SKIP] CF_ZONE_ID or CF_CACHE_PURGE_TOKEN not
+# configured" behavior.
+CF_ZONE_ID          = os.environ.get("CF_ZONE_ID", "").strip()
+CF_CACHE_PURGE_TOKEN = os.environ.get("CF_CACHE_PURGE_TOKEN", "").strip()
+CACHE_PURGE_TIMEOUT = 15
+
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -297,6 +307,80 @@ def _unresolvable_live_state(pub_status: dict) -> str:
     return "LIVE_UNKNOWN"
 
 
+def _purge_public_url(url: str) -> bool:
+    """RX-PUB-A0.6B: precise, single-URL Cloudflare cache purge -- never a
+    zone-wide purge (mission Section 14). Reuses the exact CF_ZONE_ID /
+    CF_CACHE_PURGE_TOKEN secrets and purge_cache API call
+    .github/workflows/dashboard-feeds-sync.yml already uses for its own
+    static URL list; this is the same mechanism applied to a dynamically
+    detected stale report URL instead of a fixed list.
+
+    Returns True only on a confirmed-successful Cloudflare API response.
+    Never raises -- a purge failure must never crash STAGE 3.6a or be
+    confused with an R2/identity failure. Never logs the token.
+
+    Ordering contract (mission Section 15): callers MUST only invoke this
+    after the R2 layer has confirmed remote_sha256 == artifact_sha256 for
+    this exact report -- never purge toward a canonical object that has not
+    been verified. verify_one() below enforces this by construction (this
+    function is only reachable from the SERVE_CANONICAL_ARTIFACT branch,
+    which runs after the R2-layer check)."""
+    if not (CF_ZONE_ID and CF_CACHE_PURGE_TOKEN):
+        return False
+    try:
+        _validate_public_url(url)
+    except PublicFetchConfigError:
+        # Same host/scheme allowlist as every other outbound call in this
+        # script (mission Section 36) -- never purge an unvalidated target.
+        return False
+    try:
+        body = json.dumps({"files": [url]}).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.cloudflare.com/client/v4/zones/{CF_ZONE_ID}/purge_cache",
+            data=body, method="POST",
+            headers={
+                "Authorization": f"Bearer {CF_CACHE_PURGE_TOKEN}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=CACHE_PURGE_TIMEOUT) as resp:
+            result = json.loads(resp.read())
+            return bool(result.get("success"))
+    except Exception as e:
+        log.warning("Cache purge request failed for %s: %s", url, e)
+        return False
+
+
+def _attempt_purge_and_reverify(result: dict, public_url: str, local_sha256: str) -> None:
+    """RX-PUB-A0.6B: mutates `result` in place. Only ever called for a
+    report the publication gate expects to serve, and only from call sites
+    that have already confirmed `publication_state == "REMOTE_VERIFIED"`
+    (mission Section 15 -- never purge toward an unverified canonical
+    object). Purges the exact URL once, then re-fetches once (bounded, not
+    a retry loop -- a purge either takes effect promptly or it did not
+    succeed) to check whether the edge has converged with R2."""
+    result["cache_purge_attempted"] = True
+    purged = _purge_public_url(public_url)
+    result["cache_purge_succeeded"] = purged
+    if not purged:
+        result["public_still_stale"] = True
+        return
+    try:
+        recheck = _fetch_public(public_url)
+    except PublicFetchConfigError:
+        result["public_still_stale"] = True
+        return
+    if recheck["bytes"] is not None and _sha256_bytes(recheck["bytes"]) == local_sha256:
+        result["live_state"] = "LIVE_VERIFIED"
+        result["public_sha256"] = local_sha256
+        result["public_verified_at"] = _verifier._utc_now()
+        result["public_verified_after_invalidation"] = True
+        result["public_response_headers"] = recheck["headers"]
+        result.pop("public_error", None)
+    else:
+        result["public_still_stale"] = True
+
+
 def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict:
     local_bytes = local_path.read_bytes()
     local_sha256 = _sha256_bytes(local_bytes)
@@ -318,6 +402,11 @@ def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict
         "customer_ready": None,
         "expected_live_behavior": None,
         "publication_gate_bypass": False,
+        # RX-PUB-A0.6B
+        "cache_purge_attempted": False,
+        "cache_purge_succeeded": None,
+        "public_verified_after_invalidation": False,
+        "public_still_stale": False,
     }
 
     # -- R2 layer (LOCAL vs R2) -----------------------------------------
@@ -389,6 +478,13 @@ def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict
             result["public_error"] = (
                 "publication gate says customer_ready=true but public HTTP GET returned 404"
             )
+            # RX-PUB-A0.6B: a 404 for a gate-approved report whose R2 copy
+            # is independently confirmed correct could be a stale/negative
+            # cache entry (mission Section 13) -- try a precise purge and
+            # one re-fetch before accepting this as a genuine defect. Never
+            # purges toward an object R2 itself hasn't verified.
+            if result["publication_state"] == "REMOTE_VERIFIED":
+                _attempt_purge_and_reverify(result, public_url, local_sha256)
         else:
             result["live_state"] = _unresolvable_live_state(pub_status)
             result["public_error"] = "public HTTP GET returned 404; publication gate could not evaluate this report"
@@ -426,6 +522,13 @@ def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict
                     f"artifact_sha256 ({local_sha256[:16]}...) != public_sha256 "
                     f"({public_sha256[:16]}...) -- local and customer-served bytes diverge"
                 )
+                # RX-PUB-A0.6B: the confirmed root cause (docs/RX_PUB_A0_6_
+                # PROOF_BEFORE_CHANGE.md Phase 0) -- a gate-approved,
+                # R2-verified-correct report can still be served stale
+                # bytes by a lagging Cloudflare edge POP. Purge the exact
+                # URL and re-check once before accepting this as terminal.
+                if result["publication_state"] == "REMOTE_VERIFIED":
+                    _attempt_purge_and_reverify(result, public_url, local_sha256)
         else:
             # UNKNOWN_EXPECTATION: the gate never evaluated this report (a
             # resolver miss / ITEM_NOT_RESOLVABLE), or our own fetch of its
@@ -563,6 +666,13 @@ def main() -> int:
     live_fetch_failed = 0
     live_not_processed_deadline = 0
     publication_gate_bypass = 0
+    # RX-PUB-A0.6B: mission Section 35 -- event-derived only, counted from
+    # what _attempt_purge_and_reverify actually recorded per report.
+    cache_invalidations_attempted = 0
+    cache_invalidations_succeeded = 0
+    cache_invalidations_failed = 0
+    public_verified_after_invalidation = 0
+    public_still_stale = 0
 
     deadline_hit = False
     for _loop_idx, entry in enumerate(entries):
@@ -612,6 +722,17 @@ def main() -> int:
         result["source_updated_at"] = entry.get("processed_at") or entry.get("timestamp") or ""
         result["path"] = str(local_path.relative_to(REPO_ROOT))
         manifest_out["reports"][intel_id] = result
+
+        if result.get("cache_purge_attempted"):
+            cache_invalidations_attempted += 1
+            if result.get("cache_purge_succeeded"):
+                cache_invalidations_succeeded += 1
+            else:
+                cache_invalidations_failed += 1
+            if result.get("public_verified_after_invalidation"):
+                public_verified_after_invalidation += 1
+            elif result.get("public_still_stale"):
+                public_still_stale += 1
 
         state = result["publication_state"]
         if state == "REMOTE_VERIFIED":
@@ -681,6 +802,12 @@ def main() -> int:
         "live_fetch_failed":      live_fetch_failed,
         "live_not_processed_deadline": live_not_processed_deadline,
         "publication_gate_bypass": publication_gate_bypass,
+        # RX-PUB-A0.6B (mission Section 35)
+        "cache_invalidations_attempted": cache_invalidations_attempted,
+        "cache_invalidations_succeeded": cache_invalidations_succeeded,
+        "cache_invalidations_failed":    cache_invalidations_failed,
+        "public_verified_after_invalidation": public_verified_after_invalidation,
+        "public_still_stale": public_still_stale,
         "elapsed_seconds":  elapsed,
         "run_deadline_exceeded": deadline_hit,
     }
@@ -734,6 +861,31 @@ def main() -> int:
         live_verified, live_expected_denial, live_mismatched,
         live_resolution_failed, live_fetch_failed, live_not_processed_deadline, live_unknown,
     )
+    if cache_invalidations_attempted:
+        log.info(
+            "Cache purge summary: %d attempted, %d succeeded, %d failed | "
+            "%d converged after purge (now LIVE_VERIFIED), %d still stale after purge",
+            cache_invalidations_attempted, cache_invalidations_succeeded, cache_invalidations_failed,
+            public_verified_after_invalidation, public_still_stale,
+        )
+
+    # RX-PUB-A0.6A / mission Section 9: a publication-gate bypass is the
+    # single most severe outcome this verifier can observe -- a report the
+    # platform's own gate says must not be served was served anyway. Always
+    # surfaced with its own block, distinct from and in addition to the
+    # general failure summary below, and never silently folded into an
+    # ordinary mismatch count (mission Section 52 lists this as an automatic
+    # mission blocker).
+    if publication_gate_bypass > 0:
+        log.error("!" * 70)
+        log.error(
+            "PUBLICATION_GATE_BYPASS x%d -- a report the platform's publication gate "
+            "denied (customer_ready=false) was served with a real HTML body at its "
+            "public URL. This is a customer-facing access-control defect, not a byte "
+            "divergence (RX-PUB-A0.6 mission Section 9).",
+            publication_gate_bypass,
+        )
+        log.error("!" * 70)
 
     # RX-PUB-A0.6A / mission Section 9: a publication-gate bypass is the
     # single most severe outcome this verifier can observe -- a report the

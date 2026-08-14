@@ -525,12 +525,33 @@ function buildCommercialGateBanner(certLevel) {
 // a full HTML intel report on-the-fly, then cache it back to R2.
 // =============================================================================
 
-async function findItemBySlug(env, slug) {
+// RX-PUB-A0.6C: last-resort fallback source, checked only when none of the
+// four enriched feed products above resolve the slug. docs/RX_PUB_A0_6_
+// PROOF_BEFORE_CHANGE.md's live evidence (2026-08-14): api/v1/intel/
+// latest.json and api/feed.json are kept in sync with each other (472
+// items each, identical population) by generate_api_manifests.py, but both
+// are a smaller population than data/stix/feed_manifest.json (518 items) --
+// the same in-window source scripts/generate_intel_reports.py's Zero-skip
+// policy regenerates every run and scripts/r2_reports_verifier.py treats as
+// authoritative. 69 confirmed real in-window reports were unresolvable
+// through every one of the four sources above, and (per that fail-open gap)
+// served straight from R2 with zero evaluatePublicationGate() evaluation.
+// feed_manifest.json's leaner per-item schema (no precomputed P20-P26
+// scores) is not a problem: evaluatePublicationGate() computes every score
+// fresh from base content fields (title, description, severity, iocs, ttps,
+// etc.) via the canonical engine functions -- it never reads a precomputed
+// score off the item -- and fails CLOSED if any engine errors on a missing
+// field, never open. Uploaded every run by scripts/r2_upload.py to this
+// exact key (BUCKET_DATA, "intel/feed_manifest.json").
+const FEED_MANIFEST_FALLBACK_KEY = "intel/feed_manifest.json";
+
+export async function findItemBySlug(env, slug) {
   const sources = [
     LATEST_PRO_JSON_KEY,
     LATEST_JSON_KEY,
     "api/v1/intel/top10.json",
     "api/v1/intel/apex.json",
+    FEED_MANIFEST_FALLBACK_KEY,
   ];
   for (const key of sources) {
     try {

@@ -406,6 +406,176 @@ class TestExpectedLiveBehavior(unittest.TestCase):
         )
 
 
+class TestCachePurgeAndReverify(unittest.TestCase):
+    """RX-PUB-A0.6B (mission Section 10-16): a gate-approved, R2-verified
+    report served stale by a lagging edge POP must trigger a precise purge
+    and one re-check -- but ONLY after R2 itself has confirmed the
+    canonical object (Section 15), never before."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="rrv_purge_test_"))
+        self.report_path = self.tmp / "intel--purgetest000000.html"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write(self, content: str) -> bytes:
+        data = content.encode("utf-8")
+        self.report_path.write_bytes(data)
+        return data
+
+    def _r2_verified(self, data: bytes):
+        """R2 layer reports REMOTE_VERIFIED -- the only state that may
+        authorize a purge attempt."""
+        return patch.object(rrv._verifier, "_s3api_head_object", return_value={"status": 200, "content_length": len(data), "etag": "x"}), \
+               patch.object(rrv, "_get_object_bytes", return_value=data)
+
+    def _r2_unverified(self):
+        return patch.object(rrv._verifier, "_s3api_head_object", return_value=None), \
+               patch.object(rrv._verifier, "_boto3_head_object", return_value=None)
+
+    def _gate_approved(self):
+        return patch.object(
+            rrv, "_fetch_publication_status",
+            return_value={"customer_ready": True, "state": "CUSTOMER_READY", "reason_codes": [], "fetch_error": None},
+        )
+
+    def test_purge_succeeds_and_reverify_converges_reclassifies_as_verified(self):
+        local_data = self._write("<!DOCTYPE html><html>current canonical content</html>")
+        stale_data = b"<!DOCTYPE html><html>OLD stale edge-cached content</html>"
+        p1, p2 = self._r2_verified(local_data)
+        fetch_calls = [
+            {"bytes": stale_data, "status": 200, "headers": {"content-type": "text/html"}, "error": None},  # first fetch: stale
+            {"bytes": local_data, "status": 200, "headers": {"content-type": "text/html", "cf-ray": "post-purge"}, "error": None},  # re-fetch after purge: fresh
+        ]
+        with p1, p2, self._gate_approved(), \
+             patch.object(rrv, "_fetch_public", side_effect=fetch_calls), \
+             patch.object(rrv, "_purge_public_url", return_value=True) as mock_purge:
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--purgetest000000.html")
+
+        mock_purge.assert_called_once_with("https://intel.cyberdudebivash.com/reports/2026/08/intel--purgetest000000.html")
+        self.assertEqual(result["publication_state"], "REMOTE_VERIFIED")
+        self.assertEqual(result["live_state"], "LIVE_VERIFIED")
+        self.assertTrue(result["cache_purge_attempted"])
+        self.assertTrue(result["cache_purge_succeeded"])
+        self.assertTrue(result["public_verified_after_invalidation"])
+        self.assertFalse(result["public_still_stale"])
+        self.assertEqual(result["public_sha256"], _sha256(local_data))
+        self.assertNotIn("public_error", result)
+
+    def test_purge_succeeds_but_reverify_still_stale_stays_divergent(self):
+        local_data = self._write("<!DOCTYPE html><html>current canonical content</html>")
+        stale_data = b"<!DOCTYPE html><html>OLD stale edge-cached content</html>"
+        p1, p2 = self._r2_verified(local_data)
+        with p1, p2, self._gate_approved(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": stale_data, "status": 200, "headers": {"content-type": "text/html"}, "error": None}), \
+             patch.object(rrv, "_purge_public_url", return_value=True):
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--purgetest000000.html")
+
+        self.assertEqual(result["live_state"], "LIVE_STALE_OR_DIVERGENT")
+        self.assertTrue(result["cache_purge_attempted"])
+        self.assertTrue(result["cache_purge_succeeded"])
+        self.assertFalse(result["public_verified_after_invalidation"])
+        self.assertTrue(result["public_still_stale"])
+
+    def test_purge_fails_stays_divergent_without_a_second_fetch(self):
+        """Purge failure (no credentials, API error) must not attempt the
+        bounded re-fetch -- there is nothing to re-check yet."""
+        local_data = self._write("<!DOCTYPE html><html>current canonical content</html>")
+        stale_data = b"<!DOCTYPE html><html>OLD stale edge-cached content</html>"
+        p1, p2 = self._r2_verified(local_data)
+        with p1, p2, self._gate_approved(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": stale_data, "status": 200, "headers": {"content-type": "text/html"}, "error": None}) as mock_fetch, \
+             patch.object(rrv, "_purge_public_url", return_value=False):
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--purgetest000000.html")
+
+        self.assertEqual(result["live_state"], "LIVE_STALE_OR_DIVERGENT")
+        self.assertTrue(result["cache_purge_attempted"])
+        self.assertFalse(result["cache_purge_succeeded"])
+        self.assertTrue(result["public_still_stale"])
+        self.assertEqual(mock_fetch.call_count, 1, "a failed purge must not trigger a re-fetch")
+
+    def test_purge_never_attempted_when_r2_layer_has_not_verified_the_object(self):
+        """Mission Section 15, verbatim: never purge toward an unverified
+        canonical object. If R2 itself could not confirm the object (no
+        credentials, R2 outage), staleness at the edge is not this
+        function's problem to fix yet."""
+        local_data = self._write("<!DOCTYPE html><html>content</html>")
+        stale_data = b"<!DOCTYPE html><html>different content</html>"
+        p1, p2 = self._r2_unverified()
+        with p1, p2, self._gate_approved(), \
+             patch.object(rrv, "_fetch_public", return_value={"bytes": stale_data, "status": 200, "headers": {"content-type": "text/html"}, "error": None}), \
+             patch.object(rrv, "_purge_public_url") as mock_purge:
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--purgetest000000.html")
+
+        self.assertNotEqual(result["publication_state"], "REMOTE_VERIFIED")
+        mock_purge.assert_not_called()
+        self.assertFalse(result["cache_purge_attempted"])
+        self.assertEqual(result["live_state"], "LIVE_STALE_OR_DIVERGENT")
+
+    def test_unexpected_404_also_eligible_for_purge_and_reverify(self):
+        """A 404 for a gate-approved, R2-verified report could be a stale
+        negative-cache entry -- the same purge-and-reverify path applies."""
+        local_data = self._write("<!DOCTYPE html><html>current canonical content</html>")
+        p1, p2 = self._r2_verified(local_data)
+        fetch_calls = [
+            {"bytes": None, "status": 404, "headers": {}, "error": "HTTP 404"},
+            {"bytes": local_data, "status": 200, "headers": {"content-type": "text/html"}, "error": None},
+        ]
+        with p1, p2, self._gate_approved(), \
+             patch.object(rrv, "_fetch_public", side_effect=fetch_calls), \
+             patch.object(rrv, "_purge_public_url", return_value=True):
+            result = rrv.verify_one(self.report_path, "reports/2026/08/intel--purgetest000000.html")
+
+        self.assertEqual(result["live_state"], "LIVE_VERIFIED")
+        self.assertTrue(result["public_verified_after_invalidation"])
+
+
+class TestPurgePublicUrl(unittest.TestCase):
+    """Unit coverage of _purge_public_url in isolation from verify_one()."""
+
+    def test_no_credentials_configured_returns_false_without_network_call(self):
+        with patch.object(rrv, "CF_ZONE_ID", ""), patch.object(rrv, "CF_CACHE_PURGE_TOKEN", ""), \
+             patch("urllib.request.urlopen") as mock_urlopen:
+            self.assertFalse(rrv._purge_public_url("https://intel.cyberdudebivash.com/reports/2026/08/x.html"))
+        mock_urlopen.assert_not_called()
+
+    def test_disallowed_host_returns_false_without_network_call(self):
+        with patch.object(rrv, "CF_ZONE_ID", "zone123"), patch.object(rrv, "CF_CACHE_PURGE_TOKEN", "secrettoken"), \
+             patch("urllib.request.urlopen") as mock_urlopen:
+            self.assertFalse(rrv._purge_public_url("https://169.254.169.254/latest/meta-data/"))
+        mock_urlopen.assert_not_called()
+
+    def test_successful_cloudflare_response_returns_true(self):
+        class _FakeResp:
+            def read(self):
+                return json.dumps({"success": True}).encode("utf-8")
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        with patch.object(rrv, "CF_ZONE_ID", "zone123"), patch.object(rrv, "CF_CACHE_PURGE_TOKEN", "secrettoken"), \
+             patch("urllib.request.urlopen", return_value=_FakeResp()):
+            self.assertTrue(rrv._purge_public_url("https://intel.cyberdudebivash.com/reports/2026/08/x.html"))
+
+    def test_cloudflare_api_error_returns_false_not_raises(self):
+        with patch.object(rrv, "CF_ZONE_ID", "zone123"), patch.object(rrv, "CF_CACHE_PURGE_TOKEN", "secrettoken"), \
+             patch("urllib.request.urlopen", side_effect=Exception("connection reset")):
+            self.assertFalse(rrv._purge_public_url("https://intel.cyberdudebivash.com/reports/2026/08/x.html"))
+
+    def test_unsuccessful_cloudflare_response_returns_false(self):
+        class _FakeResp:
+            def read(self):
+                return json.dumps({"success": False, "errors": [{"message": "invalid zone"}]}).encode("utf-8")
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        with patch.object(rrv, "CF_ZONE_ID", "zone123"), patch.object(rrv, "CF_CACHE_PURGE_TOKEN", "secrettoken"), \
+             patch("urllib.request.urlopen", return_value=_FakeResp()):
+            self.assertFalse(rrv._purge_public_url("https://intel.cyberdudebivash.com/reports/2026/08/x.html"))
+
+
 class TestPublicUrlAllowlist(unittest.TestCase):
     """CodeRabbit finding (CWE-918 SSRF): RX_PUB_A0_PUBLIC_BASE_URL is
     CI-environment-controlled, not end-user input, but urlopen() with a
