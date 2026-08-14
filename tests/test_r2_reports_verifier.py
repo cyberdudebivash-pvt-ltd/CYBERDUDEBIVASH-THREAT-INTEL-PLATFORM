@@ -9,11 +9,13 @@ scripts/r2_upload_verifier.py, proving the classification behavior
 (REMOTE_VERIFIED / STALE_OR_DIVERGENT / FAILED / UNKNOWN) is correct for
 each case the mission's Section 12 case table requires.
 """
+import concurrent.futures
 import hashlib
 import json
 import os
 import sys
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -649,6 +651,109 @@ class TestFinalFailureHeaderPreservation(unittest.TestCase):
         self.assertEqual(result["status"], 503)
         self.assertEqual(result["headers"].get("cf-ray"), "abc123-IAD")
         self.assertEqual(result["headers"].get("cache-control"), "no-cache")
+
+
+class TestPublicFetchThrottling(unittest.TestCase):
+    """RX-PUB-A0.6D follow-up: real production evidence (sentinel-blogger.yml
+    run 31786632126, the first run with 6D's bounded concurrency) showed
+    VERIFY_MAX_WORKERS=8 driving public-origin HTTP 429s from a 3.2%
+    baseline (5/155, observed even at ~1-at-a-time sequential pacing) up to
+    36% (184/507) -- an order-of-magnitude increase from bursting up to 16
+    simultaneous requests at the shared public origin. These tests cover the
+    fix: a dedicated semaphore around _fetch_public's network attempt,
+    independent of the R2-layer's own (unaffected, still-8-way) concurrency,
+    plus Retry-After-aware backoff on a 429."""
+
+    def test_retry_after_seconds_parses_valid_numeric_header(self):
+        self.assertEqual(rrv._retry_after_seconds({"retry-after": "5"}), 5.0)
+
+    def test_retry_after_seconds_returns_none_when_absent(self):
+        self.assertIsNone(rrv._retry_after_seconds({}))
+
+    def test_retry_after_seconds_returns_none_for_unparseable_value(self):
+        # The HTTP-date form of Retry-After exists but is deliberately not
+        # supported (see _retry_after_seconds docstring) -- must degrade to
+        # the fixed delay, never raise.
+        self.assertIsNone(rrv._retry_after_seconds({"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"}))
+
+    def test_429_response_waits_for_retry_after_instead_of_fixed_delay(self):
+        import email.message
+
+        def _fake_urlopen(*args, **kwargs):
+            headers = email.message.Message()
+            headers["Retry-After"] = "7"
+            raise urllib.error.HTTPError(
+                url="https://intel.cyberdudebivash.com/reports/x.html",
+                code=429, msg="Too Many Requests", hdrs=headers, fp=None,
+            )
+
+        sleep_calls = []
+        with patch.object(rrv, "PUBLIC_RETRY_DELAY", 3), \
+             patch.object(rrv._PUBLIC_OPENER, "open", side_effect=_fake_urlopen), \
+             patch.object(rrv.time, "sleep", side_effect=sleep_calls.append):
+            result = rrv._fetch_public("https://intel.cyberdudebivash.com/reports/x.html")
+
+        self.assertEqual(result["status"], 429)
+        self.assertEqual(
+            sleep_calls, [7.0, 7.0],
+            "a 429 with a Retry-After header must back off for that long, not the fixed PUBLIC_RETRY_DELAY"
+        )
+
+    def test_429_response_without_retry_after_falls_back_to_fixed_delay(self):
+        import email.message
+
+        def _fake_urlopen(*args, **kwargs):
+            headers = email.message.Message()  # no Retry-After
+            raise urllib.error.HTTPError(
+                url="https://intel.cyberdudebivash.com/reports/x.html",
+                code=429, msg="Too Many Requests", hdrs=headers, fp=None,
+            )
+
+        sleep_calls = []
+        with patch.object(rrv, "PUBLIC_RETRY_DELAY", 3), \
+             patch.object(rrv._PUBLIC_OPENER, "open", side_effect=_fake_urlopen), \
+             patch.object(rrv.time, "sleep", side_effect=sleep_calls.append):
+            rrv._fetch_public("https://intel.cyberdudebivash.com/reports/x.html")
+
+        self.assertEqual(sleep_calls, [3, 3])
+
+    def test_public_fetch_concurrency_is_bounded_independently_of_worker_pool(self):
+        import threading
+        import time as _time
+
+        lock = threading.Lock()
+        state = {"current": 0, "max_seen": 0}
+
+        def _tracked_urlopen(req, timeout=None):
+            with lock:
+                state["current"] += 1
+                state["max_seen"] = max(state["max_seen"], state["current"])
+            _time.sleep(0.05)
+            with lock:
+                state["current"] -= 1
+
+            class _Resp:
+                status = 200
+                def getheaders(self_inner): return [("Content-Type", "text/html")]
+                def read(self_inner): return b"<!DOCTYPE html><html>x</html>"
+                def __enter__(self_inner): return self_inner
+                def __exit__(self_inner, *a): return False
+            return _Resp()
+
+        with patch.object(rrv, "PUBLIC_FETCH_MAX_CONCURRENCY", 2), \
+             patch.object(rrv, "_public_fetch_semaphore", threading.Semaphore(2)), \
+             patch.object(rrv._PUBLIC_OPENER, "open", side_effect=_tracked_urlopen):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                list(pool.map(
+                    lambda _: rrv._fetch_public("https://intel.cyberdudebivash.com/reports/x.html"),
+                    range(10),
+                ))
+
+        self.assertLessEqual(
+            state["max_seen"], 2,
+            "public-origin fetch concurrency must stay bounded by PUBLIC_FETCH_MAX_CONCURRENCY "
+            "even when 8 worker threads are all trying to fetch simultaneously"
+        )
 
 
 class TestFailOpenGuard(unittest.TestCase):
