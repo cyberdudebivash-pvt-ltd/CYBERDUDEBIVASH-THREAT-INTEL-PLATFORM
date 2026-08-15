@@ -162,11 +162,23 @@ def _find_sync_meta() -> Optional[Path]:
 # S3 API verification (primary method -- authenticated, works for private buckets)
 # ---------------------------------------------------------------------------
 
-def _s3api_head_object(bucket: str, key: str) -> Optional[dict]:
+def _s3api_head_object(bucket: str, key: str, full: bool = False) -> Optional[dict]:
     """
     BUG 3 FIX: Use awscli s3api head-object (authenticated) to check an R2 object.
     This is the CORRECT method for private R2 buckets.
     Unauthenticated HTTP HEAD returns HTTP 400 on private R2 buckets.
+
+    full=False (default, unchanged): returns the trimmed
+    {status, content_length, etag, source} dict this function has always
+    returned -- every existing caller (this module's own verify_r2_object(),
+    r2_reports_verifier.py) keeps getting exactly that shape.
+
+    full=True: also includes "raw", the complete parsed head-object JSON
+    (LastModified/ContentType/CacheControl/Metadata/etc.), for callers that
+    need metadata this function otherwise discards (e.g. a forensic
+    diagnostic). Reuse-before-build: extends this primitive instead of a
+    second implementation duplicating the same credential/retry/subprocess
+    logic elsewhere.
     """
     if not CF_ACCOUNT_ID or not ACCESS_KEY or not SECRET_KEY:
         log.warning("S3 credentials absent -- cannot perform S3 API head-object check")
@@ -198,15 +210,21 @@ def _s3api_head_object(bucket: str, key: str) -> Optional[dict]:
                     "S3 API head-object OK: s3://%s/%s -- size=%d bytes, etag=%s",
                     bucket, key, content_length, etag[:16] if etag else "N/A",
                 )
-                return {
+                out = {
                     "status":         200,
                     "content_length": content_length,
                     "etag":           etag,
                     "source":         "awscli_s3api",
                 }
+                if full:
+                    out["raw"] = data
+                return out
             elif "NoSuchKey" in result.stderr or result.returncode == 254:
                 log.warning("S3 API: object not found: s3://%s/%s", bucket, key)
-                return {"status": 404, "content_length": 0, "etag": "", "source": "awscli_s3api"}
+                out = {"status": 404, "content_length": 0, "etag": "", "source": "awscli_s3api"}
+                if full:
+                    out["raw"] = None
+                return out
             else:
                 log.warning(
                     "S3 API head-object failed (attempt %d/%d): rc=%d stderr=%s",

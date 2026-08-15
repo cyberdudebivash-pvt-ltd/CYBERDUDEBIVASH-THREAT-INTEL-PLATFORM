@@ -1,17 +1,11 @@
 """
 tests/test_multi_source_collector.py
 
-CI-workflow audit P0 fix: scripts/multi_source_collector.py was the only
-api/feed.json writer that appended newly-collected items without
-re-applying the platform's 500-item cap (output_validation_gate.py's
-API_FEED_CAP and run_pipeline.py's stage_sync_root_feed_json() both
-already enforce it). Confirmed live: api/feed.json grew from 244 items
-(05:37 UTC) to 516 items (17:45 UTC) on 2026-08-14, hard-failing
-STAGE 3.9 (Output Validation Gate) on every sentinel-blogger.yml and
-deploy-worker.yml run since, and skipping ~40 downstream P20-P38
-certification/deployment stages gated behind it (confirmed via run
-31821295989's job step list -- STAGE 3.90 through STAGE 4.04 all
-"skipped" because STAGE 3.9 hard-failed above them).
+scripts/multi_source_collector.py was the only api/feed.json writer that
+appended newly-collected items without re-applying the platform's 500-item
+cap (output_validation_gate.py's API_FEED_CAP and run_pipeline.py's
+stage_sync_root_feed_json() both already enforce it), allowing feed.json to
+grow past the cap and hard-fail the downstream Output Validation Gate.
 
 These tests exercise scripts/multi_source_collector.py's run() end-to-end
 against a temp FEED_PATH, with all 8 network collectors monkeypatched so
