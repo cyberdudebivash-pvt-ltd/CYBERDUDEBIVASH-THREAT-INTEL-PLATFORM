@@ -1,6 +1,171 @@
 {
-  "sigma_rules": [],
-  "yara_rules": [],
-  "snort_rules": [],
-  "stats": {}
+  "sigma_rules": [
+    {
+      "title": "CDB Sentinel APEX - CVE202616007__Authenticated_SQL_Injection_in_AppFlowy",
+      "id": "sigma--948b732be0b2",
+      "status": "experimental",
+      "description": "Detects activity related to CVE-2026-16007 - Authenticated SQL Injection in AppFlowy",
+      "references": [
+        "https://intel.cyberdudebivash.com"
+      ],
+      "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+      "date": "2026/08/15",
+      "tags": [
+        "cve.cve-2026-16007"
+      ],
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection": {
+          "CommandLine|contains": [
+            "suspicious"
+          ]
+        },
+        "condition": "selection"
+      },
+      "level": "medium",
+      "falsepositives": [
+        "Legitimate administrative activity"
+      ]
+    }
+  ],
+  "yara_rules": [
+    {
+      "rule_name": "CDB_CVE202616007__Authenticated_SQL_Injectio",
+      "rule_text": "rule CDB_CVE202616007__Authenticated_SQL_Injectio {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-16007 - Authenticated SQL Injection in AppFlowy\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $cve0 = \"CVE-2026-16007\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"AppFlowy\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_GPEWebDefender_exploit",
+      "rule_text": "rule CDB_GPEWebDefender_exploit {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for GPEWebDefender exploit\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsfirstezkpgru",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsfirstezkpgru {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://firstezkpg.run/riowC\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httplayananpemena",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httplayananpemena {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://layanan-pemenang33.blogspot.com/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsamericasdspk",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsamericasdspk {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://americasdspkits.com/rewards_login\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpwwwj110qvip",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpwwwj110qvip {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://www.j110q.vip/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpstranscriptem",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpstranscriptem {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://transcript.emurgopolicyreview.com/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsgenialcorpcl",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsgenialcorpcl {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://genialcorp.cl/allmroproducts/data-entry.html\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpwwwseguridadb",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpwwwseguridadb {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://www.seguridad-bancol.weebly.com/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsenelgiaclub",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsenelgiaclub {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://enelgia.club/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpswwwdocusigns",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpswwwdocusigns {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://www.docusignsetup.icu/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsurltomefreer",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsurltomefreer {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://urlto.me/freerobux1010101\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpalldbgdhhdhhd",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpalldbgdhhdhhd {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://alldbgdhhdhhdhhhchhchdhdm-dp9hzij3r3mr.edgeone.\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsemctheatreco",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsemctheatreco {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://emctheatre.com/docusign/Mac/utility.php\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsallegrolokal",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsallegrolokal {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://allegrolokalnie.lokalna-ofeta1224178.lol/ofert\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpslwemuhpbrhwu",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpslwemuhpbrhwu {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://lwemuhpbrhwujqu7x-ugk3vphvutaw96z0lcdyzswo.ver\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpslwemuhpbrhwu",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpslwemuhpbrhwu {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://lwemuhpbrhwujqu7x-ugk3vphvutaw96z0lcdyzswo.ver\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpssoporteclave",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpssoporteclave {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://soporteclave.com/?rid=8KjOYGL\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsrbcodenetv32",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsrbcodenetv32 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://rbcode.net/v/32d387ed9b13e49d41563f07aa049be2\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpskjgmhnetuyut",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpskjgmhnetuyut {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://kjgmhnetuyut.blogspot.com/p/payment-received-s\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsloginverifyd",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsloginverifyd {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://login-verifydocusignauthentication.fomlchev.uk\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpwwwsupp0rtass",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpwwwsupp0rtass {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://www.supp0rt-assistance.vercel.app/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpserverstaticp",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpserverstaticp {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://server-static-page--optimumcarasls2.replit.app/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpbafkreiexrtpk",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpbafkreiexrtpk {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://bafkreiexrtpkkflfywi6lyfj7zc5bw6zrcvv4dib4wbfjr\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpbafkreihql754",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpbafkreihql754 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://bafkreihql7542hbekhfae4355pumneesu37jvm2yqy22hi\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsssosigninatt",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsssosigninatt {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://ssosigninattcomilogin6w2if0.authcurrentlymailu\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsssosigninatt",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsssosigninatt {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://ssosigninattcomiloginrw2a84.authcurrentlymailu\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsanshikamishr",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsanshikamishr {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://anshikamishra6373-blip.github.io/Amazon/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsfacebookinte",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsfacebookinte {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://facebook-interface.blogspot.com/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsgulabahmadco",
+      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsgulabahmadco {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://gulabahmad-code.github.io/Assignment_5/\"\n        severity = \"high\"\n        date = \"2026-08-15\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+    }
+  ],
+  "snort_rules": [
+    {
+      "rule_name": "CVE202616007__Authenticated_SQL_Injection_in_AppFlowy",
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-16007 - Authenticated SQL Injection in AppFlowy\"; content:\"CVE-2026-16007\"; nocase; sid:6100616; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 6100616
+    }
+  ],
+  "stats": {
+    "total_rules": 32,
+    "sigma_count": 1,
+    "yara_count": 30,
+    "snort_count": 1,
+    "coverage_techniques": 0,
+    "generated_at": "2026-08-15T06:58:35.117126+00:00"
+  }
 }
