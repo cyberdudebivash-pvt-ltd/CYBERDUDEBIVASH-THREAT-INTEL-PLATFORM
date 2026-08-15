@@ -1,0 +1,72 @@
+name: "P0-MP.1A - R2 STIX Manifest Forensic Diagnostic (read-only, one-off)"
+
+# =============================================================================
+# BOUNDED, READ-ONLY, MANUAL-ONLY.
+#
+# Runs scripts/p0_r2_stix_manifest_diagnostic.py to answer one question for
+# the P0 data/stix/feed_manifest.json persistence incident
+# (docs/P0_FEED_MANIFEST_PERSISTENCE_INCIDENT.md): what STIX feed-manifest
+# state currently exists in R2, and does R2 hold any recoverable pre-collapse
+# generation?
+#
+# This workflow performs NO write to R2, NO write to the repository, and NO
+# deploy. It only reads (head-object / get-object / list-objects-v2 /
+# list-object-versions) and uploads its findings as a GitHub Actions build
+# artifact + prints them to the job log. See
+# tests/test_p0_r2_stix_manifest_diagnostic_read_only.py for the static proof
+# that the diagnostic script itself contains no mutating S3 call.
+#
+# Credentials reused unchanged from the existing production R2 credential
+# model (scripts/r2_upload.py / STAGE 3.5, STAGE 3.93.6, STAGE 4.1 in
+# sentinel-blogger.yml) -- no new credential path introduced.
+#
+# workflow_dispatch only: no schedule, no push, no workflow_run trigger.
+# Not wired into the production pipeline. Not intended to be a permanent
+# CI stage -- a bounded, one-off P0 forensic tool (mission Section 13).
+# =============================================================================
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-r2-stix-manifest-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    name: "R2 STIX Manifest Diagnostic (read-only)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Ensure awscli present
+        run: |
+          aws --version || pip install --quiet awscli
+
+      - name: Run read-only R2 diagnostic
+        timeout-minutes: 10
+        env:
+          CF_ACCOUNT_ID:         ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/p0_r2_stix_manifest_diagnostic.py
+
+      - name: Upload diagnostic report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-r2-stix-manifest-diagnostic
+          path: data/quality/p0_r2_stix_manifest_diagnostic.json
+          retention-days: 14
+          if-no-files-found: warn
