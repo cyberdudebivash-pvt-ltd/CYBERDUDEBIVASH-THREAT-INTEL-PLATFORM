@@ -45,7 +45,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -77,7 +76,14 @@ SEARCH_PREFIXES = [
 ]
 
 MAX_KEYS_PER_PREFIX = 1000   # bounded listing, not an unbounded bucket dump
-MAX_CANDIDATE_DOWNLOAD_BYTES = 50 * 1024 * 1024  # skip content analysis above 50MB
+MAX_CANDIDATE_DOWNLOAD_BYTES = 50 * 1024 * 1024  # skip content analysis above 50MB per object
+# Aggregate budget across ALL candidates combined: the per-object cap above
+# bounds one download, but with 10 prefixes x up to 1000 keys each, an
+# unbounded candidate LIST could still mean thousands of downloads. Bound
+# both the candidate count and the cumulative bytes actually fetched, and
+# record truncation explicitly rather than letting the job time out mid-scan.
+MAX_CANDIDATES_DOWNLOADED = 25
+MAX_TOTAL_CANDIDATE_DOWNLOAD_BYTES = 200 * 1024 * 1024
 
 
 def _utc_now() -> str:
@@ -89,45 +95,23 @@ def _sha256(data: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
-# One new, small, read-only primitive: full head-object JSON.
-# _verifier._s3api_head_object() (reused above) deliberately trims its return
-# value to {status, content_length, etag, source} -- correct for its own
-# STAGE 3.6 pass/fail purpose, but Section 4 of this diagnostic needs
-# LastModified/ContentType/CacheControl/custom metadata too, which that
-# function discards. Same credential/retry/env model as that function
-# (copied, not reinvented); the only difference is returning the untrimmed
-# parsed JSON instead of a subset.
+# Full head-object metadata: extends _verifier._s3api_head_object() (its
+# full=True mode, added alongside this diagnostic) instead of duplicating
+# its credential/retry/subprocess logic here. That function's default
+# (full=False) return value and every existing caller are unchanged.
 # ---------------------------------------------------------------------------
 def _head_object_full(bucket: str, key: str) -> dict | None:
-    if not (_verifier.CF_ACCOUNT_ID and _verifier.ACCESS_KEY and _verifier.SECRET_KEY):
-        return None
-    cmd = [
-        "aws", "s3api", "head-object",
-        "--bucket", bucket, "--key", key,
-        "--endpoint-url", _verifier.R2_ENDPOINT,
-        "--output", "json",
-    ]
-    env = os.environ.copy()
-    env["AWS_ACCESS_KEY_ID"] = _verifier.ACCESS_KEY
-    env["AWS_SECRET_ACCESS_KEY"] = _verifier.SECRET_KEY
-    env["AWS_DEFAULT_REGION"] = "auto"
-    for attempt in range(1, _verifier.MAX_RETRIES + 1):
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True,
-                timeout=_verifier.REQUEST_TIMEOUT, env=env,
-            )
-            if result.returncode == 0:
-                return {"found": True, **json.loads(result.stdout)}
-            if "NoSuchKey" in result.stderr or "Not Found" in result.stderr or result.returncode == 254:
-                return {"found": False}
-        except subprocess.TimeoutExpired:
-            pass
-        except Exception:
-            pass
-        if attempt < _verifier.MAX_RETRIES:
-            time.sleep(_verifier.RETRY_DELAY)
-    return None
+    head = _verifier._s3api_head_object(bucket, key, full=True)
+    if head is None:
+        # awscli path unavailable/exhausted -- fall back to the boto3 helper
+        # for at least an existence/size/etag signal (no full metadata in
+        # this path, same tradeoff verify_r2_object() already accepts).
+        head = _verifier._boto3_head_object(bucket, key)
+        if head is None:
+            return None
+    if head.get("status") == 404:
+        return {"found": False}
+    return {"found": True, **(head.get("raw") or {}), "_content_length": head.get("content_length"), "_etag": head.get("etag")}
 
 
 def _list_objects_v2(bucket: str, prefix: str, max_keys: int = MAX_KEYS_PER_PREFIX) -> list[dict] | None:
@@ -195,8 +179,13 @@ def _list_object_versions(bucket: str, key: str) -> dict:
                 "stderr_excerpt": result.stderr.strip()[:300],
             }
         data = json.loads(result.stdout)
-        versions = data.get("Versions", [])
-        delete_markers = data.get("DeleteMarkers", [])
+        # --prefix matches every key that STARTS WITH `key` (e.g. it would
+        # also match "intel/feed_manifest.json.backup"), not only the exact
+        # canonical key -- filter to an exact match before counting, or
+        # single_generation_only could describe a sibling object instead of
+        # (or in addition to) the canonical one.
+        versions = [v for v in data.get("Versions", []) if v.get("Key") == key]
+        delete_markers = [d for d in data.get("DeleteMarkers", []) if d.get("Key") == key]
         return {
             "checked": True, "supported": True,
             "version_count": len(versions),
@@ -329,14 +318,30 @@ def main() -> int:
                 candidates.append(obj)
 
     candidate_analysis = []
+    candidates_downloaded = 0
+    total_downloaded_bytes = 0
+    candidate_scan_truncated = False
     for obj in candidates:
         key = obj["key"]
         size = obj.get("size") or 0
         entry: dict = {"key": key, "listing_metadata": obj}
         if size > MAX_CANDIDATE_DOWNLOAD_BYTES:
-            entry["skipped_download"] = f"size {size} exceeds {MAX_CANDIDATE_DOWNLOAD_BYTES} byte diagnostic cap"
+            entry["skipped_download"] = f"size {size} exceeds {MAX_CANDIDATE_DOWNLOAD_BYTES} byte per-object diagnostic cap"
             candidate_analysis.append(entry)
             continue
+        if (candidates_downloaded >= MAX_CANDIDATES_DOWNLOADED
+                or total_downloaded_bytes + size > MAX_TOTAL_CANDIDATE_DOWNLOAD_BYTES):
+            entry["skipped_download"] = (
+                f"aggregate diagnostic budget exhausted "
+                f"({candidates_downloaded}/{MAX_CANDIDATES_DOWNLOADED} candidates, "
+                f"{total_downloaded_bytes}/{MAX_TOTAL_CANDIDATE_DOWNLOAD_BYTES} bytes) -- "
+                "not downloaded this run"
+            )
+            candidate_scan_truncated = True
+            candidate_analysis.append(entry)
+            continue
+        candidates_downloaded += 1
+        total_downloaded_bytes += size
         raw = _reports_verifier._get_object_bytes(_r2_upload.BUCKET_DATA, key)
         if raw is None:
             entry["get_object_ok"] = False
@@ -362,6 +367,13 @@ def main() -> int:
                 pass
         candidate_analysis.append(entry)
     report["historical_candidates"] = candidate_analysis
+    report["candidate_scan"] = {
+        "candidates_downloaded": candidates_downloaded,
+        "total_downloaded_bytes": total_downloaded_bytes,
+        "truncated": candidate_scan_truncated,
+        "max_candidates_downloaded": MAX_CANDIDATES_DOWNLOADED,
+        "max_total_candidate_download_bytes": MAX_TOTAL_CANDIDATE_DOWNLOAD_BYTES,
+    }
 
     # --- Section 7/8 classification ----------------------------------------
     head_found = bool(canonical_head and canonical_head.get("found"))
@@ -373,7 +385,15 @@ def main() -> int:
     if not head_found:
         classification = "R2_OBJECT_MISSING"
     elif candidate_analysis:
-        classification = "R2_PARTIAL_RECOVERY_AVAILABLE"  # requires human/next-PR judgement on whether any candidate is actually pre-collapse
+        # A key-name match ("manifest"/"feed" in the key) is not proof of
+        # recoverable content -- it can be the current copy itself, malformed
+        # JSON, or a backup_r2.py hash catalog with no manifest body at all.
+        # This script never claims R2_PARTIAL_RECOVERY_AVAILABLE (one of the
+        # mission's 6 final-classification values) on name-match alone; that
+        # requires content-level proof (a candidate whose analysis shows
+        # valid STIX-shaped records predating the current generation), which
+        # only the calling document's evidence matrix can establish.
+        classification = "R2_RECOVERY_CANDIDATES_FOUND"
     else:
         classification = "R2_CURRENT_ONLY_COLLAPSED"  # provisional; the calling doc compares canonical object stats against the git pre-collapse baseline to confirm
 
@@ -381,12 +401,16 @@ def main() -> int:
     report["single_generation_only"] = single_generation_only
     report["classification_note"] = (
         "This script classifies structurally (object exists? other candidates "
-        "found?). Whether the canonical object's own content actually matches "
-        "the collapsed generation or an earlier one is a content-level "
-        "comparison against the git pre-collapse baseline, done by the caller "
-        "(docs/P0_R2_STIX_MANIFEST_RECOVERY_DIAGNOSTIC.md) using this report's "
-        "canonical_object.analysis.sha256/record_count/newest_record_ts, not "
-        "re-derived here."
+        "found by key-name match?), never claiming recovery is proven just "
+        "because a plausibly-named object exists. 'R2_RECOVERY_CANDIDATES_FOUND' "
+        "is a preliminary signal, not one of the mission's 6 final classification "
+        "values (R2_PRE_COLLAPSE_RECOVERY_AVAILABLE / R2_CURRENT_ONLY_COLLAPSED / "
+        "R2_PARTIAL_RECOVERY_AVAILABLE / R2_OBJECT_MISSING / R2_ACCESS_FAILED / "
+        "R2_STATE_INDETERMINATE) -- the caller "
+        "(docs/P0_R2_STIX_MANIFEST_RECOVERY_DIAGNOSTIC.md) makes that final call "
+        "using this report's canonical_object.analysis and each candidate's "
+        "analysis (sha256/record_count/newest_record_ts/looks_like_stix_manifest) "
+        "compared against the git pre-collapse baseline."
     )
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
