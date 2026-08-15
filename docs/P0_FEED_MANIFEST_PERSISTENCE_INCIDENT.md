@@ -149,6 +149,37 @@ job that runs `aws s3api head-object` / `get-object` against
 `intel/feed_manifest.json` and reports size/hash/last-modified) before it
 can be ruled in or out — not yet done.
 
+## 4c. Proof Before Change / Reuse Report — P0-MP.1A R2 diagnostic tooling
+
+Per this repository's engineering constitution, the concrete implementation
+this incident produced (`scripts/p0_r2_stix_manifest_diagnostic.py`,
+`.github/workflows/p0-r2-stix-manifest-diagnostic.yml`,
+`tests/test_p0_r2_stix_manifest_diagnostic_read_only.py`) is recorded here:
+
+| Field | Entry |
+|---|---|
+| Objective | Answer, with real R2 evidence, whether `intel/feed_manifest.json` in R2 (`sentinel-apex-data`) holds any recoverable pre-collapse generation of the STIX manifest, without mutating anything. |
+| Affected files | `scripts/p0_r2_stix_manifest_diagnostic.py` (new), `.github/workflows/p0-r2-stix-manifest-diagnostic.yml` (new, `workflow_dispatch` only), `tests/test_p0_r2_stix_manifest_diagnostic_read_only.py` (new), `scripts/r2_upload_verifier.py` (extended: `_s3api_head_object()` gained an additive `full: bool = False` parameter; default behavior and every existing call site unchanged). |
+| Existing engine reused | `r2_upload_verifier._s3api_head_object()` / `_boto3_head_object()`, `r2_reports_verifier._get_object_bytes()`, `r2_upload.BUCKET_DATA`/`BUCKET_REPORTS` — called, not re-implemented. |
+| Evidence modification required | Section 4b above: R2's state for `intel/feed_manifest.json` could not be checked from the sandbox (no `CF_ACCOUNT_ID`, no `aws` CLI), and is the one open forensic question blocking a recovery-source decision. |
+| Risk classification | LOW. Strictly read-only against R2 (proven by `tests/test_p0_r2_stix_manifest_diagnostic_read_only.py`, which scans the diagnostic and every reused helper it delegates to for any mutating S3 verb); `workflow_dispatch`-only, not wired into any production trigger; writes no repository file except an ignorable local `data/quality/p0_r2_stix_manifest_diagnostic.json` snapshot. |
+| Expected regression risk | None to production: no existing route, schema, P-layer handler, or scheduled workflow is touched. The one existing-function change (`_s3api_head_object`'s new `full` parameter) is additive and defaults to the prior behavior, verified by keeping `scripts/r2_upload_verifier.py`'s own STAGE 3.6 call site unmodified. |
+| Rollback plan | Delete the 3 new files and revert the one-line `full` parameter addition; no other file depends on it yet. |
+
+**Observability exception, documented per the Deprecation/Observability policy:** this diagnostic intentionally does **not** add a `sentinel-blogger.yml` CI gate, a `ci_stats_extract.py` entry, or an API observability endpoint. It is a bounded, one-off, manually-triggered P0 forensic tool per the mission's explicit Section 13 ("do not inject this permanently into every production run unless there is a clear future operational reason") and Section 15 stop condition — not a new standing platform capability. If a recurring need for R2 forensic checks emerges later, that would be a separate, explicitly-scoped follow-up.
+
+**Reuse Report:**
+
+| Metric | Result |
+|---|---|
+| Existing engines reused (called, not re-implemented) | 3 (`_s3api_head_object`, `_boto3_head_object`, `_get_object_bytes`) |
+| Existing API routes extended | 0 (none — no API route involved) |
+| New engines introduced | 1 read-only helper (`_list_object_versions`, no existing equivalent in this codebase) + 1 additive extension (`_s3api_head_object(..., full=True)`) |
+| Duplicate engines introduced | 0 |
+| Duplicate routes introduced | 0 |
+| Backward compatibility preserved | PASS — `_s3api_head_object()`'s default (`full=False`) return shape is byte-for-byte unchanged |
+| Regression suite | `tests/test_p0_r2_stix_manifest_diagnostic_read_only.py` 4/4 PASS locally; full platform regression suite not run for this docs-only/tooling-only addition (no production code path changed) |
+
 ## 5. Implication for the mission's proposed fix
 
 This reframes but does not invalidate the mission's core concern: the STIX
