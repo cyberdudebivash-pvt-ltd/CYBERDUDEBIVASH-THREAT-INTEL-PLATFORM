@@ -1,0 +1,10 @@
+{
+  "threat_id": "thr-42798a04f6c6",
+  "title": "CVE-2026-67991: crmne/ruby_llm at commit fa6f279847d6d7027814539d9c0dfc3bbdfd2a8",
+  "scripts": [
+    {
+      "type": "hardening_bash",
+      "content": "#!/bin/bash\n# CDB APEX v37.0 - Emergency Hardening Script\n# Threat: CVE-2026-67991: crmne/ruby_llm at commit fa6f279847d6d702781\n# Generated: 2026-08-16T16:53:30.466036+00:00\n\necho \"[*] Updating system packages...\"\napt-get update && apt-get upgrade -y 2>/dev/null || yum update -y 2>/dev/null\n\necho \"[*] Enabling firewall...\"\nufw enable 2>/dev/null || firewall-cmd --set-default-zone=drop 2>/dev/null\n\necho \"[*] Disabling unnecessary services...\"\nsystemctl disable --now telnet.socket 2>/dev/null\nsystemctl disable --now rsh.socket 2>/dev/null\n\necho \"[*] Setting secure SSH configuration...\"\nsed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config\nsed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config\nsystemctl restart sshd\n\necho \"[+] Hardening complete for threat: thr-42798a04f6c6\"\n"
+    }
+  ]
+}
