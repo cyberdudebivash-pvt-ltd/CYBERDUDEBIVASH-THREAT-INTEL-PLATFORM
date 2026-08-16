@@ -1,6 +1,156 @@
 {
   "sigma_rules": [
     {
+      "title": "CDB Sentinel APEX - CVE202674578__crypto_algif_skcipher__force_synchronous_proce",
+      "id": "sigma--9ff544140b43",
+      "status": "experimental",
+      "description": "Detects activity related to CVE-2026-74578 - crypto: algif_skcipher - force synchronous processing on trees without ctx->state",
+      "references": [
+        "https://intel.cyberdudebivash.com"
+      ],
+      "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+      "date": "2026/08/16",
+      "tags": [
+        "cve.cve-2026-74578"
+      ],
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection": {
+          "CommandLine|contains": [
+            "suspicious"
+          ]
+        },
+        "condition": "selection"
+      },
+      "level": "medium",
+      "falsepositives": [
+        "Legitimate administrative activity"
+      ]
+    },
+    {
+      "title": "CDB Sentinel APEX - CVE202617608__WP_Compress__71009__CrossSite_Request_Forgery",
+      "id": "sigma--864ec628a559",
+      "status": "experimental",
+      "description": "Detects activity related to CVE-2026-17608 - WP Compress <= 7.10.09 - Cross-Site Request Forgery to Arbitrary Options Deletion",
+      "references": [
+        "https://intel.cyberdudebivash.com"
+      ],
+      "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+      "date": "2026/08/16",
+      "tags": [
+        "cve.cve-2026-17608"
+      ],
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection": {
+          "CommandLine|contains": [
+            "suspicious"
+          ]
+        },
+        "condition": "selection"
+      },
+      "level": "high",
+      "falsepositives": [
+        "Legitimate administrative activity"
+      ]
+    },
+    {
+      "title": "CDB Sentinel APEX - Exploit_for_CVE202224481",
+      "id": "sigma--8c474728c4d0",
+      "status": "experimental",
+      "description": "Detects activity related to Exploit for CVE-2022-24481",
+      "references": [
+        "https://intel.cyberdudebivash.com"
+      ],
+      "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+      "date": "2026/08/16",
+      "tags": [
+        "cve.cve-2022-24481"
+      ],
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection": {
+          "CommandLine|contains": [
+            "suspicious"
+          ]
+        },
+        "condition": "selection"
+      },
+      "level": "medium",
+      "falsepositives": [
+        "Legitimate administrative activity"
+      ]
+    },
+    {
+      "title": "CDB Sentinel APEX - Exploit_for_CVE202673847",
+      "id": "sigma--eabf419fbf8a",
+      "status": "experimental",
+      "description": "Detects activity related to Exploit for CVE-2026-73847",
+      "references": [
+        "https://intel.cyberdudebivash.com"
+      ],
+      "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+      "date": "2026/08/16",
+      "tags": [
+        "cve.cve-2026-73847"
+      ],
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection": {
+          "CommandLine|contains": [
+            "suspicious"
+          ]
+        },
+        "condition": "selection"
+      },
+      "level": "medium",
+      "falsepositives": [
+        "Legitimate administrative activity"
+      ]
+    },
+    {
+      "title": "CDB Sentinel APEX - Exploit_for_CVE202673519",
+      "id": "sigma--69896867a979",
+      "status": "experimental",
+      "description": "Detects activity related to Exploit for CVE-2026-73519",
+      "references": [
+        "https://intel.cyberdudebivash.com"
+      ],
+      "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+      "date": "2026/08/16",
+      "tags": [
+        "cve.cve-2026-73519"
+      ],
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection": {
+          "CommandLine|contains": [
+            "suspicious"
+          ]
+        },
+        "condition": "selection"
+      },
+      "level": "medium",
+      "falsepositives": [
+        "Legitimate administrative activity"
+      ]
+    },
+    {
       "title": "CDB Sentinel APEX - CVE202619930__Dolibarr_User_Cloning_cardphp_ldap_injection",
       "id": "sigma--41cf5f94b116",
       "status": "experimental",
@@ -153,6 +303,34 @@
   ],
   "yara_rules": [
     {
+      "rule_name": "CDB_CVE202674578__crypto_algif_skcipher__for",
+      "rule_text": "rule CDB_CVE202674578__crypto_algif_skcipher__for {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-74578 - crypto: algif_skcipher - force synchronous processing on trees \"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $cve0 = \"CVE-2026-74578\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Security_Affairs_newsletter_Round_590_by",
+      "rule_text": "rule CDB_Security_Affairs_newsletter_Round_590_by {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Security Affairs newsletter Round 590 by Pierluigi Paganini \u2013 INTERNATIONAL EDIT\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Week_in_review_Salesforce_and_ServiceNow",
+      "rule_text": "rule CDB_Week_in_review_Salesforce_and_ServiceNow {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Week in review: Salesforce and ServiceNow portals exposed for 17 months, exploit\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"ServiceNow\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_CVE202617608__WP_Compress__71009__CrossS",
+      "rule_text": "rule CDB_CVE202617608__WP_Compress__71009__CrossS {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-17608 - WP Compress <= 7.10.09 - Cross-Site Request Forgery to Arbitrar\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $cve0 = \"CVE-2026-17608\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Exploit_for_CVE202224481",
+      "rule_text": "rule CDB_Exploit_for_CVE202224481 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Exploit for CVE-2022-24481\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $cve0 = \"CVE-2022-24481\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Exploit_for_CVE202673847",
+      "rule_text": "rule CDB_Exploit_for_CVE202673847 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Exploit for CVE-2026-73847\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $cve0 = \"CVE-2026-73847\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Exploit_for_CVE202673519",
+      "rule_text": "rule CDB_Exploit_for_CVE202673519 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Exploit for CVE-2026-73519\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $cve0 = \"CVE-2026-73519\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
       "rule_name": "CDB_CVE202619930__Dolibarr_User_Cloning_card",
       "rule_text": "rule CDB_CVE202619930__Dolibarr_User_Cloning_card {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-19930 - Dolibarr User Cloning card.php ldap injection\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $cve0 = \"CVE-2026-19930\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
     },
@@ -243,69 +421,66 @@
     {
       "rule_name": "CDB_OpenPhish_Phishing_URL_httpsravichavigit",
       "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsravichavigit {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://ravichavi.github.io/Netflix-Clone/\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsamanvish90sg",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsamanvish90sg {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://amanvish90s.github.io/E-commerce_Amazon_Fronte\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpssenapatishre",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpssenapatishre {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://senapatishrestha-ctrl.github.io/my-shopping-fr\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpswwwsecuritys",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpswwwsecuritys {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://www.securitysuite365.com/AccountSelectionPage/\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n        $kw1 = \"AccountSelectionPage\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsrobloxcommlu",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsrobloxcommlu {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://roblox.com.ml/users/467736516270/profile\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsrbcodenetva3",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsrbcodenetva3 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://rbcode.net/v/a3810e1a6d61e1b21e34472b4bf7178c\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpshosseinaliaz",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpshosseinaliaz {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://hossein.ali-azizi2672.workers.dev/\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_https7dhzrw85gmce",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_https7dhzrw85gmce {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://7dhzrw85gm-cell.github.io/Roblox.com/\"\n        severity = \"high\"\n        date = \"2026-08-16\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
     }
   ],
   "snort_rules": [
     {
+      "rule_name": "CVE202674578__crypto_algif_skcipher__force_synchronous_proce",
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-74578 - crypto: algif_skcipher - force synchronous \"; content:\"CVE-2026-74578\"; nocase; sid:3083554; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 3083554
+    },
+    {
+      "rule_name": "CVE202617608__WP_Compress__71009__CrossSite_Request_Forgery",
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-17608 - WP Compress <= 7.10.09 - Cross-Site Request\"; content:\"CVE-2026-17608\"; nocase; sid:1675435; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 1675435
+    },
+    {
+      "rule_name": "Exploit_for_CVE202224481",
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: Exploit for CVE-2022-24481\"; content:\"CVE-2022-24481\"; nocase; sid:3215255; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 3215255
+    },
+    {
+      "rule_name": "Exploit_for_CVE202673847",
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: Exploit for CVE-2026-73847\"; content:\"CVE-2026-73847\"; nocase; sid:6260580; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 6260580
+    },
+    {
+      "rule_name": "Exploit_for_CVE202673519",
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: Exploit for CVE-2026-73519\"; content:\"CVE-2026-73519\"; nocase; sid:2674984; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 2674984
+    },
+    {
       "rule_name": "CVE202619930__Dolibarr_User_Cloning_cardphp_ldap_injection",
-      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-19930 - Dolibarr User Cloning card.php ldap injecti\"; content:\"CVE-2026-19930\"; nocase; sid:4013299; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
-      "sid": 4013299
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-19930 - Dolibarr User Cloning card.php ldap injecti\"; content:\"CVE-2026-19930\"; nocase; sid:2041064; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 2041064
     },
     {
       "rule_name": "CVE202619932__DefaultFuction_NoticeSystemManagent_NoticeCont",
-      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-19932 - DefaultFuction Notice-System-Managent Notic\"; content:\"CVE-2026-19932\"; nocase; sid:6447846; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
-      "sid": 6447846
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-19932 - DefaultFuction Notice-System-Managent Notic\"; content:\"CVE-2026-19932\"; nocase; sid:5995001; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 5995001
     },
     {
       "rule_name": "CVE202619929__OpenBoxes_Template_Processing_DocumentControll",
-      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-19929 - OpenBoxes Template Processing DocumentContr\"; content:\"CVE-2026-19929\"; nocase; sid:7242342; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
-      "sid": 7242342
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-19929 - OpenBoxes Template Processing DocumentContr\"; content:\"CVE-2026-19929\"; nocase; sid:8457931; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 8457931
     },
     {
       "rule_name": "CVE202619928__OpenBoxes_Role_Interceptor_RoleInterceptorgroo",
-      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-19928 - OpenBoxes Role Interceptor RoleInterceptor.\"; content:\"CVE-2026-19928\"; nocase; sid:8133375; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
-      "sid": 8133375
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-19928 - OpenBoxes Role Interceptor RoleInterceptor.\"; content:\"CVE-2026-19928\"; nocase; sid:6239335; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 6239335
     },
     {
       "rule_name": "CVE202619927__OpenBoxes_Product_Upload_Endpoint_ProductContr",
-      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-19927 - OpenBoxes Product Upload Endpoint ProductCo\"; content:\"CVE-2026-19927\"; nocase; sid:4469613; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
-      "sid": 4469613
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-19927 - OpenBoxes Product Upload Endpoint ProductCo\"; content:\"CVE-2026-19927\"; nocase; sid:3346509; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 3346509
     }
   ],
   "stats": {
-    "total_rules": 40,
-    "sigma_count": 5,
+    "total_rules": 50,
+    "sigma_count": 10,
     "yara_count": 30,
-    "snort_count": 5,
+    "snort_count": 10,
     "coverage_techniques": 0,
-    "generated_at": "2026-08-16T06:59:52.638693+00:00"
+    "generated_at": "2026-08-16T13:01:45.221374+00:00"
   }
 }
