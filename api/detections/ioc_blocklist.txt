@@ -1,35 +1,45 @@
 # CYBERDUDEBIVASH SENTINEL APEX — IOC Blocklist
-# Version: 185.0 | Generated: 2026-08-18T09:05:01.087854+00:00
+# Version: 185.0 | Generated: 2026-08-19T01:45:01.256127+00:00
 # Platform: https://intel.cyberdudebivash.com
 # Format: one indicator per line (domains, IPs, hashes, URLs)
 # Import: Palo Alto, FortiGate, Pi-hole, pfSense, CrowdStrike
 
-# ── BEHAVIORAL (4 indicators)
+# ── BEHAVIORAL (9 indicators)
 NTDS.dit access attempt via Volume Shadow Copy Service
-LSASS memory access via OpenProcess + ReadProcessMemory
+Shadow copy deletion: vssadmin delete shadows /all /quiet
 DNS beaconing: regular 60-second interval queries to single domain
+LSASS memory access via OpenProcess + ReadProcessMemory
+Scheduled task creation: schtasks /create /sc minute /tn Update
+Disable Windows Defender: Set-MpPreference -DisableRealtimeMonitoring $true
+Large outbound data transfer to non-corporate IP over port 443
+Suspicious parent-child: WinWord.exe > cmd.exe > powershell.exe
 Registry persistence: HKCU\Software\Microsoft\Windows\CurrentVersion\Run
 
-# ── DOMAIN (76 indicators)
+# ── DOMAIN (102 indicators)
 secure-8932.net
 customer.externalid
 rsmfcf7vars.nonce
-lima-guestagent.sock
 tool.check
 tool.tools
+cpuid.nent
+zone.dir
 mcpcontext.validatepath
-cstecgi.cgi
-firewall.so
-gmwlocations.latitude
-wps.so
-portal-9277.net
+login-1568.xyz
+destinations.options
+update-9127.net
 secure-2400.com
 httpheadernames.origin
 httpheadernames.vary
-golang.org
-lan.so
-vsftpd.conf
+argparse.suppress
+lib.lftest
+lib.lftest.test
+context.cc
+sails.helpers.users
+wan.cgi
 update-4811.net
+portal-8069.xyz
+certificate.replaces
+endpoint.certificate.replaced
 digestauthprovider.verify
 http4k.org
 buffer.call
@@ -37,12 +47,22 @@ buffer.call.call
 indirectcall.call
 vm.run
 attacks.md
+cdn-7302.net
+cdn-1732.com
+cdn-5213.net
+update-8825.io
+secure-4087.com
 lsmctx.len
 cdn-2898.net
 java.lang.stackoverflowerror
 propertyresolver.fillpprstack
 requestfilters.gunzip
 serverfilters.gzip
+authority.id
+admins.add
+admins.update
+ipsandports.listing
+cconvertgeojson.cpp
 chevron.render
 compression.cpp
 mdlloader.cpp
@@ -59,19 +79,24 @@ sys-9436d8.service
 tmpfiles.org
 cmd.exe
 main.exe
-make.com
-refs.stringvalue
+domainzones.add
+kirill.bast
+urllib.request.httppasswordmgr
 Procmon64.exe
 adsource.dll
-edu.ucsb.nceas.metacat.restservice
-ipv6.so
-icagenda.com
-initiatedby.user.userprincipalname
+lib.base.oao
 gl.inet
-subprocess.run
-core.fsmonitor
-docs.metasploit.com
-profiles.import
+sub.wyzie.io
+tx.state
+data.resident
+ctrl.smc
+update-7991.com
+update-4042.net
+api-2767.xyz
+login-4162.io
+login-2629.io
+login-1047.xyz
+api-9781.xyz
 cdn-9159.io
 akira.exe
 msconfig.exe
@@ -80,21 +105,28 @@ settings.js
 tasks.js
 healthymagination.com
 rezilion.com
+portal-9680.com
+command.osdesc
+default3.handlebars
+oxidized.url
+np.load
+numpyreader.read
+pickle.loads
 buffer.alloc
 buffer.allocunsafe
 buffer.allocunsafeslow
 www.lyx.org
 mcdonaldscorp.onmicrosoft.com
 linuxtesting.org
-dati.gov.it
 
-# ── INDICATOR (4 indicators)
+# ── INDICATOR (5 indicators)
 enterprise@http4k.org
+15:38:30
+13:55:39
 adsource_original.dll
-threat-notifications@email.apple.com
 security@safepal.com
 
-# ── IPV4 (27 indicators)
+# ── IPV4 (43 indicators)
 194.212.72.201
 1.6.12.17
 2.9.9.6
@@ -102,11 +134,18 @@ security@safepal.com
 6.2.1.12
 6.2.1.2
 6.2.2.1
-91.250.34.23
+185.158.218.118
+193.93.6.63
 193.56.206.38
 193.150.98.84
+193.78.223.58
 5.42.0.0
 6.50.0.0
+45.2.78.41
+45.100.230.97
+212.62.153.164
+91.70.184.142
+193.81.50.235
 193.201.83.36
 6.49.0.0
 146.56.116.119
@@ -114,20 +153,29 @@ security@safepal.com
 185.144.28.120
 192.255.141.13
 5.34.176.100
+6.6.6.6
 1.55.0.2
+185.54.222.66
+194.33.182.111
+45.47.14.71
+45.226.215.35
+194.3.95.239
+193.205.125.143
+212.135.139.188
 185.43.59.231
 1.0.0.182
 1.0.0.201
 31.76.7.137
 45.125.67.42
 91.219.238.169
+45.160.102.242
 6.5.3.3
 
-# ── MD5 (1 indicators)
+# ── MD5 (2 indicators)
+68e76627798d62555d5287f4488a32c7
 4D6ABBFC7C052CBAFAA53659971AC471
 
-# ── SHA1 (9 indicators)
-8a45892378d22f40505c31a38f786a07701b6d50
+# ── SHA1 (8 indicators)
 0936e2504655a5cbf7bc3c388f6d3e2bb24916d3
 e876ceb47ba092420a97724a957152b3808568b0
 66b10bda8895f4bfaf8c205361f0125cdf51f99b
@@ -137,13 +185,27 @@ eac0b05dafdb0ddf8b9139dad8929aaba86568ca
 12730A7DD9AF98F14441D476C10EB346708C1194
 ee77bb09a42a49843ac85ef64c14d2328b251df1
 
-# ── SHA256 (18 indicators)
+# ── SHA256 (33 indicators)
 610390c1c38cdaa1d2da75459904db473b970cc62869e5b2404ed4a19dd269a7
 ECCAD70D5313A6E8A9781057CB1E150648FFF7B296C7B22666D01F662F69490B
-52beabb317795e04ccfb53bbc9f2f8a32a35c19ff4cdb672c8eae18c73ed9131
+5b9d71a1c1f618346a72a1de56ff6b7bdf490839376e5e35a18d941e95f4ef79
+50c269d684f6b50fac122fe1084d6adb1263d496cb3ea2ce63185a7e64da3c91
 2cf7a98904976c764922ce4faae3758edc61b969bf503d905410e7c8fd266bb8
 090b9a758bc19ffab1e6cf2961d4d057408effc920314d2c4b79c9bf09378dd2
+48e9e3bf1767cb021670faca9c9c96a729fc1ade7e4d848d4d558f89f256b442
+711b132e668903ef5a3496ba0aa2e8e3043e4e6bcc3b320077b81986285bc364
+e466cdc2d2e9324a45bf82d7cb8bcd74fae62bba78002f83241def55d0d7355f
+607b2d534ac7c95fb92c7d2413c5ef0ed02bdf338ad0c027ad6cfa09a611865a
+11115b1d99e2550cec33551aebd656bc162d8f9e36285b87fb5cd27e7e2f3eb4
+3d8ca31740a6ee457f7d4f7e8eab37179e302a4f5ae7ad40164f6287bfbbaed1
 59c7bca01a560e7ae3f851d614c585e9e19331100f9fc184ca1dedc916b99c49
+58b758e25d6524b92db366da6d26defbcb4ab42b939234fb18fb272f7e035934
+7760f88afe02841525d57b8caad829f44286a8492a427602ed266b8f0af7e9a0
+26f5b415d1caad33d7d57b8abc9577842e1b02f7fb8303d5e47eebc75e1a43b4
+bb1a1600a2b4ff9eff2ac6bacf116bf70a35a4a349555cda276a4eced1311eee
+16da3089d248457027cba29bb53922381b796a391c17473fa26f27fb56643423
+67e99b970b080c6cc30e92f5545aa74f6ee9d236ebd09da448cc733f5a4b4cf6
+9b03c51fab8fcec2bce46367d31b71ebdc200983cb02548e8b9ff7e1a2842533
 4c0886349e9d348569fffe1b7a31e474d514508bf0cd6f1e5dd99c2a73525e4d
 f13cb360768363d3424e2192c7805b8c8015eb8706dbbbcdead6aed8cf390109
 f357182c5ff306e9e99e8da9aef69a8ae67548f7120c6b541aca694d7395580b
@@ -156,19 +218,21 @@ d411d93f358128c77aed0be91365b18cfb7575ecd188d22a216cbaeaa51c5e11
 99c4dcc677942513ff39846aba051d1baeaaa5ad083dabc9e3f9b49a522b0a0a
 a7dc0a626d84e17f16d5fc1096e4478298b2a4b61b42a1cf25043cccf846a50a
 fafa019e18d44a47c615da188d7d56a15364ded87a13e3c405b195b4f48314cd
+8c7f03c0ae5aa529c9baff387e6852fa6531f68b7b52c212f9c7fc37b3927042
 
-# ── URL (332 indicators)
+# ── URL (309 indicators)
 https://cvefeed.io/vuln/detail/CVE-2026-73047
-https://api-4919.io/wp-login.php
+https://cdn-8362.net/.env
 https://cvefeed.io/vuln/detail/CVE-2026-75587
-https://cvefeed.io/vuln/detail/CVE-2026-49826
+https://cvefeed.io/vuln/detail/CVE-2026-53959
 http://185.144.28.120:3232/esxi.sh
 https://profound-beijinho-504b1f.netlify.app/
 https://t.co/GXFaqggV8a
+http://127.0.0.1:8000/delete_scan/
 https://user:pass@host/
-https://cvefeed.io/vuln/detail/CVE-2026-48528
 https://cvefeed.io/vuln/detail/CVE-2026-12998
 https://cvefeed.io/vuln/detail/CVE-2026-15965
+https://cvefeed.io/vuln/detail/CVE-2026-73973
 https://cvefeed.io/vuln/detail/CVE-2026-11801
 https://cvefeed.io/vuln/detail/CVE-2026-14832
 https://cvefeed.io/vuln/detail/CVE-2026-13700
@@ -185,11 +249,8 @@ https://cvefeed.io/vuln/detail/CVE-2026-19918
 https://cvefeed.io/vuln/detail/CVE-2026-15453
 https://cvefeed.io/vuln/detail/CVE-2026-8840
 https://cvefeed.io/vuln/detail/CVE-2026-15162
-https://cvefeed.io/vuln/detail/CVE-2026-74243
-https://cvefeed.io/vuln/detail/CVE-2026-49457
 https://cvefeed.io/vuln/detail/CVE-2026-74767
 https://cvefeed.io/vuln/detail/CVE-2026-74764
-https://cvefeed.io/vuln/detail/CVE-2026-74247
 https://cvefeed.io/vuln/detail/CVE-2026-9816
 https://cvefeed.io/vuln/detail/CVE-2026-19964
 https://cvefeed.io/vuln/detail/CVE-2026-19958
@@ -201,11 +262,6 @@ https://cvefeed.io/vuln/detail/CVE-2026-73043
 https://cvefeed.io/vuln/detail/CVE-2026-14484
 https://cvefeed.io/vuln/detail/CVE-2026-15001
 https://cvefeed.io/vuln/detail/CVE-2026-15312
-https://cvefeed.io/vuln/detail/CVE-2026-73682
-https://cvefeed.io/vuln/detail/CVE-2026-50523
-https://cvefeed.io/vuln/detail/CVE-2026-72970
-https://cvefeed.io/vuln/detail/CVE-2026-66271
-https://cvefeed.io/vuln/detail/CVE-2026-66270
 https://cvefeed.io/vuln/detail/CVE-2026-15371
 https://cvefeed.io/vuln/detail/CVE-2026-9693
 https://cvefeed.io/vuln/detail/CVE-2026-19988
@@ -217,24 +273,18 @@ https://cvefeed.io/vuln/detail/CVE-2026-19960
 https://cvefeed.io/vuln/detail/CVE-2026-19959
 https://cvefeed.io/vuln/detail/CVE-2026-19957
 https://cvefeed.io/vuln/detail/CVE-2026-19955
-https://cvefeed.io/vuln/detail/CVE-2026-74241
-https://cvefeed.io/vuln/detail/CVE-2026-74240
-https://cvefeed.io/vuln/detail/CVE-2026-19188
+https://cvefeed.io/vuln/detail/CVE-2025-11729
+https://cvefeed.io/vuln/detail/CVE-2026-66602
 https://cvefeed.io/vuln/detail/CVE-2026-19984
 https://cvefeed.io/vuln/detail/CVE-2026-9767
 https://cvefeed.io/vuln/detail/CVE-2026-73046
 https://cvefeed.io/vuln/detail/CVE-2026-73045
 https://cvefeed.io/vuln/detail/CVE-2026-15341
-https://cvefeed.io/vuln/detail/CVE-2026-74245
-https://cvefeed.io/vuln/detail/CVE-2026-74244
-https://cvefeed.io/vuln/detail/CVE-2026-63650
-https://cvefeed.io/vuln/detail/CVE-2026-73847
-https://cvefeed.io/vuln/detail/CVE-2026-73849
-https://cvefeed.io/vuln/detail/CVE-2026-19682
-https://cvefeed.io/vuln/detail/CVE-2026-19841
-https://cvefeed.io/vuln/detail/CVE-2026-66272
-https://cvefeed.io/vuln/detail/CVE-2026-57469
 https://cvefeed.io/vuln/detail/CVE-2026-14279
+https://cvefeed.io/vuln/detail/CVE-2026-66591
+https://cvefeed.io/vuln/detail/CVE-2026-66589
+https://cvefeed.io/vuln/detail/CVE-2026-27365
+https://cvefeed.io/vuln/detail/CVE-2026-66603
 https://cvefeed.io/vuln/detail/CVE-2026-75091
 https://cvefeed.io/vuln/detail/CVE-2026-17604
 https://cvefeed.io/vuln/detail/CVE-2026-2497
@@ -254,15 +304,9 @@ https://cvefeed.io/vuln/detail/CVE-2026-13360
 https://cvefeed.io/vuln/detail/CVE-2026-16080
 https://cvefeed.io/vuln/detail/CVE-2026-15303
 https://cvefeed.io/vuln/detail/CVE-2026-14433
-https://cvefeed.io/vuln/detail/CVE-2026-63649
-https://cvefeed.io/vuln/detail/CVE-2026-73683
-https://cvefeed.io/vuln/detail/CVE-2026-49989
-https://cvefeed.io/vuln/detail/CVE-2026-57472
-https://cvefeed.io/vuln/detail/CVE-2026-57471
-https://cvefeed.io/vuln/detail/CVE-2026-53970
 https://cvefeed.io/vuln/detail/CVE-2026-19980
-https://cvefeed.io/vuln/detail/CVE-2026-63701
-https://cvefeed.io/vuln/detail/CVE-2026-63700
+https://cvefeed.io/vuln/detail/CVE-2026-75976
+https://cvefeed.io/vuln/detail/CVE-2026-52873
 https://cvefeed.io/vuln/detail/CVE-2026-75151
 https://cvefeed.io/vuln/detail/CVE-2026-75094
 https://cvefeed.io/vuln/detail/CVE-2026-75093
@@ -297,24 +341,18 @@ https://cvefeed.io/vuln/detail/CVE-2026-19921
 https://cvefeed.io/vuln/detail/CVE-2026-19922
 https://cvefeed.io/vuln/detail/CVE-2026-19917
 https://cvefeed.io/vuln/detail/CVE-2026-73050
-https://cvefeed.io/vuln/detail/CVE-2026-74242
-https://cvefeed.io/vuln/detail/CVE-2026-69414
-https://cvefeed.io/vuln/detail/CVE-2026-74248
-https://cvefeed.io/vuln/detail/CVE-2026-19847
-https://cvefeed.io/vuln/detail/CVE-2026-19681
-https://cvefeed.io/vuln/detail/CVE-2026-19846
-https://cvefeed.io/vuln/detail/CVE-2026-19639
-https://cvefeed.io/vuln/detail/CVE-2026-19636
-https://cvefeed.io/vuln/detail/CVE-2026-49986
-https://cvefeed.io/vuln/detail/CVE-2026-63702
-https://cvefeed.io/vuln/detail/CVE-2026-19884
-https://cvefeed.io/vuln/detail/CVE-2026-19836
-https://cvefeed.io/vuln/detail/CVE-2026-19835
-https://cvefeed.io/vuln/detail/CVE-2026-19837
 https://your-host/cve202440725scanner.py
+https://cdn-1236.com/.env
+https://secure-8289.net/.env
+https://update-3824.net/wp-login.php
+https://api-6306.io/wp-login.php
+https://api-7833.com/wp-login.php
+https://update-5296.net/.env
+https://update-9893.io/api/config
 http://server-static-page--optimumcarasls2.replit.app/
 https://n-cfjznllwrpfpmyyinhdgwemzxljuukztq3qp73q-0lu-script.googleusercontent.com/userCodeAppPanel
 https://www.dropbox.com/scl/fi/vwtoo632m1y8sqnm5vplm/Razo.rar?...&amp
+https://update-3654.io/.env
 http://en-treezer-logins-cdns.typedream.app/
 http://nologiceries814aug.wasmer.app/
 http://en-t-r-e-z-r-io-login.typedream.app/
@@ -465,6 +503,7 @@ https://fildenford-mq.vercel.app/?naps
 https://metacpan.org/dist/Net-OAuth
 https://cvefeed.io/vuln/detail/CVE-2026-19711
 https://cvefeed.io/vuln/detail/CVE-2026-19726
+https://cvefeed.io/vuln/detail/CVE-2026-62292
 https://cvefeed.io/vuln/detail/CVE-2026-19967
 https://cvefeed.io/vuln/detail/CVE-2026-74439
 https://cvefeed.io/vuln/detail/CVE-2026-74434
@@ -472,10 +511,12 @@ https://cvefeed.io/vuln/detail/CVE-2026-74435
 https://cvefeed.io/vuln/detail/CVE-2026-74426
 https://cvefeed.io/vuln/detail/CVE-2026-74425
 https://cvefeed.io/vuln/detail/CVE-2026-74423
-https://cvefeed.io/vuln/detail/CVE-2025-7639
 https://cvefeed.io/vuln/detail/CVE-2026-16586
 https://cvefeed.io/vuln/detail/CVE-2026-17608
 https://cvefeed.io/vuln/detail/CVE-2026-74427
+https://cvefeed.io/vuln/detail/CVE-2026-52876
+https://cvefeed.io/vuln/detail/CVE-2026-52877
+https://cvefeed.io/vuln/detail/CVE-2026-52872
 https://cvefeed.io/vuln/detail/CVE-2026-42162
 https://cvefeed.io/vuln/detail/CVE-2026-71424
 https://cvefeed.io/vuln/detail/CVE-2026-67868
@@ -489,4 +530,3 @@ https://cvefeed.io/vuln/detail/CVE-2026-74429
 https://cvefeed.io/vuln/detail/CVE-2026-74431
 https://cvefeed.io/vuln/detail/CVE-2026-74436
 https://cvefeed.io/vuln/detail/CVE-2026-74430
-https://cvefeed.io/vuln/detail/CVE-2026-46603
