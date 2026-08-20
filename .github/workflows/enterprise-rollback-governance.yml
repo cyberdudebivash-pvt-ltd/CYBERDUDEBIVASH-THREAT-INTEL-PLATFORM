@@ -207,8 +207,20 @@ jobs:
           fi
 
           # Revert commits in reverse order (newest first)
+          #
+          # v184.3 FIX: this previously had `|| true` on the revert itself. GitHub
+          # Actions' default shell for run: steps is `bash -e` (errexit already on),
+          # so `|| true` was the ONLY thing suppressing failure here -- a revert
+          # conflict on any commit in the range was silently swallowed, the loop
+          # continued reverting the NEXT commit on top of an unresolved conflict/
+          # broken index, and the script then unconditionally ran `git commit
+          # --no-verify` + `git push origin HEAD:main` on whatever state that left
+          # behind -- during an active production incident, with no PR/review.
+          # Removing `|| true` restores bash's default fail-fast: the step now
+          # aborts immediately on the first revert failure, before the loop can
+          # compound it and before commit/push can ever run on a bad tree.
           for COMMIT in $COMMITS_TO_REVERT; do
-            git revert --no-commit "$COMMIT" || true
+            git revert --no-commit "$COMMIT"
           done
 
           git commit -m "chore(rollback): Revert to ${TARGET_SHA:0:8} | Reason: ${{ github.event.inputs.rollback_reason }} | Actor: ${{ github.actor }} | Pre-rollback tag: ${{ needs.snapshot.outputs.rollback_tag }}" \

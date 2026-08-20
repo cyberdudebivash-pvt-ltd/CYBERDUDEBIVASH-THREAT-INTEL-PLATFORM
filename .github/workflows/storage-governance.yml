@@ -126,6 +126,19 @@ jobs:
             echo "No telemetry changes to commit"
           else
             git commit -m "chore: storage governance + telemetry update [skip ci]" || true
-            git push origin main || true
-            echo "Telemetry data committed"
+            # v184.3 FIX: `git push ... || true` previously swallowed push
+            # failures unconditionally, and "Telemetry data committed" printed
+            # regardless of whether the push actually succeeded -- a remote-
+            # ahead/network/permission failure would silently drop the commit
+            # with zero visible signal anywhere in the run. One retry after a
+            # fetch+rebase (telemetry data has no meaningful merge conflicts to
+            # resolve manually), then a real, visible error if that also fails.
+            if git push origin main; then
+              echo "Telemetry data committed and pushed."
+            elif git fetch origin main && git rebase origin/main && git push origin main; then
+              echo "Telemetry data committed and pushed (after rebase retry)."
+            else
+              echo "::error::Failed to push telemetry/governance commit to main after retry -- data was NOT persisted upstream."
+              exit 1
+            fi
           fi
