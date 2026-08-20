@@ -82,6 +82,13 @@ INCLUDE_DIRS = [
     "dashboard",   # v157.0 FIX: dashboard/ was missing from dist/ — root cause of 404 on
                    # ENTERPRISE DASHBOARD, SOC V2, ORCHESTRATION, SOCIAL, REVENUE+,
                    # WEB3 INTEL, REVENUE nav buttons. All dashboard/*.html files now deployed.
+    "customer",    # v184.3 FIX: customer/ (customer/api-keys.html, the self-service FREE
+                   # API key signup form) was missing from dist/ -- same class of bug as the
+                   # v157.0 dashboard/ fix above. Confirmed live: no shipped page could even
+                   # reach the free-signup form, so the backend fix to FREE key issuance
+                   # (workers/revenue-engine handleFreeKeyRequest) was unreachable via the
+                   # real site. customer/ contains exactly one file today -- safe to ship
+                   # wholesale, unlike docs/ below.
 ]
 
 INCLUDE_FILES_PATTERN = [
@@ -551,6 +558,33 @@ def main() -> int:
             n = copy_item(src, dst)
             total_files += n
             log.info("  Copied %s/ → dist/%s/  (%d files)", dirname, dirname, n)
+
+    # ── 2b. Copy whitelisted docs/*.html pages only (v184.3 FIX) ─────────────
+    # docs/ stays in EXCLUDE_ROOT_DIRS -- it holds ~30 internal engineering/
+    # audit .md files (incident postmortems, phase-implementation notes,
+    # architecture specs) that must never ship. But docs/{index,quickstart,
+    # faq}.html are customer-facing pages, linked from enterprise-homepage.html,
+    # developer-portal.html, enterprise-knowledge-center.html,
+    # enterprise-pricing.html, and enterprise-compliance.html (all of which
+    # DO ship). The blanket directory exclusion took those down with the
+    # internal docs, breaking every "Quick Start"/"FAQ" link on the live site.
+    # Copy only this explicit whitelist, preserving the /docs/ URL path the
+    # linking pages already use -- everything else in docs/ stays excluded.
+    DOCS_HTML_WHITELIST = ["index.html", "quickstart.html", "faq.html"]
+    docs_src = REPO_ROOT / "docs"
+    docs_copied = 0
+    if docs_src.exists():
+        docs_dst = DIST_DIR / "docs"
+        docs_dst.mkdir(parents=True, exist_ok=True)
+        for fname in DOCS_HTML_WHITELIST:
+            fpath = docs_src / fname
+            if fpath.exists():
+                shutil.copy2(fpath, docs_dst / fname)
+                docs_copied += 1
+                total_files += 1
+            else:
+                log.warning("  SKIP: docs/%s not found in repo", fname)
+        log.info("  Copied %d whitelisted docs/*.html pages → dist/docs/", docs_copied)
 
     # ── 3. Copy root-level HTML pages (filtered) ─────────────────────────────
     html_count = 0

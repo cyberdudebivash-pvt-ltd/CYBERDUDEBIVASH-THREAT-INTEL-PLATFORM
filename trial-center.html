@@ -174,12 +174,12 @@ footer{border-top:1px solid var(--border);padding:28px 32px;margin-top:24px;}
       <span class="trial-free-label">No payment required</span>
       <ul class="trial-features">
         <li><span class="ck">✓</span>Live threat feed metadata</li>
-        <li><span class="ck">✓</span>100 API requests/day</li>
+        <li><span class="ck">✓</span>30 API requests/min, 25 items/response</li>
         <li><span class="ck">✓</span>STIX 2.1 IDs for reference</li>
         <li><span class="ck">✓</span>Severity + risk scores</li>
         <li><span class="ck">✓</span>Public dashboard access</li>
       </ul>
-      <a href="/customer/api-keys.html" class="trial-btn outline">Get Free API Key →</a>
+      <a href="#" class="trial-btn outline" onclick="openFreeKeyModal();return false;">Get Free API Key →</a>
     </div>
 
     <!-- PRO trial — FEATURED -->
@@ -375,6 +375,35 @@ footer{border-top:1px solid var(--border);padding:28px 32px;margin-top:24px;}
 
 </div>
 
+<!-- Free API key signup modal -- reuses POST /api/apikeys/request-free verbatim,
+     the same endpoint customer/api-keys.html's "Manage your API keys" portal
+     validates against. Added because no page anywhere in the site previously
+     called this endpoint: the old "Get Free API Key" button linked to the
+     existing-customer lookup portal instead, which 404s/"no account found"s
+     for anyone who doesn't already have one -- self-service FREE signup was
+     completely unreachable from the UI regardless of the backend working. -->
+<div id="freeKeyOverlay" style="display:none;position:fixed;inset:0;background:rgba(3,7,15,0.82);z-index:9998;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:32px;max-width:420px;width:100%;text-align:center;position:relative;">
+    <button onclick="closeFreeKeyModal()" style="position:absolute;top:14px;right:14px;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;">&times;</button>
+    <div id="freeKeyStepForm">
+      <div style="font-size:32px;margin-bottom:10px;">🔑</div>
+      <h3 style="font-size:18px;font-weight:800;margin-bottom:8px;color:var(--text);">Get Your Free API Key</h3>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">No card required. Instant activation, valid for 1 year.</p>
+      <input type="email" id="freeKeyEmail" placeholder="you@company.com" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;color:var(--text);font-size:13px;font-family:inherit;outline:none;margin-bottom:12px;box-sizing:border-box;" onkeydown="if(event.key==='Enter')submitFreeKeyRequest()">
+      <button id="freeKeySubmitBtn" onclick="submitFreeKeyRequest()" style="width:100%;padding:12px;background:var(--accent);color:#000;font-size:13px;font-weight:800;border:none;border-radius:8px;cursor:pointer;">Get Free API Key →</button>
+      <div id="freeKeyErr" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--red);margin-top:12px;"></div>
+    </div>
+    <div id="freeKeyStepResult" style="display:none;">
+      <div style="font-size:32px;margin-bottom:10px;">✅</div>
+      <h3 style="font-size:18px;font-weight:800;margin-bottom:8px;color:var(--text);">Your API Key Is Ready</h3>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px;font-family:monospace;font-size:13px;color:var(--accent);word-break:break-all;margin-bottom:12px;" id="freeKeyValue"></div>
+      <button onclick="copyFreeKey()" style="padding:8px 16px;background:rgba(0,255,198,0.1);color:var(--accent);border:1px solid rgba(0,255,198,0.3);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:16px;">Copy Key</button>
+      <p style="font-size:12px;color:var(--muted);" id="freeKeyMsg"></p>
+      <a href="/api-docs.html" style="display:block;font-size:12px;color:var(--accent);margin-top:10px;">Read the API Docs →</a>
+    </div>
+  </div>
+</div>
+
 <footer>
   <div class="footer-inner">
     <div class="footer-links">
@@ -457,6 +486,57 @@ function toggleFAQ(el){
     if(card) card.classList.add('highlighted');
   }
 })();
+
+/* Free API key signup -- POST /api/apikeys/request-free (revenue-engine) */
+const FREE_KEY_API = 'https://revenue.intel.cyberdudebivash.com';
+let lastIssuedFreeKey = '';
+
+function openFreeKeyModal(){
+  document.getElementById('freeKeyOverlay').style.display = 'flex';
+  document.getElementById('freeKeyStepForm').style.display = 'block';
+  document.getElementById('freeKeyStepResult').style.display = 'none';
+  document.getElementById('freeKeyErr').style.display = 'none';
+  document.getElementById('freeKeyEmail').focus();
+}
+function closeFreeKeyModal(){
+  document.getElementById('freeKeyOverlay').style.display = 'none';
+}
+async function submitFreeKeyRequest(){
+  const email = document.getElementById('freeKeyEmail').value.trim();
+  const errEl = document.getElementById('freeKeyErr');
+  const btn   = document.getElementById('freeKeySubmitBtn');
+  errEl.style.display = 'none';
+  if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    errEl.textContent = 'Please enter a valid email address.'; errEl.style.display = 'block'; return;
+  }
+  btn.textContent = 'Requesting…'; btn.disabled = true;
+  try{
+    const res = await fetch(FREE_KEY_API + '/api/apikeys/request-free', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({email: email})
+    });
+    const data = await res.json().catch(function(){ return {}; });
+    if(!res.ok || data.error){
+      errEl.textContent = data.message || data.error || 'Something went wrong. Please try again.';
+      errEl.style.display = 'block';
+      btn.textContent = 'Get Free API Key →'; btn.disabled = false;
+      return;
+    }
+    lastIssuedFreeKey = (data.key && data.key !== '[sent to your email]') ? data.key : '';
+    document.getElementById('freeKeyValue').textContent = lastIssuedFreeKey || 'Sent to your email — check your inbox.';
+    document.getElementById('freeKeyMsg').textContent = data.message || 'Check your email for onboarding details.';
+    document.getElementById('freeKeyStepForm').style.display = 'none';
+    document.getElementById('freeKeyStepResult').style.display = 'block';
+  }catch(e){
+    errEl.textContent = 'Network error. Please try again.'; errEl.style.display = 'block';
+    btn.textContent = 'Get Free API Key →'; btn.disabled = false;
+  }
+}
+function copyFreeKey(){
+  const txt = lastIssuedFreeKey || document.getElementById('freeKeyValue').textContent;
+  navigator.clipboard.writeText(txt);
+}
 
 /* live trial count ticker */
 (function(){
