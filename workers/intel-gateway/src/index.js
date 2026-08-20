@@ -3739,9 +3739,21 @@ async function handleRequest(request, env, ctx) {
   // is only ever set when a credential was actually presented. Scoped to
   // /api and /taxii (where a credential is meaningful) and excludes
   // /api/admin and /api/auth so re-authentication with a stale token still
-  // reaches the login/admin handlers.
-  if (auth.error && (path.startsWith("/api/") || path.startsWith("/taxii"))
-      && !path.startsWith("/api/admin") && !path.startsWith("/api/auth")) {
+  // reaches the login/admin handlers -- and excludes /api/preview (documented
+  // "unauthenticated by design" public teaser), /api/payment/* (checkout
+  // itself -- must never be blocked by an unrelated stale key a browser
+  // happens to send) and /api/pricing (public data) so a stale credential
+  // can't change behavior on routes that are public regardless of auth state.
+  if (auth.error
+      && (path.startsWith("/api/") || path.startsWith("/taxii"))
+      && !path.startsWith("/api/admin") && !path.startsWith("/api/auth")
+      && !path.startsWith("/api/preview") && !path.startsWith("/api/payment")
+      && path !== "/api/pricing") {
+    // Mirror /auth/login's existing brute-force response shape (429, not 401)
+    // so a locked-out IP sees the same signal everywhere in the gateway.
+    if (auth.error === "rate_limited") {
+      return jsonResp({ error: "Too many failed attempts", retry_after: 60 }, 429, { "Retry-After": "60" });
+    }
     return jsonResp(
       { error: "Unauthorized", reason: auth.error, hint: "Provide a valid X-API-Key header or Authorization: Bearer <token>." },
       401
@@ -4121,7 +4133,7 @@ async function handleRequest(request, env, ctx) {
     // this identical R2 source (LATEST_JSON_KEY) -- loadFeedItems() swallows
     // R2 errors into an empty-but-200 payload, which previously rendered as a
     // silent empty preview instead of a signal that the feed is down.
-    if (!feedData.items || feedData.items.length === 0) return errorResp("Feed not available", 503);
+    if (!Array.isArray(feedData.items) || feedData.items.length === 0) return errorResp("Feed not available", 503);
     // Always the FREE/teaser view regardless of caller tier (unauthenticated
     // by design) -- so IOCs, detection rules, and actor attribution must be
     // masked the same way the FREE branch of every other endpoint is.
