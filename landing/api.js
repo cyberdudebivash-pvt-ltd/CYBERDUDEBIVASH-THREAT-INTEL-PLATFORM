@@ -33,7 +33,16 @@ const APEX = (() => {
     return apiFetch('/api/v1/onboard');
   }
 
-  /** POST /api/v1/subscribe — create checkout session */
+  /**
+   * POST /api/v1/subscribe — create checkout session
+   * @deprecated Since 2026-08-20. This path targeted an orphaned backend with
+   * no live production traffic behind it and is no longer called from
+   * index.html (the pricing CTAs now link directly to /upgrade.html, the
+   * existing production checkout page already wired to the real Razorpay
+   * flow). Replacement: /upgrade.html?plan={pro|enterprise}. Retained,
+   * unused, through 2026-11-20 (90 days) in case another page still embeds
+   * this widget; remove after that date once confirmed no consumer remains.
+   */
   async function subscribe(plan, provider = 'stripe', name = '', email = '') {
     return apiFetch('/api/v1/subscribe', {
       method: 'POST',

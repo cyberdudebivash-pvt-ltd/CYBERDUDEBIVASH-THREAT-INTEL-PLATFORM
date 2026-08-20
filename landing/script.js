@@ -79,6 +79,9 @@ function initReveal() {
 }
 
 /* ── Subscribe Button Handler ──────────────────────────────────────────── */
+/* DEPRECATED: no [data-subscribe] element remains in index.html — the pricing
+   CTAs now link directly to /upgrade.html (see APEX.subscribe in api.js for
+   why). Left in place, unused, in case a future page re-adds the trigger. */
 async function handleSubscribe(btn) {
   const plan     = btn.dataset.plan     || 'pro';
   const provider = btn.dataset.provider || 'stripe';
@@ -216,13 +219,15 @@ window.APEX_UI = { Toast, handleSubscribe };
   if (!el) return;
   // Try fetching live critical count (non-blocking, fail-safe)
   try {
-    fetch('https://cyberdudebivash-threat-intel-platform-production.up.railway.app/api/v1/stats', {
+    // Real production gateway (intel.cyberdudebivash.com), same origin this
+    // page is served from — the Railway URL previously here was a separate,
+    // disconnected backend with no live traffic behind it.
+    fetch('/api/platform/stats', {
       signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
     })
     .then(r => r.ok ? r.json() : null)
     .then(data => {
-      if (!data) return;
-      const count = data.critical_count || data.apex_intelligence?.total_p1 || null;
+      const count = data?.intel?.severity_distribution?.critical;
       if (count != null && !isNaN(count)) {
         animateCounter(el, parseInt(count), 1200);
       }
