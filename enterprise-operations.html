@@ -338,7 +338,16 @@ async function loadObservability() {
     document.getElementById('a-decisions').textContent = d.decision_engine?.decisions_triggered || '—';
     document.getElementById('a-maturity').textContent  = d.maturity_model?.avg_maturity_score ?? '—';
     document.getElementById('a-approval').textContent  = (d.release_gate?.approval_rate_pct ?? '—') + (d.release_gate?.approval_rate_pct != null ? '%' : '');
-  } catch(e) { /* non-fatal */ }
+  } catch(e) {
+    // Was an empty catch -- every sibling loader (loadAnalyst, loadCustomer, etc.)
+    // shows a visible "Failed to load..." message on error; this one left the
+    // KPI cards silently stuck on their static "—" placeholder forever, with no
+    // signal that the fetch to /api/v1/p32/observability had failed at all.
+    for (const id of ['a-items','a-decisions','a-maturity','a-approval']) {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<span style="color:#ef4444;font-size:12px">Failed to load</span>';
+    }
+  }
 }
 
 // ─── Panel loader ─────────────────────────────────────────────────────────────

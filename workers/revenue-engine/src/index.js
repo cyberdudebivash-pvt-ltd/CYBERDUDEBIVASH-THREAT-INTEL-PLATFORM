@@ -82,6 +82,8 @@ export default {
         return await handleFreeKeyRequest(request, env, rid);
       if (path === "/api/apikeys/validate" && method === "GET")
         return await handleApiKeyValidate(request, env, rid);
+      if (path === "/api/apikeys/self-rotate" && method === "POST")
+        return await handleApiKeySelfRotate(request, env, rid);
       if (path === "/api/payments/submit" && method === "POST")
         return await handlePaymentSubmit(request, env, rid);
       if (path === "/api/customer/portal" && method === "GET")
@@ -1913,6 +1915,40 @@ async function handleApiKeyRevoke(request, env, rid) {
 
   await appendAuditLog(env, { action:"key_revoked", email:cleanEmail, reason:reason||"admin_action", ts:now });
   return json({ success:true, keys_revoked:keys.length, email:cleanEmail });
+}
+
+// =============================================================================
+// SELF-SERVICE KEY ROTATION
+// handleApiKeyRotate above is admin-only (isAdmin() gate at dispatch) and
+// identifies the target customer by an email supplied in the request body --
+// fine for a support desk, unsafe to expose to a browser/script directly,
+// since nothing there proves the caller owns that email. This route proves
+// ownership the only way a public API allows: the caller must present their
+// own currently-active key. It then calls handleApiKeyRotate completely
+// unchanged (Reuse Before Build, priority 1: call the existing function
+// unchanged) with the verified email, so entitlement sync (API_KEYS_KV),
+// audit logging, and the "key_rotated" notification email all stay identical
+// to the admin path with zero duplicated logic.
+//
+// Deliberately rotation-only, not revocation: handleApiKeyRevoke also sets
+// the customer record to "suspended" (an account-level action appropriate
+// for admin/fraud handling), which isn't what a customer wants when they
+// just need to kill a leaked key -- rotation already does that immediately
+// (the old key is deleted from API_KEYS_KV / marked "rotated" the moment the
+// new one is issued), without the account-suspension side effect.
+// =============================================================================
+async function handleApiKeySelfRotate(request, env, rid) {
+  const key = request.headers.get("X-API-Key") || (request.headers.get("Authorization") || "").replace("Bearer ", "");
+  if (!key) return json({ error: "X-API-Key header (your current active key) is required" }, 401);
+  const rec = await env.REVENUE_CRM_KV.get(`apikey:${key}`, "json");
+  if (!rec || rec.status !== "active") return json({ error: "invalid_or_inactive_key" }, 401);
+
+  const proxied = new Request(request.url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: rec.email }),
+  });
+  return await handleApiKeyRotate(proxied, env, rid);
 }
 
 // =============================================================================
