@@ -278,7 +278,7 @@ body{display:flex;flex-direction:column;overflow:hidden;}
   <div class="ss-item">Pipeline: <span class="ss-ok">6h AUTO</span></div>
   <div class="ss-item">Run #<span id="ss-run" style="color:var(--text);font-weight:700;">—</span></div>
   <div class="ss-item">Last sync: <span id="ss-sync" style="color:var(--text);font-weight:700;">—</span></div>
-  <div class="ss-item">API: <a href="https://cyberdudebivash-threat-intel-platform-production.up.railway.app/health" target="_blank" style="color:var(--green);font-weight:700;font-size:10px;">Railway &#x26A1;</a></div>
+  <div class="ss-item">API: <a href="https://intel.cyberdudebivash.com/api/health" target="_blank" style="color:var(--green);font-weight:700;font-size:10px;">Gateway &#x26A1;</a></div>
   <div style="margin-left:auto;font-size:10px;color:var(--dim);font-family:var(--font-mono);">v1.0 — Zero Regression Mode</div>
 </div>
 
@@ -288,7 +288,7 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 // Zero regression: all triggers open GitHub Actions (read-only UI)
 // No direct pipeline writes from browser
 // ═══════════════════════════════════════════════════════════════
-const API    = 'https://cyberdudebivash-threat-intel-platform-production.up.railway.app';
+const API    = 'https://intel.cyberdudebivash.com';
 const GH_ACT = 'https://github.com/cyberdudebivash/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/actions';
 const GH_WF  = 'https://github.com/cyberdudebivash/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/actions/workflows/sentinel-blogger.yml';
 
@@ -405,12 +405,12 @@ async function loadLiveData() {
 
 async function loadLatestThreats() {
   try {
-    const r = await fetch(API + '/api/v1/intel/latest?n=5');
+    const r = await fetch(API + '/api/v1/intel/latest.json');
     if (!r.ok) return;
     const d = await r.json();
     const el = document.getElementById('latest-threats');
     if (!el) return;
-    el.innerHTML = (d.data||[]).map(t => {
+    el.innerHTML = (d.items||[]).slice(0,5).map(t => {
       const rc = t.severity==='CRITICAL'?'var(--red)':t.severity==='HIGH'?'var(--orange)':'var(--accent3)';
       return `<div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;"
         onclick="window.open('${t.blog_url}','_blank')">

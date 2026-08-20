@@ -394,7 +394,7 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 // Twitter/X: PENDING (needs API keys)
 // Zero regression: preview + manual publish only — no auto-post from UI
 // ═══════════════════════════════════════════════════════════════════
-const API = 'https://cyberdudebivash-threat-intel-platform-production.up.railway.app';
+const API = 'https://intel.cyberdudebivash.com';
 const TELEGRAM_URL = 'https://t.me/cyberdudebivashSentinelApex';
 const LINKEDIN_PROFILE = 'https://www.linkedin.com/in/bivash-kumar-57a7a8268/';
 
@@ -419,12 +419,12 @@ async function init() {
 
 async function loadAdvisories() {
   try {
-    const r = await fetch(API + '/api/v1/intel/feed?limit=20');
+    const r = await fetch(API + '/api/v1/intel/latest.json');
     if (!r.ok) throw new Error('API ' + r.status);
     const d = await r.json();
-    ADVISORIES = d.data || [];
+    ADVISORIES = (d.items || []).slice(0, 20);
     populateSelect();
-    dlog('ok', 'Loaded ' + ADVISORIES.length + ' advisories from Railway API');
+    dlog('ok', 'Loaded ' + ADVISORIES.length + ' advisories from Gateway API');
     // Simulate post counts from advisory count
     stats.li  = Math.floor(ADVISORIES.filter(a => a.risk_score >= 8).length * 0.9);
     stats.mas = ADVISORIES.filter(a => a.risk_score >= 7).length;
