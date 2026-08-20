@@ -1426,7 +1426,7 @@ const DEMO_FALLBACK_THREATS = [
 // TIER CONFIGURATION
 // ─────────────────────────────────────────────────────────────────────────────
 const TIERS = {
-  FREE:       { label:"Free",       req_day:100,    req_min:10,   price_usd:0,    price_inr:0,       trial_days:0,  features:["basic_feed","metadata","stix_ids"] },
+  FREE:       { label:"Free",       req_day:25,     req_min:30,   price_usd:0,    price_inr:0,       trial_days:0,  features:["basic_feed","metadata","stix_ids"] },
   PRO:        { label:"Pro",        req_day:1000,   req_min:100,  price_usd:99,   price_inr:8250,    trial_days:7,  features:["full_ioc","sigma","yara","kql","spl","stix_bundle","actor","kill_chain","playbook","misp_json","csv_export"] },
   ENTERPRISE: { label:"Enterprise", req_day:50000,  req_min:500,  price_usd:999,  price_inr:83200,   trial_days:14, features:["siem_webhook","soar_export","navigator","hunt_queries","actor_tracking","campaign_intel","prediction_api","sector_feed","executive_brief","fair_model","reg_compliance","10_seats"] },
   MSSP:       { label:"MSSP",       req_day:200000, req_min:2000, price_usd:1999, price_inr:166500,  trial_days:14, features:["multi_tenant","white_label","partner_api","bulk_stix","tenant_keys","oem_resale","40pct_revshare","unlimited_seats"] },
@@ -1513,7 +1513,20 @@ async function handleFreeKeyRequest(request, env, rid) {
     const keys = await env.REVENUE_CRM_KV.get(`apikeys:${email}`, "json") || [];
     const activeKey = keys.find(k => k.tier === "FREE" && k.status === "active");
     if (activeKey) {
-      await queueEmail(env, { to:email, template:"free_key_welcome", vars:{ api_key:activeKey.key, tier:"FREE", req_day:100, upgrade_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html" } });
+      // Backfill: this key may have been issued before the entitlement-sync
+      // fix above existed, in which case it was never written to
+      // API_KEYS_KV and would still 401 on every gateway call even after
+      // being resent. Upsert unconditionally (cheap, idempotent) rather
+      // than trying to detect whether it's already synced.
+      if (env.API_KEYS_KV) {
+        await env.API_KEYS_KV.put(activeKey.key, JSON.stringify({
+          key: activeKey.key, tier: "FREE", customer_id: existing.id, email,
+          source: "free_signup",
+          created_at: activeKey.created_at, expires_at: activeKey.expires_at,
+          payment_metadata: {},
+        }));
+      }
+      await queueEmail(env, { to:email, template:"free_key_welcome", vars:{ api_key:activeKey.key, tier:"FREE", req_day:25, upgrade_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html" } });
       return json({ success:true, already_exists:true, key:"[sent to your email]", tier:"FREE", message:"Your existing free API key has been resent to your email." });
     }
   }
@@ -1523,7 +1536,13 @@ async function handleFreeKeyRequest(request, env, rid) {
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 365 * 86400000).toISOString(); // 1 year
 
-  const keyRecord = { id:keyId, key, tier:"FREE", status:"active", email, created_at:now, expires_at:expiresAt, req_day:100, req_min:10, rotation_count:0 };
+  // req_day/req_min here are the customer-facing figures shown at signup and
+  // stored for display (admin listings, /api/apikeys/validate) -- not an
+  // independent enforcement path. The one that actually gates every gateway
+  // call is intel-gateway's RATE_LIMITS.FREE (30/min) and FREE_TIER_ITEM_CAP
+  // (25 items/response); kept in sync with those here so this endpoint
+  // doesn't quote a customer a limit intel-gateway doesn't actually apply.
+  const keyRecord = { id:keyId, key, tier:"FREE", status:"active", email, created_at:now, expires_at:expiresAt, req_day:25, req_min:30, rotation_count:0 };
   const custRecord = { id:genId("cust"), email, tier:"FREE", status:"active", created_at:now, plan_started_at:now, source:"free_signup" };
 
   await env.REVENUE_CRM_KV.put(`customer:${email}`, JSON.stringify(custRecord));
@@ -1531,10 +1550,28 @@ async function handleFreeKeyRequest(request, env, rid) {
   await env.REVENUE_CRM_KV.put(`apikey:${key}`, JSON.stringify(keyRecord));
   await env.REVENUE_CRM_KV.put(`apikey_id:${keyId}`, JSON.stringify(keyRecord));
 
-  await queueEmail(env, { to:email, template:"free_key_welcome", vars:{ api_key:key, tier:"FREE", req_day:100, upgrade_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html" } });
+  // Entitlement sync — mirror the key into API_KEYS_KV, the namespace
+  // intel-gateway's live auth path (resolveAuth()) actually reads on every
+  // request. Without this, every FREE-tier self-service signup issued a key
+  // intel-gateway could never recognize (confirmed live: 401 invalid_key on
+  // every gateway call) — REVENUE_CRM_KV and API_KEYS_KV are different
+  // namespaces intel-gateway never cross-reads. Same pattern already used by
+  // provisionCustomer()'s entitlement sync below for paid tiers; this path
+  // was missed when that fix was made. Guarded so this is a no-op wherever
+  // the binding isn't configured.
+  if (env.API_KEYS_KV) {
+    await env.API_KEYS_KV.put(key, JSON.stringify({
+      key, tier: "FREE", customer_id: custRecord.id, email,
+      source: "free_signup",
+      created_at: now, expires_at: expiresAt,
+      payment_metadata: {},
+    }));
+  }
+
+  await queueEmail(env, { to:email, template:"free_key_welcome", vars:{ api_key:key, tier:"FREE", req_day:25, upgrade_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html" } });
   await trackEvent(env, "free_key_issued", { email, keyId });
 
-  return json({ success:true, key, tier:"FREE", req_day:100, req_min:10, expires_at:expiresAt, upgrade_url:"/PAYMENT-GATEWAY.html", message:"API key issued. Check your email for onboarding details." });
+  return json({ success:true, key, tier:"FREE", req_day:25, req_min:30, expires_at:expiresAt, upgrade_url:"/PAYMENT-GATEWAY.html", message:"API key issued. Check your email for onboarding details." });
 }
 
 // =============================================================================
