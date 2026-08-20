@@ -1,24 +1,24 @@
 # CYBERDUDEBIVASH SENTINEL APEX — IOC Blocklist
-# Version: 185.0 | Generated: 2026-08-20T09:08:38.634713+00:00
+# Version: 185.0 | Generated: 2026-08-20T21:33:11.798243+00:00
 # Platform: https://intel.cyberdudebivash.com
 # Format: one indicator per line (domains, IPs, hashes, URLs)
 # Import: Palo Alto, FortiGate, Pi-hole, pfSense, CrowdStrike
 
-# ── BEHAVIORAL (9 indicators)
+# ── BEHAVIORAL (8 indicators)
 Shadow copy deletion: vssadmin delete shadows /all /quiet
 DNS beaconing: regular 60-second interval queries to single domain
 LSASS memory access via OpenProcess + ReadProcessMemory
+NTDS.dit access attempt via Volume Shadow Copy Service
 Scheduled task creation: schtasks /create /sc minute /tn Update
-PowerShell encoded command execution: -EncodedCommand base64
-Registry persistence: HKCU\Software\Microsoft\Windows\CurrentVersion\Run
-Large outbound data transfer to non-corporate IP over port 443
 Suspicious parent-child: WinWord.exe > cmd.exe > powershell.exe
 Disable Windows Defender: Set-MpPreference -DisableRealtimeMonitoring $true
+PowerShell encoded command execution: -EncodedCommand base64
 
-# ── DOMAIN (131 indicators)
+# ── DOMAIN (120 indicators)
 tool.check
 tool.tools
 mcpcontext.validatepath
+asteval.interpreter.eval
 login-1568.xyz
 destinations.options
 portal-7910.io
@@ -31,7 +31,7 @@ lib.lftest.test
 context.cc
 sails.helpers.users
 wan.cgi
-update-8376.xyz
+update-4883.xyz
 certificate.replaces
 endpoint.certificate.replaced
 digestauthprovider.verify
@@ -41,12 +41,14 @@ buffer.call.call
 indirectcall.call
 vm.run
 attacks.md
-update-8848.xyz
-api-5173.com
+secure-6390.net
+mongodbsaver.list
+mongodbstore.search
 java.lang.stackoverflowerror
 propertyresolver.fillpprstack
 requestfilters.gunzip
 serverfilters.gzip
+portal-6795.io
 authority.id
 freemarker.template.utility.execute
 admins.add
@@ -70,46 +72,27 @@ assistants.read
 assistants.search
 req.query.media
 domainzones.add
+go.opentelemetry.io
+span.setbaggageitem
 Procmon64.exe
 adsource.dll
 phoca.cz
+endpoint.spec.subnets
+frappe.model.workflow
 lib.base.oao
+l.groups
+l.nweights
+l.outputs
+l.size
+placeholder.source
 ls.unveilhooks
 gl.inet
 sub.wyzie.io
 bynar.io
-wlan.hmt
-portal-9103.net
-sg.end
-sg.size
-cdn-137.io
-in.datalen
-api-3338.io
-fs.fetchdata
-fs.storedata
-cdn-5156.net
-portal-5869.net
-secure-6129.io
-jhsoft.web.hrmattendanc
-jhsoft.web.hrmattendance
-login-3708.xyz
-ts.qid
-tx.txq
-fh.data
-fh.len
-fh.size
-6a2c1007.428ffe26.258b27.015d.gae
-lore.kernel.org
-gmail.com
-data.buf
-data.size
-hdr.data.end
-hdr.data.start
-pm.mutex
-body.numvertexdecls
-lb.mutex
-data.ext.ptr
-query.revision
+conf.publish.auth.accounts
+publishservicetransport.roundtrip
+tsessioncookiestore.cpp
+backup.cgi
 portal-3444.io
 update-7991.com
 update-4042.net
@@ -126,6 +109,7 @@ api-9314.xyz
 secure-7724.net
 akira.exe
 msconfig.exe
+urllib.parse.urljoin
 attached.research
 snap7.dll
 safepal.com
@@ -140,6 +124,7 @@ pickle.loads
 buffer.alloc
 buffer.allocunsafe
 buffer.allocunsafeslow
+requestspec.cookies
 libstdbuf.so
 hunt.io
 any.run
@@ -147,42 +132,37 @@ kirill.bast
 urllib.request.httppasswordmgr
 www.lyx.org
 mcdonaldscorp.onmicrosoft.com
+transport-server.cred
+transport-server.url
+frappe.client
 
-# ── INDICATOR (10 indicators)
+# ── INDICATOR (8 indicators)
 enterprise@http4k.org
 adsource_original.dll
-c:236:43
-6a2c1007.428ffe26.258b27.015d.gae@google.com
-20260610145235.cb1441f00893@smtp.kernel.org
+c:278:20
 security@safepal.com
 password@searxng.example.com
 11:50:35
 15:38:30
 13:55:39
 
-# ── IPV4 (41 indicators)
+# ── IPV4 (35 indicators)
 185.158.218.118
 194.35.51.112
 193.56.206.38
-212.135.244.182
+91.36.175.227
 5.42.0.0
 6.50.0.0
-91.229.20.11
-194.91.146.85
+185.117.125.219
 6.49.0.0
+193.235.63.234
+2.6.0.1
 146.56.116.119
 146.59.252.178
 185.144.28.120
 192.255.141.13
 5.34.176.100
 6.6.6.6
-212.196.153.85
-91.39.182.211
-212.65.25.104
-212.223.210.52
-193.180.251.63
-45.137.216.198
-194.171.213.8
 45.75.125.189
 185.54.222.66
 194.33.182.111
@@ -207,32 +187,28 @@ password@searxng.example.com
 68e76627798d62555d5287f4488a32c7
 4D6ABBFC7C052CBAFAA53659971AC471
 
-# ── SHA1 (11 indicators)
+# ── SHA1 (13 indicators)
 0936e2504655a5cbf7bc3c388f6d3e2bb24916d3
 e876ceb47ba092420a97724a957152b3808568b0
 66b10bda8895f4bfaf8c205361f0125cdf51f99b
 cd5297e2ea5cb27c790bdcf2f3c2f1064a81d55e
 eac0b05dafdb0ddf8b9139dad8929aaba86568ca
+5bc0cd17358e19a5415d11a531088170d7b81452
+50d767984e78d51b53e2020fdf0967fd624bc377
 4e53875aa22e8991c2fa4a7660d86e1caba66659
-f6eed7acfd30099ef7baeb6ba45bb59daad80631
-29c0f7c655f47bcbd575ff75e58480df6ec3c9da
-ae443117b742c357bfef3a7bddabf76fcf86e9ef
+14e2bf27c88ba137e35cbb0c2a75f72b595bb98a
+cfb872b2446794193b58edd63f4dbf6af48a6292
+ae5596a9548e010a8a79838806eff60ef9554539
 12730A7DD9AF98F14441D476C10EB346708C1194
 ee77bb09a42a49843ac85ef64c14d2328b251df1
 
-# ── SHA256 (37 indicators)
+# ── SHA256 (31 indicators)
 5b9d71a1c1f618346a72a1de56ff6b7bdf490839376e5e35a18d941e95f4ef79
 639464d1cdf1838cf749bbf3f66062a0f1c1edaddbbb00e8b540465c0a3dc5b2
 2cf7a98904976c764922ce4faae3758edc61b969bf503d905410e7c8fd266bb8
-7923329b3833168c36aad4a8c27075103c34ab3b48c7975f1600312eda749d9f
-3d019d36feb9856eb6e428c6ff63e4c33bbf5c389e40afdb4a29e22e7db83dc6
-98281d2ade04f55de6e4815e906dd29899ca8754f7319ed7d48c6923b22c0e1c
-3ca8803b812a8f4ceb3b4ef473bc0a8130065aed419586beff9f5861ba8e3d91
-bd0a472c5d57571657c04ff3dd12d22777e2b70fc6c92102e9adc36eb03d3fce
-829aa69274f873954147121ded93a3a00285cd3f7223b90f19f9c26a79e982b9
-aae6abdf6ced0a1692354051abaa14dfe81d8ae298bf5ef835a8ceaf3c9f0d63
-07af6d1b4a084a230d33528ca3d56cc709ce65071ec6ffce27b5c266d2e0134a
-6a905cc8eca31f29679ae4741869674c0427637a62c9cd7d2964cac50da75268
+8e400210d6b21525a28834d8f8815a402893e1544587a5b505fbb416daaf5342
+cf85ebaed88a82a42b79f765aeba06345a9fce765b214b8aa80b8544753b53bc
+1f4a2b4a5b44c1a2799a58b92092c951da6fb5a5a115d370b4c98a6478c9dfb0
 f8788c82a9504f50759f1a66d51e045020c015588e303f74ac64145c0733477e
 58b758e25d6524b92db366da6d26defbcb4ab42b939234fb18fb272f7e035934
 7760f88afe02841525d57b8caad829f44286a8492a427602ed266b8f0af7e9a0
@@ -259,7 +235,7 @@ d411d93f358128c77aed0be91365b18cfb7575ecd188d22a216cbaeaa51c5e11
 a7dc0a626d84e17f16d5fc1096e4478298b2a4b61b42a1cf25043cccf846a50a
 fafa019e18d44a47c615da188d7d56a15364ded87a13e3c405b195b4f48314cd
 
-# ── URL (291 indicators)
+# ── URL (350 indicators)
 https://eshelyaron.com/posts/2026-08-06-emacs-arbitrary-code-execution-returns.html
 https://lists.gnu.org/archive/html/emacs-devel/2026-07/msg00453.html
 https://cdn-8362.net/.env
@@ -273,6 +249,7 @@ https://user:pass@host/
 https://cvefeed.io/vuln/detail/CVE-2026-74992
 https://cvefeed.io/vuln/detail/CVE-2026-75860
 https://cvefeed.io/vuln/detail/CVE-2026-13405
+https://cvefeed.io/vuln/detail/CVE-2026-63654
 https://cvefeed.io/vuln/detail/CVE-2026-75963
 https://cvefeed.io/vuln/detail/CVE-2026-19615
 https://cvefeed.io/vuln/detail/CVE-2026-19697
@@ -282,12 +259,17 @@ https://cvefeed.io/vuln/detail/CVE-2026-73973
 https://cvefeed.io/vuln/detail/CVE-2026-11801
 https://cvefeed.io/vuln/detail/CVE-2026-14832
 https://cvefeed.io/vuln/detail/CVE-2026-13700
+https://cvefeed.io/vuln/detail/CVE-2026-72852
 https://cvefeed.io/vuln/detail/CVE-2026-9816
 https://cvefeed.io/vuln/detail/CVE-2026-19964
 https://cvefeed.io/vuln/detail/CVE-2026-19958
 https://cvefeed.io/vuln/detail/CVE-2026-15748
 https://cvefeed.io/vuln/detail/CVE-2026-67961
 https://cvefeed.io/vuln/detail/CVE-2026-67919
+https://cvefeed.io/vuln/detail/CVE-2026-75526
+https://cvefeed.io/vuln/detail/CVE-2026-72854
+https://cvefeed.io/vuln/detail/CVE-2026-63003
+https://cvefeed.io/vuln/detail/CVE-2026-61663
 https://cvefeed.io/vuln/detail/CVE-2026-14163
 https://cvefeed.io/vuln/detail/CVE-2026-73542
 https://cvefeed.io/vuln/detail/CVE-2026-58081
@@ -301,13 +283,14 @@ https://cvefeed.io/vuln/detail/CVE-2026-19961
 https://cvefeed.io/vuln/detail/CVE-2026-19960
 https://cvefeed.io/vuln/detail/CVE-2026-19959
 https://cvefeed.io/vuln/detail/CVE-2026-19957
-https://cvefeed.io/vuln/detail/CVE-2026-19955
+https://cvefeed.io/vuln/detail/CVE-2026-66785
 https://cvefeed.io/vuln/detail/CVE-2025-14601
 https://vsdesk.ru/
 https://cvefeed.io/vuln/detail/CVE-2026-76888
 https://cvefeed.io/vuln/detail/CVE-2025-11729
 https://cvefeed.io/vuln/detail/CVE-2026-66602
 https://cvefeed.io/vuln/detail/CVE-2026-19984
+https://cvefeed.io/vuln/detail/CVE-2026-9033
 https://cvefeed.io/vuln/detail/CVE-2026-75981
 https://cvefeed.io/vuln/detail/CVE-2026-15446
 https://cvefeed.io/vuln/detail/CVE-2026-66591
@@ -315,7 +298,10 @@ https://cvefeed.io/vuln/detail/CVE-2026-66589
 https://cvefeed.io/vuln/detail/CVE-2026-27365
 https://cvefeed.io/vuln/detail/CVE-2026-66603
 https://cvefeed.io/vuln/detail/CVE-2026-75091
+https://cvefeed.io/vuln/detail/CVE-2026-66788
 https://cvefeed.io/vuln/detail/CVE-2026-19980
+https://cvefeed.io/vuln/detail/CVE-2026-77148
+https://cvefeed.io/vuln/detail/CVE-2026-66787
 https://cvefeed.io/vuln/detail/CVE-2026-76928
 https://cvefeed.io/vuln/detail/CVE-2026-76924
 https://cvefeed.io/vuln/detail/CVE-2026-76923
@@ -356,10 +342,8 @@ https://cvefeed.io/vuln/detail/CVE-2026-19983
 https://cvefeed.io/vuln/detail/CVE-2026-19981
 https://cvefeed.io/vuln/detail/CVE-2026-19979
 https://cvefeed.io/vuln/detail/CVE-2026-19965
-https://cvefeed.io/vuln/detail/CVE-2026-19956
 https://your-host/cve202440725scanner.py
 https://metacpan.org/dist/Net-OAuth
-https://lore.kernel.org/bpf/20260610145235.CB1441F00893@smtp.kernel.org/
 https://cdn-3508.com/api/config
 https://cdn-1236.com/.env
 https://secure-8289.net/.env
@@ -376,6 +360,54 @@ https://hidden-star-0b1d.osoriotanikaabvk17394.workers.dev/meta-account-security
 https://hidden-star-0b1d.osoriotanikaabvk17394.workers.dev/meta-account-security.html
 https://n-cfjznllwrpfpmyyinhdgwemzxljuukztq3qp73q-0lu-script.googleusercontent.com/userCodeAppPanel
 https://www.dropbox.com/scl/fi/vwtoo632m1y8sqnm5vplm/Razo.rar?...&amp
+http://sp13ct-lormor-biz-frandik-zavsel.pages.dev/
+https://16b399.icefactory.cl/
+https://www.support-ledger-help-desk-login-nano-navy.vercel.app/
+https://www.14088.xyz/
+https://3d6dca.icefactory.cl/avw3343XZHCyzC2KVfEoAXbpc4Yjg86Z7MEaxpaDPAbr2Vy8KH4JTfYembZ0rH1n/?rotated=1
+https://9b1u-q9a0x6-7dwi1-di3iy9.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158912592190&name_token136=Riverdale%20Ridge%20Ravens%20HS%20Baseball
+https://w7s6t8-cjkv-0523h-6am230.pages.dev/send_appeal_request
+https://dccrsorgia.github.io/in.crs.verifyCertificate.id-TMJK8JJy4RuII5JYuqLhWA8HRA
+https://dccrsorgia.github.io/.in-crs-verifyCertificate-id-TM5r5MUuG5KguqnhWA8HRA-3D-3D
+https://mandtlogin.pages.dev/favicon.ico/
+https://qagdt-ga5-tzy-tx2-yiku-x4rz3.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158912592190&name_token136=Riverdale%20Ridge%20Ravens%20HS%20Baseball
+https://loginservice.cloud/E.QbnTmb8RZIbk78YN?/linkedin/slink?code=afSN103785
+https://qagdt-ga5-tzy-tx2-yiku-x4rz3.pages.dev/send_appeal_request
+https://f0f43a.icefactory.cl/
+https://em6gto.top/o/n0zc2/7319088730292480#selectedbank9
+https://lhi0h-uk3o-cic04-2xl-pt5g.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158912592190&name_token136=Riverdale%20Ridge%20Ravens%20HS%20Baseball
+http://www.roblox.ly/users/9039375552/profile/
+https://neh34-u405qr-gpbty6-tde-mrmp.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158912592190&name_token136=Riverdale%20Ridge%20Ravens%20HS%20Baseball
+http://xminesserversaqwq.edgeone.dev/
+https://dccrsorgia.github.io/gov.in.crs.verifyCertificate.id-TMJK8JJy4RuII5JYuqLhWA8HRA/
+https://fairtrade.com.ar/lpp/details.php
+https://vvpj-qqcsb5-851-85m-r56y.pages.dev/send_appeal_request
+https://gorillaunit.fr/cmz/f6ba0594-0290ddd-12096a-ad270d4-167b4d-4f3e39.html?AkFS8AsfId7ynAcCr3jn6akCEKaLu0Q3kWJoR4CYAKncEcwKDy9AdGIUIh5y9cr43v6kAD2iFZYmh7Kt1WukiSMcHwFSo8rhNtQcTTctZeoVZCe0qh16Op84UKMPSD7t1rt9V
+https://7b4b6e.icefactory.cl/
+https://166c75.icefactory.cl/
+https://fcb7fa.icefactory.cl/
+https://a03lps-j6srjp-y5n-jsc-qbqhw.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158912592190&name_token136=Riverdale%20Ridge%20Ravens%20HS%20Baseball
+http://www.14025.xyz/
+https://mtvlj29hwc-qnkxz51bgr-3k7j0g-zl814b.pages.dev/
+https://nice-gray-rmhnvluy.edgeone.dev/
+https://urlz.li/b12f2603
+https://vvpj-qqcsb5-851-85m-r56y.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158912592190&name_token136=Riverdale%20Ridge%20Ravens%20HS%20Baseball
+https://lpost-sa72.shop/o/n0zc2/7319088730292480#selectedbank9
+https://loi2051.cfd/o/n0zc2/7319088730292480#selectedbank9
+http://7142de.icefactory.cl/
+https://w7s6t8-cjkv-0523h-6am230.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158912592190&name_token136=Riverdale%20Ridge%20Ravens%20HS%20Baseball
+https://valli-18.github.io/netflix-ui-demo-
+https://m4nfdw.top/o/n0zc2/7319088730292480#selectedbank9
+https://aidenpiearce.github.io/Javascript-amazon
+https://btdh-0x8t6v-awl75-p8wm-vfx.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158912592190&name_token136=Riverdale%20Ridge%20Ravens%20HS%20Baseball
+https://pp5erm.sbs/o/n0zc2/7319088730292480#selectedbank9
+https://sw.run/VDmSX
+https://www.agingenieria.com.pe/wp-content/logs/newsletter/www.made-in-china.com/index.html
+https://hwihaliha.vercel.app/
+https://tuvmw5-5fre-xw1-axziz-xvy.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158912592190&name_token136=Riverdale%20Ridge%20Ravens%20HS%20Baseball
+https://a8rona.sbs/o/n0zc2/7319088730292480#selectedbank9
+http://aethersyncmatrix8.lol/
+https://paczkanr7254.shop/o/n0zc2/7319088730292480#selectedbank9
 https://s4w.in/roblox-com-users-98129062876-profile
 https://flexibilidadeadequada.s3.us-east-005.backblazeb2.com/aumento.html
 https://www.roblox.et/users/3119405750/profile
@@ -526,6 +558,7 @@ https://www.openwall.com/lists/oss-security/2026/05/04/25
 https://metacpan.org/dist/Punk-OAuth2
 https://webkitgtk.org/security/WSA-2026-0005.html
 https://cvefeed.io/vuln/detail/CVE-2026-15049
+https://cvefeed.io/vuln/detail/CVE-2026-75514
 https://cvefeed.io/vuln/detail/CVE-2026-19699
 https://cvefeed.io/vuln/detail/CVE-2026-58083
 https://cvefeed.io/vuln/detail/CVE-2026-58086
@@ -539,6 +572,8 @@ https://cvefeed.io/vuln/detail/CVE-2026-49427
 https://cvefeed.io/vuln/detail/CVE-2026-62292
 https://cvefeed.io/vuln/detail/CVE-2026-19967
 https://cvefeed.io/vuln/detail/CVE-2025-14602
+https://cvefeed.io/vuln/detail/CVE-2026-66002
+https://cvefeed.io/vuln/detail/CVE-2026-62315
 https://cvefeed.io/vuln/detail/CVE-2026-58085
 https://cvefeed.io/vuln/detail/CVE-2026-52876
 https://cvefeed.io/vuln/detail/CVE-2026-52877
