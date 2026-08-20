@@ -160,7 +160,12 @@ jobs:
 
       - name: " Install Wrangler (stable)"
         run: |
-          npm install -g wrangler@3
+          # Pinned to the exact patch verified against the pricing.js bare-JSON-import
+          # fix (bundles esbuild 0.17.19, confirmed to accept the syntax pricing.js
+          # now uses). An unpinned `wrangler@3` can silently resolve a newer 3.x
+          # patch with a different bundled esbuild and reintroduce the same
+          # deploy-time parse failure this fix just resolved.
+          npm install -g wrangler@3.114.17
           wrangler --version
           echo "Wrangler installation: OK"
 
