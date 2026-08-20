@@ -1513,6 +1513,19 @@ async function handleFreeKeyRequest(request, env, rid) {
     const keys = await env.REVENUE_CRM_KV.get(`apikeys:${email}`, "json") || [];
     const activeKey = keys.find(k => k.tier === "FREE" && k.status === "active");
     if (activeKey) {
+      // Backfill: this key may have been issued before the entitlement-sync
+      // fix above existed, in which case it was never written to
+      // API_KEYS_KV and would still 401 on every gateway call even after
+      // being resent. Upsert unconditionally (cheap, idempotent) rather
+      // than trying to detect whether it's already synced.
+      if (env.API_KEYS_KV) {
+        await env.API_KEYS_KV.put(activeKey.key, JSON.stringify({
+          key: activeKey.key, tier: "FREE", customer_id: existing.id, email,
+          source: "free_signup",
+          created_at: activeKey.created_at, expires_at: activeKey.expires_at,
+          payment_metadata: {},
+        }));
+      }
       await queueEmail(env, { to:email, template:"free_key_welcome", vars:{ api_key:activeKey.key, tier:"FREE", req_day:25, upgrade_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html" } });
       return json({ success:true, already_exists:true, key:"[sent to your email]", tier:"FREE", message:"Your existing free API key has been resent to your email." });
     }
