@@ -40,7 +40,7 @@ Authorization: Bearer sa_YOUR_API_KEY_HERE
 |------------|---------------------------|------------------------------------------------|
 | FREE       | Self-service signup        | Public feed, 25 items/day, no CVSS/KEV         |
 | PRO        | Gumroad subscription       | 200+ items/day, CVSS/KEV/EPSS, actor attribution |
-| ENTERPRISE | Direct: bivashnayak.ai007@gmail.com | Full feed, SLA, multi-tenant, SIEM integration |
+| ENTERPRISE | Direct: bivashnayak.ai007@gmail.com | Full feed, SLA, multi-tenant, SIEM integration ([TAXII setup guide](siem-taxii-integration-guide.md)) |
 
 ---
 
@@ -67,6 +67,19 @@ curl "https://...?api_key=sa_abc123def456"
 ### 2. Key rotation
 
 PRO keys rotate every 90 days. Check your subscription email for the renewal notice. Re-fetch your key from the Gumroad dashboard.
+
+If you suspect your key has leaked, rotate it yourself immediately — no
+need to wait on support:
+
+```bash
+curl -X POST https://revenue.intel.cyberdudebivash.com/api/apikeys/self-rotate \
+  -H "X-API-Key: sa_YOUR_CURRENT_KEY"
+```
+
+This deletes the old key immediately and returns a new one in the response
+body (also emailed to your account). It only works while your current key
+is still active, so rotate before a suspected-leaked key expires or gets
+revoked some other way.
 
 ### 3. Key not yet activated
 
