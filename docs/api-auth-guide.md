@@ -223,9 +223,10 @@ fetchFeed(apiKey).then(items => {
 
 | Tier       | Requests/min | Items/day | NVD Enrichment |
 |------------|-------------|-----------|----------------|
-| FREE       | 10          | 25        | No             |
-| PRO        | 60          | 200+      | Yes            |
-| ENTERPRISE | Unlimited   | Full feed | Yes + Bulk     |
+| FREE       | 30          | 25        | No             |
+| PRO        | 120         | 200+      | Yes            |
+| ENTERPRISE | 600         | Full feed | Yes + Bulk     |
+| MSSP       | 1200        | Full feed | Yes + Bulk     |
 
 Rate limit responses return `HTTP 429 Too Many Requests` with a `Retry-After` header.
 
