@@ -3742,13 +3742,17 @@ async function handleRequest(request, env, ctx) {
   // reaches the login/admin handlers -- and excludes /api/preview (documented
   // "unauthenticated by design" public teaser), /api/payment/* (checkout
   // itself -- must never be blocked by an unrelated stale key a browser
-  // happens to send) and /api/pricing (public data) so a stale credential
-  // can't change behavior on routes that are public regardless of auth state.
+  // happens to send), /api/pricing (public data), and bare /taxii + /taxii/
+  // (handleTAXII's own server-discovery route, public per the TAXII 2.1 spec
+  // -- only /taxii/collections/... and beyond require PRO/ENTERPRISE) so a
+  // stale credential can't change behavior on routes that are public
+  // regardless of auth state.
   if (auth.error
       && (path.startsWith("/api/") || path.startsWith("/taxii"))
       && !path.startsWith("/api/admin") && !path.startsWith("/api/auth")
       && !path.startsWith("/api/preview") && !path.startsWith("/api/payment")
-      && path !== "/api/pricing") {
+      && path !== "/api/pricing"
+      && path !== "/taxii" && path !== "/taxii/") {
     // Mirror /auth/login's existing brute-force response shape (429, not 401)
     // so a locked-out IP sees the same signal everywhere in the gateway.
     if (auth.error === "rate_limited") {
