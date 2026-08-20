@@ -247,18 +247,39 @@ jobs:
 
       - name: Run pip-audit dependency scan
         run: |
+          # v184.4 FIX: the bare `|| true` here swallowed pip-audit's exit code
+          # entirely, so a genuine tool failure (crash, network failure hitting
+          # the OSV/PyPI advisory DB, malformed requirements.txt) looked
+          # identical to "clean scan, no report needed" downstream. pip-audit's
+          # own documented contract is 0=no vulns, 1=vulns found -- both are
+          # legitimate completions and both write a report; anything else means
+          # the scan itself never really ran. Persist the exit code so the parse
+          # step can tell these apart.
+          set +e
           pip-audit \
             --requirement requirements.txt \
             --format json \
             --output pip-audit-report.json \
-            --skip-editable \
-            || true
+            --skip-editable
+          echo $? > /tmp/pip_audit_exit_code
+          set -e
+          echo "pip-audit exit code: $(cat /tmp/pip_audit_exit_code)"
           echo "pip-audit scan complete"
 
       - name: Parse pip-audit results
         run: |
+          PIP_AUDIT_EXIT=$(cat /tmp/pip_audit_exit_code 2>/dev/null || echo "0")
           if [ ! -f pip-audit-report.json ] || [ "$(wc -c < pip-audit-report.json)" -lt 5 ]; then
-            echo "pip-audit: report not generated — no requirements.txt or no vulnerabilities"
+            if [ ! -f requirements.txt ]; then
+              echo "pip-audit: no requirements.txt — nothing to scan"
+              echo '{"dependencies":[]}' > pip-audit-report.json
+              exit 0
+            fi
+            if [ "$PIP_AUDIT_EXIT" -gt 1 ]; then
+              echo "::error::pip-audit failed (exit $PIP_AUDIT_EXIT) before producing a report, even though requirements.txt exists — the scan never actually completed. Treating as a failure, not a clean result."
+              exit 1
+            fi
+            echo "pip-audit: report not generated — no vulnerabilities"
             echo '{"dependencies":[]}' > pip-audit-report.json
             exit 0
           fi
@@ -276,13 +297,25 @@ jobs:
           jq -r '.dependencies[] | select(.vulns | length > 0) | "\(.name)==\(.version): \([.vulns[].id] | join(", "))"' \
             pip-audit-report.json 2>/dev/null || true
 
-          # Count CRITICAL/HIGH by checking CVE severity aliases in vuln IDs
+          # CVE/PYSEC-identified subset, shown for log readability only.
           CRITICAL=$(jq '[.dependencies[].vulns[] | select(.id | test("CVE|PYSEC"))] | length' \
             pip-audit-report.json 2>/dev/null || echo "0")
-          echo "CVE-linked vulnerabilities: $CRITICAL"
+          echo "CVE/PYSEC-linked vulnerabilities: $CRITICAL"
 
-          if [ "$CRITICAL" -gt "0" ]; then
-            echo "::warning::pip-audit found $CRITICAL CVE-linked vulnerabilities. Review pip-audit-report.json and update requirements.txt."
+          # v184.4 FIX: the gate previously only failed on $CRITICAL, which is
+          # filtered to IDs matching "CVE|PYSEC". pip-audit can report advisories
+          # under GHSA identifiers alone (no CVE/PYSEC alias yet assigned) -- those
+          # were silently excluded from $CRITICAL and would pass the gate even
+          # though $TOTAL (checked above, only for the "zero vulnerabilities" exit)
+          # already counted them. Gate on $TOTAL so every vulnerability pip-audit
+          # actually found blocks the job, not just the CVE/PYSEC-identified ones.
+          if [ "$TOTAL" -gt "0" ]; then
+            # v184.3 FIX: this previously only logged a ::warning:: and always
+            # exited 0 -- a job named "safety" (part of sast-gate's required
+            # needs: list) reported success regardless of how many CVE-linked
+            # dependency vulnerabilities were actually found.
+            echo "::error::pip-audit found $TOTAL vulnerabilities ($CRITICAL CVE/PYSEC-linked). Review pip-audit-report.json and update requirements.txt."
+            exit 1
           fi
 
       - name: Upload pip-audit report
@@ -300,7 +333,14 @@ jobs:
     name: Semgrep SAST
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.event_name != 'schedule' || github.event.inputs.full_scan == 'true'
+    # v184.3 FIX: was `github.event_name != 'schedule' || ...` -- github.event.inputs
+    # doesn't exist on schedule-triggered runs, so `.full_scan` was always empty/
+    # undefined there, and the condition evaluated FALSE on every single cron run.
+    # This directly contradicted the documented intent above ("schedule ... is
+    # unaffected and still scan[s] everything") -- the daily full scan never
+    # actually ran Semgrep. workflow_dispatch (default full_scan=false) keeps its
+    # existing explicit-opt-in behavior; push/pull_request/schedule now all run it.
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.full_scan == 'true'
 
     steps:
       - name: Checkout
@@ -445,7 +485,11 @@ jobs:
           fi
 
       - name: TruffleHog OSS
-        uses: trufflesecurity/trufflehog@main
+        # v184.3 FIX: was pinned to the floating @main branch ref -- ironic for the
+        # repo's own secret-scanning security gate to run unpinned/unverified code.
+        # Pinned to the latest stable release tag, matching every other third-party
+        # action in this workflow fleet (all use version tags, not floating refs).
+        uses: trufflesecurity/trufflehog@v3.96.0
         with:
           path: ./
           base: ${{ steps.scan-range.outputs.base }}
@@ -457,6 +501,17 @@ jobs:
   # --------------------------------------------------------------------------
   sast-gate:
     name: SAST Gate (required)
+    # v184.3 NOTE: semgrep is deliberately NOT in this needs: list yet. Its scan
+    # step (job `semgrep` above) still runs with `|| true` and has no fail-on-
+    # findings check of its own -- unlike bandit/safety/trufflehog, semgrep here
+    # runs 5 broad rulesets (p/python, p/owasp-top-ten, p/jwt, p/secrets,
+    # p/fastapi) whose real false-positive rate against this specific codebase
+    # has not been validated. This gate is used as a required check gating
+    # every PR in this repo; wiring in an unvalidated hard-fail condition here
+    # risks blocking the whole PR flow on noise rather than real findings.
+    # Needs a one-time validation pass (run semgrep, review actual results,
+    # then add a fail-on-error-level-findings check) before it can safely join
+    # this required gate -- flagged rather than silently left unfixed.
     needs: [bandit, safety, trufflehog]
     runs-on: ubuntu-latest
     timeout-minutes: 5

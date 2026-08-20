@@ -154,11 +154,29 @@ jobs:
         timeout-minutes: 3
         run: |
           echo "[GATE 1] Validating frontend integrity..."
-          python3 scripts/frontend_integrity.py verify 2>&1 | head -30 || true
-          RESULT=$(python3 scripts/frontend_integrity.py verify 2>&1 | grep -E "^(PASS|FAIL|OK)" | head -1 || echo "OK")
-          echo "[GATE 1] Integrity check: $RESULT"
-          echo "ok=true" >> $GITHUB_OUTPUT
-          echo "[GATE 1] Integrity gate PASSED"
+          # v184.3 FIX: this previously ran the script twice (once for its own
+          # exit code, discarded via `|| true`; once more just to grep a status
+          # string that was itself never checked) and always wrote `ok=true`
+          # regardless of the actual result -- the readiness report's "Gate 1
+          # (Integrity): PASS/WARN" line (below) was reporting PASS unconditionally.
+          # Runs once, uses the script's own exit code (frontend_integrity.py's
+          # verify command already calls sys.exit() with the real result).
+          set +e
+          python3 scripts/frontend_integrity.py verify 2>&1 | tee /tmp/integrity_output.txt | head -30
+          INTEGRITY_EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ "$INTEGRITY_EXIT" -eq 0 ]; then
+            echo "ok=true" >> $GITHUB_OUTPUT
+            echo "[GATE 1] Integrity gate PASSED"
+          else
+            echo "ok=false" >> $GITHUB_OUTPUT
+            echo "[GATE 1] Integrity gate FAILED (exit $INTEGRITY_EXIT) — see output above"
+            # v184.4 FIX: integrity_ok was only ever read by the cosmetic readiness-
+            # report PASS/WARN line (no job `needs:`/`if:` gates on it) -- a failed
+            # frontend integrity check downgraded a report line but never failed the
+            # step or blocked deployment. Fail the step for real.
+            exit "$INTEGRITY_EXIT"
+          fi
 
       - name: "Run post-deploy validator"
         timeout-minutes: 5
