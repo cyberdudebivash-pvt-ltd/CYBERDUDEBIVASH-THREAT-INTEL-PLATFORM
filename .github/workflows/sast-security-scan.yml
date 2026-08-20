@@ -247,18 +247,39 @@ jobs:
 
       - name: Run pip-audit dependency scan
         run: |
+          # v184.4 FIX: the bare `|| true` here swallowed pip-audit's exit code
+          # entirely, so a genuine tool failure (crash, network failure hitting
+          # the OSV/PyPI advisory DB, malformed requirements.txt) looked
+          # identical to "clean scan, no report needed" downstream. pip-audit's
+          # own documented contract is 0=no vulns, 1=vulns found -- both are
+          # legitimate completions and both write a report; anything else means
+          # the scan itself never really ran. Persist the exit code so the parse
+          # step can tell these apart.
+          set +e
           pip-audit \
             --requirement requirements.txt \
             --format json \
             --output pip-audit-report.json \
-            --skip-editable \
-            || true
+            --skip-editable
+          echo $? > /tmp/pip_audit_exit_code
+          set -e
+          echo "pip-audit exit code: $(cat /tmp/pip_audit_exit_code)"
           echo "pip-audit scan complete"
 
       - name: Parse pip-audit results
         run: |
+          PIP_AUDIT_EXIT=$(cat /tmp/pip_audit_exit_code 2>/dev/null || echo "0")
           if [ ! -f pip-audit-report.json ] || [ "$(wc -c < pip-audit-report.json)" -lt 5 ]; then
-            echo "pip-audit: report not generated — no requirements.txt or no vulnerabilities"
+            if [ ! -f requirements.txt ]; then
+              echo "pip-audit: no requirements.txt — nothing to scan"
+              echo '{"dependencies":[]}' > pip-audit-report.json
+              exit 0
+            fi
+            if [ "$PIP_AUDIT_EXIT" -gt 1 ]; then
+              echo "::error::pip-audit failed (exit $PIP_AUDIT_EXIT) before producing a report, even though requirements.txt exists — the scan never actually completed. Treating as a failure, not a clean result."
+              exit 1
+            fi
+            echo "pip-audit: report not generated — no vulnerabilities"
             echo '{"dependencies":[]}' > pip-audit-report.json
             exit 0
           fi
