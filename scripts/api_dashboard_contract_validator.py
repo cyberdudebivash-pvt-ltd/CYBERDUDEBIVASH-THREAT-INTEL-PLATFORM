@@ -21,9 +21,34 @@ v143.4.1 TWO-TIER ARCHITECTURE:
   api/feed.json      = quality-filtered top 500 (what the dashboard displays)
   These are intentionally DIFFERENT SETS. Quality filtering is expected.
 
+v184.1 TWO ADDITIONAL CHECK-2 FALSE-POSITIVE GUARDS:
+  1. Content-match-by-different-ID guard (the actual cause of the 2026-08-20
+     deploy-worker failure this version fixes): api/feed.json and
+     feed_manifest.json are written by two independent generator scripts
+     (generate-and-sync.yml's pipeline vs multi-source-intel.yml's
+     multi_source_collector.py). Confirmed by direct inspection that the
+     SAME advisory can get a different hash-based ID from each generator
+     even though both IDs are the same hex length (so is_migration and the
+     legacy-hex check above both correctly report no format change) --
+     e.g. api's "intel--f9aed404366e7e77d6aab000" and manifest's
+     "indicator--696f52793bfd9b8e3dcbb91c08b68c47" are the exact same
+     Wireshark CVE-2026-76928 advisory (identical `title`), just hashed
+     from different input fields by the two pipelines. An item "missing"
+     from the manifest by ID but present under the identical `title` is
+     not a regression -- self-heal it as a WARN via a title lookup.
+  2. Pending-manifest-sync guard: api/feed.json refreshes on every push to
+     main plus every 6h (generate-and-sync.yml) while feed_manifest.json
+     refreshes independently every 4h (multi-source-intel.yml) -- an item
+     newer than anything the manifest has ingested yet is a pipeline-timing
+     gap, not a missing item. Kept as a secondary guard alongside guard 1
+     above (defense-in-depth for genuinely-new items that predate any
+     manifest entry to title-match against).
+
 Checks:
   1. API internal sort order (HARD FAIL)
-  2. API top-N items exist in manifest (WARN on ID format migration, FAIL on regression)
+  2. API top-N items exist in manifest (WARN on ID format migration, content
+     match under a different ID, pending manifest sync, or small manifest;
+     FAIL only on a genuine regression)
   3. Relative order within manifest (WARN -- timestamp drift expected)
   4. Timestamp consistency (WARN -- manifest re-processing expected)
   5. Manifest-top items absent from API = quality-filtered (WARN only)
@@ -38,7 +63,7 @@ import os, sys, json, argparse, hashlib, html as html_module
 import re
 from datetime import datetime, timezone
 
-SCRIPT_VERSION = "1.6.0"  # v184.0: manifest staleness guard (CHECK 2 demoted to WARN when manifest < 200 items)
+SCRIPT_VERSION = "1.7.0"  # v184.1: pending-manifest-sync guard (CHECK 2 demoted to WARN for items newer than the manifest's newest entry)
 DEFAULT_TOP    = 50
 MAX_DELTA_SEC  = 1
 
@@ -284,9 +309,29 @@ def validate(repo_root, top_n):
             f"CHECK 2 (api ⊆ manifest) downgraded from ERROR to WARN until STIX pipeline repopulates."
         )
 
-    api_missing_count   = 0
-    api_migration_warns = 0
-    dominant_hex_len    = api_hex_len or 24  # from detect_id_format_migration
+    # v184.1 guard 1: an item "missing" by ID that matches a manifest entry's
+    # exact `title` is the same content under a different generator-assigned
+    # ID, not a regression -- see the module docstring for the confirmed
+    # cross-pipeline ID mismatch this catches.
+    manifest_by_title: dict = {}
+    for e in manifest_items:
+        t = e.get("title")
+        if t and t not in manifest_by_title:
+            manifest_by_title[t] = e
+
+    # v184.1 guard 2: an item newer than anything the manifest has ingested
+    # yet is a pipeline-timing gap, not a regression -- see the module
+    # docstring for why api/feed.json and feed_manifest.json can legitimately
+    # be out of sync by up to one manifest ingest cycle (~4h).
+    manifest_newest_ts = max(
+        (normalize_ts(ts_key(e)) for e in manifest_items if ts_key(e)), default=""
+    )
+
+    api_missing_count       = 0
+    api_migration_warns     = 0
+    api_content_match_warns = 0
+    api_pending_sync_warns  = 0
+    dominant_hex_len        = api_hex_len or 24  # from detect_id_format_migration
 
     for api_rank, a_entry in enumerate(a_top, 1):
         a_id = a_entry.get("stix_id") or a_entry.get("id", "")
@@ -294,11 +339,25 @@ def validate(repo_root, top_n):
             api_missing_count += 1
             item_hex_len  = get_hex_len(a_entry)
             item_is_legacy = (0 < item_hex_len < dominant_hex_len)
-            effective_migration = is_migration or item_is_legacy or not manifest_is_full_history
-            msg = (
-                f"API ITEM {'ID SCHEMA MISMATCH (legacy 12-char, self-healing)' if item_is_legacy else 'NOT IN MANIFEST'}: "
-                f"{a_id[:40]} (api rank={api_rank})"
+            item_title = a_entry.get("title")
+            item_content_match = bool(item_title and item_title in manifest_by_title)
+            item_ts = normalize_ts(ts_key(a_entry))
+            item_is_pending_sync = bool(manifest_newest_ts and item_ts and item_ts > manifest_newest_ts)
+            effective_migration = (
+                is_migration or item_is_legacy or not manifest_is_full_history
+                or item_content_match or item_is_pending_sync
             )
+            if item_content_match and not (is_migration or item_is_legacy or not manifest_is_full_history):
+                api_content_match_warns += 1
+            elif item_is_pending_sync and not (is_migration or item_is_legacy or not manifest_is_full_history):
+                api_pending_sync_warns += 1
+            reason_label = (
+                "ID SCHEMA MISMATCH (legacy 12-char, self-healing)" if item_is_legacy
+                else "CONTENT MATCH UNDER DIFFERENT ID (self-healing)" if item_content_match
+                else "PENDING MANIFEST SYNC (newer than manifest's latest ingest, self-healing)" if item_is_pending_sync
+                else "NOT IN MANIFEST"
+            )
+            msg = f"API ITEM {reason_label}: {a_id[:40]} (api rank={api_rank})"
             if effective_migration:
                 api_migration_warns += 1
                 if api_migration_warns <= 5:
@@ -314,11 +373,16 @@ def validate(repo_root, top_n):
                     errors.append("(truncated at 5 missing-from-manifest errors)")
                     break
 
-    stats["api_missing_from_manifest"] = api_missing_count
-    stats["api_legacy_id_warnings"]    = api_migration_warns
+    stats["api_missing_from_manifest"]  = api_missing_count
+    stats["api_legacy_id_warnings"]     = api_migration_warns
+    stats["api_content_match_warnings"] = api_content_match_warns
+    stats["api_pending_sync_warnings"]  = api_pending_sync_warns
+    _other_warns = api_migration_warns - api_content_match_warns - api_pending_sync_warns
     stats["missing_reason"] = (
-        "id_format_migration"      if (is_migration or api_migration_warns > 0)
+        "id_format_migration"      if (is_migration or _other_warns > 0)
         else "manifest_not_full_history" if not manifest_is_full_history
+        else "content_match_different_id" if api_content_match_warns > 0
+        else "pending_manifest_sync" if api_pending_sync_warns > 0
         else "genuine_regression"
     )
 
@@ -448,6 +512,12 @@ def main():
         if stats.get("id_format_migration"):
             print(f"  [OK] ID format migration mode -- {stats.get('api_missing_from_manifest',0)} "
                   f"items logged as warnings (not regressions)")
+        elif stats.get("api_content_match_warnings", 0) > 0:
+            print(f"  [OK] {stats['api_content_match_warnings']} item(s) matched manifest content "
+                  f"under a different generator-assigned ID (self-healing, not a regression)")
+        elif stats.get("api_pending_sync_warnings", 0) > 0:
+            print(f"  [OK] {stats['api_pending_sync_warnings']} item(s) pending manifest sync "
+                  f"(newer than manifest's latest ingest, self-healing on next cycle)")
         else:
             print(f"  [OK] All {n} top entries verified in manifest")
         print(f"  [OK] No duplicates in api/feed.json")
@@ -482,6 +552,10 @@ def main():
         status_suffix = (
             f" [ID FORMAT MIGRATION: {stats.get('api_missing_from_manifest',0)} warnings]"
             if stats.get("id_format_migration") or stats.get("api_legacy_id_warnings", 0) > 0
+            else f" [CONTENT MATCH, DIFFERENT ID: {stats.get('api_content_match_warnings',0)} warnings]"
+            if stats.get("api_content_match_warnings", 0) > 0
+            else f" [PENDING MANIFEST SYNC: {stats.get('api_pending_sync_warnings',0)} warnings]"
+            if stats.get("api_pending_sync_warnings", 0) > 0
             else ""
         )
         print(
