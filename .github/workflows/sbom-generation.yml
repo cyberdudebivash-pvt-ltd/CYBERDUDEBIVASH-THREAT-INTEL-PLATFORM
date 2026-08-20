@@ -470,7 +470,18 @@ jobs:
             || GRYPE_EXIT=$?
 
           if [ ! -f "${{ env.SBOM_DIR }}/grype-vulnerabilities.json" ]; then
+            # v184.3 FIX: a missing output file here means Grype itself
+            # crashed/errored before writing anything (a `--output json --file`
+            # invocation always writes a file, even with zero matches) -- this
+            # previously exited 0 regardless, silently reporting "scan passed"
+            # for a scan that never actually ran or completed. GRYPE_EXIT (set
+            # above via `|| GRYPE_EXIT=$?`) now decides: a real tool failure
+            # fails this step; otherwise this stays a soft no-op as before.
             echo "Could not parse Grype output -- skipping vulnerability summary"
+            if [ -n "${GRYPE_EXIT:-}" ] && [ "${GRYPE_EXIT}" -ne 0 ]; then
+              echo "::error::Grype scan did not complete (exit ${GRYPE_EXIT}) and produced no output -- treating as failed."
+              exit 1
+            fi
             exit 0
           fi
 
@@ -539,7 +550,16 @@ jobs:
   # --------------------------------------------------------------------------
   sbom-gate:
     name: SBOM Gate
-    needs: [sbom-python]
+    # v184.3 FIX: was needs: [sbom-python] only. sbom-docker's Grype step
+    # correctly exit(1)s on a CRITICAL+fixable CVE, but that result was
+    # invisible to this gate -- a production Docker image could ship a
+    # CRITICAL fixable CVE, sbom-docker would go red, and this "SBOM Gate"
+    # would still report "passed" because it never looked at sbom-docker at
+    # all. sbom-docker only runs on main/release (if: github.ref ==
+    # 'refs/heads/main' || github.event_name == 'release'), so its result is
+    # legitimately 'skipped' on every other trigger -- checked for explicitly
+    # below rather than requiring 'success' unconditionally.
+    needs: [sbom-python, sbom-docker]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -549,6 +569,11 @@ jobs:
         run: |
           if [[ "${{ needs.sbom-python.result }}" != "success" ]]; then
             echo "::error::Python SBOM generation failed."
+            exit 1
+          fi
+          DOCKER_RESULT="${{ needs.sbom-docker.result }}"
+          if [[ "$DOCKER_RESULT" != "success" && "$DOCKER_RESULT" != "skipped" ]]; then
+            echo "::error::Docker image SBOM/vulnerability scan failed (result: $DOCKER_RESULT)."
             exit 1
           fi
           echo "SBOM gate passed."

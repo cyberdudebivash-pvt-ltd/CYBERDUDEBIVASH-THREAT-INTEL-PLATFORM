@@ -369,6 +369,12 @@ jobs:
             cat .PIPELINE_LOCK 2>/dev/null || true
             echo "======================================================"
             echo "  Skipping pipeline run. Remove .PIPELINE_LOCK to resume."
+            # v184.3 FIX: 'exit 0' here only ended this one step -- every
+            # subsequent stage (including Stage 1-3's real data mutation and
+            # Stage 4's git push, the exact "overwrite god mode reports" this
+            # lock exists to prevent) ran anyway regardless of the lock. This
+            # env var is checked by those two gateway steps to actually skip.
+            echo "PIPELINE_LOCKED=true" >> "$GITHUB_ENV"
             exit 0
           fi
           echo "[OK] No pipeline lock active. Proceeding."
@@ -614,6 +620,11 @@ jobs:
         # freshness gate fail, API timeout). Existing committed reports in the working
         # tree are always deployed. Hard-fail gates in 5.4.6 and 5.4.7 still block
         # deployment if the dist/ artifact itself is corrupt or incomplete.
+        #
+        # v184.3 FIX: skip entirely when STAGE 0.00 detected .PIPELINE_LOCK -- see
+        # that step's comment. This is the actual data-mutating stage the lock exists
+        # to protect against.
+        if: env.PIPELINE_LOCKED != 'true'
         continue-on-error: true
         run: python3 scripts/run_pipeline.py
 
@@ -2622,7 +2633,10 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "STAGE 4 - Git Sync (commit + push metadata)"
         timeout-minutes: 8
-        if: always()
+        # v184.3 FIX: also skip when STAGE 0.00 detected .PIPELINE_LOCK -- this is
+        # the actual git-push mechanism that would overwrite an operator's in-flight
+        # manual work, which the lock's own comment says it exists to prevent.
+        if: ${{ always() && env.PIPELINE_LOCKED != 'true' }}
         run: |
           # v184.0 safety net: restore safe_git_commit.py if still missing after STAGE 0.05b
           [ -f "scripts/safe_git_commit.py" ] || git checkout HEAD -- scripts/safe_git_commit.py 2>/dev/null || true
@@ -2674,6 +2688,7 @@ jobs:
       # Hard fail prevents deploying a GitHub Pages site with zero reports.
       # -----------------------------------------------------------------------
       - name: "STAGE 5.4 - Post-pipeline report count gate"
+        id: report-count-gate
         timeout-minutes: 5
         run: python3 scripts/ci_report_count_check.py
 
@@ -2693,6 +2708,7 @@ jobs:
       # This gate MUST block deployment when any report_url is broken.
       # -----------------------------------------------------------------------
       - name: "STAGE 5.4.1 - Report existence validator (v184.0 HARD FAIL)"
+        id: report-existence-validator
         timeout-minutes: 3
         run: python3 scripts/report_existence_validator.py
 
@@ -2717,15 +2733,21 @@ jobs:
       #   This prevents the main-branch from growing past the 75,000-file threshold.
       #
       # SAFETY:
-      #   - Dry-run by default unless ARCHIVE_DRY_RUN=0 is set explicitly.
+      #   - v184.3 FIX: this previously claimed "dry-run by default unless
+      #     ARCHIVE_DRY_RUN=0 is set explicitly" -- backwards from what's
+      #     actually wired below (`vars.ARCHIVE_DRY_RUN || '0'`, and the
+      #     script itself treats "0" as LIVE, only "1" as dry-run). Corrected:
+      #     LIVE by default unless ARCHIVE_DRY_RUN=1 is set explicitly.
       #   - Hard-stops if reports would fall below ARCHIVE_MIN_REPORTS (500).
-      #   - Verifies clean: false is set before executing any git rm operations.
+      #   - Verifies clean: false is set before executing any git rm operations
+      #     -- so even in "live" mode, no git rm actually runs while Pages
+      #     deploy (STAGE 5) uses clean: true, as it currently does.
       #   - Exit 2 = Pages still uses clean:true → non-blocking warning only.
       #   - Exit 1 = safety constraint violated → treated as hard fail.
       #
       # ENVIRONMENT VARIABLES (optional, all have safe defaults):
       #   REPORT_RETENTION_DAYS  -- days to keep in working tree (default: 90)
-      #   ARCHIVE_DRY_RUN        -- "1" forces dry-run (default: "1" for safety)
+      #   ARCHIVE_DRY_RUN        -- "1" forces dry-run; default is LIVE ("0")
       #   ARCHIVE_MIN_REPORTS    -- minimum hot reports to retain (default: 500)
       # -----------------------------------------------------------------------
       - name: "STAGE 5.4.5b - Report Archive Governance (v184.0 — NON-BLOCKING)"
@@ -2780,7 +2802,26 @@ jobs:
         # disk before build_dist_artifact.py runs. With 82,387 HTML+PDF files checked
         # out (7.1 GB), purging old reports frees 3+ GB and speeds up the dist/ build.
         # This is defence-in-depth alongside the mtime filter fix in build_dist_artifact.py.
-        if: ${{ !cancelled() }}
+        #
+        # v184.3 FIX: the bare !cancelled() above meant this bootstrap ran (and the
+        # dist-build -> verify -> Pages-deploy chain after it) even when STAGE 5.4 or
+        # 5.4.1 -- the two gates immediately upstream, whose own comments say "Hard
+        # fail prevents deploying a GitHub Pages site with zero reports" and "This
+        # gate MUST block deployment when any report_url is broken" -- had FAILED, or
+        # had been silently SKIPPED because some earlier hard-fail gate (3.3/3.6/3.8/
+        # 3.9/3.91/3.92/etc.) fired first and this step's bare !cancelled() was the
+        # first thing downstream willing to run again. STAGE 5.4.6/5.4.7/STAGE 5 below
+        # already correctly chain off each other's conclusion (verify-dist requires
+        # build-dist == success, the Pages deploy requires verify-dist == success) --
+        # but none of that chain checked whether the actual content-integrity gates
+        # upstream of it had passed, so a hard-fail there could still result in the
+        # existing on-disk content being deployed anyway. Requiring both gates'
+        # conclusion == 'success' here correctly blocks the whole chain whether they
+        # failed OR were skipped (a skipped step's conclusion is not 'success'),
+        # while leaving every other stage's bootstrap/observability behavior
+        # (e.g. STAGE 4's git push always running) unchanged -- this is the minimal,
+        # evidence-scoped fix, not a rework of the whole gate architecture.
+        if: ${{ !cancelled() && steps.report-count-gate.conclusion == 'success' && steps.report-existence-validator.conclusion == 'success' }}
         timeout-minutes: 5
         env:
           STIX_MAX_BUNDLES: "50"

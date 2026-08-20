@@ -115,9 +115,22 @@ jobs:
           fi
 
           echo "[ARCHIVE] Starting cold archive automation (flags: $DRY_RUN_FLAG)"
+          # v184.3 FIX: this previously ran without pipefail, so `ARCH_EXIT=$?`
+          # after `... | tee file` captured tee's exit code (virtually always 0),
+          # never the archive script's -- the FAILED/DEGRADED branches below were
+          # dead code in practice. Even when ARCH_EXIT WAS correctly 1, nothing
+          # here ever exited non-zero, so this step -- and the "Commit lifecycle
+          # outputs" step gated on `if: success()` right after it -- always
+          # reported success and pushed to main regardless of a real archive
+          # write failure (originals-preserved-but-write-failed is still a
+          # failure the operator needs to see and that must not be committed
+          # as if it succeeded, for the only genuinely destructive/irreversible
+          # operation in this pipeline).
+          set +o pipefail
+          set -o pipefail
           set +e
           python3 scripts/cold_archive_automation.py $DRY_RUN_FLAG 2>&1 | tee /tmp/archive_output.txt
-          ARCH_EXIT=$?
+          ARCH_EXIT=${PIPESTATUS[0]}
           set -e
 
           ARCH_STATUS="OK"
@@ -133,6 +146,14 @@ jobs:
 
           echo "archive_status=$ARCH_STATUS" >> $GITHUB_OUTPUT
           grep -E "archived:|purged:|HOT:|WARM:|COLD:|PURGE:" /tmp/archive_output.txt | tail -20 || true
+
+          # DEGRADED (exit 3) is a documented partial-success state (entries
+          # skipped, audit log updated) -- not blocked. FAILED (exit 1) is a
+          # genuine write failure and must stop the job here, before the
+          # "Commit lifecycle outputs" step (gated on success()) can run.
+          if [ "$ARCH_STATUS" = "FAILED" ]; then
+            exit 1
+          fi
 
       - name: "Commercial Observability Snapshot"
         id: commercial_obs

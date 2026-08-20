@@ -33,10 +33,19 @@ concurrency:
   group: platform-build-deploy-${{ github.ref }}
   cancel-in-progress: true
 
+
+# v184.3 FIX: packages: write and security-events: write were both granted at
+# workflow level, so every job (lint, security-scan, build-frontend,
+# validate-helm, terraform-validate, post-deploy-verify -- none of which touch
+# a registry or upload SARIF) inherited a GITHUB_TOKEN with GHCR push rights
+# it never needed. security-events: write turned out to be entirely unused --
+# no job in this file calls github/codeql-action/upload-sarif or otherwise
+# writes to the Security tab (confirmed via repo-wide grep) -- so it's dropped
+# outright rather than rescoped. packages: write is moved to a job-level
+# override on build-services (below), the only job that calls
+# docker/login-action.
 permissions:
   contents: read
-  packages: write
-  security-events: write
 
 env:
   REGISTRY: ghcr.io
@@ -140,6 +149,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [lint]
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -296,16 +308,40 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Check intel.cyberdudebivash.com
+        # v184.3 FIX: neither check here could ever fail the job (the `&&
+        # echo ... || echo ...` pattern always exits 0 regardless of which
+        # branch runs), despite this job being named "Live Platform Health
+        # Check" / "Production Health Verify" -- a genuinely down production
+        # site would still show green. One retry after a short pause absorbs
+        # a transient blip before treating it as a real failure.
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://intel.cyberdudebivash.com/)
-          echo "Platform HTTP: $STATUS"
-          [ "$STATUS" = "200" ] && echo "✅ LIVE" || echo "⚠️ Returned $STATUS"
+          for attempt in 1 2; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://intel.cyberdudebivash.com/)
+            echo "Platform HTTP (attempt $attempt): $STATUS"
+            [ "$STATUS" = "200" ] && break
+            [ "$attempt" = "1" ] && sleep 10
+          done
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ LIVE"
+          else
+            echo "::error::Platform health check failed — HTTP $STATUS after retry."
+            exit 1
+          fi
 
       - name: Check feed endpoint
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://intel.cyberdudebivash.com/api/feed.json)
-          echo "Feed API: $STATUS"
-          [ "$STATUS" = "200" ] && echo "✅ Feed OK" || echo "⚠️ Feed returned $STATUS"
+          for attempt in 1 2; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://intel.cyberdudebivash.com/api/feed.json)
+            echo "Feed API (attempt $attempt): $STATUS"
+            [ "$STATUS" = "200" ] && break
+            [ "$attempt" = "1" ] && sleep 10
+          done
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ Feed OK"
+          else
+            echo "::error::Feed API health check failed — HTTP $STATUS after retry."
+            exit 1
+          fi
 
       - name: Deployment summary
         run: |
