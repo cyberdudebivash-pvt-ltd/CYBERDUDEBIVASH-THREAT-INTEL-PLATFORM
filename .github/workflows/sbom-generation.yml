@@ -485,6 +485,19 @@ jobs:
             exit 0
           fi
 
+          # v184.4 FIX: the file-exists branch below fed every jq extraction through
+          # `2>/dev/null || echo "0"` -- a file that exists but is empty, truncated,
+          # or has a `.matches` field that isn't an array (malformed/corrupted Grype
+          # output) made every jq call error out, silently falling back to "0" for
+          # TOTAL/CRITICAL/HIGH and reporting "Grype gate passed: 0 actionable
+          # critical CVEs" for a scan whose output was never actually readable.
+          # Validate structure before trusting any count derived from it.
+          if ! jq -e '.matches | type == "array"' \
+            "${{ env.SBOM_DIR }}/grype-vulnerabilities.json" > /dev/null 2>&1; then
+            echo "::error::Grype output file exists but is not valid/well-formed JSON (missing or non-array .matches) -- cannot trust a zero-vulnerability result derived from it."
+            exit 1
+          fi
+
           TOTAL=$(jq '.matches | length' \
             "${{ env.SBOM_DIR }}/grype-vulnerabilities.json" 2>/dev/null || echo "0")
           CRITICAL=$(jq '[.matches[].vulnerability | select(.severity == "Critical")] | length' \

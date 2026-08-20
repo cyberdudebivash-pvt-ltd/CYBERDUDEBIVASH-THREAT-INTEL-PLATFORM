@@ -316,7 +316,14 @@ jobs:
         # a transient blip before treating it as a real failure.
         run: |
           for attempt in 1 2; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://intel.cyberdudebivash.com/)
+            # v184.4 FIX: under default `bash -e`, a curl transport failure (DNS,
+            # connection refused, timeout -- not just a non-200 response) would
+            # abort this step immediately, skipping the retry entirely. Guard the
+            # assignment so a transport failure is treated as a normal "not 200"
+            # attempt and the retry loop actually gets to run twice.
+            if ! STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://intel.cyberdudebivash.com/); then
+              STATUS="000"
+            fi
             echo "Platform HTTP (attempt $attempt): $STATUS"
             [ "$STATUS" = "200" ] && break
             [ "$attempt" = "1" ] && sleep 10
@@ -331,7 +338,11 @@ jobs:
       - name: Check feed endpoint
         run: |
           for attempt in 1 2; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://intel.cyberdudebivash.com/api/feed.json)
+            # v184.4 FIX: guard against curl transport failures aborting the step
+            # under default `bash -e` before the retry loop's second attempt runs.
+            if ! STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://intel.cyberdudebivash.com/api/feed.json); then
+              STATUS="000"
+            fi
             echo "Feed API (attempt $attempt): $STATUS"
             [ "$STATUS" = "200" ] && break
             [ "$attempt" = "1" ] && sleep 10

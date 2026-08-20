@@ -1304,6 +1304,15 @@ jobs:
           fi
 
       - name: "STAGE 3.2 - Generate Internal HTML Reports (report_generator)"
+        # v184.4 FIX: had no `if:` at all (bare default success()), so under an
+        # active .PIPELINE_LOCK -- where STAGE 1-3 (which produces the feed
+        # manifest this step reads) is deliberately skipped, and a skipped step
+        # does not count as a failure for success() -- this step still ran and
+        # regenerated HTML reports off the stale, lock-frozen manifest. Same
+        # class of gap as sentinel-blogger.yml Finding 2 (STAGE 1-3/STAGE 4
+        # lock guard); this is the primary report-mutating step that guard was
+        # never extended to.
+        if: env.PIPELINE_LOCKED != 'true'
         timeout-minutes: 20
         run: python3 scripts/report_generator.py --manifest data/stix/feed_manifest.json
 
@@ -1494,6 +1503,14 @@ jobs:
         # which made this MANDATORY step fail and skip every downstream HARD
         # FAIL integrity gate through STAGE 4.04 (STAGE 3.5.1 R2 Reports Index
         # Integrity Gate, STAGE 3.6 R2 Upload Integrity Verifier, etc.).
+        #
+        # v184.4 FIX: default `if: success()` meant this step -- which publishes
+        # reports/manifests to the live R2 bucket customers read from -- still
+        # ran under an active .PIPELINE_LOCK, since the upstream steps it depends
+        # on (STAGE 1-3, STAGE 3.2) are skipped rather than failed when locked,
+        # and a skipped step doesn't trip success() = false. Explicitly respect
+        # the lock here too, consistent with the STAGE 1-3/STAGE 4/STAGE 3.2 guards.
+        if: env.PIPELINE_LOCKED != 'true'
         timeout-minutes: 50
         env:
           CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
@@ -2937,7 +2954,19 @@ jobs:
         #   Estimated dist/ size: ~3 days x ~46 MB/day = ~138 MB (well under 900 MB gate)
         #
         # Historical reports are served from Cloudflare R2 (uploaded in Stage 3.5).
-        if: ${{ !cancelled() }}
+        #
+        # v184.4 FIX: The !cancelled()-only condition above deliberately decouples
+        # build-dist from predeploy-gate (STAGE 5.4.5d, a continue-on-error quality
+        # signal) for the 404-avoidance reason documented above. It did NOT need to
+        # (and should not) be decoupled from predist-cleanup (STAGE 5.4.5c), which is
+        # a MANDATORY, non-continue-on-error prerequisite (disk reclaim + upstream
+        # report-count-gate/report-existence-validator chain — see STAGE 5.4.5c's own
+        # comment). Without this check, a failed or skipped report gate upstream still
+        # let build-dist run and produce a deployable dist/, silently bypassing the
+        # STAGE 5.4.5c hard-fail gate the same way Finding 1 did before it was fixed.
+        # STAGE 5.4.7 (verify-dist) and STAGE 5 (Pages deploy) already chain off
+        # build-dist's own conclusion, so this closes the last gap in that chain.
+        if: ${{ !cancelled() && steps.predist-cleanup.conclusion == 'success' }}
         timeout-minutes: 10
         env:
           REPORT_RETENTION_DAYS: "3"
@@ -2955,7 +2984,13 @@ jobs:
       # after cleanup. T08 uses REPORT_COUNT env + dist/reports/ as fallbacks.
       # -----------------------------------------------------------------------
       - name: "STAGE 5.4.6b - Post-dist reports/ cleanup (v184.0 P0 DISK GOV)"
-        if: ${{ !cancelled() }}
+        # v184.4 FIX: only delete reports/ from the runner disk once build-dist has
+        # actually preserved them in dist/reports/. If build-dist failed or was
+        # skipped (e.g. predist-cleanup gate above did not succeed), reports/ is the
+        # only remaining on-disk copy this run — deleting it unconditionally under
+        # the previous bare !cancelled() would destroy data with no dist/ copy to
+        # fall back on.
+        if: ${{ !cancelled() && steps.build-dist.conclusion == 'success' }}
         timeout-minutes: 2
         run: |
           BEFORE=$(df / --output=avail | tail -1 | awk '{printf "%.2f", $1/1024/1024}')

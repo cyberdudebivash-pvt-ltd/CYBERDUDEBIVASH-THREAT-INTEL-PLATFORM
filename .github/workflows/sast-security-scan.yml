@@ -276,17 +276,24 @@ jobs:
           jq -r '.dependencies[] | select(.vulns | length > 0) | "\(.name)==\(.version): \([.vulns[].id] | join(", "))"' \
             pip-audit-report.json 2>/dev/null || true
 
-          # Count CRITICAL/HIGH by checking CVE severity aliases in vuln IDs
+          # CVE/PYSEC-identified subset, shown for log readability only.
           CRITICAL=$(jq '[.dependencies[].vulns[] | select(.id | test("CVE|PYSEC"))] | length' \
             pip-audit-report.json 2>/dev/null || echo "0")
-          echo "CVE-linked vulnerabilities: $CRITICAL"
+          echo "CVE/PYSEC-linked vulnerabilities: $CRITICAL"
 
-          if [ "$CRITICAL" -gt "0" ]; then
+          # v184.4 FIX: the gate previously only failed on $CRITICAL, which is
+          # filtered to IDs matching "CVE|PYSEC". pip-audit can report advisories
+          # under GHSA identifiers alone (no CVE/PYSEC alias yet assigned) -- those
+          # were silently excluded from $CRITICAL and would pass the gate even
+          # though $TOTAL (checked above, only for the "zero vulnerabilities" exit)
+          # already counted them. Gate on $TOTAL so every vulnerability pip-audit
+          # actually found blocks the job, not just the CVE/PYSEC-identified ones.
+          if [ "$TOTAL" -gt "0" ]; then
             # v184.3 FIX: this previously only logged a ::warning:: and always
             # exited 0 -- a job named "safety" (part of sast-gate's required
             # needs: list) reported success regardless of how many CVE-linked
             # dependency vulnerabilities were actually found.
-            echo "::error::pip-audit found $CRITICAL CVE-linked vulnerabilities. Review pip-audit-report.json and update requirements.txt."
+            echo "::error::pip-audit found $TOTAL vulnerabilities ($CRITICAL CVE/PYSEC-linked). Review pip-audit-report.json and update requirements.txt."
             exit 1
           fi
 

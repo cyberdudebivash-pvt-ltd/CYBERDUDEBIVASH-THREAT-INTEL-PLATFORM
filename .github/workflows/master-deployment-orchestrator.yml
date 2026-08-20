@@ -171,6 +171,11 @@ jobs:
           else
             echo "ok=false" >> $GITHUB_OUTPUT
             echo "[GATE 1] Integrity gate FAILED (exit $INTEGRITY_EXIT) — see output above"
+            # v184.4 FIX: integrity_ok was only ever read by the cosmetic readiness-
+            # report PASS/WARN line (no job `needs:`/`if:` gates on it) -- a failed
+            # frontend integrity check downgraded a report line but never failed the
+            # step or blocked deployment. Fail the step for real.
+            exit "$INTEGRITY_EXIT"
           fi
 
       - name: "Run post-deploy validator"
