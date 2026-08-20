@@ -3730,6 +3730,24 @@ async function handleRequest(request, env, ctx) {
   // Resolve auth once for this request (skip for pure public health check to save a KV read)
   const auth = await resolveAuth(request, env);
 
+  // Surface auth failures explicitly instead of silently downgrading to FREE.
+  // resolveAuth() already computes auth.error for a credential that WAS
+  // presented but is invalid/expired/revoked/rate-limited (index.js:334-373);
+  // nothing previously read it, so a customer with a broken key got 200 OK +
+  // masked FREE-tier data -- indistinguishable from the platform having no
+  // data. Anonymous requests (no credential supplied) are unaffected: auth.error
+  // is only ever set when a credential was actually presented. Scoped to
+  // /api and /taxii (where a credential is meaningful) and excludes
+  // /api/admin and /api/auth so re-authentication with a stale token still
+  // reaches the login/admin handlers.
+  if (auth.error && (path.startsWith("/api/") || path.startsWith("/taxii"))
+      && !path.startsWith("/api/admin") && !path.startsWith("/api/auth")) {
+    return jsonResp(
+      { error: "Unauthorized", reason: auth.error, hint: "Provide a valid X-API-Key header or Authorization: Bearer <token>." },
+      401
+    );
+  }
+
   // Rate limiting (skip health check so monitors never get throttled)
   if (path !== "/api/health" && path !== "/api/health/") {
     const rl = await checkRateLimit(env, ip, auth.tier);
@@ -4099,6 +4117,11 @@ async function handleRequest(request, env, ctx) {
   // --- /api/preview -----------------------------------------------------------
   if (path === "/api/preview" || path === "/api/preview/") {
     const feedData = await loadFeedItems(env);
+    // Same "no data == unavailable" judgment /api/feed.json already makes for
+    // this identical R2 source (LATEST_JSON_KEY) -- loadFeedItems() swallows
+    // R2 errors into an empty-but-200 payload, which previously rendered as a
+    // silent empty preview instead of a signal that the feed is down.
+    if (!feedData.items || feedData.items.length === 0) return errorResp("Feed not available", 503);
     // Always the FREE/teaser view regardless of caller tier (unauthenticated
     // by design) -- so IOCs, detection rules, and actor attribution must be
     // masked the same way the FREE branch of every other endpoint is.
