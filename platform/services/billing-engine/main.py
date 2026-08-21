@@ -59,14 +59,24 @@ TIER_LIMITS = {
         "price_monthly_usd": 0,
         "price_annual_usd": 0,
     },
+    # v184.4 FIX: price_monthly_usd/price_annual_usd below were previously
+    # 499/4,990 (Pro) and 4,999/49,990 (Enterprise) -- invented figures that
+    # matched nothing else in the codebase. Cross-verified canonical pricing
+    # now confirmed from THREE independent, live, customer-facing sources
+    # that all agree with each other: pricing.html (public marketing page),
+    # agent/monetization/payment_gateway.py's PRICES_USD/PRICES_INR (the real
+    # Stripe/Razorpay checkout backend actually used by /api/v1/subscribe),
+    # and api/main.py's /api/v1/tiers + /api/v1/onboard. Quota limits
+    # (api_calls_per_month etc.) are left as-is -- no cross-verified evidence
+    # contradicts them, only the pricing fields were confirmed wrong.
     SaaSTier.PRO: {
         "api_calls_per_month": 100_000,
         "ioc_enrichments_per_month": 10_000,
         "stix_bundles_per_month": 1_000,
         "pdf_reports_per_month": 500,
         "ai_queries_per_month": 5_000,
-        "price_monthly_usd": 499,
-        "price_annual_usd": 4_990,
+        "price_monthly_usd": 49,
+        "price_annual_usd": 470,
     },
     SaaSTier.ENTERPRISE: {
         "api_calls_per_month": 10_000_000,
@@ -74,8 +84,8 @@ TIER_LIMITS = {
         "stix_bundles_per_month": 100_000,
         "pdf_reports_per_month": 50_000,
         "ai_queries_per_month": 500_000,
-        "price_monthly_usd": 4_999,
-        "price_annual_usd": 49_990,
+        "price_monthly_usd": 499,
+        "price_annual_usd": 4_788,
     },
     SaaSTier.GOVERNMENT: {
         "api_calls_per_month": -1,  # unlimited
@@ -95,25 +105,22 @@ TIER_LIMITS = {
         "price_monthly_usd": 0,  # custom licensing
         "price_annual_usd": 0,
     },
-    # Was missing entirely — GET /tiers threw a 500 on every call (KeyError)
-    # since SaaSTier.MSSP has no entry here to look up. Not fixed by picking
-    # a number: this repo has at least three mutually-inconsistent pricing
-    # schemes for "mssp" across api/, platform/services/, and
-    # sentinel-apex-api/ ($1,999, $2,499, and this file's own pro/enterprise
-    # scale imply yet a different figure) with no evidence for which is
-    # canonical. Treated as custom/negotiated pricing (matching this file's
-    # own OEM tier, and mssp_operations_engine.py's actual per-customer
-    # wholesale model) rather than inventing a flat rate — see the
-    # cross-codebase pricing reconciliation this needs before any of those
-    # numbers can be trusted.
+    # v184.4 FIX: was missing entirely (GET /tiers threw a 500/KeyError on
+    # every call) and, once added, was set to price 0 as "custom/negotiated"
+    # pending a cross-codebase pricing reconciliation. That reconciliation is
+    # now done: pricing.html, payment_gateway.py's PRICES_USD/PRICES_INR (a
+    # real Stripe price ID, STRIPE_MSP_PRICE_ID, backs MSSP checkout), and
+    # api/main.py's /api/v1/tiers + /api/v1/onboard all independently agree
+    # on a fixed $1,999/mo MSSP tier with unlimited-client scope -- not a
+    # request-a-quote/negotiated tier. Using that verified figure.
     SaaSTier.MSSP: {
         "api_calls_per_month": -1,
         "ioc_enrichments_per_month": -1,
         "stix_bundles_per_month": -1,
         "pdf_reports_per_month": -1,
         "ai_queries_per_month": -1,
-        "price_monthly_usd": 0,  # custom/negotiated — see comment above
-        "price_annual_usd": 0,
+        "price_monthly_usd": 1_999,
+        "price_annual_usd": 19_188,
     },
 }
 
