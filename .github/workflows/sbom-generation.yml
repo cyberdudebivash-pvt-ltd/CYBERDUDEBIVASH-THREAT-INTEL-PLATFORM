@@ -260,8 +260,11 @@ jobs:
 
       # ── v47.3 FIX: Build with CPU_ONLY=true ──────────────────────────────
       # Passes --build-arg CPU_ONLY=true to the Dockerfile builder stage.
-      # Dockerfile v47.1 sed-replaces torch==2.2.0 -> torch==2.2.0+cpu and
-      # installs from download.pytorch.org/whl/cpu (no CUDA extras, ~200 MB).
+      # v184.7: Dockerfile's sed now derives the torch version pinned in
+      # requirements.txt via regex backreference (torch==\1+cpu) instead of
+      # hardcoding "2.2.0+cpu" -- so this appends +cpu to whatever torch
+      # version is actually pinned (currently 2.13.0) and installs from
+      # download.pytorch.org/whl/cpu (no CUDA extras, ~200 MB).
       # cache-to intentionally omitted: CPU build != production cache key.
       # v47.4: upgraded @v5 -> @v6 (Node.js 24 native).
       # v47.5: cache-from removed — docker driver does not support GHA cache
