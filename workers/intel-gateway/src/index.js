@@ -4608,6 +4608,35 @@ async function handleRequest(request, env, ctx) {
     if (path === "/api/v1/automation/intelligence") return await handleP16Automation(request, env);
     if (path === "/api/v1/observability/metrics") return await handleP16Observability(request, env);
   }
+  // --- P17-P40 + rx-pub-a0: require authentication (v184.4 FIX) --------------
+  // These ~120 routes (P17, P18's non-ioc/enriched routes, P19, P20, and
+  // every /api/v1/pNN/* route from P21 through P40, plus rx-pub-a0) dispatched
+  // with NO auth parameter and NO guard at all -- computed intelligence
+  // (quality/actionability/trust scores, actor/TTP attribution, the entire
+  // P33 ECIOS layer) was served to fully anonymous callers. Same minimum-bar
+  // guard already used for P16.1-P16.8 above: requires a valid provisioned
+  // key or JWT, not full tier differentiation (no evidence in this codebase
+  // supports inventing a specific tier requirement per route). This runs
+  // BEFORE and in addition to the finer-grained auth.tier checks P18's
+  // ioc/enriched, P21/certify, P29/certify, and P31's routes already do
+  // downstream -- purely additive, does not change their existing behavior
+  // for a caller who already had a valid key.
+  const _p17to40Gated =
+    path === "/api/platform/orchestrator/state" || path === "/api/v1/digital-twin/state" ||
+    path === "/api/v1/campaigns/forecast" || path === "/api/v1/executive/command-center" ||
+    path.startsWith("/api/v1/policies") || path.startsWith("/api/v1/playbooks") ||
+    path === "/api/v1/ai-ops/analytics" ||
+    path === "/api/v1/intel/correlation" || path === "/api/v1/intel/trust-indicators" ||
+    path === "/api/v1/reports/validate" || path === "/api/v1/reports/quality" ||
+    path === "/api/v1/ioc/enriched" || path === "/api/v1/confidence/methodology" ||
+    path === "/api/v1/reports/certify" || path === "/api/v1/reports/scorecard" ||
+    path === "/api/v1/reports/p20/quality" || path === "/api/v1/reports/p20/audit" ||
+    /^\/api\/v1\/p(2[1-9]|3\d|40)\//.test(path) ||
+    path.startsWith("/api/v1/rx-pub-a0/");
+  if (_p17to40Gated && !auth.key && !auth.jwt) {
+    return jsonResp({ error: "Authentication required", hint: "Provide X-API-Key header or Authorization: Bearer <JWT>" }, 401);
+  }
+
   // --- P17: Enterprise Cyber Defense OS (additive, v17.0) -------------------
   if (path === "/api/platform/orchestrator/state")    return await handleP17Orchestrator(request, env);
   if (path === "/api/v1/digital-twin/state")          return await handleP17DigitalTwin(request, env);
