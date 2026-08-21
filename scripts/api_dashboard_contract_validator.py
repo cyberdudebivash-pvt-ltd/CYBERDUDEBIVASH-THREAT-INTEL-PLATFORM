@@ -344,6 +344,7 @@ def validate(repo_root, top_n):
 
     api_missing_count       = 0
     api_migration_warns     = 0
+    api_legacy_id_warns     = 0
     api_content_match_warns = 0
     api_pending_sync_warns  = 0
     api_kev_bulletin_warns  = 0
@@ -367,11 +368,14 @@ def validate(repo_root, top_n):
                 is_migration or item_is_legacy or not manifest_is_full_history
                 or item_content_match or item_is_pending_sync or item_is_kev_bulletin
             )
-            if item_content_match and not (is_migration or item_is_legacy or not manifest_is_full_history):
+            not_global_migration = not (is_migration or not manifest_is_full_history)
+            if item_is_legacy and not_global_migration:
+                api_legacy_id_warns += 1
+            elif item_content_match and not_global_migration:
                 api_content_match_warns += 1
-            elif item_is_pending_sync and not (is_migration or item_is_legacy or not manifest_is_full_history):
+            elif item_is_pending_sync and not_global_migration:
                 api_pending_sync_warns += 1
-            elif item_is_kev_bulletin and not (is_migration or item_is_legacy or not manifest_is_full_history):
+            elif item_is_kev_bulletin and not_global_migration:
                 api_kev_bulletin_warns += 1
             reason_label = (
                 "ID SCHEMA MISMATCH (legacy 12-char, self-healing)" if item_is_legacy
@@ -397,16 +401,12 @@ def validate(repo_root, top_n):
                     break
 
     stats["api_missing_from_manifest"]  = api_missing_count
-    stats["api_legacy_id_warnings"]     = api_migration_warns
+    stats["api_legacy_id_warnings"]     = api_legacy_id_warns
     stats["api_content_match_warnings"] = api_content_match_warns
     stats["api_pending_sync_warnings"]  = api_pending_sync_warns
     stats["api_kev_bulletin_warnings"]  = api_kev_bulletin_warns
-    _other_warns = (
-        api_migration_warns - api_content_match_warns
-        - api_pending_sync_warns - api_kev_bulletin_warns
-    )
     stats["missing_reason"] = (
-        "id_format_migration"      if (is_migration or _other_warns > 0)
+        "id_format_migration"      if (is_migration or api_legacy_id_warns > 0)
         else "manifest_not_full_history" if not manifest_is_full_history
         else "content_match_different_id" if api_content_match_warns > 0
         else "pending_manifest_sync" if api_pending_sync_warns > 0
