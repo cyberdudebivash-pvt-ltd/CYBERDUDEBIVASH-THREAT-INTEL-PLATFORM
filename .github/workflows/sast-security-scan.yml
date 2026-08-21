@@ -501,7 +501,10 @@ jobs:
         # repo's own secret-scanning security gate to run unpinned/unverified code.
         # Pinned to the latest stable release tag, matching every other third-party
         # action in this workflow fleet (all use version tags, not floating refs).
-        uses: trufflesecurity/trufflehog@v3.96.0
+        # v184.8 FIX: a version tag can still be re-pointed by the maintainer (or
+        # an attacker with push access to their repo) -- pinned to the commit SHA
+        # that @v3.96.0 currently resolves to for full supply-chain immutability.
+        uses: trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0
         with:
           path: ./
           base: ${{ steps.scan-range.outputs.base }}
