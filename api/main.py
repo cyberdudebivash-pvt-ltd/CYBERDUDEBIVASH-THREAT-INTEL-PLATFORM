@@ -1064,7 +1064,16 @@ async def onboarding_guide():
             "free":      "curl https://cyberdudebivash-threat-intel-platform-production.up.railway.app/api/v1/intel/latest",
             "paid":      "curl -H 'X-API-Key: YOUR_KEY' .../api/v1/intel/feed?limit=100",
             "subscribe": "POST /api/v1/subscribe  body: {name, email, tier, payment_provider}",
-            "test_key":  "Use demo-pro-key-1111 for free Pro tier testing",
+            # v184.4 FIX: this unconditionally told every visitor to use
+            # demo-pro-key-1111 -- but demo keys are correctly disabled by
+            # default in production (ENABLE_DEMO_KEYS unset, see DEMO_KEYS
+            # above), so a customer following this instruction got a real
+            # 401/403 instead of working access. Keep the field present
+            # (preserves response shape for any client reading it
+            # unconditionally) but give it an honest value either way.
+            "test_key": ("Use demo-pro-key-1111 for free Pro tier testing"
+                          if _DEMO_KEYS_ENABLED else
+                          "Demo keys are disabled in production -- use POST /api/v1/subscribe to get a real key, or the free tier needs no key at all"),
         },
         "channels": {
             "store":            STORE_URL,
