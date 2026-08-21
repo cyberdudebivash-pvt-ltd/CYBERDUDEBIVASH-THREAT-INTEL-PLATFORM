@@ -24,10 +24,27 @@ Repo:      cyberdudebivash-pvt-ltd/cyberdudebivash-threat-intel-platform
 Branch:    main (shallow clone, depth 1 — grafted, full history not fetched: an
            unshallow attempt timed out after 5 min, consistent with a very large
            repo; not required for this round's audit)
-HEAD:      5419dacabbcf644f7062e7b186f9bd4c70dcb45c
-HEAD msg:  "AI ANALYST v37.0 - 914 threats analyzed | 0 detection rules [skip ci]"
+HEAD at audit start: 5419dacabbcf644f7062e7b186f9bd4c70dcb45c
+           ("AI ANALYST v37.0 - 914 threats analyzed | 0 detection rules [skip ci]")
 Status:    clean at clone time
 ```
+
+**Mid-flight data regeneration (real-time evidence of the platform's own automation cadence).**
+While this PR's branch was open, `main` advanced with `609928b9` ("SENTINEL APEX v184.0 —
+conflict-recovery (attempt 1): restore generated artifacts from ORIG_HEAD [skip ci]",
+authored by the pipeline's own `CDB-Sentinel-Bot`), a ~1,200-file automated regeneration
+touching `api/feed.json` and every derived artifact. This produced a real merge conflict
+in this PR (in the auto-generated `data/quality/p33_certification_report.json` only —
+`scripts/p33_production_certification.py` and this audit doc merged clean), resolved by
+merging `main` in and **re-running the fixed script against the new data** rather than
+hand-merging JSON. All specific figures below (§4.1, §4.3, §5, §6) reflect that merged,
+current state — `api/feed.json` grew from 224 items to **500**, confirmed byte-for-byte
+matching a fresh live curl of `https://intel.cyberdudebivash.com/api/feed.json`
+(`generated_at: 2026-08-21T17:44:40Z` on both). This is offered as first-hand evidence
+for a conclusion this audit would otherwise only assert: the pipeline genuinely does
+regenerate continuously, which is exactly why point-in-time certification numbers must be
+treated as a snapshot, not a permanent grade — and why the field-mapping/file-path fix in
+§4.2 is the durable finding here, not any single day's gate count.
 
 **Live production verification** (real HTTP requests, `curl`, this session):
 
@@ -43,7 +60,7 @@ Status:    clean at clone time
 | `https://intel.cyberdudebivash.com/api/reports/latest.json` | 200 | 2.90s |
 | `https://cti.cyberdudebivash.in/` | 200 | 0.51s |
 
-`api/feed.json` live content was downloaded and diffed against the repo's own checked-in copy: live has 475 items vs. the repo's 224 (expected — automation runs continuously; the repo lags live by some hours), same schema shape, `evidence_chain` populated, `confidence` correctly in `[0,1]`. `cti.cyberdudebivash.in`'s relationship to this platform (same product, alias, or separate) was not established this round — flagged as open.
+`api/feed.json` live content was downloaded and diffed against the repo's own checked-in copy at audit start: live had 475 items vs. the repo's 224 (expected — automation runs continuously; the repo lags live by some hours), same schema shape, `evidence_chain` populated, `confidence` correctly in `[0,1]`. By the end of this round (post-merge, see §2 above), repo and live were re-checked and matched exactly at 500 items with an identical `generated_at` timestamp. `cti.cyberdudebivash.in`'s relationship to this platform (same product, alias, or separate) was not established this round — flagged as open.
 
 ---
 
@@ -59,7 +76,7 @@ Full detail gathered via direct code reading and a dedicated exploration pass; c
 - **APIs**: ~250 live routes in `workers/intel-gateway/src/index.js` (5,039 lines); real auth (JWT HS256 + API-key + brute-force lockout), real 4-tier model, real per-IP rate limiting. `data/openapi.json` documents only 6 of the ~250 live routes — material API-documentation drift.
 - **Entitlement enforcement is in shadow mode** for all but one gated resource (`cve_detail_full`) per the live `wrangler.toml` config — tier logic exists broadly in code but is not yet broadly enforced in production.
 - **STIX/TAXII/export**: real and substantial. `agent/export_stix.py` builds genuine STIX 2.1 object graphs; a real TAXII 2.1 server exists in `workers/intel-gateway/src/index.js` (`handleTAXII`) with tier-gated collections; real CSV/MISP export routes exist and are wired.
-- **Detection engineering**: real, substantial generator code (`agent/integrations/detection_engine.py`, 746 lines, 8 rule formats) wired into the live pipeline — but genuinely under-populated in output: only 17.9% of current feed items carry a detection rule (`detection_rules_total > 0`), confirmed via direct data inspection, not the false 0% the certification script previously reported.
+- **Detection engineering**: real, substantial generator code (`agent/integrations/detection_engine.py`, 746 lines, 8 rule formats) wired into the live pipeline — but genuinely under-populated in output. Against the 224-item snapshot examined at the start of this round, 17.9% of items carried a detection rule (`detection_rules_total > 0`); against the current 500-item, live-matching snapshot (post-merge, §2), that figure is **0.0%** — `detection_rules_total` is `None` on every item, confirmed via direct data inspection. Both readings are real (not the false 0% the certification script previously, separately, reported for an unrelated field-name reason) — the drop between them is itself a new finding this round surfaced rather than resolved; see §6 gap 4.
 - **Storage**: R2 (`INTEL_R2`, `REPORTS_R2`) + KV for the intel gateway; D1/SQL exists only for the separate revenue/CRM worker. No relational query capability over the intel corpus itself.
 - **MSSP**: `MSSP` is a first-class auth tier with a dedicated static feed variant (`api/feed_mssp.json`); `agent/enterprise_tenant_isolation_engine.py` exists as source but this round did not confirm a live caller for it — flagged as needing dedicated follow-up before any multi-tenancy claim is made externally.
 
@@ -72,13 +89,13 @@ Full detail gathered via direct code reading and a dedicated exploration pass; c
 | Gate | Symptom (before) | Root cause | Evidence |
 |---|---|---|---|
 | G05 Confidence range | 159/159 items "out of range" | `data/feed.json`'s `confidence` field uses a 0–100 scale; gate expects 0–1 | Direct field read: `21.9` in the stale file vs. `0.35`/`'0.17'` in the current one |
-| G07 MITRE coverage | 96.9% (stale file) → then falsely 0.0% once pointed at the real file | Deprecated field pair `mitre_tactics`/`ttps` is `[]` on every current item; real data lives in `attck_technique_ids`/`attck_techniques` | `mitre_tactics or ttps` truthy on 0/224 current items; `attck_technique_ids or attck_techniques` truthy on 155/224 |
-| G09 Source URL completeness | 0.0% (both files) | Checks `item.get("source")` (a short label) instead of `item.get("source_url")` (the actual URL) | `source_url` starts with `http` on 100% of current items once the right field is checked |
-| G19 Evidence chain | 0.0%, "field not in feed schema" | True for the stale file (field genuinely absent); false once pointed at the current file, where it's fully populated | `evidence_chain` present on 224/224 current items |
-| G20 Detection bundle | 0.0%, "field not in feed schema" | Checks `detection_bundle`, a field name that exists in neither file; real field is `detection_rules_total` | Fixed field, real result: 17.9% coverage (genuinely below the 40% threshold — a real gap, not a bug) |
-| G23 TTP coverage matrix | 96.9% (stale) → 0.0% (real file, wrong field) | Same deprecated-field issue as G07 | Fixed: 69.2%, matching G07 |
-| `_enrich()` (feeds G18) | Enrichment score 43.2 (stale) → 17.1 (real file, wrong field) | Same `ttps` deprecated-field check inside the private scoring helper | Fixed: 31.0/100 |
-| G22 Campaign intelligence | "No actor_tags and no repeated TTPs" | Same deprecated `ttps` field in the campaign-grouping loop | Fixed: 9 shared TTP groups detected |
+| G07 MITRE coverage | 96.9% (stale file) → then falsely 0.0% once pointed at the real file | Deprecated field pair `mitre_tactics`/`ttps` is `[]` on every current item; real data lives in `attck_technique_ids`/`attck_techniques` | `mitre_tactics or ttps` truthy on 0/500 current items; `attck_technique_ids or attck_techniques` truthy on 284/500 |
+| G09 Source URL completeness | 0.0% (both files) | Checks `item.get("source")` (a short label) instead of `item.get("source_url")` (the actual URL) | `source_url` starts with `http` on 496/500 (99.2%) of current items once the right field is checked |
+| G19 Evidence chain | 0.0%, "field not in feed schema" | True for the stale file (field genuinely absent); false once pointed at the current file, where it's fully populated | `evidence_chain` present on 500/500 current items |
+| G20 Detection bundle | 0.0%, "field not in feed schema" | Checks `detection_bundle`, a field name that exists in neither file; real field is `detection_rules_total` | Fixed field, real result: 0/500 (0.0%) coverage — genuinely below the 40% threshold, and confirmed genuine (not a lurking field-name bug) by direct inspection: `detection_rules_total` is `None` on all 500 items in this snapshot. See §6 gap 4 — this is itself a new, real finding, not the bug this PR fixes |
+| G23 TTP coverage matrix | 96.9% (stale) → 0.0% (real file, wrong field) | Same deprecated-field issue as G07 | Fixed: 56.8% (284/500), matching G07 |
+| `_enrich()` (feeds G18) | Enrichment score 43.2 (stale) → lower once pointed at the real file, wrong field | Same `ttps` deprecated-field check inside the private scoring helper | Fixed: avg 32.8/100 across 500 items |
+| G22 Campaign intelligence | "No actor_tags and no repeated TTPs" | Same deprecated `ttps` field in the campaign-grouping loop | Fixed: 14 unique actors, 13 shared TTP groups detected |
 
 **Root file cause, underlying all of the above**: `_FEED` was defined as `_DATA / "feed.json"` (`data/feed.json`), a file whose own embedded `generated_at: 2026-05-12T10:54:42Z` and `schema_version: v134.0` prove it predates the current schema by over 3 months. `api/feed.json` — the file this repo actually publishes, confirmed byte-shape-matching what `intel.cyberdudebivash.com/api/feed.json` serves live — is the correct file to certify against.
 
@@ -91,27 +108,29 @@ Full detail gathered via direct code reading and a dedicated exploration pass; c
 - G07, G23, G22's TTP loop, and the private `_enrich()` helper (feeding G18) now check `attck_technique_ids`/`attck_techniques` **in addition to** the deprecated `mitre_tactics`/`ttps` (kept as a fallback, not removed — consistent with this repo's own "Deprecation Instead of Deletion" policy, so any older item still using the old fields is still counted correctly).
 - G19's and G20's now-inaccurate `"(field not in feed schema)"` message suffix was removed (it was true for the old file, false for the current one).
 
-**Blast radius**: one file changed (`scripts/p33_production_certification.py`), plus its own auto-regenerated output (`data/quality/p33_certification_report.json`, produced by running the script — not hand-edited). No API route, schema, auth path, or other script was touched. `scripts/regression_tests.py` does not reference `p33` anywhere (confirmed via grep) — the regression suite result is fully independent of this change.
+**Blast radius**: one file changed by this fix (`scripts/p33_production_certification.py`), plus its own auto-regenerated output (`data/quality/p33_certification_report.json`, produced by running the script — not hand-edited). No API route, schema, auth path, or other script was touched. `scripts/regression_tests.py` does not reference `p33` anywhere (confirmed via grep) — the regression suite result is fully independent of this change. The PR's diff additionally carries a merge commit reconciling `main`'s own concurrent automated data-regeneration (§2) — that merge is a reconciliation of upstream content, not a change introduced by this fix, and touches no file this fix's logic depends on other than the one real conflict (the generated report JSON, resolved by regeneration, not hand-merging).
 
-### 4.3 Before / After (real runs, this session)
+### 4.3 Before / After (real runs, this session; "After" re-verified post-merge against the 500-item state — see §2)
 
 | | Before | After |
 |---|---|---|
-| Feed file certified | `data/feed.json` (159 items, stale) | `api/feed.json` (224 items, current) |
-| Gates passed | 21/26 | 18/26 |
-| Warnings | 5 (3 of them **false**: G19, G20, and effectively G09) | 8 (all real) |
+| Feed file certified | `data/feed.json` (159 items, stale) | `api/feed.json` (500 items, current, live-matching) |
+| Gates passed | 21/26 | 17/26 |
+| Warnings | 5 (3 of them **false**: G19, G20, and effectively G09) | 9 (all real) |
 | Blockers | 0 | 0 |
 | **Tier** | **WORLDWIDE_RELEASE** | **CONTROLLED_RELEASE** |
 
-The tier going down is the correct, honest outcome — it reflects a certification that now measures the real, current feed instead of a flattering 3-month-old snapshot. Remaining real warnings after the fix: G03 markdown leakage (31/224, 13.8%), G04 placeholder language (1/224), G05 confidence range (1/224, a single genuine `22`-on-0-100-scale outlier that slipped past normalization), G07/G23 MITRE/TTP coverage (69.2%, below their 95%/70% thresholds), G08 IOC coverage (28.6%, below 50% — confirmed genuine, not a field-name bug: `ioc_count` and `real_ioc_count` agree exactly), G16 HTML report count (0 for the current batch — not investigated further this round, likely a batch-vs-archive counting scope question), G20 detection coverage (17.9%, below 40% — genuine).
+The tier going down is the correct, honest outcome — it reflects a certification that now measures the real, current feed instead of a flattering 3-month-old snapshot. Remaining real warnings after the fix: G03 markdown leakage (56/500, 11.2%), G04 placeholder language (1/500), G05 confidence range (1/500, a single genuine out-of-range outlier — value `90` on a 0–100 scale that slipped past normalization), G07/G23 MITRE/TTP coverage (56.8%, below their 95%/70% thresholds), G08 IOC coverage (45.0%, below 50% — confirmed genuine, not a field-name bug: `ioc_count` and `real_ioc_count` agree exactly), G14 P25 trust gate (1 blocker — see below), G16 HTML report count (0 for the current batch — not investigated further this round, likely a batch-vs-archive counting scope question), G20 detection coverage (0.0%, below 40% — genuine, and a full regression from the 17.9% observed against the pre-merge 224-item snapshot; see §6 gap 4).
+
+**G14 is new in this run and was not part of this PR's fix** (its field mapping — `data/quality/p25_enterprise_trust_gate.json` — was already corrected by an earlier, unrelated fix dated `SEC-2026-07-18` in the script's own history). It is included here because it is genuinely new evidence, surfaced by the same fresh data this merge brought in: the real P25 trust gate (`scripts/p25_enterprise_trust_gate.py`) now reports 1 blocker — `"G4 P21 Certification: P21: 60% of items below minimum certification — quality crisis"` — a downstream gate self-reporting a quality crisis on this exact snapshot. This independently corroborates this audit's broader finding (real intelligence-quality metrics sitting below the platform's own thresholds) from a completely different code path than the one this PR touches.
 
 ---
 
 ## 5. Regression Evidence
 
-`python3 scripts/regression_tests.py`: **19/21 PASS** — both before and after this round's change (confirmed independently, since the suite doesn't reference `p33` at all). The 2 pre-existing, unrelated failures:
+`python3 scripts/regression_tests.py`: **19/21 PASS** — confirmed at three points: before this round's change, immediately after, and a third time after merging in `main`'s concurrent 500-item data regeneration (§2), since the suite doesn't reference `p33` at all and its 2 failures are independent of feed-file selection. The 2 pre-existing, unrelated failures (identical count and root cause across all three runs):
 
-- **T03 (`validate_repo_8_of_8`)** → underlying cause: `intel_schema` check, "14 schema violation(s) in 914 entries." A data-schema defect across the platform's full historical dataset (914 entries — matching the "914 threats analyzed" in the current HEAD commit message), unrelated to feed-file selection or field naming.
+- **T03 (`validate_repo_8_of_8`)** → underlying cause: `intel_schema` check, "14 schema violation(s) in 914 entries." A data-schema defect across the platform's full historical dataset (914 entries — matching the "914 threats analyzed" in the HEAD commit message at audit start, §2 — and reproduced identically post-merge, confirming this dataset is independent of the 224→500 item feed regeneration), unrelated to feed-file selection or field naming.
 - **T09 (`report_url_not_source_url`)** → 14 specific items where `report_url == source_url` (should differ). A data-content defect on specific items, not a code path this round touched.
 
 Both are real, pre-existing, independent defects — named here rather than hidden, per this repo's own CLAUDE.md and the mandate's integrity rules. Neither was introduced by, nor fixed by, this round's change. **CLAUDE.md's stated baseline of "21/21 PASS" does not currently hold** — a further documentation/reality gap, consistent with the pattern described in §1 and §6.
@@ -126,19 +145,20 @@ Both are real, pre-existing, independent defects — named here rather than hidd
 3. **T03/T09 pre-existing regression failures** (§5) — a real data-schema violation set (14/914 entries) and a report/source URL collision (14 items) — both need root-cause investigation.
 
 **P1 — enterprise competitiveness:**
-4. Detection-rule coverage is genuinely 17.9% of published items, despite a real, sophisticated 8-format generator existing — a wiring/coverage gap, not a missing-capability gap.
-5. MITRE/TTP coverage genuinely 69.2%, below the 95%/70% thresholds this platform's own certification sets for itself.
-6. IOC coverage genuinely 28.6%, below its own 50% threshold.
-7. `data/openapi.json` documents 6 of ~250 live routes — a real barrier to any serious API-productization or developer-adoption push.
-8. Entitlement enforcement is shadow-mode for all but one resource — tier logic exists, isn't yet commercially enforced.
+4. Detection-rule coverage is genuinely **0.0%** of the current 500-item snapshot (`detection_rules_total` is `None` on every item, confirmed by direct inspection) despite a real, sophisticated 8-format generator existing. This is a full regression from the 17.9% observed against the pre-merge 224-item snapshot earlier in this same session — the generator code is real, but whatever step populates this field did not run (or did not persist) for this batch. Root cause not investigated this round (out of this PR's scope — the fix here is `p33`'s measurement, not the pipeline's detection-rule generation step) but flagged as urgent given the size and direction of the drop.
+5. MITRE/TTP coverage genuinely 56.8% (284/500), below the 95%/70% thresholds this platform's own certification sets for itself.
+6. IOC coverage genuinely 45.0% (225/500), below its own 50% threshold.
+7. The real P25 enterprise trust gate (`scripts/p25_enterprise_trust_gate.py`) independently reports its own blocker on this snapshot: `"P21: 60% of items below minimum certification — quality crisis"` (surfaced as this PR's new G14 warning, §4.3). This is a second, independent code path corroborating the same intelligence-quality conclusion as gaps 4–6 above — worth root-causing together rather than separately.
+8. `data/openapi.json` documents 6 of ~250 live routes — a real barrier to any serious API-productization or developer-adoption push.
+9. Entitlement enforcement is shadow-mode for all but one resource — tier logic exists, isn't yet commercially enforced.
 
 **P2 — conversion/retention/observability:**
-9. Repository documentation sprawl (§1) actively undermines external audit/procurement credibility — hundreds of overlapping, versioned self-certification documents at repo root, several outright contradicting each other's claimed state (e.g., multiple "FINAL" audits).
-10. `CLAUDE.md` itself is out of sync with the P-layer stack it documents (P24 undocumented, P39 absent, P40 undocumented) — the governing doc for all future AI-assisted work here needs a refresh.
-11. `agent/enterprise_tenant_isolation_engine.py`'s live wiring was not confirmed this round — needs verification before any MSSP multi-tenancy claim.
+10. Repository documentation sprawl (§1) actively undermines external audit/procurement credibility — hundreds of overlapping, versioned self-certification documents at repo root, several outright contradicting each other's claimed state (e.g., multiple "FINAL" audits).
+11. `CLAUDE.md` itself is out of sync with the P-layer stack it documents (P24 undocumented, P39 absent, P40 undocumented) — the governing doc for all future AI-assisted work here needs a refresh.
+12. `agent/enterprise_tenant_isolation_engine.py`'s live wiring was not confirmed this round — needs verification before any MSSP multi-tenancy claim.
 
 **P3 — differentiation:**
-12. The evidence/provenance model (§3, Admiralty-code sourcing, anti-hallucination hard-gate) is genuinely sophisticated and, once the certification chain reliably measures it, is a legitimate, defensible differentiator against Recorded Future/CrowdStrike/Mandiant-class competitors — worth featuring accurately once P0/P1 above are closed, not before.
+13. The evidence/provenance model (§3, Admiralty-code sourcing, anti-hallucination hard-gate) is genuinely sophisticated and, once the certification chain reliably measures it, is a legitimate, defensible differentiator against Recorded Future/CrowdStrike/Mandiant-class competitors — worth featuring accurately once P0/P1 above are closed, not before.
 
 ---
 
@@ -152,14 +172,16 @@ The full 91-section mandate's remaining scope — competitive benchmarking again
 
 **GLOBAL INTELLIGENCE COMMERCIAL RELEASE — CONDITIONAL**
 
-The platform is real, live, and has genuine, defensible technical depth (evidence/provenance model, anti-hallucination gate, real STIX/TAXII/MISP export, a real if under-populated detection engine, real multi-tier auth). It is not ready for an unconditional "certified" verdict because: (a) its own primary release gate was — until this round's fix — measuring stale data and reporting false pass/warn results on 6 of its 26 checks; (b) at least 9 sibling certification scripts likely share the same defect, unverified; (c) two pre-existing, unrelated regression failures are currently unresolved; (d) real intelligence-quality metrics (MITRE/TTP/IOC/detection coverage), now honestly measured, sit below the platform's own stated thresholds; (e) the "AI" branding is not yet matched by a live generative-AI code path. None of these are reasons the platform is "not ready" for its current live audience — it is demonstrably serving real traffic today — but they are real reasons a rigorous, evidence-based commercial audit cannot certify it as unconditionally release-ready.
+The platform is real, live, and has genuine, defensible technical depth (evidence/provenance model, anti-hallucination gate, real STIX/TAXII/MISP export, a real if under-populated detection engine, real multi-tier auth). It is not ready for an unconditional "certified" verdict because: (a) its own primary release gate was — until this round's fix — measuring stale data and reporting false pass/warn results on 6 of its 26 checks; (b) at least 9 sibling certification scripts likely share the same defect, unverified; (c) two pre-existing, unrelated regression failures are currently unresolved, reproduced identically across three separate runs this round; (d) real intelligence-quality metrics (MITRE/TTP/IOC/detection coverage), now honestly measured, sit below the platform's own stated thresholds — including detection coverage, which this round additionally found had regressed to a full 0% on the current snapshot; (e) a second, independently-coded gate (`p25_enterprise_trust_gate.py`, unrelated to anything this PR touches) corroborates the same conclusion from its own code path, self-reporting a "quality crisis" blocker on this exact snapshot; (f) the "AI" branding is not yet matched by a live generative-AI code path. None of these are reasons the platform is "not ready" for its current live audience — it is demonstrably serving real traffic today, and this round confirmed the repo's checked-in state now matches live production exactly — but they are real reasons a rigorous, evidence-based commercial audit cannot certify it as unconditionally release-ready.
 
 ---
 
 ## 9. Highest-Value Next Opportunities (ranked)
 
-1. Apply the same verify-then-fix treatment to the 9 sibling certification scripts sharing the stale-`data/feed.json` dependency (§6, gap 1) — closes the single largest trust gap in the platform's own self-certification apparatus.
-2. Resolve the "AI" branding-vs-implementation gap (§6, gap 2) — either wire a real LLM call behind the existing (currently mocked) `platform/services/ai-engine`, or adjust external claims to match what's actually shipped. This is the highest-leverage finding for any competitive benchmark against LLM-native vendors.
-3. Root-cause and fix the 2 pre-existing regression failures (T03 `intel_schema`, T09 `report_url == source_url`).
-4. Increase real detection-rule and MITRE/TTP coverage toward the platform's own certification thresholds (17.9%→40%, 69.2%→95%) — the generator code already exists; this is a pipeline-coverage problem, not a build-from-scratch problem.
-5. Consolidate the root-level documentation sprawl into a single, current source of truth, and refresh `CLAUDE.md`'s P-layer table to match the actual P16–P40 code.
+1. Root-cause why `detection_rules_total` went from populated on 17.9% of items (pre-merge snapshot) to `None` on 100% of the current 500-item snapshot (§6, gap 4) — the sharpest, most urgent regression surfaced this round, on real generator code that already exists.
+2. Apply the same verify-then-fix treatment to the 9 sibling certification scripts sharing the stale-`data/feed.json` dependency (§6, gap 1) — closes the single largest trust gap in the platform's own self-certification apparatus.
+3. Investigate the P25/P21 "quality crisis" self-report (§6, gap 7) together with gaps 4–6 — three independent code paths (this PR's `p33` fix, the pre-existing `p25` trust gate, and direct data inspection) now agree the current snapshot's intelligence-quality metrics are genuinely below threshold; worth a single coordinated root-cause pass rather than three separate ones.
+4. Resolve the "AI" branding-vs-implementation gap (§6, gap 2) — either wire a real LLM call behind the existing (currently mocked) `platform/services/ai-engine`, or adjust external claims to match what's actually shipped. This is the highest-leverage finding for any competitive benchmark against LLM-native vendors.
+5. Root-cause and fix the 2 pre-existing regression failures (T03 `intel_schema`, T09 `report_url == source_url`) — confirmed stable and reproducible across three separate runs this round.
+6. Increase real MITRE/TTP and IOC coverage toward the platform's own certification thresholds (56.8%→95%, 45.0%→50%).
+7. Consolidate the root-level documentation sprawl into a single, current source of truth, and refresh `CLAUDE.md`'s P-layer table to match the actual P16–P40 code.
