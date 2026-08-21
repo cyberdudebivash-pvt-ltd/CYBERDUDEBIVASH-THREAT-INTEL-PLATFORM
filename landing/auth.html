@@ -488,8 +488,10 @@
   <!-- Footer -->
   <div class="auth-footer">
     <a href="../index.html"><i class="fa-solid fa-gauge-high" style="margin-right:4px"></i>Dashboard</a> &nbsp;·&nbsp;
-    <a href="https://tools.cyberdudebivash.com" target="_blank"><i class="fa-solid fa-store" style="margin-right:4px"></i>Store</a> &nbsp;·&nbsp;
-    <a href="https://cyberdudebivash-threat-intel-platform-production.up.railway.app/api/docs" target="_blank"><i class="fa-solid fa-code" style="margin-right:4px"></i>API Docs</a>
+    <a href="https://tools.cyberdudebivash.com" target="_blank"><i class="fa-solid fa-store" style="margin-right:4px"></i>Store</a>
+    <!-- v184.6: "API Docs" link removed -- pointed at the retired Railway
+         domain's /api/docs, and no equivalent docs route/page exists on
+         intel-gateway (the real production Worker) to replace it with. -->
     <div style="margin-top:8px;opacity:0.5">© 2026 CyberDudeBivash Pvt. Ltd.</div>
   </div>
 
@@ -499,7 +501,16 @@
 /* ══════════════════════════════════════════════════════════════════
    AUTH PAGE — CLIENT-SIDE LOGIC
 ══════════════════════════════════════════════════════════════════ */
-const API_BASE = 'https://cyberdudebivash-threat-intel-platform-production.up.railway.app';
+// v184.6: Railway backend retired. Points at intel-gateway (real production
+// Worker) now. NOTE (found during this fix, not resolved here): the real
+// /api/auth/login expects { api_key } in the request body and mints a JWT
+// from an existing API_KEYS_KV record -- there is no email/password login
+// on the real backend. This form's fields (email+password) will not
+// authenticate against production; only the demo-credential offline
+// fallback below will succeed until this page is redesigned around the
+// API-key-paste pattern landing/dashboard.html already uses correctly.
+// Flagged for a product decision, not silently worked around here.
+const API_BASE = 'https://intel.cyberdudebivash.com';
 const AUTH_STATE = { regTier: 'free' };
 
 /* ── Utilities ────────────────────────────────────────────────── */
@@ -612,7 +623,7 @@ async function doLogin(e) {
 
   // Try live API
   try {
-    const res = await fetch(`${API_BASE}/auth/login`, {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -689,7 +700,7 @@ async function doRegister(e) {
 
   // Try live API
   try {
-    const res = await fetch(`${API_BASE}/auth/register`, {
+    const res = await fetch(`${API_BASE}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: name || email, email, password, tier }),

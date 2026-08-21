@@ -94,9 +94,9 @@ FEED_REGISTRY: Dict[str, Dict] = {
         "deprecated": False,
     },
     # v184.4 FIX: gold/silver/standard/executive paths updated to match
-    # scripts/generate_tiered_feeds.py's new private-staging output location
+    # scripts/generate_tiered_feeds.py's private-staging output location
     # (they used to write to api/feed.*.json, which was PUBLIC in this git
-    # repo -- see agent/monetization/premium_storage.py for the full story).
+    # repo -- see LEGACY_COMPONENTS.md for the full retirement history).
     "gold": {
         "path": ROOT / "data" / "premium_staging" / "feed.gold.json",
         "label": "Commercial Gold Tier Feed",

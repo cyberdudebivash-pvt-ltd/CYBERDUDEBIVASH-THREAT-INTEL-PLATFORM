@@ -1189,10 +1189,16 @@ jobs:
       #   data/premium_staging/feed.executive.json — EXECUTIVE ($299/mo)    CRITICAL+HIGH brief
       #   api/feed.trial.json                      — TRIAL (FREE→CTA)       Top 10 redacted
       # v184.4 FIX: the four paid tiers write to a gitignored staging path and
-      # upload to a private R2 bucket (agent/monetization/premium_storage.py)
-      # instead of api/feed.*.json, which was PUBLIC in this git repo with no
-      # entitlement check anywhere. Only TRIAL (the intended public teaser)
-      # still writes into api/.
+      # upload to R2 instead of api/feed.*.json, which was PUBLIC in this git
+      # repo with no entitlement check anywhere. Only TRIAL (the intended
+      # public teaser) still writes into api/.
+      # v184.6 FIX: uploads now reuse the job-level CF_ACCOUNT_ID/
+      # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY (already set above, same
+      # credentials scripts/r2_upload.py uses) and write into the existing
+      # sentinel-apex-data bucket under a private premium/ prefix -- no new
+      # bucket or repo secrets needed. Served by workers/intel-gateway (the
+      # confirmed-live production Worker), not the legacy Railway-targeted
+      # api/main.py this originally used (see LEGACY_COMPONENTS.md).
       # Outputs data/product_manifest.json with pricing + endpoint registry.
       # Non-blocking: feed generation failure never fails the pipeline.
       # -----------------------------------------------------------------------
@@ -1201,19 +1207,6 @@ jobs:
         continue-on-error: true
         env:
           BASELINE_PATH: "api/feed.baseline.json"
-          # v184.4 FIX: GOLD/SILVER/STANDARD/EXECUTIVE are paid tiers that now
-          # upload to a private R2 bucket instead of being committed to this
-          # public repo (see scripts/generate_tiered_feeds.py and
-          # agent/monetization/premium_storage.py). CF_R2_PREMIUM_KEY_ID /
-          # CF_R2_PREMIUM_SECRET_KEY must be added as repo secrets pointing at
-          # a NEW, non-public "sentinel-apex-premium" R2 bucket (separate from
-          # sentinel-apex-data/sentinel-apex-reports, which are already
-          # public-CDN-served) — until then this step logs an error per file
-          # and the upload is skipped (fetch_premium_artifact() then 503s for
-          # customers rather than ever falling back to a public path).
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_R2_PREMIUM_KEY_ID: ${{ secrets.CF_R2_PREMIUM_KEY_ID }}
-          CF_R2_PREMIUM_SECRET_KEY: ${{ secrets.CF_R2_PREMIUM_SECRET_KEY }}
         run: |
           set +e
           python3 scripts/generate_tiered_feeds.py 2>&1
@@ -1241,8 +1234,10 @@ jobs:
       #   data/premium_staging/detections/cve_watchlist.csv   — CVE watchlist (CVSS/EPSS/KEV)
       #   data/premium_staging/detections/detection_pack.zip  — Bundled enterprise detection pack
       # v184.4 FIX: this +$149/mo add-on now writes to a gitignored staging
-      # path and uploads to a private R2 bucket instead of api/detections/,
-      # which was PUBLIC in this git repo with no entitlement check anywhere.
+      # path and uploads to R2 instead of api/detections/, which was PUBLIC
+      # in this git repo with no entitlement check anywhere.
+      # v184.6 FIX: see STAGE 3.1.20's comment above -- same job-level
+      # credentials, same existing sentinel-apex-data bucket, no new secrets.
       # Non-blocking: detection pack failure never fails the pipeline.
       #
       # ENGINEERING NOTE (2026-08-05): This run also executes 2 other independent
@@ -1265,11 +1260,6 @@ jobs:
         continue-on-error: true
         env:
           BASELINE_PATH: "api/feed.baseline.json"
-          # v184.4 FIX: see STAGE 3.1.20's env comment -- same private R2
-          # bucket, same required repo secrets.
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_R2_PREMIUM_KEY_ID: ${{ secrets.CF_R2_PREMIUM_KEY_ID }}
-          CF_R2_PREMIUM_SECRET_KEY: ${{ secrets.CF_R2_PREMIUM_SECRET_KEY }}
         run: |
           set +e
           python3 scripts/generate_detection_pack.py 2>&1

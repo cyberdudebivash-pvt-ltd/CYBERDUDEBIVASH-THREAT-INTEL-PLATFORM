@@ -3827,6 +3827,66 @@ async function handleRequest(request, env, ctx) {
     return await servePremiumIntelManifest(request, env, ctx, pathname);
   }
 
+  // --- /api/v1/premium/* -- tiered feed products + Detection Pack add-on -----
+  // v184.6: re-targeted here from api/main.py (a legacy Railway-targeted
+  // FastAPI app with no evidence of live deployment -- see
+  // LEGACY_COMPONENTS.md / COMPONENT_REGISTRY.json). intel-gateway is the
+  // confirmed-live production gateway, so this is where entitlement checks
+  // actually run against real traffic. Reuses the existing INTEL_R2 binding
+  // (sentinel-apex-data bucket, already bound here) under a private
+  // premium/ prefix -- no new bucket or credentials needed.
+  //
+  // Mapping note (carried over from the original api/main.py implementation):
+  // these products are priced independently of the free/pro/enterprise/mssp
+  // API subscription tiers ($999 Enterprise feed vs. $499/mo Enterprise API
+  // subscription are not the same purchase). Absent a documented
+  // cross-product entitlement mapping, gating conservatively on ENTERPRISE
+  // or MSSP API tier is the only choice supported by evidence in this
+  // codebase -- a Pro subscriber has no basis in TIERS or pricing.html for
+  // getting a $999/mo product for free.
+  const PREMIUM_FEED_TIERS = new Set(["gold", "silver", "standard", "executive"]);
+  const PREMIUM_DETECTION_ARTIFACTS = new Set([
+    "sigma_rules.yml", "kql_queries.kql", "ioc_blocklist.txt",
+    "ioc_structured.json", "cve_watchlist.csv", "detection_pack.zip",
+    "pack_manifest.json",
+  ]);
+  const PREMIUM_ARTIFACT_MEDIA_TYPES = {
+    ".zip": "application/zip", ".csv": "text/csv", ".json": "application/json",
+    ".yml": "application/x-yaml", ".kql": "text/plain", ".txt": "text/plain",
+  };
+
+  if (path.startsWith("/api/v1/premium/feed/") || path.startsWith("/api/v1/premium/detections/")) {
+    if (auth.tier !== TIERS.ENTERPRISE && auth.tier !== TIERS.MSSP) {
+      return jsonResp({
+        error: "This product requires an Enterprise or MSSP API subscription",
+        upgrade: "https://intel.cyberdudebivash.com/upgrade.html", current_tier: auth.tier,
+      }, 403);
+    }
+
+    let r2Key;
+    if (path.startsWith("/api/v1/premium/feed/")) {
+      const tier = decodeURIComponent(path.slice("/api/v1/premium/feed/".length)).toLowerCase();
+      if (!PREMIUM_FEED_TIERS.has(tier)) return errorResp(`Unknown premium feed tier: ${tier}`, 404);
+      r2Key = `premium/feeds/feed.${tier}.json`;
+    } else {
+      const artifact = decodeURIComponent(path.slice("/api/v1/premium/detections/".length));
+      if (!PREMIUM_DETECTION_ARTIFACTS.has(artifact)) return errorResp(`Unknown detection pack artifact: ${artifact}`, 404);
+      r2Key = `premium/detections/${artifact}`;
+    }
+
+    const obj = await env.INTEL_R2.get(r2Key);
+    if (!obj) return errorResp("Premium content temporarily unavailable -- try again shortly", 503);
+    const ext = r2Key.slice(r2Key.lastIndexOf("."));
+    return new Response(obj.body, {
+      status: 200,
+      headers: {
+        ...CORS_HEADERS, ...SECURITY_HEADERS,
+        "Content-Type": PREMIUM_ARTIFACT_MEDIA_TYPES[ext] || "application/octet-stream",
+        "Cache-Control": "private, max-age=300",
+      },
+    });
+  }
+
   // --- /api/health ------------------------------------------------------------
   if (path === "/api/health" || path === "/api/health/") {
     const feedData = await loadFeedItems(env);

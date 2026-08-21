@@ -62,7 +62,9 @@
       <li><a href="index.html">Home</a></li>
       <li><a href="pricing.html">Pricing</a></li>
       <li><a href="https://intel.cyberdudebivash.com" target="_blank">Live Dashboard</a></li>
-      <li><a href="https://cyberdudebivash-threat-intel-platform-production.up.railway.app/api/docs" target="_blank">API Docs</a></li>
+      <!-- v184.6: "API Docs" link removed -- pointed at the retired Railway
+           domain's /api/docs, and no equivalent docs route/page exists on
+           intel-gateway (the real production Worker) to replace it with. -->
     </ul>
     <div class="nav-cta">
       <span id="nav-tier-badge" class="tier-badge tier-free">FREE</span>
@@ -86,7 +88,8 @@
       <div class="sidebar-section-title">Platform</div>
       <ul class="dash-nav">
         <li><a onclick="showView('stats')"><span class="nav-icon">📊</span> Stats</a></li>
-        <li><a href="https://cyberdudebivash-threat-intel-platform-production.up.railway.app/api/docs" target="_blank"><span class="nav-icon">📖</span> API Docs ↗</a></li>
+        <!-- v184.6: "API Docs" link removed -- pointed at the retired Railway
+             domain's /api/docs, no equivalent exists on intel-gateway. -->
         <li><a href="pricing.html"><span class="nav-icon">⬆</span> Upgrade Plan</a></li>
       </ul>
     </div>
@@ -412,7 +415,11 @@ async function runSearch() {
   document.getElementById('search-results').innerHTML = '<div class="loading-state"><span class="spin">⟳</span> Searching...</div>';
   const key = currentKey || localStorage.getItem(LS_KEY) || '';
   const headers = key ? { 'X-API-Key': key } : {};
-  const BASE = 'https://cyberdudebivash-threat-intel-platform-production.up.railway.app';
+  // v184.6: Railway backend retired. intel-gateway (the real production
+  // Worker) has no dedicated search route yet, so this still falls through
+  // to the catch block below -- same pre-existing behavior, just no longer
+  // pointed at a dead orphaned domain.
+  const BASE = 'https://intel.cyberdudebivash.com';
   try {
     const res = await fetch(`${BASE}/api/v1/intel/search?q=${encodeURIComponent(q)}&limit=20`, { headers });
     if (!res.ok) throw new Error('HTTP ' + res.status);

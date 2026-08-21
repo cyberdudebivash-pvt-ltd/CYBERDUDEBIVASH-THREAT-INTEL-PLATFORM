@@ -135,9 +135,14 @@ class SOC2ComplianceEngine:
         checks = []
 
         # CC6.1 - API Authentication
+        # v184.6: api/main.py (a legacy Railway-targeted FastAPI app with no
+        # evidence of live deployment) removed from evidence sources.
+        # workers/intel-gateway/src/index.js is the confirmed-live production
+        # gateway's real JWT/API-key auth implementation (resolveAuth(),
+        # handleLogin()) -- see LEGACY_COMPONENTS.md / PRODUCTION_RUNTIME.md.
         checks.append(self._check_file_exists(
             "CC6.1", "CC6", "JWT API authentication implemented",
-            ["api/main.py", "api/auth.py", "scripts/api_auth_middleware.py"],
+            ["workers/intel-gateway/src/index.js", "api/auth.py", "scripts/api_auth_middleware.py"],
             evidence_label="API auth middleware",
             check_content=["jwt", "bearer", "api_key", "authentication"],
         ))
@@ -150,24 +155,35 @@ class SOC2ComplianceEngine:
         ))
 
         # CC6.3 - RBAC (Role-based access)
+        # v184.6: api/main.py removed -- workers/intel-gateway/src/index.js
+        # implements the confirmed-live tier/RBAC gating (TIERS, auth.tier,
+        # applyTierGateV2()). See CC6.1's comment.
         checks.append(self._check_content_in_files(
             "CC6.3", "CC6", "Role-based access control (RBAC)",
-            ["api/rbac.py", "api/main.py", "api/enterprise.py"],
+            ["api/rbac.py", "workers/intel-gateway/src/index.js", "api/enterprise.py"],
             keywords=["role", "permission", "rbac", "tier", "access_level"],
             min_matches=3,
         ))
 
         # CC6.4 - HTTPS/TLS enforcement
+        # v184.6: railway.json removed (Railway retired, see
+        # LEGACY_COMPONENTS.md). Cloudflare enforces TLS at the edge for
+        # every route in workers/intel-gateway/wrangler.toml; Dockerfile.api
+        # and Terraform remain as the customer-installer / experimental
+        # infra evidence sources they always were.
         checks.append(self._check_content_in_files(
             "CC6.4", "CC6", "TLS/HTTPS encryption in transit",
-            ["Dockerfile", "Dockerfile.api", "railway.json", "infrastructure/terraform/main.tf"],
+            ["Dockerfile.api", "workers/intel-gateway/wrangler.toml", "infrastructure/terraform/main.tf"],
             keywords=["https", "tls", "ssl", "TLSv1.2", "redirect-to-https"],
         ))
 
         # CC6.5 - Rate limiting
+        # v184.6: api/main.py removed -- workers/intel-gateway/src/index.js
+        # implements the confirmed-live rate limiting (RATE_LIMIT_KV
+        # binding). See CC6.1's comment.
         checks.append(self._check_content_in_files(
             "CC6.5", "CC6", "API rate limiting implemented",
-            ["api/main.py", "infrastructure/terraform/main.tf"],
+            ["workers/intel-gateway/src/index.js", "infrastructure/terraform/main.tf"],
             keywords=["rate_limit", "rate-limit", "throttle", "quota"],
         ))
 
@@ -208,9 +224,12 @@ class SOC2ComplianceEngine:
         ))
 
         # CC7.4 - Log management
+        # v184.6: api/main.py removed -- workers/intel-gateway/src/index.js
+        # implements the confirmed-live audit logging (auditLog() calls on
+        # every login/auth-relevant event). See CC6.1's comment.
         checks.append(self._check_content_in_files(
             "CC7.4", "CC7", "Audit logging implemented",
-            ["api/main.py", "scripts/api_auth_middleware.py"],
+            ["workers/intel-gateway/src/index.js", "scripts/api_auth_middleware.py"],
             keywords=["log", "audit", "logger", "access_log"],
             min_matches=3,
         ))
