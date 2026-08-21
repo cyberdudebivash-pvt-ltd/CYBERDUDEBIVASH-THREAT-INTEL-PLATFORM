@@ -49,7 +49,18 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/cyberdudebivash/sentinel-apex
+  # v184.4 FIX: was hardcoded to `ghcr.io/cyberdudebivash/sentinel-apex` -- a
+  # DIFFERENT org than this repo's actual owner (cyberdudebivash-pvt-ltd).
+  # GITHUB_TOKEN's packages:write grant is scoped to ghcr.io/<repository
+  # owner>/... only, so every push to that mismatched namespace was denied:
+  # "failed to push ghcr.io/cyberdudebivash/sentinel-apex/<service>:latest:
+  # denied: permission_denied: The requested installation does not exist."
+  # This was invisible on every PR: `push:` below is gated on
+  # `github.ref == 'refs/heads/main'`, so PR runs (build-only, push skipped)
+  # always looked green -- the failure only fires on an actual push to main.
+  # github.repository_owner always resolves to the real owner GITHUB_TOKEN
+  # is actually authorized for.
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/sentinel-apex
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -257,12 +268,12 @@ jobs:
       - name: Helm lint
         run: |
           helm lint platform/infrastructure/kubernetes/helm/sentinel-apex/ \
-            --set global.imageRegistry=ghcr.io/cyberdudebivash || true
+            --set global.imageRegistry=ghcr.io/${{ github.repository_owner }} || true
 
       - name: Helm template render
         run: |
           helm template sentinel-apex platform/infrastructure/kubernetes/helm/sentinel-apex/ \
-            --set global.imageRegistry=ghcr.io/cyberdudebivash \
+            --set global.imageRegistry=ghcr.io/${{ github.repository_owner }} \
             --skip-crds \
             > /tmp/manifests.yaml \
           && echo "Manifest lines: $(wc -l < /tmp/manifests.yaml)" \

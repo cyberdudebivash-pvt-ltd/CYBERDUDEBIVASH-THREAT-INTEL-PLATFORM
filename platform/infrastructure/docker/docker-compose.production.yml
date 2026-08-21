@@ -1,4 +1,10 @@
 # SENTINEL APEX  -  Production Docker Compose (for local dev / staging)
+#
+# v184.4 FIX: image references below were ghcr.io/cyberdudebivash/... -- a
+# different GitHub org than this repo's actual owner (cyberdudebivash-pvt-ltd),
+# which is the only namespace platform-build-deploy.yml's GITHUB_TOKEN can
+# actually push to. Images at the old path never existed and never could
+# (see that workflow's IMAGE_PREFIX comment for the full root-cause story).
 version: "3.9"
 
 x-service-defaults: &defaults
@@ -13,7 +19,7 @@ services:
   api-gateway:
     <<: *defaults
     build: { context: ../../services/api-gateway, dockerfile: Dockerfile }
-    image: ghcr.io/cyberdudebivash/sentinel-apex/api-gateway:latest
+    image: ghcr.io/cyberdudebivash-pvt-ltd/sentinel-apex/api-gateway:latest
     ports: ["8080:8000"]
     environment:
       - REDIS_URL=redis://redis:6379
@@ -29,7 +35,7 @@ services:
   intel-core:
     <<: *defaults
     build: { context: ../../services/intel-core, dockerfile: Dockerfile }
-    image: ghcr.io/cyberdudebivash/sentinel-apex/intel-core:latest
+    image: ghcr.io/cyberdudebivash-pvt-ltd/sentinel-apex/intel-core:latest
     environment:
       - QDRANT_URL=http://qdrant:6333
       - NEO4J_URI=bolt://neo4j:7687
@@ -41,7 +47,7 @@ services:
   ai-engine:
     <<: *defaults
     build: { context: ../../services/ai-engine, dockerfile: Dockerfile }
-    image: ghcr.io/cyberdudebivash/sentinel-apex/ai-engine:latest
+    image: ghcr.io/cyberdudebivash-pvt-ltd/sentinel-apex/ai-engine:latest
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -55,7 +61,7 @@ services:
   billing-engine:
     <<: *defaults
     build: { context: ../../services/billing-engine, dockerfile: Dockerfile }
-    image: ghcr.io/cyberdudebivash/sentinel-apex/billing-engine:latest
+    image: ghcr.io/cyberdudebivash-pvt-ltd/sentinel-apex/billing-engine:latest
     environment:
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
@@ -65,7 +71,7 @@ services:
   soc-automation:
     <<: *defaults
     build: { context: ../../services/soc-automation, dockerfile: Dockerfile }
-    image: ghcr.io/cyberdudebivash/sentinel-apex/soc-automation:latest
+    image: ghcr.io/cyberdudebivash-pvt-ltd/sentinel-apex/soc-automation:latest
     environment:
       - KAFKA_BROKERS=kafka:9092
       - DATABASE_URL=postgresql+asyncpg://apex:${DB_PASS}@postgres:5432/apex_soc
@@ -74,31 +80,31 @@ services:
   agentshield:
     <<: *defaults
     build: { context: ../../services/agentshield, dockerfile: Dockerfile }
-    image: ghcr.io/cyberdudebivash/sentinel-apex/agentshield:latest
+    image: ghcr.io/cyberdudebivash-pvt-ltd/sentinel-apex/agentshield:latest
 
   # -- SurfaceWatch -----------------------------------------
   surfacewatch:
     <<: *defaults
     build: { context: ../../services/surfacewatch, dockerfile: Dockerfile }
-    image: ghcr.io/cyberdudebivash/sentinel-apex/surfacewatch:latest
+    image: ghcr.io/cyberdudebivash-pvt-ltd/sentinel-apex/surfacewatch:latest
 
   # -- Executive Risk ---------------------------------------
   exec-risk:
     <<: *defaults
     build: { context: ../../services/exec-risk, dockerfile: Dockerfile }
-    image: ghcr.io/cyberdudebivash/sentinel-apex/exec-risk:latest
+    image: ghcr.io/cyberdudebivash-pvt-ltd/sentinel-apex/exec-risk:latest
 
   # -- Intel Exchange ---------------------------------------
   intel-exchange:
     <<: *defaults
     build: { context: ../../services/intel-exchange, dockerfile: Dockerfile }
-    image: ghcr.io/cyberdudebivash/sentinel-apex/intel-exchange:latest
+    image: ghcr.io/cyberdudebivash-pvt-ltd/sentinel-apex/intel-exchange:latest
 
   # -- Frontend ---------------------------------------------
   frontend:
     <<: *defaults
     build: { context: ../../frontend, dockerfile: Dockerfile }
-    image: ghcr.io/cyberdudebivash/sentinel-apex/dashboard:latest
+    image: ghcr.io/cyberdudebivash-pvt-ltd/sentinel-apex/dashboard:latest
     ports: ["3000:3000"]
 
   # -- Infrastructure ---------------------------------------

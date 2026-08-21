@@ -68,13 +68,17 @@ spec:
                     cpu: "?*"
 
     # Require Sentinel image from trusted registry
+    # v184.4 FIX: was ghcr.io/cyberdudebivash/* -- a different GitHub org than
+    # this repo's actual owner (cyberdudebivash-pvt-ltd), the only namespace
+    # images actually get pushed to (see platform-build-deploy.yml's
+    # IMAGE_PREFIX comment). This policy would have rejected every real image.
     - name: require-trusted-registry
       match:
         any:
           - resources: { kinds: [Pod], namespaces: [sentinel-apex] }
       validate:
-        message: "Images must come from ghcr.io/cyberdudebivash"
+        message: "Images must come from ghcr.io/cyberdudebivash-pvt-ltd"
         pattern:
           spec:
             containers:
-              - image: "ghcr.io/cyberdudebivash/*"
+              - image: "ghcr.io/cyberdudebivash-pvt-ltd/*"
