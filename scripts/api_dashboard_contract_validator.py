@@ -57,6 +57,18 @@ v184.2 CISA-KEV-BULLETIN GUARD (2026-08-21 deploy-worker failure this
   when the manifest never contains this content type at all). Self-heal
   as a WARN via a title-prefix match, same as the other CHECK-2 guards.
 
+v184.3 GUARD-2 CLOCK-SKEW FIX (2026-08-21 deploy-worker failure this
+  version fixes): guard 2's manifest_newest_ts is a max() over every
+  manifest entry's timestamp with no upper bound. One upstream source
+  handed the pipeline a corrupted/placeholder future-dated entry
+  (indicator--bced6ad973dc3246fd6e81f71bc4403b, timestamped hours ahead
+  of the actual run), which poisoned that max() and made 5 genuinely
+  recent, not-yet-synced api items miss the pending-sync guard entirely
+  -- they fell through to "genuine_regression" and hard-failed the gate.
+  manifest_newest_ts is now capped at wall-clock "now": any single
+  malformed future timestamp is excluded from the baseline instead of
+  raising it.
+
 Checks:
   1. API internal sort order (HARD FAIL)
   2. API top-N items exist in manifest (WARN on ID format migration, content
@@ -76,7 +88,7 @@ import os, sys, json, argparse, hashlib, html as html_module
 import re
 from datetime import datetime, timezone
 
-SCRIPT_VERSION = "1.7.1"  # v184.2: CISA-KEV-bulletin guard (CHECK 2 demoted to WARN for multi-CVE roundup items the STIX manifest generator never emits)
+SCRIPT_VERSION = "1.7.2"  # v184.3: cap guard-2's manifest_newest_ts baseline at wall-clock now, so one corrupted future-dated upstream timestamp can't poison the pending-sync check
 KEV_BULLETIN_TITLE_PREFIX = "U.S. CISA adds "
 KEV_BULLETIN_TITLE_MARKER = "Known Exploited Vulnerabilities catalog"
 DEFAULT_TOP    = 50
@@ -334,12 +346,24 @@ def validate(repo_root, top_n):
         if t and t not in manifest_by_title:
             manifest_by_title[t] = e
 
-    # v184.1 guard 2: an item newer than anything the manifest has ingested
-    # yet is a pipeline-timing gap, not a regression -- see the module
-    # docstring for why api/feed.json and feed_manifest.json can legitimately
-    # be out of sync by up to one manifest ingest cycle (~4h).
+    # v184.3 GUARD-2 CLOCK-SKEW FIX (2026-08-21 deploy-worker failure this
+    # version fixes): guard 2 below trusts manifest_newest_ts as "how fresh
+    # is the manifest", but a single upstream source can hand the pipeline a
+    # corrupted/placeholder future-dated timestamp (confirmed by direct
+    # inspection: indicator--bced6ad973dc3246fd6e81f71bc4403b carries
+    # 2026-08-21T14:00:00Z, hours ahead of any real run time). That one bad
+    # entry poisoned the max() below, made the manifest look newer than it
+    # really is, and caused 5 unrelated, genuinely-recent api items to miss
+    # the pending-sync guard and get misclassified as "genuine_regression".
+    # Cap the ceiling at wall-clock "now" (+ a small skew allowance) so a
+    # single malformed upstream timestamp can't poison this baseline.
+    _now_ts = normalize_ts(datetime.now(timezone.utc).isoformat())
     manifest_newest_ts = max(
-        (normalize_ts(ts_key(e)) for e in manifest_items if ts_key(e)), default=""
+        (
+            ts for e in manifest_items
+            if (ts := normalize_ts(ts_key(e))) and ts <= _now_ts
+        ),
+        default="",
     )
 
     api_missing_count       = 0

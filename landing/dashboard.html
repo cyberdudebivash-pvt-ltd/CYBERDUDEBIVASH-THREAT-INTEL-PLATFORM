@@ -299,6 +299,12 @@ function renderApexPanel(apex) {
   } catch { return ''; }
 }
 
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 function renderCard(item) {
   const sev = item.severity || 'UNKNOWN';
   const sc = getSevClass(sev);
@@ -432,8 +438,9 @@ async function runSearch() {
     ].filter(Boolean).join(' ').toLowerCase();
     return haystack.includes(needle);
   });
-  if (!items.length) { document.getElementById('search-results').innerHTML = '<div class="loading-state">No results for "' + q + '"</div>'; return; }
-  document.getElementById('search-results').innerHTML = `<div style="font-family:var(--font-mono);font-size:.78rem;color:var(--muted);margin-bottom:12px">${items.length} RESULTS FOR "${q.toUpperCase()}"</div>` + items.map(renderCard).join('');
+  const qSafe = escapeHtml(q);
+  if (!items.length) { document.getElementById('search-results').innerHTML = '<div class="loading-state">No results for "' + qSafe + '"</div>'; return; }
+  document.getElementById('search-results').innerHTML = `<div style="font-family:var(--font-mono);font-size:.78rem;color:var(--muted);margin-bottom:12px">${items.length} RESULTS FOR "${qSafe.toUpperCase()}"</div>` + items.map(renderCard).join('');
 }
 
 async function loadStats() {
