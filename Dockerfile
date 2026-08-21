@@ -49,17 +49,23 @@ ARG CPU_ONLY=false
 COPY requirements.txt .
 
 # Install to user site-packages (copied to runtime image).
-# When CPU_ONLY=true: sed replaces "torch==2.2.0" with "torch==2.2.0+cpu"
-# in a temp copy of requirements.txt, then installs from the PyTorch CPU
-# wheel index as the primary index (all other packages fall back to PyPI
-# via --extra-index-url). This eliminates the ~3GB NVIDIA CUDA dependency
-# chain that otherwise causes "no space left on device" in CI runners.
+# When CPU_ONLY=true: sed appends "+cpu" to whatever torch version is
+# pinned in requirements.txt, in a temp copy of that file, then installs
+# from the PyTorch CPU wheel index as the primary index (all other
+# packages fall back to PyPI via --extra-index-url). This eliminates the
+# ~3GB NVIDIA CUDA dependency chain that otherwise causes "no space left
+# on device" in CI runners.
+# v184.7 FIX: the previous sed hardcoded the literal string "2.2.0+cpu" as
+# its replacement text, so a torch version bump in requirements.txt (e.g.
+# fixing a CVE) would have been silently overwritten back to the old,
+# vulnerable 2.2.0+cpu for every CPU_ONLY=true build -- defeating the
+# fix specifically for CI/SBOM builds. Captures the actual version with a
+# backreference instead of hardcoding one.
 RUN pip install --no-cache-dir --user --upgrade pip \
  && if [ "$CPU_ONLY" = "true" ]; then \
       echo "[BUILD] CPU_ONLY=true: installing torch CPU-only wheel (no CUDA)"; \
-      sed 's|^torch==|torch==2.2.0+cpu  # CPU_ONLY override: was torch==|' \
+      sed -E 's|^torch==([0-9]+\.[0-9]+\.[0-9]+)|torch==\1+cpu|' \
           requirements.txt \
-        | sed 's|^torch==2\.2\.0+cpu  # CPU_ONLY override.*|torch==2.2.0+cpu|' \
         > /tmp/req-cpu.txt; \
       pip install --no-cache-dir --user \
           --index-url https://download.pytorch.org/whl/cpu \
