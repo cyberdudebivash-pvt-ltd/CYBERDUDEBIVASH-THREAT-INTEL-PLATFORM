@@ -29,9 +29,10 @@ ZERO FABRICATION  -  reads existing pipeline output files only.
 from __future__ import annotations
 import json, pathlib, sys, datetime, os
 
+from p38_shared_validators import get_certification_feed, StaleFeedError
+
 _ROOT    = pathlib.Path(__file__).resolve().parent.parent
 _QUALITY = _ROOT / "data" / "quality"
-_FEED    = _ROOT / "feed.json"
 
 DRY_RUN  = os.environ.get("DRY_RUN",  "false").strip().lower() == "true"
 VERSION  = "P25.0"
@@ -47,14 +48,17 @@ def _load_json(path: pathlib.Path) -> dict | list | None:
 
 
 def _load_feed() -> list:
-    raw = _load_json(_FEED)
-    if isinstance(raw, list):
-        return raw
-    if isinstance(raw, dict):
-        for key in ("items", "data", "feed"):
-            if isinstance(raw.get(key), list):
-                return raw[key]
-    return []
+    # v161.3 P0 FIX: was reading root feed.json -- a periodically-regenerated
+    # snapshot classified NOT the live production feed (see
+    # p38_shared_validators.FEED_REGISTRY["root"]). That let this gate's
+    # verdict drift independently of the feed customers actually receive --
+    # the same defect class Phase 1 (PR #219) fixed in p33. Now reads the
+    # canonical live feed (api/feed.json) via the shared resolver; an empty
+    # list here is handled by G1 exactly as an unreadable feed always was.
+    try:
+        return get_certification_feed("live").items
+    except (StaleFeedError, KeyError):
+        return []
 
 
 # ── gate checks ───────────────────────────────────────────────────────────────
