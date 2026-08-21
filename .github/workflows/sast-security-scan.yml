@@ -80,6 +80,7 @@ on:
       - "agent/**"
       - "api/**.py"
       - "requirements.txt"
+      - "requirements-ci-light.txt"
       - ".github/workflows/sast-security-scan.yml"
   pull_request:
     branches: [main, develop]
@@ -87,6 +88,7 @@ on:
       - "agent/**"
       - "api/**.py"
       - "requirements.txt"
+      - "requirements-ci-light.txt"
       - ".github/workflows/sast-security-scan.yml"
   schedule:
     - cron: "0 2 * * *"
@@ -266,9 +268,17 @@ jobs:
           # attacks are out of scope for that project and there is no
           # planned fix. Mirrors .grype.yaml's existing "not-fixed"/
           # "wont-fix" ignore policy for the same class of finding.
+          #
+          # v184.9 FIX: this gate only ever scanned requirements.txt, so
+          # requirements-ci-light.txt (installed by 14 separate CI workflows)
+          # silently drifted into 84 of its own unfixed CVEs with no gate
+          # ever catching it. -r/--requirement can be passed multiple times
+          # (pip-audit unions the files into one scan); added the second
+          # file here and to this workflow's paths: triggers above.
           set +e
           pip-audit \
             --requirement requirements.txt \
+            --requirement requirements-ci-light.txt \
             --format json \
             --output pip-audit-report.json \
             --ignore-vuln GHSA-wj6h-64fc-37mp \
