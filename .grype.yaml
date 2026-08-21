@@ -17,20 +17,28 @@
 # that have no remediation path.
 
 ignore:
+  # v184.4 FIX: fix-state/namespace/package were incorrectly nested under a
+  # `vulnerability:` key (which Grype requires to be a CVE-id string, not a
+  # map) -- this crashed Grype's own config parser before any scan could
+  # even start ("invalid application config: 3 error(s) decoding"). The
+  # SBOM Gate step's own hardening fix (see sbom-generation.yml) then
+  # correctly treated that tool-level failure as a failure -- previously it
+  # was silently swallowed and always reported "0 actionable critical
+  # CVEs" regardless of whether the scan ran at all. Fields below are
+  # Grype's actual top-level ignore-rule matchers, not children of
+  # `vulnerability`.
+  #
   # Suppress CVEs where no fix has been released by the upstream maintainer.
   # These cannot be resolved by updating dependencies.
-  - vulnerability:
-      fix-state: not-fixed
-  - vulnerability:
-      fix-state: wont-fix
+  - fix-state: not-fixed
+  - fix-state: wont-fix
   # torch CPU-only wheels (SBOM scan only  -  not deployed to production)
   # torch CVEs are typically infrastructure-level and not exploitable in this
   # context (no GPU runtime, no model serving endpoint, no untrusted input).
-  - vulnerability:
-      namespace: nvd
-      package:
-        name: torch
-        type: python
+  - namespace: nvd
+    package:
+      name: torch
+      type: python
 
 # Output: emit table + JSON (JSON is captured by --file flag in workflow)
 output:
