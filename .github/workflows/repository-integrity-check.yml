@@ -45,6 +45,17 @@ on:
   schedule:
     - cron: '17 6 * * 1'  # weekly safety net, catches drift not tied to one of the paths above
 
+# v184.9 FIX: no concurrency group existed. This workflow triggers on push to
+# .github/workflows/** among other paths, so a burst of workflow-file pushes
+# in a short window (e.g. several hardening PRs merging back to back) queues
+# multiple overlapping runs. Both jobs are read-only (validate + drift-detect,
+# no git writes) so cancelling a superseded run is safe -- unlike the
+# sentinel-data-writer group used by write-side workflows, which needs
+# cancel-in-progress: false to avoid racing mid-write state.
+concurrency:
+  group: repository-integrity-check
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

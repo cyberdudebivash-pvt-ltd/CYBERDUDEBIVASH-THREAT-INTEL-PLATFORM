@@ -20,9 +20,13 @@ concurrency:
   group: sentinel-self-healing
   cancel-in-progress: true
 
+# v184.9 FIX: actions: write was unused -- nothing in this file uploads/
+# downloads artifacts or calls the Actions API (github-script, gh run/
+# workflow, etc.). Dropped to least privilege; an attacker who got any code
+# execution in this job could otherwise cancel/re-run/delete artifacts
+# fleet-wide for no functional benefit to the workflow.
 permissions:
   contents: read
-  actions: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
