@@ -397,6 +397,7 @@ def main() -> int:
             log.error("ZIP creation failed: %s", exc)
 
     # ── Upload to R2 (v184.4 FIX -- see DETECTIONS_DIR comment above) ────────────
+    upload_failures = 0
     if not DRY_RUN:
         from scripts.r2_upload import get_credentials, s3_cp
         _CONTENT_TYPES = {
@@ -426,7 +427,15 @@ def main() -> int:
                 r2_ok += 1
             else:
                 log.error("R2 upload FAILED for detections/detection_pack.zip")
-        log.info("R2 premium upload: %d/%d artifacts", r2_ok, len(outputs) + 1)
+        r2_expected = len(outputs) + 1
+        log.info("R2 premium upload: %d/%d artifacts", r2_ok, r2_expected)
+        upload_failures = r2_expected - r2_ok
+        if upload_failures:
+            log.error(
+                "%d premium R2 upload(s) failed -- paid customers will not see "
+                "updated detection content until this is retried",
+                upload_failures,
+            )
 
     log.info("=" * 60)
     log.info("DETECTION PACK COMPLETE — %d/%d files written", written, len(outputs))
@@ -438,6 +447,8 @@ def main() -> int:
     log.info("  KEV CVEs       : %d (CISA active exploits)", len(kev_cves))
     log.info("  IOC types      : %s", dict(sorted(type_map.items(), key=lambda x: -len(x[1]))))
     log.info("=" * 60)
+    if upload_failures:
+        return 1
     return 0
 
 

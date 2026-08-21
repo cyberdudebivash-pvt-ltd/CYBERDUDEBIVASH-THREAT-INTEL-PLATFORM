@@ -1,6 +1,6 @@
 # Architecture Decisions
 
-**Last updated:** 2026-07-28. Each entry below is a decision established during the EPTP transformation program, with the evidence or business input it rests on. This document only records decisions already made — it is not a proposal list.
+**Last updated:** 2026-08-21. Each entry below is a decision established during the EPTP transformation program, with the evidence or business input it rests on. This document only records decisions already made — it is not a proposal list.
 
 ## Cloudflare Workers is the canonical production runtime
 

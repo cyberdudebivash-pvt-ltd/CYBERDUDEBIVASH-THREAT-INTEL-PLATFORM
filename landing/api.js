@@ -62,34 +62,29 @@ const APEX = (() => {
   }
 
   /**
-   * GET /api/v1/intel/latest.json — fetch latest advisories, tier-gated
-   * server-side by the caller's key. v184.6: intel-gateway's real endpoint
-   * has no `limit` query param (unlike the retired Railway backend) --
-   * it returns the full tier-appropriate set; slice client-side instead.
+   * GET /api/v1/intel/latest.json — shared fetch for fetchIntel/fetchFeed.
+   * v184.6: intel-gateway's real endpoint has no `limit`/`offset` query
+   * params (unlike the retired Railway backend) -- it returns the full
+   * tier-appropriate set; slice client-side instead.
    */
-  async function fetchIntel(apiKey, limit = 20) {
+  async function _fetchIntelSlice(apiKey, start, end) {
     const headers = {};
     if (apiKey && apiKey !== 'anon') headers['X-API-Key'] = apiKey;
     const res = await apiFetch('/api/v1/intel/latest.json', { headers });
     if (res.ok && res.data && Array.isArray(res.data.items)) {
-      res.data = { ...res.data, items: res.data.items.slice(0, limit) };
+      res.data = { ...res.data, items: res.data.items.slice(start, end) };
     }
     return res;
   }
 
-  /**
-   * GET /api/v1/intel/latest.json — paginated feed.
-   * v184.6: intel-gateway has no dedicated paginated-feed route; reuses the
-   * same endpoint as fetchIntel() and slices client-side (offset:offset+limit).
-   */
+  /** GET /api/v1/intel/latest.json — fetch latest advisories, tier-gated server-side by the caller's key. */
+  async function fetchIntel(apiKey, limit = 20) {
+    return _fetchIntelSlice(apiKey, 0, limit);
+  }
+
+  /** GET /api/v1/intel/latest.json — paginated feed. */
   async function fetchFeed(apiKey, limit = 50, offset = 0) {
-    const headers = {};
-    if (apiKey && apiKey !== 'anon') headers['X-API-Key'] = apiKey;
-    const res = await apiFetch('/api/v1/intel/latest.json', { headers });
-    if (res.ok && res.data && Array.isArray(res.data.items)) {
-      res.data = { ...res.data, items: res.data.items.slice(offset, offset + limit) };
-    }
-    return res;
+    return _fetchIntelSlice(apiKey, offset, offset + limit);
   }
 
   /** GET /api/v1/stats — platform stats */
