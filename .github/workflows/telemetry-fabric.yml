@@ -395,6 +395,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [telemetry-fabric, adversary-graph, ai-runtime-defense, malware-intelligence, enterprise-validation, proprietary-intel-network]
     if: always()
+    # v184.9 FIX: every other job in this file has a timeout-minutes; this
+    # one didn't. It's a final if: always() rollup gated on 6 upstream jobs,
+    # so a hang here would sit in the queue indefinitely once everything
+    # upstream finishes. Scoped to this job's actual work (checkout + a
+    # short status-report script), well under its siblings' 15-25min budgets.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6.0.2
       - name: Generate consolidated pipeline status
