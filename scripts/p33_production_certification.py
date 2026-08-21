@@ -42,7 +42,14 @@ from datetime import datetime, timezone
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _DATA = _ROOT / "data"
-_FEED = _DATA / "feed.json"
+# NOT data/feed.json: that file is a stale historical snapshot (observed
+# schema_version v134.0, generated_at 2026-05-12 -- over 3 months old at
+# time of writing, missing evidence_chain entirely, confidence on a 0-100
+# scale instead of 0-1). api/feed.json is the file this repo actually
+# publishes and that intel.cyberdudebivash.com serves live -- confirmed by
+# diffing against a live curl of https://intel.cyberdudebivash.com/api/feed.json
+# (matching item shape, evidence_chain present, confidence on the 0-1 scale).
+_FEED = _ROOT / "api" / "feed.json"
 _QUAL = _DATA / "quality"
 _STIX = _DATA / "stix"
 _OUT  = _QUAL / "p33_certification_report.json"
@@ -233,8 +240,13 @@ def run_certification() -> dict:
 
         # --- G07 MITRE coverage ---
         gG07 = g("G07", "MITRE ATT&CK coverage >= 95%")
+        # mitre_tactics/ttps are a deprecated pair, always [] in the current
+        # schema; the populated fields are attck_technique_ids/attck_techniques
+        # (confirmed: 155/224 items, each carrying technique_id, justification,
+        # evidence, and a verification_status).
         mitre_count = sum(1 for item in items
-                          if item.get("mitre_tactics") or item.get("ttps"))
+                          if item.get("attck_technique_ids") or item.get("attck_techniques")
+                          or item.get("mitre_tactics") or item.get("ttps"))
         mitre_pct = mitre_count / n * 100
         if mitre_pct < 95:
             gG07.warn(f"MITRE coverage {mitre_pct:.1f}% — below 95% threshold")
@@ -252,8 +264,11 @@ def run_certification() -> dict:
 
         # --- G09 Source URL completeness ---
         gG09 = g("G09", "Source URL completeness >= 95%")
+        # "source" is the short source-label field (e.g. a feed name), never
+        # a URL -- this gate is checking source_url, the field that actually
+        # holds one.
         src_count = sum(1 for item in items
-                        if str(item.get("source","")).startswith("http"))
+                        if str(item.get("source_url","")).startswith("http"))
         src_pct = src_count / n * 100
         if src_pct < 95:
             gG09.warn(f"Source URL completeness {src_pct:.1f}% — below 95%")
@@ -344,7 +359,8 @@ def run_certification() -> dict:
             score = 0
             if item.get("cvss_score"): score += 20
             if item.get("epss_score"): score += 15
-            if item.get("ttps"):       score += 20
+            if item.get("attck_technique_ids") or item.get("attck_techniques") or item.get("ttps"):
+                score += 20
             if item.get("actor_tag"):  score += 15
             if item.get("patch_available"): score += 15
             if item.get("kev_present"):     score += 15
@@ -360,16 +376,25 @@ def run_certification() -> dict:
         ev_count = sum(1 for item in items if item.get("evidence_chain"))
         ev_pct = ev_count / n * 100
         if ev_pct < 80:
-            gG19.warn(f"Evidence chain: {ev_pct:.1f}% — below 80% threshold (field not in feed schema)")
+            gG19.warn(f"Evidence chain: {ev_pct:.1f}% — below 80% threshold")
         else:
             gG19.detail = f"Evidence chain coverage {ev_pct:.1f}%"
 
         # --- G20 Detection bundle ---
         gG20 = g("G20", "Detection bundle coverage >= 40%")
-        det_count = sum(1 for item in items if item.get("detection_bundle"))
+        # Real field is detection_rules_total (an item-level rule count, not
+        # a "detection_bundle" key -- that name doesn't exist anywhere in
+        # the feed schema). Value is a count, sometimes serialized as a
+        # string, so coerce defensively rather than truthy-check the raw value.
+        def _det_count(v):
+            try:
+                return int(v or 0)
+            except (TypeError, ValueError):
+                return 0
+        det_count = sum(1 for item in items if _det_count(item.get("detection_rules_total")) > 0)
         det_pct = det_count / n * 100
         if det_pct < 40:
-            gG20.warn(f"Detection bundle: {det_pct:.1f}% — below 40% threshold (field not in feed schema)")
+            gG20.warn(f"Detection bundle: {det_pct:.1f}% — below 40% threshold")
         else:
             gG20.detail = f"Detection bundle coverage {det_pct:.1f}%"
 
@@ -387,7 +412,10 @@ def run_certification() -> dict:
         actors = [item.get("actor_tag","") for item in items if item.get("actor_tag")]
         ttp_sets: dict[str,int] = {}
         for item in items:
-            for t in (item.get("ttps") or []):
+            # attck_technique_ids (list of technique-id strings, e.g. "T1190")
+            # is the current field; ttps is the deprecated predecessor, kept
+            # as a fallback for older items rather than dropped.
+            for t in (item.get("attck_technique_ids") or item.get("ttps") or []):
                 if isinstance(t, str):
                     ttp_sets[t] = ttp_sets.get(t, 0) + 1
         multi_ttp = sum(1 for v in ttp_sets.values() if v >= 2)
@@ -398,7 +426,9 @@ def run_certification() -> dict:
 
         # --- G23 P33.5 Coverage matrix buildable ---
         gG23 = g("G23", "P33.5 Coverage matrix: items with ttps >= 70%")
-        ttp_items = sum(1 for item in items if item.get("ttps"))
+        ttp_items = sum(1 for item in items
+                        if item.get("attck_technique_ids") or item.get("attck_techniques")
+                        or item.get("ttps"))
         ttp_pct = ttp_items / n * 100
         if ttp_pct < 70:
             gG23.warn(f"TTP coverage {ttp_pct:.1f}% — below 70% threshold for full matrix")
