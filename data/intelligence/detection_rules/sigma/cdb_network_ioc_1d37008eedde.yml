@@ -1,0 +1,55 @@
+title: CDB SENTINEL APEX - Network Threat Intel [1d37008eedde]
+id: cdb-net-1d37008eedde
+status: production
+description: >
+    Auto-generated detection rule for 9 malicious IPs and 18 malicious domains
+    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.
+author: CyberDudeBivash SENTINEL APEX v51
+date: 2026-08-21
+modified: 2026-08-21
+tags:
+    - attack.command_and_control
+    - attack.t1071
+    - attack.t1090
+logsource:
+    category: firewall
+    product: any
+detection:
+    selection:
+        DestinationIp:
+            - '2.6.0.1'
+            - '0.0.0.0'
+            - '0.9.1.3'
+            - '11.5.7.0'
+            - '4.3.0.1'
+            - '6.7.4.8'
+            - '7.20.30.50'
+            - '1.20.60.50'
+            - '6.1.5.9'
+        DestinationHostname|contains:
+            - 'crates.io'
+            - 'metacpan.org'
+            - 'docs.wagtail.org'
+            - 'wagtail.org'
+            - 'wintercms.com'
+            - 'www.cve.org'
+            - 'www.agingenieria.com'
+            - 'www.made-in-china.com'
+            - 'dccrsorgia.github.io'
+            - 'aidenpiearce.github.io'
+            - 'valli-18.github.io'
+            - 'www.14025.xyz'
+            - 'fairtrade.com'
+            - 'www.14088.xyz'
+            - 'm4nfdw.top'
+            - 'em6gto.top'
+            - 'go.opentelemetry.io'
+            - 'usbank.com'
+    condition: selection
+level: medium
+falsepositives:
+    - Shared hosting infrastructure
+    - CDN/cloud provider IP overlap
+references:
+    - https://intel.cyberdudebivash.com
+    - https://cyberdudebivash.com/threat-intel
