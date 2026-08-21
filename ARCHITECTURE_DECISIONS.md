@@ -1,6 +1,6 @@
 # Architecture Decisions
 
-**Last updated:** 2026-07-28. Each entry below is a decision established during the EPTP transformation program, with the evidence or business input it rests on. This document only records decisions already made — it is not a proposal list.
+**Last updated:** 2026-08-21. Each entry below is a decision established during the EPTP transformation program, with the evidence or business input it rests on. This document only records decisions already made — it is not a proposal list.
 
 ## Cloudflare Workers is the canonical production runtime
 
@@ -13,6 +13,8 @@ Established by direct code review: every credential-issuing path in `intel-gatew
 ## Railway hosting is retired
 
 Business decision, accepted as given for this program. Repository evidence (dedicated Railway deployment configuration in three separate locations) is consistent with Railway having previously been an active deployment target.
+
+**Update (2026-08-21):** acted upon. `railway.json`, `Dockerfile.railway`, `Procfile`, `api/main.py`, `agent/api/api_server.py`, and `sentinel-apex-api/` were removed. `api/main.py`'s premium-content entitlement routes (added in a prior session, before this file's non-deployment was established) were re-targeted to `workers/intel-gateway/src/index.js` first. Three live customer-facing pages (`landing/api.js`, `landing/dashboard.html`, `landing/auth.html`) were found still calling the dead Railway domain and repointed to `intel-gateway`. See `LEGACY_COMPONENTS.md`'s "Retired Components (Railway retirement, 2026-08-21)" section for full detail, including what was intentionally left unresolved (an architecture mismatch in `auth.html`'s login/register forms, and several now-orphaned `api/*.py` helper modules not in the agreed removal scope).
 
 ## Google Blogger publishing is retired
 

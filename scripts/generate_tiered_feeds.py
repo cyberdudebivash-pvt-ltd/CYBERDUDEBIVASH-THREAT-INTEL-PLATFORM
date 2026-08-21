@@ -42,10 +42,17 @@ API_DIR       = REPO / "api"
 # PUBLIC GitHub repo -- fetchable by anyone with zero auth via
 # raw.githubusercontent.com, with no route anywhere in this codebase that ever
 # checked a caller's tier before serving them. They now write to this
-# gitignored local staging path and get uploaded to a private R2 bucket
-# (agent/monetization/premium_storage.py) instead. Only TRIAL (the intended
-# public teaser) still writes to API_DIR.
+# gitignored local staging path and get uploaded to R2 below. Only TRIAL (the
+# intended public teaser) still writes to API_DIR.
+#
+# v184.6 FIX: uploads now go to the existing sentinel-apex-data bucket (under
+# a private premium/ prefix), via scripts/r2_upload.py's existing AWS CLI
+# credentials -- not a new sentinel-apex-premium bucket / new credentials.
+# Served by workers/intel-gateway (the confirmed-live production Worker,
+# which already binds that bucket as INTEL_R2), not the legacy Railway-
+# targeted api/main.py this originally used (see LEGACY_COMPONENTS.md).
 PREMIUM_STAGING_DIR = REPO / "data" / "premium_staging"
+PREMIUM_BUCKET = "sentinel-apex-data"
 DRY_RUN       = os.environ.get("DRY_RUN", "false").strip().lower() == "true"
 PLATFORM_BASE = "https://intel.cyberdudebivash.com"
 VERSION       = "185.0"
@@ -217,6 +224,7 @@ def main() -> int:
     ]
 
     written = 0
+    upload_failures = 0
     for path, items, tier, desc, is_premium in products:
         wrapped = _wrap(items, tier, desc, total)
         if DRY_RUN:
@@ -227,10 +235,18 @@ def main() -> int:
                 log.info("Written: %s (%d items)", path.name, len(items))
                 written += 1
                 if is_premium:
-                    from agent.monetization.premium_storage import upload_premium_artifact
-                    if upload_premium_artifact(str(path), f"feeds/{path.name}"):
-                        log.info("Uploaded to private R2: feeds/%s", path.name)
+                    from scripts.r2_upload import get_credentials, s3_cp
+                    cf_account, _, _ = get_credentials()
+                    endpoint = f"https://{cf_account}.r2.cloudflarestorage.com"
+                    r2_key = f"premium/feeds/{path.name}"
+                    if s3_cp(
+                        str(path), PREMIUM_BUCKET, r2_key, endpoint,
+                        content_type="application/json",
+                        cache_control="private, max-age=300",
+                    ):
+                        log.info("Uploaded to R2: %s/%s", PREMIUM_BUCKET, r2_key)
                     else:
+                        upload_failures += 1
                         log.error(
                             "R2 upload FAILED for %s -- paid customers will not "
                             "see updated content until this is retried "
@@ -247,16 +263,18 @@ def main() -> int:
         "platform":     PLATFORM_BASE,
         "products": [
             # v184.4 FIX: "endpoint" now points at the authenticated
-            # /api/v1/premium/feed/{tier} route (api/main.py) instead of a
-            # public GitHub Pages URL -- the raw files no longer live there.
-            # "file" documents the private R2 key, not a repo path (there
-            # isn't one for these tiers anymore).
+            # /api/v1/premium/feed/{tier} route instead of a public GitHub
+            # Pages URL -- the raw files no longer live there. "file"
+            # documents the private R2 key, not a repo path (there isn't
+            # one for these tiers anymore). v184.6: re-targeted to
+            # intel-gateway (the confirmed-live Worker) and the existing
+            # sentinel-apex-data bucket -- see PREMIUM_BUCKET comment above.
             {
                 "tier":      "ENTERPRISE",
                 "plan":      "Enterprise Plan",
                 "price_usd_monthly": 999,
                 "endpoint":  "/api/v1/premium/feed/gold",
-                "file":      "r2://sentinel-apex-premium/feeds/feed.gold.json",
+                "file":      "r2://sentinel-apex-data/premium/feeds/feed.gold.json",
                 "items":     len(gold_items),
                 "features":  ["GOLD tier only", "CVSS/EPSS data", "KEV flags", "IOCs", "Sigma/KQL rules", "APEX AI", "exec_summary", "STIX 2.1"],
             },
@@ -265,7 +283,7 @@ def main() -> int:
                 "plan":      "Professional Plan",
                 "price_usd_monthly": 499,
                 "endpoint":  "/api/v1/premium/feed/silver",
-                "file":      "r2://sentinel-apex-premium/feeds/feed.silver.json",
+                "file":      "r2://sentinel-apex-data/premium/feeds/feed.silver.json",
                 "items":     len(silver_items),
                 "features":  ["GOLD + SILVER tiers", "CVSS/EPSS data", "KEV flags", "IOCs", "Sigma/KQL rules", "exec_summary"],
             },
@@ -274,7 +292,7 @@ def main() -> int:
                 "plan":      "Standard Plan",
                 "price_usd_monthly": 199,
                 "endpoint":  "/api/v1/premium/feed/standard",
-                "file":      "r2://sentinel-apex-premium/feeds/feed.standard.json",
+                "file":      "r2://sentinel-apex-data/premium/feeds/feed.standard.json",
                 "items":     len(standard_items),
                 "features":  ["All certified items", "CVSS data", "exec_summary", "severity scoring"],
             },
@@ -283,7 +301,7 @@ def main() -> int:
                 "plan":      "Executive Brief",
                 "price_usd_monthly": 299,
                 "endpoint":  "/api/v1/premium/feed/executive",
-                "file":      "r2://sentinel-apex-premium/feeds/feed.executive.json",
+                "file":      "r2://sentinel-apex-data/premium/feeds/feed.executive.json",
                 "items":     len(exec_items),
                 "features":  ["CRITICAL+HIGH only", "exec_summary", "CVSS/EPSS", "KEV", "lean payload"],
             },
@@ -313,6 +331,9 @@ def main() -> int:
     log.info("  EXECUTIVE:     %d items  ($299/mo)", len(exec_items))
     log.info("  TRIAL:         %d items  (FREE → conversion)", len(trial_items))
     log.info("=" * 60)
+    if upload_failures:
+        log.error("%d premium R2 upload(s) failed -- exiting nonzero", upload_failures)
+        return 1
     return 0
 
 

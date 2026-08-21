@@ -47,8 +47,16 @@ BASELINE_PATH = Path(os.environ.get("BASELINE_PATH", str(REPO / "api" / "feed.ba
 # committed to this PUBLIC GitHub repo -- fetchable by anyone with zero auth,
 # with no route anywhere that ever checked a caller's entitlement before
 # serving it. Now writes to this gitignored local staging path and gets
-# uploaded to a private R2 bucket (agent/monetization/premium_storage.py).
+# uploaded to R2 below.
+#
+# v184.6 FIX: uploads now go to the existing sentinel-apex-data bucket (under
+# a private premium/ prefix), via scripts/r2_upload.py's existing AWS CLI
+# credentials -- not a new sentinel-apex-premium bucket / new credentials.
+# Served by workers/intel-gateway (the confirmed-live production Worker,
+# which already binds that bucket as INTEL_R2), not the legacy Railway-
+# targeted api/main.py this originally used (see LEGACY_COMPONENTS.md).
 DETECTIONS_DIR = REPO / "data" / "premium_staging" / "detections"
+PREMIUM_BUCKET = "sentinel-apex-data"
 DRY_RUN       = os.environ.get("DRY_RUN", "false").strip().lower() == "true"
 PLATFORM_BASE = "https://intel.cyberdudebivash.com"
 VERSION       = "185.0"
@@ -338,11 +346,11 @@ def main() -> int:
             "upgrade_url":  f"{PLATFORM_BASE}/pricing",
         },
         "contents": {
-            "sigma_rules":       {"file": "r2://sentinel-apex-premium/detections/sigma_rules.yml",     "count": sigma_count,          "format": "Sigma YAML"},
-            "kql_queries":       {"file": "r2://sentinel-apex-premium/detections/kql_queries.kql",     "count": kql_count,            "format": "KQL (Sentinel / Defender)"},
-            "ioc_blocklist":     {"file": "r2://sentinel-apex-premium/detections/ioc_blocklist.txt",   "count": ioc_count,            "format": "Flat text (one IOC per line)"},
-            "ioc_structured":    {"file": "r2://sentinel-apex-premium/detections/ioc_structured.json", "count": len(structured_iocs), "format": "JSON (type, value, context)"},
-            "cve_watchlist":     {"file": "r2://sentinel-apex-premium/detections/cve_watchlist.csv",   "count": cve_rows,             "format": "CSV (vuln management import)"},
+            "sigma_rules":       {"file": "r2://sentinel-apex-data/premium/detections/sigma_rules.yml",     "count": sigma_count,          "format": "Sigma YAML"},
+            "kql_queries":       {"file": "r2://sentinel-apex-data/premium/detections/kql_queries.kql",     "count": kql_count,            "format": "KQL (Sentinel / Defender)"},
+            "ioc_blocklist":     {"file": "r2://sentinel-apex-data/premium/detections/ioc_blocklist.txt",   "count": ioc_count,            "format": "Flat text (one IOC per line)"},
+            "ioc_structured":    {"file": "r2://sentinel-apex-data/premium/detections/ioc_structured.json", "count": len(structured_iocs), "format": "JSON (type, value, context)"},
+            "cve_watchlist":     {"file": "r2://sentinel-apex-data/premium/detections/cve_watchlist.csv",   "count": cve_rows,             "format": "CSV (vuln management import)"},
         },
         "kev_cves_covered": kev_cves,
         "ioc_types":  {k: len(v) for k, v in type_map.items()},
@@ -388,22 +396,46 @@ def main() -> int:
         except Exception as exc:
             log.error("ZIP creation failed: %s", exc)
 
-    # ── Upload to private R2 (v184.4 FIX -- see DETECTIONS_DIR comment above) ────
+    # ── Upload to R2 (v184.4 FIX -- see DETECTIONS_DIR comment above) ────────────
+    upload_failures = 0
     if not DRY_RUN:
-        from agent.monetization.premium_storage import upload_premium_artifact
+        from scripts.r2_upload import get_credentials, s3_cp
+        _CONTENT_TYPES = {
+            ".yml": "application/x-yaml", ".kql": "text/plain", ".txt": "text/plain",
+            ".json": "application/json", ".csv": "text/csv", ".zip": "application/zip",
+        }
+        cf_account, _, _ = get_credentials()
+        endpoint = f"https://{cf_account}.r2.cloudflarestorage.com"
+
+        def _upload(local_path: Path) -> bool:
+            r2_key = f"premium/detections/{local_path.name}"
+            return s3_cp(
+                str(local_path), PREMIUM_BUCKET, r2_key, endpoint,
+                content_type=_CONTENT_TYPES.get(local_path.suffix, "application/octet-stream"),
+                cache_control="private, max-age=300",
+            )
+
         r2_ok = 0
         for path, _, _ in outputs:
             if path.exists():
-                if upload_premium_artifact(str(path), f"detections/{path.name}"):
+                if _upload(path):
                     r2_ok += 1
                 else:
                     log.error("R2 upload FAILED for detections/%s", path.name)
         if zip_path.exists():
-            if upload_premium_artifact(str(zip_path), "detections/detection_pack.zip"):
+            if _upload(zip_path):
                 r2_ok += 1
             else:
                 log.error("R2 upload FAILED for detections/detection_pack.zip")
-        log.info("R2 premium upload: %d/%d artifacts", r2_ok, len(outputs) + 1)
+        r2_expected = len(outputs) + 1
+        log.info("R2 premium upload: %d/%d artifacts", r2_ok, r2_expected)
+        upload_failures = r2_expected - r2_ok
+        if upload_failures:
+            log.error(
+                "%d premium R2 upload(s) failed -- paid customers will not see "
+                "updated detection content until this is retried",
+                upload_failures,
+            )
 
     log.info("=" * 60)
     log.info("DETECTION PACK COMPLETE — %d/%d files written", written, len(outputs))
@@ -415,6 +447,8 @@ def main() -> int:
     log.info("  KEV CVEs       : %d (CISA active exploits)", len(kev_cves))
     log.info("  IOC types      : %s", dict(sorted(type_map.items(), key=lambda x: -len(x[1]))))
     log.info("=" * 60)
+    if upload_failures:
+        return 1
     return 0
 
 

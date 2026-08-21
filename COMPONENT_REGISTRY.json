@@ -1,8 +1,15 @@
 {
   "schema_version": "1.0",
   "generated_by": "EPTP Phase 8 Batch 2",
-  "last_updated": "2026-07-28",
-  "classifications": ["production", "legacy", "experimental", "customer_artifact", "archived", "unknown"],
+  "last_updated": "2026-08-21",
+  "classifications": [
+    "production",
+    "legacy",
+    "experimental",
+    "customer_artifact",
+    "archived",
+    "unknown"
+  ],
   "components": [
     {
       "name": "intel-gateway",
@@ -87,8 +94,10 @@
       "classification": "legacy",
       "confidence": "medium",
       "last_verified_phase": "EPTP Phase 8 Batch 6",
-      "note": "Targets Railway (retired). Deployment status unconfirmed. HIDDEN DEPENDENCY found Batch 6: .github/workflows/enterprise-rollback-governance.yml lists this exact path in a 'critical_patterns' list that flags changes to it for extra rollback scrutiny -- a governance dependency, not a runtime one, but it means this workflow needs updating in the same change if this file is ever retired, or it will keep flagging an already-removed path indefinitely. Also calls scripts/payment_abstraction_layer.py (per that file's own comment) -- retiring api_server.py would leave payment_abstraction_layer.py's liveness an open question too unless it has other callers, not yet checked.",
-      "retirement_readiness": "BLOCKED"
+      "note": "Targets Railway (retired). Deployment status unconfirmed. HIDDEN DEPENDENCY found Batch 6: .github/workflows/enterprise-rollback-governance.yml lists this exact path in a 'critical_patterns' list that flags changes to it for extra rollback scrutiny -- a governance dependency, not a runtime one, but it means this workflow needs updating in the same change if this file is ever retired, or it will keep flagging an already-removed path indefinitely. Also calls scripts/payment_abstraction_layer.py (per that file's own comment) -- retiring api_server.py would leave payment_abstraction_layer.py's liveness an open question too unless it has other callers, not yet checked. RESOLVED (Railway retirement batch): enterprise-rollback-governance.yml's critical_patterns entry for this path removed. scripts/payment_abstraction_layer.py confirmed to have zero other callers (grep across the repo) -- now provably orphaned dead code, not removed in this batch (out of agreed scope) but flagged for a future cleanup pass.",
+      "retirement_readiness": "RETIRED",
+      "retired_date": "2026-08-21",
+      "retired_batch": "Railway retirement"
     },
     {
       "name": "api-main-railway-app",
@@ -97,8 +106,10 @@
       "classification": "legacy",
       "confidence": "medium",
       "last_verified_phase": "EPTP Phase 8 Batch 6",
-      "note": "Alternate entry point referenced by railway.json/Procfile. Deployment status unconfirmed. HIDDEN DEPENDENCY found Batch 6: scripts/soc2_compliance_engine.py checks for api/main.py's existence and content as evidence that SOC2 controls CC6.1 (API auth) and CC6.3 (RBAC) are satisfied -- a compliance-tooling dependency, not a runtime one. Retiring this file would need that compliance script updated first, or it will report a failed control. Several other scripts (commercial_readiness_auditor.py, business_readiness_certifier.py, self_improve_actions.py, api_snapshot_server.py) also reference api/main.py by path; not individually verified this batch, but the pattern strongly resembles the same compliance/audit-evidence usage as soc2_compliance_engine.py rather than a functional dependency (INFERENCE, not verified per-file).",
-      "retirement_readiness": "BLOCKED"
+      "note": "Alternate entry point referenced by railway.json/Procfile. Deployment status unconfirmed. HIDDEN DEPENDENCY found Batch 6: scripts/soc2_compliance_engine.py checks for api/main.py's existence and content as evidence that SOC2 controls CC6.1 (API auth) and CC6.3 (RBAC) are satisfied -- a compliance-tooling dependency, not a runtime one. Retiring this file would need that compliance script updated first, or it will report a failed control. Several other scripts (commercial_readiness_auditor.py, business_readiness_certifier.py, self_improve_actions.py, api_snapshot_server.py) also reference api/main.py by path; not individually verified this batch, but the pattern strongly resembles the same compliance/audit-evidence usage as soc2_compliance_engine.py rather than a functional dependency (INFERENCE, not verified per-file). RESOLVED (Railway retirement batch): this file's /api/v1/premium/feed and /api/v1/premium/detections routes (added in a prior session, before this file's non-deployment was confirmed) were re-targeted to workers/intel-gateway/src/index.js -- the confirmed-live production gateway -- before removal. scripts/soc2_compliance_engine.py's CC6.1/CC6.3/CC6.5/CC7.4 checks updated to cite workers/intel-gateway/src/index.js instead. commercial_readiness_auditor.py/business_readiness_certifier.py/self_improve_actions.py/api_snapshot_server.py confirmed to use soft existence/keyword checks (not functional imports) that degrade gracefully -- not updated, left to report lower scores as an accurate reflection of the file's removal.",
+      "retirement_readiness": "RETIRED",
+      "retired_date": "2026-08-21",
+      "retired_batch": "Railway retirement"
     },
     {
       "name": "sentinel-apex-api",
@@ -107,8 +118,10 @@
       "classification": "legacy",
       "confidence": "medium",
       "last_verified_phase": "EPTP Phase 8 Batch 6",
-      "note": "Second, independent Railway-targeted codebase. Its own CI automation is inert. Batch 6 checked for inbound references outside its own directory: a Grafana dashboard (monitoring/grafana/dashboards/api-performance.json) and several whole-repo maintenance/audit scripts (build_dist_artifact.py, production_health_check.py, python_syntax_guard.py, unify_version_strings.py, validate_phase4.py) reference it -- consistent with generic repo-wide tooling that iterates every directory, not a special functional dependency, but not individually confirmed for each script. platform/services/api-gateway/main.py's apparent match was a false positive (its own OpenTelemetry service name happens to contain the same substring, unrelated).",
-      "retirement_readiness": "NEEDS VALIDATION"
+      "note": "Second, independent Railway-targeted codebase. Its own CI automation is inert. Batch 6 checked for inbound references outside its own directory: a Grafana dashboard (monitoring/grafana/dashboards/api-performance.json) and several whole-repo maintenance/audit scripts (build_dist_artifact.py, production_health_check.py, python_syntax_guard.py, unify_version_strings.py, validate_phase4.py) reference it -- consistent with generic repo-wide tooling that iterates every directory, not a special functional dependency, but not individually confirmed for each script. platform/services/api-gateway/main.py's apparent match was a false positive (its own OpenTelemetry service name happens to contain the same substring, unrelated). RESOLVED (Railway retirement batch): both inbound references re-checked and confirmed inert before removal -- the Grafana dashboard match was an unrelated `uid` string (\"cdb-sentinel-apex-api\") containing the same substring, and scripts/build_dist_artifact.py has this path in an explicit EXCLUDE_ROOT_DIRS set (excluding an already-nonexistent directory is a no-op). No functional dependency found.",
+      "retirement_readiness": "RETIRED",
+      "retired_date": "2026-08-21",
+      "retired_batch": "Railway retirement"
     },
     {
       "name": "railway-deployment-config",
@@ -117,9 +130,10 @@
       "classification": "legacy",
       "confidence": "high",
       "last_verified_phase": "EPTP Phase 8 Batch 3",
-      "note": "Added to registry this batch -- was documented in LEGACY_COMPONENTS.md but missing here. Railway retired by business decision. These files are read by Railway's own platform via filename convention, not referenced by anything else in this repository internally.",
-      "retirement_readiness": "BLOCKED",
-      "retirement_blocker": "Gated on EPTP Phase 7's still-open T-01 (confirming whether Railway-URL-dependent frontend pages still function) -- unresolved as of this batch."
+      "note": "Added to registry this batch -- was documented in LEGACY_COMPONENTS.md but missing here. Railway retired by business decision. These files are read by Railway's own platform via filename convention, not referenced by anything else in this repository internally. RESOLVED (Railway retirement batch): Phase 7's T-01 (Railway-URL-dependent frontend pages) checked directly -- landing/api.js, landing/dashboard.html, and landing/auth.html all had hardcoded live calls to the dead Railway domain (index.html and landing/script.js had already been migrated to intel-gateway in a prior session). Repointed to https://intel.cyberdudebivash.com; see LEGACY_COMPONENTS.md's Retired Components section for the full list of what was fixed vs. flagged.",
+      "retirement_readiness": "RETIRED",
+      "retired_date": "2026-08-21",
+      "retired_batch": "Railway retirement"
     },
     {
       "name": "root-dev-docker-compose",
@@ -192,7 +206,7 @@
       "last_verified_phase": "EPTP Phase 8 Batch 5",
       "note": "Resolved a Batch 4 drift-detection finding. Default CMD runs agent.api.api_server:app (already-registered as agent-api-railway-app, legacy). Its SENTINEL_MODE=blogger alternate branch runs agent/sentinel_blogger.py inside the container, but SENTINEL_MODE is not set anywhere else in the repository -- confirmed via repo-wide grep -- so that branch is unreachable in practice. The real report pipeline runs natively via sentinel-blogger.yml on the GitHub Actions runner, not through this Dockerfile.",
       "retirement_readiness": "BLOCKED",
-      "retirement_blocker": "Tied to agent-api-railway-app's blockers (enterprise-rollback-governance.yml's critical-file list, unresolved deployment-target question) -- can't cleanly retire the Dockerfile while the app it builds is still an open question."
+      "retirement_blocker": "v184.6: the prior blocker (tied to agent-api-railway-app) is resolved -- that app is retired. NEW blocker found in the same batch: .github/workflows/sbom-generation.yml builds this Dockerfile (context: ., no explicit Dockerfile override) as a live dependency-CVE scan target, unrelated to Railway hosting. The Dockerfile's default CMD (uvicorn agent.api.api_server:app) now references a deleted module -- harmless today since the SBOM job only builds and inspects the image with Syft/Grype, never runs the container -- but rewriting the CMD (or repointing the SBOM workflow at a different Dockerfile) is a separate decision requiring its own verification, not made in this batch."
     },
     {
       "name": "blogger-publish-cluster",
