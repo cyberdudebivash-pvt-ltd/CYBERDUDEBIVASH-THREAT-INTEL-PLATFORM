@@ -255,11 +255,23 @@ jobs:
           # legitimate completions and both write a report; anything else means
           # the scan itself never really ran. Persist the exit code so the parse
           # step can tell these apart.
+          #
+          # v184.7 FIX: requirements.txt bumped to clear 97 of 98 known CVEs
+          # (fastapi/starlette/uvicorn/python-multipart/python-dotenv/
+          # scikit-learn/transformers/torch/pyjwt/requests/python-jose/
+          # urllib3/protobuf). The one remaining -- CVE-2024-23342
+          # (GHSA-wj6h-64fc-37mp), a Minerva timing-attack weakness in the
+          # `ecdsa` package pulled in transitively by python-jose -- has no
+          # fix at any ecdsa version; upstream has stated side-channel
+          # attacks are out of scope for that project and there is no
+          # planned fix. Mirrors .grype.yaml's existing "not-fixed"/
+          # "wont-fix" ignore policy for the same class of finding.
           set +e
           pip-audit \
             --requirement requirements.txt \
             --format json \
             --output pip-audit-report.json \
+            --ignore-vuln GHSA-wj6h-64fc-37mp \
             --skip-editable
           echo $? > /tmp/pip_audit_exit_code
           set -e

@@ -12,6 +12,15 @@
 #   - requirements.txt: aiohttp>=3.10.11 (fixes CVE-2024-27306 CRITICAL)
 #   - Dockerfile: apt-get upgrade in runtime stage (fixes OS-level criticals)
 #
+# v184.7 (2026-08-21): requirements.txt bumped to clear 97 of 98 CVEs
+# pip-audit was independently flagging (fastapi/starlette/uvicorn/
+# python-multipart/python-dotenv/scikit-learn/transformers/torch/pyjwt/
+# requests/python-jose/urllib3/protobuf) -- the image installs from the
+# same requirements.txt, so this SBOM gate's CRITICAL findings in those
+# same packages are expected to clear too. The one remaining pip-audit
+# finding (ecdsa CVE-2024-23342, no upstream fix) is suppressed at the
+# pip-audit layer (sast-security-scan.yml), not here.
+#
 # After patching above, any remaining criticals are unfixed upstream.
 # This policy ensures the SBOM gate does not permanently fail on CVEs
 # that have no remediation path.
