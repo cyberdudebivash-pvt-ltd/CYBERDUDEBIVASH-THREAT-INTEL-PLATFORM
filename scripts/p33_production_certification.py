@@ -38,6 +38,8 @@ Outputs: data/quality/p33_certification_report.json
 
 from __future__ import annotations
 import json, os, pathlib, re, sys
+
+from p38_shared_validators import is_detection_eligible
 from datetime import datetime, timezone
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -393,10 +395,23 @@ def run_certification() -> dict:
                 return 0
         det_count = sum(1 for item in items if _det_count(item.get("detection_rules_total")) > 0)
         det_pct = det_count / n * 100
+        # Eligible-denominator breakdown (mandate: publish both numerator
+        # and denominator rather than a raw over-full-feed percentage --
+        # generic/news items are not expected to carry a detection rule).
+        # This does NOT change G20's pass/fail basis (still the full-feed
+        # 40% threshold below, to avoid silently changing gate semantics),
+        # it only adds honest, transparent context to the same gate.
+        eligible_items = [item for item in items if is_detection_eligible(item)]
+        eligible_n = len(eligible_items)
+        eligible_det_count = sum(1 for item in eligible_items if _det_count(item.get("detection_rules_total")) > 0)
+        eligible_pct = (eligible_det_count / eligible_n * 100) if eligible_n else 0.0
+        eligible_detail = (
+            f" | eligible (CVE or vuln_class): {eligible_det_count}/{eligible_n} = {eligible_pct:.1f}%"
+        )
         if det_pct < 40:
-            gG20.warn(f"Detection bundle: {det_pct:.1f}% — below 40% threshold")
+            gG20.warn(f"Detection bundle: {det_pct:.1f}% — below 40% threshold{eligible_detail}")
         else:
-            gG20.detail = f"Detection bundle coverage {det_pct:.1f}%"
+            gG20.detail = f"Detection bundle coverage {det_pct:.1f}%{eligible_detail}"
 
         # --- G21 P33.1 Case intelligence derivable ---
         gG21 = g("G21", "P33.1 Case intelligence derivable: severity >= 80% items")

@@ -31,9 +31,12 @@ ARCHITECTURE DECISION RECORD — ADR-P38-001
              effects and no external dependencies beyond stdlib.
 """
 from __future__ import annotations
+import hashlib
 import json
 import pathlib
 import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -562,6 +565,132 @@ def load_json_safe(path: pathlib.Path) -> Optional[Dict]:
     except Exception:
         return None
 
+
+# ---------------------------------------------------------------------------
+# CANONICAL CERTIFICATION FEED RESOLVER
+#
+# Single entry point for every production certification/quality script to
+# resolve the feed it should measure, replacing each script independently
+# deciding between data/feed.json (stale snapshot) and api/feed.json (live).
+# Phase 1 (PR #219) found p33 silently measuring the stale "root" feed;
+# Phase 2 generalises the fix so no sibling script can repeat it.
+# ---------------------------------------------------------------------------
+DEFAULT_FRESHNESS_TOLERANCE_HOURS = 48.0
+
+
+class StaleFeedError(RuntimeError):
+    """Raised when the canonical certification feed is missing or unreadable.
+    Callers must NOT catch this to silently fall back to a different,
+    possibly-stale dataset -- that is exactly the Phase 1 regression class."""
+
+
+@dataclass
+class CertificationFeed:
+    key: str
+    path: pathlib.Path
+    items: List[Dict]
+    item_count: int
+    generated_at: Optional[str]
+    age_hours: Optional[float]
+    is_fresh: Optional[bool]
+    schema_version: Optional[str]
+    fingerprint: str
+
+
+def _feed_fingerprint(items: List[Dict]) -> str:
+    """Deterministic short fingerprint of a feed's id set (drift detection)."""
+    ids = sorted(str(i.get("id", "")) for i in items if isinstance(i, dict))
+    return hashlib.sha256("|".join(ids).encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def get_certification_feed(
+    feed_key: str = "live",
+    *,
+    freshness_tolerance_hours: float = DEFAULT_FRESHNESS_TOLERANCE_HOURS,
+) -> CertificationFeed:
+    """Canonical resolver for every production certification/quality script.
+
+    Contract:
+      - feed_key defaults to "live" (api/feed.json) -- the real production
+        feed. Scripts that intentionally measure a different registered
+        feed (e.g. a commercial tier) must pass that key explicitly and
+        document why in their own header.
+      - Explicit failure (StaleFeedError) if the canonical feed file is
+        missing or unreadable -- never a silent fallback to a different
+        dataset (that silent-fallback pattern is the Phase 1 defect class).
+      - Exposes generated_at / age_hours / is_fresh / schema_version /
+        item_count / fingerprint so callers can block or downgrade
+        certification on stale or drifted input instead of certifying it
+        as if it were live.
+    """
+    reg = FEED_REGISTRY.get(feed_key)
+    if not reg:
+        raise KeyError(f"Feed key '{feed_key}' not in FEED_REGISTRY")
+    path = reg["path"]
+    if not path.exists():
+        raise StaleFeedError(
+            f"Canonical feed '{feed_key}' not found at {path} -- "
+            "refusing silent fallback to a different dataset."
+        )
+    try:
+        raw = json.loads(path.read_bytes())
+    except Exception as e:
+        raise StaleFeedError(f"Canonical feed '{feed_key}' at {path} is unreadable: {e}") from e
+
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, dict):
+        items = raw.get("items", raw.get("data", raw.get("advisories", [])))
+    else:
+        items = None
+    if not isinstance(items, list):
+        raise StaleFeedError(
+            f"Canonical feed '{feed_key}' at {path} has unexpected root type "
+            f"{type(raw).__name__} -- expected a list or a dict with items/data/advisories."
+        )
+
+    generated_at = raw.get("generated_at") or raw.get("generatedAt") if isinstance(raw, dict) else None
+    if not generated_at:
+        candidates = [
+            it.get("processed_at") or it.get("timestamp") or it.get("published_at")
+            for it in items if isinstance(it, dict)
+        ]
+        candidates = [c for c in candidates if c]
+        generated_at = max(candidates) if candidates else None
+
+    age_hours: Optional[float] = None
+    is_fresh: Optional[bool] = None
+    if generated_at:
+        try:
+            dt = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0
+            is_fresh = age_hours <= freshness_tolerance_hours
+        except Exception:
+            age_hours, is_fresh = None, None
+
+    schema_version = raw.get("schema_version") if isinstance(raw, dict) else None
+    if not schema_version and items:
+        schema_version = next(
+            (it.get("schema_version") for it in items
+             if isinstance(it, dict) and it.get("schema_version")),
+            None,
+        )
+
+    return CertificationFeed(
+        key=feed_key,
+        path=path,
+        items=items,
+        item_count=len(items),
+        generated_at=generated_at,
+        age_hours=round(age_hours, 2) if age_hours is not None else None,
+        is_fresh=is_fresh,
+        schema_version=schema_version,
+        fingerprint=_feed_fingerprint(items),
+    )
+
+
 # ---------------------------------------------------------------------------
 # FEED TYPE DETECTOR
 # ---------------------------------------------------------------------------
@@ -623,6 +752,111 @@ def source_diversity(items: List[Dict]) -> Dict:
         "top_dominance_pct": round(top_dom, 1),
         "sources": dict(sources.most_common(10)),
     }
+
+# ---------------------------------------------------------------------------
+# REPORT/SOURCE URL CONTRACT — Single Source of Truth
+#
+# report_url  = CYBERDUDEBIVASH-owned published intelligence report location.
+# source_url  = external evidence / advisory location (GitHub Advisories,
+#               vendor blogs, etc.).  These are NEVER interchangeable:
+#               report_url must never be set to an external source_url as a
+#               "better than empty" fallback (P0 regression class — see
+#               scripts/sync_report_urls.py history).
+#
+# Canonical definition, matching validate_repo.py V10/V11 and
+# manifest_url_repair.py's existing guards: a report_url is "owned" if it is
+# a relative /reports/... path, or an absolute https:// URL whose host is a
+# CYBERDUDEBIVASH-owned domain.  OWNED_HOST_MARKER intentionally matches by
+# substring (not exact host) because the platform legitimately publishes
+# reports across multiple cyberdudebivash.com subdomains (intel., reports.,
+# etc.) — do not narrow this to one hardcoded domain.
+# ---------------------------------------------------------------------------
+OWNED_HOST_MARKER = "cyberdudebivash"
+
+
+def is_owned_report_url(url: Optional[str]) -> bool:
+    """True if `url` is a CYBERDUDEBIVASH-owned report location (relative
+    /reports/... path, or absolute https:// URL on an owned domain)."""
+    if not url or not isinstance(url, str):
+        return False
+    if url.startswith("/reports/"):
+        return True
+    if url.startswith("https://") and OWNED_HOST_MARKER in url:
+        return True
+    return False
+
+
+def is_external_report_url(url: Optional[str]) -> bool:
+    """True if `url` is a non-empty http(s) URL that is NOT CYBERDUDEBIVASH-owned
+    (i.e. it points at an external source and must never populate report_url)."""
+    if not url or not isinstance(url, str):
+        return False
+    return url.startswith("http") and OWNED_HOST_MARKER not in url
+
+
+# ---------------------------------------------------------------------------
+# CURRENT-VS-LEGACY FIELD ACCESSORS
+#
+# p33_production_certification.py already established the correct pattern
+# (current field first, deprecated field as fallback -- never the reverse)
+# independently in four places (G07, G18's _enrich(), G22, G23). Phase 2
+# found the identical stale-field defect in six sibling scripts (p27-p32,
+# p36) still checking ONLY the deprecated pair. These accessors are that
+# proven pattern extracted once, so every certification script agrees on
+# exactly one definition instead of re-deriving (or forgetting) it.
+# ---------------------------------------------------------------------------
+def has_mitre_coverage(item: Dict) -> bool:
+    """True if `item` carries MITRE ATT&CK data under either the current
+    fields (attck_technique_ids/attck_techniques) or the deprecated pair
+    (mitre_tactics/ttps) kept as a fallback per the Deprecation Instead of
+    Deletion policy -- never the deprecated pair alone."""
+    return bool(
+        item.get("attck_technique_ids") or item.get("attck_techniques")
+        or item.get("mitre_tactics") or item.get("ttps")
+    )
+
+
+def has_source_url(item: Dict) -> bool:
+    """True if `item` has a usable source_url (the actual link) -- distinct
+    from `source`, which is only a short display label."""
+    su = item.get("source_url")
+    return bool(su and isinstance(su, str) and su.strip())
+
+
+def get_detection_rules_total(item: Dict) -> int:
+    """Current detection_rules_total (int-coerced defensively -- observed as
+    both int and string in real data), falling back to the legacy
+    detection_bundle field only if detection_rules_total is absent."""
+    val = item.get("detection_rules_total")
+    if val is None:
+        val = item.get("detection_bundle")
+    try:
+        return int(val) if val is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def has_detection_rules(item: Dict) -> bool:
+    return get_detection_rules_total(item) > 0
+
+
+def is_detection_eligible(item: Dict) -> bool:
+    """True if `item` is of a report type where a detection artifact is
+    plausibly applicable -- CVE-referenced or vuln_class-classified content
+    (the two signals confirmed, by direct inspection of the live feed
+    during the Phase 2 detection-coverage investigation, to exactly track
+    which items the existing detection_bundle_injector.py generator treats
+    as in-scope). Generic/news/non-operational items (no CVE, no vuln
+    class) are not expected to carry a rule, so counting them in a coverage
+    denominator understates real coverage -- see mandate: report both
+    eligible_detection_items and items_with_valid_detection, never a
+    raw over-total-feed percentage alone."""
+    if item.get("cve_id") or item.get("cve_ids"):
+        return True
+    if item.get("vuln_class"):
+        return True
+    return False
+
 
 # ---------------------------------------------------------------------------
 # SCHEMA DRIFT DETECTOR

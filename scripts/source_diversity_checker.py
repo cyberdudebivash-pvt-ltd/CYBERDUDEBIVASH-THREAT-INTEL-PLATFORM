@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from collections import defaultdict
 
+from p38_shared_validators import get_certification_feed, StaleFeedError
+
 log = logging.getLogger("sentinel.source_diversity")
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -40,12 +42,16 @@ def _test_source(source):
 def run_source_diversity_check():
     now = datetime.now(timezone.utc)
 
-    # Load data/feed.json source breakdown
-    data_path = REPO_ROOT / "data" / "feed.json"
-    items = []
-    if data_path.exists():
-        raw = json.loads(data_path.read_text(encoding="utf-8"))
-        items = raw if isinstance(raw, list) else raw.get("items", raw.get("advisories", []))
+    # v161.3 P0 FIX: was data/feed.json (the stale research snapshot -- see
+    # p38_shared_validators.FEED_REGISTRY["research"]), which drove this
+    # gate's actual "issues"/status verdict (below) even though a separate,
+    # correctly-live-sourced api_feed_sources block existed alongside it --
+    # i.e. the report LOOKED like it covered live data but the pass/fail
+    # logic didn't. Now both sections read the same live feed.
+    try:
+        items = get_certification_feed("live").items
+    except (StaleFeedError, KeyError):
+        items = []
 
     src_dist = defaultdict(int)
     for i in items:
@@ -64,12 +70,8 @@ def run_source_diversity_check():
         live_results.append(r)
         if r["reachable"]: reachable_count += 1
 
-    # Check api/feed.json sources
-    api_path = REPO_ROOT / "api" / "feed.json"
-    api_items = []
-    if api_path.exists():
-        raw2 = json.loads(api_path.read_text(encoding="utf-8"))
-        api_items = raw2 if isinstance(raw2, list) else raw2.get("items",[])
+    # api/feed.json IS the live feed loaded above -- no second load needed.
+    api_items = items
     api_sources = defaultdict(int)
     for i in api_items:
         s = i.get("source") or "Unknown"

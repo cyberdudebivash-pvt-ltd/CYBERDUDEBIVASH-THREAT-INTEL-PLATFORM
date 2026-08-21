@@ -3217,6 +3217,22 @@ jobs:
         run: python3 scripts/regression_immunity.py
 
       # -----------------------------------------------------------------------
+      # STAGE 5.6.2: STALE-FEED RECURRENCE GUARD (Phase 2 -- HARD FAIL)
+      # Root cause this guards against: p33_production_certification.py
+      # (PR #219) and 12 sibling certification/quality/validator scripts
+      # (Phase 2) were each independently found silently measuring the
+      # stale root feed.json / data/feed.json snapshot instead of the live
+      # api/feed.json, producing false certification verdicts. AST-based
+      # static scan -- fails the build if any production certification
+      # script reintroduces a direct Path()/open() dependency on the stale
+      # feed instead of resolving it via
+      # scripts/p38_shared_validators.get_certification_feed('live').
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.6.2 - Stale-Feed Recurrence Guard (HARD FAIL)"
+        timeout-minutes: 3
+        run: python3 scripts/certification_feed_guard.py
+
+      # -----------------------------------------------------------------------
       # STAGE 5.7-PRE: HTML ENCODING AUTO-FIX (v184.0 -- HARD FAIL)
       # Runs fix_all_html_encoding.py BEFORE the integrity gate so that any
       # mojibake, BOM, or double-encoded sequences are eliminated before

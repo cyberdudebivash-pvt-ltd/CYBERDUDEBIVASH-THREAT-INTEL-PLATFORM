@@ -33,15 +33,18 @@ import argparse
 import json
 import math
 import pathlib
+import sys
 import datetime
 from typing import Dict, List, Any, Optional
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from p38_shared_validators import get_certification_feed, StaleFeedError
 
 # ============================================================
 # PATHS
 # ============================================================
 DATA_ROOT       = pathlib.Path("data")
 MANIFEST_PATH   = DATA_ROOT / "intel_manifest.json"
-FEED_PATH       = DATA_ROOT / "feed.json"
 KEV_PATH        = DATA_ROOT / "quality" / "kev_catalog.json"
 TRUST_PATH      = DATA_ROOT / "quality" / "source_trust_scores.json"
 OUTPUT_PATH     = DATA_ROOT / "quality" / "confidence_calibration.json"
@@ -119,7 +122,16 @@ def _freshness_score(item: Dict) -> float:
 def _mitre_coverage_score(item: Dict) -> float:
     """0.0-1.0: MITRE ATT&CK technique depth."""
     tactics    = item.get("mitre_tactics", [])
-    techniques = item.get("techniques", [])
+    # v161.3 P0 FIX: attck_technique_ids/attck_techniques are the current
+    # fields (mitre_tactics/techniques kept as deprecated fallback, per
+    # p38_shared_validators.has_mitre_coverage's equivalent definition) --
+    # without these, every current-schema item scored the 0.0-depth floor.
+    techniques = (
+        item.get("techniques")
+        or item.get("attck_technique_ids")
+        or item.get("attck_techniques")
+        or []
+    )
     if isinstance(tactics, list):
         t_count = len(tactics)
     elif isinstance(tactics, dict):
@@ -313,7 +325,7 @@ def load_kev_ids() -> set:
 
 def load_items() -> List[Dict]:
     items: Dict[str, Dict] = {}
-    for path in [MANIFEST_PATH, FEED_PATH]:
+    for path in [MANIFEST_PATH]:
         if not path.exists():
             continue
         try:
@@ -325,6 +337,20 @@ def load_items() -> List[Dict]:
                     items.setdefault(sid, item)
         except Exception as e:
             print(f"[CONF] Warning loading {path}: {e}")
+    # v161.3 P0 FIX: was data/feed.json (the stale research snapshot -- see
+    # p38_shared_validators.FEED_REGISTRY["research"]). MANIFEST_PATH
+    # (data/intel_manifest.json) does not currently exist in this repo, so
+    # this was this function's ONLY data source in practice -- calibration
+    # ran entirely against a 3-month-stale 159-item snapshot instead of the
+    # live 500-item feed. Now reads the live production feed via the
+    # canonical resolver.
+    try:
+        for item in get_certification_feed("live").items:
+            sid = item.get("stix_id") or item.get("id", "")
+            if sid:
+                items.setdefault(sid, item)
+    except (StaleFeedError, KeyError) as e:
+        print(f"[CONF] Warning loading live feed: {e}")
     return list(items.values())
 
 

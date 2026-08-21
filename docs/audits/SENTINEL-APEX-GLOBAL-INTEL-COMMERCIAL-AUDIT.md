@@ -1,7 +1,7 @@
 # CYBERDUDEBIVASH® SENTINEL APEX — Global Intelligence Commercial Audit
 
-**Date:** 2026-08-21
-**Scope of this round:** Phase 1 (real current-state audit) + one fully-implemented, tested, shipped vertical slice, per explicit user direction. This is **not** a completed pass through the full 91-section commercial transformation mandate — that mandate is realistically an 11-phase, multi-month program (its own Section 81 says so). Attempting to fake full completion in one round would itself violate the mandate's own integrity rules (no fake confidence, no fake certification). This document is honest about what was and wasn't done.
+**Date:** 2026-08-21 (Phase 1) / 2026-08-21 (Phase 2, same day, resumed session)
+**Scope:** §1–9 are the original Phase 1 record (real current-state audit + one shipped vertical slice, PR #219) and are preserved unedited below as the historical baseline. §10 is Phase 2 (P0 certification integrity, data-quality recovery, detection-coverage restoration) — a resumed session executed against Phase 1's own ranked gap register (§9), not a re-audit from scratch. Neither phase is a completed pass through the full 91-section commercial transformation mandate — that mandate is realistically an 11-phase, multi-month program (its own Section 81 says so). Attempting to fake full completion in one round would itself violate the mandate's own integrity rules (no fake confidence, no fake certification). This document is honest about what was and wasn't done in each phase.
 
 ---
 
@@ -185,3 +185,141 @@ The platform is real, live, and has genuine, defensible technical depth (evidenc
 5. Root-cause and fix the 2 pre-existing regression failures (T03 `intel_schema`, T09 `report_url == source_url`) — confirmed stable and reproducible across three separate runs this round.
 6. Increase real MITRE/TTP and IOC coverage toward the platform's own certification thresholds (56.8%→95%, 45.0%→50%).
 7. Consolidate the root-level documentation sprawl into a single, current source of truth, and refresh `CLAUDE.md`'s P-layer table to match the actual P16–P40 code.
+
+---
+
+## 10. Phase 2 — P0 Certification Integrity, Data-Quality Recovery & Detection-Coverage Restoration
+
+**Date:** 2026-08-21. **Scope:** every P0 item Phase 1 (§9) ranked, executed for real — root-caused with evidence, fixed, re-measured, not merely re-scored. See `docs/architecture/INTELLIGENCE-CERTIFICATION-ARCHITECTURE.md` for the resulting canonical-feed/schema-compatibility architecture this phase introduced.
+
+### 10.1 Recovery state
+
+Phase 2 was a resumed session (a prior attempt was interrupted by a usage-limit exhaustion mid-investigation). Repository state was reconstructed from git, not trusted from conversation summary: `claude/phase-2-production-continuation-7w8qoi` had zero unique commits (sitting exactly at `main`'s prior tip) and a clean working tree — the interrupted session's in-progress analysis had not been saved to disk. `origin/main` had advanced 2 commits (pure generated-data regeneration — `api/feed.json`, PDFs, no scripts touched); fast-forwarded cleanly. All root causes below were re-derived and re-verified from scratch against this current state, not assumed from the prior session's notes.
+
+### 10.2 T03/T09 root cause + fix
+
+All 14 T03 (`intel_schema` V11) and 14 T09 (`report_url == source_url`) violations traced to one exact fallback in `scripts/sync_report_urls.py`: when no internal report existed for an item, it set `report_url = source_url` (an external link — GitHub Advisories, SecurityAffairs, BleepingComputer) with `internal_report_url = ""`, "to give subscribers a clickable reference instead of an empty field." This conflated two semantically distinct fields — `report_url` (CYBERDUDEBIVASH-owned published report) and `source_url` (external evidence) — and directly contradicted the repo's own `validate_repo.py` V10/V11 invariants and T09.
+
+**Fix:** removed the fallback. When no internal report exists, `report_url` is now left truthfully empty (matching the existing, already-established convention for `render_error`/`write_error`/`file_missing` items in `generate_intel_reports.py`) instead of pointing at an external site. Made the sync **idempotent**: a stale external `report_url` left over from a prior corrupted run is now actively cleared on the next run rather than persisting indefinitely — verified by running the script twice consecutively and diffing byte-for-byte identical output.
+
+Two downstream consumers assumed the old (wrong) contract and were fixed alongside the producer: `scripts/report_url_integrity_gate.py` treated an *empty* `report_url` as "malformed" (it is a legitimate "not yet published" state, not a defect); `scripts/manifest_url_repair.py`'s external/internal classification was unified with the same shared helper (see §10.4) rather than left as a third independent definition.
+
+**Data repair:** ran the (already-existing, now-fixed) repair mechanism, `manifest_url_repair.py`, through the actual pipeline rather than hand-editing records — it also repaired 462 items that had *no* `report_url` at all (a materially larger, previously-invisible gap: `data/stix/feed_manifest.json` had valid `report_url` on only 11/914 items before repair).
+
+| | Before | After |
+|---|---|---|
+| `data/stix/feed_manifest.json`: `report_url == source_url` | 14 | **0** |
+| `data/stix/feed_manifest.json`: valid `report_url` coverage | 11/914 (1.2%) | 473/914 (51.7%) |
+| `api/feed.json`: external `report_url` | 5 | **0** |
+| `scripts/regression_tests.py` | **19/21** | **21/21** |
+
+### 10.3 Exact certification-script inventory
+
+Phase 1 estimated "at least 9" sibling scripts shared `p33`'s stale-feed defect. Phase 2 enumerated **all 48** certification/quality/validator scripts under `scripts/` (`*_production_certification.py` ∪ `*certification*.py` ∪ `*validator*.py` ∪ `*quality*.py`) and verified each by direct code reading, not naming-pattern assumption alone:
+
+- **9 scripts, exactly** — matching Phase 1's estimate precisely — silently measured the stale feed and are now fixed: `p27`, `p28`, `p29`, `p30`, `p31`, `p32`, `p36_production_certification.py` (hardcoded `data/feed.json`, no live fallback) and `p34`, `p35_production_certification.py` (a candidate-list that tried root `feed.json` *before* `api/feed.json`; since root always exists, live was never reached).
+- **3 more**, found by investigation broader than the naming convention (proof the convention itself is an incomplete search — see below): `manifest_integrity_system.py` (dead, unused constant, removed), `source_diversity_checker.py` (primary verdict computed from stale data despite a separate, unused, correctly-live-sourced block sitting right next to it), `confidence_calibrator.py` (its intended primary source, `data/intel_manifest.json`, does not exist in this repo, so the stale fallback was its *only* data source in practice).
+- **1 already-live script with a different bug**: `cti_validator.py` correctly read the live feed but checked dead field names (`mitre_techniques`/`attack_techniques`, which exist nowhere in the schema).
+- **The naming-convention blind spot, proven concretely**: `p25_enterprise_trust_gate.py` — a real release gate, wired into CI, producing a `release_tier` verdict — matches none of the four glob patterns above. It had the identical stale-feed bug (§10.5) and was found only because P25's self-reported "quality crisis" from Phase 1 was investigated directly.
+- **23 scripts already measured live production data correctly**; **16 measure a different, legitimately-distinct dataset** (commercial tier feeds, offline structural scans, dormant/not-CI-wired diagnostics) or are the shared library itself. Full per-script table (feed source, schema fields, CI wiring, before/after) was produced during the inventory and is reflected in this section's summary; the exhaustive version was working data for this fix, not preserved as a separate artifact.
+
+**9 + 3 + 1 = 13 scripts fixed this phase**, all verified individually: syntax parse, direct invocation against the live feed, `feed_items` confirmed at 500 (was 159 or, for `confidence_calibrator.py`, effectively 0 meaningful items).
+
+### 10.4 Canonical feed & schema-compatibility architecture
+
+Rather than patch 13 scripts with 13 independent literal paths, `scripts/p38_shared_validators.py` (an existing shared-validator module from a prior P38 effort, extended here rather than replaced — Principle 2/4) gained:
+
+- **`get_certification_feed(feed_key="live")`** — the canonical resolver. Returns path, `item_count`, `generated_at`, `age_hours`, `is_fresh` (against a configurable tolerance), `schema_version`, and a content fingerprint. Raises `StaleFeedError` explicitly on a missing/unreadable feed — **no silent fallback to a different dataset**, the exact failure mode that caused the original bug.
+- **`is_owned_report_url` / `is_external_report_url`** — the report/source URL contract from §10.2, now one definition instead of three.
+- **`has_mitre_coverage`, `has_detection_rules`/`get_detection_rules_total`, `is_detection_eligible`** — the current-field-first/legacy-fallback pattern `p33` had already independently proven correct in 4 places, extracted once and reused by all 13 fixed scripts instead of each re-deriving (or, as found in 6 of them, omitting) it.
+
+A repository-level **stale-feed recurrence guard** (`scripts/certification_feed_guard.py`) was added and wired into CI (`sentinel-blogger.yml` STAGE 5.6.2, hard-fail): an AST-based static scan — deliberately not grep/regex, which produced 260 false positives against ordinary log messages in an early draft — that fails the build if any production certification script reintroduces a direct `Path()`/`open()` dependency on the stale feed. It scans the same glob patterns as the Phase 2 inventory, plus an explicit list for confirmed gates (like P25) that don't match the naming convention. Currently passes clean against all 43 in-scope scripts.
+
+### 10.5 P25 root cause
+
+`p25_enterprise_trust_gate.py` read `feed.json` (root) directly — the same "stale CI snapshot, NOT the live production feed" class of bug as `p33`'s original defect, confirmed by direct comparison: the stale snapshot had confidence data on only 39/500 items versus the live feed's 500/500. On the *current* snapshot this no longer reproduces the "quality crisis" Phase 1 observed (`WORLDWIDE_RELEASE`, 0 blockers, both before and after the fix) — upstream automation had regenerated the root snapshot in the interim. That is exactly the danger this class of bug creates: P25's verdict was tracking whichever snapshot last happened to be regenerated, not the feed customers actually receive, and could silently flip back to a false "crisis" or a false "clean" on the next automated regeneration. Fixed via `get_certification_feed("live")`, same as the 13 scripts in §10.3.
+
+### 10.6 Detection-coverage collapse — root cause and recovery
+
+Root cause was **not** a broken generator (Phase 1 could not rule this out; Phase 2 did, directly). `detection_bundle_injector.py` and `detection_quality_engine.py` both run correctly and were verified live — the defect was a **cross-workflow git-conflict-recovery race**: `scripts/safe_git_commit.py` restores a fixed whitelist of generated-artifact paths from `ORIG_HEAD` on push conflicts. `api/feed.json` was on that list; `api/detection_quality.json` (written by `detection_quality_engine.py --apply`, invoked only by `generate-and-sync.yml`, a *separate* scheduled workflow from the one `safe_git_commit.py` runs in) was not. A conflict during `sentinel-blogger.yml`'s run — confirmed via two dated "conflict-recovery… restore generated artifacts from ORIG_HEAD" commits in git history — restored `sentinel-blogger.yml`'s own never-annotated `api/feed.json`, unconditionally discarding whatever the other workflow had just computed. This is the same bug class as four earlier, already-fixed instances in the same file (v184.2/v184.4/v184.5 comments), just on a fifth path. Fixed by adding `api/detection_quality.json` to the restore whitelist.
+
+Separately (an independent, second bug): `p29`–`p32` checked `detection_bundle`, a dict-shaped field confirmed **never written anywhere in the codebase** — dead code, not a live-vs-stale issue.
+
+Repaired current data through the real pipeline scripts (not hand-edited counts): ran `detection_bundle_injector.py` then `detection_quality_engine.py --apply` against the live `api/feed.json`, proving the fix end-to-end.
+
+| | Before | After |
+|---|---|---|
+| `detection_rules_total` coverage (raw, /500) | 0.0% (0/500) | **40.4%** (202/500) |
+| `detection_rules_total` coverage (eligible: CVE- or `vuln_class`-classified, /365) | not measured | **55.3%** (202/365) |
+| `p33` G20 (Detection bundle coverage ≥40%) | WARN | **PASS** |
+
+Eligible-denominator reporting (mandate: publish both numerator and denominator, not a raw over-full-feed percentage) was added to `p33`'s G20 and the equivalent gates in `p29`–`p32`, published **alongside** the existing raw-feed percentage rather than replacing it, so neither number is hidden. `is_detection_eligible()` uses CVE-reference or `vuln_class` presence — the two signals confirmed, by direct inspection of which items the real generator actually treats as in-scope, to track eligibility; no detection-eligible report-type taxonomy exists in the current schema to do this more precisely (a P2 gap, §10.11).
+
+Two things are explicitly **not** fixed this phase, flagged rather than silently worked around: (1) `detection_bundle_injector.py`'s `MAX_DETECT_ITEMS` cap (default 200, position-based not eligibility-prioritized) still under-covers a 500-item feed — 163/214 CVE-bearing items currently get no rule purely because of array position; changing generation-stage behavior/cost on a scheduled workflow was judged out of this phase's safe surgical-fix scope. (2) Three independent, non-shared Sigma/KQL/Suricata/YARA generator implementations exist in the codebase (already self-documented as a known duplication in `generate-and-sync.yml`) — a real Principle 3 violation, not touched here.
+
+### 10.7 P33 before/after
+
+| | Before | After |
+|---|---|---|
+| Tier | CONTROLLED_RELEASE | **CONTROLLED_RELEASE** (unchanged) |
+| Gates passed | 17/26 | 16/26 |
+| Blockers | 0 | 0 |
+| Warnings | 9 | 10 |
+
+The net -1 is not a regression — it is two real fixes and three newly-honest findings netting slightly negative: **G14** (P25 chain) and **G20** (detection) flipped WARN→PASS from the fixes in §10.5–10.6. **G11/G12/G13** (P31/P30/P28 cert-chain gates) flipped PASS→WARN because those sibling scripts, now correctly measuring the live 500-item feed instead of a stale 159-item one, honestly surfaced real data-quality problems (markdown leakage, placeholder language, sub-95% MITRE coverage) that the stale snapshot never had a chance to detect. Per this phase's explicit mandate: preserve the worse, honest result rather than the better, false one.
+
+### 10.8 All certification gates — matrix
+
+Every score below is a live re-run against the current, merged, 500-item feed (`api/feed.json`, `generated_at: 2026-08-21T18:36:38Z`) — not carried forward from Phase 1 or from before this phase's fixes.
+
+| Gate | Feed (before → after) | Tier | Gates passed | Blockers |
+|---|---|---|---|---|
+| P21 Certification Gate | live (unchanged) | n/a (per-item) | avg score 35.3, 298/500 below minimum | — |
+| P24 Commercial Certification | live (unchanged) | ENTERPRISE_READY | — | 1 |
+| P25 Enterprise Trust Gate | **root → live** | WORLDWIDE_RELEASE | 10/10 | 0 |
+| P26 Intelligence Excellence | live (unchanged) | CONTROLLED_RELEASE | — | 1 |
+| P27 Production Certification | **research(159) → live(500)** | BLOCKED | 7/14 | 3 |
+| P28 Production Certification | **research(159) → live(500)** | BLOCKED | 9/17 | 4 |
+| P29 Production Certification | **research(159) → live(500)** | BLOCKED | 12/20 | 5 |
+| P30 Production Certification | **research(159) → live(500)** | BLOCKED | 14/26 | 4 |
+| P31 Production Certification | **research(159) → live(500)** | BLOCKED | 12/26 | 4 |
+| P32 Production Certification | **research(159) → live(500)** | CONTROLLED_RELEASE | 14/26 | 2 |
+| P33 Production Certification | live (unchanged; §10.7) | CONTROLLED_RELEASE | 16/26 | 0 |
+| P34 Production Certification | **root-priority → live(500)** | BLOCKED | 23/26 | 1 |
+| P35 Production Certification | **root-priority → live(500)** | BLOCKED | 21/26 | 2 |
+| P36 Production Certification | **research(159) → live(500)** | BLOCKED | 22/26 | 2 |
+| P38 Production Certification | live (already canonical) | BLOCKED | 20/26 | 2 |
+| P40 Production Certification | n/a (source fabric, not feed-driven) | BLOCKED | 24/27 | 3 |
+
+**No contradictory release claims from different stale inputs remain**: every gate above now measures the same 500-item live feed (P40 is the sole legitimate exception — it certifies the source registry, not feed content, by design). Several gates newly show BLOCKED where they previously showed a false PASS/CONDITIONAL — this is the intended, honest outcome of this phase, not a regression: real content-quality issues (§10.7) in the live feed are now visible for the first time instead of hidden behind stale measurement.
+
+### 10.9 Regression results
+
+`python3 scripts/regression_tests.py`: **21/21 PASS** (was 19/21 at phase start — T03 and T09, §10.2). Re-verified at every commit boundary in this phase, including after the merge of upstream's concurrent automated regeneration.
+
+### 10.10 CI guardrails added
+
+- `scripts/certification_feed_guard.py`, wired as `sentinel-blogger.yml` STAGE 5.6.2 (hard-fail) — §10.4.
+- `safe_git_commit.py`'s generated-artifact restore whitelist extended to include `api/detection_quality.json` — §10.6.
+- No existing CI stage, route, schema, or auth path was modified.
+
+### 10.11 Updated gap register
+
+**P0 — closed this phase:** stale-feed dependency (13 scripts), T03/T09 URL-integrity regression, P25 stale-feed measurement, detection-coverage persistence-race data loss, `detection_bundle` dead-field-name bug (4 scripts), `cti_validator.py` dead MITRE field names.
+
+**P1 — real, newly-surfaced, not yet fixed (the honest cost of no longer hiding behind stale data):**
+1. `p27`'s markdown-leakage (55/500) and placeholder-language (1/500) gates now correctly measure the live feed and find real content-quality defects, cascading BLOCKED status through the `p28`→`p29`→`p30`/`p31` certification chain (§10.7). Needs its own root-cause pass: is this a genuine content-generation defect, or are G03/G04's regex patterns themselves over-broad? Not investigated this phase (out of the stale-feed-measurement scope this phase targeted).
+2. `detection_bundle_injector.py`'s `MAX_DETECT_ITEMS=200` position-based cap under-covers a 500-item feed (§10.6) — 163/214 CVE-bearing items get no rule purely due to array position. Changing scheduled-workflow generation behavior was judged outside this phase's surgical-fix scope; flagged as the highest-value next step for detection coverage specifically.
+3. Three independent, non-shared detection-rule generator implementations (Sigma/KQL/Suricata/YARA) — a real Single-Source-of-Truth violation, self-documented in `generate-and-sync.yml` but not consolidated.
+4. MITRE/TTP coverage remains genuinely 56.8% (284/500), IOC coverage 45.2% — both below the platform's own thresholds, now consistently measured across every gate that checks them (previously each gate could disagree depending on which stale/live file it happened to read).
+5. `p24`'s and `p26`'s remaining blockers (P21 quality distribution, `p26` composite score) were not individually root-caused this phase — both already read the live feed correctly; this is a content-quality question, not a measurement-integrity one, and out of this phase's P0 scope.
+
+**P2:**
+6. No detection-eligible report-type taxonomy exists in the schema; `is_detection_eligible()`'s CVE-or-`vuln_class` heuristic is the best available signal, not a first-class field. A real `report_type`/`detection_applicability` field would make this exact rather than inferred.
+7. `manifest_url_repair.py`'s internal/external URL classification now shares a helper with `sync_report_urls.py`; `validate_repo.py`'s V10/V11 checks (deliberately left untouched — a "NO AUTO-HEAL" hard gate, not itself the defect) still independently re-implement the identical logic. Worth a future, carefully-verified consolidation, not attempted this phase given its criticality.
+
+**P3:** repository documentation sprawl and `CLAUDE.md` P-layer table drift (Phase 1 §6, gaps 10–11) remain unaddressed — orthogonal to this phase's integrity focus.
+
+### 10.12 Phase 2 verdict
+
+**PHASE 2 — CONDITIONAL.** Every P0 measurement-integrity defect this phase targeted is closed with evidence: the exact certification-script count is now known (not "at least 9"), every one of the 13 affected scripts measures the same live dataset, the URL-integrity regression is root-fixed and idempotent, the detection-coverage collapse is root-caused and demonstrably recovered (0%→40.4%), and a CI guardrail makes the whole defect class structurally harder to reintroduce. It is not unconditional because closing the measurement-integrity gap did exactly what an honest measurement should do: it surfaced real, previously-hidden content-quality defects (§10.11, P1 items 1 and 4) that are now correctly blocking several certification gates and remain unresolved. That is the intended, correct state to hand off — not a reason to claim more than was actually fixed.

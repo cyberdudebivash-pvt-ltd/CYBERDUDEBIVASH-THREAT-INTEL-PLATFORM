@@ -40,9 +40,13 @@ from __future__ import annotations
 import json, os, pathlib, re, sys
 from datetime import datetime, timezone
 
+from p38_shared_validators import (
+    get_certification_feed, has_mitre_coverage, has_detection_rules,
+    is_detection_eligible, StaleFeedError,
+)
+
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _DATA = _ROOT / "data"
-_FEED = _DATA / "feed.json"
 _QUAL = _DATA / "quality"
 _STIX = _DATA / "stix"
 _OUT  = _QUAL / "p31_certification_report.json"
@@ -63,9 +67,12 @@ SEVERITY_ORDER = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
 
 def _load_feed():
+    # v161.3 P0 FIX: was data/feed.json -- the stale research snapshot (see
+    # p38_shared_validators.FEED_REGISTRY["research"]). Now reads the live
+    # production feed via the canonical resolver.
     try:
-        return json.loads(_FEED.read_bytes())
-    except Exception:
+        return get_certification_feed("live").items
+    except (StaleFeedError, KeyError):
         return []
 
 
@@ -153,7 +160,7 @@ def g07_mitre_coverage(items: list) -> dict:
     if not items:
         return {"gate": "G07", "name": "MITRE ATT&CK Coverage >= 95%", "pass": True,
                 "detail": "No items", "severity": "OK"}
-    with_mitre = sum(1 for i in items if (i.get("ttps") or i.get("mitre_tactics")))
+    with_mitre = sum(1 for i in items if has_mitre_coverage(i))
     pct = with_mitre / len(items) * 100
     ok  = pct >= 95
     return {"gate": "G07", "name": "MITRE ATT&CK Coverage >= 95%", "pass": ok,
@@ -289,11 +296,17 @@ def g20_detection_coverage(items: list) -> dict:
     if not items:
         return {"gate": "G20", "name": "Detection Coverage >= 40%", "pass": True,
                 "detail": "No items", "severity": "OK"}
-    with_det = sum(1 for i in items if i.get("detection_bundle") and len(i["detection_bundle"]) > 0)
+    # v161.3 P0 FIX: detection_bundle is never written anywhere in the
+    # codebase (confirmed dead). Real, populated field is detection_rules_total.
+    with_det = sum(1 for i in items if has_detection_rules(i))
     pct = with_det / len(items) * 100
     ok  = pct >= 40
+    eligible = [i for i in items if is_detection_eligible(i)]
+    elig_cov = sum(1 for i in eligible if has_detection_rules(i))
+    elig_pct = (elig_cov / len(eligible) * 100) if eligible else 0.0
     return {"gate": "G20", "name": "Detection Coverage >= 40%", "pass": ok,
-            "detail": f"{pct:.1f}% ({with_det}/{len(items)})",
+            "detail": f"{pct:.1f}% ({with_det}/{len(items)}) | eligible (CVE or vuln_class): "
+                      f"{elig_cov}/{len(eligible)} = {elig_pct:.1f}%",
             "severity": "WARNING" if not ok else "OK"}
 
 
@@ -306,7 +319,7 @@ def g21_graph_derivable(items: list) -> dict:
                 "detail": "No items", "severity": "OK"}
     with_graph = sum(
         1 for i in items
-        if i.get("actor_tag") or (isinstance(i.get("ttps"), list) and len(i["ttps"]) > 0)
+        if i.get("actor_tag") or has_mitre_coverage(i)
     )
     pct = with_graph / len(items) * 100
     ok  = pct >= 30
@@ -347,7 +360,7 @@ def g23_ttp_coverage(items: list) -> dict:
     if not items:
         return {"gate": "G23", "name": "P31.3 TTP Coverage >= 80%", "pass": True,
                 "detail": "No items", "severity": "OK"}
-    with_ttp = sum(1 for i in items if isinstance(i.get("ttps"), list) and len(i["ttps"]) > 0)
+    with_ttp = sum(1 for i in items if has_mitre_coverage(i))
     pct = with_ttp / len(items) * 100
     ok  = pct >= 80
     return {"gate": "G23", "name": "P31.3 TTP Coverage >= 80%", "pass": ok,
@@ -373,7 +386,7 @@ def g25_relationship_confidence(items: list) -> dict:
     for item in items:
         sigs = [
             bool(item.get("actor_tag")),
-            isinstance(item.get("ttps"), list) and len(item["ttps"]) > 0,
+            has_mitre_coverage(item),
             bool(item.get("source_url")),
             float(item.get("risk_score") or 0) > 0,
             int(item.get("ioc_count") or 0) > 0,
@@ -395,7 +408,7 @@ def g26_copilot_derivable(items: list) -> dict:
                 "detail": "No items", "severity": "OK"}
     rich = sum(
         1 for i in items
-        if (isinstance(i.get("ttps"), list) and len(i["ttps"]) > 0) and i.get("actor_tag")
+        if has_mitre_coverage(i) and i.get("actor_tag")
     )
     pct = rich / len(items) * 100
     ok  = pct >= 50

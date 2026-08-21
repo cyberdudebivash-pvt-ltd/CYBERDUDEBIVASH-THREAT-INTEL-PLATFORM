@@ -9,6 +9,8 @@ import json, logging, re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from p38_shared_validators import has_mitre_coverage
+
 log = logging.getLogger("sentinel.cti_validator")
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -35,7 +37,11 @@ def run_cti_validation():
 
     # Check api/feed.json MITRE coverage
     items = _load_items(REPO_ROOT/"api"/"feed.json")
-    mitre_mapped = sum(1 for i in items if i.get("mitre_techniques") or i.get("attack_techniques") or i.get("mitre_tactics"))
+    # v161.3 P0 FIX: mitre_techniques/attack_techniques do not exist anywhere
+    # in the schema (dead field names); real fields are
+    # attck_technique_ids/attck_techniques, with mitre_tactics/ttps as the
+    # deprecated fallback -- see p38_shared_validators.has_mitre_coverage.
+    mitre_mapped = sum(1 for i in items if has_mitre_coverage(i))
     tactic_coverage = set()
     for i in items:
         for f in ("mitre_tactics","kill_chain_phases","ttps"):
@@ -81,7 +87,7 @@ def run_cti_validation():
 
     # Check data/feed.json for MITRE coverage
     data_items = _load_items(REPO_ROOT/"data"/"feed.json")
-    data_mitre = sum(1 for i in data_items if i.get("mitre_techniques") or i.get("attack_techniques"))
+    data_mitre = sum(1 for i in data_items if has_mitre_coverage(i))
     data_kev = sum(1 for i in data_items if i.get("kev") or i.get("kev_present"))
 
     report = {
