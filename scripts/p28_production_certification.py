@@ -30,9 +30,10 @@ Outputs: data/quality/p28_certification_report.json
 from __future__ import annotations
 import json, os, pathlib, re, sys
 
+from p38_shared_validators import get_certification_feed, has_mitre_coverage, StaleFeedError
+
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _DATA = _ROOT / "data"
-_FEED = _DATA / "feed.json"
 _QUAL = _DATA / "quality"
 _STIX = _DATA / "stix"
 _OUT  = _QUAL / "p28_certification_report.json"
@@ -51,9 +52,12 @@ SYNTH_PATTERN = re.compile(
 SEVERITY_ORDER = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
 def _load_feed():
+    # v161.3 P0 FIX: was data/feed.json -- the stale research snapshot (see
+    # p38_shared_validators.FEED_REGISTRY["research"]). Now reads the live
+    # production feed via the canonical resolver.
     try:
-        return json.loads(_FEED.read_bytes())
-    except Exception:
+        return get_certification_feed("live").items
+    except (StaleFeedError, KeyError):
         return []
 
 def _severity_idx(sev):
@@ -106,7 +110,7 @@ def g06_cvss_severity_consistency(items):
     return _make_gate("G06", "CVSS/Severity Consistency", gaps == 0, f"{gaps}/{len(items)} gaps ≥2 bands", "WARNING")
 
 def g07_mitre_coverage(items):
-    cov = sum(1 for it in items if (it.get("mitre_tactics") and len(it["mitre_tactics"])>0) or (it.get("ttps") and len(it["ttps"])>0))
+    cov = sum(1 for it in items if has_mitre_coverage(it))
     pct = round(cov/len(items)*100,1) if items else 0
     sev = "BLOCKER" if pct < 80 else ("WARNING" if pct < 95 else "OK")
     return _make_gate("G07", "MITRE ATT&CK Coverage ≥95%", pct >= 95, f"{pct}% ({cov}/{len(items)})", sev)
@@ -211,7 +215,7 @@ def run_audit():
         f = float(v)
         return f if f <= 1.0 else f / 100.0  # normalize: feed uses 0-1 or 0-100
     avg_conf  = round(sum(_conf(it) for it in items) / max(1,len(items)) * 100, 1)
-    mitre_cov = round(sum(1 for it in items if (it.get("mitre_tactics") and len(it["mitre_tactics"])>0) or (it.get("ttps") and len(it["ttps"])>0)) / max(1,len(items)) * 100, 1)
+    mitre_cov = round(sum(1 for it in items if has_mitre_coverage(it)) / max(1,len(items)) * 100, 1)
     ioc_cov   = round(sum(1 for it in items if (it.get("ioc_count") or 0)>0) / max(1,len(items)) * 100, 1)
     src_cov   = round(sum(1 for it in items if str(it.get("source_url","")).startswith("http")) / max(1,len(items)) * 100, 1)
 

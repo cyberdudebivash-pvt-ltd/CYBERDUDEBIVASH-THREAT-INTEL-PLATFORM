@@ -26,9 +26,10 @@ Gate list (14 gates):
 from __future__ import annotations
 import json, os, pathlib, re, sys
 
+from p38_shared_validators import get_certification_feed, has_mitre_coverage, StaleFeedError
+
 _ROOT   = pathlib.Path(__file__).resolve().parent.parent
 _DATA   = _ROOT / "data"
-_FEED   = _DATA / "feed.json"
 _QUAL   = _DATA / "quality"
 _STIX   = _DATA / "stix"
 _HTML   = _DATA  # search recursively under data/
@@ -59,9 +60,15 @@ SYNTH_PATTERN = re.compile(
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 def _load_feed() -> list[dict]:
+    # v161.3 P0 FIX: was data/feed.json -- a 3-month-stale research snapshot
+    # (see p38_shared_validators.FEED_REGISTRY["research"]) with zero
+    # attck_technique_ids/attck_techniques/detection_rules_total values,
+    # since that snapshot predates those fields. Now reads the live
+    # production feed via the canonical resolver, same fix already applied
+    # to p33_production_certification.py in PR #219.
     try:
-        return json.loads(_FEED.read_bytes())
-    except Exception:
+        return get_certification_feed("live").items
+    except (StaleFeedError, KeyError):
         return []
 
 def _severity_band(sev: str) -> tuple[float, float]:
@@ -152,11 +159,7 @@ def g06_cvss_severity_consistency(items: list) -> dict:
             "severity": "WARNING" if gap_items > 0 else "OK"}
 
 def g07_mitre_coverage(items: list) -> dict:
-    covered = sum(
-        1 for item in items
-        if (item.get("mitre_tactics") and len(item["mitre_tactics"]) > 0)
-        or (item.get("ttps") and len(item["ttps"]) > 0)
-    )
+    covered = sum(1 for item in items if has_mitre_coverage(item))
     pct = round(covered / len(items) * 100, 1) if items else 0
     ok = pct >= 95.0
     return {"gate": "G07", "name": "MITRE ATT&CK Coverage", "pass": ok,

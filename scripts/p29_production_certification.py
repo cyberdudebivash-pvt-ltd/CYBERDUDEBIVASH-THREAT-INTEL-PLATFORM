@@ -33,9 +33,13 @@ Outputs: data/quality/p29_certification_report.json
 from __future__ import annotations
 import json, os, pathlib, re, sys
 
+from p38_shared_validators import (
+    get_certification_feed, has_mitre_coverage, has_detection_rules,
+    is_detection_eligible, StaleFeedError,
+)
+
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _DATA = _ROOT / "data"
-_FEED = _DATA / "feed.json"
 _QUAL = _DATA / "quality"
 _STIX = _DATA / "stix"
 _OUT  = _QUAL / "p29_certification_report.json"
@@ -54,9 +58,12 @@ SYNTH_PATTERN = re.compile(
 SEVERITY_ORDER = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
 def _load_feed():
+    # v161.3 P0 FIX: was data/feed.json -- the stale research snapshot (see
+    # p38_shared_validators.FEED_REGISTRY["research"]). Now reads the live
+    # production feed via the canonical resolver.
     try:
-        return json.loads(_FEED.read_bytes())
-    except Exception:
+        return get_certification_feed("live").items
+    except (StaleFeedError, KeyError):
         return []
 
 def _severity_idx(sev):
@@ -113,8 +120,7 @@ def g06_cvss_severity_consistency(items):
     return _make_gate("G06", "CVSS/Severity Consistency", gaps == 0, f"{gaps}/{len(items)} gaps ≥2 bands", "WARNING")
 
 def g07_mitre_coverage(items):
-    cov = sum(1 for it in items if (it.get("mitre_tactics") and len(it["mitre_tactics"])>0)
-              or (it.get("ttps") and len(it["ttps"])>0))
+    cov = sum(1 for it in items if has_mitre_coverage(it))
     pct = round(cov/len(items)*100,1) if items else 0
     sev = "BLOCKER" if pct < 80 else ("WARNING" if pct < 95 else "OK")
     return _make_gate("G07", "MITRE ATT&CK Coverage ≥95%", pct >= 95, f"{pct}% ({cov}/{len(items)})", sev)
@@ -199,15 +205,18 @@ def g18_evidence_chain_coverage(items):
 # ── Gates G19–G20: P29-specific EIN gates ────────────────────────────────────
 
 def g19_detection_coverage(items):
-    """P29.6: ≥40% of items carry at least one detection format in detection_bundle."""
-    cov = 0
-    for it in items:
-        db = it.get("detection_bundle") or {}
-        if isinstance(db, dict) and any(db.get(f) for f in ("sigma","kql","yara","spl","suricata","snort")):
-            cov += 1
+    """P29.6: >=40% of items carry at least one detection rule.
+    v161.3 P0 FIX: detection_bundle (a dict-of-formats shape) is never
+    written anywhere in the codebase -- confirmed dead. The real, populated
+    field is detection_rules_total (an int count), via the shared accessor."""
+    cov = sum(1 for it in items if has_detection_rules(it))
     pct = round(cov/len(items)*100,1) if items else 0
+    eligible = [it for it in items if is_detection_eligible(it)]
+    elig_cov = sum(1 for it in eligible if has_detection_rules(it))
+    elig_pct = round(elig_cov/len(eligible)*100, 1) if eligible else 0.0
     return _make_gate("G19", "Detection Coverage ≥40%", pct >= 40,
-                      f"{pct}% ({cov}/{len(items)} items with detection_bundle)", "WARNING")
+                      f"{pct}% ({cov}/{len(items)} items with detection_rules_total>0) "
+                      f"| eligible (CVE or vuln_class): {elig_cov}/{len(eligible)} = {elig_pct}%", "WARNING")
 
 def g20_confidence_graph_coverage(items):
     """P29.2: ≥80% of items have a non-default confidence value (not exactly 0.5 or absent)."""
@@ -270,11 +279,10 @@ def run_audit():
 
     kev_count   = sum(1 for it in items if it.get("kev_present") or (it.get("apex",{}) or {}).get("kev_listed"))
     avg_conf    = round(sum(_conf(it) for it in items) / max(1,len(items)) * 100, 1)
-    mitre_cov   = round(sum(1 for it in items if (it.get("mitre_tactics") and len(it["mitre_tactics"])>0)
-                           or (it.get("ttps") and len(it["ttps"])>0)) / max(1,len(items)) * 100, 1)
+    mitre_cov   = round(sum(1 for it in items if has_mitre_coverage(it)) / max(1,len(items)) * 100, 1)
     ioc_cov     = round(sum(1 for it in items if (it.get("ioc_count") or 0)>0) / max(1,len(items)) * 100, 1)
     src_cov     = round(sum(1 for it in items if str(it.get("source_url","")).startswith("http")) / max(1,len(items)) * 100, 1)
-    det_cov     = round(sum(1 for it in items if (it.get("detection_bundle") or {})) / max(1,len(items)) * 100, 1)
+    det_cov     = round(sum(1 for it in items if has_detection_rules(it)) / max(1,len(items)) * 100, 1)
     p29_gate    = gates[-1]  # G20
 
     return {

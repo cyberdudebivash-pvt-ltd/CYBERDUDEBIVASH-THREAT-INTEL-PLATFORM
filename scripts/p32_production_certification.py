@@ -40,9 +40,13 @@ from __future__ import annotations
 import json, os, pathlib, re, sys
 from datetime import datetime, timezone
 
+from p38_shared_validators import (
+    get_certification_feed, has_mitre_coverage, has_detection_rules,
+    is_detection_eligible, StaleFeedError,
+)
+
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _DATA = _ROOT / "data"
-_FEED = _DATA / "feed.json"
 _QUAL = _DATA / "quality"
 _STIX = _DATA / "stix"
 _OUT  = _QUAL / "p32_certification_report.json"
@@ -63,9 +67,12 @@ SEVERITY_ORDER = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
 
 def _load_feed():
+    # v161.3 P0 FIX: was data/feed.json -- the stale research snapshot (see
+    # p38_shared_validators.FEED_REGISTRY["research"]). Now reads the live
+    # production feed via the canonical resolver.
     try:
-        return json.loads(_FEED.read_bytes())
-    except Exception:
+        return get_certification_feed("live").items
+    except (StaleFeedError, KeyError):
         return []
 
 
@@ -153,7 +160,7 @@ def g07_mitre_coverage(items: list) -> dict:
     if not items:
         return {"gate": "G07", "name": "MITRE ATT&CK Coverage >= 95%", "pass": True,
                 "detail": "No items", "severity": "OK"}
-    with_mitre = sum(1 for i in items if (i.get("ttps") or i.get("mitre_tactics")))
+    with_mitre = sum(1 for i in items if has_mitre_coverage(i))
     pct = with_mitre / len(items) * 100
     ok  = pct >= 95
     return {"gate": "G07", "name": "MITRE ATT&CK Coverage >= 95%", "pass": ok,
@@ -263,7 +270,7 @@ def g18_enrichment_score(items: list) -> dict:
     for item in items:
         score = 0
         if item.get("cvss_score"): score += 20
-        if item.get("ttps"):       score += 20
+        if has_mitre_coverage(item): score += 20
         if item.get("ioc_count") and int(item.get("ioc_count") or 0) > 0: score += 20
         if item.get("actor_tag"):  score += 20
         if item.get("patch_available"): score += 20
@@ -291,11 +298,17 @@ def g20_detection_coverage(items: list) -> dict:
     if not items:
         return {"gate": "G20", "name": "Detection Coverage >= 40%", "pass": True,
                 "detail": "No items", "severity": "OK"}
-    with_detection = sum(1 for i in items if i.get("detection_bundle"))
+    # v161.3 P0 FIX: detection_bundle is never written anywhere in the
+    # codebase (confirmed dead). Real, populated field is detection_rules_total.
+    with_detection = sum(1 for i in items if has_detection_rules(i))
     pct = with_detection / len(items) * 100
     ok  = pct >= 40
+    eligible = [i for i in items if is_detection_eligible(i)]
+    elig_cov = sum(1 for i in eligible if has_detection_rules(i))
+    elig_pct = (elig_cov / len(eligible) * 100) if eligible else 0.0
     return {"gate": "G20", "name": "Detection Coverage >= 40%", "pass": ok,
-            "detail": f"{pct:.1f}% ({with_detection}/{len(items)})",
+            "detail": f"{pct:.1f}% ({with_detection}/{len(items)}) | eligible (CVE or vuln_class): "
+                      f"{elig_cov}/{len(eligible)} = {elig_pct:.1f}%",
             "severity": "WARNING" if not ok else "OK"}
 
 
@@ -307,7 +320,7 @@ def g21_lifecycle_derivable(items: list) -> dict:
     if not items:
         return {"gate": "G21", "name": "P32 Lifecycle Derivable >= 60%", "pass": True,
                 "detail": "No items", "severity": "OK"}
-    derivable = sum(1 for i in items if (i.get("ttps") or i.get("severity")))
+    derivable = sum(1 for i in items if (has_mitre_coverage(i) or i.get("severity")))
     pct = derivable / len(items) * 100
     ok  = pct >= 60
     return {"gate": "G21", "name": "P32 Lifecycle Derivable >= 60%", "pass": ok,
@@ -335,7 +348,7 @@ def g23_detection_effectiveness_scoreable(items: list) -> dict:
     if not items:
         return {"gate": "G23", "name": "P32 Detection Effectiveness Scoreable >= 70%", "pass": True,
                 "detail": "No items", "severity": "OK"}
-    with_ttps = sum(1 for i in items if i.get("ttps"))
+    with_ttps = sum(1 for i in items if has_mitre_coverage(i))
     pct = with_ttps / len(items) * 100
     ok  = pct >= 70
     return {"gate": "G23", "name": "P32 Detection Effectiveness Scoreable >= 70%", "pass": ok,
@@ -362,7 +375,7 @@ def g25_maturity_score_avg(items: list) -> dict:
     for item in items:
         # Build composite maturity proxy from available fields
         s = 0
-        if item.get("ttps"):       s += 20
+        if has_mitre_coverage(item): s += 20
         if item.get("ioc_count") and int(item.get("ioc_count") or 0) > 0: s += 15
         if item.get("actor_tag"):  s += 15
         if item.get("cvss_score"): s += 20

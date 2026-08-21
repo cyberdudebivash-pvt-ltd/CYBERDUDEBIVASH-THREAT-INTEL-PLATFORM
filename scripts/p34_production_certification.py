@@ -28,6 +28,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from p38_shared_validators import get_certification_feed, has_mitre_coverage, StaleFeedError
+
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _DATA = _ROOT / "data" / "quality"
 _WORKERS = _ROOT / "workers" / "intel-gateway" / "src"
@@ -68,24 +70,15 @@ def _load_json(path: pathlib.Path) -> dict | None:
 
 
 def _load_feed() -> list:
-    candidates = [
-        _ROOT / "feed.json",
-        _ROOT / "api" / "feed.json",
-        _ROOT / "data" / "feed.json",
-    ]
-    for p in candidates:
-        if p.exists():
-            try:
-                raw = json.loads(p.read_bytes())
-                if isinstance(raw, list):
-                    return raw
-                if isinstance(raw, dict):
-                    for key in ("items", "advisories", "data"):
-                        if isinstance(raw.get(key), list):
-                            return raw[key]
-            except Exception:
-                pass
-    return []
+    # v161.3 P0 FIX: this candidate list put root feed.json FIRST -- since
+    # that file always exists, api/feed.json (the live production feed) was
+    # never actually reached (see p38_shared_validators.FEED_REGISTRY,
+    # which classifies root feed.json as "NOT the live production feed").
+    # Now resolves the live feed directly via the canonical resolver.
+    try:
+        return get_certification_feed("live").items
+    except (StaleFeedError, KeyError):
+        return []
 
 
 def main() -> int:
@@ -199,7 +192,7 @@ def main() -> int:
     # ─── Intelligence field coverage ─────────────────────────────────────
 
     # G15: TTP coverage >= 50%
-    ttp_cov = sum(1 for i in sample if isinstance(i.get("ttps"), list) and len(i["ttps"]) > 0) / slen * 100
+    ttp_cov = sum(1 for i in sample if has_mitre_coverage(i)) / slen * 100
     gate("G15", "TTP field coverage >= 50%", "WARNING",
          ttp_cov >= 50,
          f"ttp_coverage={ttp_cov:.1f}%")

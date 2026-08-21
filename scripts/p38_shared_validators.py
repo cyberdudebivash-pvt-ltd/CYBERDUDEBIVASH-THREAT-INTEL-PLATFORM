@@ -795,6 +795,70 @@ def is_external_report_url(url: Optional[str]) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# CURRENT-VS-LEGACY FIELD ACCESSORS
+#
+# p33_production_certification.py already established the correct pattern
+# (current field first, deprecated field as fallback -- never the reverse)
+# independently in four places (G07, G18's _enrich(), G22, G23). Phase 2
+# found the identical stale-field defect in six sibling scripts (p27-p32,
+# p36) still checking ONLY the deprecated pair. These accessors are that
+# proven pattern extracted once, so every certification script agrees on
+# exactly one definition instead of re-deriving (or forgetting) it.
+# ---------------------------------------------------------------------------
+def has_mitre_coverage(item: Dict) -> bool:
+    """True if `item` carries MITRE ATT&CK data under either the current
+    fields (attck_technique_ids/attck_techniques) or the deprecated pair
+    (mitre_tactics/ttps) kept as a fallback per the Deprecation Instead of
+    Deletion policy -- never the deprecated pair alone."""
+    return bool(
+        item.get("attck_technique_ids") or item.get("attck_techniques")
+        or item.get("mitre_tactics") or item.get("ttps")
+    )
+
+
+def has_source_url(item: Dict) -> bool:
+    """True if `item` has a usable source_url (the actual link) -- distinct
+    from `source`, which is only a short display label."""
+    su = item.get("source_url")
+    return bool(su and isinstance(su, str) and su.strip())
+
+
+def get_detection_rules_total(item: Dict) -> int:
+    """Current detection_rules_total (int-coerced defensively -- observed as
+    both int and string in real data), falling back to the legacy
+    detection_bundle field only if detection_rules_total is absent."""
+    val = item.get("detection_rules_total")
+    if val is None:
+        val = item.get("detection_bundle")
+    try:
+        return int(val) if val is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def has_detection_rules(item: Dict) -> bool:
+    return get_detection_rules_total(item) > 0
+
+
+def is_detection_eligible(item: Dict) -> bool:
+    """True if `item` is of a report type where a detection artifact is
+    plausibly applicable -- CVE-referenced or vuln_class-classified content
+    (the two signals confirmed, by direct inspection of the live feed
+    during the Phase 2 detection-coverage investigation, to exactly track
+    which items the existing detection_bundle_injector.py generator treats
+    as in-scope). Generic/news/non-operational items (no CVE, no vuln
+    class) are not expected to carry a rule, so counting them in a coverage
+    denominator understates real coverage -- see mandate: report both
+    eligible_detection_items and items_with_valid_detection, never a
+    raw over-total-feed percentage alone."""
+    if item.get("cve_id") or item.get("cve_ids"):
+        return True
+    if item.get("vuln_class"):
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # SCHEMA DRIFT DETECTOR
 # ---------------------------------------------------------------------------
 def detect_schema_drift(items: List[Dict]) -> Dict:

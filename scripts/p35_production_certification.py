@@ -34,6 +34,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
+from p38_shared_validators import get_certification_feed, has_mitre_coverage, StaleFeedError
+
 _ROOT   = pathlib.Path(__file__).resolve().parent.parent
 _DATA   = _ROOT / "data" / "quality"
 _HEALTH = _ROOT / "data" / "health"
@@ -65,18 +67,15 @@ def _load(path: pathlib.Path) -> dict | list | None:
 
 
 def _feed() -> list:
-    for p in [_ROOT / "feed.json", _ROOT / "api" / "feed.json", _DATA.parent / "feed.json"]:
-        if p.exists():
-            try:
-                raw = json.loads(p.read_bytes())
-                if isinstance(raw, list):
-                    return raw
-                for k in ("items", "advisories", "data"):
-                    if isinstance(raw.get(k), list):
-                        return raw[k]
-            except Exception:
-                pass
-    return []
+    # v161.3 P0 FIX: this candidate list put root feed.json FIRST -- since
+    # that file always exists, api/feed.json (the live production feed) was
+    # never actually reached (see p38_shared_validators.FEED_REGISTRY,
+    # which classifies root feed.json as "NOT the live production feed").
+    # Now resolves the live feed directly via the canonical resolver.
+    try:
+        return get_certification_feed("live").items
+    except (StaleFeedError, KeyError):
+        return []
 
 
 def _avg(vals: list) -> float:
@@ -225,7 +224,7 @@ def main() -> int:
     # ─── MITRE coverage G23-G24 ─────────────────────────────────────────
 
     mitre_re = re.compile(r"^T\d{4}(\.\d{3})?$")
-    ttp_items = [i for i in sample if isinstance(i.get("ttps"), list) and i["ttps"]]
+    ttp_items = [i for i in sample if has_mitre_coverage(i)]
     ttp_cov   = len(ttp_items) / ns * 100
     gate("G23", "TTP field coverage >= 30%", "WARNING",
          ttp_cov >= 30, f"ttp_coverage={ttp_cov:.1f}%")
