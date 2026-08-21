@@ -1,10 +1,25 @@
 // CYBERDUDEBIVASH SENTINEL APEX — KQL Detection Queries Bundle
-// Version: 185.0 | Generated: 2026-08-20T23:32:02.944646+00:00
+// Version: 185.0 | Generated: 2026-08-21T01:43:27.692545+00:00
 // Platform: https://intel.cyberdudebivash.com
-// Total queries: 760
+// Total queries: 767
 // Import: Microsoft Sentinel Analytics Rules, Defender Advanced Hunting
 
 // ═══════════════════════════════════════════════════════════════════
+// ── [GOLD] Exploit for Improper Input Validation in Drupal
+// Risk: 9.00 | Severity: CRITICAL
+// STIX ID: intel--2d873aa0c994dc47
+// SENTINEL APEX — CVE-2018-7600 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2018-7600", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
 // ── [GOLD] CISA Adds Microsoft Internet Key Exchange RCE Vulnerability Exploited in Attacks
 // Risk: 9.00 | Severity: CRITICAL
 // STIX ID: intel--94c5c8623129da7e
@@ -38,11 +53,11 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2025-21479", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [GOLD] Exploit for Improper Input Validation in Drupal
+// ── [GOLD] Exploit for Type Confusion in Google Chrome
 // Risk: 9.00 | Severity: CRITICAL
-// STIX ID: intel--2d873aa0c994dc47
-// SENTINEL APEX — CVE-2018-7600 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// STIX ID: intel--af5d84bf72614a52
+// SENTINEL APEX — CVE-2024-4947 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -50,7 +65,37 @@ SecurityEvent
 | summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2018-7600", RuleSource = "SENTINEL-APEX"
+| extend Severity = "MEDIUM", CVE = "CVE-2024-4947", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] Exploit for Interpretation Conflict in Wordpress
+// Risk: 9.00 | Severity: CRITICAL
+// STIX ID: intel--81d24b5b6c9f7c61
+// SENTINEL APEX — CVE-2026-60137 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-60137", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] Exploit for Path Traversal in F5 Big-Ip_Access_Policy_Manager
+// Risk: 9.00 | Severity: CRITICAL
+// STIX ID: intel--fffa49e1baa7b190
+// SENTINEL APEX — CVE-2020-5902 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2020-5902", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [GOLD] CISA Adds Microsoft SharePoint Weak Authentication Vulnerability to KEV List
@@ -134,7 +179,7 @@ SecurityEvent
 // Risk: 8.50 | Severity: HIGH
 // STIX ID: intel--61c9f012008521c1
 // SENTINEL APEX — CVE-2026-32475 Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -183,7 +228,7 @@ SecurityEvent
 // Risk: 8.40 | Severity: HIGH
 // STIX ID: intel--3b421afdecedf205
 // SENTINEL APEX — CVE-2024-54149 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -243,7 +288,7 @@ SecurityEvent
 // Risk: 7.30 | Severity: HIGH
 // STIX ID: intel--05b1b3da1ba6d406
 // SENTINEL APEX — CVE-2026-54263 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -252,6 +297,22 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-54263", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] Exploit for CVE-2026-18315
+// CVE: CVE-2026-18315
+// Risk: 7.00 | Severity: HIGH
+// STIX ID: intel--d888c43f29458b19
+// SENTINEL APEX — CVE-2026-18315 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-18315", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [GOLD] GNU Emacs vulnerability upon opening arbitrary file
@@ -411,7 +472,7 @@ SecurityEvent
 // Risk: 6.70 | Severity: MEDIUM
 // STIX ID: intel--1debc99a3baaf9bd
 // SENTINEL APEX — CVE-2026-55410 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -427,7 +488,7 @@ SecurityEvent
 // Risk: 6.50 | Severity: MEDIUM
 // STIX ID: intel--dba010d1e7fe0603
 // SENTINEL APEX — CVE-2026-22689 Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -445,7 +506,7 @@ DeviceProcessEvents
 // Risk: 6.50 | Severity: MEDIUM
 // STIX ID: intel--a75c63045541def8
 // SENTINEL APEX — CVE-2026-54261 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -476,7 +537,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--0794ffa11cdf5155
 // SENTINEL APEX — CVE-2026-3965 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -532,6 +593,21 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-77643", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] Dgraph Alpha group stores can be replaced via unauthenticated external snapshot 
+// Risk: 8.50 | Severity: HIGH
+// STIX ID: intel--820007123a6f4203
+// SENTINEL APEX — CVE-2026-54061 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-54061", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [GOLD] Froxlor: Credential and 2FA secret disclosure via Froxlor API endpoints
@@ -599,7 +675,7 @@ SecurityEvent
 // Risk: 6.50 | Severity: MEDIUM
 // STIX ID: intel--41a58213dd118e77
 // SENTINEL APEX — CVE-2026-63003 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -608,6 +684,21 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-63003", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] Tekton Pipelines-as-Code: Unscoped GitHub App installation token allows unauthor
+// Risk: 6.50 | Severity: MEDIUM
+// STIX ID: intel--4fbf30f2778e7c0e
+// SENTINEL APEX — CVE-2026-54168 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-54168", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [GOLD] Netty Vulnerable to Cache Poisoning and Information Disclosure via CORS Vary Hea
@@ -800,11 +891,26 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-64859", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
+// ── [GOLD] Pipelines-as-Code GitHub App token request can be redirected via untrusted Enter
+// Risk: 8.20 | Severity: HIGH
+// STIX ID: intel--43db8c3f7d4d03a6
+// SENTINEL APEX — CVE-2026-54167 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-54167", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
 // ── [GOLD] netty-incubator-codec-ohttp: BoringSSL HPKE private key bytes exposed through to
 // Risk: 8.10 | Severity: HIGH
 // STIX ID: intel--abc3cd23820ace1b
 // SENTINEL APEX — CVE-2026-61798 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -878,11 +984,26 @@ DeviceProcessEvents
 | extend Severity = "HIGH", CVE = "CVE-2026-47686", RuleSource = "SENTINEL-APEX"
 | order by Timestamp desc
 
+// ── [GOLD] LangChain MongoDB has NoSQL Operator Injection in MongoDBSaver.list() leading to
+// Risk: 7.70 | Severity: HIGH
+// STIX ID: intel--f3cc1029567b6228
+// SENTINEL APEX — CVE-2026-55253 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-55253", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
 // ── [GOLD] netty-incubator-codec-ohttp BinaryHttpParser: Unauthenticated CPU-exhaustion DoS
 // Risk: 7.50 | Severity: HIGH
 // STIX ID: intel--bbefd909f2b0a5a3
 // SENTINEL APEX — CVE-2026-63202 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -897,7 +1018,7 @@ SecurityEvent
 // Risk: 7.50 | Severity: HIGH
 // STIX ID: intel--8e1123e2f81b6160
 // SENTINEL APEX — CVE-2026-63124 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -1001,12 +1122,31 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-54348", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
+// ── [GOLD] CVE-2026-77647 - SPIP Remote Code Execution Vulnerability
+// CVE: CVE-2026-77647
+// Risk: 7.00 | Severity: HIGH
+// STIX ID: intel--f148d45ff97dc5b9ed675c5f
+// SENTINEL APEX — CVE-2026-77647 Remote Code Execution Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+// Deploy to: Microsoft Sentinel / Defender XDR
+let lookback = 1d;
+DeviceProcessEvents
+| where Timestamp > ago(lookback)
+| where (InitiatingProcessFileName in~ ("w3wp.exe", "httpd.exe", "nginx.exe", "tomcat.exe", "java.exe")
+    and FileName in~ ("cmd.exe", "powershell.exe", "bash", "sh", "python.exe", "python3"))
+    or (ProcessCommandLine has_any ("wget http", "curl http", "certutil -urlcache", "bitsadmin /transfer"))
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine,
+          InitiatingProcessFileName, InitiatingProcessCommandLine
+| where not(ProcessCommandLine has_any ("update", "install", "backup", "deploy"))  // filter known-good
+| extend Severity = "HIGH", CVE = "CVE-2026-77647", RuleSource = "SENTINEL-APEX"
+| order by Timestamp desc
+
 // ── [GOLD] CVE-2026-50192 - Kerberos Hub private key (X-Kerberos-Hub-PrivateKey) leaked to 
 // CVE: CVE-2026-50192
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--964e2f23f46469ad
 // SENTINEL APEX — CVE-2026-50192 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -1022,7 +1162,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--58cce34465118986
 // SENTINEL APEX — CVE-2026-55489 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -1038,7 +1178,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--6c96c8da3cbcee53
 // SENTINEL APEX — CVE-2026-55491 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -1054,7 +1194,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--a356ab689af66557
 // SENTINEL APEX — CVE-2026-46355 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -1070,7 +1210,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--68b7a293245de401
 // SENTINEL APEX — CVE-2026-16946 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -1086,7 +1226,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--fb27f417e7fc456f
 // SENTINEL APEX — CVE-2026-16945 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -1102,7 +1242,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--e48c080c6d5c86f8
 // SENTINEL APEX — CVE-2026-46682 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -1111,6 +1251,54 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-46682", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-77022 - Comfast CF-N1-S SSID Configuration mbox-config sub_44B438 stack
+// CVE: CVE-2026-77022
+// Risk: 7.00 | Severity: HIGH
+// STIX ID: intel--6b70b71edffb5ed6
+// SENTINEL APEX — CVE-2026-77022 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-77022", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-71428 - unstructured: Server-Side Request Forgery in the URL-based part
+// CVE: CVE-2026-71428
+// Risk: 7.00 | Severity: HIGH
+// STIX ID: intel--e935358d15a91b98
+// SENTINEL APEX — CVE-2026-71428 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-71428", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-65842 - Plate: SSRF with response disclosure in DOCX image embedding
+// CVE: CVE-2026-65842
+// Risk: 7.00 | Severity: HIGH
+// STIX ID: intel--c761cc25bd8e33bb
+// SENTINEL APEX — CVE-2026-65842 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-65842", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [GOLD] CVE-2026-76404 - Remote Code Execution (RCE) through Deserialization of Untruste
@@ -1531,118 +1719,6 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-40345", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [GOLD] CVE-2026-19968 - Open Asset Import Library Assimp 3DGS MDL7 Model LWOLoader.h Re
-// CVE: CVE-2026-19968
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--b5d723eff07dbec2
-// SENTINEL APEX — CVE-2026-19968 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T09:10:37Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19968", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [GOLD] CVE-2026-19966 - CodeCanyon TimeCamp Integration for CRM Contact Information Upd
-// CVE: CVE-2026-19966
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--901e9b6e114ae526
-// SENTINEL APEX — CVE-2026-19966 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T09:10:37Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19966", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [GOLD] CVE-2026-19967 - Open Asset Import Library Assimp File Compression.cpp decompres
-// CVE: CVE-2026-19967
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--2b6e6a12bb7939a6
-// SENTINEL APEX — CVE-2026-19967 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T09:10:37Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19967", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [GOLD] CVE-2026-19969 - Open Asset Import Library Assimp 3DGS MDL7 Model Output Mesh Ge
-// CVE: CVE-2026-19969
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--08f5627532689ad0
-// SENTINEL APEX — CVE-2026-19969 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T09:10:37Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19969", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [GOLD] CVE-2026-19963 - Edimax EW-7478APC stainfo command injection
-// CVE: CVE-2026-19963
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--9021404bf0901782
-// SENTINEL APEX — CVE-2026-19963 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T09:10:37Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19963", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [GOLD] CVE-2026-19964 - Jij-Inc Jij-MCP-Server jm_check python_repr.py PythonREPL.run c
-// CVE: CVE-2026-19964
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--39573a5c4c00405d
-// SENTINEL APEX — CVE-2026-19964 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T09:10:37Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19964", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [GOLD] CVE-2026-19962 - Edimax EW-7478APC setWAN command injection
-// CVE: CVE-2026-19962
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--6da26ccc1716d4f2
-// SENTINEL APEX — CVE-2026-19962 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T09:10:37Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19962", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [GOLD] VMware Syslog Path Traversal Becomes Root RCE, Persistent SSH Access and ESXi Ra
 // Risk: 6.99 | Severity: MEDIUM
 // STIX ID: intel--b8a8c834d3893333c5443457
@@ -1758,7 +1834,7 @@ SecurityEvent
 // Risk: 5.30 | Severity: MEDIUM
 // STIX ID: intel--1fa0170438a03b42
 // SENTINEL APEX — CVE-2026-67447 Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -1776,7 +1852,7 @@ DeviceProcessEvents
 // Risk: 5.30 | Severity: MEDIUM
 // STIX ID: intel--483bc1b3ef08fca2
 // SENTINEL APEX — CVE-2026-61799 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -2191,22 +2267,6 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-9816", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [GOLD] CVE-2026-19964 - Jij-Inc Jij-MCP-Server jm_check python_repr.py PythonREPL.run c
-// CVE: CVE-2026-19964
-// Risk: 1.22 | Severity: LOW
-// STIX ID: intel--6c7b7a7580df7b19b5cbcc32
-// SENTINEL APEX — CVE-2026-19964 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T01:39:12Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19964", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [GOLD] CVE-2026-77645 - Critical Remote Code Execution (RCE) vulnerability reported in 
 // CVE: CVE-2026-77645
 // Risk: 1.16 | Severity: LOW
@@ -2494,38 +2554,6 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-19986", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [GOLD] CVE-2026-19963 - Edimax EW-7478APC stainfo command injection
-// CVE: CVE-2026-19963
-// Risk: 1.09 | Severity: LOW
-// STIX ID: intel--ec3e812238833661fa992002
-// SENTINEL APEX — CVE-2026-19963 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T01:39:12Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19963", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [GOLD] CVE-2026-19962 - Edimax EW-7478APC setWAN command injection
-// CVE: CVE-2026-19962
-// Risk: 1.09 | Severity: LOW
-// STIX ID: intel--1ad79583b05c7a64c4685c21
-// SENTINEL APEX — CVE-2026-19962 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T01:39:12Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19962", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [GOLD] CVE-2026-66785 - Submariner: submariner: unvalidated endpoint.spec.subnets propa
 // CVE: CVE-2026-66785
 // Risk: 1.04 | Severity: LOW
@@ -2620,6 +2648,22 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-19984", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [GOLD] CVE-2026-77648 - OpenStack Glance Server-Side Request Forgery
+// CVE: CVE-2026-77648
+// Risk: 0.74 | Severity: LOW
+// STIX ID: intel--60f6a19c6f6650df4c645572
+// SENTINEL APEX — CVE-2026-77648 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-77648", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [GOLD] CVE-2026-72843 - EverShop Missing Authorization on PATCH /api/customers/:id Allo
@@ -3535,22 +3579,6 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-19979", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [GOLD] CVE-2026-19965 - automad Password Reset Endpoint UserController.php requestPassw
-// CVE: CVE-2026-19965
-// Risk: 0.53 | Severity: LOW
-// STIX ID: intel--b965b38b9162848e951e6b81
-// SENTINEL APEX — CVE-2026-19965 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T01:39:12Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19965", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [SILVER] U.S. CISA adds Apple macOS, Microsoft SharePoint, Broadcom VMware vCenter, and M
 // Risk: 9.00 | Severity: CRITICAL
 // STIX ID: intel--67cc7fb3bf81e40217eb6d96
@@ -3600,7 +3628,7 @@ SecurityEvent
 // Risk: 8.50 | Severity: HIGH
 // STIX ID: intel--74000cef8c46981b
 // SENTINEL APEX — CVE-2026-73570 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -3611,27 +3639,11 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-73570", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [SILVER] Exploit for CVE-2026-18315
-// CVE: CVE-2026-18315
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--d888c43f29458b19
-// SENTINEL APEX — CVE-2026-18315 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-18315", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [SILVER] forminator-poc-lab exploit
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--7a22d15602924bb4
 // SENTINEL APEX — CVE-2026-15748 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -3647,7 +3659,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--fbb22b13d5fa0d32
 // SENTINEL APEX — CVE-2026-71960 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -3662,7 +3674,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--217394ac1f1e68ae
 // SENTINEL APEX — CVE-2026-56091 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -3671,6 +3683,21 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-56091", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [SILVER] Zyxel Patches Command Injection Flaw in 18 Access Points Allowing Root OS Comman
+// Risk: 7.00 | Severity: HIGH
+// STIX ID: intel--f6504fad92a1b264
+// SENTINEL APEX — CVE-2026-6837 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-6837", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [SILVER] cve-lab-journal exploit
@@ -3758,7 +3785,7 @@ SecurityEvent
 // Risk: 6.50 | Severity: MEDIUM
 // STIX ID: intel--0cb575dda5e37f44
 // SENTINEL APEX — CVE-2026-54622 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4008,7 +4035,7 @@ SecurityEvent
 // Risk: 8.10 | Severity: HIGH
 // STIX ID: intel--df049d071364f1b4
 // SENTINEL APEX — CVE-2026-54182 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4023,7 +4050,7 @@ SecurityEvent
 // Risk: 8.10 | Severity: HIGH
 // STIX ID: intel--2e661a9706ffc6f8
 // SENTINEL APEX — CVE-2026-54178 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4053,7 +4080,7 @@ SecurityEvent
 // Risk: 7.70 | Severity: HIGH
 // STIX ID: intel--3ae5dfa26d70280c
 // SENTINEL APEX — CVE-2026-54155 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4098,7 +4125,7 @@ SecurityEvent
 // Risk: 7.60 | Severity: HIGH
 // STIX ID: intel--45253139d042f9e8
 // SENTINEL APEX — CVE-2026-54180 Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -4116,7 +4143,7 @@ DeviceProcessEvents
 // Risk: 7.60 | Severity: HIGH
 // STIX ID: intel--896c9153e1f94570
 // SENTINEL APEX — CVE-2026-54175 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4131,7 +4158,7 @@ SecurityEvent
 // Risk: 7.50 | Severity: HIGH
 // STIX ID: intel--d4f6b8da87b71b42
 // SENTINEL APEX — CVE-2026-54156 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4140,6 +4167,21 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-54156", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [SILVER] vouch-proxy has an Unbounded Multipart Cookie Allocation DoS
+// Risk: 7.50 | Severity: HIGH
+// STIX ID: intel--c60d08d56c11cc68
+// SENTINEL APEX — CVE-2026-55149 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-55149", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [SILVER] GeoLens: Cross-dataset authorization bypass discloses private dataset metadata, 
@@ -4206,7 +4248,7 @@ SecurityEvent
 // Risk: 6.60 | Severity: MEDIUM
 // STIX ID: intel--a5c62533664fd2a9
 // SENTINEL APEX — CVE-2026-54177 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4221,7 +4263,7 @@ SecurityEvent
 // Risk: 6.50 | Severity: MEDIUM
 // STIX ID: intel--48ad7e3c2b845d65
 // SENTINEL APEX — CVE-2026-57570 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4236,7 +4278,7 @@ SecurityEvent
 // Risk: 6.50 | Severity: MEDIUM
 // STIX ID: intel--feeb20195861bf44
 // SENTINEL APEX — CVE-2026-54624 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4251,7 +4293,7 @@ SecurityEvent
 // Risk: 6.50 | Severity: MEDIUM
 // STIX ID: intel--650f569c99ec6d30
 // SENTINEL APEX — CVE-2026-54176 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4386,7 +4428,7 @@ SecurityEvent
 // Risk: 5.40 | Severity: MEDIUM
 // STIX ID: intel--4372642553316ef7
 // SENTINEL APEX — CVE-2026-54256 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4401,7 +4443,7 @@ SecurityEvent
 // Risk: 5.40 | Severity: MEDIUM
 // STIX ID: intel--df8f35b763d7578a
 // SENTINEL APEX — CVE-2026-54181 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4416,7 +4458,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--fa32c371c430190e
 // SENTINEL APEX — CVE-2026-55451 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4431,7 +4473,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--d04378b49a0af70d
 // SENTINEL APEX — CVE-2026-61827 Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -4464,7 +4506,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--7d286cd52d1b4c6c
 // SENTINEL APEX — CVE-2026-54245 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4473,6 +4515,21 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-54245", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [SILVER] Velero vulnerable to file path traversal when extracting from backup's tarball
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--b2900f606a697b93
+// SENTINEL APEX — CVE-2026-32637 — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CVE-2026-32637", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [SILVER] Winter: Local File Inclusion through @import directives in LESS compilation of b
@@ -4488,21 +4545,6 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "CVE-2026-63179", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [SILVER] Dgraph Alpha group stores can be replaced via unauthenticated external snapshot 
-// Risk: 8.50 | Severity: HIGH
-// STIX ID: intel--820007123a6f4203
-// SENTINEL APEX — CVE-2026-54061 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-54061", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [SILVER] Rogue ransomware affiliate poses as data recovery firm to steal payments
@@ -4757,26 +4799,11 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "Akira Ransomware Uses Safe Mode to Bypass EDR", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [SILVER] Tekton Pipelines-as-Code: Unscoped GitHub App installation token allows unauthor
-// Risk: 6.50 | Severity: MEDIUM
-// STIX ID: intel--4fbf30f2778e7c0e
-// SENTINEL APEX — CVE-2026-54168 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-54168", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [SILVER] Rust Supply Chain Attack Puts Build-Time Malware in Crates with 245 Million Down
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--3c4f72d09ee4179f
 // SENTINEL APEX — Rust Supply Chain Attack Puts Build-Time Malware in Crates with 245 Million Downloads — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4792,7 +4819,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--b9361ce9af7bcb3e
 // SENTINEL APEX — CVE-2026-15743 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4808,7 +4835,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--53aebbd7f76c65f1
 // SENTINEL APEX — CVE-2026-54770 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -4972,21 +4999,6 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "MeshCentral has unsanitized data fields", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [SILVER] Pipelines-as-Code GitHub App token request can be redirected via untrusted Enter
-// Risk: 8.20 | Severity: HIGH
-// STIX ID: intel--43db8c3f7d4d03a6
-// SENTINEL APEX — CVE-2026-54167 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-54167", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [SILVER] LibreNMS: SSRF-driven stored XSS via Oxidized API response fields in device show
 // Risk: 8.10 | Severity: HIGH
 // STIX ID: intel--dce46f7483f8a851
@@ -5053,21 +5065,6 @@ DeviceProcessEvents
 | extend Severity = "HIGH", CVE = "Incomplete Fix in MONAI: algo_from_pickle() pickle.loads() RCE still present in v1.5.2 despite GHSA-89gg-p5r5-q6r4 claiming      patch", RuleSource = "SENTINEL-APEX"
 | order by Timestamp desc
 
-// ── [SILVER] LangChain MongoDB has NoSQL Operator Injection in MongoDBSaver.list() leading to
-// Risk: 7.70 | Severity: HIGH
-// STIX ID: intel--f3cc1029567b6228
-// SENTINEL APEX — CVE-2026-55253 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-55253", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [SILVER] vm2 has Memory Exhaustion DoS via bufferAllocLimit Bypass
 // Risk: 7.50 | Severity: HIGH
 // STIX ID: intel--897d1e13879eb394
@@ -5088,7 +5085,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--368cd456ae7384d0
 // SENTINEL APEX — CVE-2026-55765 Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -5106,7 +5103,7 @@ DeviceProcessEvents
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--ffc9aadeba7bce18
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: http://sp13ct-lormor-biz-frandik-zavsel.pages.dev/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: http://sp13ct-lormor-biz-frandik-zavsel.pages.dev/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5125,7 +5122,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--f9112050f932c56c
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://16b399.icefactory.cl/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://16b399.icefactory.cl/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5144,7 +5141,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--eff3a6be1ca071dc
 // SENTINEL APEX — [OpenPhish] Phishing URL: https://www.support-ledger-help-desk-login-nano-navy.vercel.app/ Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -5162,7 +5159,7 @@ DeviceProcessEvents
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--ee358cf7ccb24352
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://www.14088.xyz/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://www.14088.xyz/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5181,7 +5178,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--e7a0bc1de8e617a5
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://3d6dca.icefactory.cl/avw3343XZHCyzC2KVfEoAXbpc4Yjg86Z7MEaxpaDPAbr2Vy8KH4JTfYembZ0rH1n/?rotat | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://3d6dca.icefactory.cl/avw3343XZHCyzC2KVfEoAXbpc4Yjg86Z7MEaxpaDPAbr2Vy8KH4JTfYembZ0rH1n/?rotat | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5200,7 +5197,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--e74509a0912db1a2
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://9b1u-q9a0x6-7dwi1-di3iy9.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://9b1u-q9a0x6-7dwi1-di3iy9.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5219,7 +5216,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--e56e0cfed4ae58aa
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://w7s6t8-cjkv-0523h-6am230.pages.dev/send_appeal_request | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://w7s6t8-cjkv-0523h-6am230.pages.dev/send_appeal_request | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5238,7 +5235,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--e34582eebc70253e
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://dccrsorgia.github.io/in.crs.verifyCertificate.id-TMJK8JJy4RuII5JYuqLhWA8HRA | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://dccrsorgia.github.io/in.crs.verifyCertificate.id-TMJK8JJy4RuII5JYuqLhWA8HRA | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5257,7 +5254,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--e2b466718914aca6
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://dccrsorgia.github.io/.in-crs-verifyCertificate-id-TM5r5MUuG5KguqnhWA8HRA-3D-3D | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://dccrsorgia.github.io/.in-crs-verifyCertificate-id-TM5r5MUuG5KguqnhWA8HRA-3D-3D | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5276,7 +5273,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--e03de4362de626ed
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://mandtlogin.pages.dev/favicon.ico/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://mandtlogin.pages.dev/favicon.ico/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5295,7 +5292,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--cffc3ccac0a7119b
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://qagdt-ga5-tzy-tx2-yiku-x4rz3.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=204 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://qagdt-ga5-tzy-tx2-yiku-x4rz3.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=204 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5314,7 +5311,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--ce7eea6e42f209a4
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://loginservice.cloud/E.QbnTmb8RZIbk78YN?/linkedin/slink?code=afSN103785 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://loginservice.cloud/E.QbnTmb8RZIbk78YN?/linkedin/slink?code=afSN103785 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5333,7 +5330,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--cdbbb660f0a74e0c
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://qagdt-ga5-tzy-tx2-yiku-x4rz3.pages.dev/send_appeal_request | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://qagdt-ga5-tzy-tx2-yiku-x4rz3.pages.dev/send_appeal_request | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5352,7 +5349,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--cb8a6ab8d3eabd7c
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://f0f43a.icefactory.cl/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://f0f43a.icefactory.cl/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5371,7 +5368,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--cb01c25dbdf57bb9
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://em6gto.top/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://em6gto.top/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5390,7 +5387,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--c96dd0cc235240ee
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://lhi0h-uk3o-cic04-2xl-pt5g.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=204315 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://lhi0h-uk3o-cic04-2xl-pt5g.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=204315 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5409,7 +5406,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--c4132b70eccd23a9
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: http://www.roblox.ly/users/9039375552/profile/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: http://www.roblox.ly/users/9039375552/profile/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5428,7 +5425,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--bf6da488b90239c0
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://neh34-u405qr-gpbty6-tde-mrmp.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=204 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://neh34-u405qr-gpbty6-tde-mrmp.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=204 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5447,7 +5444,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--b28d74c5286a2c66
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: http://xminesserversaqwq.edgeone.dev/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: http://xminesserversaqwq.edgeone.dev/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5466,7 +5463,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--a89d40483de22a08
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://dccrsorgia.github.io/gov.in.crs.verifyCertificate.id-TMJK8JJy4RuII5JYuqLhWA8HRA/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://dccrsorgia.github.io/gov.in.crs.verifyCertificate.id-TMJK8JJy4RuII5JYuqLhWA8HRA/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5485,7 +5482,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--a770757849934e6b
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://fairtrade.com.ar/lpp/details.php | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://fairtrade.com.ar/lpp/details.php | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5504,7 +5501,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--a283c3f43f24c032
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://vvpj-qqcsb5-851-85m-r56y.pages.dev/send_appeal_request | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://vvpj-qqcsb5-851-85m-r56y.pages.dev/send_appeal_request | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5523,7 +5520,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--9bc2fb822bfa80bc
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://gorillaunit.fr/cmz/f6ba0594-0290ddd-12096a-ad270d4-167b4d-4f3e39.html?AkFS8AsfId7ynAcCr3jn6a | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://gorillaunit.fr/cmz/f6ba0594-0290ddd-12096a-ad270d4-167b4d-4f3e39.html?AkFS8AsfId7ynAcCr3jn6a | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5542,7 +5539,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--955f6e692c3417ea
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://7b4b6e.icefactory.cl/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://7b4b6e.icefactory.cl/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5561,7 +5558,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--87537a4eb2a4d026
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://166c75.icefactory.cl/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://166c75.icefactory.cl/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5580,7 +5577,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--79e236e2666b3fae
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://fcb7fa.icefactory.cl/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://fcb7fa.icefactory.cl/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5599,7 +5596,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--7510a5e79e13fdfb
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://a03lps-j6srjp-y5n-jsc-qbqhw.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://a03lps-j6srjp-y5n-jsc-qbqhw.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5618,7 +5615,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--686f2e0287771c95
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: http://www.14025.xyz/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: http://www.14025.xyz/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5637,7 +5634,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--66082a07618d659e
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://mtvlj29hwc-qnkxz51bgr-3k7j0g-zl814b.pages.dev/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://mtvlj29hwc-qnkxz51bgr-3k7j0g-zl814b.pages.dev/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5656,7 +5653,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--654238b068df29d4
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://nice-gray-rmhnvluy.edgeone.dev/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://nice-gray-rmhnvluy.edgeone.dev/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5675,7 +5672,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--5fd9db8f12ec0575
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://urlz.li/b12f2603 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://urlz.li/b12f2603 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5694,7 +5691,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--5e3c4e6739d5a9e4
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://vvpj-qqcsb5-851-85m-r56y.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://vvpj-qqcsb5-851-85m-r56y.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5713,7 +5710,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--593af8f4bfd676d2
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://lpost-sa72.shop/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://lpost-sa72.shop/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5732,7 +5729,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--5501247e8ad70f11
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://loi2051.cfd/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://loi2051.cfd/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5751,7 +5748,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--3f7c76a83802b694
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: http://7142de.icefactory.cl/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: http://7142de.icefactory.cl/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5770,7 +5767,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--3f14eaf600285261
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://w7s6t8-cjkv-0523h-6am230.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://w7s6t8-cjkv-0523h-6am230.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=2043158 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5789,7 +5786,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--3962b412da33c87b
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://valli-18.github.io/netflix-ui-demo- | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://valli-18.github.io/netflix-ui-demo- | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5808,7 +5805,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--36634694fe699c9b
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://m4nfdw.top/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://m4nfdw.top/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5827,7 +5824,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--357540d6f0d09d0e
 // SENTINEL APEX — [OpenPhish] Phishing URL: https://aidenpiearce.github.io/Javascript-amazon Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -5845,7 +5842,7 @@ DeviceProcessEvents
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--2e2bcf4f38e7ac89
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://btdh-0x8t6v-awl75-p8wm-vfx.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=20431 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://btdh-0x8t6v-awl75-p8wm-vfx.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=20431 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5864,7 +5861,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--2c801be3b57e0ac2
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://pp5erm.sbs/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://pp5erm.sbs/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5883,7 +5880,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--2ad914da067ade1e
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://sw.run/VDmSX | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://sw.run/VDmSX | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5902,7 +5899,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--27a6f8e978f55f54
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://www.agingenieria.com.pe/wp-content/logs/newsletter/www.made-in-china.com/index.html | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://www.agingenieria.com.pe/wp-content/logs/newsletter/www.made-in-china.com/index.html | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5921,7 +5918,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--141b403eab9ae385
 // SENTINEL APEX — [OpenPhish] Phishing URL: https://hwihaliha.vercel.app/ Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -5939,7 +5936,7 @@ DeviceProcessEvents
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--0e977ba469025e85
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://tuvmw5-5fre-xw1-axziz-xvy.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=204315 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://tuvmw5-5fre-xw1-axziz-xvy.pages.dev/qaz-wsx-edc-rfv?welcome=2043158912592190&token248=204315 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5958,7 +5955,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--0c0ffbab1a0d291d
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://a8rona.sbs/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://a8rona.sbs/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5977,7 +5974,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--08a71f5f54ce8d87
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: http://aethersyncmatrix8.lol/ | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: http://aethersyncmatrix8.lol/ | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -5996,7 +5993,7 @@ EmailAttachmentInfo
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--0000d9e85c4953cc
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: [OpenPhish] Phishing URL: https://paczkanr7254.shop/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: [OpenPhish] Phishing URL: https://paczkanr7254.shop/o/n0zc2/7319088730292480#selectedbank9 | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -6011,60 +6008,12 @@ EmailAttachmentInfo
 | extend Severity = "HIGH", ThreatType = "Phishing", RuleSource = "SENTINEL-APEX"
 | order by Timestamp desc
 
-// ── [SILVER] CVE-2026-77022 - Comfast CF-N1-S SSID Configuration mbox-config sub_44B438 stack
-// CVE: CVE-2026-77022
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--6b70b71edffb5ed6
-// SENTINEL APEX — CVE-2026-77022 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-77022", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [SILVER] CVE-2026-71428 - unstructured: Server-Side Request Forgery in the URL-based part
-// CVE: CVE-2026-71428
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--e935358d15a91b98
-// SENTINEL APEX — CVE-2026-71428 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-71428", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [SILVER] CVE-2026-65842 - Plate: SSRF with response disclosure in DOCX image embedding
-// CVE: CVE-2026-65842
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--c761cc25bd8e33bb
-// SENTINEL APEX — CVE-2026-65842 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-65842", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [SILVER] CVE-2026-77020 - CodeAstro Apartment Visitor Management System password-recovery
 // CVE: CVE-2026-77020
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--08cd3c64612396fb
 // SENTINEL APEX — CVE-2026-77020 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -6080,7 +6029,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--01c599dde1e59111
 // SENTINEL APEX — CVE-2026-63043 Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -6099,7 +6048,7 @@ DeviceProcessEvents
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--177bc9aec3575be0
 // SENTINEL APEX — CVE-2026-63040 Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -6118,7 +6067,7 @@ DeviceProcessEvents
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--4a959679efdaed95
 // SENTINEL APEX — CVE-2026-63016 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -6134,7 +6083,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--009160e4e6f3c0f0
 // SENTINEL APEX — CVE-2026-63015 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9006,7 +8955,7 @@ EmailAttachmentInfo
 // Risk: 6.50 | Severity: MEDIUM
 // STIX ID: intel--49c4c3072a40a964
 // SENTINEL APEX — Wagtail: Improper restriction handling on Page translation API endpoint — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9021,7 +8970,7 @@ SecurityEvent
 // Risk: 6.50 | Severity: MEDIUM
 // STIX ID: intel--ef8cd6d1a9edc5a3
 // SENTINEL APEX — Wagtail: Improper permission handling when copying snippets — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9036,7 +8985,7 @@ SecurityEvent
 // Risk: 6.30 | Severity: MEDIUM
 // STIX ID: intel--e10b94e89197262a
 // SENTINEL APEX — stigmem-node has blind SSRF via unvalidated webhook subscription delivery_address — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9066,7 +9015,7 @@ SecurityEvent
 // Risk: 5.30 | Severity: MEDIUM
 // STIX ID: intel--e9ff67022b2a53f7
 // SENTINEL APEX — Wagtail: Improper restriction handling on descendant collections in Documents and Images API — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9081,7 +9030,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--364a7bed81fa0a59
 // SENTINEL APEX — CVE-2025-30156 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9097,7 +9046,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--ab51718a140fd072
 // SENTINEL APEX — CVE-2026-77176 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9176,7 +9125,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--a5957632e4c08f8c
 // SENTINEL APEX — CVE-2026-63481 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9192,7 +9141,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--7d016f9755bfa7cd
 // SENTINEL APEX — CVE-2026-63044 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9208,7 +9157,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--c4bd340408e6221e
 // SENTINEL APEX — CVE-2026-63042 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9224,7 +9173,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--546a2c11ca8f81a3
 // SENTINEL APEX — CVE-2026-63039 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9240,7 +9189,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--cac019b13e3533d4
 // SENTINEL APEX — CVE-2026-63038 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9256,7 +9205,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--22f1f9434aca978f
 // SENTINEL APEX — CVE-2026-63037 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -9692,22 +9641,6 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-62292", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [SILVER] CVE-2026-19967 - Open Asset Import Library Assimp File Compression.cpp decompres
-// CVE: CVE-2026-19967
-// Risk: 1.09 | Severity: LOW
-// STIX ID: intel--ec8ded4f12e4ae75f1b53454
-// SENTINEL APEX — CVE-2026-19967 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T01:39:12Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19967", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [SILVER] Low Security Vulnerability (CVE-2026-43678)
 // CVE: CVE-2026-43678
 // Risk: 1.04 | Severity: LOW
@@ -10028,38 +9961,6 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "CVE-2026-19994", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [SILVER] CVE-2026-19968 - Open Asset Import Library Assimp 3DGS MDL7 Model LWOLoader.h Re
-// CVE: CVE-2026-19968
-// Risk: 0.53 | Severity: LOW
-// STIX ID: intel--930422f21f608808d6fa824d
-// SENTINEL APEX — CVE-2026-19968 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T01:39:12Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19968", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [SILVER] CVE-2026-19966 - CodeCanyon TimeCamp Integration for CRM Contact Information Upd
-// CVE: CVE-2026-19966
-// Risk: 0.53 | Severity: LOW
-// STIX ID: intel--c09c479fa36bdeebaa7a7d7a
-// SENTINEL APEX — CVE-2026-19966 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T01:39:12Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-19966", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [STANDARD] Claude Code Helps Ransomware Operator Steal LDAP Passwords, Backdoor VPNs and Ex
 // Risk: 6.85 | Severity: MEDIUM
 // STIX ID: intel--f3c21f33a170fe645f2a7035
@@ -10098,7 +9999,7 @@ EmailAttachmentInfo
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--fc65551efcd23d41
 // SENTINEL APEX — Pakistan's Transparent Tribe Refreshes Toolset for Afghan Cyberattacks — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10113,7 +10014,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--1719f90f5a94ff7e
 // SENTINEL APEX — rsyslog: omfile dynaFile containment hardening (GHSA-xmp9-244p-5ggv) — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10233,7 +10134,7 @@ SecurityEvent
 // Risk: 8.50 | Severity: HIGH
 // STIX ID: intel--96dc957c8f23e22c
 // SENTINEL APEX — NSA, CISA, FBI, DOE, and EPA Warn of Active AI-Assisted Attacks on Siemens S7 PLCs — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10248,7 +10149,7 @@ SecurityEvent
 // Risk: 8.50 | Severity: HIGH
 // STIX ID: intel--49c78703912c239d
 // SENTINEL APEX — Senators press TikTok over withholding of safety features for some users — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10263,7 +10164,7 @@ SecurityEvent
 // Risk: 8.50 | Severity: HIGH
 // STIX ID: intel--44c1c796795034b3
 // SENTINEL APEX — AI-Generated Exploit Scripts Target Siemens S7 PLCs in U.S. Critical Infrastructure — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10278,7 +10179,7 @@ SecurityEvent
 // Risk: 8.50 | Severity: HIGH
 // STIX ID: intel--03799b18da022bba
 // SENTINEL APEX — Critical NASA AIT-GUI Flaw Lets Unauthenticated Attackers Issue Spacecraft Commands — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10293,7 +10194,7 @@ SecurityEvent
 // Risk: 8.50 | Severity: HIGH
 // STIX ID: intel--3eb9dc22c914420a
 // SENTINEL APEX — Critical Elementor Pro bug exposes WordPress sites to RCE attacks Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -10311,7 +10212,7 @@ DeviceProcessEvents
 // Risk: 8.50 | Severity: HIGH
 // STIX ID: intel--3964676747041974
 // SENTINEL APEX — Isolated-vm Flaw Lets Sandboxed JavaScript Escape to Host for Potential RCE Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -10329,7 +10230,7 @@ DeviceProcessEvents
 // Risk: 8.50 | Severity: HIGH
 // STIX ID: intel--4dd256f81bf8de88
 // SENTINEL APEX — Critical NetScaler Flaw Can Bypass Authentication on Certain Gateway and AAA Servers — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10338,6 +10239,51 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "Critical NetScaler Flaw Can Bypass Authentication on Certain Gateway and AAA Servers", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Atlassian, Splunk Patch Dozens of Critical, High-Severity Vulnerabilities
+// Risk: 8.50 | Severity: HIGH
+// STIX ID: intel--7e4855f3b930816b
+// SENTINEL APEX — Atlassian, Splunk Patch Dozens of Critical, High-Severity Vulnerabilities — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Atlassian, Splunk Patch Dozens of Critical, High-Severity Vulnerabilities", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] MLflow Vulnerability Exploited for Cloud Credential Theft
+// Risk: 8.50 | Severity: HIGH
+// STIX ID: intel--f96b963c4d1b6d2b
+// SENTINEL APEX — MLflow Vulnerability Exploited for Cloud Credential Theft — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "MLflow Vulnerability Exploited for Cloud Credential Theft", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Cisco Patches Critical Crosswork, Secure Workload Vulnerabilities
+// Risk: 8.50 | Severity: HIGH
+// STIX ID: intel--10614d469d8d3bed
+// SENTINEL APEX — Cisco Patches Critical Crosswork, Secure Workload Vulnerabilities — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Cisco Patches Critical Crosswork, Secure Workload Vulnerabilities", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [STANDARD] 8,539 reasons to rethink how vulnerabilities get patched
@@ -10448,26 +10394,11 @@ DeviceProcessEvents
 | extend Severity = "HIGH", CVE = "CVE-2026-55107", RuleSource = "SENTINEL-APEX"
 | order by Timestamp desc
 
-// ── [STANDARD] vouch-proxy has an Unbounded Multipart Cookie Allocation DoS
-// Risk: 7.50 | Severity: HIGH
-// STIX ID: intel--c60d08d56c11cc68
-// SENTINEL APEX — CVE-2026-55149 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-55149", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [STANDARD] binary-exploitation
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--c374bb737c0b7f18
 // SENTINEL APEX — binary-exploitation — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10482,7 +10413,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--cd893def5dad3678
 // SENTINEL APEX — grade-server-ctf exploit — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10497,7 +10428,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--9e5d9a1f406d114b
 // SENTINEL APEX — devsecops-poc-workflows exploit — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10512,7 +10443,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--3961b87cd411f2ee
 // SENTINEL APEX — BOD 26-04 Just Changed How Federal Agencies Prioritize Vulnerabilities. — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10527,7 +10458,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--5ed9b29d9284b507
 // SENTINEL APEX — debugging-modern-glibc-heap exploit — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10542,7 +10473,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--5dfd2926e1848732
 // SENTINEL APEX — ThreatsDay: Gogs 10.0 RCE, n8n Workflow-to-RCE, $10M Reward, GLM-5.3 AI Exploit and More Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -10560,7 +10491,7 @@ DeviceProcessEvents
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--20df50339945e7d3
 // SENTINEL APEX — py-web-vuln-scanner exploit — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10575,7 +10506,7 @@ SecurityEvent
 // Risk: 7.00 | Severity: HIGH
 // STIX ID: intel--06748f47b4be20ca
 // SENTINEL APEX — 'Grandoreiro' Malware Resurfaces With Mexico Campaign — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10584,6 +10515,66 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "'Grandoreiro' Malware Resurfaces With Mexico Campaign", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Sql-injection-payloads exploit
+// Risk: 7.00 | Severity: HIGH
+// STIX ID: intel--313ec0b79e04418b
+// SENTINEL APEX — Sql-injection-payloads exploit — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Sql-injection-payloads exploit", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] poc-inteligencia-tributaria-palmas exploit
+// Risk: 7.00 | Severity: HIGH
+// STIX ID: intel--05ae67fd9e320b1a
+// SENTINEL APEX — poc-inteligencia-tributaria-palmas exploit — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "poc-inteligencia-tributaria-palmas exploit", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] CDN Tsunami Attack Abuses HTTP/3 Translation for Up to 350x DoS Amplification
+// Risk: 7.00 | Severity: HIGH
+// STIX ID: intel--81a48030002e9bf6
+// SENTINEL APEX — CDN Tsunami Attack Abuses HTTP/3 Translation for Up to 350x DoS Amplification — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "CDN Tsunami Attack Abuses HTTP/3 Translation for Up to 350x DoS Amplification", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] AWS limits AI agents data access, even when manipulated
+// Risk: 7.00 | Severity: HIGH
+// STIX ID: intel--875088ddc172601f
+// SENTINEL APEX — AWS limits AI agents data access, even when manipulated — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "AWS limits AI agents data access, even when manipulated", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [STANDARD] AI is making fraud harder to spot and identity harder to prove
@@ -10865,26 +10856,11 @@ DeviceProcessEvents
 | extend Severity = "HIGH", CVE = "Multiple Suicides Reported in US Cyber Operations Forces", RuleSource = "SENTINEL-APEX"
 | order by Timestamp desc
 
-// ── [STANDARD] SafePal data breach impacts 39,798 customers, stolen info for sale
-// Risk: 7.00 | Severity: HIGH
-// STIX ID: intel--44e275f54a865a2f
-// SENTINEL APEX — SafePal data breach impacts 39,798 customers, stolen info for sale — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T09:10:37Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "SafePal data breach impacts 39,798 customers, stolen info for sale", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [STANDARD] Winter: CSRF through AJAX handler names reachable as backend page actions
 // Risk: 6.10 | Severity: MEDIUM
 // STIX ID: intel--2eeee80b2563e74e
 // SENTINEL APEX — Winter: CSRF through AJAX handler names reachable as backend page actions — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10899,7 +10875,7 @@ SecurityEvent
 // Risk: 5.50 | Severity: MEDIUM
 // STIX ID: intel--a87a247dfb4a9ff0
 // SENTINEL APEX — asteval Sandbox Escape: arbitrary native memory read/write via numpy ctypes in default asteval Interpreter — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10932,7 +10908,7 @@ DeviceProcessEvents
 // Risk: 5.30 | Severity: MEDIUM
 // STIX ID: intel--cce38d2349a9bb43
 // SENTINEL APEX — Winter: ImportExportController AJAX handlers bypass granular import/export permission gate — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10947,7 +10923,7 @@ SecurityEvent
 // Risk: 5.30 | Severity: MEDIUM
 // STIX ID: intel--97fe925653893e67
 // SENTINEL APEX — Fleet: Unauthenticated download of in-house iOS app binaries via predictable URLs — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10962,7 +10938,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--bced6ad973dc3246
 // SENTINEL APEX — Calling on Cyber Pros to Help Defend City Hall — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10977,7 +10953,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--17090da3eef509be
 // SENTINEL APEX — New CUSTODY Framework Constrains AI Agents Inside the Network — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -10992,7 +10968,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--c29988f4e9d1a543
 // SENTINEL APEX — Intelligence Insights: August 2026 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11007,7 +10983,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--57f62e3d5a5ab331
 // SENTINEL APEX — Suspected Russian Hackers Abuse Google OAuth and WhatsApp Linking to Hijack Accounts — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11022,7 +10998,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--a0201f795ac9346f
 // SENTINEL APEX — Chinas SilkParasite espionage operation targeting Central Asia with AI-assisted malware — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11037,7 +11013,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--29151347b07a6859
 // SENTINEL APEX — What We Missed: Delta Flight Disrupted With Wi-Fi Hack — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11052,7 +11028,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--d1fb88be1ee40ce3
 // SENTINEL APEX — NocoBase: Arbitrary File Write chained with Local file Inclusion leads to Remote code execution Remote Code Execution Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 // Deploy to: Microsoft Sentinel / Defender XDR
 let lookback = 1d;
 DeviceProcessEvents
@@ -11070,7 +11046,7 @@ DeviceProcessEvents
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--d8c22b9781715da2
 // SENTINEL APEX — AWS Network Firewall now supports rule hit count — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11085,7 +11061,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--54c9ebc6919da731
 // SENTINEL APEX — Early 764 member sentenced to 77 years, longest prison term to date for a nihilistic violent extremist — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11130,7 +11106,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--d222fa7f506c6f43
 // SENTINEL APEX — Manic: The Android Malware That Exfiltrates Data Even When the Phone Is Offline — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11145,7 +11121,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--53067f123fbf65b6
 // SENTINEL APEX — Is Cyber missing the Marque? — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11160,7 +11136,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--edef0c2509b1bdf4
 // SENTINEL APEX — Hackers poison arrayref Rust crate to push infostealer malware — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11175,7 +11151,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--7dcfbf5588eebae3
 // SENTINEL APEX — N-able Bug Exposes Password Vault Master Keys — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11186,26 +11162,11 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "N-able Bug Exposes Password Vault Master Keys", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [STANDARD] Velero vulnerable to file path traversal when extracting from backup's tarball
-// Risk: 5.00 | Severity: MEDIUM
-// STIX ID: intel--b2900f606a697b93
-// SENTINEL APEX — CVE-2026-32637 — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "CVE-2026-32637", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [STANDARD] CRLF-Powered Desync Lets Attackers Poison CDN Cache and Serve XSS to Live Users
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--07a1583909ee55fa
 // SENTINEL APEX — CRLF-Powered Desync Lets Attackers Poison CDN Cache and Serve XSS to Live Users — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11220,7 +11181,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--b2e1b0fbc8cddc94
 // SENTINEL APEX — AWS Shows How to Stop a Hijacked AI Agent From Reading Data the User Cannot Access — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11235,7 +11196,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--9a2ae84e053b0b59
 // SENTINEL APEX — Microsoft Defender Driver Can Be Weaponized to Disable EDR and AV From Windows Kernel — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11250,7 +11211,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--e713e6b231ec3d5a
 // SENTINEL APEX — Popular Rust Packages With 244M Downloads Compromised to Run Malware — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11265,7 +11226,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--980845efffde91cb
 // SENTINEL APEX — OpenAI confirms ChatGPT Outage — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11280,7 +11241,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--bb9e225df335185c
 // SENTINEL APEX — Retail theft bill spurs very large and very dangerous surveillance fears — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11295,7 +11256,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--c3d85e9b5693a6fa
 // SENTINEL APEX — 9M Images Exposed by Facial Recognition Platform — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11310,7 +11271,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--7cc54fc19cb6218b
 // SENTINEL APEX — ChatGPT for Teens tackles risky chats and homework shortcuts — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11325,7 +11286,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--d5a843e876d6d0dd
 // SENTINEL APEX — New Cryptographic Context Injection Attack Could Let Web Pages Steal Grok Chat Data — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11340,7 +11301,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--97e16767a41fe245
 // SENTINEL APEX — Surveillance  Everything You Wanted to Know, But Were Afraid to Ask — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11355,7 +11316,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--d3be5c01538c89f2
 // SENTINEL APEX — Phishing Campaign Detection
-// CVE/Threat: How MSPs can catch phishing attacks email filters miss | Generated: 2026-08-20T23:30:06Z
+// CVE/Threat: How MSPs can catch phishing attacks email filters miss | Generated: 2026-08-21T01:42:03Z
 let lookback = 7d;
 let suspicious_exts = dynamic([".hta", ".lnk", ".iso", ".vhd", ".docm", ".xlsm", ".pptm"]);
 EmailAttachmentInfo
@@ -11374,7 +11335,7 @@ EmailAttachmentInfo
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--88d24e3755c51854
 // SENTINEL APEX — ToxicPanda Android Malware Can Steal Banking PINs and Gain Shell Access to Phones — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11389,7 +11350,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--f60e7484664f4db0
 // SENTINEL APEX — Hackers Use Fake CAPTCHA to Install Malware That Kills 145 Security Processes — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11404,7 +11365,7 @@ SecurityEvent
 // Risk: 5.00 | Severity: MEDIUM
 // STIX ID: intel--a39252bba0048287
 // SENTINEL APEX — Twitch wants your content for Amazon AI training. Heres how to opt out — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-20T23:30:06Z
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
 let lookback = 1d;
 SecurityEvent
 | where TimeGenerated > ago(lookback)
@@ -11413,6 +11374,186 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "Twitch wants your content for Amazon AI training. Heres how to opt out", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] New Android Malware Steals Banking PINs and Relays Data Through Someone Elses In
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--c8b0338e5296619b
+// SENTINEL APEX — New Android Malware Steals Banking PINs and Relays Data Through Someone Elses Infected Phones — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "New Android Malware Steals Banking PINs and Relays Data Through Someone Elses Infected Phones", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Threat Actor Hacks 14,000 IP Cameras in Ukraine and Russia
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--8ba25f15963869f3
+// SENTINEL APEX — Threat Actor Hacks 14,000 IP Cameras in Ukraine and Russia — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Threat Actor Hacks 14,000 IP Cameras in Ukraine and Russia", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Using Microsoft Graph and Powershell - Risk Detection Commands, (Thu, Aug 20th)
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--fc2f8674f6b45a97
+// SENTINEL APEX — Using Microsoft Graph and Powershell - Risk Detection Commands, (Thu, Aug 20th) — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Using Microsoft Graph and Powershell - Risk Detection Commands, (Thu, Aug 20th)", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Hackers Bypass Microsoft 365 MFA and Hijack Finance Mailbox to Steal Payments
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--8ec8ce1bf5f092ca
+// SENTINEL APEX — Hackers Bypass Microsoft 365 MFA and Hijack Finance Mailbox to Steal Payments — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Hackers Bypass Microsoft 365 MFA and Hijack Finance Mailbox to Steal Payments", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Using Microsoft Graph and Powershell to Mine for Information - Stale Accounts an
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--258e34d9c00f3432
+// SENTINEL APEX — Using Microsoft Graph and Powershell to Mine for Information - Stale Accounts and Licenses, (Thu, Aug 20th) — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Using Microsoft Graph and Powershell to Mine for Information - Stale Accounts and Licenses, (Thu, Aug 20th)", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Your Mac already has a built-in firewall. Heres how to get more from it
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--c05d514c7f1ba9f4
+// SENTINEL APEX — Your Mac already has a built-in firewall. Heres how to get more from it — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Your Mac already has a built-in firewall. Heres how to get more from it", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Citrix urges admins to patch new NetScaler flaws as soon as possible
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--c315ec97c9a2b918
+// SENTINEL APEX — Citrix urges admins to patch new NetScaler flaws as soon as possible — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Citrix urges admins to patch new NetScaler flaws as soon as possible", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Zombie Card Attack Can Revive Expired Visa Cards for Contactless Payments
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--1d9df15ac93a2091
+// SENTINEL APEX — Zombie Card Attack Can Revive Expired Visa Cards for Contactless Payments — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Zombie Card Attack Can Revive Expired Visa Cards for Contactless Payments", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] 9 million images of peoples faces exposed by reverse lookup service
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--e2e806dff640dc26
+// SENTINEL APEX — 9 million images of peoples faces exposed by reverse lookup service — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "9 million images of peoples faces exposed by reverse lookup service", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Why "Shady AI" is Security's Next Big Governance Problem
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--b71756c48355eb92
+// SENTINEL APEX — Why "Shady AI" is Security's Next Big Governance Problem — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Why "Shady AI" is Security's Next Big Governance Problem", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Manic Android Malware Exfiltrates Data From Offline Phones via Nearby Infected D
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--9beef3faa0cce74b
+// SENTINEL APEX — Manic Android Malware Exfiltrates Data From Offline Phones via Nearby Infected Devices — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Manic Android Malware Exfiltrates Data From Offline Phones via Nearby Infected Devices", RuleSource = "SENTINEL-APEX"
+| order by TimeGenerated desc
+
+// ── [STANDARD] Corero brings cloud-based AI threat analysis to SmartWall ONE
+// Risk: 5.00 | Severity: MEDIUM
+// STIX ID: intel--ce8772349046ca94
+// SENTINEL APEX — Corero brings cloud-based AI threat analysis to SmartWall ONE — Anomalous Activity Detection
+// Product: Web Application | Generated: 2026-08-21T01:42:03Z
+let lookback = 1d;
+SecurityEvent
+| where TimeGenerated > ago(lookback)
+| where EventID in (4625, 4648, 4728, 4740, 4776)
+| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
+    by IpAddress, bin(TimeGenerated, 1h)
+| where FailureCount > 10 or DistinctTargets > 5
+| extend Severity = "MEDIUM", CVE = "Corero brings cloud-based AI threat analysis to SmartWall ONE", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [STANDARD] Researchers find a loophole that lets expired credit cards make unauthorized pay
@@ -12510,36 +12651,6 @@ SecurityEvent
 | extend Severity = "MEDIUM", CVE = "ISC Stormcast For Monday, August 17th, 2026 https://isc.sans.edu/podcastdetail/10054, (Mon, Aug 17th)", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
-// ── [STANDARD] Re: Fwd: OpenZFS Linux open zpool manipulation and escapes via unprivileged user
-// Risk: 5.00 | Severity: MEDIUM
-// STIX ID: intel--5e4af8ce2752c4bc
-// SENTINEL APEX — Re: Fwd: OpenZFS Linux open zpool manipulation and escapes via unprivileged userns — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T09:10:37Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "Re: Fwd: OpenZFS Linux open zpool manipulation and escapes via unprivileged userns", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [STANDARD] DDoS Attacks Cause Major Threema Outages
-// Risk: 5.00 | Severity: MEDIUM
-// STIX ID: intel--a7822de226a4aff9
-// SENTINEL APEX — DDoS Attacks Cause Major Threema Outages — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T09:10:37Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "DDoS Attacks Cause Major Threema Outages", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
 // ── [STANDARD] Winter: Local File Inclusion through =include directives in JavaScript asset com
 // Risk: 4.90 | Severity: MEDIUM
 // STIX ID: intel--8098ffc3181a8cb9
@@ -12553,21 +12664,6 @@ SecurityEvent
     by IpAddress, bin(TimeGenerated, 1h)
 | where FailureCount > 10 or DistinctTargets > 5
 | extend Severity = "MEDIUM", CVE = "Winter: Local File Inclusion through =include directives in JavaScript asset compilation", RuleSource = "SENTINEL-APEX"
-| order by TimeGenerated desc
-
-// ── [STANDARD] DDoS Attacks Cause Major Threema Outages
-// Risk: 2.65 | Severity: LOW
-// STIX ID: intel--ccd87f344d1aedb2a2062b50
-// SENTINEL APEX — DDoS Attacks Cause Major Threema Outages — Anomalous Activity Detection
-// Product: Web Application | Generated: 2026-08-17T01:39:12Z
-let lookback = 1d;
-SecurityEvent
-| where TimeGenerated > ago(lookback)
-| where EventID in (4625, 4648, 4728, 4740, 4776)
-| summarize FailureCount = count(), DistinctTargets = dcount(TargetUserName)
-    by IpAddress, bin(TimeGenerated, 1h)
-| where FailureCount > 10 or DistinctTargets > 5
-| extend Severity = "MEDIUM", CVE = "DDoS Attacks Cause Major Threema Outages", RuleSource = "SENTINEL-APEX"
 | order by TimeGenerated desc
 
 // ── [STANDARD] GeoServers Unauthenticated SQL injection Vulnerability Enables RCE Attacks
