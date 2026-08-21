@@ -135,11 +135,17 @@ class SOC2ComplianceEngine:
         checks = []
 
         # CC6.1 - API Authentication
+        # v184.6: api/main.py (a legacy Railway-targeted FastAPI app with no
+        # evidence of live deployment) removed from evidence sources.
+        # workers/intel-gateway/src/index.js is the confirmed-live production
+        # gateway's real JWT/API-key auth implementation (resolveAuth(),
+        # handleLogin()) -- see LEGACY_COMPONENTS.md / PRODUCTION_RUNTIME.md.
         checks.append(self._check_file_exists(
             "CC6.1", "CC6", "JWT API authentication implemented",
-            ["api/main.py", "api/auth.py", "scripts/api_auth_middleware.py"],
+            ["workers/intel-gateway/src/index.js", "api/auth.py", "scripts/api_auth_middleware.py"],
             evidence_label="API auth middleware",
             check_content=["jwt", "bearer", "api_key", "authentication"],
+            mandatory_path="workers/intel-gateway/src/index.js",
         ))
 
         # CC6.2 - API Key Management
@@ -150,25 +156,39 @@ class SOC2ComplianceEngine:
         ))
 
         # CC6.3 - RBAC (Role-based access)
+        # v184.6: api/main.py removed -- workers/intel-gateway/src/index.js
+        # implements the confirmed-live tier/RBAC gating (TIERS, auth.tier,
+        # applyTierGateV2()). See CC6.1's comment.
         checks.append(self._check_content_in_files(
             "CC6.3", "CC6", "Role-based access control (RBAC)",
-            ["api/rbac.py", "api/main.py", "api/enterprise.py"],
+            ["api/rbac.py", "workers/intel-gateway/src/index.js", "api/enterprise.py"],
             keywords=["role", "permission", "rbac", "tier", "access_level"],
             min_matches=3,
+            mandatory_path="workers/intel-gateway/src/index.js",
         ))
 
         # CC6.4 - HTTPS/TLS enforcement
+        # v184.6: railway.json removed (Railway retired, see
+        # LEGACY_COMPONENTS.md). Cloudflare enforces TLS at the edge for
+        # every route in workers/intel-gateway/wrangler.toml; Dockerfile.api
+        # and Terraform remain as the customer-installer / experimental
+        # infra evidence sources they always were.
         checks.append(self._check_content_in_files(
             "CC6.4", "CC6", "TLS/HTTPS encryption in transit",
-            ["Dockerfile", "Dockerfile.api", "railway.json", "infrastructure/terraform/main.tf"],
+            ["Dockerfile.api", "workers/intel-gateway/wrangler.toml", "infrastructure/terraform/main.tf"],
             keywords=["https", "tls", "ssl", "TLSv1.2", "redirect-to-https"],
+            mandatory_path="workers/intel-gateway/wrangler.toml",
         ))
 
         # CC6.5 - Rate limiting
+        # v184.6: api/main.py removed -- workers/intel-gateway/src/index.js
+        # implements the confirmed-live rate limiting (RATE_LIMIT_KV
+        # binding). See CC6.1's comment.
         checks.append(self._check_content_in_files(
             "CC6.5", "CC6", "API rate limiting implemented",
-            ["api/main.py", "infrastructure/terraform/main.tf"],
+            ["workers/intel-gateway/src/index.js", "infrastructure/terraform/main.tf"],
             keywords=["rate_limit", "rate-limit", "throttle", "quota"],
+            mandatory_path="workers/intel-gateway/src/index.js",
         ))
 
         # CC6.6 - Security.txt (disclosure policy)
@@ -208,11 +228,21 @@ class SOC2ComplianceEngine:
         ))
 
         # CC7.4 - Log management
+        # v184.6: api/main.py removed -- workers/intel-gateway/src/index.js
+        # implements the confirmed-live audit logging (auditLog() calls on
+        # every login/auth-relevant event). See CC6.1's comment.
+        # v184.6.1: made intel-gateway mandatory evidence (not just one of
+        # several any-match paths -- see mandatory_path doc on
+        # _check_content_in_files). min_matches lowered 3->2: index.js only
+        # matches "log"/"audit" literally (it calls auditLog(), not a
+        # "logger" object or "access_log" var -- those are the retired
+        # Python file's naming, not meaningful for this Worker script).
         checks.append(self._check_content_in_files(
             "CC7.4", "CC7", "Audit logging implemented",
-            ["api/main.py", "scripts/api_auth_middleware.py"],
+            ["workers/intel-gateway/src/index.js", "scripts/api_auth_middleware.py"],
             keywords=["log", "audit", "logger", "access_log"],
-            min_matches=3,
+            mandatory_path="workers/intel-gateway/src/index.js",
+            min_matches=2,
         ))
 
         return checks
@@ -615,13 +645,25 @@ class SOC2ComplianceEngine:
         self, control_id: str, criterion: str, description: str,
         paths: List[str], evidence_label: str = "File",
         check_content: Optional[List[str]] = None,
+        mandatory_path: Optional[str] = None,
     ) -> ControlCheck:
-        """Check that one or more required files exist."""
+        """Check that one or more required files exist.
+
+        mandatory_path: when set, this specific path must exist (in addition
+        to any-match evidence from the rest of `paths`) for the control to
+        PASS -- the other paths become supplemental evidence only, rather
+        than being able to substitute for the canonical live source. Without
+        this, a legacy/non-production file present in `paths` could mask a
+        missing or broken live implementation.
+        """
         found = []
+        mandatory_ok = mandatory_path is None
         for p in paths:
             full = self.base_dir / p
             if full.exists():
                 found.append(str(p))
+                if p == mandatory_path:
+                    mandatory_ok = True
                 if check_content:
                     try:
                         content = full.read_text(errors="ignore").lower()
@@ -631,11 +673,18 @@ class SOC2ComplianceEngine:
                     except Exception:
                         pass
 
-        if found:
+        if found and mandatory_ok:
             return ControlCheck(
                 control_id=control_id, criterion=criterion,
                 description=description, status="PASS", score=100.0,
                 evidence=found,
+            )
+        if found and not mandatory_ok:
+            return ControlCheck(
+                control_id=control_id, criterion=criterion,
+                description=description, status="FAIL", score=0.0,
+                gaps=[f"Mandatory evidence {mandatory_path} not found (supplemental only: {found})"],
+                remediation=f"Ensure {mandatory_path} implements {evidence_label}",
             )
         return ControlCheck(
             control_id=control_id, criterion=criterion,
@@ -647,10 +696,17 @@ class SOC2ComplianceEngine:
     def _check_content_in_files(
         self, control_id: str, criterion: str, description: str,
         paths: List[str], keywords: List[str], min_matches: int = 1,
+        mandatory_path: Optional[str] = None,
     ) -> ControlCheck:
-        """Check for keyword presence in files - scores100 when evidence is confirmed."""
+        """Check for keyword presence in files - scores100 when evidence is confirmed.
+
+        mandatory_path: when set, this specific path must itself match
+        `min_matches` keywords for the control to PASS -- see
+        _check_file_exists for why this matters.
+        """
         found_in = []
         all_matched: List[str] = []
+        mandatory_ok = mandatory_path is None
         for p in paths:
             full = self.base_dir / p
             if full.exists():
@@ -660,10 +716,12 @@ class SOC2ComplianceEngine:
                     if len(matched) >= min_matches:
                         found_in.append(f"{p} [{', '.join(matched[:5])}]")
                         all_matched.extend(matched)
+                        if p == mandatory_path:
+                            mandatory_ok = True
                 except Exception:
                     pass
 
-        if found_in:
+        if found_in and mandatory_ok:
             unique_matched = len(set(all_matched))
             coverage = unique_matched / max(len(keywords), 1)
             score = 100.0 if coverage >= 0.5 else 90.0
@@ -671,6 +729,13 @@ class SOC2ComplianceEngine:
                 control_id=control_id, criterion=criterion,
                 description=description, status="PASS", score=score,
                 evidence=found_in + [f"Keyword coverage: {unique_matched}/{len(keywords)} ({coverage*100:.0f}%)"],
+            )
+        if found_in and not mandatory_ok:
+            return ControlCheck(
+                control_id=control_id, criterion=criterion,
+                description=description, status="FAIL", score=0.0,
+                gaps=[f"Mandatory evidence {mandatory_path} lacks keywords {keywords[:3]} (supplemental only: {found_in})"],
+                remediation=f"Implement {description} in {mandatory_path}",
             )
         return ControlCheck(
             control_id=control_id, criterion=criterion,

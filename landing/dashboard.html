@@ -62,7 +62,9 @@
       <li><a href="index.html">Home</a></li>
       <li><a href="pricing.html">Pricing</a></li>
       <li><a href="https://intel.cyberdudebivash.com" target="_blank">Live Dashboard</a></li>
-      <li><a href="https://cyberdudebivash-threat-intel-platform-production.up.railway.app/api/docs" target="_blank">API Docs</a></li>
+      <!-- v184.6: "API Docs" link removed -- pointed at the retired Railway
+           domain's /api/docs, and no equivalent docs route/page exists on
+           intel-gateway (the real production Worker) to replace it with. -->
     </ul>
     <div class="nav-cta">
       <span id="nav-tier-badge" class="tier-badge tier-free">FREE</span>
@@ -86,7 +88,8 @@
       <div class="sidebar-section-title">Platform</div>
       <ul class="dash-nav">
         <li><a onclick="showView('stats')"><span class="nav-icon">📊</span> Stats</a></li>
-        <li><a href="https://cyberdudebivash-threat-intel-platform-production.up.railway.app/api/docs" target="_blank"><span class="nav-icon">📖</span> API Docs ↗</a></li>
+        <!-- v184.6: "API Docs" link removed -- pointed at the retired Railway
+             domain's /api/docs, no equivalent exists on intel-gateway. -->
         <li><a href="pricing.html"><span class="nav-icon">⬆</span> Upgrade Plan</a></li>
       </ul>
     </div>
@@ -411,18 +414,26 @@ async function runSearch() {
   if (!q) { Toast.warn('Enter a search query.'); return; }
   document.getElementById('search-results').innerHTML = '<div class="loading-state"><span class="spin">⟳</span> Searching...</div>';
   const key = currentKey || localStorage.getItem(LS_KEY) || '';
-  const headers = key ? { 'X-API-Key': key } : {};
-  const BASE = 'https://cyberdudebivash-threat-intel-platform-production.up.railway.app';
-  try {
-    const res = await fetch(`${BASE}/api/v1/intel/search?q=${encodeURIComponent(q)}&limit=20`, { headers });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const items = Array.isArray(data) ? data : (data.items || data.results || []);
-    if (!items.length) { document.getElementById('search-results').innerHTML = '<div class="loading-state">No results for "' + q + '"</div>'; return; }
-    document.getElementById('search-results').innerHTML = `<div style="font-family:var(--font-mono);font-size:.78rem;color:var(--muted);margin-bottom:12px">${items.length} RESULTS FOR "${q.toUpperCase()}"</div>` + items.map(renderCard).join('');
-  } catch(e) {
-    document.getElementById('search-results').innerHTML = `<div class="loading-state" style="color:var(--amber)">Search requires Pro tier. <a href="pricing.html" style="color:var(--cyan)">Upgrade →</a></div>`;
+  // v184.6: intel-gateway (the real production Worker) has no dedicated
+  // /api/v1/intel/search route. Instead of calling a nonexistent endpoint,
+  // pull the caller's tier-gated feed via the existing fetchFeed() helper
+  // and filter it client-side across the fields a security engineer would
+  // actually search by.
+  const { ok, data } = await APEX.fetchFeed(key, 1000, 0);
+  if (!ok || !data || !Array.isArray(data.items)) {
+    document.getElementById('search-results').innerHTML = `<div class="loading-state" style="color:var(--amber)">Could not load advisories to search. <a href="pricing.html" style="color:var(--cyan)">Upgrade →</a></div>`;
+    return;
   }
+  const needle = q.toLowerCase();
+  const items = data.items.filter(item => {
+    const haystack = [
+      item.title, item.cve, item.cve_id, item.actor, item.threat_actor,
+      item.tlp, item.mitre_tactic, item.mitre_technique, item.summary,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(needle);
+  });
+  if (!items.length) { document.getElementById('search-results').innerHTML = '<div class="loading-state">No results for "' + q + '"</div>'; return; }
+  document.getElementById('search-results').innerHTML = `<div style="font-family:var(--font-mono);font-size:.78rem;color:var(--muted);margin-bottom:12px">${items.length} RESULTS FOR "${q.toUpperCase()}"</div>` + items.map(renderCard).join('');
 }
 
 async function loadStats() {

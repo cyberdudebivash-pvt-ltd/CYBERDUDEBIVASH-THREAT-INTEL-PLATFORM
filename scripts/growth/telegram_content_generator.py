@@ -118,7 +118,10 @@ def _build_daily_roundup(manifest: List[Dict]) -> str:
         f"📱 [Join Telegram Channel]({PLATFORM_URL.replace('intel.','t.me/cyberdudebivash')}SentinelApex)",
         f"",
         f"💡 *Free API — no signup:*",
-        f"`curl {PLATFORM_URL.replace('https://intel.','https://cyberdudebivash-threat-intel-platform-production.up.railway.app')}/api/v1/intel/latest`",
+        # v184.6: Railway backend retired, points at intel-gateway now. Also
+        # fixes a pre-existing bug: the old .replace('https://intel.', <url>)
+        # construction produced a garbled concatenated URL, not a valid one.
+        f"`curl {PLATFORM_URL}/api/v1/intel/latest.json`",
         f"",
         f"_Pro plan ($49/mo) → full IOC + APEX AI + Telegram alerts_",
         f"_→ {PRICING_URL}_",

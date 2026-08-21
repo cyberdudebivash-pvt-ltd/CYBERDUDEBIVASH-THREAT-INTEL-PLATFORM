@@ -5,7 +5,10 @@
 'use strict';
 
 const APEX = (() => {
-  const BASE = 'https://cyberdudebivash-threat-intel-platform-production.up.railway.app';
+  // v184.6: Railway backend retired (orphaned, no live traffic behind it --
+  // see index.html/script.js's own equivalent fix from 2026-08-20). This now
+  // points at intel-gateway, the real production Cloudflare Worker gateway.
+  const BASE = 'https://intel.cyberdudebivash.com';
   const TIMEOUT_MS = 12000;
 
   /** Fetch with timeout + structured error */
@@ -28,7 +31,14 @@ const APEX = (() => {
     }
   }
 
-  /** GET /api/v1/onboard — pricing + quick-start guide */
+  /**
+   * GET /api/v1/onboard — pricing + quick-start guide
+   * @deprecated Since 2026-08-21 (Railway retirement). No equivalent route
+   * exists on intel-gateway (the real production Worker) and no caller of
+   * this function was found anywhere in the repository. Retained, unused,
+   * through 2026-11-21 (90 days) in case another page still embeds this
+   * widget; remove after that date once confirmed no consumer remains.
+   */
   async function onboard() {
     return apiFetch('/api/v1/onboard');
   }
@@ -51,18 +61,30 @@ const APEX = (() => {
     });
   }
 
-  /** GET /api/v1/intel/latest — fetch latest advisories */
-  async function fetchIntel(apiKey, limit = 20) {
+  /**
+   * GET /api/v1/intel/latest.json — shared fetch for fetchIntel/fetchFeed.
+   * v184.6: intel-gateway's real endpoint has no `limit`/`offset` query
+   * params (unlike the retired Railway backend) -- it returns the full
+   * tier-appropriate set; slice client-side instead.
+   */
+  async function _fetchIntelSlice(apiKey, start, end) {
     const headers = {};
     if (apiKey && apiKey !== 'anon') headers['X-API-Key'] = apiKey;
-    return apiFetch(`/api/v1/intel/latest?limit=${limit}`, { headers });
+    const res = await apiFetch('/api/v1/intel/latest.json', { headers });
+    if (res.ok && res.data && Array.isArray(res.data.items)) {
+      res.data = { ...res.data, items: res.data.items.slice(start, end) };
+    }
+    return res;
   }
 
-  /** GET /api/v1/intel/feed — paginated feed */
+  /** GET /api/v1/intel/latest.json — fetch latest advisories, tier-gated server-side by the caller's key. */
+  async function fetchIntel(apiKey, limit = 20) {
+    return _fetchIntelSlice(apiKey, 0, limit);
+  }
+
+  /** GET /api/v1/intel/latest.json — paginated feed. */
   async function fetchFeed(apiKey, limit = 50, offset = 0) {
-    const headers = {};
-    if (apiKey && apiKey !== 'anon') headers['X-API-Key'] = apiKey;
-    return apiFetch(`/api/v1/intel/feed?limit=${limit}&offset=${offset}`, { headers });
+    return _fetchIntelSlice(apiKey, offset, offset + limit);
   }
 
   /** GET /api/v1/stats — platform stats */
@@ -72,14 +94,21 @@ const APEX = (() => {
     return apiFetch('/api/v1/stats', { headers });
   }
 
-  /** GET /api/v1/tiers — public tier info */
+  /**
+   * GET /api/v1/tiers — public tier info
+   * @deprecated Since 2026-08-21 (Railway retirement). No equivalent route
+   * exists on intel-gateway and no caller of this function was found
+   * anywhere in the repository. Retained, unused, through 2026-11-21 (90
+   * days) in case another page still embeds this widget; remove after that
+   * date once confirmed no consumer remains.
+   */
   async function fetchTiers() {
     return apiFetch('/api/v1/tiers');
   }
 
-  /** GET /api/v1/health — liveness check */
+  /** GET /api/health — liveness check (intel-gateway's real path, v184.6) */
   async function health() {
-    return apiFetch('/api/v1/health');
+    return apiFetch('/api/health');
   }
 
   return { onboard, subscribe, fetchIntel, fetchFeed, fetchStats, fetchTiers, health };
