@@ -195,6 +195,28 @@ audit_and_fix_*.py
 # RC-GITIGNORE-1 FIX v171.1: Changed reports/ -> /reports/ to scope to repo root only.
 # Previously api/reports/ (the JSON index files) was accidentally gitignored by this pattern.
 /reports/
+
+# --- PREMIUM CONTENT (v184.4 FIX — served via private R2, never git) ---
+# GOLD/SILVER/STANDARD/EXECUTIVE tiered feeds and the Detection Pack add-on
+# are paid products (see scripts/generate_tiered_feeds.py and
+# scripts/generate_detection_pack.py). This repo is public; committing them
+# here made them fetchable by anyone via raw.githubusercontent.com with zero
+# auth. They now write to this staging path and get uploaded to a private R2
+# bucket, served only through the authenticated /api/v1/premium/* routes in
+# api/main.py. Also exclude the old public paths explicitly in case a future
+# change accidentally reintroduces writes there.
+/data/premium_staging/
+/api/feed.gold.json
+/api/feed.silver.json
+/api/feed.standard.json
+/api/feed.executive.json
+/api/detections/sigma_rules.yml
+/api/detections/kql_queries.kql
+/api/detections/ioc_blocklist.txt
+/api/detections/ioc_structured.json
+/api/detections/cve_watchlist.csv
+/api/detections/pack_manifest.json
+/api/detections/detection_pack.zip
 # --- HELM TMP CHARTS ---
 platform/infrastructure/kubernetes/helm/sentinel-apex/tmpcharts/
 PUSH-GODMODE-v2.ps1

@@ -924,6 +924,76 @@ async def export_stix_bundle(
         }],
     }
 
+# ── GET /api/v1/premium/* — Authenticated Premium Content Delivery ─────────
+# v184.4 FIX: the tiered feed products (Enterprise/Professional/Standard/
+# Executive, $199-$999/mo) and the Detection Pack add-on (+$149/mo) were
+# previously committed straight into this PUBLIC GitHub repo (api/feed.gold.
+# json etc., api/detections/*) with NO route anywhere that ever checked a
+# caller's entitlement before serving them -- fetchable by anyone with zero
+# auth via raw.githubusercontent.com. scripts/generate_tiered_feeds.py and
+# scripts/generate_detection_pack.py now write this content to a private R2
+# bucket instead (see agent/monetization/premium_storage.py); these routes
+# are the only way to reach it, and they validate the caller's tier first.
+#
+# Mapping note: these products are priced independently of the free/pro/
+# enterprise/mssp API subscription tiers ($999 Enterprise feed vs. $499/mo
+# Enterprise API subscription are not the same purchase). Absent a documented
+# cross-product entitlement mapping, gating conservatively on "enterprise" or
+# "mssp" API tier is the only choice supported by evidence in this codebase --
+# a $49/mo Pro subscriber has no basis in TIERS or pricing.html for getting a
+# $999/mo product for free.
+_PREMIUM_FEED_TIERS = {"gold", "silver", "standard", "executive"}
+_PREMIUM_ALLOWED_API_TIERS = {"enterprise", "mssp"}
+
+def _require_premium_entitlement(auth: Dict) -> None:
+    tier = auth["tier"]
+    if tier not in _PREMIUM_ALLOWED_API_TIERS:
+        raise HTTPException(403, {
+            "error": "This product requires an Enterprise or MSSP API subscription",
+            "upgrade": STORE_URL, "current_tier": tier,
+        })
+
+@app.get("/api/v1/premium/feed/{tier}", tags=["Premium"])
+async def premium_feed(tier: str, auth: Dict = Depends(get_api_key)):
+    """Serve a paid-tier intelligence feed (gold/silver/standard/executive)
+    from private R2 storage. Requires Enterprise or MSSP API tier."""
+    tier = tier.lower()
+    if tier not in _PREMIUM_FEED_TIERS:
+        raise HTTPException(404, {"error": f"Unknown premium feed tier: {tier}"})
+    _require_premium_entitlement(auth)
+    from agent.monetization.premium_storage import fetch_premium_artifact
+    data = fetch_premium_artifact(f"feeds/feed.{tier}.json")
+    if data is None:
+        raise HTTPException(503, {
+            "error": f"Premium feed '{tier}' is temporarily unavailable — try again shortly",
+        })
+    return Response(content=data, media_type="application/json")
+
+@app.get("/api/v1/premium/detections/{artifact}", tags=["Premium"])
+async def premium_detections(artifact: str, auth: Dict = Depends(get_api_key)):
+    """Serve a Detection Pack artifact (sigma_rules.yml, kql_queries.kql,
+    ioc_blocklist.txt, ioc_structured.json, cve_watchlist.csv,
+    detection_pack.zip, pack_manifest.json) from private R2 storage.
+    Requires Enterprise or MSSP API tier."""
+    _ALLOWED = {
+        "sigma_rules.yml", "kql_queries.kql", "ioc_blocklist.txt",
+        "ioc_structured.json", "cve_watchlist.csv", "detection_pack.zip",
+        "pack_manifest.json",
+    }
+    if artifact not in _ALLOWED:
+        raise HTTPException(404, {"error": f"Unknown detection pack artifact: {artifact}"})
+    _require_premium_entitlement(auth)
+    from agent.monetization.premium_storage import fetch_premium_artifact
+    data = fetch_premium_artifact(f"detections/{artifact}")
+    if data is None:
+        raise HTTPException(503, {
+            "error": f"Detection pack artifact '{artifact}' is temporarily unavailable — try again shortly",
+        })
+    media_type = "application/zip" if artifact.endswith(".zip") else (
+        "text/csv" if artifact.endswith(".csv") else "application/octet-stream"
+    )
+    return Response(content=data, media_type=media_type)
+
 # ── GET /api/v1/bulk/export ───────────────────────────────────────────────
 @app.get("/api/v1/bulk/export", tags=["Bulk Export"])
 async def bulk_export(

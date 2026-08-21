@@ -93,8 +93,12 @@ FEED_REGISTRY: Dict[str, Dict] = {
         "commercial_use": True,
         "deprecated": False,
     },
+    # v184.4 FIX: gold/silver/standard/executive paths updated to match
+    # scripts/generate_tiered_feeds.py's new private-staging output location
+    # (they used to write to api/feed.*.json, which was PUBLIC in this git
+    # repo -- see agent/monetization/premium_storage.py for the full story).
     "gold": {
-        "path": ROOT / "api" / "feed.gold.json",
+        "path": ROOT / "data" / "premium_staging" / "feed.gold.json",
         "label": "Commercial Gold Tier Feed",
         "purpose": "Premium enriched dataset for gold tier. 260 curated high-signal items.",
         "feed_type": "COMMERCIAL_CVE",
@@ -106,7 +110,7 @@ FEED_REGISTRY: Dict[str, Dict] = {
         "deprecated": False,
     },
     "silver": {
-        "path": ROOT / "api" / "feed.silver.json",
+        "path": ROOT / "data" / "premium_staging" / "feed.silver.json",
         "label": "Commercial Silver Tier Feed",
         "purpose": "Mid-tier enriched feed. 397 items.",
         "feed_type": "COMMERCIAL_CVE",
@@ -118,7 +122,7 @@ FEED_REGISTRY: Dict[str, Dict] = {
         "deprecated": False,
     },
     "standard": {
-        "path": ROOT / "api" / "feed.standard.json",
+        "path": ROOT / "data" / "premium_staging" / "feed.standard.json",
         "label": "Commercial Standard Tier Feed",
         "purpose": "Entry-level commercial feed. 491 items, same count as baseline with reduced enrichment.",
         "feed_type": "COMMERCIAL_CVE",
@@ -130,7 +134,7 @@ FEED_REGISTRY: Dict[str, Dict] = {
         "deprecated": False,
     },
     "executive": {
-        "path": ROOT / "api" / "feed.executive.json",
+        "path": ROOT / "data" / "premium_staging" / "feed.executive.json",
         "label": "Executive Intelligence Feed",
         "purpose": "Curated executive-grade summary feed. 220 items. Confidence not required per format.",
         "feed_type": "EXECUTIVE",
