@@ -52,6 +52,15 @@ concurrency:
   group: sentinel-data-writer
   cancel-in-progress: false
 
+# v184.9 FIX: no top-level default existed. The single job below already
+# declares its own full permissions (contents: write, pages: write) so
+# current runtime behavior was already correctly scoped -- this is
+# defense-in-depth only, protecting a future job added to this file without
+# its own explicit block from silently inheriting the repo's default
+# (potentially broader) permissions.
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PIPELINE_VERSION: '182.0'
