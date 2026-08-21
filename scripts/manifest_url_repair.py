@@ -13,6 +13,8 @@ import os
 import sys
 from pathlib import Path
 
+from p38_shared_validators import is_external_report_url
+
 REPO     = Path(os.environ.get("GITHUB_WORKSPACE", Path(__file__).resolve().parent.parent))
 MANIFEST = REPO / "data" / "stix" / "feed_manifest.json"
 FEED     = REPO / "api" / "feed.json"
@@ -61,8 +63,10 @@ def main() -> int:
     m_list = (raw_m if isinstance(raw_m, list)
               else raw_m.get("advisories", raw_m.get("items", [])))
 
-    def _is_external(url: str) -> bool:
-        return bool(url and url.startswith("http") and "cyberdudebivash" not in url)
+    # Canonical owned-vs-external classification, shared with
+    # sync_report_urls.py and validate_repo.py's V10/V11 checks (single
+    # source of truth for "is this report_url CYBERDUDEBIVASH-owned").
+    _is_external = is_external_report_url
 
     # Repair missing OR external report_url entries (V11 P0 REGRESSION guard)
     repaired = 0
