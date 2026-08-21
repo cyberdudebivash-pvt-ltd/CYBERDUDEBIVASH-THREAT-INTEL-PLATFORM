@@ -6,19 +6,31 @@
 ###############################################################################
 
 # --- CORE WEB & API ORCHESTRATION ---
-fastapi==0.109.0            # High-performance API framework
-uvicorn[standard]==0.27.0   # Production ASGI server
-python-multipart==0.0.6     # Form data support for agent uploads
-pydantic==2.5.3             # Data validation and settings management
-python-dotenv==1.0.0        # Environment variable orchestration
+# v184.7 FIX: fastapi 0.109.0 (PYSEC-2024-38) + starlette pulled in below
+# 0.36.0 by that fastapi version, which caps out at CVE-2026-1943 fixed
+# state only -- the four PYSEC-2026-{161,248,249,2281/2280} starlette CVEs
+# are fixed exclusively in starlette>=1.0, and no fastapi release ever
+# accepts a <1.0 starlette floor alongside a >=1.0 one. Bumping fastapi to
+# the latest release (unbounded starlette floor, >=0.46.0) lets pip's
+# resolver pick starlette>=1.3.1 on its own -- verified via a clean-room
+# pip resolve + pip-audit re-scan (98 -> 1 vulnerability, ecdsa only, see
+# sast-security-scan.yml comment). starlette/protobuf pinned explicitly
+# below (not just left transitive) so a future bare reinstall can't
+# silently regress to an older allowed floor.
+fastapi==0.141.1             # High-performance API framework
+starlette>=1.3.1              # transitive via fastapi -- floor pinned, see v184.7 note above
+uvicorn[standard]==0.52.4    # Production ASGI server
+python-multipart==0.0.32    # Form data support for agent uploads
+pydantic==2.13.4             # Data validation and settings management
+python-dotenv==1.2.3         # Environment variable orchestration
 
 # --- v43 GENESIS & AI REASONING CORE ---
 numpy==1.26.3               # Numerical analysis for G05 Campaign Engine
-pandas==2.2.0               # Telemetry data manipulation
-scikit-learn==1.4.0         # Machine learning for G12 AI Hunter
-scipy==1.12.0               # Statistical modeling for Predictive Cortex
-transformers==4.37.0        # NLP for AI Threat Analyst briefings
-torch==2.2.0                # Deep learning backend for anomaly detection
+pandas==2.2.0                # Telemetry data manipulation
+scikit-learn==1.9.0          # Machine learning for G12 AI Hunter
+scipy==1.12.0                # Statistical modeling for Predictive Cortex
+transformers==5.15.1         # NLP for AI Threat Analyst briefings (soft-imported, deterministic rule-based fallback if unavailable -- see agent/v70_apex_upgrade/ai/summarizer.py)
+torch==2.13.0                 # Deep learning backend for anomaly detection (soft-imported everywhere it's used, deterministic fallback -- see core/ai/, scripts/anomaly_radar_engine.py)
 
 # --- THREAT INTELLIGENCE & STIX/TAXII MESH ---
 stix2==3.0.1                # STIX 2.1 object generation and validation
@@ -28,15 +40,16 @@ taxii2-client==2.3.0        # Internal telemetry syncing
 # --- v44 MONEY ENGINE & REVENUE ORCHESTRATION ---
 stripe==7.11.0              # Enterprise payment gateway integration
 cryptography>=43.0.3        # SaaS license encryption & Zero-Trust Auth; v48.0 FIX: CVE-2024-26130 (CRITICAL 9.1) fixed in 42.0.5+; pinned to >=43.0.3
-pyjwt[crypto]==2.8.0        # Secure tenant session management
+pyjwt[crypto]==2.13.0       # Secure tenant session management; v184.7 FIX: 2.8.0 had 10 CVEs (PYSEC-2026-{120,175,177,179}, PYSEC-2025-183), fixed in 2.13.0
 
 # --- INTEGRATIONS & SENSOR GRID ---
-requests==2.32.3          # Multi-source intelligence ingestion (v75.0: fixed yanked 2.32.0)
+requests==2.34.2           # Multi-source intelligence ingestion; v184.7 FIX: 2.32.3 had PYSEC-2026-{1872,2275}, fixed in 2.33.0+
 httpx==0.26.0               # Async telemetry fetching for v44 Mesh mesh
 aiohttp>=3.10.11            # High-velocity WebSocket firehose support; v48.0 FIX: CVE-2024-27306/CVE-2024-30251 (CRITICAL) fixed in 3.9.4+; pinned to >=3.10.11
 beautifulsoup4==4.12.3      # Zero-day hunting from public advisories
-urllib3>=1.26.18,<2.0      # v143.1 FIX: requests 2.32.3 requires urllib3<2.0 (no RequestsDependencyWarning)
+urllib3>=2.7.0              # v184.7 FIX: 1.26.20 had 5 CVEs, fixed in 2.7.0+; v143.1's <2.0 requests constraint no longer applies at requests>=2.33 (verified via clean-room resolve)
 charset_normalizer>=3.3.2,<4.0  # v143.1 FIX: widen range, compatible with requests 2.32.x
+protobuf>=5.29.6,<6.0       # v184.7 FIX: 4.25.9 had PYSEC-2026-1805, fixed in 5.29.6+; capped <6.0 to match opentelemetry-proto's own protobuf<6.0 constraint (see OpenTelemetry block below)
 
 # --- AUTOMATION & SYNDICATION ---
 feedparser==6.0.10                 # RSS polling for the Syndicate network
@@ -65,8 +78,8 @@ redis==5.0.3                # Redis client — rate limiting, sessions, audit st
                             # Required when: REDIS_URL is set
 
 # Object Storage (Backup)
-boto3==1.34.34              # AWS S3 / Cloudflare R2 backup destination
-botocore==1.34.34           # boto3 dependency (pinned for reproducibility)
+boto3==1.35.99               # AWS S3 / Cloudflare R2 backup destination
+botocore==1.35.99            # boto3 dependency (pinned for reproducibility); v184.7 FIX: 1.34.34 capped urllib3<2.1, blocking the urllib3>=2.7.0 CVE fix above -- botocore's urllib3 constraint widened to <3,!=2.2.0 starting at 1.35.0
                             # Required when: CDB_BACKUP_DESTINATION=s3|r2
 
 # Email (Onboarding)
@@ -74,12 +87,24 @@ sendgrid==6.11.0            # Customer welcome emails & onboarding notifications
                             # Required when: SENDGRID_API_KEY is set
 
 # OpenTelemetry Distributed Tracing — production observability (CDB_TRACING_ENABLED=true)
-opentelemetry-sdk==1.23.0
-opentelemetry-instrumentation-fastapi==0.44b0
-opentelemetry-instrumentation-requests==0.44b0
-opentelemetry-exporter-otlp-proto-grpc==1.23.0
+# v184.7 FIX: opentelemetry-proto==1.23.0 (pulled in transitively by
+# -sdk/-exporter-otlp-proto-grpc at 1.23.0) caps protobuf<5.0, conflicting
+# with the protobuf>=5.29.6 CVE fix above. Bumped the whole opentelemetry
+# family in lockstep (verified via clean-room resolve) to the matching set
+# whose opentelemetry-proto requires protobuf<6.0,>=5.0 instead.
+opentelemetry-sdk==1.44.0
+opentelemetry-instrumentation-fastapi==0.65b0
+opentelemetry-instrumentation-requests==0.65b0
+opentelemetry-exporter-otlp-proto-grpc==1.44.0
 
 # Structured output & password hashing
 passlib[bcrypt]==1.7.4      # Secure password hashing for RBAC user accounts
-python-jose[cryptography]==3.3.0  # RS256 JWT for OIDC federation
+python-jose[cryptography]==3.5.0  # RS256 JWT for OIDC federation; v184.7 FIX: 3.3.0 had 5 CVEs, fixed in 3.4.0+
+# v184.7 NOTE: python-jose[cryptography]'s transitive `ecdsa` dependency
+# (CVE-2024-23342, Minerva timing attack on P-256 ECDSA) has NO fix at any
+# ecdsa version -- upstream: "the python-ecdsa project considers side
+# channel attacks out of scope... there is no planned fix." Not a
+# version-bump problem; suppressed explicitly in
+# .github/workflows/sast-security-scan.yml's pip-audit invocation with
+# this same justification, not silently ignored.
 
