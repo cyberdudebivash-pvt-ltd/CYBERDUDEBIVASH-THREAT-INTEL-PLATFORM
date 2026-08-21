@@ -35,7 +35,6 @@ INDEX_PATH    = BASE_DIR / "data" / "growth" / "seo_index.json"
 PLATFORM_URL  = "https://intel.cyberdudebivash.com"
 PRICING_URL   = "https://intel.cyberdudebivash.com/landing/pricing.html"
 DASH_URL      = "https://intel.cyberdudebivash.com/landing/dashboard.html"
-API_DOCS_URL  = "https://cyberdudebivash-threat-intel-platform-production.up.railway.app/api/docs"
 TELEGRAM_URL  = "https://t.me/cyberdudebivashSentinelApex"
 BRAND         = "CYBERDUDEBIVASH® Sentinel APEX"
 MAX_POSTS_PER_RUN = int(os.environ.get("SEO_MAX_POSTS", "3"))
@@ -209,7 +208,7 @@ def _build_enhanced_cta(entry: Dict) -> str:
 
 ```bash
 # Fetch live threat intelligence right now:
-curl https://cyberdudebivash-threat-intel-platform-production.up.railway.app/api/v1/intel/latest
+curl https://intel.cyberdudebivash.com/api/v1/intel/latest.json
 ```
 
 ### Upgrade for Full APEX Intelligence
@@ -466,7 +465,8 @@ def generate_weekly_page(manifest: Optional[List[Dict]] = None) -> str:
         f"([Details]({e.get('blog_url', PLATFORM_URL)}))"
         for e in kev_list
     ) or "- No new KEV entries this week"
-    api_base = "https://cyberdudebivash-threat-intel-platform-production.up.railway.app"
+    # v184.6: Railway backend retired, points at intel-gateway now.
+    api_base = "https://intel.cyberdudebivash.com"
     post = f"""---
 title: "Top Cyber Threats This Week — {week_str}"
 date: "{iso_date}"
@@ -481,7 +481,7 @@ author: "CYBERDUDEBIVASH Sentinel APEX AI"
 # Top Cyber Threats This Week — {week_str}
 
 > Weekly threat intelligence powered by **CYBERDUDEBIVASH® Sentinel APEX** — 500+ advisories, 12 AI engines, updated every 6 hours.
-> [Live Dashboard]({PLATFORM_URL}) | [Free API]({api_base}/api/v1/intel/latest) | [Get Pro Access]({PRICING_URL}) | [Telegram]({TELEGRAM_URL})
+> [Live Dashboard]({PLATFORM_URL}) | [Free API]({api_base}/api/v1/intel/latest.json) | [Get Pro Access]({PRICING_URL}) | [Telegram]({TELEGRAM_URL})
 
 ## 📊 This Week at a Glance
 

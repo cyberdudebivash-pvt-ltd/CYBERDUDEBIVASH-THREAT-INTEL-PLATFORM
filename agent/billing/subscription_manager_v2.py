@@ -37,7 +37,7 @@ _STRIPE_SUCCESS_URL     = os.environ.get("CDB_STRIPE_SUCCESS_URL", "https://cybe
 _STRIPE_CANCEL_URL      = os.environ.get("CDB_STRIPE_CANCEL_URL", "https://cyberdudebivash.com/billing/cancel")
 _TRIAL_DAYS             = int(os.environ.get("CDB_TRIAL_DAYS", "14"))
 
-# Stripe Price IDs per tier (set in Railway env / GitHub Secrets)
+# Stripe Price IDs per tier (set via GitHub Secrets -- Railway retired)
 _PRICE_IDS = {
     "PRO":        os.environ.get("CDB_STRIPE_PRICE_PRO", ""),
     "ENTERPRISE": os.environ.get("CDB_STRIPE_PRICE_ENTERPRISE", ""),

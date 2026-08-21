@@ -14,6 +14,8 @@ Established by direct code review: every credential-issuing path in `intel-gatew
 
 Business decision, accepted as given for this program. Repository evidence (dedicated Railway deployment configuration in three separate locations) is consistent with Railway having previously been an active deployment target.
 
+**Update (2026-08-21):** acted upon. `railway.json`, `Dockerfile.railway`, `Procfile`, `api/main.py`, `agent/api/api_server.py`, and `sentinel-apex-api/` were removed. `api/main.py`'s premium-content entitlement routes (added in a prior session, before this file's non-deployment was established) were re-targeted to `workers/intel-gateway/src/index.js` first. Three live customer-facing pages (`landing/api.js`, `landing/dashboard.html`, `landing/auth.html`) were found still calling the dead Railway domain and repointed to `intel-gateway`. See `LEGACY_COMPONENTS.md`'s "Retired Components (Railway retirement, 2026-08-21)" section for full detail, including what was intentionally left unresolved (an architecture mismatch in `auth.html`'s login/register forms, and several now-orphaned `api/*.py` helper modules not in the agreed removal scope).
+
 ## Google Blogger publishing is retired
 
 Business decision, corroborated by repository evidence: the platform's report-generation pipeline (`agent/sentinel_blogger.py`) documents its own removal of Blogger integration in an earlier version, replacing it with direct R2 writes. A cluster of now-unused Blogger-publishing modules was identified as a consequence and removed in EPTP Phase 8, Batch 1.
