@@ -23,19 +23,26 @@
 # =============================================================================
 
 # --- CORE WEB & API ---
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-python-dotenv==1.0.0
-python-multipart==0.0.6
+# v184.9 FIX: this file had drifted into a stale duplicate of the pre-fix
+# root requirements.txt -- 84 pip-audit findings across 9 packages, live in
+# 14 production CI workflows (see file header). Applying the same
+# already-verified floor-bumps shipped in requirements.txt (v184.7/v184.8),
+# not re-deriving them -- see that file's inline comments for full CVE
+# rationale per package.
+fastapi==0.141.1
+starlette>=1.3.1              # transitive via fastapi -- floor pinned, see requirements.txt v184.7 note
+uvicorn[standard]==0.52.4
+pydantic==2.13.4
+python-dotenv==1.2.3
+python-multipart==0.0.32
 
 # --- NETWORKING & INTEL INGESTION ---
-requests==2.32.3
+requests==2.34.2
 httpx==0.26.0
-aiohttp==3.9.2
+aiohttp>=3.14.3
 feedparser==6.0.10
 beautifulsoup4==4.12.3
-urllib3>=1.26.18,<2.0
+urllib3>=2.7.0
 charset_normalizer>=3.3.2,<4.0
 
 # --- STIX / TAXII (threat intel formats) ---
@@ -44,8 +51,8 @@ stix2-validator==3.1.2
 taxii2-client==2.3.0
 
 # --- SECURITY & JWT ---
-cryptography==42.0.2
-pyjwt[crypto]==2.8.0
+cryptography>=43.0.3
+pyjwt[crypto]==2.13.0
 
 # --- LIGHT NUMERICAL (no torch/transformers/scipy) ---
 numpy==1.26.3
