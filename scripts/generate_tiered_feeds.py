@@ -37,6 +37,15 @@ from typing import Any, Dict, List, Optional
 REPO          = Path(__file__).resolve().parent.parent
 BASELINE_PATH = Path(os.environ.get("BASELINE_PATH", str(REPO / "api" / "feed.baseline.json")))
 API_DIR       = REPO / "api"
+# v184.4 FIX: GOLD/SILVER/STANDARD/EXECUTIVE (the actual paid tiers -- $199 to
+# $999/mo) previously wrote straight into API_DIR, which is committed to this
+# PUBLIC GitHub repo -- fetchable by anyone with zero auth via
+# raw.githubusercontent.com, with no route anywhere in this codebase that ever
+# checked a caller's tier before serving them. They now write to this
+# gitignored local staging path and get uploaded to a private R2 bucket
+# (agent/monetization/premium_storage.py) instead. Only TRIAL (the intended
+# public teaser) still writes to API_DIR.
+PREMIUM_STAGING_DIR = REPO / "data" / "premium_staging"
 DRY_RUN       = os.environ.get("DRY_RUN", "false").strip().lower() == "true"
 PLATFORM_BASE = "https://intel.cyberdudebivash.com"
 VERSION       = "185.0"
@@ -194,16 +203,21 @@ def main() -> int:
     log.info("EXECUTIVE brief: %d items (CRITICAL+HIGH only)", len(exec_items))
 
     # ── Write products ────────────────────────────────────────────────────────────
+    # v184.4 FIX: paid tiers (is_premium=True) go to PREMIUM_STAGING_DIR
+    # (gitignored) and get uploaded to the private R2 bucket below, instead of
+    # API_DIR (public, git-committed). TRIAL is the one intentionally-public
+    # tier and keeps writing to API_DIR unchanged.
+    PREMIUM_STAGING_DIR.mkdir(parents=True, exist_ok=True)
     products = [
-        (API_DIR / "feed.gold.json",      gold_items,     "ENTERPRISE",    "Gold-tier verified threat intelligence — all premium enrichments included"),
-        (API_DIR / "feed.silver.json",     silver_items,   "PROFESSIONAL",  "Professional threat intelligence — GOLD + SILVER certified items"),
-        (API_DIR / "feed.standard.json",   standard_items, "STANDARD",      "Full certified intelligence feed — all 176 quality-gated items"),
-        (API_DIR / "feed.trial.json",      trial_items,    "TRIAL",         "Trial preview — top 10 intelligence items (redacted). Upgrade for full access."),
-        (API_DIR / "feed.executive.json",  exec_items,     "EXECUTIVE",     "Executive intelligence brief — CRITICAL + HIGH severity items only"),
+        (PREMIUM_STAGING_DIR / "feed.gold.json",      gold_items,     "ENTERPRISE",    "Gold-tier verified threat intelligence — all premium enrichments included", True),
+        (PREMIUM_STAGING_DIR / "feed.silver.json",    silver_items,   "PROFESSIONAL",  "Professional threat intelligence — GOLD + SILVER certified items", True),
+        (PREMIUM_STAGING_DIR / "feed.standard.json",  standard_items, "STANDARD",      "Full certified intelligence feed — all 176 quality-gated items", True),
+        (API_DIR / "feed.trial.json",                 trial_items,    "TRIAL",         "Trial preview — top 10 intelligence items (redacted). Upgrade for full access.", False),
+        (PREMIUM_STAGING_DIR / "feed.executive.json", exec_items,     "EXECUTIVE",     "Executive intelligence brief — CRITICAL + HIGH severity items only", True),
     ]
 
     written = 0
-    for path, items, tier, desc in products:
+    for path, items, tier, desc, is_premium in products:
         wrapped = _wrap(items, tier, desc, total)
         if DRY_RUN:
             log.info("[DRY RUN] Would write %s (%d items)", path.name, len(items))
@@ -212,6 +226,17 @@ def main() -> int:
             if _atomic_write(path, wrapped):
                 log.info("Written: %s (%d items)", path.name, len(items))
                 written += 1
+                if is_premium:
+                    from agent.monetization.premium_storage import upload_premium_artifact
+                    if upload_premium_artifact(str(path), f"feeds/{path.name}"):
+                        log.info("Uploaded to private R2: feeds/%s", path.name)
+                    else:
+                        log.error(
+                            "R2 upload FAILED for %s -- paid customers will not "
+                            "see updated content until this is retried "
+                            "(local file still written for manual recovery)",
+                            path.name,
+                        )
             else:
                 log.error("FAILED: %s", path.name)
 
@@ -221,12 +246,17 @@ def main() -> int:
         "version":      VERSION,
         "platform":     PLATFORM_BASE,
         "products": [
+            # v184.4 FIX: "endpoint" now points at the authenticated
+            # /api/v1/premium/feed/{tier} route (api/main.py) instead of a
+            # public GitHub Pages URL -- the raw files no longer live there.
+            # "file" documents the private R2 key, not a repo path (there
+            # isn't one for these tiers anymore).
             {
                 "tier":      "ENTERPRISE",
                 "plan":      "Enterprise Plan",
                 "price_usd_monthly": 999,
-                "endpoint":  f"{PLATFORM_BASE}/api/feed.gold.json",
-                "file":      "api/feed.gold.json",
+                "endpoint":  "/api/v1/premium/feed/gold",
+                "file":      "r2://sentinel-apex-premium/feeds/feed.gold.json",
                 "items":     len(gold_items),
                 "features":  ["GOLD tier only", "CVSS/EPSS data", "KEV flags", "IOCs", "Sigma/KQL rules", "APEX AI", "exec_summary", "STIX 2.1"],
             },
@@ -234,8 +264,8 @@ def main() -> int:
                 "tier":      "PROFESSIONAL",
                 "plan":      "Professional Plan",
                 "price_usd_monthly": 499,
-                "endpoint":  f"{PLATFORM_BASE}/api/feed.silver.json",
-                "file":      "api/feed.silver.json",
+                "endpoint":  "/api/v1/premium/feed/silver",
+                "file":      "r2://sentinel-apex-premium/feeds/feed.silver.json",
                 "items":     len(silver_items),
                 "features":  ["GOLD + SILVER tiers", "CVSS/EPSS data", "KEV flags", "IOCs", "Sigma/KQL rules", "exec_summary"],
             },
@@ -243,8 +273,8 @@ def main() -> int:
                 "tier":      "STANDARD",
                 "plan":      "Standard Plan",
                 "price_usd_monthly": 199,
-                "endpoint":  f"{PLATFORM_BASE}/api/feed.standard.json",
-                "file":      "api/feed.standard.json",
+                "endpoint":  "/api/v1/premium/feed/standard",
+                "file":      "r2://sentinel-apex-premium/feeds/feed.standard.json",
                 "items":     len(standard_items),
                 "features":  ["All certified items", "CVSS data", "exec_summary", "severity scoring"],
             },
@@ -252,8 +282,8 @@ def main() -> int:
                 "tier":      "EXECUTIVE",
                 "plan":      "Executive Brief",
                 "price_usd_monthly": 299,
-                "endpoint":  f"{PLATFORM_BASE}/api/feed.executive.json",
-                "file":      "api/feed.executive.json",
+                "endpoint":  "/api/v1/premium/feed/executive",
+                "file":      "r2://sentinel-apex-premium/feeds/feed.executive.json",
                 "items":     len(exec_items),
                 "features":  ["CRITICAL+HIGH only", "exec_summary", "CVSS/EPSS", "KEV", "lean payload"],
             },
