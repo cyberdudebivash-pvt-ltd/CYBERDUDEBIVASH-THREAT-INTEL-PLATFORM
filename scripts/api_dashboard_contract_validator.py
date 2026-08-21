@@ -44,6 +44,19 @@ v184.1 TWO ADDITIONAL CHECK-2 FALSE-POSITIVE GUARDS:
      above (defense-in-depth for genuinely-new items that predate any
      manifest entry to title-match against).
 
+v184.2 CISA-KEV-BULLETIN GUARD (2026-08-21 deploy-worker failure this
+  version fixes): confirmed by direct inspection that api/feed.json's
+  "U.S. CISA adds <N flaws> to its Known Exploited Vulnerabilities catalog"
+  items are roundup bulletins covering multiple CVEs under one entry --
+  a different content shape than the single-CVE/single-indicator objects
+  the STIX manifest generator emits. Checked the full 644-entry manifest:
+  zero KEV-bulletin-titled entries exist anywhere in it, historically --
+  this is a structural, by-design content-type gap (the manifest generator
+  has no STIX object shape for a multi-CVE roundup), not a missed write or
+  a timing lag guards 1/2 above would catch (no title match is possible
+  when the manifest never contains this content type at all). Self-heal
+  as a WARN via a title-prefix match, same as the other CHECK-2 guards.
+
 Checks:
   1. API internal sort order (HARD FAIL)
   2. API top-N items exist in manifest (WARN on ID format migration, content
@@ -63,7 +76,9 @@ import os, sys, json, argparse, hashlib, html as html_module
 import re
 from datetime import datetime, timezone
 
-SCRIPT_VERSION = "1.7.0"  # v184.1: pending-manifest-sync guard (CHECK 2 demoted to WARN for items newer than the manifest's newest entry)
+SCRIPT_VERSION = "1.7.1"  # v184.2: CISA-KEV-bulletin guard (CHECK 2 demoted to WARN for multi-CVE roundup items the STIX manifest generator never emits)
+KEV_BULLETIN_TITLE_PREFIX = "U.S. CISA adds "
+KEV_BULLETIN_TITLE_MARKER = "Known Exploited Vulnerabilities catalog"
 DEFAULT_TOP    = 50
 MAX_DELTA_SEC  = 1
 
@@ -331,6 +346,7 @@ def validate(repo_root, top_n):
     api_migration_warns     = 0
     api_content_match_warns = 0
     api_pending_sync_warns  = 0
+    api_kev_bulletin_warns  = 0
     dominant_hex_len        = api_hex_len or 24  # from detect_id_format_migration
 
     for api_rank, a_entry in enumerate(a_top, 1):
@@ -339,22 +355,29 @@ def validate(repo_root, top_n):
             api_missing_count += 1
             item_hex_len  = get_hex_len(a_entry)
             item_is_legacy = (0 < item_hex_len < dominant_hex_len)
-            item_title = a_entry.get("title")
+            item_title = a_entry.get("title") or ""
             item_content_match = bool(item_title and item_title in manifest_by_title)
+            item_is_kev_bulletin = (
+                item_title.startswith(KEV_BULLETIN_TITLE_PREFIX)
+                and KEV_BULLETIN_TITLE_MARKER in item_title
+            )
             item_ts = normalize_ts(ts_key(a_entry))
             item_is_pending_sync = bool(manifest_newest_ts and item_ts and item_ts > manifest_newest_ts)
             effective_migration = (
                 is_migration or item_is_legacy or not manifest_is_full_history
-                or item_content_match or item_is_pending_sync
+                or item_content_match or item_is_pending_sync or item_is_kev_bulletin
             )
             if item_content_match and not (is_migration or item_is_legacy or not manifest_is_full_history):
                 api_content_match_warns += 1
             elif item_is_pending_sync and not (is_migration or item_is_legacy or not manifest_is_full_history):
                 api_pending_sync_warns += 1
+            elif item_is_kev_bulletin and not (is_migration or item_is_legacy or not manifest_is_full_history):
+                api_kev_bulletin_warns += 1
             reason_label = (
                 "ID SCHEMA MISMATCH (legacy 12-char, self-healing)" if item_is_legacy
                 else "CONTENT MATCH UNDER DIFFERENT ID (self-healing)" if item_content_match
                 else "PENDING MANIFEST SYNC (newer than manifest's latest ingest, self-healing)" if item_is_pending_sync
+                else "KEV CATALOG BULLETIN (multi-CVE roundup, no discrete STIX entry expected, self-healing)" if item_is_kev_bulletin
                 else "NOT IN MANIFEST"
             )
             msg = f"API ITEM {reason_label}: {a_id[:40]} (api rank={api_rank})"
@@ -377,12 +400,17 @@ def validate(repo_root, top_n):
     stats["api_legacy_id_warnings"]     = api_migration_warns
     stats["api_content_match_warnings"] = api_content_match_warns
     stats["api_pending_sync_warnings"]  = api_pending_sync_warns
-    _other_warns = api_migration_warns - api_content_match_warns - api_pending_sync_warns
+    stats["api_kev_bulletin_warnings"]  = api_kev_bulletin_warns
+    _other_warns = (
+        api_migration_warns - api_content_match_warns
+        - api_pending_sync_warns - api_kev_bulletin_warns
+    )
     stats["missing_reason"] = (
         "id_format_migration"      if (is_migration or _other_warns > 0)
         else "manifest_not_full_history" if not manifest_is_full_history
         else "content_match_different_id" if api_content_match_warns > 0
         else "pending_manifest_sync" if api_pending_sync_warns > 0
+        else "kev_catalog_bulletin" if api_kev_bulletin_warns > 0
         else "genuine_regression"
     )
 
@@ -518,6 +546,9 @@ def main():
         elif stats.get("api_pending_sync_warnings", 0) > 0:
             print(f"  [OK] {stats['api_pending_sync_warnings']} item(s) pending manifest sync "
                   f"(newer than manifest's latest ingest, self-healing on next cycle)")
+        elif stats.get("api_kev_bulletin_warnings", 0) > 0:
+            print(f"  [OK] {stats['api_kev_bulletin_warnings']} item(s) are CISA KEV catalog "
+                  f"bulletins (multi-CVE roundup, no discrete STIX manifest entry expected)")
         else:
             print(f"  [OK] All {n} top entries verified in manifest")
         print(f"  [OK] No duplicates in api/feed.json")
@@ -556,6 +587,8 @@ def main():
             if stats.get("api_content_match_warnings", 0) > 0
             else f" [PENDING MANIFEST SYNC: {stats.get('api_pending_sync_warnings',0)} warnings]"
             if stats.get("api_pending_sync_warnings", 0) > 0
+            else f" [KEV CATALOG BULLETIN: {stats.get('api_kev_bulletin_warnings',0)} warnings]"
+            if stats.get("api_kev_bulletin_warnings", 0) > 0
             else ""
         )
         print(
