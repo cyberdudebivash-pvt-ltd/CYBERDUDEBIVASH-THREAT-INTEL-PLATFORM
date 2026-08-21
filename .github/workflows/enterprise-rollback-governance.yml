@@ -56,16 +56,28 @@ jobs:
     steps:
       - name: Verify CONFIRM token
         id: check
+        # v184.8 FIX: free-text workflow_dispatch inputs (confirm_rollback,
+        # target_ref, rollback_reason) are passed via env: and referenced as
+        # shell variables instead of being template-spliced into the run:
+        # script -- splicing happens before bash ever parses the script, so a
+        # value containing quotes/shell metacharacters previously achieved
+        # arbitrary command execution in this contents:write/deployments:write
+        # job. Same fix applied to every run: step below that touches these
+        # inputs.
+        env:
+          CONFIRM_ROLLBACK: ${{ github.event.inputs.confirm_rollback }}
+          TARGET_REF: ${{ github.event.inputs.target_ref }}
+          ROLLBACK_REASON: ${{ github.event.inputs.rollback_reason }}
         run: |
-          if [[ "${{ github.event.inputs.confirm_rollback }}" != "CONFIRM" ]]; then
+          if [[ "$CONFIRM_ROLLBACK" != "CONFIRM" ]]; then
             echo "::error::Rollback requires confirm_rollback=CONFIRM. Aborting."
             echo "authorized=false" >> $GITHUB_OUTPUT
             exit 1
           fi
           echo "authorized=true" >> $GITHUB_OUTPUT
           echo "Rollback authorized by: ${{ github.actor }}"
-          echo "Target ref: ${{ github.event.inputs.target_ref }}"
-          echo "Reason: ${{ github.event.inputs.rollback_reason }}"
+          echo "Target ref: $TARGET_REF"
+          echo "Reason: $ROLLBACK_REASON"
 
   # ── Pre-Rollback State Capture ──────────────────────────────────────────────
   snapshot:
@@ -94,11 +106,13 @@ jobs:
           echo "Rollback safety tag: ${ROLLBACK_TAG}"
 
       - name: Create pre-rollback safety tag
+        env:
+          ROLLBACK_REASON: ${{ github.event.inputs.rollback_reason }}
         run: |
           git config user.name  "SENTINEL APEX Rollback Bot"
           git config user.email "noreply@cyberdudebivash.in"
           git tag -a "${{ steps.capture.outputs.rollback_tag }}" \
-            -m "Pre-rollback safety snapshot | Reason: ${{ github.event.inputs.rollback_reason }} | Actor: ${{ github.actor }}"
+            -m "Pre-rollback safety snapshot | Reason: $ROLLBACK_REASON | Actor: ${{ github.actor }}"
           git push origin "${{ steps.capture.outputs.rollback_tag }}"
           echo "Safety tag pushed: ${{ steps.capture.outputs.rollback_tag }}"
 
@@ -118,8 +132,9 @@ jobs:
 
       - name: Validate target ref exists and is reachable
         id: validate
+        env:
+          TARGET_REF: ${{ github.event.inputs.target_ref }}
         run: |
-          TARGET_REF="${{ github.event.inputs.target_ref }}"
           TARGET_SHA=$(git rev-parse --verify "$TARGET_REF" 2>/dev/null || echo "INVALID")
 
           if [[ "$TARGET_SHA" == "INVALID" ]]; then
@@ -191,6 +206,8 @@ jobs:
           git config user.email "noreply@cyberdudebivash.in"
 
       - name: Execute git revert to target
+        env:
+          ROLLBACK_REASON: ${{ github.event.inputs.rollback_reason }}
         run: |
           TARGET_SHA="${{ needs.validate-target.outputs.target_sha }}"
           CURRENT_SHA="${{ needs.snapshot.outputs.current_sha }}"
@@ -225,7 +242,7 @@ jobs:
             git revert --no-commit "$COMMIT"
           done
 
-          git commit -m "chore(rollback): Revert to ${TARGET_SHA:0:8} | Reason: ${{ github.event.inputs.rollback_reason }} | Actor: ${{ github.actor }} | Pre-rollback tag: ${{ needs.snapshot.outputs.rollback_tag }}" \
+          git commit -m "chore(rollback): Revert to ${TARGET_SHA:0:8} | Reason: $ROLLBACK_REASON | Actor: ${{ github.actor }} | Pre-rollback tag: ${{ needs.snapshot.outputs.rollback_tag }}" \
             --no-verify
 
           git push origin HEAD:main
@@ -290,6 +307,20 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Write rollback audit record
+        # v184.8 FIX: previously template-spliced ${{ }} values directly into
+        # Python source inside the heredoc -- a rollback_reason/target_ref
+        # containing a `"` followed by Python syntax executed arbitrary code
+        # on the runner. Values now flow through env: and os.environ instead.
+        env:
+          ACTOR: ${{ github.actor }}
+          TARGET_REF: ${{ github.event.inputs.target_ref }}
+          TARGET_SHA: ${{ needs.validate-target.outputs.target_sha }}
+          PRE_ROLLBACK_SHA: ${{ needs.snapshot.outputs.current_sha }}
+          SAFETY_TAG: ${{ needs.snapshot.outputs.rollback_tag }}
+          ROLLBACK_REASON: ${{ github.event.inputs.rollback_reason }}
+          RUN_ID: ${{ github.run_id }}
+          SKIP_CANARY: ${{ github.event.inputs.skip_canary }}
+          CANARY_RESULT: ${{ needs.post-rollback-canary.result }}
         run: |
           python3 - <<'EOF'
           import json, datetime, os
@@ -297,15 +328,15 @@ jobs:
           record = {
               "timestamp":      datetime.datetime.utcnow().isoformat() + "Z",
               "event":          "production_rollback",
-              "actor":          "${{ github.actor }}",
-              "target_ref":     "${{ github.event.inputs.target_ref }}",
-              "target_sha":     "${{ needs.validate-target.outputs.target_sha }}",
-              "pre_rollback_sha": "${{ needs.snapshot.outputs.current_sha }}",
-              "safety_tag":     "${{ needs.snapshot.outputs.rollback_tag }}",
-              "reason":         "${{ github.event.inputs.rollback_reason }}",
-              "run_id":         "${{ github.run_id }}",
-              "canary_skipped": "${{ github.event.inputs.skip_canary }}" == "true",
-              "status":         "${{ needs.post-rollback-canary.result }}" if "${{ github.event.inputs.skip_canary }}" != "true" else "skipped",
+              "actor":          os.environ["ACTOR"],
+              "target_ref":     os.environ["TARGET_REF"],
+              "target_sha":     os.environ["TARGET_SHA"],
+              "pre_rollback_sha": os.environ["PRE_ROLLBACK_SHA"],
+              "safety_tag":     os.environ["SAFETY_TAG"],
+              "reason":         os.environ["ROLLBACK_REASON"],
+              "run_id":         os.environ["RUN_ID"],
+              "canary_skipped": os.environ["SKIP_CANARY"] == "true",
+              "status":         os.environ["CANARY_RESULT"] if os.environ["SKIP_CANARY"] != "true" else "skipped",
           }
           print(json.dumps(record, indent=2))
           print("\n[AUDIT] Rollback event recorded.")
@@ -313,8 +344,20 @@ jobs:
 
       - name: Notify Telegram
         if: always()
+        # v184.8 FIX: rollback_reason/target_ref previously spliced directly
+        # into MSG="..." before the shell parsed it, in the same step as the
+        # Telegram bot token -- a crafted reason could break out of the string
+        # and exfiltrate TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID via the same curl
+        # call. All values (including secrets) now flow through env:.
+        env:
+          ACTOR: ${{ github.actor }}
+          TARGET_REF: ${{ github.event.inputs.target_ref }}
+          ROLLBACK_REASON: ${{ github.event.inputs.rollback_reason }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          MSG="🔄 SENTINEL APEX ROLLBACK | Actor: ${{ github.actor }} | Target: ${{ github.event.inputs.target_ref }} | Reason: ${{ github.event.inputs.rollback_reason }} | Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+          MSG="🔄 SENTINEL APEX ROLLBACK | Actor: $ACTOR | Target: $TARGET_REF | Reason: $ROLLBACK_REASON | Run: $RUN_URL"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="$TELEGRAM_CHAT_ID" \
             -d text="$MSG" || true

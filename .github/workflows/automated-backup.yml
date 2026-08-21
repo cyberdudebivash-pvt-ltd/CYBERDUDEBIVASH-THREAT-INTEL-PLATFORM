@@ -190,14 +190,19 @@ jobs:
         run: pip install cryptography boto3 --quiet
 
       - name: Verify backup integrity
+        # v184.8 FIX: backup_id (free-text workflow_dispatch input) previously
+        # template-spliced into BACKUP_ID="..." before the shell parsed it, in
+        # the same step as CDB_BACKUP_ENCRYPTION_KEY/CDB_BACKUP_S3_BUCKET.
+        # Passed through env: (BACKUP_ID_INPUT) instead.
         env:
           CDB_BACKUP_ENABLED:        "true"
           CDB_BACKUP_DESTINATION:    ${{ vars.CDB_BACKUP_DESTINATION || 'local' }}
           CDB_BACKUP_ENCRYPTION_KEY: ${{ secrets.CDB_BACKUP_ENCRYPTION_KEY }}
           CDB_BACKUP_S3_BUCKET:      ${{ secrets.CDB_BACKUP_S3_BUCKET }}
           CDB_BACKUP_LOCAL_PATH:     "data/backups"
+          BACKUP_ID_INPUT:           ${{ github.event.inputs.backup_id }}
         run: |
-          BACKUP_ID="${{ github.event.inputs.backup_id }}"
+          BACKUP_ID="${BACKUP_ID_INPUT}"
           if [[ -z "$BACKUP_ID" ]]; then
             echo "::error::backup_id input is required for verify operation"
             exit 1
