@@ -60,7 +60,11 @@ MANIFEST_STATE_DIR = DATA_DIR / "manifest_integrity"
 
 # Manifest paths
 FEED_MANIFEST = DATA_DIR / "feed_manifest.json"
-FEED_JSON = DATA_DIR / "feed.json"
+# v161.3 P0 FIX: FEED_JSON (data/feed.json, the stale research snapshot --
+# see p38_shared_validators.FEED_REGISTRY["research"]) was defined but never
+# referenced anywhere in this file -- dead code, removed rather than pointed
+# at a live feed, since introducing a new consumer would be scope creep this
+# module's manifest-integrity purpose doesn't call for.
 APEX_MANIFEST = DATA_DIR / "apex_enriched_manifest.json"
 APEX_V2_MANIFEST = DATA_DIR / "apex_v2_manifest.json"
 

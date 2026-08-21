@@ -37,8 +37,11 @@ _UNDATED_RE = re.compile(r"/reports/intel--[^/]+\.html$")
 
 
 def is_malformed(url: str) -> bool:
+    # Empty report_url is a truthful "no internal report published yet" state
+    # (see scripts/sync_report_urls.py's URL contract) -- not malformed. Only
+    # a non-empty, wrongly-shaped URL is a real defect.
     if not url:
-        return True
+        return False
     if url.endswith("/"):
         return True
     if _UNDATED_RE.search(url) and not _DATE_PATH_RE.search(url):

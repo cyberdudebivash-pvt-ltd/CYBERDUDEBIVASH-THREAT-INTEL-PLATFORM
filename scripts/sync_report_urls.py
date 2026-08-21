@@ -20,10 +20,23 @@ THIS SCRIPT:
   5. Atomic write → api/feed.json (tmp + os.replace, never partial)
   6. Also updates api/latest.json if present
 
+URL CONTRACT (v161.3 — see scripts/p38_shared_validators.py):
+  report_url = CYBERDUDEBIVASH-owned published intelligence report location.
+  source_url = external evidence/advisory location. These are NEVER
+  interchangeable. report_url is NEVER set to source_url as a "better than
+  empty" fallback -- that produced 14 report_url==source_url regressions
+  (T03/T09) because it conflates "no internal report exists" with "here is
+  a report". If no internal report exists, report_url is left truthfully
+  empty so the dashboard shows its existing "NO DOSSIER" state.
+
 Strategy:
-  - NEVER clears an existing valid report_url
+  - NEVER clears an existing valid (owned) report_url
   - NEVER sets report_url to a non-existent path (disk-verified optional)
+  - NEVER promotes source_url (or any external URL) into report_url
   - Always makes URLs absolute (https://intel.cyberdudebivash.com/...)
+  - Idempotent: clears any stale external report_url left over from a prior
+    corrupted run instead of leaving it in place, so repeated runs converge
+    to the same truthful state rather than drifting
   - Non-fatal: any item-level error is logged and skipped, pipeline continues
 
 INSERTION POINT: sentinel-blogger.yml STAGE 3.1.7 (after STAGE 3.1.6)
@@ -43,6 +56,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from p38_shared_validators import is_owned_report_url, is_external_report_url
 
 # ---------------------------------------------------------------------------
 # Config
@@ -115,16 +130,17 @@ def _make_absolute_url(url: str) -> str:
 
 
 def _is_valid_report_url(url: str) -> bool:
-    """Check that a report_url looks like a real report path (not placeholder)."""
-    if not url:
+    """Check that a report_url is a real, CYBERDUDEBIVASH-owned report path
+    (not a placeholder and not an external source URL). A relative path must
+    be under /reports/; an absolute URL must be on an owned domain -- same
+    definition validate_repo.py's V10 check enforces, via the shared
+    p38_shared_validators helper so this script, manifest_url_repair.py, and
+    validate_repo.py agree on exactly one definition of "valid report URL"."""
+    if not url or url in ("#", "/"):
         return False
-    if url in ("#", "/", ""):
-        return False
-    if "reports/" not in url:
-        return False
-    if url.endswith(".html") or "/reports/" in url:
-        return True
-    return False
+    if url.startswith("/"):
+        return url.startswith("/reports/")
+    return is_owned_report_url(url)
 
 
 def _guess_report_path_from_item(item: dict) -> Optional[Path]:
@@ -245,7 +261,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     synced_from_manifest  = 0
     synced_from_disk      = 0
-    synced_from_source_url = 0
+    cleared_invalid       = 0
     already_valid         = 0
     not_found             = 0
     errors                = 0
@@ -289,18 +305,19 @@ def main() -> int:
                     synced_from_disk += 1
                     continue
 
-            # Source URL fallback: use source_url for items with no internal HTML report.
-            # Gives subscribers (GitHub Advisory, SecurityAffairs, BleepingComputer, etc.)
-            # a clickable reference link instead of an empty report_url field.
-            # Overwritten automatically in future runs if an internal HTML report is generated.
-            source_url = (item.get("source_url") or "").strip()
-            if source_url and source_url.startswith("http"):
-                item["report_url"]          = source_url
-                item["internal_report_url"] = ""  # empty: distinguishes external from internal
-                synced_from_source_url += 1
-                continue
-
-            # Genuinely no report for this item
+            # No internal CYBERDUDEBIVASH report exists for this item yet.
+            # report_url and source_url are semantically distinct (report_url =
+            # owned published report; source_url = external evidence) and must
+            # never be conflated -- an external source is not a substitute
+            # report. Represent this truthfully: report_url stays unavailable.
+            # If a stale/invalid value is already sitting there (e.g. a
+            # leftover external URL from a previously-corrupted run), clear it
+            # so repeated runs converge to the same truthful state instead of
+            # drifting -- this is what makes the sync idempotent.
+            if existing and is_external_report_url(existing):
+                cleared_invalid += 1
+            item["report_url"]          = ""
+            item["internal_report_url"] = ""
             not_found += 1
 
         except Exception as e:
@@ -309,10 +326,10 @@ def main() -> int:
 
     elapsed = time.monotonic() - t_start
     log.info(
-        "SYNC COMPLETE: manifest=%d disk=%d source_url=%d already_valid=%d not_found=%d errors=%d "
-        "total=%d elapsed=%.1fs",
-        synced_from_manifest, synced_from_disk, synced_from_source_url,
-        already_valid, not_found, errors, len(feed_data), elapsed
+        "SYNC COMPLETE: manifest=%d disk=%d already_valid=%d not_found=%d "
+        "(of which cleared_invalid=%d) errors=%d total=%d elapsed=%.1fs",
+        synced_from_manifest, synced_from_disk, already_valid, not_found,
+        cleared_invalid, errors, len(feed_data), elapsed
     )
 
     # ------------------------------------------------------------------

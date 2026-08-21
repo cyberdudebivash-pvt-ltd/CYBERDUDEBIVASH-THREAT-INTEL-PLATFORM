@@ -13,9 +13,10 @@ Result written to data/quality/p36_certification_report.json.
 from __future__ import annotations
 import json, pathlib, sys, datetime, re
 
+from p38_shared_validators import get_certification_feed, has_mitre_coverage, StaleFeedError
+
 ROOT    = pathlib.Path(__file__).resolve().parent.parent
 DATA_Q  = ROOT / "data" / "quality"
-FEED_P  = ROOT / "data" / "feed.json"
 SRC_P   = ROOT / "workers" / "intel-gateway" / "src"
 INDEX_P = SRC_P / "index.js"
 CI_P    = ROOT / "scripts" / "ci_stats_extract.py"
@@ -30,12 +31,18 @@ def _load_json(path: pathlib.Path) -> dict | list | None:
 
 
 def _load_feed() -> list:
-    raw = _load_json(FEED_P)
-    if raw is None:
+    # v161.3 P0 FIX: was data/feed.json -- a 3-month-stale research snapshot
+    # (see p38_shared_validators.FEED_REGISTRY["research"]). That registry's
+    # own "root" entry claimed this script consumed root feed.json as
+    # primary with research as a G06 fallback; the actual code (this
+    # function, pre-fix) did neither -- it read research unconditionally,
+    # no fallback at all. Now reads the live production feed via the
+    # canonical resolver, same fix already applied to p33 (PR #219) and the
+    # other Phase 2 sibling scripts.
+    try:
+        return get_certification_feed("live").items
+    except (StaleFeedError, KeyError):
         return []
-    if isinstance(raw, list):
-        return raw
-    return raw.get("items", raw.get("data", []))
 
 
 def _gate(gate_id: str, label: str, severity: str, status: bool, detail: str) -> dict:
@@ -113,7 +120,7 @@ def run_certification() -> dict:
     gates.append(_gate("G11", "Confidence field coverage >= 80%", "BLOCKER", g11,
                         f"confidence_pct={confidence_pct:.1f}%"))
 
-    ttp_pct = _pct("ttps", lambda x: (x.get("ttps") and len(x["ttps"]) > 0) or bool(x.get("mitre_tactics")))
+    ttp_pct = _pct("ttps", has_mitre_coverage)
     g12 = ttp_pct >= 30.0
     gates.append(_gate("G12", "TTP / MITRE coverage >= 30%", "WARNING", g12, f"ttp_pct={ttp_pct:.1f}%"))
 
@@ -147,13 +154,13 @@ def run_certification() -> dict:
                         f"sources={distinct_sources} top_dominance={top_dom:.1f}%"))
 
     # ── G19-G22: Detection excellence ─────────────────────────────────────────
-    sigma_ready = [x for x in feed if (x.get("ttps") and len(x["ttps"])>0) and (x.get("iocs") and len(x["iocs"])>0)]
+    sigma_ready = [x for x in feed if has_mitre_coverage(x) and (x.get("iocs") and len(x["iocs"])>0)]
     sigma_pct   = 100 * len(sigma_ready) / n if n > 0 else 0
     g19 = sigma_pct >= 20.0
     gates.append(_gate("G19", "Sigma-ready items (TTP + IOC) >= 20%", "WARNING", g19,
                         f"sigma_pct={sigma_pct:.1f}% ({len(sigma_ready)}/{n})"))
 
-    hunt_ready = [x for x in feed if x.get("ttps") and len(x["ttps"])>0]
+    hunt_ready = [x for x in feed if has_mitre_coverage(x)]
     hunt_pct   = 100 * len(hunt_ready) / n if n > 0 else 0
     g20 = hunt_pct >= 30.0
     gates.append(_gate("G20", "Threat-hunt-ready items (TTP) >= 30%", "WARNING", g20,

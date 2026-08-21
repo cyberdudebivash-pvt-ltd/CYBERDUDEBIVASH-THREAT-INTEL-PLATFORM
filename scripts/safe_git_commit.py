@@ -653,6 +653,29 @@ def main() -> None:
             # -- producing a manifest 4 items behind the newly-published feed
             # and hard-failing scripts/api_dashboard_contract_validator.py's
             # CHECK 2 (genuine_regression) on the very next deploy-worker run.
+            # P0-FIX v161.3 (Phase 2): api/detection_quality.json (written by
+            # detection_quality_engine.py --apply, generate-and-sync.yml
+            # STAGE 6.99) was missing from this list -- same class of bug as
+            # v184.4/v184.5, on a different path, but with a worse blast
+            # radius: this list already contains api/feed.json, so the
+            # RESTORE step below unconditionally overwrites this run's
+            # api/feed.json with ORIG_HEAD's version -- but ORIG_HEAD's
+            # api/feed.json (written by THIS workflow, sentinel-blogger.yml,
+            # which never calls detection_quality_engine.py) never had
+            # detection_rules_total populated in the first place. So even
+            # when this restore step "succeeds," it silently discards
+            # detection_rules_total on every item, independent of whatever
+            # generate-and-sync.yml's STAGE 6.99 had just computed and
+            # committed. Confirmed via git history: two conflict-recovery
+            # commits (609928b92, 239512ecd) touch api/feed.json but neither
+            # touches api/detection_quality.json, and that file's last real
+            # computation predates both. Root-caused during the Phase 2
+            # detection-coverage-collapse investigation (0.0% on every item
+            # in the live feed, despite a working, verified-correct
+            # generator). Restoring it here alongside api/feed.json is not
+            # sufficient by itself to fully fix the race (the two workflows'
+            # commit strategies still differ), but it closes this specific,
+            # confirmed silent-overwrite path.
             _GENERATED_ARTIFACT_PATHS = [
                 "api/v1/intel/latest.json",
                 "api/v1/intel/top10.json",
@@ -665,6 +688,7 @@ def main() -> None:
                 "api/reports/latest.json",
                 "api/reports/stats.json",
                 "data/stix/feed_manifest.json",
+                "api/detection_quality.json",
             ]
 
             def _artifact_item_count(p: Path):
