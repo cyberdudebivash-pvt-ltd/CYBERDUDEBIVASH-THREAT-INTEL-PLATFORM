@@ -1020,7 +1020,13 @@ def _section_detection(report: dict, st: dict) -> list:
     vuln_class   = _detect_vuln_class(title, str((t.get("apex_ai") or {}).get("description") or ""))
     cve_slug     = (cve or "cdb-advisory").lower().replace(":", "-").replace(" ", "-")
     today_str    = datetime.now(timezone.utc).strftime("%Y/%m/%d")
-    product_hint = re.sub(r'CVE-\d{4}-\d+\s*-?\s*', '', title).strip().split()[0][:20] if title else "target"
+    # v184.4 FIX: a title that is only a bare CVE ID (e.g. "CVE-2026-65706" with
+    # no trailing description) leaves an empty string after stripping the CVE
+    # prefix, so .split() returns [] and [0] raised IndexError -- crashing PDF
+    # generation for that advisory entirely. Fall back to the CVE id itself.
+    _stripped_title = re.sub(r'CVE-\d{4}-\d+\s*-?\s*', '', title).strip() if title else ""
+    _stripped_parts = _stripped_title.split()
+    product_hint = _stripped_parts[0][:20] if _stripped_parts else (cve or "target")
 
     sigma_tpl = _SIGMA_TEMPLATES.get(vuln_class, _SIGMA_TEMPLATES["generic"])
     sigma_rule = sigma_tpl.format(
