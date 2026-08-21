@@ -59,7 +59,7 @@ Hidden-dependency blockers resolved as part of this retirement (not deferred):
 
 **Correction (EPTP Phase 8 Batch 5):** `api/v1/` and `api/apex_v2/` were previously listed here as unconfirmed/duplicated surfaces. They are not — both contain generated data only (no code), are the report pipeline's local staging output before upload to R2, and are confirmed production. See [`PRODUCTION_RUNTIME.md`](PRODUCTION_RUNTIME.md)'s Report Generation Flow.
 
-## Retirement Readiness (EPTP Phase 8 Batch 6)
+## Retirement Readiness (EPTP Phase 8 Batch 6 + Railway retirement, 2026-08-21)
 
 Every component above was checked for hidden dependencies (governance rules, compliance tooling, cascading callers) before any retirement-readiness judgment. Full detail, including specific blockers, is in [`COMPONENT_REGISTRY.json`](COMPONENT_REGISTRY.json)'s `retirement_readiness` field per component.
 

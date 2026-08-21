@@ -224,6 +224,7 @@ def main() -> int:
     ]
 
     written = 0
+    upload_failures = 0
     for path, items, tier, desc, is_premium in products:
         wrapped = _wrap(items, tier, desc, total)
         if DRY_RUN:
@@ -245,6 +246,7 @@ def main() -> int:
                     ):
                         log.info("Uploaded to R2: %s/%s", PREMIUM_BUCKET, r2_key)
                     else:
+                        upload_failures += 1
                         log.error(
                             "R2 upload FAILED for %s -- paid customers will not "
                             "see updated content until this is retried "
@@ -329,6 +331,9 @@ def main() -> int:
     log.info("  EXECUTIVE:     %d items  ($299/mo)", len(exec_items))
     log.info("  TRIAL:         %d items  (FREE → conversion)", len(trial_items))
     log.info("=" * 60)
+    if upload_failures:
+        log.error("%d premium R2 upload(s) failed -- exiting nonzero", upload_failures)
+        return 1
     return 0
 
 

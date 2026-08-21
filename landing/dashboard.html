@@ -414,22 +414,26 @@ async function runSearch() {
   if (!q) { Toast.warn('Enter a search query.'); return; }
   document.getElementById('search-results').innerHTML = '<div class="loading-state"><span class="spin">⟳</span> Searching...</div>';
   const key = currentKey || localStorage.getItem(LS_KEY) || '';
-  const headers = key ? { 'X-API-Key': key } : {};
-  // v184.6: Railway backend retired. intel-gateway (the real production
-  // Worker) has no dedicated search route yet, so this still falls through
-  // to the catch block below -- same pre-existing behavior, just no longer
-  // pointed at a dead orphaned domain.
-  const BASE = 'https://intel.cyberdudebivash.com';
-  try {
-    const res = await fetch(`${BASE}/api/v1/intel/search?q=${encodeURIComponent(q)}&limit=20`, { headers });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const items = Array.isArray(data) ? data : (data.items || data.results || []);
-    if (!items.length) { document.getElementById('search-results').innerHTML = '<div class="loading-state">No results for "' + q + '"</div>'; return; }
-    document.getElementById('search-results').innerHTML = `<div style="font-family:var(--font-mono);font-size:.78rem;color:var(--muted);margin-bottom:12px">${items.length} RESULTS FOR "${q.toUpperCase()}"</div>` + items.map(renderCard).join('');
-  } catch(e) {
-    document.getElementById('search-results').innerHTML = `<div class="loading-state" style="color:var(--amber)">Search requires Pro tier. <a href="pricing.html" style="color:var(--cyan)">Upgrade →</a></div>`;
+  // v184.6: intel-gateway (the real production Worker) has no dedicated
+  // /api/v1/intel/search route. Instead of calling a nonexistent endpoint,
+  // pull the caller's tier-gated feed via the existing fetchFeed() helper
+  // and filter it client-side across the fields a security engineer would
+  // actually search by.
+  const { ok, data } = await APEX.fetchFeed(key, 1000, 0);
+  if (!ok || !data || !Array.isArray(data.items)) {
+    document.getElementById('search-results').innerHTML = `<div class="loading-state" style="color:var(--amber)">Could not load advisories to search. <a href="pricing.html" style="color:var(--cyan)">Upgrade →</a></div>`;
+    return;
   }
+  const needle = q.toLowerCase();
+  const items = data.items.filter(item => {
+    const haystack = [
+      item.title, item.cve, item.cve_id, item.actor, item.threat_actor,
+      item.tlp, item.mitre_tactic, item.mitre_technique, item.summary,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(needle);
+  });
+  if (!items.length) { document.getElementById('search-results').innerHTML = '<div class="loading-state">No results for "' + q + '"</div>'; return; }
+  document.getElementById('search-results').innerHTML = `<div style="font-family:var(--font-mono);font-size:.78rem;color:var(--muted);margin-bottom:12px">${items.length} RESULTS FOR "${q.toUpperCase()}"</div>` + items.map(renderCard).join('');
 }
 
 async function loadStats() {

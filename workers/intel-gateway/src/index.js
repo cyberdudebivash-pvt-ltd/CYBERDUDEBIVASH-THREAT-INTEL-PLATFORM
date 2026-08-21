@@ -3864,17 +3864,26 @@ async function handleRequest(request, env, ctx) {
     }
 
     let r2Key;
-    if (path.startsWith("/api/v1/premium/feed/")) {
-      const tier = decodeURIComponent(path.slice("/api/v1/premium/feed/".length)).toLowerCase();
-      if (!PREMIUM_FEED_TIERS.has(tier)) return errorResp(`Unknown premium feed tier: ${tier}`, 404);
-      r2Key = `premium/feeds/feed.${tier}.json`;
-    } else {
-      const artifact = decodeURIComponent(path.slice("/api/v1/premium/detections/".length));
-      if (!PREMIUM_DETECTION_ARTIFACTS.has(artifact)) return errorResp(`Unknown detection pack artifact: ${artifact}`, 404);
-      r2Key = `premium/detections/${artifact}`;
+    try {
+      if (path.startsWith("/api/v1/premium/feed/")) {
+        const tier = decodeURIComponent(path.slice("/api/v1/premium/feed/".length)).toLowerCase();
+        if (!PREMIUM_FEED_TIERS.has(tier)) return errorResp(`Unknown premium feed tier: ${tier}`, 404);
+        r2Key = `premium/feeds/feed.${tier}.json`;
+      } else {
+        const artifact = decodeURIComponent(path.slice("/api/v1/premium/detections/".length));
+        if (!PREMIUM_DETECTION_ARTIFACTS.has(artifact)) return errorResp(`Unknown detection pack artifact: ${artifact}`, 404);
+        r2Key = `premium/detections/${artifact}`;
+      }
+    } catch (_decodeErr) {
+      return errorResp("Malformed premium content path", 400);
     }
 
-    const obj = await env.INTEL_R2.get(r2Key);
+    let obj;
+    try {
+      obj = await env.INTEL_R2.get(r2Key);
+    } catch (_r2Err) {
+      return errorResp("Premium content temporarily unavailable -- try again shortly", 503);
+    }
     if (!obj) return errorResp("Premium content temporarily unavailable -- try again shortly", 503);
     const ext = r2Key.slice(r2Key.lastIndexOf("."));
     return new Response(obj.body, {

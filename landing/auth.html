@@ -350,21 +350,19 @@
     </div>
 
     <!-- ── LOGIN FORM ─────────────────────────────────────────── -->
+    <!-- v184.6.1: rewritten from email+password to API-key entry -- the real
+         intel-gateway backend (/api/auth/login) only ever accepted
+         { api_key }, never email/password, so the original form could not
+         authenticate any real customer. This mirrors the working API-key
+         pattern already used by landing/dashboard.html. -->
     <div id="loginForm">
       <form class="auth-form" onsubmit="doLogin(event)">
         <div class="field">
-          <label>Email Address</label>
+          <label>API Key</label>
           <div class="field-wrap">
-            <i class="fa-solid fa-envelope field-icon"></i>
-            <input type="email" id="loginEmail" placeholder="you@company.com" required autocomplete="email">
-          </div>
-        </div>
-        <div class="field">
-          <label>Password</label>
-          <div class="field-wrap">
-            <i class="fa-solid fa-lock field-icon"></i>
-            <input type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password">
-            <button type="button" class="pw-toggle" onclick="togglePw('loginPassword',this)">
+            <i class="fa-solid fa-key field-icon"></i>
+            <input type="password" id="loginApiKey" placeholder="cdb-••••••••••••••••" required autocomplete="off" minlength="16">
+            <button type="button" class="pw-toggle" onclick="togglePw('loginApiKey',this)">
               <i class="fa-solid fa-eye"></i>
             </button>
           </div>
@@ -373,10 +371,9 @@
         <button type="submit" class="submit-btn" id="loginBtn">
           <i class="fa-solid fa-right-to-bracket" style="margin-right:6px"></i>Sign In
         </button>
-        <div class="divider">or</div>
-        <button type="button" class="demo-btn" onclick="demoLogin()">
-          <i class="fa-solid fa-flask"></i> Use Demo Account
-        </button>
+        <div style="font-size:0.7rem;color:var(--text-muted);text-align:center;margin-top:4px">
+          Don't have a key? <a href="pricing.html" style="color:var(--cyan)">Subscribe to get one →</a>
+        </div>
       </form>
 
       <!-- Token panel (shown after login) -->
@@ -389,97 +386,35 @@
         <div style="margin-top:10px;font-size:0.72rem;color:var(--text-muted)">
           Use as: <code style="color:var(--cyan);font-family:'JetBrains Mono',monospace;font-size:0.7rem">Authorization: Bearer YOUR_TOKEN</code>
         </div>
-        <a href="../index.html" class="submit-btn" style="display:block;text-align:center;text-decoration:none;margin-top:12px;padding:10px">
+        <a href="dashboard.html" class="submit-btn" style="display:block;text-align:center;text-decoration:none;margin-top:12px;padding:10px">
           <i class="fa-solid fa-gauge-high" style="margin-right:6px"></i>Go to Dashboard
         </a>
       </div>
     </div>
 
-    <!-- ── REGISTER FORM ──────────────────────────────────────── -->
+    <!-- ── REGISTER PANEL ─────────────────────────────────────── -->
+    <!-- v184.6.1: the real intel-gateway backend has no email/password
+         registration -- POST /api/auth/register unconditionally returns 422
+         "Email registration is not available. API keys are issued upon
+         subscription." The original form collected name/email/password and
+         silently fabricated a locally-generated, non-functional API key
+         whenever that request failed, presenting it as a real "Account
+         Created!" key that would never authenticate. Replaced with an
+         accurate CTA to the real provisioning flow (subscribe → key issued). -->
     <div id="registerForm" style="display:none">
-      <form class="auth-form" onsubmit="doRegister(event)">
-        <div class="field">
-          <label>Full Name</label>
-          <div class="field-wrap">
-            <i class="fa-solid fa-user field-icon"></i>
-            <input type="text" id="regName" placeholder="Your name or org" maxlength="80" autocomplete="name">
-          </div>
-        </div>
-        <div class="field">
-          <label>Email Address</label>
-          <div class="field-wrap">
-            <i class="fa-solid fa-envelope field-icon"></i>
-            <input type="email" id="regEmail" placeholder="you@company.com" required autocomplete="email">
-          </div>
-        </div>
-        <div class="field">
-          <label>Password</label>
-          <div class="field-wrap">
-            <i class="fa-solid fa-lock field-icon"></i>
-            <input type="password" id="regPassword" placeholder="Min 8 characters" required minlength="8"
-              autocomplete="new-password" oninput="checkPwStrength(this.value)">
-            <button type="button" class="pw-toggle" onclick="togglePw('regPassword',this)">
-              <i class="fa-solid fa-eye"></i>
-            </button>
-          </div>
-          <div class="pw-strength" id="pwStrength"></div>
-          <div class="pw-strength-lbl" id="pwStrengthLbl"></div>
-        </div>
-        <div class="field">
-          <label>Confirm Password</label>
-          <div class="field-wrap">
-            <i class="fa-solid fa-lock-open field-icon"></i>
-            <input type="password" id="regConfirm" placeholder="Repeat password" required
-              autocomplete="new-password">
-          </div>
-        </div>
-
-        <!-- Plan selector -->
-        <div class="field">
-          <label>Plan</label>
-          <div class="tier-row">
-            <div class="tier-badge selected" data-tier="free" onclick="selectRegTier('free',this)">
-              <span class="tier-badge-name">Free</span>
-              <span class="tier-badge-price">$0/mo</span>
-            </div>
-            <div class="tier-badge" data-tier="pro" onclick="selectRegTier('pro',this)">
-              <span class="tier-badge-name">Pro</span>
-              <span class="tier-badge-price">$49/mo</span>
-            </div>
-            <div class="tier-badge" data-tier="enterprise" onclick="selectRegTier('enterprise',this)">
-              <span class="tier-badge-name">Enterprise</span>
-              <span class="tier-badge-price">$499/mo</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="msg-box" id="registerMsg"></div>
-        <button type="submit" class="submit-btn" id="registerBtn">
-          <i class="fa-solid fa-user-plus" style="margin-right:6px"></i>Create Account
-        </button>
-        <div style="font-size:0.7rem;color:var(--text-muted);text-align:center;margin-top:4px">
-          By registering you agree to our <a href="#" style="color:var(--cyan)">Terms of Service</a>
-        </div>
-      </form>
-
-      <!-- Success panel -->
-      <div class="token-panel" id="registerSuccessPanel">
-        <div style="text-align:center;margin-bottom:12px">
-          <i class="fa-solid fa-circle-check" style="color:var(--green);font-size:2rem"></i>
-          <div style="font-weight:700;margin-top:8px;color:var(--green)">Account Created!</div>
-        </div>
-        <div class="token-label">Your API Key</div>
-        <div class="token-display">
-          <div class="token-value" id="regApiKey">—</div>
-          <button class="token-copy" onclick="copyToken('regApiKey')"><i class="fa-solid fa-copy" style="margin-right:3px"></i>Copy</button>
-        </div>
-        <div style="margin-top:12px;font-size:0.72rem;color:var(--text-muted)">
-          <i class="fa-solid fa-triangle-exclamation" style="color:var(--orange);margin-right:4px"></i>
-          Save your API key — it won't be shown again.
-        </div>
-        <button class="submit-btn" style="margin-top:12px" onclick="switchTab('login')">
-          <i class="fa-solid fa-right-to-bracket" style="margin-right:6px"></i>Sign In Now
-        </button>
+      <div style="text-align:center;padding:8px 4px 4px">
+        <i class="fa-solid fa-key" style="color:var(--cyan);font-size:1.8rem"></i>
+        <div style="font-weight:700;margin-top:12px">API Keys Are Issued on Subscription</div>
+        <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:8px;line-height:1.5">
+          There's no separate sign-up step — pick a plan and your API key is provisioned
+          automatically on checkout (instantly for Free, on payment confirmation for Pro/Enterprise).
+        </p>
+      </div>
+      <a href="pricing.html" class="submit-btn" style="display:block;text-align:center;text-decoration:none;margin-top:16px;padding:12px">
+        <i class="fa-solid fa-rocket" style="margin-right:6px"></i>View Plans &amp; Get a Key
+      </a>
+      <div style="font-size:0.7rem;color:var(--text-muted);text-align:center;margin-top:10px">
+        Already have a key? <a href="#" onclick="switchTab('login');return false" style="color:var(--cyan)">Sign in →</a>
       </div>
     </div>
 
@@ -501,17 +436,13 @@
 /* ══════════════════════════════════════════════════════════════════
    AUTH PAGE — CLIENT-SIDE LOGIC
 ══════════════════════════════════════════════════════════════════ */
-// v184.6: Railway backend retired. Points at intel-gateway (real production
-// Worker) now. NOTE (found during this fix, not resolved here): the real
-// /api/auth/login expects { api_key } in the request body and mints a JWT
-// from an existing API_KEYS_KV record -- there is no email/password login
-// on the real backend. This form's fields (email+password) will not
-// authenticate against production; only the demo-credential offline
-// fallback below will succeed until this page is redesigned around the
-// API-key-paste pattern landing/dashboard.html already uses correctly.
-// Flagged for a product decision, not silently worked around here.
+// v184.6.1: Railway backend retired, and this page rebuilt around the real
+// intel-gateway auth contract -- POST /api/auth/login expects { api_key }
+// and mints a JWT from the matching API_KEYS_KV record. There is no
+// email/password login or self-service registration on the real backend
+// (see the register-panel comment above), so this page no longer pretends
+// otherwise.
 const API_BASE = 'https://intel.cyberdudebivash.com';
-const AUTH_STATE = { regTier: 'free' };
 
 /* ── Utilities ────────────────────────────────────────────────── */
 const el = id => document.getElementById(id);
@@ -545,10 +476,8 @@ function switchTab(tab) {
   el('tabLogin').classList.toggle('active', isLogin);
   el('tabRegister').classList.toggle('active', !isLogin);
   hideMsg('loginMsg');
-  hideMsg('registerMsg');
-  // Reset success panels
-  el('loginTokenPanel').style.display     = 'none';
-  el('registerSuccessPanel').style.display = 'none';
+  // Reset success panel
+  el('loginTokenPanel').style.display = 'none';
 }
 
 /* ── Password toggle ──────────────────────────────────────────── */
@@ -560,28 +489,6 @@ function togglePw(inputId, btn) {
   btn.innerHTML = show
     ? '<i class="fa-solid fa-eye-slash"></i>'
     : '<i class="fa-solid fa-eye"></i>';
-}
-
-/* ── Password strength ────────────────────────────────────────── */
-function checkPwStrength(pw) {
-  const bar = el('pwStrength');
-  const lbl = el('pwStrengthLbl');
-  if (!bar || !lbl) return;
-  let score = 0;
-  if (pw.length >= 8)  score++;
-  if (/[A-Z]/.test(pw)) score++;
-  if (/[0-9]/.test(pw)) score++;
-  if (/[^A-Za-z0-9]/.test(pw)) score++;
-  const levels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
-  bar.className = `pw-strength s${score}`;
-  lbl.textContent = score > 0 ? `Password strength: ${levels[score]}` : '';
-}
-
-/* ── Tier selection ───────────────────────────────────────────── */
-function selectRegTier(tier, btn) {
-  AUTH_STATE.regTier = tier;
-  document.querySelectorAll('.tier-badge').forEach(b => b.classList.remove('selected'));
-  if (btn) btn.classList.add('selected');
 }
 
 /* ── Copy token ───────────────────────────────────────────────── */
@@ -609,51 +516,45 @@ async function doLogin(e) {
   e.preventDefault();
   hideMsg('loginMsg');
 
-  const email    = (el('loginEmail')    ? el('loginEmail').value    : '').trim();
-  const password =  el('loginPassword') ? el('loginPassword').value : '';
+  const apiKey = (el('loginApiKey') ? el('loginApiKey').value : '').trim();
 
-  if (!email || !password) {
-    showMsg('loginMsg', 'error', 'Please fill in all fields.'); return;
+  if (!apiKey || apiKey.length < 16) {
+    showMsg('loginMsg', 'error', 'Enter a valid API key (minimum 16 characters).'); return;
   }
 
   setLoading('loginBtn', true, '<i class="fa-solid fa-right-to-bracket" style="margin-right:6px"></i>Sign In');
 
   let token = null;
-  let userName = '';
 
-  // Try live API
   try {
     const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ api_key: apiKey }),
     });
     const data = await res.json();
     if (res.ok && data.token) {
-      token    = data.token;
-      userName = data.user?.name || email;
+      token = data.token;
     } else {
-      showMsg('loginMsg', 'error', data.detail || data.error || 'Invalid credentials.');
+      showMsg('loginMsg', 'error', data.error || data.detail || 'Invalid API key.');
       setLoading('loginBtn', false, '<i class="fa-solid fa-right-to-bracket" style="margin-right:6px"></i>Sign In');
       return;
     }
   } catch(err) {
-    // Offline fallback — accept demo credentials
-    if (email === 'demo@cyberdudebivash.com' && password === 'Demo@1234') {
-      token    = _makeDemoToken(email);
-      userName = 'Demo User';
-    } else {
-      showMsg('loginMsg', 'info', 'API not reachable. Try demo@cyberdudebivash.com / Demo@1234 for demo access.');
-      setLoading('loginBtn', false, '<i class="fa-solid fa-right-to-bracket" style="margin-right:6px"></i>Sign In');
-      return;
-    }
+    showMsg('loginMsg', 'error', 'Could not reach the API. Please try again.');
+    setLoading('loginBtn', false, '<i class="fa-solid fa-right-to-bracket" style="margin-right:6px"></i>Sign In');
+    return;
   }
 
-  // Store token
-  try { localStorage.setItem('apex_jwt', token); localStorage.setItem('apex_user', userName); } catch(e){}
+  // Store token + the raw key (dashboard.html reads the raw key from this
+  // same localStorage key for X-API-Key requests)
+  try {
+    localStorage.setItem('apex_jwt', token);
+    localStorage.setItem('cdb_api_key', apiKey);
+  } catch(e){}
 
   setLoading('loginBtn', false, '<i class="fa-solid fa-right-to-bracket" style="margin-right:6px"></i>Sign In');
-  showMsg('loginMsg', 'success', `Welcome back, ${userName}! Redirecting...`);
+  showMsg('loginMsg', 'success', 'Signed in. Redirecting...');
 
   const tokenPanel = el('loginTokenPanel');
   const tokenVal   = el('loginTokenValue');
@@ -661,89 +562,7 @@ async function doLogin(e) {
   if (tokenVal)   tokenVal.textContent = token;
 
   // Auto-redirect after 2s
-  setTimeout(() => { window.location.href = '../index.html'; }, 2500);
-}
-
-/* ── DEMO LOGIN ───────────────────────────────────────────────── */
-function demoLogin() {
-  const emailEl = el('loginEmail');
-  const passEl  = el('loginPassword');
-  if (emailEl) emailEl.value = 'demo@cyberdudebivash.com';
-  if (passEl)  passEl.value  = 'Demo@1234';
-  showMsg('loginMsg', 'info', 'Demo credentials filled. Click Sign In.');
-}
-
-/* ── REGISTER ─────────────────────────────────────────────────── */
-async function doRegister(e) {
-  e.preventDefault();
-  hideMsg('registerMsg');
-
-  const name     = (el('regName')     ? el('regName').value     : '').trim();
-  const email    = (el('regEmail')    ? el('regEmail').value    : '').trim();
-  const password =  el('regPassword') ? el('regPassword').value : '';
-  const confirm  =  el('regConfirm')  ? el('regConfirm').value  : '';
-  const tier     = AUTH_STATE.regTier;
-
-  if (!email || !password) {
-    showMsg('registerMsg', 'error', 'Please fill in all required fields.'); return;
-  }
-  if (password !== confirm) {
-    showMsg('registerMsg', 'error', 'Passwords do not match.'); return;
-  }
-  if (password.length < 8) {
-    showMsg('registerMsg', 'error', 'Password must be at least 8 characters.'); return;
-  }
-
-  setLoading('registerBtn', true, '<i class="fa-solid fa-user-plus" style="margin-right:6px"></i>Create Account');
-
-  let apiKey = null;
-
-  // Try live API
-  try {
-    const res = await fetch(`${API_BASE}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name || email, email, password, tier }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      apiKey = data.api_key || data.key;
-    } else {
-      showMsg('registerMsg', 'error', data.detail || data.error || 'Registration failed. Try again.');
-      setLoading('registerBtn', false, '<i class="fa-solid fa-user-plus" style="margin-right:6px"></i>Create Account');
-      return;
-    }
-  } catch(err) {
-    // Offline: generate local demo key
-    apiKey = _genLocalKey(tier, email);
-    showMsg('registerMsg', 'info', 'API offline — generated local demo key for testing.');
-  }
-
-  setLoading('registerBtn', false, '<i class="fa-solid fa-user-plus" style="margin-right:6px"></i>Create Account');
-
-  // Show success panel
-  const regApiKeyEl = el('regApiKey');
-  if (regApiKeyEl) regApiKeyEl.textContent = apiKey || 'See email for your key.';
-  el('registerSuccessPanel').style.display = 'block';
-
-  // Hide the form fields
-  document.querySelector('#registerForm form').style.display = 'none';
-}
-
-/* ── Helpers ──────────────────────────────────────────────────── */
-function _makeDemoToken(email) {
-  // Demo JWT-like structure (NOT cryptographically valid — for UI testing only)
-  const header  = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).replace(/=/g,'');
-  const payload = btoa(JSON.stringify({ sub: email, tier: 'free', iat: Date.now(), demo: true })).replace(/=/g,'');
-  return `${header}.${payload}.DEMO_SIGNATURE_NOT_VALID`;
-}
-
-function _genLocalKey(tier, email) {
-  let h = 0;
-  for (const c of email) h = ((h << 5) - h + c.charCodeAt(0)) | 0;
-  const hex  = Math.abs(h).toString(16).padStart(8, '0');
-  const rand = Math.random().toString(36).slice(2, 10);
-  return `cbdb-${tier}-${hex}-${rand}`;
+  setTimeout(() => { window.location.href = 'dashboard.html'; }, 2500);
 }
 
 /* ── On page load: check for existing token ───────────────────── */
@@ -752,7 +571,7 @@ window.addEventListener('load', () => {
     const tok = localStorage.getItem('apex_jwt');
     if (tok) {
       showMsg('loginMsg', 'info', 'You are already signed in. Redirecting to dashboard...');
-      setTimeout(() => { window.location.href = '../index.html'; }, 1500);
+      setTimeout(() => { window.location.href = 'dashboard.html'; }, 1500);
     }
   } catch(e) {}
 });

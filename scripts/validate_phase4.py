@@ -107,7 +107,14 @@ def check_1_enterprise_ai():
     print("\n[1] Enterprise AI Endpoints")
 
     endpoint_file = ROOT / "sentinel-apex-api" / "app" / "api" / "v1" / "endpoints" / "enterprise_ai.py"
-    main_file     = ROOT / "sentinel-apex-api" / "app" / "main.py"
+
+    if not endpoint_file.parent.parent.parent.parent.exists():
+        warn("Enterprise AI Endpoints",
+             "sentinel-apex-api/ retired 2026-08-21 (Railway retirement) — check skipped, "
+             "not a production gate")
+        return True
+
+    main_file = ROOT / "sentinel-apex-api" / "app" / "main.py"
 
     ok1 = check("enterprise_ai.py exists", _file_exists(endpoint_file),
                  str(endpoint_file.relative_to(ROOT)))
@@ -351,7 +358,14 @@ def check_8_payment():
     print("\n[8] Payment Notify — Proof-of-Payment VIP Onboarding")
 
     payment_file = ROOT / "sentinel-apex-api" / "app" / "api" / "v1" / "endpoints" / "payment.py"
-    main_file    = ROOT / "sentinel-apex-api" / "app" / "main.py"
+
+    if not payment_file.parent.parent.parent.parent.exists():
+        warn("Payment Notify — Proof-of-Payment VIP Onboarding",
+             "sentinel-apex-api/ retired 2026-08-21 (Railway retirement) — check skipped, "
+             "not a production gate")
+        return True
+
+    main_file = ROOT / "sentinel-apex-api" / "app" / "main.py"
 
     ok1 = check("payment.py exists",
                  _file_exists(payment_file), str(payment_file.relative_to(ROOT)))
@@ -410,17 +424,23 @@ def check_9_sla_rate():
                  _file_contains(sla_js, "sla_status.json", "SLAMonitor"),
                  "SLAMonitor global + status JSON fetch required")
 
-    ok6 = check("rate_limit.py has 2,000 req/min Enterprise burst",
-                 _file_contains(rl_file, "TIER_BURST_LIMITS", "2000"),
-                 "ENTERPRISE burst limit = 2000/min required")
+    if rl_file.parent.parent.parent.exists():
+        ok6 = check("rate_limit.py has 2,000 req/min Enterprise burst",
+                     _file_contains(rl_file, "TIER_BURST_LIMITS", "2000"),
+                     "ENTERPRISE burst limit = 2000/min required")
 
-    ok7 = check("rate_limit.py has dual-window enforcement",
-                 _file_contains(rl_file, "check_and_increment", "burst_limit", "_burst"),
-                 "Per-minute + per-day sliding window required")
+        ok7 = check("rate_limit.py has dual-window enforcement",
+                     _file_contains(rl_file, "check_and_increment", "burst_limit", "_burst"),
+                     "Per-minute + per-day sliding window required")
 
-    ok8 = check("rate_limit.py injects burst headers",
-                 _file_contains(rl_file, "X-RateLimit-Burst-Limit", "X-RateLimit-Burst-Remaining"),
-                 "Burst rate limit headers required")
+        ok8 = check("rate_limit.py injects burst headers",
+                     _file_contains(rl_file, "X-RateLimit-Burst-Limit", "X-RateLimit-Burst-Remaining"),
+                     "Burst rate limit headers required")
+    else:
+        warn("rate_limit.py checks",
+             "sentinel-apex-api/ retired 2026-08-21 (Railway retirement) — checks skipped, "
+             "not a production gate")
+        ok6 = ok7 = ok8 = True
 
     ok9 = check("api-key-manager.html has Chart.js analytics",
                  _file_contains(api_html, "dailyChart", "endpointChart", "_render_daily_chart"),
