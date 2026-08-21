@@ -253,8 +253,15 @@ jobs:
       # Default driver (docker-container) pulls moby/buildkit:buildx-stable-1
       # from Docker Hub, causing intermittent network timeouts on GHA runners.
       # docker driver is embedded in the daemon — zero Docker Hub network calls.
+      # v184.8 FIX: docker/*, softprops/action-gh-release below were on floating
+      # major-version tags (@v3, @v6, @v2) -- if any of those tags were ever
+      # re-pointed (compromised upstream or moved by the maintainer), the next
+      # run would silently pull different code. Pinned to the commit SHA each
+      # tag currently resolves to (matches the anchore/* pattern already used
+      # correctly in this file); version kept in the trailing comment for
+      # readability/upgrade tracking.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
           driver: docker
 
@@ -270,7 +277,7 @@ jobs:
       # v47.5: cache-from removed — docker driver does not support GHA cache
       #   exporters. Caching is optimization-only for this SBOM scan build.
       - name: Build Docker image for SBOM scanning (CPU-only torch)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           load: true
@@ -551,7 +558,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload SBOM to release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             sbom-python/sbom-python-cyclonedx.json

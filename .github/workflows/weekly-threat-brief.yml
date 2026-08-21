@@ -148,8 +148,12 @@ jobs:
           fi
 
       # ------------------------------------------------------------------
+      # v184.8 FIX: was on the floating @v4.8.0 tag -- this job holds
+      # pages:write and pushes to gh-pages, so a re-pointed tag would deploy
+      # arbitrary content to the live Pages site with this token. Pinned to
+      # the commit SHA @v4.8.0 currently resolves to.
       - name: "STEP 7 — Deploy brief to GitHub Pages"
-        uses: JamesIves/github-pages-deploy-action@v4.8.0
+        uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f # v4.8.0
         with:
           folder: .
           branch: gh-pages
