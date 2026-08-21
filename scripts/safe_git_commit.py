@@ -638,6 +638,21 @@ def main() -> None:
             # three files -- mutually inconsistent and none matching this
             # run's actual 11805-file disk scan) while every other generated
             # artifact was correctly restored and logged.
+            #
+            # P0-FIX v184.5: data/stix/feed_manifest.json (written by
+            # multi_source_collector.py + reconciled by manifest_reconciler.py,
+            # Stage 3.1.13/3.90) was missing from this list -- same class of
+            # bug as v184.4, just on a different path. Confirmed via a live
+            # production deploy-worker failure (2026-08-21): a run's own log
+            # showed manifest_reconciler.py had correctly reconciled the
+            # manifest in-memory/on-disk, but a concurrent-push conflict on
+            # this same run triggered `git reset --hard origin/main`, and
+            # because feed_manifest.json wasn't in the restore list, it
+            # silently reverted to the stale pre-reset origin/main version
+            # while api/feed.json (which IS on this list) correctly survived
+            # -- producing a manifest 4 items behind the newly-published feed
+            # and hard-failing scripts/api_dashboard_contract_validator.py's
+            # CHECK 2 (genuine_regression) on the very next deploy-worker run.
             _GENERATED_ARTIFACT_PATHS = [
                 "api/v1/intel/latest.json",
                 "api/v1/intel/top10.json",
@@ -649,6 +664,7 @@ def main() -> None:
                 "api/reports/index.json",
                 "api/reports/latest.json",
                 "api/reports/stats.json",
+                "data/stix/feed_manifest.json",
             ]
 
             def _artifact_item_count(p: Path):
