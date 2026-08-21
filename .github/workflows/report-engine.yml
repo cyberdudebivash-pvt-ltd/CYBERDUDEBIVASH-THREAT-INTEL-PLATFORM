@@ -50,13 +50,19 @@ jobs:
           python-version: '3.12'
 
       - name:  Generate Report
+        # v184.8 FIX: `days` has no `type:` constraint (free string,
+        # workflow_dispatch-only) and was previously spliced unquoted into
+        # the run: command before the shell parsed it, in the same step as
+        # CDB_JWT_SECRET. Both inputs now flow through env: and are quoted.
         env:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
           PYTHONPATH: ${{ github.workspace }}
+          REPORT_TYPE: ${{ github.event.inputs.report_type || 'weekly' }}
+          REPORT_DAYS: ${{ github.event.inputs.days || '7' }}
         run: |
           python -m agent.v52_report_engine.engine \
-            --type ${{ github.event.inputs.report_type || 'weekly' }} \
-            --days ${{ github.event.inputs.days || '7' }}
+            --type "${REPORT_TYPE}" \
+            --days "${REPORT_DAYS}"
 
       - name:  Commit Report
         env:
