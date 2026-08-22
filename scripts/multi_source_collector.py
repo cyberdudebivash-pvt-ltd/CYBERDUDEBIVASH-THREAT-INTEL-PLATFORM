@@ -56,10 +56,15 @@ ENV:
   DRY_RUN=true    -- print without writing
 """
 from __future__ import annotations
-import json, logging, os, re, time, hashlib, urllib.request, urllib.error
+import json, logging, os, re, sys, time, hashlib, urllib.request, urllib.error
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from normalize_text import strip_markdown_artifacts as _strip_md  # noqa: E402
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s [COLLECTOR] %(levelname)s %(message)s", datefmt="%H:%M:%S")
@@ -112,7 +117,11 @@ def _make_item(title: str, desc: str, severity: str, source: str,
     """Build a standard feed item."""
     ts = ts or _now()
     clean_title = title.strip()[:200]
+    # item_id is hashed on clean_title (pre-markdown-strip) to preserve ID
+    # stability for already-ingested items -- only the *displayed* title/
+    # description below are cleaned of markdown syntax.
     item_id = _gen_id(clean_title, ts)
+    display_title = _strip_md(clean_title)
     primary_cve = cve_ids[0] if cve_ids else ""
     sev_upper = severity.upper() if severity else "UNKNOWN"
     # v166.4 P0 FIX: micro-differentiate risk_score within HIGH to break uniform_risk cluster.
@@ -169,8 +178,8 @@ def _make_item(title: str, desc: str, severity: str, source: str,
     return {
         "id": item_id,
         "stix_id": item_id,
-        "title": clean_title,
-        "description": desc.strip()[:1000] if desc else "",
+        "title": display_title,
+        "description": _strip_md(desc).strip()[:1000] if desc else "",
         "severity": sev_upper,
         "risk_score": _risk_score,
         "confidence": _confidence,

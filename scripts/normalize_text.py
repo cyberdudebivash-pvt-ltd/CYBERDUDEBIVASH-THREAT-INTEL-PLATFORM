@@ -122,6 +122,124 @@ def normalize_text(text: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Markdown-artifact stripping (v185.0 P0 FIX -- content leakage root cause)
+#
+# Several ingestion sources (GitHub Security Advisories, oss-sec mailing
+# list RSS, cvefeed.io RSS) publish descriptions as Markdown. Ingestors
+# previously passed this text straight through with only .strip()[:N]
+# truncation, so raw syntax (##, **, `code`, [text](url)) leaked into
+# title/description fields that the platform renders and stores as plain
+# text. This is fixed at the earliest producer (the two ingestor item-
+# builder functions), not by patching generated feed JSON.
+#
+# Security note: this STRIPS syntax down to plain text -- it never parses
+# Markdown into HTML. External content must never be rendered as markup
+# (XSS/HTML-injection surface); plain text is the only safe output here.
+# ---------------------------------------------------------------------------
+_MD_FENCE_RE = re.compile(r"```[ \t]*[a-zA-Z0-9_+-]*[ \t]*\n?(.*?)```", re.DOTALL)
+_MD_CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
+# Bold/italic: "**" is unrestricted (no false positive observed -- asterisks
+# don't carry an identifier-naming meaning in this domain). "__" requires
+# internal whitespace, i.e. it must wrap a *phrase*, not a bare token --
+# without this, a chain of bare (non-backtick-wrapped) dunder identifiers in
+# prose, e.g. "via __class__.__mro__.__subclasses__() to access", is
+# misread as three paired emphasis spans and corrupted into
+# "class.mro.subclasses()", destroying a security-relevant Python gadget
+# chain (intel--129927ec6eec9381). The [^_\n] restriction on the connector
+# text is what actually prevents matching *across* underscores in a chain
+# like that -- it cannot skip over any of the other "__" occurrences to
+# reach a whitespace character further away, since each one immediately
+# terminates the class. See also the identical fix applied to G03's
+# MD_PATTERN in p27_production_certification.py.
+#
+# The whitespace requirement alone is not sufficient when TWO dunder tokens
+# appear near each other: the closing "__" of the first can spuriously pair
+# with the opening "__" of the second across the connecting prose, e.g.
+# "__proto__ (e.g. __proto__##gcPolluted)" -- "(e.g." contains a space, so
+# "__...(e.g. ...__" reads as a valid whitespace-containing pair even
+# though both real dunder tokens are untouched by that specific match.
+# Fixed by protecting each COMPLETE dunder-shaped token (a self-contained
+# "__word__" or "__some_word__" run, matched individually) as an atomic
+# unit BEFORE the general bold/underscore pass runs, via the same
+# stash-and-restore mechanism used for code spans below -- so a dunder
+# token can never participate in pairing with some other, unrelated "__"
+# elsewhere in the string.
+_MD_DUNDER_RE = re.compile(r"(__[A-Za-z0-9](?:[A-Za-z0-9_]*[A-Za-z0-9])?__)")
+_MD_BOLD_ASTERISK_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_MD_BOLD_UNDERSCORE_RE = re.compile(r"__([^_\n]*\s[^_\n]*)__")
+_MD_LINK_RE = re.compile(r"\[([^\]\n]*)\]\((https?://[^\s)]+)\)")
+_MD_ATX_HEADER_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]*(.*?)[ \t]*#*[ \t]*$", re.MULTILINE)
+_MD_HR_RE = re.compile(r"^[ \t]{0,3}(-{3,}|_{3,}|\*{3,})[ \t]*$", re.MULTILINE)
+_BLANK_RUN_RE = re.compile(r"\n{3,}")
+_CODE_TOKEN_RE = re.compile(r"\x00CODE(\d+)\x00")
+
+
+def strip_markdown_artifacts(text: Any) -> str:
+    """
+    Convert Markdown-formatted source text into clean plain text, for
+    fields (title, description, summary) that the platform stores and
+    renders as plain text rather than HTML.
+
+    Removes syntax markers (fenced/inline code, headers, bold/italic,
+    links, horizontal rules) while preserving all enclosed human-readable
+    content -- never deletes technical substance, only formatting syntax.
+
+    Code content (fenced blocks, inline `spans`, and complete __dunder__
+    identifiers) is protected -- stashed behind a placeholder token before
+    any other pass runs, restored intact afterwards -- so it is never
+    reinterpreted as other Markdown syntax. This matters because code
+    snippets and identifiers routinely contain characters that look like
+    Markdown on their own: a comment line starting with "#", or a dunder
+    identifier like `__proto__` that a naive bold-stripper would otherwise
+    misread as "__" emphasis markers wrapping "proto" and corrupt into
+    "proto" -- destroying a security-relevant identifier.
+
+    Idempotent: already-clean text passes through unchanged.
+    Safe to call on any value type (None -> '').
+    """
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+    if not text:
+        return text
+
+    out = text
+
+    # Protect code content first (fenced blocks, then inline spans): stash
+    # it behind placeholder tokens so every later pass (link/bold/header/hr
+    # stripping) only ever sees the token, never the original code text.
+    stashed: list[str] = []
+
+    def _stash(m: "re.Match[str]") -> str:
+        stashed.append(m.group(1).rstrip("\n"))
+        return f"\x00CODE{len(stashed) - 1}\x00"
+
+    out = _MD_FENCE_RE.sub(_stash, out)
+    out = _MD_CODE_SPAN_RE.sub(_stash, out)
+    out = _MD_DUNDER_RE.sub(_stash, out)
+
+    out = _MD_LINK_RE.sub(
+        lambda m: f"{m.group(1)} ({m.group(2)})" if m.group(1) else m.group(2),
+        out,
+    )
+    out = _MD_BOLD_ASTERISK_RE.sub(lambda m: m.group(1), out)
+    out = _MD_BOLD_UNDERSCORE_RE.sub(lambda m: m.group(1), out)
+    out = _MD_ATX_HEADER_RE.sub(lambda m: m.group(1), out)
+    out = _MD_HR_RE.sub("", out)
+
+    if stashed:
+        out = _CODE_TOKEN_RE.sub(lambda m: stashed[int(m.group(1))], out)
+
+    # Drop trailing whitespace per line, then collapse blank-line runs left
+    # behind by removed header/hr/fence lines.
+    out = "\n".join(line.rstrip() for line in out.split("\n"))
+    out = _BLANK_RUN_RE.sub("\n\n", out)
+
+    return out.strip()
+
+
+# ---------------------------------------------------------------------------
 # Field lists for item normalization
 # ---------------------------------------------------------------------------
 _STRING_FIELDS = (
@@ -223,4 +341,32 @@ if __name__ == "__main__":
         if status == "FAIL":
             all_pass = False
         print(f"  [{status}] {repr(inp)} -> {repr(result)} (expected {repr(expected)})")
+
+    md_tests = [
+        ("## Summary\n\nThe fix", "Summary\n\nThe fix"),
+        ("### Summary ###", "Summary"),
+        ("A `code span` here", "A code span here"),
+        ("**bold** and __also bold__", "bold and also bold"),
+        ("See [the advisory](https://example.com/x)", "See the advisory (https://example.com/x)"),
+        ("line\n---\nnext", "line\n\nnext"),
+        ("Plain text, no markdown.", "Plain text, no markdown."),
+        ("Before\n```go\nif x > 0 {\n  # not a header\n  y = 1\n}\n```\nAfter",
+         "Before\nif x > 0 {\n  # not a header\n  y = 1\n}\nAfter"),
+        ("uses ## as a separator", "uses ## as a separator"),
+        ("segment is `__proto__` (e.g. `__proto__##gcPolluted`)",
+         "segment is __proto__ (e.g. __proto__##gcPolluted)"),
+        ("via __class__.__mro__.__subclasses__() to access system",
+         "via __class__.__mro__.__subclasses__() to access system"),
+        ("AddPageForm.__init__ returns early", "AddPageForm.__init__ returns early"),
+        ("segment is __proto__ (e.g. __proto__##gcPolluted)",
+         "segment is __proto__ (e.g. __proto__##gcPolluted)"),
+        ("This is __truly emphasized__ text", "This is truly emphasized text"),
+    ]
+    for inp, expected in md_tests:
+        result = strip_markdown_artifacts(inp)
+        status = "PASS" if result == expected else "FAIL"
+        if status == "FAIL":
+            all_pass = False
+        print(f"  [{status}] strip_markdown_artifacts({repr(inp)}) -> {repr(result)} (expected {repr(expected)})")
+
     print(f"\nSelf-test: {'PASS' if all_pass else 'FAIL'}")

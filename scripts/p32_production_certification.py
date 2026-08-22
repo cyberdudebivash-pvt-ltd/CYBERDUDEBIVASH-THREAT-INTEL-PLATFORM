@@ -56,9 +56,21 @@ DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
 REQUIRED_FIELDS = ["id", "title", "description", "severity", "risk_score",
                    "confidence", "timestamp", "source"]
 
-MD_PATTERN    = re.compile(r"(\*\*|__|\#{2,}|\[.+?\]\(https?://.+?\)|`[^`]+`)")
+# v185.0 P0 FIX (same evidenced false positives as p27_production_certification.py:
+# mid-line "##" in prose, e.g. "...default ##)...", and unpaired "**"/"__" in
+# ransomware-redaction/dunder-identifier text -- see that file's inline
+# comments for full evidence). Anchored hash-run to line-start; require
+# genuine paired bold/italic markers. Duplicated here (not centralized in
+# p38_shared_validators.py) because of time constraints during this pass --
+# recommended follow-up: extract to a single shared function all 7
+# certification scripts import, per Principle 3 (Single Source of Truth).
+MD_PATTERN    = re.compile(
+    r"(?:\*\*.+?\*\*|__[^_\n]*\s[^_\n]*__|^[ \t]{0,3}\#{2,6}(?=[ \t]|$)|\[.+?\]\(https?://.+?\)|`[^`]+`)",
+    re.MULTILINE | re.DOTALL,
+)
 SYNTH_PATTERN = re.compile(
-    r"\b(lorem ipsum|placeholder|tbd|todo|insert here|example text|"
+    r"\b(lorem ipsum|placeholder\s+(?:text|content|value|image|data)|"
+    r"\[placeholder\]|\{placeholder\}|tbd|todo|insert here|example text|"
     r"sample text|test data|dummy|redacted for|to be determined)\b",
     re.IGNORECASE,
 )

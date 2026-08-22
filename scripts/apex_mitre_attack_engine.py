@@ -30,6 +30,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger("apex.mitre_attack")
@@ -213,6 +214,22 @@ CWE_TO_ATTACK: Dict[str, List[str]] = {
 
 # ── Vocabulary-based technique inference ─────────────────────────────────────
 
+def _keyword_matches(keyword: str, text: str) -> bool:
+    """Word-boundary-anchored keyword match. v185.0 P0 FIX: plain
+    re.search(re.escape(keyword), text) let short acronym keywords match as
+    a bare substring inside unrelated words -- e.g. "rdp" inside
+    "wordpress", "rce" inside "resource" -- producing wrong technique
+    mappings (a pure WordPress-plugin RCE advisory picked up "Exploitation
+    of Remote Services" on "RDP" evidence; a pure-DoS CloudStack CVE with
+    no code-execution capability picked up "Command and Scripting
+    Interpreter" on "RCE" evidence extracted from "...Release of
+    Resource..."). TECHNIQUE_LIBRARY's applies_to lists include several
+    short 2-4 char acronyms (RCE, RDP, XSS, SMB, LFI, RFI, LPE, C2, DCOM,
+    IEX, SUID, SOAP, PDF) that are all vulnerable to the same collision
+    class, not just these two observed cases."""
+    return re.search(r"\b" + re.escape(keyword.lower()) + r"\b", text) is not None
+
+
 def _infer_techniques(item: Dict) -> List[str]:
     """Infer applicable ATT&CK techniques from item content."""
     all_text = " ".join(str(item.get(k) or "") for k in (
@@ -232,7 +249,7 @@ def _infer_techniques(item: Dict) -> List[str]:
     for tid, tech in TECHNIQUE_LIBRARY.items():
         score = 0.0
         for keyword in tech["applies_to"]:
-            if re.search(re.escape(keyword.lower()), all_text):
+            if _keyword_matches(keyword, all_text):
                 score += 1.0
         if score > 0:
             # Normalise by keyword count
@@ -258,7 +275,7 @@ def _build_technique_entry(tid: str, item: Dict, match_score: float) -> Dict:
     triggered_by = []
     combined = (title + " " + desc + " " + vuln_type).lower()
     for keyword in tech["applies_to"]:
-        if re.search(re.escape(keyword.lower()), combined):
+        if _keyword_matches(keyword, combined):
             triggered_by.append(keyword)
 
     justification = (
@@ -305,7 +322,7 @@ def enrich_attack_mapping(item: Dict) -> Dict:
         tech = TECHNIQUE_LIBRARY.get(tid, {})
         if not tech:
             continue
-        score = sum(1.0 for kw in tech["applies_to"] if re.search(re.escape(kw.lower()), all_text))
+        score = sum(1.0 for kw in tech["applies_to"] if _keyword_matches(kw, all_text))
         score = score / max(1, len(tech["applies_to"]))
         technique_entries.append(_build_technique_entry(tid, item, score))
 
@@ -326,12 +343,31 @@ def enrich_attack_mapping(item: Dict) -> Dict:
             "mapping_version":   ENGINE_VERSION,
         }]
 
+    # v185.0 P0 FIX: write the CURRENT schema fields (attck_technique_ids/
+    # attck_techniques) as primary output, not just the deprecated `ttps`
+    # pair -- this engine's coverage was previously invisible to the
+    # current-schema field check entirely. resolved_entries excludes the
+    # UNRESOLVED placeholder from ALL THREE fields, ttps included: a list
+    # containing only an "insufficient evidence" marker is not real
+    # coverage, and initially leaving it in `ttps` here reproduced the same
+    # false-coverage pattern found in the legacy field's real production
+    # data during this same investigation (a non-empty list read as
+    # "covered" by has_mitre_coverage()/attck_mapping_state() even though
+    # it carries no actual technique). The reasoning text itself is not
+    # lost -- it's still in this function's technique_entries return value
+    # for any caller that wants to inspect why nothing matched -- it is
+    # simply not injected into the item's persisted coverage-bearing
+    # fields, where its presence alone would misrepresent coverage.
+    resolved_entries = [t for t in technique_entries if t.get("technique_id") != "UNRESOLVED"]
+
     item_out = dict(item)
-    item_out["ttps"]            = technique_entries
-    item_out["ttp_count"]       = len([t for t in technique_entries if t.get("technique_id") != "UNRESOLVED"])
-    item_out["attack_engine"]   = ENGINE_ID
-    item_out["attack_version"]  = ENGINE_VERSION
-    item_out["attack_ts"]       = datetime.now(timezone.utc).isoformat()
+    item_out["ttps"]                 = resolved_entries
+    item_out["attck_techniques"]     = resolved_entries
+    item_out["attck_technique_ids"]  = [t["technique_id"] for t in resolved_entries]
+    item_out["ttp_count"]            = len(resolved_entries)
+    item_out["attack_engine"]        = ENGINE_ID
+    item_out["attack_version"]       = ENGINE_VERSION
+    item_out["attack_ts"]            = datetime.now(timezone.utc).isoformat()
     return item_out
 
 
@@ -350,7 +386,16 @@ def main() -> int:
         return 1
     with path.open(encoding="utf-8") as f:
         data = json.load(f)
-    items = data if isinstance(data, list) else data.get("items", [])
+    if isinstance(data, list):
+        items = data
+    else:
+        # v185.0 P0 FIX: only checked data.get("items", []) -- the actual
+        # manifest envelope written by clean_feed_manifest.py (and read
+        # throughout the rest of the pipeline, e.g. run_pipeline.py's
+        # load_manifest()) uses "advisories" as the key. This CLI had
+        # never been run against the real manifest before (see also the
+        # missing `Path` import fixed above in this same investigation).
+        items = data.get("advisories") or data.get("reports") or data.get("items") or []
     enriched = [enrich_attack_mapping(item) for item in items]
     log.info("ATT&CK-mapped %d items", len(enriched))
 
