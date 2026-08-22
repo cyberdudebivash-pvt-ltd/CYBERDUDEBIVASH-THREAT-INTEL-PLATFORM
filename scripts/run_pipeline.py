@@ -3698,6 +3698,120 @@ def stage_sync_root_feed_json() -> None:
         log.warning("[3.9-SYNC] feed.json sync skipped (non-fatal): %s", _sync_e)
     # ── End v173.1 FIX ──────────────────────────────────────────────────────────
 
+    apply_report_materialization_barrier(manifest_path)
+
+
+def apply_report_materialization_barrier(manifest_path: Path) -> None:
+    """
+    P0 FIX (2026-08-22): Report Continuity Materialization Barrier.
+
+    ROOT CAUSE (confirmed by direct reproduction on a fresh checkout of main,
+    not assumed): generate_intel_reports.py's own render/write/validate loop
+    (Stage 3.6) never sets a /reports/ report_url without first proving the
+    file exists on disk -- but stage_sync_root_feed_json()'s canonical
+    write-back (Step 7) and its RECONCILIATION sub-step (payload items not
+    matched by id/stix_id get appended to the manifest write-back list) both
+    copy an item's report_url field forward as-is, from whatever source
+    produced that item (the quality engine, the thin-manifest prev_feed
+    fallback, or a carried-forward api/feed.json entry) -- without ever
+    re-checking that the file it names survived into THIS run's working
+    tree. STAGE 5.4.1 (report_existence_validator.py, v153.1) checks exactly
+    that, later, and hard-fails the deploy when it finds one. Reproduced
+    fresh on this branch: 233 entries in data/stix/feed_manifest.json with a
+    /reports/ report_url and no file on disk, all in the current month,
+    spread across the last several days at a declining-but-nonzero rate each
+    day -- an ongoing per-run gap, not a single historical incident.
+
+    FIX (Section 13 Option C+D): re-run generate_intel_reports.py in the new
+    --only-missing mode -- the SAME atomic write+validate+clear-on-failure
+    engine Stage 3.6 already trusted, just skipping any item whose
+    report_url already resolves to an existing file, so this is a cheap,
+    idempotent, incremental repair pass over the manifest as it stands right
+    now, not a full re-render. Anything that engine cannot materialize is
+    left with report_url cleared by that engine's own existing failure path
+    -- this barrier never fabricates a report and never leaves a dangling
+    reference. Called last in stage_sync_root_feed_json() because that is
+    the final manifest-mutating stage in run_pipeline.py; nothing after it
+    can reintroduce a gap before STAGE 5.4.1 runs. A standalone function
+    (rather than inlined) so it is independently unit-testable and so it can
+    be re-run defensively from other call sites without duplicating logic.
+    """
+    try:
+        _mat_raw = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+        _mat_items = (_mat_raw if isinstance(_mat_raw, list)
+                      else _mat_raw.get("advisories", _mat_raw.get("reports", [])))
+
+        # v185.0 P0 FIX: generate_intel_reports.py's own save path treats a
+        # bare-list manifest differently from a dict envelope -- for a list it
+        # applies a "_publishable" filter that DROPS every item whose
+        # report_url isn't /reports/-prefixed (i.e. every external/source-
+        # fallback item), because that filter exists for api/feed.json (which
+        # is legitimately list-shaped) and generate_intel_reports.py cannot
+        # tell that shape apart from a canonical manifest that has merely
+        # drifted out of its intended {"advisories": [...]} envelope (Step 7
+        # of stage_sync_root_feed_json() is supposed to guarantee that
+        # envelope every run, but was confirmed -- via
+        # `git show HEAD:data/stix/feed_manifest.json` on this branch -- to
+        # not currently hold it). Re-enveloping here, right before this
+        # barrier's own subprocess call, guarantees that call never sees a
+        # bare list and can never silently drop the manifest's external
+        # items as a side effect of repairing the local ones -- this
+        # barrier's one job is closing the report_url/file gap, never
+        # narrowing the manifest itself.
+        if isinstance(_mat_raw, list):
+            log.warning(
+                "[MATBARRIER] manifest on disk is a bare list (expected the "
+                "{\"advisories\": [...]} envelope) -- re-enveloping before the "
+                "repair pass so no item is dropped as a side effect."
+            )
+            _mat_envelope = {
+                "version":       PIPELINE_VERSION,
+                "platform":      "SENTINEL-APEX",
+                "generated_at":  utc_now(),
+                "total_reports": len(_mat_items),
+                "entry_count":   len(_mat_items),
+                "source":        "report materialization barrier re-envelope",
+                "advisories":    _mat_items,
+            }
+            _mat_tmp = Path(str(manifest_path) + ".matenv.tmp")
+            _mat_tmp.write_text(
+                json.dumps(_mat_envelope, indent=2, ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+            json.loads(_mat_tmp.read_text(encoding="utf-8"))  # verify before promote
+            os.replace(str(_mat_tmp), str(manifest_path))
+
+        _mat_dangling = [
+            it for it in _mat_items
+            if (it.get("report_url") or "").startswith("/reports/")
+            and not (REPO_ROOT / (it.get("report_url") or "").lstrip("/")).exists()
+        ]
+        if _mat_dangling:
+            log.warning(
+                "[MATBARRIER] %d manifest item(s) reference a /reports/ report_url "
+                "with no file on disk -- running generate_intel_reports.py --only-missing "
+                "to materialize or clear them before the report-existence gate runs.",
+                len(_mat_dangling),
+            )
+            _mat_result = run_script(
+                [sys.executable, "scripts/generate_intel_reports.py",
+                 "--manifest", str(manifest_path),
+                 "--public-prefix", "https://intel.cyberdudebivash.com",
+                 "--only-missing", "--limit", "0"],
+                stage="matbarrier", allow_fail=True, timeout=600,
+            )
+            if _mat_result.returncode == 0:
+                log.info("[MATBARRIER] ✅ Incremental repair pass complete.")
+            else:
+                log.warning(
+                    "[MATBARRIER] generate_intel_reports.py exited %d (non-fatal -- "
+                    "STAGE 5.4.1 will still catch any remaining gap).",
+                    _mat_result.returncode,
+                )
+        else:
+            log.info("[MATBARRIER] No dangling report_url references -- manifest is materialization-clean.")
+    except Exception as _mat_e:
+        log.warning("[MATBARRIER] Materialization barrier skipped (non-fatal): %s", _mat_e)
 
 
 def main() -> None:
