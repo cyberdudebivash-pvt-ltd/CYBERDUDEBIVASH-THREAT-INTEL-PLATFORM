@@ -41,6 +41,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from normalize_text import strip_markdown_artifacts  # noqa: E402
+from p38_shared_validators import is_pseudo_ioc  # noqa: E402
+
 REPO_ROOT      = Path(__file__).resolve().parent.parent
 MANIFEST_PATH  = REPO_ROOT / "data" / "stix" / "feed_manifest.json"
 PLATFORM_VERSION = "v134.0"
@@ -114,7 +120,13 @@ def normalise_entry(item: dict) -> dict | None:
         return None
     if any(kw in title for kw in BRAND_KEYWORDS):
         return None
-    out["title"] = title
+    # v185.0 P0 FIX: strip Markdown syntax leaked from source formats (GitHub
+    # Security Advisories, oss-sec/cvefeed RSS) -- ingestion-level fix lives in
+    # true_intel_ingestor.py/multi_source_collector.py; this catches it here too
+    # since this stage runs on every item every pipeline cycle (defense-in-depth
+    # + retroactively cleans already-ingested entries, since ID is read from the
+    # existing id/stix_id field below, never recomputed from title when present).
+    out["title"] = strip_markdown_artifacts(title)
 
     # -- timestamp --
     timestamp = (
@@ -183,11 +195,31 @@ def normalise_entry(item: dict) -> dict | None:
         tags = [str(tags)]
     out["tags"] = tags
 
-    # -- description: strip "Tactical cluster: " prefix --
+    # -- description: strip "Tactical cluster: " prefix + markdown artifacts --
     desc = out.get("description") or title
     if isinstance(desc, str) and desc.startswith("Tactical cluster: "):
         desc = desc[len("Tactical cluster: "):]
+    if isinstance(desc, str):
+        desc = strip_markdown_artifacts(desc)
     out["description"] = desc
+
+    # -- iocs: strip pseudo-IOCs (reference URLs, CVE IDs, or an article's
+    # own source_url reported as if it were a real indicator) -- v185.0
+    # P0 FIX. Confirmed present in live data: 175/500 api/feed.json items
+    # (35%) carried an IOC whose value was exactly their own source_url
+    # (mostly cvefeed.io CVE-detail pages), inflating ioc_count without a
+    # single real indicator. ioc_count is recomputed to stay consistent
+    # with len(iocs) (regression_tests.py T06's existing invariant) --
+    # never left stale after filtering.
+    iocs = out.get("iocs")
+    if isinstance(iocs, list) and iocs:
+        real_iocs = [
+            i for i in iocs
+            if not (isinstance(i, dict) and is_pseudo_ioc(i.get("value", ""), out))
+        ]
+        if len(real_iocs) != len(iocs):
+            out["iocs"] = real_iocs
+            out["ioc_count"] = len(real_iocs)
 
     out["schema_version"] = PLATFORM_VERSION
     return out

@@ -50,9 +50,76 @@ SEVERITY_CVSS_BANDS = {
     "INFO":     (0.0,  0.0),
 }
 
-MD_PATTERN   = re.compile(r"(\*\*|__|\#{2,}|\[.+?\]\(https?://.+?\)|`[^`]+`)")
+# v185.0 P0 FIX (G03 false positives): the original pattern matched bare,
+# unpaired "**"/"__"/"#{2,}" occurrences anywhere in the string, so it
+# flagged several classes of legitimate content as leaked Markdown:
+#   - mid-sentence repeated hashes used as prose, e.g. "...splits keys on
+#     the separator (default ##)..." (intel--37207a945025646027c04625)
+#   - dunder-prefixed identifiers, e.g. "__report_gsfailure"
+#     (intel--5125aa26395e3174)
+#   - single trailing asterisks in ransomware-tracker victim-name redaction,
+#     e.g. "Cyrus**" (intel--3b9d0461aff40fce)
+# Fixed by requiring genuine PAIRED bold/italic markers (open...close with
+# the same marker, mirroring scripts/normalize_text.py's own stripping
+# regex) and anchoring the hash-run check to line-start (CommonMark ATX
+# heading position). True positives (e.g. "**bold**", "## Summary" at a
+# line start) are unaffected.
+#
+# Pairing alone is not sufficient for "__": a *paired* dunder identifier
+# (e.g. "__init__", "__proto__", "__dunder__") is structurally identical to
+# real "__emphasis__" markdown -- both are literally "__" + text + "__".
+# Evidence from real advisories (all legitimate Python/JS security content,
+# not leaked markdown): "AddPageForm.__init__ returns early..."
+# (intel--41a58213dd118e77), "without using import, any __dunder__
+# attribute..." (intel--a87a247dfb4a9ff0), and the __proto__ case above.
+# Disambiguated the same way in both directions: dunder identifiers are a
+# single token with no internal whitespace, while genuine underscore
+# emphasis in this corpus is essentially always applied to a phrase.
+# "__" therefore only counts as emphasis when its content contains internal
+# whitespace; "**" is unrestricted since no bold-marker false positive has
+# been observed (asterisks are not overloaded with an identifier-naming
+# meaning the way underscores are in Python/JS). A rare residual ambiguous
+# case remains where multi-asterisk redaction runs (e.g. "P** R***")
+# incidentally contain a real "**" pair -- left flagged rather than
+# special-cased from one example.
+#
+# The whitespace requirement alone is insufficient when two dunder tokens
+# appear near each other: the closing "__" of the first can spuriously
+# pair with the opening "__" of the second across the connecting prose,
+# e.g. "__proto__ (e.g. __proto__##gcPolluted)" -- "(e.g." contains a
+# space, so "__...(e.g. ...__" reads as a whitespace-containing pair even
+# though neither real dunder token is emphasis. Evidence:
+# intel--8b5b662cb9861c3d has four dunder tokens in one sentence
+# ("__class__, __bases__, __subclasses__(), and __globals__"). Fixed the
+# same way as scripts/normalize_text.py's stripper: mask every complete
+# dunder-shaped token ("__word__") as an atomic unit first, so it can never
+# participate in pairing with some other "__" elsewhere in the string, then
+# check what remains for real markdown.
+_DUNDER_RE = re.compile(r"__[A-Za-z0-9](?:[A-Za-z0-9_]*[A-Za-z0-9])?__")
+MD_PATTERN   = re.compile(
+    r"(?:\*\*.+?\*\*|__[^_\n]*\s[^_\n]*__|^[ \t]{0,3}\#{2,6}(?=[ \t]|$)|\[.+?\]\(https?://.+?\)|`[^`]+`)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _has_markdown_leakage(text: str) -> bool:
+    """G03 check: True if text contains leaked Markdown syntax, after
+    masking complete dunder identifiers so they can't be misread as -- or
+    spuriously pair into -- underscore emphasis."""
+    masked = _DUNDER_RE.sub("\x00", text)
+    return bool(MD_PATTERN.search(masked))
+# v185.0 P0 FIX (G04 false positive): bare "placeholder" also matches its
+# legitimate technical/CMS sense (e.g. django-cms "placeholder" content
+# regions -- "copy plugins out of a placeholder they have no permission
+# on"), which is not synthetic/scaffolding language. Evidence:
+# intel--0cb575dda5e37f44 (real django-cms advisory, not placeholder text).
+# Narrowed to the compound phrases that actually indicate unfilled
+# template/AI scaffolding, per the "no exact phrase banning without
+# context" content-quality principle -- other terms in this list have zero
+# observed false positives in the live feed and are left unchanged.
 SYNTH_PATTERN = re.compile(
-    r"\b(lorem ipsum|placeholder|tbd|todo|insert here|example text|"
+    r"\b(lorem ipsum|placeholder\s+(?:text|content|value|image|data)|"
+    r"\[placeholder\]|\{placeholder\}|tbd|todo|insert here|example text|"
     r"sample text|test data|dummy|redacted for|to be determined)\b",
     re.IGNORECASE,
 )
@@ -113,8 +180,8 @@ def g02_required_fields(items: list) -> dict:
 def g03_no_markdown_leakage(items: list) -> dict:
     hits = sum(
         1 for item in items
-        if MD_PATTERN.search(str(item.get("title", "")))
-        or MD_PATTERN.search(str(item.get("description", "")))
+        if _has_markdown_leakage(str(item.get("title", "")))
+        or _has_markdown_leakage(str(item.get("description", "")))
     )
     ok = hits == 0
     return {"gate": "G03", "name": "No Markdown Leakage", "pass": ok,

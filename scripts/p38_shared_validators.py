@@ -39,6 +39,19 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+_SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+# Reused, not re-implemented, per this module's own REUSE MAP convention
+# above: anti_hallucination_engine.py's PSEUDO_IOC check already knows
+# which reference/vendor/CVE-tracker domains and CVE-ID shapes are not
+# real indicators of compromise -- is_pseudo_ioc() below calls these same
+# compiled patterns rather than duplicating the detection logic.
+from anti_hallucination_engine import (  # noqa: E402
+    REFERENCE_URL_PATTERNS as _AHE_REFERENCE_URL_PATTERNS,
+    CVE_RE as _AHE_CVE_RE,
+)
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
@@ -814,6 +827,166 @@ def has_mitre_coverage(item: Dict) -> bool:
         item.get("attck_technique_ids") or item.get("attck_techniques")
         or item.get("mitre_tactics") or item.get("ttps")
     )
+
+
+# Report categories where a MITRE ATT&CK technique mapping AND a real IOC
+# are plausible -- the content describes a concrete technical vulnerability
+# or attacker behavior. Shared between attck_eligible() and
+# is_ioc_eligible() since both ask the same underlying question ("does
+# this content have a technical/behavioral hook to extract from"). Pure
+# commentary/news pieces with no CVE, no vuln_class, and no attack-relevant
+# threat_type are NOT eligible for either: forcing a mapping or an
+# indicator onto them would be fabrication, not coverage (the mandate
+# explicitly allows 0 ATT&CK/0 IOC for news when evidence doesn't support
+# one -- that is a correct outcome, not a defect to paper over).
+_TECHNICAL_THREAT_TYPES = {
+    "cve", "vulnerability", "ransomware", "malware", "threat intel",
+    "threat intelligence", "phishing-url", "phishing", "kev",
+    "oss-advisory", "data breach", "remote code execution",
+    "web application attack", "malicious url", "cloud security",
+    "ics/ot", "supply chain", "zero-day", "zero day", "botnet",
+}
+
+
+def attck_eligible(item: Dict) -> bool:
+    """True if `item` is of a report type/content class where a MITRE
+    ATT&CK technique mapping is plausible. Mirrors is_detection_eligible's
+    role for detection coverage: the point is to report
+    eligible-vs-mapped, never raw-items-vs-mapped, since an ineligible item
+    correctly has 0 techniques."""
+    if item.get("cve_id") or item.get("cve_ids") or item.get("cves"):
+        return True
+    if item.get("vuln_class"):
+        return True
+    tt = str(item.get("threat_type") or "").strip().lower()
+    return tt in _TECHNICAL_THREAT_TYPES
+
+
+def attck_mapping_state(item: Dict) -> str:
+    """Evidence-bound schema state for `item`'s ATT&CK mapping:
+      NOT_ELIGIBLE -- content class has no plausible technique mapping
+      UNMAPPED     -- eligible, but no technique present (0 is honest here)
+      LEGACY_ONLY  -- technique(s) present only in the deprecated
+                      mitre_tactics/ttps fields, not the current schema
+      MAPPED       -- technique(s) present in the current
+                      attck_technique_ids/attck_techniques fields
+    This is the field-schema dimension only -- it does not independently
+    verify per-technique evidence quality (OBSERVED/REPORTED/INFERRED),
+    which lives on each technique entry's own verification_status/
+    confidence field where the producing engine supplies one (e.g.
+    attack_mapping_validator.py's verification_status, or
+    apex_mitre_attack_engine.py's confidence)."""
+    if not attck_eligible(item):
+        return "NOT_ELIGIBLE"
+    if item.get("attck_technique_ids") or item.get("attck_techniques"):
+        return "MAPPED"
+    if item.get("mitre_tactics") or item.get("ttps"):
+        return "LEGACY_ONLY"
+    return "UNMAPPED"
+
+
+def attck_coverage_summary(items: List[Dict]) -> Dict:
+    """Numerator+denominator ATT&CK coverage breakdown -- never a bare
+    percentage. Reports eligible/mapped/legacy_only/unmapped/not_eligible
+    counts so a reader can see both the honest eligible-item coverage rate
+    AND how much of that coverage rests on the deprecated field pair
+    rather than the current schema."""
+    total = len(items)
+    counts: Dict[str, int] = {"NOT_ELIGIBLE": 0, "UNMAPPED": 0, "LEGACY_ONLY": 0, "MAPPED": 0}
+    for it in items:
+        counts[attck_mapping_state(it)] += 1
+    eligible_total = total - counts["NOT_ELIGIBLE"]
+    covered_any = counts["MAPPED"] + counts["LEGACY_ONLY"]
+    return {
+        "total_items": total,
+        "eligible_items": eligible_total,
+        "not_eligible_items": counts["NOT_ELIGIBLE"],
+        "covered_items_any_field": covered_any,
+        "covered_items_current_schema": counts["MAPPED"],
+        "covered_items_legacy_field_only": counts["LEGACY_ONLY"],
+        "unmapped_eligible_items": counts["UNMAPPED"],
+        "eligible_coverage_pct": round(covered_any / eligible_total * 100, 1) if eligible_total else 0.0,
+        "current_schema_coverage_pct": round(counts["MAPPED"] / eligible_total * 100, 1) if eligible_total else 0.0,
+    }
+
+
+def is_pseudo_ioc(ioc_value: str, item: Optional[Dict] = None) -> bool:
+    """True if `ioc_value` is a reference identifier masquerading as an
+    indicator of compromise, not a real IOC:
+      - a bare CVE ID (a vulnerability reference, not an indicator)
+      - a known vendor/NVD/CISA/threat-intel-blog reference URL (reuses
+        anti_hallucination_engine.py's REFERENCE_URL_PATTERNS/CVE_RE)
+      - (when `item` is given) identical to the item's OWN source_url --
+        an article can never be malicious infrastructure it is reporting
+        on, regardless of which domain hosts it, so this catches the same
+        violation class for domains outside the fixed reference-URL list.
+        Confirmed present in live data: 175/500 api/feed.json items (35%)
+        had an IOC whose value was exactly their own source_url (mostly
+        cvefeed.io CVE-detail pages reported as "url"-type indicators).
+    Does NOT flag a URL just because it matches an item's source_url when
+    that item is itself a URL-flagging feed (OpenPhish/URLhaus), where the
+    "source" and the malicious indicator are legitimately the same URL --
+    those items set iocs directly during ingestion from the value being
+    reported on, not as a fallback padding pattern, so this function is
+    intentionally scoped to reference-identifier detection, not a blanket
+    "matches source_url" rule applied without that context."""
+    if not ioc_value:
+        return False
+    v = str(ioc_value).strip()
+    if _AHE_CVE_RE.match(v):
+        return True
+    if _AHE_REFERENCE_URL_PATTERNS.search(v):
+        return True
+    if item:
+        src = str(item.get("source_url") or "").strip()
+        tt = str(item.get("threat_type") or "").strip().upper()
+        if src and v.rstrip("/") == src.rstrip("/") and tt not in ("PHISHING-URL", "MALWARE-URL", "MALICIOUS URL"):
+            return True
+    return False
+
+
+def is_ioc_eligible(item: Dict) -> bool:
+    """True if `item` is of a report type/content class where a real IOC
+    (IP/domain/URL/hash distinct from the item's own reference link) is
+    plausibly extractable. Mirrors attck_eligible/is_detection_eligible:
+    the point is to report eligible-vs-populated, never
+    raw-items-vs-populated, since a pure commentary/news item correctly
+    has 0 IOCs."""
+    if item.get("cve_id") or item.get("cve_ids") or item.get("cves"):
+        return True
+    tt = str(item.get("threat_type") or "").strip().lower()
+    return tt in _TECHNICAL_THREAT_TYPES
+
+
+def ioc_coverage_summary(items: List[Dict]) -> Dict:
+    """Numerator+denominator IOC coverage breakdown -- never a bare
+    percentage. Separates genuinely populated IOCs from pseudo-IOCs (a
+    reference URL or CVE ID counted as if it were a real indicator), so a
+    reader can see both the honest eligible-item coverage rate AND how
+    much of the raw ioc_count is inflated by non-indicator values."""
+    total = len(items)
+    eligible = 0
+    real_covered = 0
+    pseudo_only = 0
+    for it in items:
+        if not is_ioc_eligible(it):
+            continue
+        eligible += 1
+        iocs = it.get("iocs") or []
+        real = [i for i in iocs if not is_pseudo_ioc(i.get("value", ""), it)]
+        if real:
+            real_covered += 1
+        elif iocs:
+            pseudo_only += 1
+    return {
+        "total_items": total,
+        "eligible_items": eligible,
+        "not_eligible_items": total - eligible,
+        "covered_items_real_ioc": real_covered,
+        "items_pseudo_ioc_only": pseudo_only,
+        "unmapped_eligible_items": eligible - real_covered - pseudo_only,
+        "eligible_coverage_pct": round(real_covered / eligible * 100, 1) if eligible else 0.0,
+    }
 
 
 def has_source_url(item: Dict) -> bool:
