@@ -45,6 +45,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 from normalize_text import strip_markdown_artifacts  # noqa: E402
+from p38_shared_validators import is_pseudo_ioc  # noqa: E402
 
 REPO_ROOT      = Path(__file__).resolve().parent.parent
 MANIFEST_PATH  = REPO_ROOT / "data" / "stix" / "feed_manifest.json"
@@ -201,6 +202,24 @@ def normalise_entry(item: dict) -> dict | None:
     if isinstance(desc, str):
         desc = strip_markdown_artifacts(desc)
     out["description"] = desc
+
+    # -- iocs: strip pseudo-IOCs (reference URLs, CVE IDs, or an article's
+    # own source_url reported as if it were a real indicator) -- v185.0
+    # P0 FIX. Confirmed present in live data: 175/500 api/feed.json items
+    # (35%) carried an IOC whose value was exactly their own source_url
+    # (mostly cvefeed.io CVE-detail pages), inflating ioc_count without a
+    # single real indicator. ioc_count is recomputed to stay consistent
+    # with len(iocs) (regression_tests.py T06's existing invariant) --
+    # never left stale after filtering.
+    iocs = out.get("iocs")
+    if isinstance(iocs, list) and iocs:
+        real_iocs = [
+            i for i in iocs
+            if not (isinstance(i, dict) and is_pseudo_ioc(i.get("value", ""), out))
+        ]
+        if len(real_iocs) != len(iocs):
+            out["iocs"] = real_iocs
+            out["ioc_count"] = len(real_iocs)
 
     out["schema_version"] = PLATFORM_VERSION
     return out
