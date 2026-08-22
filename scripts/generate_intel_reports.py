@@ -2471,6 +2471,11 @@ def main(argv=None) -> int:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--fail-on-zero", action="store_true",
                         help="Exit 1 if no reports were generated")
+    parser.add_argument("--only-missing", action="store_true",
+                        help="Incremental repair mode: skip items whose report_url "
+                             "already resolves to an existing local file. Lets this "
+                             "script be re-invoked cheaply as a late materialization "
+                             "barrier without re-rendering the whole manifest.")
     args = parser.parse_args(argv)
 
     MANIFEST_PATH = Path(args.manifest)
@@ -2538,6 +2543,24 @@ def main(argv=None) -> int:
             skipped_brand += 1
             item["validation_status"] = "brand_skip"
             continue
+
+        # P0 report-continuity fix: --only-missing is a targeted repair pass, not
+        # an alternate full-render mode. It skips exactly the items that are NOT
+        # this barrier's concern: an external/source-fallback report_url (http-
+        # prefixed -- report_existence_validator.py itself never checks these,
+        # and this barrier must not convert an intentionally-external item into
+        # a locally-rendered one as a side effect) and a /reports/ report_url
+        # whose file is verified present on disk right now -- the same check
+        # report_existence_validator.py performs, never trusted on the field's
+        # mere presence. Only a genuinely empty report_url or a /reports/ one
+        # with no backing file falls through to the normal render+write+
+        # validate path below.
+        if args.only_missing:
+            _existing_ru = (item.get("report_url") or "").strip()
+            if _existing_ru.startswith("http"):
+                continue
+            if _existing_ru.startswith("/reports/") and (REPO_ROOT / _existing_ru.lstrip("/")).exists():
+                continue
 
         # ── Zero-skip policy: generate report for EVERY real entry ──
         # Short entries get an enriched template - no blanket skip
