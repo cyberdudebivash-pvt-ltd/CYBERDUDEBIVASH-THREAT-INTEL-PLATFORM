@@ -999,14 +999,30 @@ def has_source_url(item: Dict) -> bool:
 def get_detection_rules_total(item: Dict) -> int:
     """Current detection_rules_total (int-coerced defensively -- observed as
     both int and string in real data), falling back to the legacy
-    detection_bundle field only if detection_rules_total is absent."""
+    detection_bundle field, and -- Phase 4.1 mandate Section 12 fix -- as a
+    final fallback, a count of the CURRENT per-item rule fields
+    detection_bundle_injector.py actually writes (sigma_rule, kql_query,
+    suricata_rule, yara_rule).
+
+    Root cause (confirmed by direct inspection of the live feed, not
+    assumed): detection_rules_total/detection_bundle exist on ZERO items in
+    the current feed, while sigma_rule/kql_query/suricata_rule carry real
+    content on 86 -- exactly the "0.0% detection coverage" figure reported
+    everywhere upstream of this accessor all session was this field-name
+    drift, not an absence of detection content. This is the exact class of
+    defect Section 12 names explicitly ("detection_rules, detection_rules_
+    total, detection_bundle, sigma_rules, detections, detection_pack, or
+    current equivalents... never silently count the same rule twice").
+    Counts distinct rule TYPES present (0-4), never the same rule twice."""
     val = item.get("detection_rules_total")
     if val is None:
         val = item.get("detection_bundle")
-    try:
-        return int(val) if val is not None else 0
-    except (TypeError, ValueError):
-        return 0
+    if val is not None:
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            pass
+    return sum(1 for k in ("sigma_rule", "kql_query", "suricata_rule", "yara_rule") if item.get(k))
 
 
 def has_detection_rules(item: Dict) -> bool:
