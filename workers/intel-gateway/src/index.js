@@ -97,6 +97,7 @@ import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
 import { applyTierGateV2, enforceTierGate } from './revenue-enforcement.js';
+import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
 const PLATFORM_VERSION    = "184.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -487,6 +488,93 @@ async function loadFeedItems(env) {
   const data = await r2Get(env, LATEST_JSON_KEY);
   if (data && data.items && data.items.length > 0) return data;
   return { schema_version: "1.0", count: 0, items: [], generated_at: now(), version: PLATFORM_VERSION };
+}
+
+// =============================================================================
+// DETECTION REGISTRY QUERY HANDLERS (Phase 4.1 mandate Section 9-19)
+// Tiering follows this file's own established precedent for comparable
+// P17-P40 intelligence endpoints (Section 15: "do not implement paywall
+// assumptions not supported by existing product policy") rather than
+// inventing a new policy: FREE gets a redacted preview (same masked-preview
+// pattern already used for the main feed at auth.tier === TIERS.FREE
+// elsewhere in this file); PRO+ gets complete artifact content; ENTERPRISE/
+// MSSP get the higher page-size ceiling this file already grants them on
+// other endpoints (e.g. the vendor-risk route's 200-vs-100 limit split).
+// =============================================================================
+
+const DETECTION_TIER_LIMITS = { FREE: 10, PRO: 50, ENTERPRISE: 200, MSSP: 200 };
+
+function _redactForFreeTier(artifact) {
+  const preview = typeof artifact.content === "string" ? artifact.content.slice(0, 160) : "";
+  return {
+    ...artifact,
+    content: preview + (preview.length === 160 ? "... [upgrade to PRO to view the complete artifact]" : ""),
+    _preview_only: true,
+  };
+}
+
+/** Section 13/14: list + filter + paginate canonical detection artifacts.
+ * Section 18: a genuinely empty result is returned as a valid empty page,
+ * never fabricated content and never a silent fallback to a stale file. */
+async function handleDetectionsQuery(request, env, auth) {
+  let feed;
+  try {
+    feed = await loadFeedItems(env);
+  } catch (e) {
+    // Fail closed with an honest error, not a fabricated empty-looking
+    // success (Section 18 applies to genuine emptiness, not to a load
+    // failure masquerading as one).
+    return errorResp("Detection registry temporarily unavailable -- try again shortly", 503);
+  }
+
+  const url = new URL(request.url);
+  const params = Object.fromEntries(url.searchParams.entries());
+  const tierCap = DETECTION_TIER_LIMITS[auth.tier] || DETECTION_TIER_LIMITS.FREE;
+  if (!params.limit || parseInt(params.limit, 10) > tierCap) params.limit = String(tierCap);
+
+  let registry;
+  try {
+    registry = buildDetectionRegistry(feed.items || []);
+  } catch (e) {
+    return errorResp("Detection registry build failed", 500);
+  }
+
+  const result = queryDetectionRegistry(registry, params);
+  if (result.error) return jsonResp(result, 400);
+
+  const isFree = auth.tier === TIERS.FREE;
+  const data = result.data.map(a => toPublicArtifact(isFree ? _redactForFreeTier(a) : a));
+
+  return jsonResp({
+    schema_version: "1.0.0",
+    engine_version: DETECTION_REGISTRY_VERSION,
+    generated_at: now(),
+    count: data.length,
+    data,
+    pagination: result.pagination,
+    ...(isFree ? { tier_note: "FREE tier returns redacted previews and a lower page size. Upgrade to PRO for complete artifacts." } : {}),
+  });
+}
+
+/** GET /api/v1/detections/{intel_id} -- all detection artifacts for one
+ * intelligence item, the natural REST-path equivalent of
+ * /api/v1/detections?intel_id=X (Section 13's intel_id filter). */
+async function handleDetectionArtifactById(request, env, auth) {
+  const url = new URL(request.url);
+  const intelId = decodeURIComponent(url.pathname.slice("/api/v1/detections/".length));
+  if (!intelId) return errorResp("Missing intel_id", 400);
+
+  const patchedUrl = new URL(request.url);
+  patchedUrl.searchParams.set("intel_id", intelId);
+  const patchedRequest = new Request(patchedUrl.toString(), request);
+  const resp = await handleDetectionsQuery(patchedRequest, env, auth);
+  if (resp.status !== 200) return resp;
+
+  const body = await resp.json();
+  if (body.count === 0) {
+    return jsonResp({ error: "No detection artifacts found for this intel_id", intel_id: intelId, reason: "not_found_or_not_eligible" }, 404);
+  }
+  return jsonResp(body);
 }
 
 // =============================================================================
@@ -4699,6 +4787,7 @@ async function handleRequest(request, env, ctx) {
     path === "/api/v1/reports/validate" || path === "/api/v1/reports/quality" ||
     path === "/api/v1/ioc/enriched" || path === "/api/v1/confidence/methodology" ||
     path === "/api/v1/reports/certify" || path === "/api/v1/reports/scorecard" ||
+    path === "/api/v1/detections" || path.startsWith("/api/v1/detections/") ||
     path === "/api/v1/reports/p20/quality" || path === "/api/v1/reports/p20/audit" ||
     /^\/api\/v1\/p(2[1-9]|3\d|40)\//.test(path) ||
     path.startsWith("/api/v1/rx-pub-a0/");
@@ -4722,6 +4811,13 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/v1/reports/quality")             return await handleP18QualityScore(request, env);
   if (path === "/api/v1/ioc/enriched")                return await handleP18IOCEnriched(request, env, auth.tier);
   if (path === "/api/v1/confidence/methodology")      return await handleP18ConfidenceMethod(request, env);
+  // --- Detection Registry (additive, Phase 4.1 mandate Section 9-19) --------
+  // Canonical per-item detection-artifact query API -- see detection-registry.js
+  // header for the full root-cause trace and scope boundary. Distinct from
+  // /api/v1/premium/detections/{artifact} (unchanged, still the correct
+  // route for the static enterprise bundle-file product).
+  if (path === "/api/v1/detections")                  return await handleDetectionsQuery(request, env, auth);
+  if (path.startsWith("/api/v1/detections/"))          return await handleDetectionArtifactById(request, env, auth, path);
   // --- P19: Enterprise Report Excellence + Dead-code Activation (additive, v19.0) -----------
   if (path === "/api/v1/reports/certify")           return await handleP19Certify(request, env);
   if (path === "/api/v1/reports/scorecard")         return await handleP19Scorecard(request, env);
