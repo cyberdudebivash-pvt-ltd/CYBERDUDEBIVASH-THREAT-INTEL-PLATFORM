@@ -802,10 +802,27 @@ class IntelQualityEnricher:
         if not isinstance(existing_ttps, list):
             existing_ttps = []
 
-        if not existing_ttps or not item.get("mitre_tactics"):
+        # v185.2 P0 FIX: apex_mitre_attack_engine.py (wired as pipeline Stage
+        # 3.3, the ATT&CK backfill) writes ttps as a list of evidence dicts
+        # (technique_id/technique_name/tactic/justification/detection_hint/
+        # ...), not plain technique-ID strings. dict.fromkeys() below requires
+        # hashable elements -- a dict entry raised "unhashable type: 'dict'"
+        # and, since enrich_batch() has no per-item try/except, aborted
+        # enrichment for the entire REMAINING batch. Confirmed live: this
+        # dropped PHASE4 enrichment coverage to 2.9% the first time the
+        # backfill stage ran ahead of this one. An item already evidence-
+        # mapped by MAE is authoritative -- skip the crude keyword-substring
+        # merge (unanchored, the same false-positive class MAE's own v185.0
+        # fix corrected) rather than downgrading it to bare ID strings
+        # blended with unanchored guesses. Plain-string/legacy/empty ttps
+        # still go through the merge exactly as before.
+        existing_is_evidence_mapped = any(isinstance(t, dict) for t in existing_ttps)
+        existing_ids = [t for t in existing_ttps if isinstance(t, str)]
+
+        if not existing_is_evidence_mapped and (not existing_ids or not item.get("mitre_tactics")):
             inferred = _infer_mitre_techniques(text)
             if inferred:
-                merged = list(dict.fromkeys(existing_ttps + inferred))[:8]
+                merged = list(dict.fromkeys(existing_ids + inferred))[:8]
                 item["ttps"]          = merged
                 item["mitre_tactics"] = merged[:5]
                 item["ttp_count"]     = len(merged)

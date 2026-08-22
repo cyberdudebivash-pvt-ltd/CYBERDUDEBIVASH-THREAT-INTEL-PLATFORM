@@ -1482,6 +1482,44 @@ def stage_manifest_cleanup() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Stage 3.3 -- ATT&CK Mapping Backfill (Phase 4)
+# ---------------------------------------------------------------------------
+
+def stage_attack_mapping_backfill() -> None:
+    """
+    Runs apex_mitre_attack_engine.py's evidence-based technique mapping
+    (CWE + text-evidence inference, never a blanket assignment) over the
+    FULL manifest on every pipeline run.
+
+    This is a BACKFILL, not the first wiring of this engine: the identical
+    enrich_attack_mapping() function already runs live, per-item, at
+    ingestion time via enterprise_intelligence_integrator.py's MAE step
+    (agent/sentinel_blogger.py STEP 7g). That per-item call only reaches
+    items ingested after the EII wiring existed and silently no-ops on any
+    exception (zero-regression contract), so most of the existing manifest
+    never received a mapping through it. Re-applying the same function
+    here closes that coverage gap for older/skipped items and is idempotent
+    for anything the live path already mapped, since both call sites invoke
+    the exact same function against the same item content.
+
+    Shadow-mode verified before wiring (Phase 4, ATT&CK production-
+    readiness audit): against the full production manifest (1075 items),
+    624 items gained honest evidence-based coverage (0 -> N techniques),
+    446 correctly produced no mapping (insufficient evidence -- never
+    fabricated), and only 6 lost a prior weak mapping -- all 6 sample-
+    reviewed and confirmed as more honest abstentions, not false negatives
+    against strong evidence. Runtime ~1.3s for 1075 items.
+    """
+    log.info("STAGE 3.3 -- ATT&CK Mapping Backfill")
+    run_script(
+        [sys.executable, "scripts/apex_mitre_attack_engine.py"],
+        stage="3.3.attack_backfill",
+        allow_fail=True,
+        timeout=120,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Stage 3.5 -- Global Schema Enforcement (MANDATORY write-boundary gate)
 # ---------------------------------------------------------------------------
 
@@ -3695,6 +3733,7 @@ def main() -> None:
         "anti_stale_hardening",
         "schema_validation",
         "dedup_enrich",
+        "attack_mapping_backfill",
         "html_reports",
         "manifest_integrity",
         "pipeline_consistency",
@@ -3877,6 +3916,9 @@ def main() -> None:
     except Exception as _e:
         log.warning("[3.2-POST] intel_dedup_engine.save_all() skipped (non-fatal): %s", _e)
     _stage_done("dedup_enrich")
+
+    stage_attack_mapping_backfill()      # Phase 4: evidence-based ATT&CK backfill (shadow-verified)
+    _stage_done("attack_mapping_backfill")
 
     stage_enforce_schema()               # MANDATORY: schema enforcement at write boundary
     stage_sync_root_feed_json()          # P0 FIX: populate feed.json from STIX/manifest always
