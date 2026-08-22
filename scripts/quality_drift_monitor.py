@@ -22,6 +22,7 @@ rolling history (last 30 runs) for trend visibility over time.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -47,6 +48,7 @@ log = logging.getLogger("quality_drift_monitor")
 ENGINE_VERSION = "185.0.0"
 REPO = Path(__file__).resolve().parent.parent
 OUT_PATH = REPO / "data" / "quality" / "quality_drift_report.json"
+LOCK_PATH = OUT_PATH.with_suffix(".lock")
 MAX_HISTORY = 30
 
 
@@ -87,16 +89,18 @@ def _eligible_coverage(items: List[Dict]) -> Dict[str, Any]:
     }
 
 
-def _load_previous() -> Dict[str, Any] | None:
+def _load_prior_report() -> Dict[str, Any]:
+    """Read the full prior report once. Must be called only while holding
+    LOCK_PATH -- see main() -- so it observes a consistent state relative
+    to the write that follows in the same locked section."""
     if not OUT_PATH.exists():
-        return None
+        return {}
     try:
         with OUT_PATH.open(encoding="utf-8") as f:
-            prior = json.load(f)
-        return prior.get("current")
+            return json.load(f)
     except Exception as e:
         log.warning("Could not read previous report (non-fatal): %s", e)
-        return None
+        return {}
 
 
 def _compute_delta(current: Dict[str, Any], previous: Dict[str, Any] | None) -> Dict[str, Any] | None:
@@ -148,46 +152,51 @@ def main() -> int:
         "eligible_coverage": _eligible_coverage(items),
     }
 
-    previous = _load_previous()
-    delta = _compute_delta(current, previous)
-
-    prior_report: Dict[str, Any] = {}
-    if OUT_PATH.exists():
-        try:
-            with OUT_PATH.open(encoding="utf-8") as f:
-                prior_report = json.load(f)
-        except Exception:
-            prior_report = {}
-    history: List[Dict[str, Any]] = prior_report.get("history", [])
-    history.append({
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "feed_fingerprint": feed.fingerprint,
-        "by_severity_pct": by_severity_pct,
-        "attck_coverage_pct": current["eligible_coverage"]["attck"]["pct"],
-        "ioc_coverage_pct": current["eligible_coverage"]["ioc"]["pct"],
-        "detection_coverage_pct": current["eligible_coverage"]["detection"]["pct"],
-    })
-    history = history[-MAX_HISTORY:]
-
-    report = {
-        "engine": "quality_drift_monitor",
-        "engine_version": ENGINE_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "current": current,
-        "previous": previous,
-        "delta": delta,
-        "history": history,
-    }
-
+    # v185.1 P0 FIX: a PID-specific temp filename alone only prevents two
+    # concurrent runs from corrupting *each other's* write -- it does not
+    # stop a lost-update race on the accumulated `history` list, where both
+    # runs read the same prior history, each append their own entry, and
+    # whichever os.replace() lands last silently discards the other run's
+    # entry. Found via review on PR #226: the first fix (PID-suffixed temp
+    # file, still used below) closed the write-collision half of the
+    # finding but not this half. Serialising the whole read-modify-write
+    # section behind an exclusive lock closes both: only one process reads
+    # `prior_report` and computes the next `history` at a time.
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # A shared ".tmp" name lets a second concurrent run delete/overwrite the
-    # first run's temp file before its own replace() -- a unique per-process
-    # suffix makes the write collision-free without needing a lock, since
-    # each run's own final os.replace() is still atomic.
-    tmp = OUT_PATH.with_suffix(f".{os.getpid()}.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
-    tmp.replace(OUT_PATH)
+    with open(LOCK_PATH, "w") as lockf:
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+        try:
+            prior_report = _load_prior_report()
+            previous = prior_report.get("current")
+            delta = _compute_delta(current, previous)
+
+            history: List[Dict[str, Any]] = prior_report.get("history", [])
+            history.append({
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "feed_fingerprint": feed.fingerprint,
+                "by_severity_pct": by_severity_pct,
+                "attck_coverage_pct": current["eligible_coverage"]["attck"]["pct"],
+                "ioc_coverage_pct": current["eligible_coverage"]["ioc"]["pct"],
+                "detection_coverage_pct": current["eligible_coverage"]["detection"]["pct"],
+            })
+            history = history[-MAX_HISTORY:]
+
+            report = {
+                "engine": "quality_drift_monitor",
+                "engine_version": ENGINE_VERSION,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "current": current,
+                "previous": previous,
+                "delta": delta,
+                "history": history,
+            }
+
+            tmp = OUT_PATH.with_suffix(f".{os.getpid()}.tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+            tmp.replace(OUT_PATH)
+        finally:
+            fcntl.flock(lockf, fcntl.LOCK_UN)
 
     log.info(
         "Feed=%s items=%d | PASS=%d(%.1f%%) WARN=%d(%.1f%%) HOLD=%d(%.1f%%)",
