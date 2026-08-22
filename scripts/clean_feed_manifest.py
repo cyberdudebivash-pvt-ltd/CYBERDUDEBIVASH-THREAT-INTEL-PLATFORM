@@ -208,18 +208,29 @@ def normalise_entry(item: dict) -> dict | None:
     # P0 FIX. Confirmed present in live data: 175/500 api/feed.json items
     # (35%) carried an IOC whose value was exactly their own source_url
     # (mostly cvefeed.io CVE-detail pages), inflating ioc_count without a
-    # single real indicator. ioc_count is recomputed to stay consistent
-    # with len(iocs) (regression_tests.py T06's existing invariant) --
-    # never left stale after filtering.
+    # single real indicator.
+    #
+    # v185.1 FIX: ioc_count is now unconditionally recomputed as
+    # len(iocs) -- not only when pseudo-IOC filtering actually removed
+    # something. Evidence this was needed: a live production report spot-
+    # check (Phase 4 Checkpoint D) found intel--366368291ece92d9df1af7d0's
+    # rendered HTML "IOCs: 23" summary widget disagreeing with its own
+    # ioc_count=3 -- the widget was reading a *different* field
+    # (indicator_count, a legitimate but distinct STIX-bundle-object count
+    # from agent/export_stix.py, not this item's own extracted iocs list)
+    # under the same "IOC" label. That specific template mislabeling is
+    # not fixed here (out of scope for a surgical, well-understood change
+    # under this pass), but this at least guarantees ioc_count itself --
+    # the field regression_tests.py T06 already treats as authoritative --
+    # can never independently drift from len(iocs) for any other reason.
     iocs = out.get("iocs")
-    if isinstance(iocs, list) and iocs:
+    if isinstance(iocs, list):
         real_iocs = [
             i for i in iocs
             if not (isinstance(i, dict) and is_pseudo_ioc(i.get("value", ""), out))
         ]
-        if len(real_iocs) != len(iocs):
-            out["iocs"] = real_iocs
-            out["ioc_count"] = len(real_iocs)
+        out["iocs"] = real_iocs
+        out["ioc_count"] = len(real_iocs)
 
     out["schema_version"] = PLATFORM_VERSION
     return out
