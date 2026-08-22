@@ -3733,6 +3733,7 @@ def main() -> None:
         "anti_stale_hardening",
         "schema_validation",
         "dedup_enrich",
+        "attack_mapping_backfill",
         "html_reports",
         "manifest_integrity",
         "pipeline_consistency",

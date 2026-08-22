@@ -78,9 +78,6 @@ def _g1_feed_integrity(items: list) -> tuple[bool, str, list[str]]:
 
 def _g2_confidence(items: list) -> tuple[bool, str, list[str]]:
     """G2: Average confidence level across feed."""
-    raw = [float(i.get("confidence") or 0) for i in items if i.get("confidence") is not None]
-    if not raw:
-        return True, "Confidence field absent (non-blocking)", []
     # v185.3 P0 FIX: confidence is stored under two incompatible scales by
     # different producers -- most items as a 0-1 fraction (0.15, 0.25, ...),
     # a minority as an already-0-100 percentage (90). Averaging raw values
@@ -93,7 +90,36 @@ def _g2_confidence(items: list) -> tuple[bool, str, list[str]]:
     # applied here in the inverse direction, normalising down to a 0-1
     # fraction before averaging, since this check's own output format
     # multiplies by 100.
-    confs = [v / 100.0 if v > 1.0 else v for v in raw]
+    #
+    # v185.4 P0 FIX: the normalisation above assumed every raw value was
+    # either a valid 0-1 fraction or a valid 0-100 percentage. It didn't
+    # reject a value outside 0..100 (e.g. 150 -> "normalised" to 1.5, still
+    # invalid) or a non-finite value (a literal NaN/Infinity survives
+    # float() and silently propagates through sum()/len(), and `avg < 0.10`
+    # is always False for NaN, so this gate would PASS on invalid data
+    # instead of flagging it). Reject and report invalid values explicitly
+    # instead of letting them skew or hide inside the average.
+    invalid = 0
+    confs: list[float] = []
+    for item in items:
+        v = item.get("confidence")
+        if v is None:
+            continue
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            invalid += 1
+            continue
+        if not (v == v) or v in (float("inf"), float("-inf")) or not (0.0 <= v <= 100.0):
+            invalid += 1
+            continue
+        confs.append(v / 100.0 if v > 1.0 else v)
+    if invalid:
+        return False, f"{invalid} item(s) have non-finite or out-of-range (0..100) confidence values", [
+            "Check the producer writing raw `confidence` for malformed values",
+        ]
+    if not confs:
+        return True, "Confidence field absent (non-blocking)", []
     avg = sum(confs) / len(confs)
     if avg < 0.10:
         return False, f"Average confidence critically low: {avg:.2%}", [

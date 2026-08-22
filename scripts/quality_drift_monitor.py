@@ -180,7 +180,11 @@ def main() -> int:
     }
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUT_PATH.with_suffix(".tmp")
+    # A shared ".tmp" name lets a second concurrent run delete/overwrite the
+    # first run's temp file before its own replace() -- a unique per-process
+    # suffix makes the write collision-free without needing a lock, since
+    # each run's own final os.replace() is still atomic.
+    tmp = OUT_PATH.with_suffix(f".{os.getpid()}.tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     tmp.replace(OUT_PATH)

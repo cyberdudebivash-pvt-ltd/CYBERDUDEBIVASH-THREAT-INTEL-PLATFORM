@@ -694,6 +694,17 @@ def main() -> None:
                 "api/reports/stats.json",
                 "data/stix/feed_manifest.json",
                 "api/detection_quality.json",
+                # Phase 4: quality_drift_monitor.py accumulates a 30-run
+                # rolling history in this file every run. It was staged
+                # (files_to_stage, above) but not listed here -- meaning a
+                # concurrent-push conflict's `reset --hard origin/main`
+                # would discard this run's committed copy (in ORIG_HEAD)
+                # without restoring it, silently losing that run's
+                # history entry (the next run's history array would not
+                # contain it either, since it can only append to whatever
+                # it reads back). Same class of gap as the other entries
+                # in this list, just not yet exercised by a live conflict.
+                "data/quality/quality_drift_report.json",
             ]
 
             def _artifact_item_count(p: Path):
