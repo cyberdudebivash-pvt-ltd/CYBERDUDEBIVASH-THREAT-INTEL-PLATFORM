@@ -406,7 +406,20 @@ def run(feed_path: Path, manifest_path: Path) -> dict:
         len(unprocessed), len(selected), MAX_ITEMS,
     )
 
-    injected = 0; skipped = 0
+    # Phase 4.1 mandate Section 20 fix: this loop previously had no per-item
+    # exception isolation. A single item that crashed _classify_vuln/_sigma_
+    # rule/_kql_query/_suricata_rule (or the manifest sync / per-item file
+    # write) propagated straight out of run() uncaught -- aborting the WHOLE
+    # pass. Because the feed/manifest write only happens once, AFTER the
+    # loop finishes, this didn't just skip the bad item: it silently
+    # discarded every item successfully processed earlier in that same run
+    # too (nothing had been written to disk yet), and (per STAGE 3.1.12's
+    # continue-on-error: true in sentinel-blogger.yml) the pipeline
+    # continued past the crash with no detection content written at all and
+    # no failure surfaced beyond a log line. Wrapping just the per-item body
+    # fixes both failure modes at once: a crash on item N now costs exactly
+    # item N, not items 1..N-1 already processed this run.
+    injected = 0; skipped = 0; failed = 0; failed_ids: list = []
     for item in items:
         if id(item) not in selected_ids:
             continue
@@ -416,49 +429,63 @@ def run(feed_path: Path, manifest_path: Path) -> dict:
             skipped += 1
             continue
 
-        title      = str(item.get("title") or "")
-        tags       = item.get("tags") or []
-        threat_type= str(item.get("threat_type") or "")
-        cve_id     = item.get("cve_id") or ""
-        vuln_class = _classify_vuln(title, tags, threat_type, cve_id)
+        try:
+            title      = str(item.get("title") or "")
+            tags       = item.get("tags") or []
+            threat_type= str(item.get("threat_type") or "")
+            cve_id     = item.get("cve_id") or ""
+            vuln_class = _classify_vuln(title, tags, threat_type, cve_id)
 
-        sigma     = _sigma_rule(item, vuln_class)
-        kql       = _kql_query(item, vuln_class)
-        suricata  = _suricata_rule(item, vuln_class)
+            sigma     = _sigma_rule(item, vuln_class)
+            kql       = _kql_query(item, vuln_class)
+            suricata  = _suricata_rule(item, vuln_class)
 
-        item["sigma_rule"]     = sigma
-        item["kql_query"]      = kql
-        item["suricata_rule"]  = suricata
-        item["vuln_class"]     = vuln_class
-        item["detection_generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            item["sigma_rule"]     = sigma
+            item["kql_query"]      = kql
+            item["suricata_rule"]  = suricata
+            item["vuln_class"]     = vuln_class
+            item["detection_generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Sync to manifest
-        if stix_id in manifest_by_id:
-            manifest_by_id[stix_id].update({
-                "sigma_rule": sigma, "kql_query": kql,
-                "suricata_rule": suricata, "vuln_class": vuln_class,
-            })
+            # Sync to manifest
+            if stix_id in manifest_by_id:
+                manifest_by_id[stix_id].update({
+                    "sigma_rule": sigma, "kql_query": kql,
+                    "suricata_rule": suricata, "vuln_class": vuln_class,
+                })
 
-        # Write individual detection file for API endpoint
-        if stix_id and not DRY_RUN:
-            det_path = DETECTIONS_DIR / f"{stix_id}.json"
-            det_path.parent.mkdir(parents=True, exist_ok=True)
-            det_payload = {
-                "stix_id": stix_id, "cve_id": cve_id, "title": title,
-                "vuln_class": vuln_class,
-                "sigma_rule": sigma, "kql_query": kql, "suricata_rule": suricata,
-                "generated_at": item["detection_generated_at"],
-                "_tier": "PRO",
-                "_notice": "Detection rules require PRO subscription. Subscribe at intel.cyberdudebivash.com/upgrade.html",
-            }
-            det_path.write_text(json.dumps(det_payload, indent=2), encoding="utf-8")
+            # Write individual detection file for API endpoint
+            if stix_id and not DRY_RUN:
+                det_path = DETECTIONS_DIR / f"{stix_id}.json"
+                det_path.parent.mkdir(parents=True, exist_ok=True)
+                det_payload = {
+                    "stix_id": stix_id, "cve_id": cve_id, "title": title,
+                    "vuln_class": vuln_class,
+                    "sigma_rule": sigma, "kql_query": kql, "suricata_rule": suricata,
+                    "generated_at": item["detection_generated_at"],
+                    "_tier": "PRO",
+                    "_notice": "Detection rules require PRO subscription. Subscribe at intel.cyberdudebivash.com/upgrade.html",
+                }
+                det_path.write_text(json.dumps(det_payload, indent=2), encoding="utf-8")
 
-        injected += 1
-        log.info("[DETECT] %s → vuln_class=%s sigma+kql+suricata injected", stix_id[:40], vuln_class)
+            injected += 1
+            log.info("[DETECT] %s → vuln_class=%s sigma+kql+suricata injected", stix_id[:40], vuln_class)
+        except Exception as e:
+            # Log a safe error (item id + exception type/message only -- no
+            # raw item dump that could leak unrelated fields into logs) and
+            # continue to the next item. Exception (not BaseException) so
+            # KeyboardInterrupt/SystemExit still propagate -- this isolates
+            # one item's bug, it does not swallow a genuine system-level
+            # abort signal.
+            failed += 1
+            failed_ids.append(stix_id[:40] or "unknown")
+            log.error("[DETECT-FAIL] %s → %s: %s", stix_id[:40] or "unknown", type(e).__name__, e)
+            continue
 
-    log.info("COMPLETE: injected=%d skipped=%d", injected, skipped)
+    log.info("COMPLETE: injected=%d skipped=%d failed=%d", injected, skipped, failed)
+    if failed:
+        log.warning("Failed item ids (first 20): %s", failed_ids[:20])
 
-    if not DRY_RUN and injected > 0:
+    if not DRY_RUN and (injected > 0 or failed > 0):
         out = feed if isinstance(feed, list) else {**feed, "advisories": items}
         _atomic_write(feed_path, out)
         log.info("[WRITE] Feed updated")
@@ -468,6 +495,13 @@ def run(feed_path: Path, manifest_path: Path) -> dict:
         _atomic_write(TELEMETRY, {
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "injected": injected, "skipped": skipped, "total_items": len(items),
+            # Phase 4.1 mandate Section 20/21: failed is now tracked and
+            # surfaced (previously any per-item failure crashed the whole
+            # run before this counter could ever be written) -- a nonzero
+            # value here means real items with real content failed
+            # generation and should be investigated, not silently retried
+            # forever with no visibility.
+            "failed": failed, "failed_ids_sample": failed_ids[:20],
             # v185.0: transparent processing-budget accounting -- numerator+
             # denominator, never a bare percentage. remaining_unprocessed_
             # eligible is the count still waiting for a future run's budget;
@@ -482,7 +516,7 @@ def run(feed_path: Path, manifest_path: Path) -> dict:
             "remaining_unprocessed_eligible": max(0, len(unprocessed) - len(selected)),
         })
 
-    return {"injected": injected, "skipped": skipped}
+    return {"injected": injected, "skipped": skipped, "failed": failed}
 
 
 if __name__ == "__main__":

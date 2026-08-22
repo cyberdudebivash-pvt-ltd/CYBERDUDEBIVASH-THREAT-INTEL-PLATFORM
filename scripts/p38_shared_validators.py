@@ -854,7 +854,7 @@ def attck_eligible(item: Dict) -> bool:
     role for detection coverage: the point is to report
     eligible-vs-mapped, never raw-items-vs-mapped, since an ineligible item
     correctly has 0 techniques."""
-    if item.get("cve_id") or item.get("cve_ids") or item.get("cves"):
+    if get_cve_ids(item):
         return True
     if item.get("vuln_class"):
         return True
@@ -952,7 +952,7 @@ def is_ioc_eligible(item: Dict) -> bool:
     the point is to report eligible-vs-populated, never
     raw-items-vs-populated, since a pure commentary/news item correctly
     has 0 IOCs."""
-    if item.get("cve_id") or item.get("cve_ids") or item.get("cves"):
+    if get_cve_ids(item):
         return True
     tt = str(item.get("threat_type") or "").strip().lower()
     return tt in _TECHNICAL_THREAT_TYPES
@@ -999,14 +999,30 @@ def has_source_url(item: Dict) -> bool:
 def get_detection_rules_total(item: Dict) -> int:
     """Current detection_rules_total (int-coerced defensively -- observed as
     both int and string in real data), falling back to the legacy
-    detection_bundle field only if detection_rules_total is absent."""
+    detection_bundle field, and -- Phase 4.1 mandate Section 12 fix -- as a
+    final fallback, a count of the CURRENT per-item rule fields
+    detection_bundle_injector.py actually writes (sigma_rule, kql_query,
+    suricata_rule, yara_rule).
+
+    Root cause (confirmed by direct inspection of the live feed, not
+    assumed): detection_rules_total/detection_bundle exist on ZERO items in
+    the current feed, while sigma_rule/kql_query/suricata_rule carry real
+    content on 86 -- exactly the "0.0% detection coverage" figure reported
+    everywhere upstream of this accessor all session was this field-name
+    drift, not an absence of detection content. This is the exact class of
+    defect Section 12 names explicitly ("detection_rules, detection_rules_
+    total, detection_bundle, sigma_rules, detections, detection_pack, or
+    current equivalents... never silently count the same rule twice").
+    Counts distinct rule TYPES present (0-4), never the same rule twice."""
     val = item.get("detection_rules_total")
     if val is None:
         val = item.get("detection_bundle")
-    try:
-        return int(val) if val is not None else 0
-    except (TypeError, ValueError):
-        return 0
+    if val is not None:
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            pass
+    return sum(1 for k in ("sigma_rule", "kql_query", "suricata_rule", "yara_rule") if item.get(k))
 
 
 def has_detection_rules(item: Dict) -> bool:
@@ -1024,11 +1040,88 @@ def is_detection_eligible(item: Dict) -> bool:
     denominator understates real coverage -- see mandate: report both
     eligible_detection_items and items_with_valid_detection, never a
     raw over-total-feed percentage alone."""
-    if item.get("cve_id") or item.get("cve_ids"):
+    if get_cve_ids(item):
         return True
     if item.get("vuln_class"):
         return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# CANONICAL SCHEMA ACCESSORS (Phase 4.1 mandate Section 27) -- "central
+# helpers... do not scatter fallback logic across 40 scripts." Each accessor
+# below is the SINGLE place cve-id / ioc-count / confidence-scale fallback
+# logic lives; new code should call these instead of re-deriving field
+# fallbacks inline (matching this module's own existing REUSE MAP doctrine).
+# Canonical-vs-legacy field decisions are read from SCHEMA_REGISTRY above
+# (cve_ids canonical, cves deprecated->cve_ids; confidence canonical,
+# confidence_score deprecated->confidence) -- these accessors do not
+# redecide that, they implement it once.
+# ---------------------------------------------------------------------------
+
+def get_cve_ids(item: Dict) -> List[str]:
+    """Canonical CVE-identifier accessor. cve_ids (list) and cves (list,
+    SCHEMA_REGISTRY-deprecated alias of cve_ids) are merged with the
+    singular cve_id, de-duplicated (case-insensitive, output upper-cased),
+    order preserved, list-first then singular. Never raises; a malformed
+    or absent field simply contributes nothing."""
+    ids: List[str] = []
+    seen: set = set()
+    for key in ("cve_ids", "cves"):
+        raw = item.get(key)
+        if isinstance(raw, list):
+            for v in raw:
+                s = str(v).strip().upper()
+                if s and s not in seen:
+                    seen.add(s)
+                    ids.append(s)
+    single = item.get("cve_id")
+    if single:
+        s = str(single).strip().upper()
+        if s and s not in seen:
+            seen.add(s)
+            ids.append(s)
+    return ids
+
+
+def get_ioc_count(item: Dict) -> int:
+    """Canonical IOC-count accessor. Mandate Section 25: never trust a
+    persisted count that can drift from the actual IOC collection -- when
+    an `iocs` array is present, its length is authoritative regardless of
+    what any stored count field says. Only falls back to a stored count
+    (ioc_count, then real_ioc_count, then the deprecated indicator_count)
+    for the leaner schemas that carry no iocs array at all."""
+    iocs = item.get("iocs")
+    if isinstance(iocs, list):
+        return len(iocs)
+    for key in ("ioc_count", "real_ioc_count", "indicator_count"):
+        v = item.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
+            return int(v)
+    return 0
+
+
+def get_confidence_normalized(item: Dict) -> Optional[float]:
+    """Canonical confidence accessor, normalized to [0.0, 1.0]. Reproduces
+    the scale-detection + validity logic p25_enterprise_trust_gate.py's G2
+    gate uses (the fix for the "803% average confidence" cross-producer
+    scale-mismatch bug: some producers write confidence as a 0-1 fraction,
+    others as a 0-100 percentage). Returns None -- never a clamped guess --
+    for an absent, non-numeric, non-finite (NaN/Infinity), or out-of-
+    [0,100]-range value; callers that must distinguish "absent" from
+    "present but invalid" should inspect item.get("confidence") directly."""
+    v = item.get("confidence")
+    if v is None:
+        v = item.get("confidence_score")  # SCHEMA_REGISTRY-deprecated alias
+    if v is None:
+        return None
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    if not (v == v) or v in (float("inf"), float("-inf")) or not (0.0 <= v <= 100.0):
+        return None
+    return v / 100.0 if v > 1.0 else v
 
 
 # ---------------------------------------------------------------------------
