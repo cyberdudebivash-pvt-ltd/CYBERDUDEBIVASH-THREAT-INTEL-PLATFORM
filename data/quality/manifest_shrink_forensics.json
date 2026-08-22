@@ -1,0 +1,39 @@
+{
+  "incident": "P0.2 report-continuity root-cause elimination",
+  "generated_at": "2026-08-22T14:15:00Z",
+  "question": "Where does the observed 'MANIFEST_FINAL_COUNT=1356 -> 1115 items in data/stix/feed_manifest.json[\"advisories\"]' shrink actually happen?",
+  "verdict": "The shrink happens ENTIRELY INSIDE run_pipeline.py's own internal execution (its Stage 2.2 through Stage 3.6c), before the 'STAGE 1-3 - Master Pipeline Orchestrator' workflow step even exits. It is NOT caused by any post-pipeline workflow step (STAGE 3.1 onward) in this repository's current main.",
+  "evidence_chain": [
+    {
+      "step": 1,
+      "source": "scripts/run_pipeline.py line 1131",
+      "finding": "write_github_env(\"MANIFEST_FINAL_COUNT\", str(final_count)) is called from run_pipeline.py's own Stage 2.2 (manifest_stabilisation), NOT at the true end of run_pipeline.py's execution. Stages 2.5 (freshness_gate), 3 (schema_validation), 3.1 (manifest_cleanup), 3.6 (html_reports), 3.6a (manifest_integrity_check), and 3.6c (prune_stix_bundles) all run AFTER Stage 2.2 sets this value, entirely within the same run_pipeline.py process/step."
+    },
+    {
+      "step": 2,
+      "source": "production job 97025064853 (run 32570451251) raw log",
+      "finding": "MANIFEST_FINAL_COUNT=1356 is a static $GITHUB_ENV value set once during run_pipeline.py's Stage 2.2 and echoed unchanged in every subsequent step's environment dump for the rest of the job -- it is a frozen snapshot from mid-run_pipeline.py execution, not a live re-computed count. Every later log line reading 'MANIFEST_FINAL_COUNT: 1356' is this same stale env var being displayed by GitHub Actions' step-env dump, not evidence that the manifest still held 1356 items at that time."
+    },
+    {
+      "step": 3,
+      "source": "production job 97025064853, STAGE 3.1.5 (11:55:36Z), first post-run_pipeline.py step that reads data/stix/feed_manifest.json",
+      "finding": "field_preserving_merge.py logged 'Loaded existing manifest: 0 items from feed_manifest.json (fmt=dict)' at this point -- due to the separately-documented P0.2 key-matching bug (see below), NOT because the file was genuinely empty. The file WAS already dict-shaped and non-empty; field_preserving_merge.py simply could not find a key it recognised."
+    },
+    {
+      "step": 4,
+      "source": "production job 97025064853, STAGE 3.1.7 (11:55:37.77Z, ~150ms after STAGE 3.1.6 wrote its own output)",
+      "finding": "enterprise_scoring_engine.py logged 'Manifest: data/stix/feed_manifest.json' then 'Loaded 1115 advisories' -- reading the SAME resolved absolute path field_preserving_merge.py had just written to. Because enterprise_scoring_engine.py correctly reads the canonical 'advisories' key (never touched by field_preserving_merge.py's separate, incorrectly-keyed 'data' write), this is the first point this investigation could directly observe the manifest's real 'advisories' content post-run_pipeline.py: 1115 items. No step between run_pipeline.py's exit and this read added or removed items from 'advisories' -- the count was already 1115 the moment the workflow's own steps got their first real look at it."
+    },
+    {
+      "step": 5,
+      "source": "scripts/manifest_reconciler.py production run report (data/health/manifest_reconciler_report.json, prior investigation)",
+      "finding": "manifest_count_before=1115, manifest_count_after=1122, synced=7 -- confirms the manifest was ALREADY at 1115 by the time this step (STAGE 3.90, much later in the workflow) ran, and that this purely-additive reconciler only ever grows the count (+7 here), consistent with findings 3-4 above."
+    }
+  ],
+  "conclusion": "1356 was never the true count at the moment run_pipeline.py's step exited -- it was a mid-run snapshot from Stage 2.2, before several of run_pipeline.py's OWN later internal stages (2.5 freshness_gate, 3 schema_validation, 3.1 manifest_cleanup, 3.6 html_reports, 3.6a manifest_integrity_check, 3.6c prune_stix_bundles) had a chance to further filter/validate the manifest down to its real final count of 1115. This shrink is out of scope for the post-pipeline writer graph (data/quality/post_pipeline_writer_graph.json), which only covers steps AFTER run_pipeline.py's own step exits. It should not be confused with, or used as evidence for, the separate and independently-confirmed field_preserving_merge.py 'advisories' key-matching defect (see data/quality/post_pipeline_writer_graph.json's manually_verified records and the P0.2 PR description) -- that defect does not change the item COUNT visible under 'advisories' (since it never touches that key at all), but does freeze it and route all of field_preserving_merge.py's actual sync/merge work into an orphaned, ignored 'data' key instead.",
+  "per_id_attribution": {
+    "status": "not applicable to this shrink",
+    "reason": "Because the shrink occurs entirely inside run_pipeline.py before any post-pipeline step runs, per-ID classification of which items were dropped and why is a run_pipeline.py-internal question (its own Stage 2.5/3/3.1/3.6a filtering logic), not a post-pipeline writer-graph question. This was not re-investigated here, as it sits outside the P0.2 mandate's explicit scope (\"the ~40-step post-run_pipeline.py surface\") and outside the mechanism this PR fixes. Flagged as a candidate for a future, separately-scoped investigation into run_pipeline.py's own internal Stage 2.2->3.6c manifest-shaping logic if further evidence of item loss (as opposed to the field_preserving_merge.py key-orphaning defect fixed here) is found in a future production run."
+  },
+  "recommendation": "Treat this shrink as informational/out-of-scope for the P0.2 fix rather than something this PR needed to change. The actual, fixed defect (field_preserving_merge.py's key-matching bug, STAGE 3.1.5/3.1.6) is independently confirmed via direct log evidence and does not depend on this shrink's cause being resolved."
+}

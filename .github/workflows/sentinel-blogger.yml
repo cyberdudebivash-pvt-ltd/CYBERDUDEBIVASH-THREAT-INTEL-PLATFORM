@@ -869,10 +869,27 @@ jobs:
       # to display blank intelligence fields on the next render cycle.
       # This step closes that gap: manifest always has apex_ai after this stage.
       # Safe: idempotent, non-destructive, atomic write.
+      #
+      # P0.2 FIX (2026-08-22): field_preserving_merge.py's dict-key search
+      # never recognised "advisories" -- the canonical envelope key every
+      # other manifest reader/writer uses (validate_reports.py,
+      # report_generator.py, manifest_reconciler.py,
+      # report_existence_validator.py, sync_report_urls.py). It always saw
+      # the real ~1100+ item manifest as "0 existing", so with no --cap
+      # override this step's default cap=50 (feed_manifest.json's default
+      # is sized for a much smaller manifest than this pipeline now
+      # produces) silently overwrote the real content into an orphaned
+      # "data" key while "advisories" -- what everything else reads -- went
+      # stale. Fixed at the source in field_preserving_merge.py (canonical
+      # key now recognised first, write-back key matches read key). With
+      # that fix, "existing" now correctly reflects the full manifest, so
+      # the default cap=50 would for the first time actually apply to it --
+      # an explicit --cap is required here to keep this a non-destructive
+      # sync, matching this step's own "non-destructive" guarantee above.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.1.5 - Sync apex_ai from api/feed.json -> feed_manifest (HARDENING)"
         timeout-minutes: 5
-        run: python3 scripts/field_preserving_merge.py --sync-apex --manifest data/stix/feed_manifest.json --incoming api/feed.json --feed api/feed.json || true
+        run: python3 scripts/field_preserving_merge.py --sync-apex --manifest data/stix/feed_manifest.json --incoming api/feed.json --feed api/feed.json --cap 5000 || true
 
       # -----------------------------------------------------------------------
       # STAGE 3.1.6: FIELD-PRESERVING MANIFEST MERGE (HARDENING -- PERMANENT)
@@ -881,15 +898,28 @@ jobs:
       #   - NEVER drops an existing stix_id entry (append-only)
       #   - NEVER overwrites apex_ai, risk_score, tags, cvss_score, epss_score
       #     with null/empty values (field preservation)
-      #   - Caps manifest at 500 newest entries (generous cap to prevent api > manifest skew)
       #   - Atomic write -- no partial state on disk
       # This is the core defence against the scheduled-run regression pattern
       # where bootstrap_critical_files.py resets manifest to [] and then the
       # pipeline rebuilds from batch only, losing all prior enrichment.
+      #
+      # P0.2 FIX (2026-08-22): cap raised 500 -> 5000 (matches STAGE 3.1.5
+      # above). 500 was a no-op in practice before the field_preserving_
+      # merge.py "advisories" key fix landed -- the existing manifest was
+      # always misread as empty, so this step only ever capped api/feed.json's
+      # own ~500-item incoming batch, never the real ~1100+ item manifest.
+      # With the key fix, "existing" now correctly reflects the full
+      # manifest -- a 500 cap would for the first time actively truncate
+      # hundreds of legitimate, already-report-materialized entries on every
+      # run. 5000 is a generous ceiling (~3.5x current real size) that
+      # guards against unbounded/runaway growth without acting as a real
+      # constraint under normal operation; per-source/quality trimming is
+      # STAGE 3.93.16's (source_diversity_enforcer.py --trim-manifest) job,
+      # not this sync step's.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.1.6 - Field-Preserving Manifest Merge (HARDENING)"
         timeout-minutes: 5
-        run: python3 scripts/field_preserving_merge.py --manifest data/stix/feed_manifest.json --incoming api/feed.json --cap 500 || true
+        run: python3 scripts/field_preserving_merge.py --manifest data/stix/feed_manifest.json --incoming api/feed.json --cap 5000 || true
 
       # -----------------------------------------------------------------------
       # STAGE 3.1.7: ENTERPRISE SCORING ENGINE (v184.0 -- NON-BLOCKING)

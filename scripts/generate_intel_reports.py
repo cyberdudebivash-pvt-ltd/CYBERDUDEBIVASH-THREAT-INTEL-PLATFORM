@@ -2518,6 +2518,8 @@ def main(argv=None) -> int:
     uploaded = 0
     skipped_brand = 0
     errors = 0
+    only_missing_candidates = 0  # P0.2: items --only-missing actually had to act on
+    r2_upload_failed = 0
     t_start = time.monotonic()
     # Absolute batch timeout: 3 hours max regardless of batch size.
     # Prevents indefinite stalls from hanging renders or APEX module deadlocks.
@@ -2561,6 +2563,7 @@ def main(argv=None) -> int:
                 continue
             if _existing_ru.startswith("/reports/") and (REPO_ROOT / _existing_ru.lstrip("/")).exists():
                 continue
+            only_missing_candidates += 1
 
         # ── Zero-skip policy: generate report for EVERY real entry ──
         # Short entries get an enriched template - no blanket skip
@@ -2693,6 +2696,10 @@ def main(argv=None) -> int:
                 if _ep:
                     if r2_upload(path, r2_key, _ep):
                         uploaded += 1
+                    else:
+                        r2_upload_failed += 1
+                else:
+                    r2_upload_failed += 1
         else:
             item["validation_status"] = "file_missing"
             item["report_url"] = ""
@@ -2730,6 +2737,48 @@ def main(argv=None) -> int:
     else:
         data["advisories"] = items  # internal manifest keeps all (for recovery)
         save_manifest(data)
+
+    # P0.2 (mandate Section 26): make the final-barrier repair count
+    # observable. Only written in --only-missing mode -- that is the only
+    # mode this script runs in as a repair pass (STAGE 5.4.0b and
+    # run_pipeline.py's apply_report_materialization_barrier() both call it
+    # this way); a normal full-render invocation is primary generation, not
+    # a repair, and isn't what this file reports on. Both barrier call
+    # sites share this one script, so this one write path covers both --
+    # no duplicated observability logic per Principle 3 (single source of
+    # truth).
+    if args.only_missing:
+        _repaired = written
+        _failed = only_missing_candidates - written
+        if _failed == 0 and _repaired == 0:
+            _status = "HEALTHY"
+        elif _failed == 0:
+            _status = "DEGRADED"
+        else:
+            _status = "CRITICAL"
+        _barrier_report = {
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "manifest": str(args.manifest),
+            "repair_candidates": only_missing_candidates,
+            "repaired": _repaired,
+            "failed": _failed,
+            "r2_uploaded": uploaded,
+            "r2_failed": r2_upload_failed,
+            "elapsed_seconds": round(elapsed, 2),
+            "status": _status,
+        }
+        try:
+            _barrier_path = REPO_ROOT / "data" / "health" / "report_continuity_barrier.json"
+            _barrier_path.parent.mkdir(parents=True, exist_ok=True)
+            _barrier_tmp = _barrier_path.with_suffix(".tmp")
+            _barrier_tmp.write_text(
+                json.dumps(_barrier_report, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            os.replace(_barrier_tmp, _barrier_path)
+            log(f"[BARRIER-METRICS] status={_status} candidates={only_missing_candidates} "
+                f"repaired={_repaired} failed={_failed} r2_uploaded={uploaded} r2_failed={r2_upload_failed}")
+        except Exception as _barrier_exc:
+            log(f"[BARRIER-METRICS] failed to write report_continuity_barrier.json (non-fatal): {_barrier_exc}", "warning")
 
     # v152.1: enforce --fail-on-zero flag (was parsed but never checked)
     if args.fail_on_zero and written == 0:
