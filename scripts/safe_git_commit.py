@@ -353,6 +353,11 @@ def main() -> None:
         # because nothing ever staged it. Same category as the other data/health
         # and data/status observability artifacts above; staged the same way.
         "data/quality/report_engine_ledger.json",
+        # Phase 4: quality_drift_monitor.py (STAGE 4.05) writes this every
+        # run. Same category and same risk as report_engine_ledger.json
+        # immediately above -- staged explicitly from day one rather than
+        # waiting to rediscover the GAP-001 pattern a second time.
+        "data/quality/quality_drift_report.json",
         "data/apex_v2_manifest.json",
         "data/apex_v2_strategic_report.json",
         "data/apex_intelligence_report.json",
@@ -689,6 +694,17 @@ def main() -> None:
                 "api/reports/stats.json",
                 "data/stix/feed_manifest.json",
                 "api/detection_quality.json",
+                # Phase 4: quality_drift_monitor.py accumulates a 30-run
+                # rolling history in this file every run. It was staged
+                # (files_to_stage, above) but not listed here -- meaning a
+                # concurrent-push conflict's `reset --hard origin/main`
+                # would discard this run's committed copy (in ORIG_HEAD)
+                # without restoring it, silently losing that run's
+                # history entry (the next run's history array would not
+                # contain it either, since it can only append to whatever
+                # it reads back). Same class of gap as the other entries
+                # in this list, just not yet exercised by a live conflict.
+                "data/quality/quality_drift_report.json",
             ]
 
             def _artifact_item_count(p: Path):

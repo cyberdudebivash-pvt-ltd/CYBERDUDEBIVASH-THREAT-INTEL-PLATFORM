@@ -293,6 +293,23 @@ def _engine_ttps_to_mitre_data(ttps: List[Dict]) -> List[Dict]:
     """
     Convert engine TTP dicts → pipeline mitre_data list format.
     Preserves all evidence fields and adds them as enrichment.
+
+    v185.2 P0 FIX: this bridge previously read t.get("detection_guidance"),
+    t.get("sigma_hint"), t.get("kql_hint") -- but apex_mitre_attack_engine.py's
+    _build_technique_entry() writes those three fields under different keys:
+    "detection_hint", "sigma_tag", "kql_example" (confirmed against the
+    engine's actual return dict). Because dict.get() with a default swallows
+    a key-name mismatch silently (no exception, no log), every real MAE
+    invocation through this bridge -- i.e. every live per-item call from
+    agent/sentinel_blogger.py STEP 7g via _run_mae() -- has always produced
+    an empty detection_guidance/sigma_hint/kql_hint on every technique, since
+    this bridge function existed. Found during Phase 4's ATT&CK engine
+    production-readiness audit (task #28) while tracing why zero manifest
+    items showed the engine's mapping_engine="APEX-MAE" provenance tag
+    downstream: the tag itself is an intentional omission (this bridge
+    doesn't propagate internal audit metadata into report-facing mitre_data,
+    same as P20's evidence_chain not leaking computation internals) but the
+    three content fields below were meant to survive and did not.
     """
     result = []
     for t in (ttps or []):
@@ -311,9 +328,9 @@ def _engine_ttps_to_mitre_data(ttps: List[Dict]) -> List[Dict]:
             # Enterprise enrichment fields
             "justification":      t.get("justification", ""),
             "observed_behavior":  t.get("observed_behavior", ""),
-            "detection_guidance": t.get("detection_guidance", ""),
-            "sigma_hint":         t.get("sigma_hint", ""),
-            "kql_hint":           t.get("kql_hint", ""),
+            "detection_guidance": t.get("detection_hint", ""),
+            "sigma_hint":         t.get("sigma_tag", ""),
+            "kql_hint":           t.get("kql_example", ""),
             "evidence_based":     True,
         })
     return result

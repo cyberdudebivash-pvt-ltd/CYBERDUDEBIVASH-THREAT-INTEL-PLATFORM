@@ -78,7 +78,46 @@ def _g1_feed_integrity(items: list) -> tuple[bool, str, list[str]]:
 
 def _g2_confidence(items: list) -> tuple[bool, str, list[str]]:
     """G2: Average confidence level across feed."""
-    confs = [float(i.get("confidence") or 0) for i in items if i.get("confidence") is not None]
+    # v185.3 P0 FIX: confidence is stored under two incompatible scales by
+    # different producers -- most items as a 0-1 fraction (0.15, 0.25, ...),
+    # a minority as an already-0-100 percentage (90). Averaging raw values
+    # and formatting with :.2% (which itself multiplies by 100) previously
+    # produced a nonsensical "803.04%" average-confidence figure -- found
+    # live during a P25 re-run (Phase 4 task #30). Same "values <= 1.0 are
+    # a fraction, otherwise already the target scale" detection already
+    # established in this codebase for composite_score/risk_score
+    # (scripts/run_pipeline.py's STIX-reconstruction v159.0 P0-FIX);
+    # applied here in the inverse direction, normalising down to a 0-1
+    # fraction before averaging, since this check's own output format
+    # multiplies by 100.
+    #
+    # v185.4 P0 FIX: the normalisation above assumed every raw value was
+    # either a valid 0-1 fraction or a valid 0-100 percentage. It didn't
+    # reject a value outside 0..100 (e.g. 150 -> "normalised" to 1.5, still
+    # invalid) or a non-finite value (a literal NaN/Infinity survives
+    # float() and silently propagates through sum()/len(), and `avg < 0.10`
+    # is always False for NaN, so this gate would PASS on invalid data
+    # instead of flagging it). Reject and report invalid values explicitly
+    # instead of letting them skew or hide inside the average.
+    invalid = 0
+    confs: list[float] = []
+    for item in items:
+        v = item.get("confidence")
+        if v is None:
+            continue
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            invalid += 1
+            continue
+        if not (v == v) or v in (float("inf"), float("-inf")) or not (0.0 <= v <= 100.0):
+            invalid += 1
+            continue
+        confs.append(v / 100.0 if v > 1.0 else v)
+    if invalid:
+        return False, f"{invalid} item(s) have non-finite or out-of-range (0..100) confidence values", [
+            "Check the producer writing raw `confidence` for malformed values",
+        ]
     if not confs:
         return True, "Confidence field absent (non-blocking)", []
     avg = sum(confs) / len(confs)
