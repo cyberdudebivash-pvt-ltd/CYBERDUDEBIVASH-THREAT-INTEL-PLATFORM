@@ -279,9 +279,15 @@ jobs:
         # customer/crawler traffic must not have unmediated write authority
         # over the same key the certified pipeline owns). See
         # docs/RX_PUB_A0_INCIDENT_ROOT_CAUSE.md.
+        #
+        # Phase 4.1: detection-registry.test.js added -- the canonical
+        # detection-artifact registry backing /api/v1/detections is the same
+        # class of "what can a customer see" surface as the gates above
+        # (content, status, and evidence_context exposed via a new customer-
+        # facing API), so it belongs in this same trust-boundary gate.
         run: |
           cd ${WORKER_DIR}
-          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js
+          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js src/__tests__/detection-registry.test.js
 
       - name: " esbuild bundle pre-flight (HARD GATE)"
         run: |
