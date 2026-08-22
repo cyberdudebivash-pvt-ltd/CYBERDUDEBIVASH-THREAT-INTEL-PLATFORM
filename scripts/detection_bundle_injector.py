@@ -35,10 +35,16 @@ import json
 import logging
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import uuid
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from p38_shared_validators import is_detection_eligible  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -363,8 +369,47 @@ def run(feed_path: Path, manifest_path: Path) -> dict:
     except Exception:
         manifest_items = []; manifest_by_id = {}
 
+    # v185.0 P0 FIX: MAX_ITEMS previously sliced the first N items of the
+    # RAW, unfiltered feed array (items[:MAX_ITEMS]) -- positional
+    # truncation with no eligibility filter and no priority ordering. Since
+    # the feed is re-sorted by timestamp DESC every pipeline run, any
+    # eligible item that consistently ranks below position 200 (e.g. an
+    # older but still-unprocessed CVE) was PERMANENTLY excluded: never
+    # reached on any run, no matter how many times the pipeline executed.
+    # Fixed with a two-part selection:
+    #   1. Filter to is_detection_eligible(item) first (reused from
+    #      p38_shared_validators.py, the same eligibility test used for
+    #      detection-coverage certification) -- an ineligible item never
+    #      consumes a budget slot that an eligible one could use.
+    #   2. Prioritize NOT-YET-PROCESSED eligible items over already-done
+    #      ones (deterministic secondary sort: risk_score DESC, then
+    #      stix_id for a stable tie-break -- never incidental array
+    #      order), so MAX_ITEMS becomes a per-run NEW-work budget rather
+    #      than a fixed window. As already-processed items accumulate,
+    #      lower-priority eligible items that were previously stuck past
+    #      the old positional cutoff rotate into the window on subsequent
+    #      runs -- no item is permanently stuck.
+    def _has_all_rules(it: dict) -> bool:
+        return bool(it.get("sigma_rule") and it.get("kql_query") and it.get("suricata_rule"))
+
+    eligible_items = [it for it in items if is_detection_eligible(it)]
+    unprocessed = [it for it in eligible_items if not _has_all_rules(it)]
+    unprocessed.sort(
+        key=lambda it: (-float(it.get("risk_score") or 0), str(it.get("stix_id") or it.get("id") or "")),
+    )
+    selected = unprocessed[:MAX_ITEMS]
+    selected_ids = {id(it) for it in selected}
+
+    log.info(
+        "Eligibility: %d/%d items eligible, %d already processed, %d unprocessed, %d selected this run (budget=%d)",
+        len(eligible_items), len(items), len(eligible_items) - len(unprocessed),
+        len(unprocessed), len(selected), MAX_ITEMS,
+    )
+
     injected = 0; skipped = 0
-    for item in items[:MAX_ITEMS]:
+    for item in items:
+        if id(item) not in selected_ids:
+            continue
         stix_id = str(item.get("stix_id") or item.get("id") or "")
         # Skip if already has detection rules from this session
         if item.get("sigma_rule") and item.get("kql_query") and item.get("suricata_rule"):
@@ -423,6 +468,18 @@ def run(feed_path: Path, manifest_path: Path) -> dict:
         _atomic_write(TELEMETRY, {
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "injected": injected, "skipped": skipped, "total_items": len(items),
+            # v185.0: transparent processing-budget accounting -- numerator+
+            # denominator, never a bare percentage. remaining_unprocessed_
+            # eligible is the count still waiting for a future run's budget;
+            # this should trend toward 0 as runs accumulate, never grow
+            # unboundedly (which would indicate eligible items arriving
+            # faster than the budget can cover them).
+            "eligible_items": len(eligible_items),
+            "already_processed_before_run": len(eligible_items) - len(unprocessed),
+            "unprocessed_before_run": len(unprocessed),
+            "selected_this_run": len(selected),
+            "max_items_budget": MAX_ITEMS,
+            "remaining_unprocessed_eligible": max(0, len(unprocessed) - len(selected)),
         })
 
     return {"injected": injected, "skipped": skipped}
