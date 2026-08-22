@@ -2743,6 +2743,57 @@ jobs:
         run: python3 scripts/ci_report_count_check.py
 
       # -----------------------------------------------------------------------
+      # STAGE 5.4.0b: REPORT CONTINUITY FINAL BARRIER (P0 FIX 2026-08-22)
+      # ROOT CAUSE: the equivalent barrier inside run_pipeline.py (STAGE 1-3,
+      # called from stage_sync_root_feed_json()) confirmed working correctly
+      # in production -- it found and closed a dangling report_url gap before
+      # run_pipeline.py exited -- but STAGE 5.4.1 still hard-failed on the
+      # very next full run, on a set of items overlapping the original
+      # incident. Between run_pipeline.py's exit and this point there are
+      # ~40 further individual workflow steps (STAGE 3.1 through 5.4) that
+      # each independently read/rewrite data/stix/feed_manifest.json or
+      # api/feed.json -- manifest_reconciler.py, the R2 upload/verify chain,
+      # dedup/enrichment passes, safe_git_commit.py's conflict-recovery
+      # cascade, etc. -- any one of which can reintroduce a report_url that
+      # is not backed by a local file, and auditing all of them individually
+      # was not conclusive before this needed to ship. Rather than chase the
+      # exact reintroduction point through that whole surface, this step is
+      # the true final barrier: it runs the same idempotent, incremental
+      # --only-missing repair pass (scripts/generate_intel_reports.py) as
+      # the very last thing before STAGE 5.4.1 checks -- nothing after this
+      # step can undo it. Non-fatal by design: STAGE 5.4.1 remains the sole
+      # hard-fail authority on report continuity, unchanged.
+      #
+      # continue-on-error: true (review finding, 2026-08-22): `|| true` only
+      # protects against the script's own nonzero exit -- it does NOT protect
+      # against timeout-minutes killing the step, which GitHub Actions still
+      # records as a step failure regardless of the shell command inside it.
+      # Without continue-on-error, that failure would cascade-skip every
+      # following non-`if: always()` step, including STAGE 5.4.1 itself --
+      # silently disabling the one hard-fail gate this whole incident is
+      # about, the opposite of this PR's intent. continue-on-error makes the
+      # step's outcome irrelevant to what runs next; STAGE 5.4.1 always runs.
+      #
+      # --upload-r2 (review finding, 2026-08-22): STAGE 3.5 (bulk R2 upload)
+      # already completed by this point in the run, so a report this step
+      # regenerates would otherwise reach local disk and GitHub Pages but
+      # never R2 -- the path api/* clients actually read from. --upload-r2
+      # reuses generate_intel_reports.py's own existing per-item uploader
+      # (already-tested code, not new logic) so a repaired item is pushed to
+      # R2 immediately after its local file is validated. Credentials
+      # (CF_ACCOUNT_ID, AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY) are already
+      # job-level env vars (lines 159-169 above) -- no new secrets wiring.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.4.0b - Report Continuity Final Barrier (P0 FIX)"
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          python3 scripts/generate_intel_reports.py \
+            --manifest data/stix/feed_manifest.json \
+            --public-prefix https://intel.cyberdudebivash.com \
+            --only-missing --upload-r2 --limit 0 || true
+
+      # -----------------------------------------------------------------------
       # STAGE 5.4.1: REPORT EXISTENCE VALIDATOR (v184.0 P0 HARD FAIL)
       # Validates every report_url in the feed manifest resolves to an actual
       # HTML file on disk. Catches stale/broken report links BEFORE they reach
