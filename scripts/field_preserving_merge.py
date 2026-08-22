@@ -142,37 +142,59 @@ def _is_empty(val: Any) -> bool:
     return False
 
 
-def _load_manifest(path: Path) -> tuple[list[dict], str, Any]:
+def _load_manifest(path: Path) -> tuple[list[dict], str, Any, str | None]:
+    """Returns (items, fmt, raw_data, matched_key).
+
+    matched_key is the exact dict key `items` was read from (None for
+    list-format or an unrecognised/empty dict) -- callers MUST write back to
+    this SAME key via _atomic_write, never let it re-derive a key
+    independently. "advisories" is checked first: it is the canonical
+    envelope key used by every other manifest reader/writer in the pipeline
+    (validate_reports.py, report_generator.py, manifest_reconciler.py,
+    report_existence_validator.py, sync_report_urls.py). Before this fix,
+    this function's key list omitted "advisories" entirely, so a manifest
+    shaped {"advisories": [...]} was silently read as 0 existing items and
+    a `--sync-apex`/incoming merge would then write its result into a NEW
+    "data" key -- leaving "advisories" frozen and every other script still
+    reading stale content from it. This exact symptom (field_preserving_
+    merge.py writing under "data" instead of the real key) is independently
+    documented as a P0 incident already worked around defensively in
+    ioc_quality_hardener.py, validate_reports.py, report_generator.py,
+    enterprise_scoring_engine.py, and api_dashboard_contract_validator.py --
+    this is the fix at the actual source instead of another downstream
+    workaround.
+    """
     if not path.exists():
-        return [], "list", []
+        return [], "list", [], None
     raw = path.read_text(encoding="utf-8", errors="replace")
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
         log.warning("JSON parse error in %s: %s -- treating as empty", path.name, e)
-        return [], "list", []
+        return [], "list", [], None
     if isinstance(data, list):
-        return data, "list", data
+        return data, "list", data, None
     if isinstance(data, dict):
-        for key in ("data", "items", "entries", "intel"):
+        for key in ("advisories", "data", "items", "entries", "intel"):
             if isinstance(data.get(key), list):
-                return data[key], "dict", data
-        return [], "dict", data
-    return [], "list", []
+                return data[key], "dict", data, key
+        return [], "dict", data, None
+    return [], "list", [], None
 
 
-def _atomic_write(path: Path, items: list[dict], fmt: str, raw_data: Any) -> None:
+def _atomic_write(path: Path, items: list[dict], fmt: str, raw_data: Any, matched_key: str | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".merge_tmp")
     try:
         if fmt == "dict" and isinstance(raw_data, dict):
-            for key in ("data", "items", "entries", "intel"):
-                if key in raw_data:
-                    raw_data[key] = items
-                    break
-            else:
-                # No known list key found -- inject as 'data'
-                raw_data["data"] = items
+            # Write back to the SAME key items were read from (matched_key,
+            # threaded through from _load_manifest) -- never re-derive via a
+            # separately-maintained key list. That mismatch is exactly what
+            # caused this class of bug: a read using one key list and a
+            # write using another silently orphans updates into a new key
+            # while the canonical "advisories" key goes stale.
+            key = matched_key or "advisories"
+            raw_data[key] = items
             raw_data["count"] = len(items)
             raw_data["generated"] = _utc_now()
             raw_data["platform_version"] = "stable-v1.0-apex"
@@ -341,13 +363,13 @@ def run_merge(
 
     Returns stats dict.
     """
-    existing, fmt, raw_data = _load_manifest(manifest_path)
-    log.info("[merge] Loaded existing manifest: %d items from %s (fmt=%s)",
-             len(existing), manifest_path.name, fmt)
+    existing, fmt, raw_data, matched_key = _load_manifest(manifest_path)
+    log.info("[merge] Loaded existing manifest: %d items from %s (fmt=%s, key=%s)",
+             len(existing), manifest_path.name, fmt, matched_key)
 
     incoming: list[dict] = []
     if incoming_path and incoming_path.exists():
-        incoming_raw, _, _ = _load_manifest(incoming_path)
+        incoming_raw, _, _, _ = _load_manifest(incoming_path)
         incoming = incoming_raw
         log.info("[merge] Loaded incoming: %d items from %s", len(incoming), incoming_path.name)
     elif not incoming_path and len(existing) == 0 and auto_populate_from_feed:
@@ -360,7 +382,7 @@ def run_merge(
             # Try relative to repo root
             api_feed = REPO_ROOT / "api" / "feed.json"
         if api_feed.exists():
-            api_items, _, _ = _load_manifest(api_feed)
+            api_items, _, _, _ = _load_manifest(api_feed)
             if api_items:
                 incoming = api_items
                 log.info(
@@ -399,7 +421,7 @@ def run_merge(
     if dry_run:
         log.info("[merge] DRY RUN: would write %d items to %s", len(merged_sorted), manifest_path)
     else:
-        _atomic_write(manifest_path, merged_sorted, fmt, raw_data)
+        _atomic_write(manifest_path, merged_sorted, fmt, raw_data, matched_key)
         log.info("[merge] Written %d items to %s", len(merged_sorted), manifest_path)
 
     return stats
@@ -431,8 +453,8 @@ def sync_apex_ai_from_feed(
         log.warning("[apex-sync] Manifest not found: %s -- skipping apex_ai sync", manifest_path)
         return {"synced": 0, "skipped": "manifest_not_found"}
 
-    feed_items, _, _ = _load_manifest(feed_path)
-    manifest_items, fmt, raw_data = _load_manifest(manifest_path)
+    feed_items, _, _, _ = _load_manifest(feed_path)
+    manifest_items, fmt, raw_data, matched_key = _load_manifest(manifest_path)
 
     # Build apex_ai index from feed keyed on stix_id
     feed_apex_index: dict[str, dict] = {}
@@ -483,7 +505,7 @@ def sync_apex_ai_from_feed(
     if dry_run:
         log.info("[apex-sync] DRY RUN: would sync apex_ai to %d/%d items", synced_count, len(manifest_items))
     else:
-        _atomic_write(manifest_path, manifest_items, fmt, raw_data)
+        _atomic_write(manifest_path, manifest_items, fmt, raw_data, matched_key)
         log.info("[apex-sync] Synced apex_ai to %d/%d items in %s",
                  synced_count, len(manifest_items), manifest_path.name)
 
