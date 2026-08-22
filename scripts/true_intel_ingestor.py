@@ -52,6 +52,7 @@ sys.path.insert(0, str(_REPO / "scripts"))
 sys.path.insert(0, str(_REPO))
 
 from canonical_timestamp import parse_ts as _canonical_parse_ts  # noqa: E402
+from normalize_text import strip_markdown_artifacts as _strip_md  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -361,8 +362,8 @@ def _normalize_item(
     return {
         "id":           f"intel--{hashlib.sha256((source_url + title).encode()).hexdigest()[:16]}",
         "stix_id":      f"indicator--{hashlib.sha256((source_url + title).encode()).hexdigest()[:32]}",
-        "title":        str(title).strip()[:300],
-        "description":  str(description).strip()[:1000],
+        "title":        _strip_md(title).strip()[:300],
+        "description":  _strip_md(description).strip()[:1000],
         "source_url":   str(source_url).strip(),
         "feed_source":  str(source_key),
         "published_at": str(published_at).strip(),   # SOURCE date — immutable after this point

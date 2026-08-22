@@ -41,6 +41,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from normalize_text import strip_markdown_artifacts  # noqa: E402
+
 REPO_ROOT      = Path(__file__).resolve().parent.parent
 MANIFEST_PATH  = REPO_ROOT / "data" / "stix" / "feed_manifest.json"
 PLATFORM_VERSION = "v134.0"
@@ -114,7 +119,13 @@ def normalise_entry(item: dict) -> dict | None:
         return None
     if any(kw in title for kw in BRAND_KEYWORDS):
         return None
-    out["title"] = title
+    # v185.0 P0 FIX: strip Markdown syntax leaked from source formats (GitHub
+    # Security Advisories, oss-sec/cvefeed RSS) -- ingestion-level fix lives in
+    # true_intel_ingestor.py/multi_source_collector.py; this catches it here too
+    # since this stage runs on every item every pipeline cycle (defense-in-depth
+    # + retroactively cleans already-ingested entries, since ID is read from the
+    # existing id/stix_id field below, never recomputed from title when present).
+    out["title"] = strip_markdown_artifacts(title)
 
     # -- timestamp --
     timestamp = (
@@ -183,10 +194,12 @@ def normalise_entry(item: dict) -> dict | None:
         tags = [str(tags)]
     out["tags"] = tags
 
-    # -- description: strip "Tactical cluster: " prefix --
+    # -- description: strip "Tactical cluster: " prefix + markdown artifacts --
     desc = out.get("description") or title
     if isinstance(desc, str) and desc.startswith("Tactical cluster: "):
         desc = desc[len("Tactical cluster: "):]
+    if isinstance(desc, str):
+        desc = strip_markdown_artifacts(desc)
     out["description"] = desc
 
     out["schema_version"] = PLATFORM_VERSION
