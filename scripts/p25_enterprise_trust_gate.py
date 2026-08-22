@@ -78,9 +78,22 @@ def _g1_feed_integrity(items: list) -> tuple[bool, str, list[str]]:
 
 def _g2_confidence(items: list) -> tuple[bool, str, list[str]]:
     """G2: Average confidence level across feed."""
-    confs = [float(i.get("confidence") or 0) for i in items if i.get("confidence") is not None]
-    if not confs:
+    raw = [float(i.get("confidence") or 0) for i in items if i.get("confidence") is not None]
+    if not raw:
         return True, "Confidence field absent (non-blocking)", []
+    # v185.3 P0 FIX: confidence is stored under two incompatible scales by
+    # different producers -- most items as a 0-1 fraction (0.15, 0.25, ...),
+    # a minority as an already-0-100 percentage (90). Averaging raw values
+    # and formatting with :.2% (which itself multiplies by 100) previously
+    # produced a nonsensical "803.04%" average-confidence figure -- found
+    # live during a P25 re-run (Phase 4 task #30). Same "values <= 1.0 are
+    # a fraction, otherwise already the target scale" detection already
+    # established in this codebase for composite_score/risk_score
+    # (scripts/run_pipeline.py's STIX-reconstruction v159.0 P0-FIX);
+    # applied here in the inverse direction, normalising down to a 0-1
+    # fraction before averaging, since this check's own output format
+    # multiplies by 100.
+    confs = [v / 100.0 if v > 1.0 else v for v in raw]
     avg = sum(confs) / len(confs)
     if avg < 0.10:
         return False, f"Average confidence critically low: {avg:.2%}", [

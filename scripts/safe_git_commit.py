@@ -353,6 +353,11 @@ def main() -> None:
         # because nothing ever staged it. Same category as the other data/health
         # and data/status observability artifacts above; staged the same way.
         "data/quality/report_engine_ledger.json",
+        # Phase 4: quality_drift_monitor.py (STAGE 4.05) writes this every
+        # run. Same category and same risk as report_engine_ledger.json
+        # immediately above -- staged explicitly from day one rather than
+        # waiting to rediscover the GAP-001 pattern a second time.
+        "data/quality/quality_drift_report.json",
         "data/apex_v2_manifest.json",
         "data/apex_v2_strategic_report.json",
         "data/apex_intelligence_report.json",

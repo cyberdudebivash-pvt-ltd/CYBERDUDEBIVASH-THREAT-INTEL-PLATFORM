@@ -2660,6 +2660,23 @@ jobs:
           exit 0
 
       # -----------------------------------------------------------------------
+      # STAGE 4.05 - Quality Drift Monitor (Phase 4)
+      # Observability only (Principle 7) -- publishes PASS/WARN/HOLD trend,
+      # top content-contract violation types, and eligible-vs-covered
+      # coverage (ATT&CK/IOC/detection) for the canonical live feed.
+      # Composes intelligence_content_contract.validate_batch() and
+      # p38_shared_validators' eligibility accessors -- no new scoring
+      # logic. Runs before STAGE 4 Git Sync so this run's report is part
+      # of that same commit. Non-blocking: this is a monitor, not a gate.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 4.05 - Quality Drift Monitor"
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          python3 scripts/quality_drift_monitor.py
+          exit 0
+
+      # -----------------------------------------------------------------------
       # STAGE 4: GIT SYNC -- ALWAYS RUNS
       # Commits non-sensitive metadata and HTML reports. 4-attempt push retry.
       # Exit 0 guaranteed - never kills pipeline.
