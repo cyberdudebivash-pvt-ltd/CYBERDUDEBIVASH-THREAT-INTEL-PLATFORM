@@ -81,6 +81,8 @@ on:
       - "api/**.py"
       - "requirements.txt"
       - "requirements-ci-light.txt"
+      - "api/requirements.txt"
+      - "syndicate/requirements_syndicate.txt"
       - ".github/workflows/sast-security-scan.yml"
   pull_request:
     branches: [main, develop]
@@ -89,6 +91,8 @@ on:
       - "api/**.py"
       - "requirements.txt"
       - "requirements-ci-light.txt"
+      - "api/requirements.txt"
+      - "syndicate/requirements_syndicate.txt"
       - ".github/workflows/sast-security-scan.yml"
   schedule:
     - cron: "0 2 * * *"
@@ -275,10 +279,19 @@ jobs:
           # ever catching it. -r/--requirement can be passed multiple times
           # (pip-audit unions the files into one scan); added the second
           # file here and to this workflow's paths: triggers above.
+          #
+          # v185.0 FIX: same gap, two more files -- api/requirements.txt
+          # (installed by Dockerfile.api, the live API container image) and
+          # syndicate/requirements_syndicate.txt (installed by
+          # syndicate.yml) both carried pre-fix floors with no gate ever
+          # scanning them. Bumped in-place to the same already-audited
+          # versions from requirements.txt and added here.
           set +e
           pip-audit \
             --requirement requirements.txt \
             --requirement requirements-ci-light.txt \
+            --requirement api/requirements.txt \
+            --requirement syndicate/requirements_syndicate.txt \
             --format json \
             --output pip-audit-report.json \
             --ignore-vuln GHSA-wj6h-64fc-37mp \
