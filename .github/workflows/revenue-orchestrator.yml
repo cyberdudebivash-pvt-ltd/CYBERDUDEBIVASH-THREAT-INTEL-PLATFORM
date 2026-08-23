@@ -43,9 +43,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # SEC-2026-07-25: data/sovereign/tenants.json holds real customer API
-      # keys in plaintext. It used to be force-committed to this PUBLIC repo
-      # by the step below on every purchase (git add -f ...), so every
+      # SEC-2026-07-25: data/sovereign/tenants.json used to hold real customer
+      # API keys in plaintext. It used to be force-committed to this PUBLIC
+      # repo by the step below on every purchase (git add -f ...), so every
       # tenant's key was pushed to the public internet the moment they paid.
       # Fixed by moving the durable copy to the Cloudflare KV namespace
       # (REVENUE_CRM_KV) this repo's own revenue-engine Worker already owns,
@@ -54,11 +54,20 @@ jobs:
       # This restore step seeds the local file each run so
       # agent.subscription_manager / agent.license_validator (unchanged, still
       # plain `open("data/sovereign/tenants.json")`) keep working exactly as
-      # before. NOTE: the file still tracked in this repo's history/tree today
-      # carries the already-leaked keys — those are being rotated separately
-      # (founder decision, not this workflow) and the tracked copy will be
-      # stripped in a fast-follow once a KV write from a real run is confirmed
-      # to succeed (this session has no live CF_API_TOKEN to verify with).
+      # before.
+      # SEC-2026-08-23 UPDATE: the tracked copy has now been stripped -- every
+      # api_key value in the git tree is a non-functional
+      # cdb_REDACTED_ROTATE_REQUIRED_<tenant_id> placeholder, and
+      # .gitleaks.toml's allowlist entry for this file was removed so the
+      # gate blocks any real key committed here again. This does NOT rotate
+      # the real keys that were already exposed, and does NOT purge them
+      # from git history -- both are still outstanding and need the
+      # already-planned separate rotation to actually complete. It also does
+      # NOT change what this step restores at runtime: if the
+      # legacy_sovereign_tenants_snapshot KV value itself still holds
+      # pre-rotation keys, this step will still write those into the local
+      # (untracked, un-committed) working file for this job run, same as
+      # before -- fixing that is the KV-side rotation, not this file.
       - name: Restore Sovereign Registry from Cloudflare KV
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
