@@ -3701,8 +3701,13 @@ async function handleIncidentResponse(request, env, auth, method, path, url, ctx
   // LIST  GET /api/v1/incidents/
   if ((path === "/api/v1/incidents/" || path === "/api/v1/incidents") && method === "GET") {
     try {
-      const pfx    = (auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP) ? "ir:" : ownerPfx;
-      const listPrefix = `${pfx}incident:`;
+      // Tenant isolation: every tier lists only its own incidents. Incidents
+      // are stored under ownerPfx=`ir:${auth.sub}:` (see CREATE below); a
+      // prior ENTERPRISE/MSSP branch here used the bare "ir:" prefix, which
+      // doesn't match that storage key shape (auth.sub sits between "ir:"
+      // and "incident:") and so always yielded zero results for those tiers
+      // -- fixed to the correct, tenant-scoped prefix for every tier.
+      const listPrefix = `${ownerPfx}incident:`;
       // Cursor-paginated list  -  fetches all keys across multiple pages (max 200 per page)
       let allKeys = [], cursor = undefined, complete = false;
       while (!complete) {
@@ -5112,10 +5117,25 @@ async function handleRequest(request, env, ctx) {
 }
 
 // --- Worker entry point -------------------------------------------------------
+// CORS_HEADERS/SECURITY_HEADERS are already inlined by most handlers, but a
+// subset of P-layer handler files (p20/p22/p23/p25-p29/p33/p34-p38) use their
+// own local response helper that doesn't set them, so browser callers (e.g.
+// a customer's SOC dashboard) pass CORS preflight (handled globally above)
+// and then have the real GET/POST response silently discarded by the browser.
+// Applying the same fixed, origin-independent policy here once, to every
+// response regardless of which handler produced it, closes that gap without
+// touching each handler file individually.
+function withBaselineHeaders(response) {
+  const headers = new Headers(response.headers);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 export default {
   async fetch(request, env, ctx) {
     try {
-      return await handleRequest(request, env, ctx);
+      return withBaselineHeaders(await handleRequest(request, env, ctx));
     } catch (err) {
       // Logged server-side (visible via wrangler tail / any configured
       // Logpush) but never returned to the caller -- this is the top-level
