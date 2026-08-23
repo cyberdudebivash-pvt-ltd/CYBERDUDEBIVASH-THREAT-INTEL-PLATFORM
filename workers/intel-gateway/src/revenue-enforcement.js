@@ -5,6 +5,21 @@
 // Import this file into index.js and wire into the request pipeline.
 // =============================================================================
 
+// Constant-time string comparison for shared-secret checks (admin key) --
+// same implementation as index.js's timingSafeEqual; duplicated locally
+// (rather than imported) because index.js imports from this module, so an
+// index.js -> this file -> index.js import would be circular.
+function timingSafeEqual(a, b) {
+  const bufA = new TextEncoder().encode(String(a ?? ""));
+  const bufB = new TextEncoder().encode(String(b ?? ""));
+  const len  = Math.max(bufA.length, bufB.length);
+  let diff   = bufA.length ^ bufB.length;
+  for (let i = 0; i < len; i++) {
+    diff |= (bufA[i] ?? 0) ^ (bufB[i] ?? 0);
+  }
+  return diff === 0;
+}
+
 // 
 // TIER CONFIGURATION  Hard enforcement matrix
 // FREE       : preview only, truncated AI, blocked IOC/STIX, 20 items/req
@@ -928,7 +943,7 @@ export async function trackRevenueEvent(env, event, meta = {}) {
 // 
 export async function handleRevenueAnalytics(request, env, rid) {
   const adminSecret = request.headers.get("X-Admin-Secret");
-  if (!env?.ADMIN_SECRET || adminSecret !== env.ADMIN_SECRET) {
+  if (!env?.ADMIN_SECRET || !timingSafeEqual(adminSecret || "", env.ADMIN_SECRET)) {
     return revenueJson({ error: "unauthorized" }, 401);
   }
 
