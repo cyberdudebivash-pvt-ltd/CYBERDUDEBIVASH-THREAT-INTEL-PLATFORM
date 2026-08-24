@@ -152,6 +152,34 @@
     </div>`;
   }
 
+  /* v148.0 — renders the AI verdict text (Zone 3). When the backend has
+   * truncated a real per-item summary for a FREE-tier viewer, it always
+   * ends with the exact literal Adapter.PAYWALL_TEASER_SUFFIX (see
+   * workers/intel-gateway/src/revenue-enforcement.js:877 and
+   * api_adapter.js's buildAiVerdict()). Rather than leave that as plain
+   * trailing bracket text, split it into its own highlighted "unlock"
+   * pill — a real, specific, per-item preview cut off at a genuine
+   * point, which is a far stronger conversion hook than a generic
+   * repeated sentence ever was. */
+  function renderVerdictText(verdict, item) {
+    const marker = (Adapter && Adapter.PAYWALL_TEASER_SUFFIX) || " [Full AI analysis requires Pro]";
+    const text   = String(verdict || "");
+    if (text.length > marker.length && text.slice(-marker.length) === marker) {
+      const mainText = text.slice(0, -marker.length);
+      const aiPw     = item.apex_ai && item.apex_ai.paywall;
+      const ctaUrl   = (aiPw && aiPw.upgrade_url) || "/upgrade.html?plan=pro&utm_source=ai-teaser";
+      return `
+      <div class="sapx-av-verdict-col">
+        <p class="sapx-av-verdict-text sapx-av-verdict-truncated">${esc(mainText)}</p>
+        <a href="${esc(ctaUrl)}" target="_blank" rel="noopener" class="sapx-av-teaser-pill"
+           onclick="if(typeof window.SentinelApexAnalytics!=='undefined')window.SentinelApexAnalytics.track('ai_teaser_click',{severity:'${esc(item.severity)}'});">
+          <span class="sapx-av-teaser-icon">🔓</span> Unlock full AI analysis — PRO
+        </a>
+      </div>`;
+    }
+    return `<div class="sapx-av-verdict-col"><p class="sapx-av-verdict-text">${esc(text)}</p></div>`;
+  }
+
   /* ════════════════════════════════════════════════════════════════════════════
    *  ZONE 3: 🧠 AI VERDICT PANEL (CONVERSION DRIVER)
    *  Human-readable structured insight. Drives "I need this data" feeling.
@@ -185,7 +213,7 @@
 
       <div class="sapx-av-verdict-strip">
         <span class="sapx-av-verdict-icon">🧠</span>
-        <p class="sapx-av-verdict-text">${esc(verdict)}</p>
+        ${renderVerdictText(verdict, item)}
       </div>
 
       <div class="sapx-av-body sapx-panel-collapsed" id="sapx-av-body-${esc(cardId)}">

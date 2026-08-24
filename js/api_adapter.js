@@ -371,6 +371,14 @@
     },
   };
 
+  // v148.0 P0 FIX: revenue-enforcement.js (the Worker-side backend) always
+  // appends this exact literal suffix to a real, per-item AI summary when
+  // truncating it for a FREE-tier viewer (see
+  // workers/intel-gateway/src/revenue-enforcement.js:877). Stable, canonical
+  // marker -- used below to give the truncation point its own visual
+  // treatment instead of leaving it as plain trailing text.
+  const PAYWALL_TEASER_SUFFIX = " [Full AI analysis requires Pro]";
+
   function buildAiVerdict(aiSummary, severity, socPriority, threatCategory, aiConfidence) {
     const sev  = normalizeSeverity(severity);
     const soc  = normalizeSocPriority(socPriority);
@@ -397,6 +405,30 @@
     const confContext = conf >= 80 ? "High-confidence intelligence basis."
                       : conf >= 50 ? "Moderate-confidence intelligence basis — further validation advised."
                       : "Limited intelligence signals — treat as early-warning indicator.";
+
+    // v148.0 P0 FIX: aiSummary -- the real, per-item backend-generated AI
+    // analysis (specific EPSS%, risk score, SOC priority, MITRE mapping
+    // status for THIS item) -- was accepted as a parameter here but never
+    // once referenced in this function body. Every card silently fell back
+    // to one of the 28 generic narrative strings above, keyed only by
+    // category+severity -- confirmed live: every HIGH-severity
+    // "Vulnerability" card showed the exact same verdict text regardless of
+    // which CVE it actually was, while 100% of sampled live feed items
+    // carry a real, distinct apex_ai.ai_summary. Prefer it now.
+    const summary = _str(aiSummary, "").trim();
+    if (summary) {
+      // A FREE-tier-truncated summary already ends with its own natural
+      // cutoff + upsell hook (the exact PAYWALL_TEASER_SUFFIX literal) --
+      // appending more sentences after "requires Pro" would both read as
+      // broken (grammatically continuing past a cut-off mid-word) and
+      // undercut the paywall's own message. Render it verbatim in that
+      // case; renderAiVerdictPanel() (card_renderer.js) gives the marker
+      // its own highlighted styling.
+      if (summary.slice(-PAYWALL_TEASER_SUFFIX.length) === PAYWALL_TEASER_SUFFIX) {
+        return summary;
+      }
+      return `${summary} ${confContext} ${actionSuffix}`;
+    }
 
     return `${narrative} ${confContext} ${actionSuffix}`;
   }
@@ -813,6 +845,10 @@
   /* ── PUBLIC API ─────────────────────────────────────────────────────────── */
   return {
     VERSION: "182.0",
+
+    /* Shared constants (single source of truth -- see PAYWALL_TEASER_SUFFIX
+       definition above for why card_renderer.js needs this exact literal) */
+    PAYWALL_TEASER_SUFFIX:         PAYWALL_TEASER_SUFFIX,
 
     /* Core normalizers */
     normalizeIntelItem:           normalizeIntelItem,
