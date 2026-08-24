@@ -147,6 +147,23 @@ LINUX_KERNEL_CVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# PRODUCTION-VERIFICATION FIX (2026-08-24, GAP-A-ORACLE-CPU): same class of false
+# HARD_FAIL as GAP-A-KERNEL above, for Oracle's quarterly Critical Patch Update
+# (CPU) instead of Linux kernel maintenance. Confirmed live: CVE-2026-62582
+# through CVE-2026-62640 (47 primary IDs, gaps <=3) are genuine, individually
+# distinct NVD entries -- different attack vectors and CVSS scores per CVE (e.g.
+# CVE-2026-62636 network/SOAP CVSS 8.6, CVE-2026-62637 adjacent-network CVSS 9.3,
+# CVE-2026-62638 network/HTTP CVSS 9.1) sharing only Oracle's own boilerplate
+# opening sentence, which NVD publishes verbatim for every Oracle CPU CVE. Oracle
+# bulk-discloses 100+ CVEs on CPU day, all NVD-assigned in one sequential block --
+# not a synthetic generator. Matches on that exact boilerplate (which a generator
+# would have no reason to reproduce) so genuine synthetic floods with unrelated
+# titles are still caught.
+ORACLE_CPU_CVE_RE = re.compile(
+    r"vulnerability in the .+? product of oracle .+?\(component:",
+    re.IGNORECASE,
+)
+
 
 # ── Data Loading ──────────────────────────────────────────────────────────────
 
@@ -301,12 +318,18 @@ class SyntheticCVEDetector:
         # advisories with sequential primary IDs, without false-triggering on real feeds.
         primary_cves: List[Tuple[int, int]] = []
         kernel_excluded = 0
+        oracle_cpu_excluded = 0
         for item in items:
             # v184.0 FIX: exclude Linux kernel maintenance CVEs (NVD bulk-assigns sequential IDs)
             item_title = _title(item)
             item_desc  = str(item.get("description", "") or "")
             if LINUX_KERNEL_CVE_RE.search(item_title) or LINUX_KERNEL_CVE_RE.search(item_desc):
                 kernel_excluded += 1
+                continue
+            # GAP-A-ORACLE-CPU FIX (2026-08-24): same exclusion for Oracle's quarterly
+            # Critical Patch Update -- see ORACLE_CPU_CVE_RE definition above.
+            if ORACLE_CPU_CVE_RE.search(item_title) or ORACLE_CPU_CVE_RE.search(item_desc):
+                oracle_cpu_excluded += 1
                 continue
             for field in ("cve_id", "cve_ids", "cves", "cve"):
                 val = item.get(field)
@@ -321,6 +344,11 @@ class SyntheticCVEDetector:
             findings.append(
                 f"[A] INFO: {kernel_excluded} Linux kernel maintenance CVE(s) excluded from "
                 f"sequential flood check (NVD bulk-assigns sequential IDs to kernel patches — not synthetic)."
+            )
+        if oracle_cpu_excluded:
+            findings.append(
+                f"[A] INFO: {oracle_cpu_excluded} Oracle Critical Patch Update CVE(s) excluded from "
+                f"sequential flood check (NVD bulk-assigns sequential IDs to Oracle CPU releases — not synthetic)."
             )
 
         # Check sequential flood (primary CVE IDs only)

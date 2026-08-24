@@ -36,6 +36,20 @@
     return String(str || "").replace(/[&<>"']/g, function (m) { return map[m]; });
   }
 
+  /* CodeRabbit finding (PR #246): esc() HTML-escapes but does not block a
+   * javascript:/data: scheme -- a paywall/upgrade href sourced from backend
+   * data (apex_ai.paywall.upgrade_url, stix_bundle_upgrade_url) rendered
+   * straight into an <a href> could execute script on click if that field
+   * were ever attacker-influenced. Only allow a same-site relative path or
+   * an https:// URL; anything else falls back to the safe default. */
+  function safeUpgradeUrl(url, fallback) {
+    const s = String(url || "").trim();
+    if (!s) return fallback;
+    if (s.charAt(0) === "/" && s.charAt(1) !== "/") return s;
+    if (/^https:\/\//i.test(s)) return s;
+    return fallback;
+  }
+
   function relativeTime(iso) {
     if (!iso) return "—";
     try {
@@ -162,12 +176,21 @@
    * point, which is a far stronger conversion hook than a generic
    * repeated sentence ever was. */
   function renderVerdictText(verdict, item) {
-    const marker = (Adapter && Adapter.PAYWALL_TEASER_SUFFIX) || " [Full AI analysis requires Pro]";
+    // CodeRabbit nitpick (PR #246): reviewed and partially applied. Its
+    // premise that Adapter can't be undefined doesn't hold here -- the
+    // browser branch of this file's factory wrapper passes
+    // root.SentinelApexAdapter, which is undefined if api_adapter.js failed
+    // to load or a page includes this renderer out of order, and
+    // Adapter.PAYWALL_TEASER_SUFFIX would then throw. Kept the `Adapter &&`
+    // guard; removed the duplicated literal fallback (drift risk) and added
+    // the length>0 guard so an empty marker can't trivially match every
+    // verdict string.
+    const marker = (Adapter && Adapter.PAYWALL_TEASER_SUFFIX) || "";
     const text   = String(verdict || "");
-    if (text.length > marker.length && text.slice(-marker.length) === marker) {
+    if (marker.length > 0 && text.length > marker.length && text.slice(-marker.length) === marker) {
       const mainText = text.slice(0, -marker.length);
       const aiPw     = item.apex_ai && item.apex_ai.paywall;
-      const ctaUrl   = (aiPw && aiPw.upgrade_url) || "/upgrade.html?plan=pro&utm_source=ai-teaser";
+      const ctaUrl   = safeUpgradeUrl(aiPw && aiPw.upgrade_url, "/upgrade.html?plan=pro&utm_source=ai-teaser");
       return `
       <div class="sapx-av-verdict-col">
         <p class="sapx-av-verdict-text sapx-av-verdict-truncated">${esc(mainText)}</p>
@@ -504,7 +527,7 @@
     const socMeta  = item.apex_ai.soc_priority_meta;
     const features = item.paywall_features;
     const isUrgent = item.is_high_priority;
-    const ctaUrl   = aiPw.upgrade_url || iocPw.upgrade_url || "/upgrade.html?plan=pro&utm_source=card-cta";
+    const ctaUrl   = safeUpgradeUrl(aiPw.upgrade_url || iocPw.upgrade_url, "/upgrade.html?plan=pro&utm_source=card-cta");
 
     const featureListHtml = features.map(function (f) {
       return `<li class="sapx-pw-feature-item">
@@ -585,7 +608,7 @@
         </span>
         <div class="sapx-footer-ctas">
           ${item.stix_bundle_locked
-            ? `<a href="${esc(item.stix_bundle_upgrade_url)}" target="_blank" rel="noopener"
+            ? `<a href="${esc(safeUpgradeUrl(item.stix_bundle_upgrade_url, "/upgrade.html?plan=pro&utm_source=stix-lock"))}" target="_blank" rel="noopener"
                   class="sapx-stix-bundle-locked"
                   title="STIX Bundle is a PRO-only feature — upgrade to access structured threat data">
                  🔒 STIX Bundle <span class="sapx-stix-pro-badge">PRO</span> →
