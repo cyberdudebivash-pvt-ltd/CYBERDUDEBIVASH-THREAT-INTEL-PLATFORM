@@ -293,7 +293,9 @@ function _jsonRes(data, status = 200) {
 
 async function _loadFeed(env) {
   try {
-    const obj = await env.INTEL_R2?.get("feed/feed.json");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed/feed.json" is a dead
+    // R2 key -- see p18-handlers.js's matching _loadFeed fix note.
+    const obj = await env.INTEL_R2?.get("api/v1/intel/latest.json");
     if (obj) {
       const text = await obj.text();
       const data = JSON.parse(text);
