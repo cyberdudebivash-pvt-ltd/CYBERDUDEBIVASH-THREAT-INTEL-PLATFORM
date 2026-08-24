@@ -47,7 +47,21 @@ from pathlib import Path
 REPO_ROOT     = Path(__file__).resolve().parent.parent
 FEED_PATH     = REPO_ROOT / "api" / "feed.json"
 MANIFEST_PATH = REPO_ROOT / "data" / "stix" / "feed_manifest.json"
-SCRIPT_VER    = "1.0.0"
+SCRIPT_VER    = "1.0.1"
+
+# v185.0 FIX: this reconciler used to append `missing` items into the
+# manifest verbatim, straight from api/feed.json, with no normalization.
+# validate_repo.py's intel_schema gate enforces ioc_count == len(iocs) as a
+# hard P0 invariant; 7 of the 99 items synced by an earlier run of this
+# script had ioc_count != len(iocs) in the source feed, so those violations
+# were copied straight into feed_manifest.json and only surfaced later, on
+# a full regression_tests.py run (deploy-worker.yml's own gates don't run
+# this exact check today). Fix: run the same enforce_schema_list() every
+# other write boundary in this pipeline already calls (scripts/safe_io.py)
+# on `missing` before appending -- reuses the existing, already-proven
+# invariant-fixing engine rather than reimplementing it here.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from safe_io import enforce_schema_list  # noqa: E402
 
 
 def _now() -> str:
@@ -192,6 +206,9 @@ def reconcile(dry_run: bool = False) -> dict:
             "reconciled_at": _now(),
             "script_version": SCRIPT_VER,
         }
+
+    # ── Normalize before append (P0 invariants: ioc_count==len(iocs), etc.) ───
+    missing = enforce_schema_list(missing)
 
     # ── Append missing items to manifest ──────────────────────────────────────
     updated_manifest = manifest_items + missing
