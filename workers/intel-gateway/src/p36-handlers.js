@@ -35,8 +35,18 @@ async function _loadFeed(env) {
 }
 
 async function _loadQuality(env, key) {
-  const raw = await env.THREAT_INTEL_KV.get(`quality:${key}`);
-  return raw ? JSON.parse(raw) : null;
+  // PRODUCTION-VERIFICATION FIX (2026-08-24): same phantom THREAT_INTEL_KV
+  // binding as _loadFeed above (see that function's fix note) -- this read
+  // was also unguarded and was the actual remaining cause of
+  // GET /api/v1/p36/observability's confirmed live 500 even after
+  // _loadFeed was fixed (handleP36Observability calls both). No live
+  // equivalent exists for certification-report data (see this same
+  // commit's note on P34-P37's certification readers), so this is wrapped
+  // to fail closed to null rather than redirected to fabricated data.
+  try {
+    const raw = await env.THREAT_INTEL_KV.get(`quality:${key}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
 }
 
 // --- maturity scale -----------------------------------------------------------
