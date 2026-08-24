@@ -610,11 +610,31 @@ export async function handleP18TrustIndicators(request, env) {
   const itemId   = url.searchParams.get("id") || null;
   const items    = await _loadFeed(env);
 
+  // v185.0 FIX: this handler was the one route in this file missing the
+  // `items.length === 0` guard every sibling P18 handler already has
+  // (handleP18Correlation, handleP18QualityScore, etc.). Without it, an
+  // empty feed (confirmed live: _loadFeed's INTEL_R2 source is currently
+  // unpopulated in production) fell through to the single-item branch with
+  // item still null, and buildEvidenceAttribution(null)/
+  // computeTransparentConfidence(null) threw "Cannot read properties of
+  // null (reading 'source')" -- crashing to a 500 instead of the same
+  // graceful "no_data" 503 every sibling route already returns.
+  if (items.length === 0) {
+    return _jsonResp({ status: "no_data", message: "Feed data unavailable for trust indicators" }, 503);
+  }
+
   let item = null;
   if (itemId) {
     item = items.find(i => (i.id === itemId || i.stix_id === itemId)) || null;
+    // v185.0 FIX: a nonexistent id previously fell through to the aggregate
+    // branch below (silently returning the whole-feed view instead of
+    // signaling the id didn't match anything) since that branch's condition
+    // was `!item && items.length > 0`, true regardless of why item is null.
+    if (!item) {
+      return _jsonResp({ status: "not_found", message: `No advisory found with id '${itemId}'` }, 404);
+    }
   }
-  if (!item && items.length > 0) {
+  if (!item) {
     // Return trust indicator aggregate for the full feed
     const totalItems   = items.length;
     const withSource   = items.filter(i => i.source_url).length;
