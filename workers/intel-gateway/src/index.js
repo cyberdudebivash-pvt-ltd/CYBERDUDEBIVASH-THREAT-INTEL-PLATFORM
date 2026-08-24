@@ -5173,8 +5173,22 @@ async function handleRequest(request, env, ctx) {
   // routes above (line ~4223) are unaffected -- they match first as exact
   // string comparisons before this block is ever reached. ---
   if (path === "/api/reports/premium") return await handlePremiumReport(request, env, auth, crypto.randomUUID());
-  if (path === "/api/reports/list")    return await handleReportList(request, env, auth, crypto.randomUUID());
+  if (path === "/api/reports/list") {
+    // CodeRabbit (PR #242 review): the public contract advertises "GET
+    // /api/reports/list" only; nothing rejected POST/PUT/DELETE before this,
+    // so a non-GET call would still dispatch to handleReportList and return
+    // a normal 200 read instead of 405.
+    if (method !== "GET") {
+      return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
+    }
+    return await handleReportList(request, env, auth, crypto.randomUUID());
+  }
   if (path.startsWith("/api/reports/") && path !== "/api/reports/premium" && path !== "/api/reports/list") {
+    // Same fix as /api/reports/list above -- the public contract advertises
+    // "GET /api/reports/{id}" only.
+    if (method !== "GET") {
+      return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
+    }
     let rawSegment = path.slice("/api/reports/".length);
     // premium-reports.js's own report body advertises a pdf_download_url of
     // /api/reports/{id}/pdf (metadata.pdf_download_url), but per that file's
