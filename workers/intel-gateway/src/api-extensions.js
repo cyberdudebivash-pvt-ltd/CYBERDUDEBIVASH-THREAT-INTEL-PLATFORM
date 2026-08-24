@@ -18,7 +18,6 @@
 // =============================================================================
 
 import { applyTierGateV2 } from './revenue-enforcement.js';
-import { isCustomerReady } from './publication-gate.js';
 
 // 
 // SCOPES SYSTEM
@@ -569,10 +568,20 @@ export async function handleMISPExport(request, env, auth, rid) {
     const index = await fetchReportsIndexExt(env);
     if (!index?.reports?.length) return extJson({ error: "feed_unavailable" }, 503);
 
-    // P0 follow-through (Section 15): a report blocked from customer HTML
-    // must not leak through the MISP export -- same authoritative gate,
-    // reused unchanged (never re-implemented).
-    let items = index.reports.filter(isCustomerReady);
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): isCustomerReady() is the
+    // narrative-report certification gate built for the free, public
+    // /reports/** HTML surface (P0 incident scope -- see publication-gate.js
+    // header). Live-verified this session: 0/474 current feed items clear
+    // that bar, so this filter silently emptied every MISP export for every
+    // paying customer regardless of tier (added in 91527bf28 without
+    // checking how it interacted with a raw-data export). A MISP event
+    // export is machine-consumable threat data, not a narrative report --
+    // it doesn't need P21 commercial-narrative certification, only real
+    // underlying indicator/CVE signal. Filtering on that presence keeps out
+    // empty stub items without requiring narrative-certification thresholds
+    // this endpoint was never designed to need (and which the gate's own
+    // docs forbid lowering).
+    let items = index.reports.filter(i => (Array.isArray(i.iocs) && i.iocs.length > 0) || i.cve_id);
 
     if (reportId) {
       items = items.filter(i => (i.stix_id || i.id || "") === reportId || (i.title || "").toLowerCase().includes(reportId.toLowerCase()));
@@ -720,9 +729,16 @@ export async function handleCSVExport(request, env, auth, rid) {
     const index = await fetchReportsIndexExt(env);
     if (!index?.reports?.length) return extJson({ error: "feed_unavailable" }, 503);
 
-    // P0 follow-through (Section 15): same authoritative gate as the MISP
-    // export and /reports/** -- a rejected report must not leak IOCs via CSV.
-    let items = index.reports.filter(isCustomerReady);
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): same root cause and fix as
+    // handleMISPExport above -- isCustomerReady() is the narrative-report
+    // certification gate (P0 incident scope, /reports/** HTML surface only);
+    // live-verified 0/474 feed items currently clear it, so this filter
+    // silently emptied every CSV export for every paying customer. A CSV of
+    // IOC rows is machine-consumable export data, not a narrative report.
+    // Filtering on real IOC presence keeps out empty stub items without
+    // imposing narrative-certification thresholds this endpoint was never
+    // designed to need.
+    let items = index.reports.filter(i => Array.isArray(i.iocs) && i.iocs.length > 0);
     if (since) {
       const sinceMs = new Date(since).getTime();
       items = items.filter(i => new Date(i.processed_at || 0).getTime() >= sinceMs);
