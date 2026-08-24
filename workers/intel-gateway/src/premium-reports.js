@@ -10,8 +10,6 @@
 //   - Revenue tracked in ANALYTICS_KV per report generation
 // =============================================================================
 
-import { isCustomerReady } from './publication-gate.js';
-
 // -- Tier & Pricing Config -----------------------------------------------------
 const REPORT_CONFIG = {
   VERSION: "143.0.0",
@@ -183,6 +181,11 @@ function buildIOCTable(items, maxItems = 200) {
     const rawIocs = Array.isArray(item.iocs) ? item.iocs : [];
     for (const ioc of rawIocs) {
       if (iocs.length >= maxItems) break;
+      // CodeRabbit finding (PR #246): typeof null === "object" in JS, so a
+      // malformed entry like iocs: [null] passed the old type check and then
+      // crashed on ioc.value below, 500ing the whole report. Plain-string
+      // IOC entries are still valid and handled by the branch below.
+      if (ioc === null) continue;
       const val = safeStr(typeof ioc === "object" ? (ioc.value || ioc.indicator || "") : String(ioc || ""), 512);
       const key = val.toLowerCase();
       if (!val || seen.has(key)) continue;
@@ -320,10 +323,21 @@ export async function handlePremiumReport(request, env, auth, rid) {
     // Non-fatal -- proceed with empty feed, report will still generate structure
   }
 
-  // P0 follow-through (Section 15): this is a PAID customer artifact ($49/report,
-  // $149/mo) -- it must be held to the same authoritative publication gate as
-  // the free HTML reports. Reuses evaluatePublicationGate unchanged.
-  feedItems = feedItems.filter(isCustomerReady);
+  // PRODUCTION-VERIFICATION FIX (2026-08-24): isCustomerReady() runs the
+  // narrative-report certification chain (P20+P21+P23+P25+P26) built for the
+  // free, public /reports/** HTML surface (P0 incident scope -- see
+  // publication-gate.js header). Live-verified this session against the
+  // production feed: 0/474 current items clear that bar, so this filter
+  // silently produced an EMPTY report for every paying premium-reports
+  // customer ($49/report, $149/mo) regardless of tier. A premium report is a
+  // curated digest of raw feed data the customer already has paid API access
+  // to (via /api/feed) -- it does not need the same narrative certification
+  // as the polished public HTML page, and publication-gate.js's own docs
+  // forbid lowering that gate's thresholds to make it pass. Filtering on
+  // real underlying signal instead (title plus at least one of
+  // severity/cve_id/iocs) keeps out empty stub items without imposing
+  // certification thresholds this endpoint was never designed to need.
+  feedItems = feedItems.filter(i => i.title && (i.severity || i.cve_id || (Array.isArray(i.iocs) && i.iocs.length > 0)));
 
   // Apply filters
   let filtered = feedItems;
