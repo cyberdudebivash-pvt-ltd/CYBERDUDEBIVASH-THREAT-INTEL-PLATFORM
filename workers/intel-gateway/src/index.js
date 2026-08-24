@@ -5074,9 +5074,9 @@ async function handleRequest(request, env, ctx) {
       "POST /api/payment/manual-notify", "GET /api/payment/status?review_id=",
       "POST /api/v1/brand/scan (PRO+)", "POST /api/v1/brand/check (PRO+)",
       "POST /api/v1/vendor-risk/assess (PRO+)", "POST /api/v1/vendor-risk/bulk (ENT)",
-      "GET /api/v1/geopolitical/country/{code} (PRO+)", "GET /api/v1/geopolitical/landscape",
+      "GET /api/v1/geopolitical/country/{code} (PRO+)", "GET /api/v1/geopolitical/landscape (PRO+)",
       "POST /api/v1/geopolitical/sanctions-check (PRO+)",
-      "POST /api/v1/nlq/query (PRO+)", "GET /api/v1/nlq/examples",
+      "POST /api/v1/nlq/query (PRO+)", "GET /api/v1/nlq/examples (PRO+)",
       "GET|POST /api/v1/incidents/ (PRO+)", "GET|PUT|DELETE /api/v1/incidents/{id}",
       "POST /api/v1/copilot/query (PRO+)", "GET /api/v1/copilot/modes", "GET /api/v1/copilot/health",
       "/api/v1/control-plane/state",
@@ -5118,7 +5118,12 @@ async function handleRequest(request, env, ctx) {
       "/api/misp/export",
       "/api/sigma/bulk",
       "/api/yara/bulk",
-      "/api/scoring/feed",
+      // v185.0 FIX: these two entries previously listed paths that don't
+      // exist -- "/api/scoring/feed" (real route is bare "/api/scoring",
+      // enterprise-endpoints.js:1085) and "/api/mssp/feed" (real route
+      // requires a tenant id: "/api/mssp/tenants/{tenant_id}/feed",
+      // enterprise-endpoints.js:1115-1118) -- confirmed live, both 404'd.
+      "/api/scoring",
       "/api/scoring/kev",
       "/api/scoring/ransomware",
       "/api/scoring/velocity",
@@ -5126,7 +5131,7 @@ async function handleRequest(request, env, ctx) {
       "/api/siem/sentinel",
       "/api/siem/qradar",
       "/api/stream",
-      "/api/mssp/feed",
+      "/api/mssp/tenants/{tenant_id}/feed",
     ],
   }, 404);
 }
