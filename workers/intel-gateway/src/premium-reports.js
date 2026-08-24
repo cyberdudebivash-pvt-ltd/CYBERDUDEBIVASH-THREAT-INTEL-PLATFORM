@@ -499,7 +499,16 @@ export async function handleReportList(request, env, auth, rid) {
   const reports = [];
   try {
     if (env?.INTEL_R2) {
-      const list = await env.INTEL_R2.list({ prefix: REPORT_CONFIG.R2_PREFIX, limit: 50 });
+      // LIVE-VERIFICATION FIX (post-merge, PR #242): R2Bucket.list() does not
+      // return customMetadata by default -- it must be explicitly requested
+      // via `include`. Without it, obj.customMetadata was always {} for
+      // every listed object, so meta.key_id below was always undefined --
+      // the ownership filter correctly failed closed (no cross-tenant leak),
+      // but that also meant NO customer, including the true owner, ever saw
+      // any report in their own list. Caught live immediately after deploy:
+      // customer A generated a report (confirmed via direct GET
+      // /api/reports/{id}) but their own /api/reports/list came back empty.
+      const list = await env.INTEL_R2.list({ prefix: REPORT_CONFIG.R2_PREFIX, limit: 50, include: ["customMetadata"] });
       for (const obj of (list.objects || [])) {
         const meta = obj.customMetadata || {};
         // TENANT-ISOLATION FIX (CodeRabbit, PR #242 pre-merge review): was
