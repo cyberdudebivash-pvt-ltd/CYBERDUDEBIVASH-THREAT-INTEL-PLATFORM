@@ -106,8 +106,15 @@ export function slugifyEndpoint(pathname) {
 export function calculateCostPerCall(endpointSlug, tier) {
   const t     = (tier || "free").toLowerCase();
   const costs = COST_TABLE[endpointSlug] || COST_TABLE.default;
-  // Tier key mapping: "premium" -> "premium", "enterprise" -> "enterprise", else "free"
-  const tierKey = t === "enterprise" ? "enterprise" : t === "premium" ? "premium" : "free";
+  // ZERO-TRUST HARDENING FIX (2026-08-24): only matched t === "premium",
+  // but the real tier value for a paying non-Enterprise customer is "PRO"
+  // (TIERS.PRO, index.js:317) -> lowercased "pro", never "premium" -- a
+  // real PRO customer would silently fall through to the "free" cost
+  // tier. Accept both, matching the same additive fix already applied to
+  // credit-system.js's _tierConfig. "mssp" grouped with "enterprise",
+  // consistent with how MSSP is treated elsewhere in this codebase.
+  const tierKey = (t === "enterprise" || t === "mssp") ? "enterprise"
+    : (t === "pro" || t === "premium") ? "premium" : "free";
   return costs[tierKey] ?? 1;
 }
 
@@ -271,25 +278,34 @@ export async function getTierDistribution(env, date) {
 // 
 export async function analyzeUsagePatterns(env, userId, tier, creditBalance, creditLimit) {
   const signals = [];
+  // ZERO-TRUST HARDENING FIX (2026-08-24): this function compared the raw
+  // `tier` parameter directly against lowercase "free"/"premium" literals
+  // with no normalization at all -- real auth.tier is always uppercase
+  // (TIERS.FREE/PRO/ENTERPRISE/MSSP, index.js:317), and even lowercased,
+  // a real PRO customer's tier is "pro" not "premium". Both bugs meant
+  // every signal below silently never fired for a real customer. Same
+  // bug class fixed repeatedly elsewhere this session.
+  const tLower = (tier || "free").toLowerCase();
+  const isPro  = tLower === "pro" || tLower === "premium";
 
   // Signal 1: Approaching daily/monthly credit limit (>= 70% used)
   const pctUsed = creditLimit > 0 ? (creditLimit - creditBalance) / creditLimit : 0;
 
-  if (pctUsed >= 0.90 && tier === "free") {
+  if (pctUsed >= 0.90 && tLower === "free") {
     signals.push({
       type:      "upgrade_critical",
       message:   "90% of daily free credits used. Upgrade to Pro for 10,000 monthly credits.",
       urgency:   "high",
       cta_url:   "https://intel.cyberdudebivash.com/upgrade?plan=pro&ref=usage_90pct",
     });
-  } else if (pctUsed >= 0.70 && tier === "free") {
+  } else if (pctUsed >= 0.70 && tLower === "free") {
     signals.push({
       type:      "upgrade_nudge",
       message:   "70% of daily free credits used. Pro tier gives 100 more access.",
       urgency:   "medium",
       cta_url:   "https://intel.cyberdudebivash.com/upgrade?plan=pro&ref=usage_70pct",
     });
-  } else if (pctUsed >= 0.70 && tier === "premium") {
+  } else if (pctUsed >= 0.70 && isPro) {
     signals.push({
       type:      "upgrade_enterprise",
       message:   "70% of monthly Pro credits used. Enterprise offers unlimited access.",
@@ -299,7 +315,7 @@ export async function analyzeUsagePatterns(env, userId, tier, creditBalance, cre
   }
 
   // Signal 2: High-value endpoint usage (AI/export) on free tier -> upgrade signal
-  if (tier === "free") {
+  if (tLower === "free") {
     try {
       const kv   = env?.ANALYTICS_KV;
       const date = new Date().toISOString().slice(0, 10);
