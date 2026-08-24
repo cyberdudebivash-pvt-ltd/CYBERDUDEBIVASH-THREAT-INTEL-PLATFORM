@@ -9987,6 +9987,12 @@
                  }            
             renderLiveExploits(data);
              // 🔥 TOP 10 ENGINE (SAFE CALL)
+            // Stashed so js/sentinel-live-feeds.js's loadReports() can
+            // re-rank this section once the report registry it depends on
+            // (window._cdbReportsFull, see getTopThreats() above) finishes
+            // loading -- that fetch is async and can complete after this
+            // first render.
+            window._cdbLastFeedData = data;
             renderTopThreats(data);
             // Populate threat registry for XSS-safe modal dispatch
             // v102.0: register by stix_id (preferred) OR id (v74 schema compat)
@@ -12352,8 +12358,62 @@ function getThreatPriorityScore(item) {
     return score;
 }
 
+// Converts a /api/reports/index.json registry entry into the item shape
+// getThreatPriorityScore()/sevInfo()/prio()/the card renderer expect.
+// __norm.severity is set from the registry's own `severity` field (the
+// backend's canonical classification for that report) so these items get
+// the exact same severity badge as the report itself, rather than being
+// re-derived from a numeric risk_score threshold like an un-normalized
+// feed item would be.
+function _cdbReportPoolItem(r) {
+    return {
+        id: r.id, stix_id: r.id,
+        title: r.title || '',
+        severity: r.severity || null,
+        __norm: { severity: r.severity || null },
+        risk_score: r.risk_score,
+        cvss_score: r.cvss_score,
+        epss_score: r.epss_score,
+        kev_present: !!r.kev_present,
+        actor_tag: r.actor_tag || '',
+        mitre_tactics: [],
+        ioc_count: 0,
+        timestamp: r.timestamp || r.published || '',
+        processed_at: r.timestamp || r.published || '',
+        internal_report_url: r.url || '',
+        source_url: r.url || '',
+        validation_status: 'ok',
+    };
+}
+
 function getTopThreats(data) {
-    return [...data]
+    // PRODUCTION-GRADE FIX: only rank items that already have a verified,
+    // customer-ready report (same canonical check renderTopThreats() uses
+    // per-card via cdbBuildReportUrl() to decide FULL INTEL vs UNAVAILABLE).
+    // Before this, ranking ignored report availability entirely, so the
+    // highest-priority items -- exactly the ones most likely to be freshly
+    // ingested and not yet through the report-generation pipeline -- could
+    // dominate the free-tier top 3, showing a dead "UNAVAILABLE" badge on
+    // the platform's own marquee feature instead of a working CTA.
+    //
+    // The report-ready subset of `data` alone is often too small to fill a
+    // real top 10 (confirmed live: of the ~137 items in the main dashboard
+    // feed slice, typically only a handful overlap with the ~27-report
+    // customer-ready registry -- report generation draws from a much larger
+    // 500-candidate backend pool than what's served in this page's feed
+    // slice). window._cdbReportsFull (populated by js/sentinel-live-feeds.js's
+    // loadReports() from the same /api/reports/index.json registry already
+    // used as cdbBuildReportUrl()'s fallback) supplies the rest of that
+    // larger report-ready pool, converted via _cdbReportPoolItem() above, so
+    // this feed can still reach a genuine top 10 -- every one of them
+    // guaranteed to link to a real report.
+    const fromFeed = data.filter(item => !!cdbBuildReportUrl(item));
+    const feedIds = new Set(fromFeed.map(it => it.id || it.stix_id));
+    const fromRegistry = (window._cdbReportsFull || [])
+        .filter(r => r && r.id && !feedIds.has(r.id))
+        .map(_cdbReportPoolItem);
+
+    return [...fromFeed, ...fromRegistry]
         .sort((a, b) => getThreatPriorityScore(b) - getThreatPriorityScore(a))
         .slice(0, 10);
 }

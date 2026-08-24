@@ -647,6 +647,26 @@
     (data.reports || []).forEach(r => { if (r && r.id && r.url) registry[r.id] = r.url; });
     window._cdbReportRegistry = registry;
 
+    // PRODUCTION-GRADE FIX: index.html's getTopThreats() ranks the "TOP 10
+    // ACTIVE THREATS -- SOC PRIORITY FEED" section from the report-ready
+    // subset of the main feed PLUS this fuller registry (the report
+    // pipeline's candidate pool is much larger than what's served in the
+    // page's own feed slice, so relying on the feed slice alone leaves that
+    // marquee feature showing far fewer than 10 items, or dead links).
+    // Stash the full report objects (not just id->url) so getTopThreats()
+    // has the severity/risk_score/kev_present/epss_score it needs to rank
+    // and render them.
+    window._cdbReportsFull = data.reports || [];
+
+    // This fetch is async and can finish after index.html's first render of
+    // the TOP 10 section (window._cdbLastFeedData is set right before that
+    // first call). Re-rank once now that the fuller pool is available, so
+    // the section upgrades instead of staying stuck on a report-sparse
+    // first pass.
+    if (typeof window.renderTopThreats === "function" && window._cdbLastFeedData) {
+      try { window.renderTopThreats(window._cdbLastFeedData); } catch (e) {}
+    }
+
     const container = qs(".reports-list, #reports-list, [data-section='reports']");
     if (!container) return;
 
