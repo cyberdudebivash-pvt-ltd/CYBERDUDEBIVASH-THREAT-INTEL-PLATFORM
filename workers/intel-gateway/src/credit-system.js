@@ -38,8 +38,17 @@ export const CREDIT_CONFIG = {
 // 
 function _tierConfig(tier) {
   const t = (tier || "free").toLowerCase();
-  if (t === "enterprise") return CREDIT_CONFIG.ENTERPRISE;
-  if (t === "premium")    return CREDIT_CONFIG.PRO;
+  // ZERO-TRUST HARDENING FIX (2026-08-24): checked t === "premium", but the
+  // real tier value for a paying non-Enterprise customer is "PRO"
+  // (TIERS.PRO, index.js:317) -> lowercased "pro", never "premium". A real
+  // PRO customer would silently fall through to the FREE tier's 100/day
+  // limit instead of their paid 10,000/month allocation. "mssp" also
+  // treated as unlimited, consistent with how MSSP is grouped with
+  // ENTERPRISE elsewhere in this codebase (e.g. the incident-response
+  // tenant-scoping fix earlier this session). Dead code (never imported
+  // into index.js's router) so not live-exploitable today.
+  if (t === "enterprise" || t === "mssp") return CREDIT_CONFIG.ENTERPRISE;
+  if (t === "pro" || t === "premium")     return CREDIT_CONFIG.PRO;
   return CREDIT_CONFIG.FREE;
 }
 
@@ -186,6 +195,12 @@ export async function deductCredits(env, userId, amount, tier) {
 // 
 export async function checkCredits(env, userId, tier, cost, requestId) {
   const cfg = _tierConfig(tier);
+  // ZERO-TRUST HARDENING FIX (2026-08-24): the tier === "free" checks below
+  // compared the raw, possibly-uppercase tier value directly (real
+  // auth.tier is always uppercase) -- normalize once here for those
+  // comparisons while leaving the original `tier` value untouched for
+  // display fields (tier, X-Plan header, etc.) below.
+  const tLower = (tier || "free").toLowerCase();
 
   // Enterprise -- always allowed, no deduction
   if (cfg.limit === -1) {
@@ -217,7 +232,7 @@ export async function checkCredits(env, userId, tier, cost, requestId) {
     // Build 402 Payment Required response
     const body402 = {
       error:       "credits_exhausted",
-      message:     `Credit balance exhausted. ${tier === "free" ? "Upgrade to Pro for 10,000 monthly credits." : "Upgrade to Enterprise for unlimited access."}`,
+      message:     `Credit balance exhausted. ${tLower === "free" ? "Upgrade to Pro for 10,000 monthly credits." : "Upgrade to Enterprise for unlimited access."}`,
       credits_remaining: 0,
       credits_used:      used,
       credit_limit:      bal.initial,
@@ -225,7 +240,7 @@ export async function checkCredits(env, userId, tier, cost, requestId) {
       reset_period:      bal.period_key,
       cost_of_request:   cost,
       tier,
-      upgrade_url:       tier === "free" ? CREDIT_CONFIG.UPGRADE.free_to_pro : CREDIT_CONFIG.UPGRADE.pro_to_enterprise,
+      upgrade_url:       tLower === "free" ? CREDIT_CONFIG.UPGRADE.free_to_pro : CREDIT_CONFIG.UPGRADE.pro_to_enterprise,
       trial_url:         CREDIT_CONFIG.UPGRADE.trial,
       billing_status:    status,
       request_id:        requestId,
@@ -269,6 +284,10 @@ export async function checkCredits(env, userId, tier, cost, requestId) {
 export function buildBillingStatus(balance, used, limit, tier, costThisCall) {
   const isUnlimited = limit === -1 || balance === Infinity;
   const pctUsed     = (!isUnlimited && limit > 0) ? Math.min(100, Math.floor((used / limit) * 100)) : 0;
+  // ZERO-TRUST HARDENING FIX (2026-08-24): same missing-normalization issue
+  // as checkCredits above -- compare a lowercased copy, keep `tier` as-is
+  // for the `plan` display field.
+  const tLower = (tier || "free").toLowerCase();
 
   return {
     credits_remaining: isUnlimited ? null : Math.max(0, balance),
@@ -280,10 +299,10 @@ export function buildBillingStatus(balance, used, limit, tier, costThisCall) {
     unlimited:         isUnlimited,
     upsell: (!isUnlimited && pctUsed >= 70) ? {
       active:  true,
-      message: tier === "free"
+      message: tLower === "free"
         ? `${100 - pctUsed}% credits remaining today. Upgrade to Pro for 10,000/month.`
         : `${100 - pctUsed}% credits remaining. Enterprise offers unlimited access.`,
-      upgrade_url: tier === "free" ? CREDIT_CONFIG.UPGRADE.free_to_pro : CREDIT_CONFIG.UPGRADE.pro_to_enterprise,
+      upgrade_url: tLower === "free" ? CREDIT_CONFIG.UPGRADE.free_to_pro : CREDIT_CONFIG.UPGRADE.pro_to_enterprise,
     } : null,
   };
 }

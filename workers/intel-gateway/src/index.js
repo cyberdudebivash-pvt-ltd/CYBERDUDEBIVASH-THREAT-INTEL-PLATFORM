@@ -100,6 +100,7 @@ import { applyTierGateV2, enforceTierGate } from './revenue-enforcement.js';
 import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
 import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handleAlertDispatch, handleAlertHistory, handleAlertUnsubscribe } from './alert-engine.js';
+import { handleDarkWebScan, handleDarkWebStatus, handleLeakCheck } from './dark-web-monitor.js';
 const PLATFORM_VERSION    = "184.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -5123,6 +5124,14 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/alerts/history")                             return await handleAlertHistory(request, env, auth, crypto.randomUUID());
   if (path === "/api/alerts/unsubscribe" && method === "DELETE")  return await handleAlertUnsubscribe(request, env, auth, crypto.randomUUID());
 
+  // --- dark-web-monitor.js routes (previously unreachable -- now wired,
+  // same production-verification fix pattern as sla-monitor.js/alert-
+  // engine.js above; advertised live in api-key-manager.html's working
+  // "Dark Web Scan" button, which was 404ing before this) ---
+  if (path === "/api/dark-web/scan" && method === "POST") return await handleDarkWebScan(request, env, auth, crypto.randomUUID());
+  if (path === "/api/dark-web/status")                    return await handleDarkWebStatus(request, env, auth, crypto.randomUUID());
+  if (path === "/api/leak-check")                         return await handleLeakCheck(request, env, auth, crypto.randomUUID());
+
   // --- 404 --------------------------------------------------------------------
   return jsonResp({
     error: "Not found", path,
@@ -5206,6 +5215,7 @@ async function handleRequest(request, env, ctx) {
       "/api/sla/status", "GET /api/sla/report (ENT)", "GET /api/sla/incidents (ENT)", "GET /api/sla/certificate (ENT)",
       "POST /api/alerts/subscribe (PRO+)", "GET /api/alerts/subscriptions (PRO+)", "POST /api/alerts/test (PRO+)",
       "GET /api/alerts/history (ENT)", "DELETE /api/alerts/unsubscribe (PRO+)",
+      "POST /api/dark-web/scan (PRO+)", "GET /api/dark-web/status", "GET|POST /api/leak-check (PRO+)",
     ],
   }, 404);
 }
