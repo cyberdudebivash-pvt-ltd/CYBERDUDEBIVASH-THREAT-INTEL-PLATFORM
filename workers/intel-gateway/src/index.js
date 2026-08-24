@@ -5175,7 +5175,28 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/reports/premium") return await handlePremiumReport(request, env, auth, crypto.randomUUID());
   if (path === "/api/reports/list")    return await handleReportList(request, env, auth, crypto.randomUUID());
   if (path.startsWith("/api/reports/") && path !== "/api/reports/premium" && path !== "/api/reports/list") {
-    const reportId = decodeURIComponent(path.slice("/api/reports/".length));
+    let rawSegment = path.slice("/api/reports/".length);
+    // premium-reports.js's own report body advertises a pdf_download_url of
+    // /api/reports/{id}/pdf (metadata.pdf_download_url), but per that file's
+    // header comment no PDF render service exists yet -- strip the suffix
+    // and answer honestly instead of falling through to invalid_report_id.
+    const isPdfRequest = rawSegment.endsWith("/pdf");
+    if (isPdfRequest) rawSegment = rawSegment.slice(0, -"/pdf".length);
+    let reportId;
+    try {
+      reportId = decodeURIComponent(rawSegment);
+    } catch {
+      // Malformed percent-encoding (e.g. a bare "%") throws a URIError --
+      // uncaught, this fell through to the top-level catch-all as a 500.
+      return jsonResp({ error: "invalid_report_id", request_id: crypto.randomUUID() }, 400);
+    }
+    if (isPdfRequest) {
+      return jsonResp({
+        error:      "not_yet_available",
+        message:    "PDF export is not yet available for this report. Use the JSON format at GET /api/reports/{id}.",
+        request_id: crypto.randomUUID(),
+      }, 501);
+    }
     return await handleReportGet(request, env, auth, crypto.randomUUID(), reportId);
   }
 
