@@ -102,6 +102,8 @@ import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, ha
 import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handleAlertDispatch, handleAlertHistory, handleAlertUnsubscribe } from './alert-engine.js';
 import { handleDarkWebScan, handleDarkWebStatus, handleLeakCheck } from './dark-web-monitor.js';
 import { handlePremiumReport, handleReportList, handleReportGet } from './premium-reports.js';
+import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-meter.js';
+import { deductCredits } from './credit-system.js';
 const PLATFORM_VERSION    = "184.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -3893,6 +3895,33 @@ async function handleRequest(request, env, ctx) {
   // Audit authenticated requests
   if (auth.key) {
     auditLog(ctx, env, { action: "api_request", ip, path, method, tier: auth.tier, sub: auth.sub });
+
+    // CREDIT/USAGE SHADOW MODE -- mirrors the PHASE 3 entitlement shadow-mode
+    // pattern above (observe/log only, ctx.waitUntil, never blocks or changes
+    // what is returned). Reuses credit-system.js's deductCredits() and
+    // usage-meter.js's trackApiUsage()/calculateCostPerCall()/slugifyEndpoint()
+    // unchanged -- both files were bug-fixed for the tier-comparison defect
+    // earlier this session but never wired into this router. checkCredits()
+    // (the function that can build a 402) is intentionally never called here,
+    // so this cannot block or reject a single customer request today; it only
+    // maintains a background credit ledger + per-endpoint usage stats so a
+    // future real billing decision can be based on actual traffic instead of
+    // guesswork. deductCredits/trackApiUsage are themselves fail-open by
+    // design (KV errors are caught internally, never thrown), and running
+    // inside waitUntil means a slow or failed KV write can never add latency
+    // to, or fail, the real response already in flight.
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil((async () => {
+        try {
+          const slug = slugifyEndpoint(path);
+          const cost = calculateCostPerCall(slug, auth.tier);
+          await Promise.allSettled([
+            trackApiUsage(env, auth.sub, slug, auth.tier, cost),
+            deductCredits(env, auth.sub, cost, auth.tier),
+          ]);
+        } catch (_) {}
+      })());
+    }
   }
 
   // --- TAXII 2.1 routes -------------------------------------------------------
