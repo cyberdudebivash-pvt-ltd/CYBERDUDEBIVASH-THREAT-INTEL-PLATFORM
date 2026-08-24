@@ -2108,9 +2108,14 @@ export async function handleAdmin(request, env, ctx, path, method) {
     try { body = await request.json(); } catch (_) {}
     const { tier = "PRO", customer_id, label, expires_in_days } = body;
     if (!customer_id) return jsonResp({ error: "customer_id is required" }, 400);
-    if (!TIERS[tier])  return jsonResp({ error: `Invalid tier: ${tier}. Valid: FREE, PRO, ENTERPRISE` }, 400);
+    if (!TIERS[tier])  return jsonResp({ error: `Invalid tier: ${tier}. Valid: ${Object.keys(TIERS).join(", ")}` }, 400);
 
-    const prefix = tier === "ENTERPRISE" ? "cdb_ent" : tier === "PRO" ? "cdb_pro" : "cdb_free";
+    // v185.0 FIX: this mirrors provisionApiKey()'s prefix logic (~line 2820)
+    // exactly, which already handles MSSP -- this copy had drifted and fell
+    // through to "cdb_free" for MSSP, a cosmetic mislabel only (the `tier`
+    // field driving actual entitlement/rate-limit resolution in resolveAuth
+    // was always correct) but confusing for an admin-provisioned MSSP key.
+    const prefix = tier === "ENTERPRISE" ? "cdb_ent" : tier === "MSSP" ? "cdb_mssp" : tier === "PRO" ? "cdb_pro" : "cdb_free";
     const rand   = Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => b.toString(16).padStart(2, "0")).join("");
     const apiKey = `${prefix}_${rand}`;
     const record = {
