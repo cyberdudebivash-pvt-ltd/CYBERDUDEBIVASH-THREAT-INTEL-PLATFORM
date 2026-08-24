@@ -41,10 +41,12 @@ import os
 import sys
 import json
 import hmac
-import secrets
 import hashlib
 import argparse
 import datetime
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Optional
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
@@ -52,6 +54,91 @@ ACTIVE_KEYS_PATH   = "data/keys/active_keys.json"
 REVOKED_KEYS_PATH  = "data/security/revoked_keys.json"
 CUSTOMERS_PATH     = "data/customers/registry.json"
 SUBSCRIPTIONS_PATH = "data/subscriptions/active.json"
+
+# ─── LIVE PROVISIONING (v185.0 FIX) ───────────────────────────────────────────
+# SEC-2026-08-23: this tool used to only write data/keys/active_keys.json --
+# a local git-tracked file the deployed Cloudflare Worker never reads. The
+# Worker validates every request against env.API_KEYS_KV (Cloudflare KV),
+# which nothing synced this file into (confirmed: no workflow anywhere runs
+# `wrangler kv` against API_KEYS_KV). Every key this tool ever generated was
+# therefore non-functional against the real production API at
+# https://intel.cyberdudebivash.com -- including every MSSP key issued via
+# the documented mssp-onboarding-kit/MSSP_TENANT_PROVISIONING.md runbook,
+# which calls this tool directly.
+#
+# Fix: mint the key by calling the Worker's own POST /api/admin/keys (already
+# correct -- writes straight into API_KEYS_KV, the same code path real
+# Razorpay/Gumroad webhook-provisioned keys use) instead of generating a
+# local-only value, then keep the existing local bookkeeping (active_keys.json,
+# customer registry, revenue reporting) as a record of what was provisioned,
+# not as the source of truth.
+LIVE_API_BASE_URL = os.environ.get("CDB_API_BASE_URL", "https://intel.cyberdudebivash.com").rstrip("/")
+LIVE_ADMIN_SECRET_ENV = "ADMIN_SECRET"  # same name as `npx wrangler secret put ADMIN_SECRET`
+
+# The Worker's TIERS enum (workers/intel-gateway/src/index.js) has no TRIAL
+# concept -- POST /api/admin/keys rejects it with 400. A trial is, in this
+# platform's own tier model, temporary full-feature access, so it maps to a
+# live PRO-tier key; local bookkeeping still records it as TRIAL for reporting.
+_LIVE_TIER_MAP = {"FREE": "FREE", "TRIAL": "PRO", "PRO": "PRO", "ENTERPRISE": "ENTERPRISE", "MSSP": "MSSP"}
+
+
+class LiveProvisionError(RuntimeError):
+    """Raised when the Worker's live admin API can't be reached or rejects the request.
+
+    Deliberately NOT caught anywhere that would let a caller fall back to a
+    local-only key -- that fallback is exactly the bug this fix closes.
+    """
+
+
+def _live_admin_request(method: str, path: str, body: Optional[dict] = None) -> dict:
+    secret = os.environ.get(LIVE_ADMIN_SECRET_ENV, "").strip()
+    if not secret:
+        raise LiveProvisionError(
+            f"{LIVE_ADMIN_SECRET_ENV} is not set in the environment. This tool provisions keys "
+            f"against the live production API and refuses to fall back to a local-only key "
+            f"(that silent fallback is the exact bug this was fixed to close). "
+            f"Set {LIVE_ADMIN_SECRET_ENV} to the same value used with "
+            f"`npx wrangler secret put ADMIN_SECRET` before running this command."
+        )
+    url = f"{LIVE_API_BASE_URL}{path}"
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(
+        url, method=method, data=data,
+        headers={
+            "X-Admin-Key": secret,
+            "Content-Type": "application/json",
+            "User-Agent": "SENTINEL-APEX-GENERATE-KEY/185.0.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[:300]
+        raise LiveProvisionError(
+            f"{method} {path} -> HTTP {e.code}: {detail or e.reason}. "
+            f"A 403 means {LIVE_ADMIN_SECRET_ENV} doesn't match the Worker's ADMIN_SECRET "
+            f"(re-check with `npx wrangler secret put ADMIN_SECRET`); a 400 means the request "
+            f"body was rejected (invalid tier?)."
+        ) from e
+    except urllib.error.URLError as e:
+        raise LiveProvisionError(f"{method} {path} -> network error: {e.reason}") from e
+
+
+def live_provision_key(tier: str, customer_id: str, label: str, days: int) -> dict:
+    """POST /api/admin/keys -- mints a real key in the Worker's API_KEYS_KV. Raises LiveProvisionError on failure."""
+    live_tier = _LIVE_TIER_MAP.get(tier.upper(), tier.upper())
+    result = _live_admin_request("POST", "/api/admin/keys", {
+        "tier": live_tier, "customer_id": customer_id, "label": label, "expires_in_days": days,
+    })
+    if not result.get("key"):
+        raise LiveProvisionError(f"Worker responded without a key: {result}")
+    return result
+
+
+def live_revoke_key(key_plaintext: str) -> None:
+    """DELETE /api/admin/keys/{key} -- immediately removes the key from API_KEYS_KV. Raises LiveProvisionError on failure."""
+    _live_admin_request("DELETE", f"/api/admin/keys/{urllib.parse.quote(key_plaintext, safe='')}")
 
 # Tier → daily quota mapping (matches rate_limiter.py)
 TIER_QUOTAS = {
@@ -117,17 +204,21 @@ def generate_key(
     notes: str = "",
 ) -> dict:
     """
-    Generate a new API key, register it in active_keys.json.
+    Provision a real key via the Worker's live admin API (writes to
+    API_KEYS_KV, the store the production API actually authenticates
+    against), then register it in active_keys.json as a local audit-trail
+    record -- not the source of truth. Raises LiveProvisionError if the
+    live call fails; no local-only fallback key is ever generated.
     Returns the full key record including the plaintext key (shown once only).
     """
     tier = tier.upper()
     if tier not in TIER_PREFIXES:
         raise ValueError(f"Unknown tier '{tier}'. Valid: {list(TIER_PREFIXES.keys())}")
 
-    # Generate key
-    prefix = TIER_PREFIXES[tier]
-    token  = secrets.token_hex(16).upper()
-    key    = f"{prefix}-{token}"
+    # Mint the key on the live Worker (source of truth). This raises
+    # LiveProvisionError on any failure -- deliberately not caught here.
+    live = live_provision_key(tier, customer_id=customer_email, label=customer_name or customer_email, days=days)
+    key = live["key"]
     key_hash = sha256(key)
 
     expiry = days_from_now(days)
@@ -179,7 +270,15 @@ def activate_key(key_hash: str) -> bool:
 
 
 def expire_key(key_plaintext: str, reason: str = "subscription_ended") -> bool:
-    """Mark a key as expired (grace period begins, hard revocation in 3 days)."""
+    """Mark a key as expired (grace period begins, hard revocation in 3 days).
+
+    Local bookkeeping only. The live key's TTL on API_KEYS_KV was fixed at
+    issuance (expires_in_days); there is no live "start a grace period" API
+    to shorten it early -- only an immediate DELETE (see revoke_key). If you
+    need to actually cut off live access before the original expiry, use
+    `revoke` instead; this command records intent locally without touching
+    production access.
+    """
     kh = sha256(key_plaintext)
     data = load_json(ACTIVE_KEYS_PATH, {"keys": {}})
     if kh not in data.get("keys", {}):
@@ -193,12 +292,24 @@ def expire_key(key_plaintext: str, reason: str = "subscription_ended") -> bool:
     # Schedule revocation: add to revoked after grace (manual step in Phase 1)
     _append_audit("KEY_EXPIRED", kh[:12], data["keys"][kh].get("tier","?"),
                   data["keys"][kh].get("customer_email","?"), reason)
-    print(f"  ✓ Key marked expired. Grace period ends: {data['keys'][kh]['grace_ends_at'][:10]}")
+    print(f"  ✓ Key marked expired (local record only). Grace period ends: {data['keys'][kh]['grace_ends_at'][:10]}")
+    print(f"  NOTE: this does not shorten the key's live access -- its TTL on the production API was")
+    print(f"        fixed at issuance. Use `revoke` for immediate live cutoff.")
     return True
 
 
 def revoke_key(key_plaintext: str, reason: str = "") -> bool:
-    """Immediately revoke a key — effective on next API request."""
+    """Immediately revoke a key — effective on next API request.
+
+    Calls the Worker's live DELETE /api/admin/keys/{key} (removes it from
+    API_KEYS_KV) before touching local bookkeeping, so a "revoked" key
+    actually stops working against production rather than just looking
+    revoked in the local registry. Raises LiveProvisionError if the live
+    call fails -- local state is deliberately left untouched in that case,
+    so the tool never reports success while the key still works live.
+    """
+    live_revoke_key(key_plaintext)
+
     kh = sha256(key_plaintext)
 
     # Add to revocation registry
@@ -481,7 +592,12 @@ def main():
         "expire":   cmd_expire,   "revoke": cmd_revoke, "rotate": cmd_rotate,
         "revenue":  cmd_revenue,
     }
-    cmds[args.command](args)
+    try:
+        cmds[args.command](args)
+    except LiveProvisionError as e:
+        print(f"\n  [FAILED] Live production API call failed -- no local record was created/changed as a result:")
+        print(f"  {e}\n")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
