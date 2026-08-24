@@ -98,6 +98,8 @@ import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPE
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
 import { applyTierGateV2, enforceTierGate } from './revenue-enforcement.js';
 import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
+import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
+import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handleAlertDispatch, handleAlertHistory, handleAlertUnsubscribe } from './alert-engine.js';
 const PLATFORM_VERSION    = "184.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -3176,7 +3178,18 @@ async function handleManualNotify(request, env, ctx, method) {
   if (!email) return jsonResp({ error: "email is required" }, 400);
   if (!transaction_id && !notes) return jsonResp({ error: "transaction_id or notes required" }, 400);
 
-  const reviewId = `CDB-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  // PRODUCTION-VERIFICATION FIX (2026-08-24): the random suffix was 4 base36
+  // chars (~20.7 bits) from Math.random() (not cryptographically secure),
+  // combined with a Date.now() timestamp prefix that's trivially guessable
+  // near request time -- making review_id brute-forceable against the
+  // unauthenticated GET /api/payment/status lookup (which discloses another
+  // customer's plan/payment_method/activation status/created_at for a
+  // guessed ID). Widened to 8 crypto-random bytes (64 bits, via
+  // crypto.getRandomValues) -- same ID shape, existing already-issued IDs
+  // remain valid since this only changes how new ones are generated.
+  const randomSuffix = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+    .map(b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+  const reviewId = `CDB-${Date.now().toString(36).toUpperCase()}-${randomSuffix}`;
   const record   = { name, email, plan, payment_method, transaction_id, amount, currency, notes, review_id: reviewId, created_at: now(), status: "pending" };
 
   await env.SECURITY_HUB_KV.put(`manual_payment:${reviewId}`, JSON.stringify(record), { expirationTtl: 86400 * 90 });
@@ -4603,6 +4616,33 @@ async function handleRequest(request, env, ctx) {
   }
 
   // --- /api/ingest (PRO+ only) ------------------------------------------------
+  // PRODUCTION-VERIFICATION FIX (2026-08-24): this endpoint previously wrote
+  // every submitted item directly into LATEST_JSON_KEY -- the single shared
+  // R2 object every tier's /api/feed, /api/v1/intel/latest.json and every
+  // P17-P40 handler reads as the canonical curated feed. Any authenticated
+  // PRO+ customer (the platform's lowest paid tier) could inject arbitrary,
+  // unmoderated title/severity/risk_score/actor_tag/description content
+  // that would then be served to every OTHER customer indistinguishably
+  // from curated intel -- a cross-tenant data-integrity issue undermining
+  // the platform's entire "certified/trustworthy intel" value proposition.
+  // /api/ingest is not documented or advertised anywhere in customer-facing
+  // docs as "publishes to the shared feed"; the standard meaning of a
+  // customer-facing ingest endpoint is a private add-your-own-intel-for-
+  // correlation feature, so this fix scopes storage to the submitting
+  // customer only (a separate, per-tenant R2 key -- same INTEL_R2 bucket,
+  // no new infra) instead of removing the feature. A new GET /api/ingest
+  // lets that same customer read back what they submitted.
+  if (path === "/api/ingest" && method === "GET") {
+    if (!auth.jwt) {
+      return jsonResp({ error: "Authentication required. POST Authorization: Bearer <token>." }, 401);
+    }
+    if (auth.tier === "FREE" || auth.tier === "PUBLIC") {
+      return jsonResp({ error: "PRO or ENTERPRISE tier required for /api/ingest", upgrade: "POST /auth/login with a PRO/ENTERPRISE API key" }, 403);
+    }
+    const tenantKey = `ingest/${auth.sub || "unknown"}.json`;
+    const stored = await r2Get(env, tenantKey) || { items: [] };
+    return jsonResp({ items: stored.items || [], count: (stored.items || []).length, version: PLATFORM_VERSION }, 200);
+  }
   if (path === "/api/ingest" && method === "POST") {
     // Require authenticated PRO or ENTERPRISE tier
     if (!auth.jwt) {
@@ -4673,22 +4713,26 @@ async function handleRequest(request, env, ctx) {
       ...(body.source_url     != null && { source_url: body.source_url }),
       ...(body.confidence_score != null && { confidence_score: body.confidence_score }),
     };
-    // Append to INTEL_R2 live feed
+    // Write to the submitting customer's own private R2 key -- never the
+    // shared LATEST_JSON_KEY feed served to other customers (see fix note
+    // above this route block).
     try {
-      const current = await r2Get(env, LATEST_JSON_KEY) || { schema_version: "1.0", items: [], count: 0 };
+      const tenantKey = `ingest/${auth.sub || "unknown"}.json`;
+      const current = await r2Get(env, tenantKey) || { schema_version: "1.0", items: [], count: 0 };
       const items = Array.isArray(current.items) ? current.items : [];
-      // Guard: reject exact stix_id duplicate
+      // Guard: reject exact stix_id duplicate within this customer's own set
       if (items.some(i => (i.stix_id || i.id) === itemId)) {
-        return jsonResp({ error: "Duplicate item: stix_id already exists in feed", stix_id: itemId }, 409);
+        return jsonResp({ error: "Duplicate item: stix_id already exists in your ingested items", stix_id: itemId }, 409);
       }
       items.unshift(newItem); // newest first
-      const updatedFeed = { ...current, items, count: items.length, last_ingest: ts };
-      await env.INTEL_R2.put(LATEST_JSON_KEY, JSON.stringify(updatedFeed), { httpMetadata: { contentType: "application/json" } });
+      items.length = Math.min(items.length, 5000); // bound per-tenant growth
+      const updated = { ...current, items, count: items.length, last_ingest: ts };
+      await env.INTEL_R2.put(tenantKey, JSON.stringify(updated), { httpMetadata: { contentType: "application/json" } });
       auditLog(ctx, env, { action: "ingest", sub: auth.sub, tier: auth.tier, item_id: itemId, title: newItem.title });
-      return jsonResp({ status: "created", item_id: itemId, feed_count: items.length, ingested_at: ts }, 201);
+      return jsonResp({ status: "created", item_id: itemId, your_ingested_count: items.length, ingested_at: ts, note: "Stored privately to your account. Retrieve with GET /api/ingest." }, 201);
     } catch (e) {
-      console.error(`[ingest] feed write failed: ${e.message}`);
-      return jsonResp({ error: "Failed to write to intel feed" }, 500);
+      console.error(`[ingest] tenant store write failed: ${e.message}`);
+      return jsonResp({ error: "Failed to store ingested item" }, 500);
     }
   }
 
@@ -5052,6 +5096,22 @@ async function handleRequest(request, env, ctx) {
     if (eeResponse) return eeResponse;
   }
 
+  // --- sla-monitor.js / alert-engine.js routes (previously unreachable --
+  // now wired, fixed to the real resolveAuth() contract; see each file's
+  // header comment for the production-verification fix details) ---
+  if (path === "/api/sla/status")       return await handleSLAStatus(request, env, crypto.randomUUID());
+  if (path === "/api/sla/report")       return await handleSLAReport(request, env, auth, crypto.randomUUID());
+  if (path === "/api/sla/incidents")    return await handleSLAIncidents(request, env, auth, crypto.randomUUID());
+  if (path === "/api/sla/ping" && method === "POST") return await handleSLAPing(request, env, crypto.randomUUID());
+  if (path === "/api/sla/certificate")  return await handleSLACertificate(request, env, auth, crypto.randomUUID());
+
+  if (path === "/api/alerts/subscribe" && method === "POST")      return await handleAlertSubscribe(request, env, auth, crypto.randomUUID());
+  if (path === "/api/alerts/subscriptions")                       return await handleAlertSubscriptions(request, env, auth, crypto.randomUUID());
+  if (path === "/api/alerts/test" && method === "POST")           return await handleAlertTest(request, env, auth, crypto.randomUUID());
+  if (path === "/api/alerts/dispatch" && method === "POST")       return await handleAlertDispatch(request, env, auth, crypto.randomUUID());
+  if (path === "/api/alerts/history")                             return await handleAlertHistory(request, env, auth, crypto.randomUUID());
+  if (path === "/api/alerts/unsubscribe" && method === "DELETE")  return await handleAlertUnsubscribe(request, env, auth, crypto.randomUUID());
+
   // --- 404 --------------------------------------------------------------------
   return jsonResp({
     error: "Not found", path,
@@ -5068,7 +5128,7 @@ async function handleRequest(request, env, ctx) {
       "/auth/login", "/auth/logout",
       "/taxii/", "/taxii/collections/", "/taxii/collections/{id}/objects/",
       "/api/admin/health", "/api/admin/audit", "/api/admin/keys",
-      "POST /api/ingest (PRO+)",
+      "POST /api/ingest (PRO+)", "GET /api/ingest (PRO+)",
       "POST /api/payment/razorpay/create-order", "POST /api/payment/razorpay/verify",
       "POST /api/webhooks/razorpay", "POST /api/webhooks/gumroad",
       "POST /api/payment/manual-notify", "GET /api/payment/status?review_id=",
@@ -5132,6 +5192,9 @@ async function handleRequest(request, env, ctx) {
       "/api/siem/qradar",
       "/api/stream",
       "/api/mssp/tenants/{tenant_id}/feed",
+      "/api/sla/status", "GET /api/sla/report (ENT)", "GET /api/sla/incidents (ENT)", "GET /api/sla/certificate (ENT)",
+      "POST /api/alerts/subscribe (PRO+)", "GET /api/alerts/subscriptions (PRO+)", "POST /api/alerts/test (PRO+)",
+      "GET /api/alerts/history (ENT)", "DELETE /api/alerts/unsubscribe (PRO+)",
     ],
   }, 404);
 }
