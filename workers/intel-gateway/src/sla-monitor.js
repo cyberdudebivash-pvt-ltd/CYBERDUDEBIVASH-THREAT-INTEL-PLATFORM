@@ -88,22 +88,31 @@ export async function handleSLAStatus(request, env, rid) {
   const windowTotalMs    = SLA_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   const calculatedUptime = Math.min(100, ((windowTotalMs - totalDownMs) / windowTotalMs) * 100);
 
-  const displayUptime = total > 10 ? Math.max(uptimePct, calculatedUptime) : 100;
+  // CodeRabbit review finding (PR #237): this previously defaulted to a
+  // fabricated 100% uptime whenever total <= 10 -- including total === 0,
+  // i.e. a Worker that has never received a single /api/sla/ping heartbeat
+  // would still report "operational" / 100% / sla_met_enterprise: true to
+  // paying Enterprise customers with zero actual monitoring evidence behind
+  // it. This endpoint has never been reachable before this PR (no prior
+  // customer integration to stay compatible with), so there is no cost to
+  // reporting real absence-of-data honestly instead.
+  const hasData = total > 0;
+  const displayUptime = hasData ? Math.max(uptimePct, calculatedUptime) : null;
 
   return _json(200, {
-    status:           isLikelyUp ? "operational" : "degraded",
-    uptime_pct_30d:   parseFloat(displayUptime.toFixed(4)),
+    status:           !hasData ? "insufficient_data" : (isLikelyUp ? "operational" : "degraded"),
+    uptime_pct_30d:   hasData ? parseFloat(displayUptime.toFixed(4)) : null,
     sla_target_enterprise: ENTERPRISE_SLA,
     sla_target_pro:        PRO_SLA,
-    sla_met_enterprise:    displayUptime >= ENTERPRISE_SLA,
-    sla_met_pro:           displayUptime >= PRO_SLA,
+    sla_met_enterprise:    hasData ? displayUptime >= ENTERPRISE_SLA : null,
+    sla_met_pro:           hasData ? displayUptime >= PRO_SLA : null,
     total_pings_30d:       total,
     successful_pings_30d:  upPings,
     last_ping_age_seconds: lastPingAge,
     incidents_30d:         recentIncidents.length,
     total_downtime_seconds: Math.round(totalDownMs / 1000),
     components: {
-      "intel-gateway":  { status: isLikelyUp ? "operational" : "degraded", uptime: displayUptime },
+      "intel-gateway":  { status: !hasData ? "insufficient_data" : (isLikelyUp ? "operational" : "degraded"), uptime: displayUptime },
       "stix-feed":      { status: "operational", uptime: 100 },
       "ai-engine":      { status: "operational", uptime: 99.98 },
       "dark-web-monitor": { status: "operational", uptime: 99.95 },
@@ -151,7 +160,8 @@ export async function handleSLAReport(request, env, auth, rid) {
 
   const recentPings    = pings.filter(p => (now - p.ts) <= windowMs);
   const upCount        = recentPings.filter(p => p.ok).length;
-  const uptimePct      = recentPings.length > 0 ? ((upCount / recentPings.length) * 100) : 100;
+  const hasData        = recentPings.length > 0;
+  const uptimePct      = hasData ? ((upCount / recentPings.length) * 100) : null;
   const recentIncidents = incidents.filter(i => (now - new Date(i.start).getTime()) <= windowMs);
   const totalDownMs    = recentIncidents.reduce((acc, i) => acc + (i.duration_ms || 0), 0);
 
@@ -161,8 +171,11 @@ export async function handleSLAReport(request, env, auth, rid) {
     generated_at:        new Date().toISOString(),
     period:              `${new Date(now - windowMs).toISOString().split("T")[0]} to ${new Date().toISOString().split("T")[0]}`,
     sla_target:          ENTERPRISE_SLA,
-    actual_uptime_pct:   parseFloat(uptimePct.toFixed(4)),
-    sla_status:          uptimePct >= ENTERPRISE_SLA ? "MET CHECK" : "BREACHED FAIL",
+    // CodeRabbit review finding (PR #237): previously defaulted to a
+    // fabricated 100%/"MET" when there was zero ping data. See
+    // handleSLAStatus's matching fix note above for full rationale.
+    actual_uptime_pct:   hasData ? parseFloat(uptimePct.toFixed(4)) : null,
+    sla_status:          !hasData ? "INSUFFICIENT_DATA" : (uptimePct >= ENTERPRISE_SLA ? "MET CHECK" : "BREACHED FAIL"),
     total_downtime_min:  parseFloat((totalDownMs / 60000).toFixed(2)),
     allowed_downtime_min: parseFloat(((100 - ENTERPRISE_SLA) / 100 * SLA_WINDOW_DAYS * 24 * 60).toFixed(2)),
     incidents_count:     recentIncidents.length,
