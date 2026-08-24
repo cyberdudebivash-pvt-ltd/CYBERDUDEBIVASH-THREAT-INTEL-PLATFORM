@@ -2880,7 +2880,7 @@ async function sendActivationEmail(env, email, tier, apiKey) {
 
     <div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:20px;margin:24px 0;">
       <p style="color:#94a3b8;margin:0 0 8px;">Quick Start:</p>
-      <code style="color:#fbbf24;font-size:13px;word-break:break-all;">curl -H "X-API-Key: ${apiKey}" https://intel.cyberdudebivash.com/api/v1/threats</code>
+      <code style="color:#fbbf24;font-size:13px;word-break:break-all;">curl -H "X-API-Key: ${apiKey}" https://intel.cyberdudebivash.com/api/feed</code>
     </div>
 
     <p style="color:#94a3b8;">Need help? Contact us at <a href="mailto:support@cyberdudebivash.com" style="color:#60a5fa;">support@cyberdudebivash.com</a></p>
@@ -5039,7 +5039,17 @@ async function handleRequest(request, env, ctx) {
         if (obj) { const raw = await obj.json(); eeItems = Array.isArray(raw) ? raw : (raw?.items || []); }
       }
     } catch (_) {}
-    return await routeEnterpriseEndpoint(path, request, env, ctx, eeTier, eeItems, crypto.randomUUID());
+    // v185.0 FIX: routeEnterpriseEndpoint() returns null for any path under
+    // these prefixes it doesn't have an exact/regex match for (e.g. bare
+    // /api/sigma, /api/yara, /api/siem, /api/mssp -- only their /bulk or
+    // /{id}/... sub-paths are wired). Returning that null directly as the
+    // fetch handler's Response crashed the runtime into the top-level
+    // catch-all, producing a 500 "Internal gateway error" for what should be
+    // a clean 404 -- confirmed live against production (GET /api/sigma and
+    // /api/yara both returned 500 before this fix). Fall through to the
+    // standard 404 handler below instead of returning the null.
+    const eeResponse = await routeEnterpriseEndpoint(path, request, env, ctx, eeTier, eeItems, crypto.randomUUID());
+    if (eeResponse) return eeResponse;
   }
 
   // --- 404 --------------------------------------------------------------------

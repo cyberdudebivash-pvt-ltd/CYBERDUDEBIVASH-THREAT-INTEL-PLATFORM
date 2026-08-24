@@ -489,7 +489,7 @@ def cmd_generate(args):
     print(f"  Key Hash:   {record['key_hash'][:24]}...")
     print(f"\n  ✓ Registered in {ACTIVE_KEYS_PATH}")
     print(f"\n  NEXT STEP: Email this key to {record['customer_email']}")
-    print(f"  Use template: templates/email/api_key_delivered.txt")
+    print(f"  Use template: templates/email/03_api_key_delivered.txt")
 
 def cmd_list(args):
     data = load_json(ACTIVE_KEYS_PATH, {"keys": {}})
