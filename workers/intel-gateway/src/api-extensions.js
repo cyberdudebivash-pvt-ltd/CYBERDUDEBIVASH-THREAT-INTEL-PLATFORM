@@ -645,6 +645,10 @@ async function buildMISPEvent(item, idx) {
 
   // IOCs -> MISP attributes
   for (const ioc of (item.iocs || []).slice(0, 30)) {
+    // CodeRabbit finding (PR #246): typeof null === "object" in JS -- a
+    // malformed entry like iocs: [null] would crash on ioc.type below,
+    // 500ing the whole export instead of skipping just that one entry.
+    if (ioc === null) continue;
     const mispType = iocTypeToMISP(ioc.type);
     if (!mispType) continue;
     attributes.push({
@@ -751,6 +755,10 @@ export async function handleCSVExport(request, env, auth, rid) {
     let count = 0;
     for (const item of items) {
       for (const ioc of (item.iocs || [])) {
+        // CodeRabbit finding (PR #246): typeof null === "object" in JS -- a
+        // malformed entry like iocs: [null] would crash on ioc.type/ioc.value
+        // below, 500ing the whole export instead of skipping just that entry.
+        if (ioc === null) continue;
         if (types.length && !types.includes(ioc.type)) continue;
         if (count >= limit) break;
         rows.push([

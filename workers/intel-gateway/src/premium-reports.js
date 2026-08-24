@@ -181,6 +181,11 @@ function buildIOCTable(items, maxItems = 200) {
     const rawIocs = Array.isArray(item.iocs) ? item.iocs : [];
     for (const ioc of rawIocs) {
       if (iocs.length >= maxItems) break;
+      // CodeRabbit finding (PR #246): typeof null === "object" in JS, so a
+      // malformed entry like iocs: [null] passed the old type check and then
+      // crashed on ioc.value below, 500ing the whole report. Plain-string
+      // IOC entries are still valid and handled by the branch below.
+      if (ioc === null) continue;
       const val = safeStr(typeof ioc === "object" ? (ioc.value || ioc.indicator || "") : String(ioc || ""), 512);
       const key = val.toLowerCase();
       if (!val || seen.has(key)) continue;
