@@ -755,10 +755,18 @@ export async function handleP28Certify(request, env) {
     const itemId = url.searchParams.get("id");
     if (!itemId) return _jsonResp({ error: "id param or POST body required" }, 400);
     try {
-      const raw = await env.INTEL_R2.get("feeds/feed.json");
+      // PRODUCTION-VERIFICATION FIX (2026-08-24): "feeds/feed.json" is a
+      // dead R2 key nothing ever writes -- see p18-handlers.js's matching
+      // _loadFeed fix note for the full cross-file root cause. Redirected
+      // to the live, continuously updated key.
+      const raw = await env.INTEL_R2.get("api/v1/intel/latest.json");
       if (!raw) return _jsonResp({ error: "Feed unavailable" }, 503);
       const feed = JSON.parse(await raw.text());
-      item = Array.isArray(feed) ? feed.find(i => i.id === itemId) : null;
+      // The live key stores {items: [...]}, not a bare array (the dead key
+      // this replaced was never actually populated in either shape, so
+      // this array-only check had never been exercised against real data).
+      const feedItems = Array.isArray(feed) ? feed : (feed?.items || []);
+      item = feedItems.find(i => i.id === itemId || i.stix_id === itemId);
       if (!item) return _jsonResp({ error: "Item not found" }, 404);
     } catch (e) {
       return _jsonResp({ error: "Feed error: " + e.message }, 503);
