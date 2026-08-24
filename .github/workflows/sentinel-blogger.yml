@@ -932,6 +932,22 @@ jobs:
       #   patch_urgency_score, apex_score (composite), soc_priority (P1-P4).
       # NON-BLOCKING: exit 1 logs error but does not abort pipeline.
       # Enrichment is consumed by report generator (STAGE 3.2) and API manifests.
+      #
+      # PRODUCTION-VERIFICATION FIX (2026-08-24): this stage previously scored
+      # ONLY data/stix/feed_manifest.json, a one-way SYNC TARGET of api/feed.json
+      # (see STAGE 3.1.6 "Field-Preserving Manifest Merge" above -- it copies
+      # api/feed.json -> feed_manifest.json, never the reverse). apex_score was
+      # therefore written to a file nothing reads back from, and the live-served
+      # api/feed.json -- what the Worker actually loads as `items` for the paid
+      # ENTERPRISE-tier /api/scoring, /api/scoring/kev, /api/scoring/ransomware
+      # and /api/scoring/velocity endpoints (enterprise-endpoints.js) -- never
+      # received an apex_score field. Confirmed live: every item in production
+      # api/feed.json had zero apex_score, so those four paid endpoints always
+      # returned `{"total":0,"items":[]}` for every ENTERPRISE customer.
+      # Fix is additive: also score api/feed.json directly (same script, same
+      # --manifest flag, same additive-only/atomic-write guarantee -- see file
+      # docstring). The original feed_manifest.json invocation is left in place
+      # unchanged for STIX/report consumers that already depend on it.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.1.7 - Enterprise Scoring Engine (v184.0 — 10-dimension apex_score)"
         timeout-minutes: 5
@@ -939,11 +955,18 @@ jobs:
           set +e
           python3 scripts/enterprise_scoring_engine.py --manifest data/stix/feed_manifest.json
           SCORE_EXIT=$?
+          python3 scripts/enterprise_scoring_engine.py --manifest api/feed.json
+          SCORE_EXIT2=$?
           set -e
           if [ "$SCORE_EXIT" -eq 0 ]; then
-            echo "[PASS] Enterprise Scoring Engine: apex_score blocks written to manifest"
+            echo "[PASS] Enterprise Scoring Engine: apex_score blocks written to feed_manifest.json"
           else
-            echo "[WARN] Enterprise Scoring Engine exited $SCORE_EXIT — pipeline continues"
+            echo "[WARN] Enterprise Scoring Engine (feed_manifest.json) exited $SCORE_EXIT — pipeline continues"
+          fi
+          if [ "$SCORE_EXIT2" -eq 0 ]; then
+            echo "[PASS] Enterprise Scoring Engine: apex_score blocks written to api/feed.json (live-served feed)"
+          else
+            echo "[WARN] Enterprise Scoring Engine (api/feed.json) exited $SCORE_EXIT2 — pipeline continues"
           fi
 
       # -----------------------------------------------------------------------
