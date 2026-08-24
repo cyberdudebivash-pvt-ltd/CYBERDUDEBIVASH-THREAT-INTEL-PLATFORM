@@ -19,8 +19,19 @@ function _json(data, status = 200) {
 }
 
 async function _loadFeed(env) {
-  const raw = await env.THREAT_INTEL_KV.get('feed:latest');
-  return raw ? JSON.parse(raw) : [];
+  try {
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): THREAT_INTEL_KV is not a
+    // bound namespace anywhere in wrangler.toml -- see p18-handlers.js's
+    // matching _loadFeed fix note. This read also had no try/catch, so
+    // env.THREAT_INTEL_KV.get(...) throwing on the undefined binding
+    // crashed every caller (confirmed live: GET /api/v1/p36/observability
+    // returned 500 "Internal gateway error"). Redirected to the live R2
+    // key and wrapped defensively like every sibling P-layer's loader.
+    const r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    if (!r2obj) return [];
+    const data = await r2obj.json();
+    return Array.isArray(data) ? data : (data?.items || []);
+  } catch (_) { return []; }
 }
 
 async function _loadQuality(env, key) {
