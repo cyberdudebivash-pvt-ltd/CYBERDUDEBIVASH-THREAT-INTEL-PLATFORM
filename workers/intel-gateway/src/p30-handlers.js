@@ -612,7 +612,15 @@ export function buildP30Package(item) {
 export async function handleP30Verification(request, env) {
   try {
     let items = [];
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) items = parsed;
@@ -652,7 +660,15 @@ export async function handleP30Verification(request, env) {
 export async function handleP30Timeline(request, env) {
   try {
     let items = [];
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) items = parsed;
@@ -691,7 +707,15 @@ export async function handleP30Timeline(request, env) {
 export async function handleP30SourceHealth(request, env) {
   try {
     let items = [];
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) items = parsed;
@@ -737,7 +761,15 @@ export async function handleP30SourceHealth(request, env) {
 export async function handleP30Drift(request, env) {
   try {
     let items = [];
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) items = parsed;
@@ -785,7 +817,15 @@ export async function handleP30Drift(request, env) {
 export async function handleP30ReportHealth(request, env) {
   try {
     let items = [];
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) items = parsed;
@@ -843,7 +883,15 @@ export async function handleP30Observability(request, env) {
     ]);
 
     let items = [];
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) items = parsed;
@@ -881,7 +929,15 @@ export async function handleP30Observability(request, env) {
 export async function handleP30Certify(request, env) {
   try {
     let items = [];
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) items = parsed;

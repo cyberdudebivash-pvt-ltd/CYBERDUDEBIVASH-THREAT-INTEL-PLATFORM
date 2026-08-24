@@ -49,8 +49,13 @@ function _ts() { return new Date().toISOString(); }
 
 async function _loadFeed(env) {
   try {
-    const raw = await env.THREAT_INTEL_KV.get('feed:latest');
-    return raw ? JSON.parse(raw) : [];
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): THREAT_INTEL_KV is not a
+    // bound namespace anywhere in wrangler.toml -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key.
+    const r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    if (!r2obj) return [];
+    const data = await r2obj.json();
+    return Array.isArray(data) ? data : (data?.items || []);
   } catch (_) { return []; }
 }
 

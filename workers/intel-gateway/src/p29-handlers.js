@@ -692,7 +692,15 @@ export function buildP29Package(item) {
 export async function handleP29CustomerValueAnalytics(request, env) {
   try {
     let items = [];
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) items = parsed;
@@ -770,7 +778,15 @@ export async function handleP29TrustCenter(request, env) {
   // Live feed metrics
   let feedItems = 0, avgConf = 0, mitreCount = 0, kevCount = 0, iocTotal = 0;
   try {
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) {
       const feed = JSON.parse(raw);
       if (Array.isArray(feed)) {
@@ -895,7 +911,15 @@ export async function handleP29Observability(request, env) {
   let avgConf = 0, avgEnrich = 0;
 
   try {
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) {
       const feed = JSON.parse(raw);
       if (Array.isArray(feed)) {
@@ -958,7 +982,15 @@ export async function handleP29Certify(request, env, tier) {
     const itemId = url.searchParams.get("id");
 
     let items = [];
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key,
+    // re-serialized as a bare-array JSON string so every downstream
+    // `JSON.parse(raw)` / `Array.isArray(parsed)` check below is
+    // unchanged.
+    const _r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const _r2data = _r2obj ? await _r2obj.json() : null;
+    const raw = _r2data ? JSON.stringify(Array.isArray(_r2data) ? _r2data : (_r2data.items || [])) : null;
     if (raw) { const p = JSON.parse(raw); if (Array.isArray(p)) items = p; }
 
     const item = itemId

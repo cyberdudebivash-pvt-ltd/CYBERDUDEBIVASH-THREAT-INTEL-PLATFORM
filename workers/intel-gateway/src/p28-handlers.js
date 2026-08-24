@@ -830,9 +830,13 @@ export async function handleP28Observability(request, env) {
   // Read feed for live metrics
   let feedItems = 0, avgConf = 0, criticalCount = 0, ttpCoverage = 0, iocTotal = 0;
   try {
-    const raw = await env.SECURITY_HUB_KV.get("feed:latest");
-    if (raw) {
-      const feed = JSON.parse(raw);
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key.
+    const r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    if (r2obj) {
+      const data = await r2obj.json();
+      const feed = Array.isArray(data) ? data : (data?.items || []);
       if (Array.isArray(feed)) {
         feedItems    = feed.length;
         avgConf      = feed.reduce((s, i) => s + (parseFloat(i.confidence || i.confidence_score || 0.5)), 0) / feed.length;
