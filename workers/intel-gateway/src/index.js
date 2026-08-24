@@ -101,6 +101,9 @@ import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETEC
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
 import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handleAlertDispatch, handleAlertHistory, handleAlertUnsubscribe } from './alert-engine.js';
 import { handleDarkWebScan, handleDarkWebStatus, handleLeakCheck } from './dark-web-monitor.js';
+import { handlePremiumReport, handleReportList, handleReportGet } from './premium-reports.js';
+import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-meter.js';
+import { deductCredits } from './credit-system.js';
 const PLATFORM_VERSION    = "184.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -3892,6 +3895,33 @@ async function handleRequest(request, env, ctx) {
   // Audit authenticated requests
   if (auth.key) {
     auditLog(ctx, env, { action: "api_request", ip, path, method, tier: auth.tier, sub: auth.sub });
+
+    // CREDIT/USAGE SHADOW MODE -- mirrors the PHASE 3 entitlement shadow-mode
+    // pattern above (observe/log only, ctx.waitUntil, never blocks or changes
+    // what is returned). Reuses credit-system.js's deductCredits() and
+    // usage-meter.js's trackApiUsage()/calculateCostPerCall()/slugifyEndpoint()
+    // unchanged -- both files were bug-fixed for the tier-comparison defect
+    // earlier this session but never wired into this router. checkCredits()
+    // (the function that can build a 402) is intentionally never called here,
+    // so this cannot block or reject a single customer request today; it only
+    // maintains a background credit ledger + per-endpoint usage stats so a
+    // future real billing decision can be based on actual traffic instead of
+    // guesswork. deductCredits/trackApiUsage are themselves fail-open by
+    // design (KV errors are caught internally, never thrown), and running
+    // inside waitUntil means a slow or failed KV write can never add latency
+    // to, or fail, the real response already in flight.
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil((async () => {
+        try {
+          const slug = slugifyEndpoint(path);
+          const cost = calculateCostPerCall(slug, auth.tier);
+          await Promise.allSettled([
+            trackApiUsage(env, auth.sub, slug, auth.tier, cost),
+            deductCredits(env, auth.sub, cost, auth.tier),
+          ]);
+        } catch (_) {}
+      })());
+    }
   }
 
   // --- TAXII 2.1 routes -------------------------------------------------------
@@ -5132,6 +5162,58 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/dark-web/status")                    return await handleDarkWebStatus(request, env, auth, crypto.randomUUID());
   if (path === "/api/leak-check")                         return await handleLeakCheck(request, env, auth, crypto.randomUUID());
 
+  // --- premium-reports.js routes (previously unreachable -- now wired, same
+  // pattern as dark-web-monitor.js above; advertised live in soc-
+  // integrations.html's API reference table ("POST /api/reports/premium ...
+  // $49/report", "GET /api/reports/list ... List generated reports"), which
+  // were 404ing before this. Unlike dark-web-monitor.js, this generates real
+  // reports from the live feed (not simulated data), gated by tier the same
+  // way as every other Pro+ feature already live on this router. The static
+  // /api/reports/index.json, /api/reports/latest.json, /api/reports/stats.json
+  // routes above (line ~4223) are unaffected -- they match first as exact
+  // string comparisons before this block is ever reached. ---
+  if (path === "/api/reports/premium") return await handlePremiumReport(request, env, auth, crypto.randomUUID());
+  if (path === "/api/reports/list") {
+    // CodeRabbit (PR #242 review): the public contract advertises "GET
+    // /api/reports/list" only; nothing rejected POST/PUT/DELETE before this,
+    // so a non-GET call would still dispatch to handleReportList and return
+    // a normal 200 read instead of 405.
+    if (method !== "GET") {
+      return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
+    }
+    return await handleReportList(request, env, auth, crypto.randomUUID());
+  }
+  if (path.startsWith("/api/reports/") && path !== "/api/reports/premium" && path !== "/api/reports/list") {
+    // Same fix as /api/reports/list above -- the public contract advertises
+    // "GET /api/reports/{id}" only.
+    if (method !== "GET") {
+      return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
+    }
+    let rawSegment = path.slice("/api/reports/".length);
+    // premium-reports.js's own report body advertises a pdf_download_url of
+    // /api/reports/{id}/pdf (metadata.pdf_download_url), but per that file's
+    // header comment no PDF render service exists yet -- strip the suffix
+    // and answer honestly instead of falling through to invalid_report_id.
+    const isPdfRequest = rawSegment.endsWith("/pdf");
+    if (isPdfRequest) rawSegment = rawSegment.slice(0, -"/pdf".length);
+    let reportId;
+    try {
+      reportId = decodeURIComponent(rawSegment);
+    } catch {
+      // Malformed percent-encoding (e.g. a bare "%") throws a URIError --
+      // uncaught, this fell through to the top-level catch-all as a 500.
+      return jsonResp({ error: "invalid_report_id", request_id: crypto.randomUUID() }, 400);
+    }
+    if (isPdfRequest) {
+      return jsonResp({
+        error:      "not_yet_available",
+        message:    "PDF export is not yet available for this report. Use the JSON format at GET /api/reports/{id}.",
+        request_id: crypto.randomUUID(),
+      }, 501);
+    }
+    return await handleReportGet(request, env, auth, crypto.randomUUID(), reportId);
+  }
+
   // --- 404 --------------------------------------------------------------------
   return jsonResp({
     error: "Not found", path,
@@ -5216,6 +5298,7 @@ async function handleRequest(request, env, ctx) {
       "POST /api/alerts/subscribe (PRO+)", "GET /api/alerts/subscriptions (PRO+)", "POST /api/alerts/test (PRO+)",
       "GET /api/alerts/history (ENT)", "DELETE /api/alerts/unsubscribe (PRO+)",
       "POST /api/dark-web/scan (PRO+)", "GET /api/dark-web/status", "GET|POST /api/leak-check (PRO+)",
+      "POST /api/reports/premium (PRO+, $49/report)", "GET /api/reports/list (PRO+)", "GET /api/reports/{id} (PRO+)",
     ],
   }, 404);
 }

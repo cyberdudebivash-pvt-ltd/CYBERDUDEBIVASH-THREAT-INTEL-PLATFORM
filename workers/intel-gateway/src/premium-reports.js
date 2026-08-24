@@ -435,7 +435,23 @@ export async function handlePremiumReport(request, env, auth, rid) {
             report_type:  reportType,
             generated_at: now.toISOString(),
             tier:         tier,
-            key_id:       auth.key_id || "",
+            // TENANT-ISOLATION FIX (CodeRabbit, PR #242 pre-merge review):
+            // was `auth.key_id`, a field that does not exist anywhere on the
+            // object resolveAuth() returns (index.js:328-382 -- only tier,
+            // key, sub, jwt, kv, error). Every report was therefore stored
+            // with key_id: "", and since (auth.key_id || "") also always
+            // evaluated to "" for every real request, handleReportList's and
+            // handleReportGet's ownership checks below both matched "" === ""
+            // for any authenticated PRO/ENTERPRISE customer -- full
+            // cross-tenant read access to every other customer's reports.
+            // Caught before this route was ever wired into index.js's
+            // router (PR #242), so no real customer traffic was exposed.
+            // auth.sub is the correct per-customer identity (customer_id for
+            // API-key auth, JWT sub for JWT auth) -- same field already used
+            // for tenant scoping and audit logging elsewhere in this file
+            // (getUsageSummary(env, auth.sub, ...) equivalents) and in
+            // index.js's own auditLog(..., sub: auth.sub) call sites.
+            key_id:       auth.sub || "",
           },
         }
       );
@@ -486,8 +502,16 @@ export async function handleReportList(request, env, auth, rid) {
       const list = await env.INTEL_R2.list({ prefix: REPORT_CONFIG.R2_PREFIX, limit: 50 });
       for (const obj of (list.objects || [])) {
         const meta = obj.customMetadata || {};
-        // Only return reports belonging to this key (or admin can see all)
-        if (auth.is_admin || meta.key_id === (auth.key_id || "")) {
+        // TENANT-ISOLATION FIX (CodeRabbit, PR #242 pre-merge review): was
+        // `meta.key_id === (auth.key_id || "")` -- auth.key_id does not
+        // exist on resolveAuth()'s return object, so this always compared
+        // "" === "" and matched every report for every customer. Require a
+        // real, non-empty match against auth.sub (the correct per-customer
+        // identity -- see the matching fix note where key_id is written,
+        // above in handlePremiumReport). A report with no recorded owner
+        // (key_id: "", e.g. any generated before this fix) now matches no
+        // one rather than everyone -- fails closed, not open.
+        if (auth.is_admin || (meta.key_id && auth.sub && meta.key_id === auth.sub)) {
           reports.push({
             report_id:    meta.report_id || obj.key.split("/").pop().replace(".json", ""),
             report_type:  meta.report_type || "unknown",
@@ -536,11 +560,25 @@ export async function handleReportGet(request, env, auth, rid, reportId) {
     if (env?.INTEL_R2) {
       const obj = await env.INTEL_R2.get(`${REPORT_CONFIG.R2_PREFIX}${safeId}.json`);
       if (obj) {
-        const data = await obj.json();
-        // Ownership check (skip for admins)
-        if (!auth.is_admin && data.metadata && auth.key_id && data.metadata.key_id !== auth.key_id) {
+        // TENANT-ISOLATION FIX (CodeRabbit, PR #242 pre-merge review): two
+        // compounded bugs here -- (1) `auth.key_id` does not exist on
+        // resolveAuth()'s return object (index.js:328-382), so this
+        // ownership check never activated for any real request; (2) even
+        // with the field name fixed, the old code read `data.metadata.key_id`
+        // -- the report BODY's own `metadata` object (platform_version,
+        // dashboard_url, pdf_download_url, etc.) -- which never had a
+        // key_id field at all; the real owner was only ever written to the
+        // R2 OBJECT's customMetadata (a separate side-channel from the JSON
+        // body), in handlePremiumReport above. Fixed to read
+        // obj.customMetadata.key_id and compare against auth.sub (the
+        // correct per-customer identity), and to fail closed: a report
+        // with no recorded owner, or a requester that doesn't match it, is
+        // treated as not found rather than allowed through.
+        const ownerId = obj.customMetadata?.key_id || "";
+        if (!auth.is_admin && (!ownerId || ownerId !== (auth.sub || ""))) {
           return _json({ error: "not_found", request_id: rid }, 404);
         }
+        const data = await obj.json();
         return _json(data);
       }
     }
