@@ -101,6 +101,7 @@ import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETEC
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
 import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handleAlertDispatch, handleAlertHistory, handleAlertUnsubscribe } from './alert-engine.js';
 import { handleDarkWebScan, handleDarkWebStatus, handleLeakCheck } from './dark-web-monitor.js';
+import { handlePremiumReport, handleReportList, handleReportGet } from './premium-reports.js';
 const PLATFORM_VERSION    = "184.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -5132,6 +5133,23 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/dark-web/status")                    return await handleDarkWebStatus(request, env, auth, crypto.randomUUID());
   if (path === "/api/leak-check")                         return await handleLeakCheck(request, env, auth, crypto.randomUUID());
 
+  // --- premium-reports.js routes (previously unreachable -- now wired, same
+  // pattern as dark-web-monitor.js above; advertised live in soc-
+  // integrations.html's API reference table ("POST /api/reports/premium ...
+  // $49/report", "GET /api/reports/list ... List generated reports"), which
+  // were 404ing before this. Unlike dark-web-monitor.js, this generates real
+  // reports from the live feed (not simulated data), gated by tier the same
+  // way as every other Pro+ feature already live on this router. The static
+  // /api/reports/index.json, /api/reports/latest.json, /api/reports/stats.json
+  // routes above (line ~4223) are unaffected -- they match first as exact
+  // string comparisons before this block is ever reached. ---
+  if (path === "/api/reports/premium") return await handlePremiumReport(request, env, auth, crypto.randomUUID());
+  if (path === "/api/reports/list")    return await handleReportList(request, env, auth, crypto.randomUUID());
+  if (path.startsWith("/api/reports/") && path !== "/api/reports/premium" && path !== "/api/reports/list") {
+    const reportId = decodeURIComponent(path.slice("/api/reports/".length));
+    return await handleReportGet(request, env, auth, crypto.randomUUID(), reportId);
+  }
+
   // --- 404 --------------------------------------------------------------------
   return jsonResp({
     error: "Not found", path,
@@ -5216,6 +5234,7 @@ async function handleRequest(request, env, ctx) {
       "POST /api/alerts/subscribe (PRO+)", "GET /api/alerts/subscriptions (PRO+)", "POST /api/alerts/test (PRO+)",
       "GET /api/alerts/history (ENT)", "DELETE /api/alerts/unsubscribe (PRO+)",
       "POST /api/dark-web/scan (PRO+)", "GET /api/dark-web/status", "GET|POST /api/leak-check (PRO+)",
+      "POST /api/reports/premium (PRO+, $49/report)", "GET /api/reports/list (PRO+)", "GET /api/reports/{id} (PRO+)",
     ],
   }, 404);
 }
