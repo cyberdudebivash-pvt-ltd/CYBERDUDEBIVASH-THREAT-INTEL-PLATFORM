@@ -34,8 +34,19 @@ function _pct(n, d) { return d === 0 ? 0 : +((n / d) * 100).toFixed(1); }
 function _avg(arr) { return arr.length === 0 ? 0 : +(arr.reduce((s, v) => s + v, 0) / arr.length).toFixed(2); }
 
 async function _loadFeed(env) {
-  const raw = await env.THREAT_INTEL_KV.get('feed:latest');
-  return raw ? JSON.parse(raw) : [];
+  try {
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): THREAT_INTEL_KV is not a
+    // bound namespace anywhere in wrangler.toml -- see p18-handlers.js's
+    // matching _loadFeed fix note. This read also had no try/catch, so
+    // env.THREAT_INTEL_KV.get(...) throwing on the undefined binding
+    // crashed every caller (confirmed live: GET /api/v1/p37/observability
+    // returned 500 "Internal gateway error"). Redirected to the live R2
+    // key and wrapped defensively like every sibling P-layer's loader.
+    const r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    if (!r2obj) return [];
+    const data = await r2obj.json();
+    return Array.isArray(data) ? data : (data?.items || []);
+  } catch (_) { return []; }
 }
 async function _loadQuality(env, key) {
   const raw = await env.THREAT_INTEL_KV.get(`quality:${key}`);
@@ -496,7 +507,7 @@ export async function handleP37FeedAudit(request, env) {
     source_diversity:   divers,
     enrichment_audit:   enrich,
     feed_classification: divers.feed_type,
-    p37_note: 'P37 gates on live production feed (KV feed:latest). Phase 0 audit identified 3-feed architecture: live CVE feed (api/feed.json), aggregate intel (data/feed.json), stale root snapshot (feed.json). P37 normalizes certification against the live feed only.',
+    p37_note: 'P37 gates on live production feed (R2 api/v1/intel/latest.json). Phase 0 audit identified 3-feed architecture: live CVE feed (api/feed.json), aggregate intel (data/feed.json), stale root snapshot (feed.json). P37 normalizes certification against the live feed only.',
   });
 }
 

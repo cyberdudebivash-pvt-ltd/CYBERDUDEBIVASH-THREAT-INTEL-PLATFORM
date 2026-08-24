@@ -488,7 +488,14 @@ export async function handleP25TrustScore(request, env) {
   try {
     const url     = new URL(request.url);
     const itemId  = url.searchParams.get("id");
-    const raw     = await env.SECURITY_HUB_KV.get("feed:latest", { type: "json" });
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note for the full cross-file root cause
+    // (this same key name recurs, unpopulated, across P25-P37).
+    // Redirected to the live R2 key every other already-fixed handler
+    // in this codebase uses.
+    const r2obj   = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const raw     = r2obj ? await r2obj.json() : null;
     const items   = Array.isArray(raw) ? raw : (raw?.items || raw?.data || []);
 
     let item = itemId ? items.find(i => i.id === itemId) : items[0];
@@ -526,7 +533,11 @@ export async function handleP25TrustScore(request, env) {
  */
 export async function handleP25Observability(request, env) {
   try {
-    const raw   = await env.SECURITY_HUB_KV.get("feed:latest", { type: "json" });
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed:latest" is a dead
+    // SECURITY_HUB_KV key nothing ever writes -- see p18-handlers.js's
+    // matching _loadFeed fix note. Redirected to the live R2 key.
+    const r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
+    const raw   = r2obj ? await r2obj.json() : null;
     const items = Array.isArray(raw) ? raw : (raw?.items || raw?.data || []);
 
     if (!items.length) {

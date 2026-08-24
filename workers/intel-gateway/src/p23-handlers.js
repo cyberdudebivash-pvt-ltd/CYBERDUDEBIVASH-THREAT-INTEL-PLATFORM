@@ -738,7 +738,11 @@ export function buildOperationalReadinessGateBlock(item) {
 export async function handleP23Actionability(request, env) {
   const url     = new URL(request.url);
   const stixId  = url.searchParams.get("id");
-  const feedKey = "feed.json";
+  // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed.json" (bare) is a dead
+  // R2 key nothing ever writes -- see p18-handlers.js's matching _loadFeed
+  // fix note for the full cross-file root cause. Redirected to the live,
+  // continuously updated key.
+  const feedKey = "api/v1/intel/latest.json";
 
   let items = [];
   try {
@@ -809,7 +813,9 @@ export async function handleP23OperationalReadiness(request, env) {
 
   let items = [];
   try {
-    const obj = await env.INTEL_R2.get("feed.json");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed.json" (bare) is a
+    // dead R2 key -- see p18-handlers.js's matching _loadFeed fix note.
+    const obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
     if (obj) {
       const raw  = await obj.text();
       const data = JSON.parse(raw);
@@ -893,7 +899,9 @@ export async function handleP23OperationalReadiness(request, env) {
 export async function handleP23Observability(request, env) {
   let items = [];
   try {
-    const obj = await env.INTEL_R2.get("feed.json");
+    // PRODUCTION-VERIFICATION FIX (2026-08-24): "feed.json" (bare) is a
+    // dead R2 key -- see p18-handlers.js's matching _loadFeed fix note.
+    const obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
     if (obj) {
       const data = JSON.parse(await obj.text());
       items = Array.isArray(data) ? data : (data.items || data.feed || data.data || []);

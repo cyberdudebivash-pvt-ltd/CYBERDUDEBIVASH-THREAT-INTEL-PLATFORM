@@ -1091,17 +1091,32 @@ export async function fingerprintRequest(request, env, auth, rid) {
 // =============================================================================
 
 async function fetchReportsIndexExt(env) {
-  // Try KV cache first
+  // Try KV cache first ("idx:reports" is a real cache-bust target -- see
+  // index.js's admin cache-bust endpoint -- but nothing in this codebase
+  // ever populates it with real content, so this will currently always
+  // miss and fall through; left in place as a working cache layer for
+  // whenever a writer is added).
   if (env?.SECURITY_HUB_KV) {
     const cached = await env.SECURITY_HUB_KV.get("idx:reports", { type: "json" }).catch(() => null);
     if (cached?.reports?.length) return cached;
   }
-  // R2 fallback
+  // PRODUCTION-VERIFICATION FIX (2026-08-24): the R2 fallback previously
+  // read "feed_manifest.json" (bare, no path) -- confirmed via repo-wide
+  // search that no script or workflow ever writes an R2 object at that
+  // key. All 6 callers of this function (/api/search, /api/actors,
+  // /api/cves, /api/intel/correlate, /api/export/csv, /api/export/misp)
+  // were silently getting {error:"feed_unavailable"} on every real
+  // request. Same root-cause class as the "feeds/feed.json" dead key
+  // fixed the same day in index.js/p18/p19/p20/p28-handlers.js/
+  // premium-reports.js -- redirected to the same live, continuously
+  // updated key, wrapped as {reports: [...]} to match every caller's
+  // existing `index.reports` access pattern.
   if (env?.INTEL_R2) {
-    const obj = await env.INTEL_R2.get("feed_manifest.json").catch(() => null);
+    const obj = await env.INTEL_R2.get("api/v1/intel/latest.json").catch(() => null);
     if (obj) {
-      const text = await obj.text();
-      return JSON.parse(text);
+      const data = await obj.json();
+      const items = Array.isArray(data) ? data : (data?.items || []);
+      return { reports: items };
     }
   }
   return null;
