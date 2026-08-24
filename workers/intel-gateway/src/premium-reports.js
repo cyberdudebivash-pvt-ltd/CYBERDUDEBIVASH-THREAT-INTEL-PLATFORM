@@ -249,7 +249,15 @@ function buildExecutiveSummary(items, mitre, cve, actors, reportPeriod) {
 // -- Main Report Handler -------------------------------------------------------
 
 export async function handlePremiumReport(request, env, auth, rid) {
-  const tier = auth.tier || "free";
+  const tier = (auth.tier || "free").toLowerCase();
+  // ZERO-TRUST HARDENING FIX (2026-08-24): was missing .toLowerCase() --
+  // real auth.tier is always uppercase (TIERS.FREE/PRO/ENTERPRISE/MSSP,
+  // index.js:317), so every tier === "free"/"enterprise" comparison below
+  // silently never matched for a real customer. Same bug class fixed
+  // repeatedly elsewhere this session (revenue-enforcement.js, sla-monitor.js,
+  // alert-engine.js). This file is not currently wired into index.js's
+  // router (dead code), so not live-exploitable today, but fixing the
+  // underlying defect now.
 
   // Tier gate -- free users get upsell
   if (tier === "free") {
@@ -453,7 +461,15 @@ export async function handlePremiumReport(request, env, auth, rid) {
 
 // -- GET /api/reports/list -----------------------------------------------------
 export async function handleReportList(request, env, auth, rid) {
-  const tier = auth.tier || "free";
+  const tier = (auth.tier || "free").toLowerCase();
+  // ZERO-TRUST HARDENING FIX (2026-08-24): was missing .toLowerCase() --
+  // real auth.tier is always uppercase (TIERS.FREE/PRO/ENTERPRISE/MSSP,
+  // index.js:317), so every tier === "free"/"enterprise" comparison below
+  // silently never matched for a real customer. Same bug class fixed
+  // repeatedly elsewhere this session (revenue-enforcement.js, sla-monitor.js,
+  // alert-engine.js). This file is not currently wired into index.js's
+  // router (dead code), so not live-exploitable today, but fixing the
+  // underlying defect now.
 
   if (tier === "free") {
     return _json({
@@ -497,7 +513,15 @@ export async function handleReportList(request, env, auth, rid) {
 
 // -- GET /api/reports/:id ------------------------------------------------------
 export async function handleReportGet(request, env, auth, rid, reportId) {
-  const tier = auth.tier || "free";
+  const tier = (auth.tier || "free").toLowerCase();
+  // ZERO-TRUST HARDENING FIX (2026-08-24): was missing .toLowerCase() --
+  // real auth.tier is always uppercase (TIERS.FREE/PRO/ENTERPRISE/MSSP,
+  // index.js:317), so every tier === "free"/"enterprise" comparison below
+  // silently never matched for a real customer. Same bug class fixed
+  // repeatedly elsewhere this session (revenue-enforcement.js, sla-monitor.js,
+  // alert-engine.js). This file is not currently wired into index.js's
+  // router (dead code), so not live-exploitable today, but fixing the
+  // underlying defect now.
   const safeId = safeStr(reportId || "", 30);
 
   if (!safeId || !/^rpt_[a-f0-9]{16}$/.test(safeId)) {
