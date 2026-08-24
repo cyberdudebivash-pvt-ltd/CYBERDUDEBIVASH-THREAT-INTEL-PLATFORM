@@ -292,7 +292,11 @@ export async function handlePremiumReport(request, env, auth, rid) {
   let feedItems = [];
   try {
     if (env?.INTEL_R2) {
-      const r2obj = await env.INTEL_R2.get("feeds/feed.json");
+      // PRODUCTION-VERIFICATION FIX (2026-08-24): "feeds/feed.json" is a
+      // dead R2 key nothing ever writes -- see p18-handlers.js's matching
+      // _loadFeed fix note for the full cross-file root cause. Redirected
+      // to the live, continuously updated key.
+      const r2obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
       if (r2obj) {
         const raw = await r2obj.json();
         feedItems = Array.isArray(raw)
