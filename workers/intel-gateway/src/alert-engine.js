@@ -81,8 +81,12 @@ export async function handleAlertSubscribe(request, env, auth, rid) {
   if (channel === "webhook" && !webhookUrl.startsWith("http")) {
     return _jsonErr(400, "A valid HTTPS webhook URL is required for webhook channel.", rid);
   }
-  if (!["telegram", "webhook", "email"].includes(channel)) {
-    return _jsonErr(400, "Supported channels: telegram, webhook, email", rid);
+  // "email" was previously accepted here but _dispatch() below only ever
+  // implemented telegram/webhook -- a customer subscribing via email got a
+  // 200 OK for a channel that would silently never fire. Not offered until
+  // email dispatch actually exists (CodeRabbit review finding, PR #237).
+  if (!["telegram", "webhook"].includes(channel)) {
+    return _jsonErr(400, "Supported channels: telegram, webhook", rid);
   }
 
   const subId  = `${auth.sub || rid}_${channel}`;
@@ -432,8 +436,11 @@ async function _sendTelegram(text, chatId, env) {
   if (!token) return { ok: false, error: "TELEGRAM_BOT_TOKEN not configured in Worker secrets." };
   if (!chatId) return { ok: false, error: "chat_id not set." };
 
+  // Same stalled-endpoint concern as _sendWebhook's timeout (CodeRabbit
+  // review finding, PR #237) -- caught by _dispatch()'s existing try/catch.
   const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method:  "POST",
+    signal:  AbortSignal.timeout(8000),
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify({
       chat_id:    chatId,
@@ -451,28 +458,39 @@ async function _sendTelegram(text, chatId, env) {
 async function _sendWebhook(payload, url, env) {
   if (!url || !url.startsWith("http")) return { ok: false, error: "Invalid webhook URL." };
 
-  const resp = await fetch(url, {
-    method:  "POST",
-    headers: {
-      "Content-Type":       "application/json",
-      "X-Sentinel-Source":  "CYBERDUDEBIVASH-SENTINEL-APEX",
-      "X-Sentinel-Version": "145.0.0",
-      "X-Alert-Type":       payload.is_test ? "test" : "threat_alert",
-    },
-    body: JSON.stringify({
-      source:       "SENTINEL_APEX_v143",
-      alert_type:   payload.is_test ? "test" : "threat_alert",
-      cve_id:       payload.cve_id,
-      title:        payload.title,
-      severity:     payload.severity,
-      predictive_risk: payload.risk_score,
-      zero_day_probability: payload.zdp,
-      ai_summary:   payload.summary,
-      recommended_action: payload.action,
-      timestamp:    payload.ts,
-      platform_url: "https://intel.cyberdudebivash.com",
-    }),
-  });
+  // CodeRabbit review finding (PR #237): handleAlertDispatch loops over every
+  // subscription sequentially and awaits each dispatch in turn -- an
+  // unbounded fetch() to a slow/stalled customer webhook would previously
+  // hold up delivery to every subscriber processed after it. Bounded with a
+  // request timeout so one bad endpoint can't stall the rest of the batch.
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method:  "POST",
+      signal:  AbortSignal.timeout(8000),
+      headers: {
+        "Content-Type":       "application/json",
+        "X-Sentinel-Source":  "CYBERDUDEBIVASH-SENTINEL-APEX",
+        "X-Sentinel-Version": "145.0.0",
+        "X-Alert-Type":       payload.is_test ? "test" : "threat_alert",
+      },
+      body: JSON.stringify({
+        source:       "SENTINEL_APEX_v143",
+        alert_type:   payload.is_test ? "test" : "threat_alert",
+        cve_id:       payload.cve_id,
+        title:        payload.title,
+        severity:     payload.severity,
+        predictive_risk: payload.risk_score,
+        zero_day_probability: payload.zdp,
+        ai_summary:   payload.summary,
+        recommended_action: payload.action,
+        timestamp:    payload.ts,
+        platform_url: "https://intel.cyberdudebivash.com",
+      }),
+    });
+  } catch (e) {
+    return { ok: false, error: e?.name === "TimeoutError" ? "Webhook timed out after 8s" : String(e) };
+  }
 
   if (resp.ok) return { ok: true };
   return { ok: false, error: `Webhook returned HTTP ${resp.status}` };
