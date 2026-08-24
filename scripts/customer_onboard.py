@@ -469,7 +469,16 @@ def main():
 
     args = parser.parse_args()
     dispatch = {"provision": cmd_provision, "list": cmd_list, "revenue": cmd_revenue}
-    dispatch[args.command](args)
+    try:
+        dispatch[args.command](args)
+    except _gk.LiveProvisionError as e:
+        # Step 1 (generate_key) now provisions against the live production
+        # API first and raises before any local customer/subscription/audit
+        # record is written -- so this is a clean abort, not a partial
+        # onboard. See agent/tools/generate_key.py's v185.0 FIX comment.
+        print(f"\n  [FAILED] Onboarding aborted -- live key provisioning failed, no records were created:")
+        print(f"  {e}\n")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
