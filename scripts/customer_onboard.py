@@ -288,7 +288,7 @@ def generate_welcome_package(
 
     Test your key:
       curl -H "Authorization: Bearer {key_record['key']}" \\
-           https://intel.cyberdudebivash.com/api/v1/ping
+           https://intel.cyberdudebivash.com/api/feed
 
     DATA RESIDENCY & COMPLIANCE
     ─────────────────────────────────────────────────────────────────────

@@ -91,9 +91,9 @@ footer{text-align:center;padding:32px;border-top:1px solid var(--border);font-si
       <h3>cURL (Terminal)</h3>
       <div class="code-block" id="code-curl">
         <button class="copy-btn" onclick="copyCode('code-curl')">Copy</button>
-<span class="comment"># Fetch latest critical severity threats</span>
+<span class="comment"># Fetch the live threat feed</span>
 curl -H <span class="str">"Authorization: Bearer YOUR_KEY"</span> \
-  <span class="str">"https://intel.cyberdudebivash.com/api/intel?severity=critical&limit=5"</span>
+  <span class="str">"https://intel.cyberdudebivash.com/api/feed"</span>
       </div>
 
       <h3>Python</h3>
@@ -105,13 +105,12 @@ API_KEY = <span class="str">"YOUR_KEY"</span>
 headers = {<span class="str">"Authorization"</span>: <span class="str">f"Bearer {API_KEY}"</span>}
 
 response = requests.get(
-    <span class="str">"https://intel.cyberdudebivash.com/api/intel"</span>,
+    <span class="str">"https://intel.cyberdudebivash.com/api/feed"</span>,
     headers=headers,
-    params={<span class="str">"severity"</span>: <span class="str">"critical"</span>, <span class="str">"limit"</span>: <span class="num">10</span>}
 )
 data = response.json()
 <span class="key">print</span>(f<span class="str">"Retrieved {data['count']} threats"</span>)
-<span class="key">for</span> threat <span class="key">in</span> data[<span class="str">"intel"</span>]:
+<span class="key">for</span> threat <span class="key">in</span> data[<span class="str">"items"</span>]:
     <span class="key">print</span>(f<span class="str">"  [{threat['severity']}] {threat['title']}"</span>)
       </div>
 
@@ -121,7 +120,7 @@ data = response.json()
 <span class="key">const</span> API_KEY = <span class="str">'YOUR_KEY'</span>;
 
 <span class="key">const</span> response = <span class="key">await</span> fetch(
-  <span class="str">'https://intel.cyberdudebivash.com/api/intel?severity=critical&limit=10'</span>,
+  <span class="str">'https://intel.cyberdudebivash.com/api/feed'</span>,
   { headers: { <span class="str">'Authorization'</span>: <span class="str">`Bearer ${API_KEY}`</span> } }
 );
 <span class="key">const</span> data = <span class="key">await</span> response.json();
@@ -202,13 +201,18 @@ curl -H <span class="str">"Authorization: Bearer YOUR_KEY"</span> \
   <table class="endpoint-table">
     <thead><tr><th>Endpoint</th><th>Description</th><th>Tier</th></tr></thead>
     <tbody>
-      <tr><td>GET /api/intel</td><td>Threat intel feed (CVEs, IOCs, advisories)</td><td><span class="badge free">FREE+</span></td></tr>
-      <tr><td>GET /api/intel?severity=critical</td><td>Filter by severity (low/medium/high/critical)</td><td><span class="badge free">FREE+</span></td></tr>
-      <tr><td>GET /api/stix</td><td>STIX 2.1 bundle export</td><td><span class="badge pro">PRO+</span></td></tr>
-      <tr><td>GET /api/ioc</td><td>IOC list (IPs, domains, hashes)</td><td><span class="badge pro">PRO+</span></td></tr>
-      <tr><td>GET /api/sigma</td><td>Sigma detection rules</td><td><span class="badge pro">PRO+</span></td></tr>
-      <tr><td>GET /api/yara</td><td>YARA rules</td><td><span class="badge ent">ENT+</span></td></tr>
-      <tr><td>GET /api/quota</td><td>Current quota usage</td><td><span class="badge free">FREE+</span></td></tr>
+      <!-- v185.0 FIX: every row below is verified live against production
+           (curl'd directly, not inferred from source) as of this fix. The
+           previous table (/api/intel, /api/stix, /api/ioc, /api/sigma,
+           /api/yara, /api/quota as bare paths) was entirely 404/500 -- none
+           of those bare paths exist; see the deploy-worker.yml v185.0 fix
+           for the /api/sigma and /api/yara 500-instead-of-404 bug this
+           table's old content would have led customers straight into. -->
+      <tr><td>GET /api/feed</td><td>Threat intel feed (CVEs, IOCs, advisories)</td><td><span class="badge free">FREE+</span></td></tr>
+      <tr><td>GET /api/v1/ioc/lookup</td><td>IOC lookup (IPs, domains, hashes)</td><td><span class="badge free">FREE+</span></td></tr>
+      <tr><td>GET /api/v1/cve/live</td><td>Live CVE feed</td><td><span class="badge free">FREE+</span></td></tr>
+      <tr><td>GET /api/sigma/bulk</td><td>Bulk Sigma detection rules download</td><td><span class="badge pro">PRO+</span></td></tr>
+      <tr><td>GET /api/yara/bulk</td><td>Bulk YARA rules download</td><td><span class="badge ent">ENT+</span></td></tr>
       <tr><td>GET /api/taxii/</td><td>TAXII 2.1 discovery endpoint</td><td><span class="badge pro">PRO+</span></td></tr>
     </tbody>
   </table>
