@@ -36,6 +36,44 @@ function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
+// ZERO-TRUST HARDENING (2026-08-24): defense-in-depth SSRF guard for
+// customer-supplied webhook URLs. The Worker fetches this URL server-side
+// on every alert dispatch (_sendWebhook below) -- without this check a
+// customer could point it at a private/internal/loopback address. This is
+// a hostname/IP-literal check only (no DNS-rebinding protection -- Workers'
+// fetch() API gives no hook to re-validate the resolved IP at request
+// time), so it stops the common naive case, not a fully sophisticated
+// attacker; kept minimal rather than pretending to be a complete network
+// control that this application layer cannot actually provide.
+function isPrivateOrLocalHost(hostname) {
+  const h = hostname.toLowerCase();
+  if (h === "localhost" || h.endsWith(".localhost") || h === "0.0.0.0") return true;
+  // IPv4 literal checks (loopback, private ranges, link-local incl. cloud
+  // metadata endpoints at 169.254.169.254)
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const [a, b, c] = [parseInt(m[1]), parseInt(m[2]), parseInt(m[3])];
+    if (a === 127) return true;                          // 127.0.0.0/8
+    if (a === 10) return true;                            // 10.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return true;      // 172.16.0.0/12
+    if (a === 192 && b === 168) return true;               // 192.168.0.0/16
+    if (a === 169 && b === 254) return true;               // 169.254.0.0/16
+    if (a === 0) return true;                              // 0.0.0.0/8
+  }
+  // IPv6 loopback/link-local/unique-local literals (bracketed in URL hosts)
+  if (h === "[::1]" || h === "::1") return true;
+  if (h.startsWith("[fe80:") || h.startsWith("fe80:")) return true;
+  if (h.startsWith("[fc") || h.startsWith("[fd") || h.startsWith("fc") || h.startsWith("fd")) return true;
+  return false;
+}
+
+function isSafeWebhookUrl(raw) {
+  let u;
+  try { u = new URL(raw); } catch { return false; }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+  return !isPrivateOrLocalHost(u.hostname);
+}
+
 // PRODUCTION-VERIFICATION FIX (2026-08-24): same root cause and same fix
 // shape as sla-monitor.js's header comment -- this file was never wired
 // into index.js's router, and every real caller would have failed anyway:
@@ -78,8 +116,8 @@ export async function handleAlertSubscribe(request, env, auth, rid) {
   if (channel === "telegram" && !chatId) {
     return _jsonErr(400, "chat_id is required for Telegram channel. Use /start in @CyberDudeBivashBot to get your chat_id.", rid);
   }
-  if (channel === "webhook" && !webhookUrl.startsWith("http")) {
-    return _jsonErr(400, "A valid HTTPS webhook URL is required for webhook channel.", rid);
+  if (channel === "webhook" && !isSafeWebhookUrl(webhookUrl)) {
+    return _jsonErr(400, "A valid public HTTPS webhook URL is required for webhook channel (private/internal/loopback addresses are not allowed).", rid);
   }
   // "email" was previously accepted here but _dispatch() below only ever
   // implemented telegram/webhook -- a customer subscribing via email got a
@@ -456,7 +494,7 @@ async function _sendTelegram(text, chatId, env) {
 }
 
 async function _sendWebhook(payload, url, env) {
-  if (!url || !url.startsWith("http")) return { ok: false, error: "Invalid webhook URL." };
+  if (!isSafeWebhookUrl(url)) return { ok: false, error: "Invalid or unsafe webhook URL." };
 
   // CodeRabbit review finding (PR #237): handleAlertDispatch loops over every
   // subscription sequentially and awaits each dispatch in turn -- an
