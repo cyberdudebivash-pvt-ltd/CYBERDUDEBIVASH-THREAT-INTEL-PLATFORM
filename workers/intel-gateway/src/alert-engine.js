@@ -20,6 +20,31 @@ const safe    = (v, fb = "UNKNOWN") => (v == null ? fb : String(v));
 const safeNum = (v, fb = 0)        => (typeof v === "number" && isFinite(v) ? v : Number(v) || fb);
 const safeArr = (v)                => (Array.isArray(v) ? v : []);
 
+// Constant-time string comparison for shared-secret checks -- same
+// implementation as index.js's timingSafeEqual; duplicated locally (rather
+// than imported) because index.js imports from this module, so an
+// index.js -> this file -> index.js import would be circular. Same pattern
+// already used in revenue-enforcement.js and sla-monitor.js.
+function timingSafeEqual(a, b) {
+  const bufA = new TextEncoder().encode(String(a ?? ""));
+  const bufB = new TextEncoder().encode(String(b ?? ""));
+  const len  = Math.max(bufA.length, bufB.length);
+  let diff   = bufA.length ^ bufB.length;
+  for (let i = 0; i < len; i++) {
+    diff |= (bufA[i] ?? 0) ^ (bufB[i] ?? 0);
+  }
+  return diff === 0;
+}
+
+// PRODUCTION-VERIFICATION FIX (2026-08-24): same root cause and same fix
+// shape as sla-monitor.js's header comment -- this file was never wired
+// into index.js's router, and every real caller would have failed anyway:
+// `auth.valid`/`auth.key_id`/`auth.email` don't exist on resolveAuth()'s
+// real return shape ({tier, key, sub, jwt?, kv?, error?}); tier comparisons
+// here are lowercase ("free"/"pro"/"enterprise") against a real auth.tier
+// that is always uppercase; and env.KV is not a bound namespace. Fixed to
+// the real contract; storage moved to the existing SECURITY_HUB_KV binding
+// (same reuse pattern as credit-system.js / api-extensions.js).
 /* -- KV key builders ---------------------------------------------------------- */
 const ALERT_SUB_PREFIX   = "alert_sub:";
 const ALERT_HIST_KEY     = "alert_history";
@@ -33,10 +58,10 @@ const PRO_DAILY_LIMIT    = 5;                // max alerts/day for Pro tier
            interests?: string[], min_risk?: number }
    =========================================================================== */
 export async function handleAlertSubscribe(request, env, auth, rid) {
-  if (!auth || !auth.valid) {
+  if (!auth || (!auth.key && !auth.jwt)) {
     return _jsonErr(401, "Authentication required to subscribe to alerts.", rid);
   }
-  if (auth.tier === "free") {
+  if (auth.tier === "FREE") {
     return _jsonErr(403, "Alert subscriptions require Pro or Enterprise tier. Upgrade at /upgrade.html", rid);
   }
 
@@ -47,7 +72,7 @@ export async function handleAlertSubscribe(request, env, auth, rid) {
   const chatId    = safe(body.chat_id || body.chatId || "", "");
   const webhookUrl = safe(body.url || body.webhook_url || "", "");
   const interests = safeArr(body.interests).map(i => safe(i)).filter(Boolean);
-  const minRisk   = Math.max(0, Math.min(10, safeNum(body.min_risk, auth.tier === "enterprise" ? 5 : 7)));
+  const minRisk   = Math.max(0, Math.min(10, safeNum(body.min_risk, auth.tier === "ENTERPRISE" ? 5 : 7)));
 
   // Validation
   if (channel === "telegram" && !chatId) {
@@ -56,36 +81,39 @@ export async function handleAlertSubscribe(request, env, auth, rid) {
   if (channel === "webhook" && !webhookUrl.startsWith("http")) {
     return _jsonErr(400, "A valid HTTPS webhook URL is required for webhook channel.", rid);
   }
-  if (!["telegram", "webhook", "email"].includes(channel)) {
-    return _jsonErr(400, "Supported channels: telegram, webhook, email", rid);
+  // "email" was previously accepted here but _dispatch() below only ever
+  // implemented telegram/webhook -- a customer subscribing via email got a
+  // 200 OK for a channel that would silently never fire. Not offered until
+  // email dispatch actually exists (CodeRabbit review finding, PR #237).
+  if (!["telegram", "webhook"].includes(channel)) {
+    return _jsonErr(400, "Supported channels: telegram, webhook", rid);
   }
 
-  const subId  = `${auth.key_id || auth.email || rid}_${channel}`;
+  const subId  = `${auth.sub || rid}_${channel}`;
   const subKey = ALERT_SUB_PREFIX + subId;
 
   const subscription = {
     sub_id:     subId,
-    key_id:     safe(auth.key_id,  ""),
-    email:      safe(auth.email,   ""),
-    tier:       safe(auth.tier,    "pro"),
+    sub:        safe(auth.sub,   ""),
+    tier:       safe(auth.tier,  "PRO"),
     channel,
     chat_id:    chatId,
     webhook_url: webhookUrl,
     interests:  interests.length ? interests : ["critical", "high", "zero-day"],
     min_risk:   minRisk,
-    daily_limit: auth.tier === "enterprise" ? 0 : PRO_DAILY_LIMIT, // 0 = unlimited
+    daily_limit: auth.tier === "ENTERPRISE" ? 0 : PRO_DAILY_LIMIT, // 0 = unlimited
     created_at: new Date().toISOString(),
     active:     true,
     test_sent:  false,
   };
 
-  if (env.KV) {
-    await env.KV.put(subKey, JSON.stringify(subscription), { expirationTtl: 60 * 60 * 24 * 365 });
+  if (env.SECURITY_HUB_KV) {
+    await env.SECURITY_HUB_KV.put(subKey, JSON.stringify(subscription), { expirationTtl: 60 * 60 * 24 * 365 });
     // Also add to subscription index
     let idx = [];
-    try { idx = JSON.parse(await env.KV.get("alert_sub_index") || "[]"); } catch {}
+    try { idx = JSON.parse(await env.SECURITY_HUB_KV.get("alert_sub_index") || "[]"); } catch {}
     if (!idx.includes(subId)) { idx.push(subId); }
-    await env.KV.put("alert_sub_index", JSON.stringify(idx));
+    await env.SECURITY_HUB_KV.put("alert_sub_index", JSON.stringify(idx));
   }
 
   return _json(200, {
@@ -96,7 +124,7 @@ export async function handleAlertSubscribe(request, env, auth, rid) {
     interests:   subscription.interests,
     tier:        auth.tier,
     daily_limit: subscription.daily_limit === 0 ? "unlimited" : subscription.daily_limit,
-    message:     `CHECK Subscribed! You will receive ${auth.tier === "enterprise" ? "real-time" : "daily digest"} alerts via ${channel}.`,
+    message:     `CHECK Subscribed! You will receive ${auth.tier === "ENTERPRISE" ? "real-time" : "daily digest"} alerts via ${channel}.`,
     next_step:   channel === "telegram"
       ? `Send /start to @CyberDudeBivashBot and confirm chat_id: ${chatId}`
       : `Ensure your webhook at ${webhookUrl} accepts POST with JSON body.`,
@@ -108,20 +136,20 @@ export async function handleAlertSubscribe(request, env, auth, rid) {
    handleAlertSubscriptions  -- GET /api/alerts/subscriptions
    =========================================================================== */
 export async function handleAlertSubscriptions(request, env, auth, rid) {
-  if (!auth || !auth.valid) return _jsonErr(401, "Authentication required.", rid);
-  if (auth.tier === "free")  return _jsonErr(403, "Pro+ required.", rid);
+  if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
+  if (auth.tier === "FREE")  return _jsonErr(403, "Pro+ required.", rid);
 
   let idx = [];
-  try { idx = JSON.parse(await env.KV.get("alert_sub_index") || "[]"); } catch {}
+  try { idx = JSON.parse(await env.SECURITY_HUB_KV.get("alert_sub_index") || "[]"); } catch {}
 
   const subs = [];
   for (const subId of idx) {
     try {
-      const raw = await env.KV.get(ALERT_SUB_PREFIX + subId);
+      const raw = await env.SECURITY_HUB_KV.get(ALERT_SUB_PREFIX + subId);
       if (!raw) continue;
       const sub = JSON.parse(raw);
-      // Only return subs belonging to this key/email
-      if (sub.key_id === auth.key_id || sub.email === auth.email) {
+      // Only return subs belonging to this authenticated identity
+      if (sub.sub === auth.sub) {
         subs.push({
           sub_id:     sub.sub_id,
           channel:    sub.channel,
@@ -142,8 +170,8 @@ export async function handleAlertSubscriptions(request, env, auth, rid) {
    handleAlertTest  -- POST /api/alerts/test
    =========================================================================== */
 export async function handleAlertTest(request, env, auth, rid) {
-  if (!auth || !auth.valid) return _jsonErr(401, "Authentication required.", rid);
-  if (auth.tier === "free")  return _jsonErr(403, "Pro+ required.", rid);
+  if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
+  if (auth.tier === "FREE")  return _jsonErr(403, "Pro+ required.", rid);
 
   let body;
   try { body = await request.json(); } catch { body = {}; }
@@ -153,9 +181,10 @@ export async function handleAlertTest(request, env, auth, rid) {
 
   let sub;
   try {
-    const raw = await env.KV.get(ALERT_SUB_PREFIX + subId);
+    const raw = await env.SECURITY_HUB_KV.get(ALERT_SUB_PREFIX + subId);
     if (!raw) return _jsonErr(404, "Subscription not found.", rid);
     sub = JSON.parse(raw);
+    if (sub.sub !== auth.sub) return _jsonErr(403, "You can only test your own subscriptions.", rid);
   } catch {
     return _jsonErr(500, "Failed to load subscription.", rid);
   }
@@ -176,7 +205,7 @@ export async function handleAlertTest(request, env, auth, rid) {
 
   // Mark test sent
   sub.test_sent = true;
-  if (env.KV) await env.KV.put(ALERT_SUB_PREFIX + subId, JSON.stringify(sub));
+  if (env.SECURITY_HUB_KV) await env.SECURITY_HUB_KV.put(ALERT_SUB_PREFIX + subId, JSON.stringify(sub));
 
   return _json(200, {
     success: result.ok,
@@ -195,7 +224,7 @@ export async function handleAlertDispatch(request, env, auth, rid) {
   // Admin-only endpoint
   const secret = request.headers.get("X-Admin-Secret") || "";
   const envSecret = (env.WORKER_ADMIN_SECRET || "");
-  if (!envSecret || secret !== envSecret) {
+  if (!envSecret || !timingSafeEqual(secret, envSecret)) {
     return _jsonErr(403, "Admin secret required for alert dispatch.", rid);
   }
 
@@ -232,7 +261,7 @@ export async function handleAlertDispatch(request, env, auth, rid) {
 
   // Load all active subscriptions
   let idx = [];
-  try { idx = JSON.parse(await env.KV.get("alert_sub_index") || "[]"); } catch {}
+  try { idx = JSON.parse(await env.SECURITY_HUB_KV.get("alert_sub_index") || "[]"); } catch {}
 
   let dispatched = 0;
   let errors     = 0;
@@ -240,22 +269,22 @@ export async function handleAlertDispatch(request, env, auth, rid) {
 
   for (const subId of idx) {
     try {
-      const raw = await env.KV.get(ALERT_SUB_PREFIX + subId);
+      const raw = await env.SECURITY_HUB_KV.get(ALERT_SUB_PREFIX + subId);
       if (!raw) continue;
       const sub = JSON.parse(raw);
       if (!sub.active) continue;
 
       // Tier filtering: Pro gets top-1 per dispatch; Enterprise gets all
-      const isTierEnterprise = sub.tier === "enterprise";
-      const isTierPro        = sub.tier === "premium" || sub.tier === "pro";
+      const isTierEnterprise = sub.tier === "ENTERPRISE" || sub.tier === "MSSP";
+      const isTierPro        = sub.tier === "PRO";
       if (!isTierEnterprise && !isTierPro) continue;
 
       // Daily quota for Pro
       if (!isTierEnterprise && sub.daily_limit > 0) {
         const quotaKey = ALERT_QUOTA_PREFIX + subId + ":" + today;
-        const used     = safeNum(parseInt(await env.KV.get(quotaKey) || "0"), 0);
+        const used     = safeNum(parseInt(await env.SECURITY_HUB_KV.get(quotaKey) || "0"), 0);
         if (used >= sub.daily_limit) continue;
-        await env.KV.put(quotaKey, String(used + 1), { expirationTtl: 86400 });
+        await env.SECURITY_HUB_KV.put(quotaKey, String(used + 1), { expirationTtl: 86400 });
       }
 
       // Filter by subscription interests + min_risk
@@ -304,11 +333,11 @@ export async function handleAlertDispatch(request, env, auth, rid) {
    handleAlertHistory  -- GET /api/alerts/history
    =========================================================================== */
 export async function handleAlertHistory(request, env, auth, rid) {
-  if (!auth || !auth.valid) return _jsonErr(401, "Authentication required.", rid);
-  if (auth.tier !== "enterprise") return _jsonErr(403, "Alert history requires Enterprise tier.", rid);
+  if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
+  if (auth.tier !== "ENTERPRISE" && auth.tier !== "MSSP") return _jsonErr(403, "Alert history requires Enterprise tier.", rid);
 
   let history = [];
-  try { history = JSON.parse(await env.KV.get(ALERT_HIST_KEY) || "[]"); } catch {}
+  try { history = JSON.parse(await env.SECURITY_HUB_KV.get(ALERT_HIST_KEY) || "[]"); } catch {}
 
   return _json(200, {
     history: history.slice(-50),
@@ -321,7 +350,7 @@ export async function handleAlertHistory(request, env, auth, rid) {
    handleAlertUnsubscribe  -- DELETE /api/alerts/unsubscribe
    =========================================================================== */
 export async function handleAlertUnsubscribe(request, env, auth, rid) {
-  if (!auth || !auth.valid) return _jsonErr(401, "Authentication required.", rid);
+  if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
 
   let body;
   try { body = await request.json(); } catch { body = {}; }
@@ -329,15 +358,15 @@ export async function handleAlertUnsubscribe(request, env, auth, rid) {
   if (!subId) return _jsonErr(400, "sub_id required.", rid);
 
   try {
-    const raw = await env.KV.get(ALERT_SUB_PREFIX + subId);
+    const raw = await env.SECURITY_HUB_KV.get(ALERT_SUB_PREFIX + subId);
     if (!raw) return _jsonErr(404, "Subscription not found.", rid);
     const sub = JSON.parse(raw);
     // Ownership check
-    if (sub.key_id !== auth.key_id && sub.email !== auth.email) {
+    if (sub.sub !== auth.sub) {
       return _jsonErr(403, "You can only unsubscribe your own subscriptions.", rid);
     }
     sub.active = false;
-    await env.KV.put(ALERT_SUB_PREFIX + subId, JSON.stringify(sub));
+    await env.SECURITY_HUB_KV.put(ALERT_SUB_PREFIX + subId, JSON.stringify(sub));
     return _json(200, { success: true, message: "Unsubscribed successfully.", rid });
   } catch {
     return _jsonErr(500, "Failed to process unsubscribe.", rid);
@@ -407,8 +436,11 @@ async function _sendTelegram(text, chatId, env) {
   if (!token) return { ok: false, error: "TELEGRAM_BOT_TOKEN not configured in Worker secrets." };
   if (!chatId) return { ok: false, error: "chat_id not set." };
 
+  // Same stalled-endpoint concern as _sendWebhook's timeout (CodeRabbit
+  // review finding, PR #237) -- caught by _dispatch()'s existing try/catch.
   const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method:  "POST",
+    signal:  AbortSignal.timeout(8000),
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify({
       chat_id:    chatId,
@@ -426,28 +458,39 @@ async function _sendTelegram(text, chatId, env) {
 async function _sendWebhook(payload, url, env) {
   if (!url || !url.startsWith("http")) return { ok: false, error: "Invalid webhook URL." };
 
-  const resp = await fetch(url, {
-    method:  "POST",
-    headers: {
-      "Content-Type":       "application/json",
-      "X-Sentinel-Source":  "CYBERDUDEBIVASH-SENTINEL-APEX",
-      "X-Sentinel-Version": "145.0.0",
-      "X-Alert-Type":       payload.is_test ? "test" : "threat_alert",
-    },
-    body: JSON.stringify({
-      source:       "SENTINEL_APEX_v143",
-      alert_type:   payload.is_test ? "test" : "threat_alert",
-      cve_id:       payload.cve_id,
-      title:        payload.title,
-      severity:     payload.severity,
-      predictive_risk: payload.risk_score,
-      zero_day_probability: payload.zdp,
-      ai_summary:   payload.summary,
-      recommended_action: payload.action,
-      timestamp:    payload.ts,
-      platform_url: "https://intel.cyberdudebivash.com",
-    }),
-  });
+  // CodeRabbit review finding (PR #237): handleAlertDispatch loops over every
+  // subscription sequentially and awaits each dispatch in turn -- an
+  // unbounded fetch() to a slow/stalled customer webhook would previously
+  // hold up delivery to every subscriber processed after it. Bounded with a
+  // request timeout so one bad endpoint can't stall the rest of the batch.
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method:  "POST",
+      signal:  AbortSignal.timeout(8000),
+      headers: {
+        "Content-Type":       "application/json",
+        "X-Sentinel-Source":  "CYBERDUDEBIVASH-SENTINEL-APEX",
+        "X-Sentinel-Version": "145.0.0",
+        "X-Alert-Type":       payload.is_test ? "test" : "threat_alert",
+      },
+      body: JSON.stringify({
+        source:       "SENTINEL_APEX_v143",
+        alert_type:   payload.is_test ? "test" : "threat_alert",
+        cve_id:       payload.cve_id,
+        title:        payload.title,
+        severity:     payload.severity,
+        predictive_risk: payload.risk_score,
+        zero_day_probability: payload.zdp,
+        ai_summary:   payload.summary,
+        recommended_action: payload.action,
+        timestamp:    payload.ts,
+        platform_url: "https://intel.cyberdudebivash.com",
+      }),
+    });
+  } catch (e) {
+    return { ok: false, error: e?.name === "TimeoutError" ? "Webhook timed out after 8s" : String(e) };
+  }
 
   if (resp.ok) return { ok: true };
   return { ok: false, error: `Webhook returned HTTP ${resp.status}` };
@@ -455,13 +498,13 @@ async function _sendWebhook(payload, url, env) {
 
 /* -- Internal: history logging ------------------------------------------------ */
 async function _recordHistory(env, entry) {
-  if (!env.KV) return;
+  if (!env.SECURITY_HUB_KV) return;
   try {
     let history = [];
-    try { history = JSON.parse(await env.KV.get(ALERT_HIST_KEY) || "[]"); } catch {}
+    try { history = JSON.parse(await env.SECURITY_HUB_KV.get(ALERT_HIST_KEY) || "[]"); } catch {}
     history.push(entry);
     if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
-    await env.KV.put(ALERT_HIST_KEY, JSON.stringify(history));
+    await env.SECURITY_HUB_KV.put(ALERT_HIST_KEY, JSON.stringify(history));
   } catch {}
 }
 

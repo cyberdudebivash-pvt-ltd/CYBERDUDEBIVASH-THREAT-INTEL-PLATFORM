@@ -19,6 +19,40 @@ const safe    = (v, fb = "UNKNOWN") => (v == null ? fb : String(v));
 const safeNum = (v, fb = 0)        => (typeof v === "number" && isFinite(v) ? v : Number(v) || fb);
 const safeArr = (v)                => (Array.isArray(v) ? v : []);
 
+// Constant-time string comparison for shared-secret checks -- same
+// implementation as index.js's timingSafeEqual; duplicated locally (rather
+// than imported) because index.js imports from this module, so an
+// index.js -> this file -> index.js import would be circular. Same pattern
+// already used in revenue-enforcement.js.
+function timingSafeEqual(a, b) {
+  const bufA = new TextEncoder().encode(String(a ?? ""));
+  const bufB = new TextEncoder().encode(String(b ?? ""));
+  const len  = Math.max(bufA.length, bufB.length);
+  let diff   = bufA.length ^ bufB.length;
+  for (let i = 0; i < len; i++) {
+    diff |= (bufA[i] ?? 0) ^ (bufB[i] ?? 0);
+  }
+  return diff === 0;
+}
+
+// PRODUCTION-VERIFICATION FIX (2026-08-24): this file was never reachable
+// from index.js's router (confirmed: no import of sla-monitor.js existed),
+// and even if wired it would have crashed/misbehaved for every real caller:
+//   - `auth.valid`, `auth.key_id`, `auth.email` do not exist on the real
+//     resolveAuth() return shape ({tier, key, sub, jwt?, kv?, error?} --
+//     index.js:324). Every "if (!auth.valid)" check here was always true,
+//     so real Enterprise customers with a genuine key would still get 401.
+//   - Tier values compared here ("enterprise") are lowercase; the real
+//     auth.tier is always uppercase (TIERS.ENTERPRISE = "ENTERPRISE"),
+//     confirmed by index.js:317 and documented as the exact same class of
+//     bug already fixed once in revenue-enforcement.js (see that file's
+//     REVENUE_CONFIG comment). The comparison could never match.
+//   - env.KV is not a bound namespace (wrangler.toml binds API_KEYS_KV,
+//     RATE_LIMIT_KV, ANALYTICS_KV, SECURITY_HUB_KV only) -- every ping/
+//     incident read or write was silently a no-op against `undefined`.
+// Fixed to the real contract; storage moved to the existing SECURITY_HUB_KV
+// binding (same "reuse an existing binding, no new infra" pattern already
+// used by credit-system.js and api-extensions.js's abuse/webhook state).
 const SLA_PING_KEY      = "sla:pings";
 const SLA_INCIDENT_KEY  = "sla:incidents";
 const SLA_WINDOW_DAYS   = 30;
@@ -54,22 +88,31 @@ export async function handleSLAStatus(request, env, rid) {
   const windowTotalMs    = SLA_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   const calculatedUptime = Math.min(100, ((windowTotalMs - totalDownMs) / windowTotalMs) * 100);
 
-  const displayUptime = total > 10 ? Math.max(uptimePct, calculatedUptime) : 100;
+  // CodeRabbit review finding (PR #237): this previously defaulted to a
+  // fabricated 100% uptime whenever total <= 10 -- including total === 0,
+  // i.e. a Worker that has never received a single /api/sla/ping heartbeat
+  // would still report "operational" / 100% / sla_met_enterprise: true to
+  // paying Enterprise customers with zero actual monitoring evidence behind
+  // it. This endpoint has never been reachable before this PR (no prior
+  // customer integration to stay compatible with), so there is no cost to
+  // reporting real absence-of-data honestly instead.
+  const hasData = total > 0;
+  const displayUptime = hasData ? Math.max(uptimePct, calculatedUptime) : null;
 
   return _json(200, {
-    status:           isLikelyUp ? "operational" : "degraded",
-    uptime_pct_30d:   parseFloat(displayUptime.toFixed(4)),
+    status:           !hasData ? "insufficient_data" : (isLikelyUp ? "operational" : "degraded"),
+    uptime_pct_30d:   hasData ? parseFloat(displayUptime.toFixed(4)) : null,
     sla_target_enterprise: ENTERPRISE_SLA,
     sla_target_pro:        PRO_SLA,
-    sla_met_enterprise:    displayUptime >= ENTERPRISE_SLA,
-    sla_met_pro:           displayUptime >= PRO_SLA,
+    sla_met_enterprise:    hasData ? displayUptime >= ENTERPRISE_SLA : null,
+    sla_met_pro:           hasData ? displayUptime >= PRO_SLA : null,
     total_pings_30d:       total,
     successful_pings_30d:  upPings,
     last_ping_age_seconds: lastPingAge,
     incidents_30d:         recentIncidents.length,
     total_downtime_seconds: Math.round(totalDownMs / 1000),
     components: {
-      "intel-gateway":  { status: isLikelyUp ? "operational" : "degraded", uptime: displayUptime },
+      "intel-gateway":  { status: !hasData ? "insufficient_data" : (isLikelyUp ? "operational" : "degraded"), uptime: displayUptime },
       "stix-feed":      { status: "operational", uptime: 100 },
       "ai-engine":      { status: "operational", uptime: 99.98 },
       "dark-web-monitor": { status: "operational", uptime: 99.95 },
@@ -85,8 +128,8 @@ export async function handleSLAStatus(request, env, rid) {
    handleSLAReport  -- GET /api/sla/report  (Enterprise)
    =========================================================================== */
 export async function handleSLAReport(request, env, auth, rid) {
-  if (!auth || !auth.valid) return _jsonErr(401, "Authentication required.", rid);
-  if (auth.tier !== "enterprise") {
+  if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
+  if (auth.tier !== "ENTERPRISE") {
     return _jsonErr(403, "SLA compliance reports require Enterprise tier. Upgrade at /upgrade.html", rid);
   }
 
@@ -117,18 +160,22 @@ export async function handleSLAReport(request, env, auth, rid) {
 
   const recentPings    = pings.filter(p => (now - p.ts) <= windowMs);
   const upCount        = recentPings.filter(p => p.ok).length;
-  const uptimePct      = recentPings.length > 0 ? ((upCount / recentPings.length) * 100) : 100;
+  const hasData        = recentPings.length > 0;
+  const uptimePct      = hasData ? ((upCount / recentPings.length) * 100) : null;
   const recentIncidents = incidents.filter(i => (now - new Date(i.start).getTime()) <= windowMs);
   const totalDownMs    = recentIncidents.reduce((acc, i) => acc + (i.duration_ms || 0), 0);
 
   return _json(200, {
     report_type:         "enterprise_sla_30d",
-    account:             safe(auth.email, ""),
+    account:             safe(auth.sub, ""),
     generated_at:        new Date().toISOString(),
     period:              `${new Date(now - windowMs).toISOString().split("T")[0]} to ${new Date().toISOString().split("T")[0]}`,
     sla_target:          ENTERPRISE_SLA,
-    actual_uptime_pct:   parseFloat(uptimePct.toFixed(4)),
-    sla_status:          uptimePct >= ENTERPRISE_SLA ? "MET CHECK" : "BREACHED FAIL",
+    // CodeRabbit review finding (PR #237): previously defaulted to a
+    // fabricated 100%/"MET" when there was zero ping data. See
+    // handleSLAStatus's matching fix note above for full rationale.
+    actual_uptime_pct:   hasData ? parseFloat(uptimePct.toFixed(4)) : null,
+    sla_status:          !hasData ? "INSUFFICIENT_DATA" : (uptimePct >= ENTERPRISE_SLA ? "MET CHECK" : "BREACHED FAIL"),
     total_downtime_min:  parseFloat((totalDownMs / 60000).toFixed(2)),
     allowed_downtime_min: parseFloat(((100 - ENTERPRISE_SLA) / 100 * SLA_WINDOW_DAYS * 24 * 60).toFixed(2)),
     incidents_count:     recentIncidents.length,
@@ -152,8 +199,8 @@ export async function handleSLAReport(request, env, auth, rid) {
    handleSLAIncidents  -- GET /api/sla/incidents  (Enterprise)
    =========================================================================== */
 export async function handleSLAIncidents(request, env, auth, rid) {
-  if (!auth || !auth.valid) return _jsonErr(401, "Authentication required.", rid);
-  if (auth.tier !== "enterprise") return _jsonErr(403, "Enterprise tier required.", rid);
+  if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
+  if (auth.tier !== "ENTERPRISE") return _jsonErr(403, "Enterprise tier required.", rid);
 
   const incidents = await _loadIncidents(env);
   const url = new URL(request.url);
@@ -173,7 +220,7 @@ export async function handleSLAIncidents(request, env, auth, rid) {
 export async function handleSLAPing(request, env, rid) {
   const secret = request.headers.get("X-Admin-Secret") || "";
   const envSecret = env.WORKER_ADMIN_SECRET || "";
-  if (!envSecret || secret !== envSecret) {
+  if (!envSecret || !timingSafeEqual(secret, envSecret)) {
     return _jsonErr(403, "Admin secret required for SLA ping.", rid);
   }
 
@@ -211,8 +258,8 @@ export async function handleSLAPing(request, env, rid) {
     }
   }
 
-  if (env.KV) {
-    await env.KV.put(SLA_PING_KEY, JSON.stringify(trimmed), { expirationTtl: PING_TTL });
+  if (env.SECURITY_HUB_KV) {
+    await env.SECURITY_HUB_KV.put(SLA_PING_KEY, JSON.stringify(trimmed), { expirationTtl: PING_TTL });
   }
 
   return _json(200, { recorded: true, ts: new Date(ping.ts).toISOString(), ok: ping.ok, rid });
@@ -223,8 +270,8 @@ export async function handleSLAPing(request, env, rid) {
    Returns SLA compliance certificate as JSON (can be rendered to PDF)
    =========================================================================== */
 export async function handleSLACertificate(request, env, auth, rid) {
-  if (!auth || !auth.valid) return _jsonErr(401, "Authentication required.", rid);
-  if (auth.tier !== "enterprise") return _jsonErr(403, "Enterprise tier required.", rid);
+  if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
+  if (auth.tier !== "ENTERPRISE") return _jsonErr(403, "Enterprise tier required.", rid);
 
   const now = new Date();
   const periodEnd   = now.toISOString().split("T")[0];
@@ -233,7 +280,7 @@ export async function handleSLACertificate(request, env, auth, rid) {
   return _json(200, {
     certificate: {
       title:          "SENTINEL APEX Enterprise SLA Compliance Certificate",
-      issued_to:      safe(auth.email, "Enterprise Subscriber"),
+      issued_to:      safe(auth.sub, "Enterprise Subscriber"),
       issued_by:      "CYBERDUDEBIVASH SENTINEL APEX",
       gstin:          "21ARKPN8270G1ZP",
       period:         `${periodStart} to ${periodEnd}`,
@@ -251,22 +298,22 @@ export async function handleSLACertificate(request, env, auth, rid) {
 
 /* -- Internal helpers --------------------------------------------------------- */
 async function _loadPings(env) {
-  if (!env.KV) return [];
-  try { return JSON.parse(await env.KV.get(SLA_PING_KEY) || "[]"); } catch { return []; }
+  if (!env.SECURITY_HUB_KV) return [];
+  try { return JSON.parse(await env.SECURITY_HUB_KV.get(SLA_PING_KEY) || "[]"); } catch { return []; }
 }
 
 async function _loadIncidents(env) {
-  if (!env.KV) return [];
-  try { return JSON.parse(await env.KV.get(SLA_INCIDENT_KEY) || "[]"); } catch { return []; }
+  if (!env.SECURITY_HUB_KV) return [];
+  try { return JSON.parse(await env.SECURITY_HUB_KV.get(SLA_INCIDENT_KEY) || "[]"); } catch { return []; }
 }
 
 async function _recordIncident(env, incident) {
-  if (!env.KV) return;
+  if (!env.SECURITY_HUB_KV) return;
   try {
     const incidents = await _loadIncidents(env);
     incidents.push({ ...incident, id: `INC-${Date.now().toString(36).toUpperCase()}` });
     const trimmed = incidents.slice(-500); // keep last 500 incidents
-    await env.KV.put(SLA_INCIDENT_KEY, JSON.stringify(trimmed), { expirationTtl: PING_TTL });
+    await env.SECURITY_HUB_KV.put(SLA_INCIDENT_KEY, JSON.stringify(trimmed), { expirationTtl: PING_TTL });
   } catch {}
 }
 
