@@ -72,7 +72,15 @@ export async function handleDarkWebScan(request, env, auth, rid) {
   const VERSION = "145.0.0";
 
   // Tier gate
-  const tier = auth.tier || "free";
+  const tier = (auth.tier || "free").toLowerCase();
+  // ZERO-TRUST HARDENING FIX (2026-08-24): was missing .toLowerCase() --
+  // real auth.tier is always uppercase (TIERS.FREE/PRO/ENTERPRISE/MSSP,
+  // index.js:317), so every tier === "free"/"enterprise" comparison below
+  // silently never matched for a real customer. Same bug class fixed
+  // repeatedly elsewhere this session (revenue-enforcement.js, sla-monitor.js,
+  // alert-engine.js). This file is not currently wired into index.js's
+  // router (dead code), so not live-exploitable today, but fixing the
+  // underlying defect now.
   if (tier === "free") {
     return _json({
       error:      "tier_required",
@@ -257,7 +265,15 @@ export async function handleDarkWebScan(request, env, auth, rid) {
 // -- Dark Web Status -- /api/dark-web/status ------------------------------------
 // GET -- returns monitor health, source connectivity, last scan stats
 export async function handleDarkWebStatus(request, env, auth, rid) {
-  const tier = auth.tier || "free";
+  const tier = (auth.tier || "free").toLowerCase();
+  // ZERO-TRUST HARDENING FIX (2026-08-24): was missing .toLowerCase() --
+  // real auth.tier is always uppercase (TIERS.FREE/PRO/ENTERPRISE/MSSP,
+  // index.js:317), so every tier === "free"/"enterprise" comparison below
+  // silently never matched for a real customer. Same bug class fixed
+  // repeatedly elsewhere this session (revenue-enforcement.js, sla-monitor.js,
+  // alert-engine.js). This file is not currently wired into index.js's
+  // router (dead code), so not live-exploitable today, but fixing the
+  // underlying defect now.
 
   const sources = BREACH_SOURCE_REGISTRY.map(s => ({
     ...s,
@@ -292,7 +308,15 @@ export async function handleDarkWebStatus(request, env, auth, rid) {
 // GET ?email=user@domain.com  OR  POST { email, domain, api_key }
 // Quick breach check for a single email address. Pro+ required.
 export async function handleLeakCheck(request, env, auth, rid) {
-  const tier = auth.tier || "free";
+  const tier = (auth.tier || "free").toLowerCase();
+  // ZERO-TRUST HARDENING FIX (2026-08-24): was missing .toLowerCase() --
+  // real auth.tier is always uppercase (TIERS.FREE/PRO/ENTERPRISE/MSSP,
+  // index.js:317), so every tier === "free"/"enterprise" comparison below
+  // silently never matched for a real customer. Same bug class fixed
+  // repeatedly elsewhere this session (revenue-enforcement.js, sla-monitor.js,
+  // alert-engine.js). This file is not currently wired into index.js's
+  // router (dead code), so not live-exploitable today, but fixing the
+  // underlying defect now.
 
   if (tier === "free") {
     return _json({
