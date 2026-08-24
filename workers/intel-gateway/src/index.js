@@ -5079,7 +5079,18 @@ async function handleRequest(request, env, ctx) {
     let eeItems = [];
     try {
       if (env?.INTEL_R2) {
-        const obj = await env.INTEL_R2.get("feeds/feed.json");
+        // PRODUCTION-VERIFICATION FIX (2026-08-24): "feeds/feed.json" is a
+        // dead R2 key -- confirmed via repo-wide search that no script or
+        // workflow ever writes it (it's read here and in 5 other handler
+        // files: p18/p19/p20/p28/premium-reports, all fixed the same way
+        // in this same change). Every ENTERPRISE route dispatched through
+        // routeEnterpriseEndpoint() below (scoring, sigma, yara, taxii,
+        // misp, siem, mssp, stream) was silently getting an empty items
+        // array on every request. Redirected to LATEST_JSON_KEY, the live,
+        // continuously updated key loadFeedItems() / /api/feed already
+        // reads -- confirmed live via curl after this fix: /api/feed
+        // returns 152 items (122 with apex_score from PR #236's fix).
+        const obj = await env.INTEL_R2.get(LATEST_JSON_KEY);
         if (obj) { const raw = await obj.json(); eeItems = Array.isArray(raw) ? raw : (raw?.items || []); }
       }
     } catch (_) {}

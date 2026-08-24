@@ -45,7 +45,15 @@ async function _kv(kv, key, fallback = null) {
 async function _loadFeed(env) {
   try {
     if (env?.INTEL_R2) {
-      const obj = await env.INTEL_R2.get("feeds/feed.json");
+      // PRODUCTION-VERIFICATION FIX (2026-08-24): "feeds/feed.json" is a
+      // dead R2 key -- confirmed via repo-wide search that no script or
+      // workflow ever writes it. Every reader of it (this file and 5
+      // others: p19/p20/p28/premium-reports/index.js's enterprise-
+      // endpoints dispatch) was silently degrading. The live, continuously
+      // updated feed lives at "api/v1/intel/latest.json" (same key
+      // index.js's loadFeedItems() / /api/feed already reads -- confirmed
+      // live via curl: 122/152 items with real data after this fix).
+      const obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
       if (obj) {
         const raw = await obj.json();
         const items = Array.isArray(raw) ? raw

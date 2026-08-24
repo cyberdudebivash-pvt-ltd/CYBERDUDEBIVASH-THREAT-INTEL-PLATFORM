@@ -739,7 +739,11 @@ export async function handleP20QualityReport(request, env) {
   let item = null;
   try {
     if (env?.INTEL_R2) {
-      const obj = await env.INTEL_R2.get("feeds/feed.json");
+      // PRODUCTION-VERIFICATION FIX (2026-08-24): "feeds/feed.json" is a
+      // dead R2 key nothing ever writes -- see p18-handlers.js's matching
+      // _loadFeed fix note for the full cross-file root cause. Redirected
+      // to the live, continuously updated key.
+      const obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
       if (obj) {
         const data = await obj.json();
         const items = Array.isArray(data) ? data : (data?.items || []);
@@ -780,7 +784,11 @@ export async function handleP20FeedAudit(request, env) {
   let items = [];
   try {
     if (env?.INTEL_R2) {
-      const obj = await env.INTEL_R2.get("feeds/feed.json");
+      // PRODUCTION-VERIFICATION FIX (2026-08-24): "feeds/feed.json" is a
+      // dead R2 key nothing ever writes -- see p18-handlers.js's matching
+      // _loadFeed fix note for the full cross-file root cause. Redirected
+      // to the live, continuously updated key.
+      const obj = await env.INTEL_R2.get("api/v1/intel/latest.json");
       if (obj) {
         const data = await obj.json();
         items = Array.isArray(data) ? data : (data?.items || []);
