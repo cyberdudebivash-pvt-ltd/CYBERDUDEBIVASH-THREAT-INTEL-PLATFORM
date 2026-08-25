@@ -1,6 +1,127 @@
 {
   "sigma_rules": [
     {
+      "title": "CDB Sentinel APEX - CVE202678701__389dsbase_389dsbase_cve202611610_incomplete_fi",
+      "id": "sigma--8a43e6d401dd",
+      "status": "experimental",
+      "description": "Detects activity related to CVE-2026-78701 - 389-ds-base: 389-ds-base: cve-2026-11610 incomplete fix may introduce a connection-",
+      "references": [
+        "https://intel.cyberdudebivash.com"
+      ],
+      "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+      "date": "2026/08/25",
+      "tags": [
+        "cve.cve-2026-78701",
+        "cve.cve-2026-11610"
+      ],
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection": {
+          "CommandLine|contains": [
+            "suspicious"
+          ]
+        },
+        "condition": "selection"
+      },
+      "level": "medium",
+      "falsepositives": [
+        "Legitimate administrative activity"
+      ]
+    },
+    {
+      "title": "CDB Sentinel APEX - CVE202678322__Fileroller_fileroller_stack_buffer_overflow_in",
+      "id": "sigma--0d2cc889fc0b",
+      "status": "experimental",
+      "description": "Detects activity related to CVE-2026-78322 - File-roller: file-roller: stack buffer overflow in parse_progress_line for 7z and r",
+      "references": [
+        "https://intel.cyberdudebivash.com"
+      ],
+      "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+      "date": "2026/08/25",
+      "tags": [
+        "cve.cve-2026-78322"
+      ],
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection": {
+          "CommandLine|contains": [
+            "suspicious"
+          ]
+        },
+        "condition": "selection"
+      },
+      "level": "medium",
+      "falsepositives": [
+        "Legitimate administrative activity"
+      ]
+    },
+    {
+      "title": "CDB Sentinel APEX - CVE202667578__FA50_Authentication_Bypass_Vulnerability",
+      "id": "sigma--597a52a15d4c",
+      "status": "experimental",
+      "description": "Detects activity related to CVE-2026-67578 - FA-50 Authentication Bypass Vulnerability",
+      "references": [
+        "https://intel.cyberdudebivash.com"
+      ],
+      "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+      "date": "2026/08/25",
+      "tags": [
+        "cve.cve-2026-67578"
+      ],
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection": {
+          "CommandLine|contains": [
+            "suspicious"
+          ]
+        },
+        "condition": "selection"
+      },
+      "level": "medium",
+      "falsepositives": [
+        "Legitimate administrative activity"
+      ]
+    },
+    {
+      "title": "CDB Sentinel APEX - CVE202665633__Purposelimited_JWT_accepted_as_full_bearer_aut",
+      "id": "sigma--b6a7ef695336",
+      "status": "experimental",
+      "description": "Detects activity related to CVE-2026-65633 - Purpose-limited JWT accepted as full bearer authentication in AshAuthentication",
+      "references": [
+        "https://intel.cyberdudebivash.com"
+      ],
+      "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+      "date": "2026/08/25",
+      "tags": [
+        "cve.cve-2026-65633"
+      ],
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection": {
+          "CommandLine|contains": [
+            "suspicious"
+          ]
+        },
+        "condition": "selection"
+      },
+      "level": "medium",
+      "falsepositives": [
+        "Legitimate administrative activity"
+      ]
+    },
+    {
       "title": "CDB Sentinel APEX - CVE202678638__peerigon_unzipcrxunzipcrx3_Archive_Extraction",
       "id": "sigma--aa21a4b3235e",
       "status": "experimental",
@@ -63,6 +184,66 @@
   ],
   "yara_rules": [
     {
+      "rule_name": "CDB_Silent_Patches_Dont_Stop_AttackersThey_B",
+      "rule_text": "rule CDB_Silent_Patches_Dont_Stop_AttackersThey_B {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Silent Patches Don\u2019t Stop Attackers\u2014They Blind Defenders\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_CISA_Warns_of_Oracle_HTTP_and_WebLogic_S",
+      "rule_text": "rule CDB_CISA_Warns_of_Oracle_HTTP_and_WebLogic_S {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CISA Warns of Oracle HTTP and WebLogic Server Vulnerability Exploited in Attacks\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"WebLogic\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Hackers_Exploit_Critical_miniOrange_SAML",
+      "rule_text": "rule CDB_Hackers_Exploit_Critical_miniOrange_SAML {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Hackers Exploit Critical miniOrange SAML SSO Flaws to Hijack WordPress Admin Acc\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"WordPress\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Critical_Red_Hat_Keycloak_Flaw_Lets_Unau",
+      "rule_text": "rule CDB_Critical_Red_Hat_Keycloak_Flaw_Lets_Unau {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Critical Red Hat Keycloak Flaw Lets Unauthenticated Attackers Take Over Any User\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_US_CISA_adds_maximumseverity_Oracle_flaw",
+      "rule_text": "rule CDB_US_CISA_adds_maximumseverity_Oracle_flaw {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for U.S. CISA adds maximum-severity Oracle flaw to its Known Exploited Vulnerabiliti\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Attackers_Target_miniOrange_SAML_Flaws_T",
+      "rule_text": "rule CDB_Attackers_Target_miniOrange_SAML_Flaws_T {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Attackers Target miniOrange SAML Flaws That Can Grant WordPress Admin Access\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"WordPress\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_CVE202678701__389dsbase_389dsbase_cve202",
+      "rule_text": "rule CDB_CVE202678701__389dsbase_389dsbase_cve202 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-78701 - 389-ds-base: 389-ds-base: cve-2026-11610 incomplete fix may int\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $cve0 = \"CVE-2026-78701\" ascii wide nocase\n        $cve1 = \"cve-2026-11610\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_CVE202678322__Fileroller_fileroller_stac",
+      "rule_text": "rule CDB_CVE202678322__Fileroller_fileroller_stac {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-78322 - File-roller: file-roller: stack buffer overflow in parse_progre\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $cve0 = \"CVE-2026-78322\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_CVE202667578__FA50_Authentication_Bypass",
+      "rule_text": "rule CDB_CVE202667578__FA50_Authentication_Bypass {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-67578 - FA-50 Authentication Bypass Vulnerability\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $cve0 = \"CVE-2026-67578\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_CVE202665633__Purposelimited_JWT_accepte",
+      "rule_text": "rule CDB_CVE202665633__Purposelimited_JWT_accepte {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-65633 - Purpose-limited JWT accepted as full bearer authentication in A\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $cve0 = \"CVE-2026-65633\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"AshAuthentication\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_CISA_Warns_of_Exploited_Oracle_WebLogic_",
+      "rule_text": "rule CDB_CISA_Warns_of_Exploited_Oracle_WebLogic_ {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CISA Warns of Exploited Oracle WebLogic Vulnerability\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"WebLogic\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Exploit_for_OS_Command_Injection_in_Toto",
+      "rule_text": "rule CDB_Exploit_for_OS_Command_Injection_in_Toto {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Exploit for OS Command Injection in Totolink N600R_Firmware\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Multiple_TPLink_Archer_Vulnerabilities_E",
+      "rule_text": "rule CDB_Multiple_TPLink_Archer_Vulnerabilities_E {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Multiple TP-Link Archer Vulnerabilities Enable Command Injection Attacks\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_Actively_Exploited_Oracle_WebLogic_Flaw_",
+      "rule_text": "rule CDB_Actively_Exploited_Oracle_WebLogic_Flaw_ {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Actively Exploited Oracle WebLogic Flaw Lets Unauthenticated Attackers Access Cr\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"WebLogic\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_AI_supply_chain_risk_is_showing_up_in_de",
+      "rule_text": "rule CDB_AI_supply_chain_risk_is_showing_up_in_de {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for AI supply chain risk is showing up in developer workflows first\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
       "rule_name": "CDB_TruffleHog_AWS_Analyze_reduces_remediati",
       "rule_text": "rule CDB_TruffleHog_AWS_Analyze_reduces_remediati {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for TruffleHog AWS Analyze reduces remediation time on leaked AWS credentials\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"TruffleHog\" ascii wide nocase\n    condition:\n        any of them\n}"
     },
@@ -77,6 +258,10 @@
     {
       "rule_name": "CDB_The_cybercrime_supply_chain_has_five_sta",
       "rule_text": "rule CDB_The_cybercrime_supply_chain_has_five_sta {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for The cybercrime supply chain has five stages, each with a price\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+    },
+    {
+      "rule_name": "CDB_PoCPodsUnauthenticatedPrivilegeEscalatio",
+      "rule_text": "rule CDB_PoCPodsUnauthenticatedPrivilegeEscalatio {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for PoC-Pods-Unauthenticated-Privilege-Escalation exploit\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
     },
     {
       "rule_name": "CDB_Exploit_for_Numeric_Truncation_Error_in_",
@@ -117,90 +302,46 @@
     {
       "rule_name": "CDB_OpenPhish_Phishing_URL_httponewhatappcom",
       "rule_text": "rule CDB_OpenPhish_Phishing_URL_httponewhatappcom {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://one-whatapp.com.cn/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpswwwpingwhata",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpswwwpingwhata {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://www.ping-whatapp.com.cn/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsbreezeonewha",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsbreezeonewha {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://breeze.one-whatapp.com.cn/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httppalmonewhatap",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httppalmonewhatap {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://palm.one-whatapp.com.cn/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpwwwpalmonewha",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpwwwpalmonewha {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://www.palm.one-whatapp.com.cn/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpwwwbreezeonew",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpwwwbreezeonew {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://www.breeze.one-whatapp.com.cn/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpswaonewhatapp",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpswaonewhatapp {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://wa.one-whatapp.com.cn/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpswwwwaonewhat",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpswwwwaonewhat {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://www.wa.one-whatapp.com.cn/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsg5lu5zv4f",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsg5lu5zv4f {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://g5.lu/5zv4f\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpswwwrobloxcom",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpswwwrobloxcom {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://www.roblox.com.gr/games/8832438757/pvp-sword-f\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpslnkinkseurEs",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpslnkinkseurEs {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://lnk.ink/seur-Esp\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsvmi3522209co",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsvmi3522209co {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://vmi3522209.contaboserver.net/fix/sen/rena/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpswwwszbet368v",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpswwwszbet368v {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://www.szbet368.vip/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsdaudoitroich",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsdaudoitroich {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://daudoitroichandapdat.baby/login\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpstrezorfixio",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpstrezorfixio {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://trezor-fix.io/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsfacebockscom",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsfacebockscom {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://facebocks.com.vn/bo-cau-hoi-soan-moi-bam-sat?a\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
-    },
-    {
-      "rule_name": "CDB_OpenPhish_Phishing_URL_httpsfacebockvnxd",
-      "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsfacebockvnxd {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://facebock.vn/xdfaijrmqfm?a&l\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
     }
   ],
   "snort_rules": [
     {
+      "rule_name": "CVE202678701__389dsbase_389dsbase_cve202611610_incomplete_fi",
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-78701 - 389-ds-base: 389-ds-base: cve-2026-11610 in\"; content:\"CVE-2026-78701\"; nocase; sid:7456891; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 7456891
+    },
+    {
+      "rule_name": "CVE202678322__Fileroller_fileroller_stack_buffer_overflow_in",
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-78322 - File-roller: file-roller: stack buffer over\"; content:\"CVE-2026-78322\"; nocase; sid:2483831; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 2483831
+    },
+    {
+      "rule_name": "CVE202667578__FA50_Authentication_Bypass_Vulnerability",
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-67578 - FA-50 Authentication Bypass Vulnerability\"; content:\"CVE-2026-67578\"; nocase; sid:6741829; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 6741829
+    },
+    {
+      "rule_name": "CVE202665633__Purposelimited_JWT_accepted_as_full_bearer_aut",
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-65633 - Purpose-limited JWT accepted as full bearer\"; content:\"CVE-2026-65633\"; nocase; sid:7630466; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 7630466
+    },
+    {
       "rule_name": "CVE202678638__peerigon_unzipcrxunzipcrx3_Archive_Extraction",
-      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-78638 - peerigon unzip-crx/unzip-crx-3 Archive Extr\"; content:\"CVE-2026-78638\"; nocase; sid:1693449; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
-      "sid": 1693449
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-78638 - peerigon unzip-crx/unzip-crx-3 Archive Extr\"; content:\"CVE-2026-78638\"; nocase; sid:2273730; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 2273730
     },
     {
       "rule_name": "Exploit_for_CVE202616348",
-      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: Exploit for CVE-2026-16348\"; content:\"CVE-2026-16348\"; nocase; sid:2349660; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
-      "sid": 2349660
+      "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: Exploit for CVE-2026-16348\"; content:\"CVE-2026-16348\"; nocase; sid:1898325; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+      "sid": 1898325
     }
   ],
   "stats": {
-    "total_rules": 34,
-    "sigma_count": 2,
+    "total_rules": 42,
+    "sigma_count": 6,
     "yara_count": 30,
-    "snort_count": 2,
+    "snort_count": 6,
     "coverage_techniques": 0,
-    "generated_at": "2026-08-25T07:09:22.922044+00:00"
+    "generated_at": "2026-08-25T13:12:24.750834+00:00"
   }
 }

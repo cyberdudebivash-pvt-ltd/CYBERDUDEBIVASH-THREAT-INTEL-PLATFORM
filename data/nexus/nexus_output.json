@@ -1,575 +1,1899 @@
 {
-  "version": "39.1.0",
+  "version": "39.0.0",
   "codename": "NEXUS INTELLIGENCE",
-  "generated_at": "2026-08-25T09:13:40.280627+00:00",
-  "execution_time_ms": 87.4,
-  "exposure_index": 7.72,
-  "exposure": {
-    "overall_score": 7.72,
-    "score": 7.72,
-    "trend": "INCREASING",
-    "forecast_7d": 8.34,
-    "forecast_30d": 8.88,
-    "component_scores": {
-      "threat_velocity": 10.0,
-      "critical_density": 10.0,
-      "kev_exposure": 0.74,
-      "epss_pressure": 10.0,
-      "actor_diversity": 10.0
-    },
-    "top_risks": [
-      {
-        "title": "Exploit for Numeric Truncation Error in Fortinet Fortios",
-        "risk": 9.0
-      },
-      {
-        "title": "Exploited Zimbra Flaw Highlights Shrinking Window to Patch",
-        "risk": 9.0
-      },
-      {
-        "title": "Zimbra Collaboration Suite Vulnerability Actively Exploited in the Wild",
-        "risk": 9.0
-      },
-      {
-        "title": "Exploit for OS Command Injection in Synacor Zimbra_Collaboration_Suite",
-        "risk": 9.0
-      },
-      {
-        "title": "Exploit for Heap-based Buffer Overflow in Microsoft",
-        "risk": 9.0
-      }
-    ]
-  },
-  "kill_chain_coverage": {
-    "recon": 3,
-    "weapon": 0,
-    "delivery": 689,
-    "exploit": 276,
-    "install": 15,
-    "c2": 7,
-    "actions": 0,
-    "exfil": 7,
-    "impact": 17
-  },
+  "generated_at": "2026-08-25T13:12:24.613864+00:00",
+  "execution_time_ms": 234.45,
   "threat_hunts": [
     {
-      "hunt_id": "HUNT-735B1898",
-      "hypothesis": "Mobile spyware deployment via zero-click exploitation chain",
-      "priority": "CRITICAL",
-      "actor_tags": [
-        "UNK"
-      ],
-      "mitre_tactics": [
-        "T1404"
-      ],
+      "hunt_id": "hunt--7f5a0a4fdfc6",
+      "hypothesis": "Threat actor UNC-CDB-INGEST conducting credential harvesting campaign using T1059 against enterprise infrastructure",
       "data_sources": [
-        "EDR Telemetry",
-        "Network Logs",
-        "Cloud Audit Logs"
+        "Authentication Logs",
+        "Process Access",
+        "Windows Event Log",
+        "Network Connection"
       ],
-      "status": "ACTIVE",
-      "created_at": "2026-08-25T09:13:40.280627+00:00"
-    },
-    {
-      "hunt_id": "HUNT-6EB115A3",
-      "hypothesis": "Remote access trojan persistence via startup folder and registry run keys",
+      "techniques": [
+        "T1003",
+        "T1003.001",
+        "T1003.006",
+        "T1110"
+      ],
+      "status": "PLANNED",
+      "findings": [],
+      "detection_rules": [],
+      "created_at": "2026-08-25T13:12:24.637337+00:00",
       "priority": "HIGH",
       "actor_tags": [
-        "UNK"
-      ],
-      "mitre_tactics": [
-        "T1547"
-      ],
-      "data_sources": [
-        "EDR Telemetry",
-        "Network Logs",
-        "Cloud Audit Logs"
-      ],
-      "status": "ACTIVE",
-      "created_at": "2026-08-25T09:13:40.280627+00:00"
+        "UNC-CDB-INGEST"
+      ]
     },
     {
-      "hunt_id": "HUNT-6329A3B9",
-      "hypothesis": "Nation-state persistence via registry/WMI/scheduled-task abuse",
+      "hunt_id": "hunt--402465847aaf",
+      "hypothesis": "Nation-state actor UNC-CDB-INGEST establishing persistence via T1059 in enterprise critical infrastructure",
+      "data_sources": [
+        "Registry Modification",
+        "Scheduled Task",
+        "Service Creation",
+        "WMI Activity"
+      ],
+      "techniques": [
+        "T1547.001",
+        "T1053.005",
+        "T1543.003",
+        "T1546.003"
+      ],
+      "status": "PLANNED",
+      "findings": [],
+      "detection_rules": [],
+      "created_at": "2026-08-25T13:12:24.637416+00:00",
       "priority": "HIGH",
       "actor_tags": [
-        "UNK"
-      ],
-      "mitre_tactics": [
-        "T1053"
-      ],
-      "data_sources": [
-        "EDR Telemetry",
-        "Network Logs",
-        "Cloud Audit Logs"
-      ],
-      "status": "ACTIVE",
-      "created_at": "2026-08-25T09:13:40.280627+00:00"
+        "UNC-CDB-INGEST"
+      ]
     },
     {
-      "hunt_id": "HUNT-C23A08B2",
-      "hypothesis": "Cloud infrastructure compromise via stolen API keys or OAuth token abuse",
+      "hunt_id": "hunt--b4ddc93c1821",
+      "hypothesis": "Cloud infrastructure compromise via stolen API keys or OAuth token abuse targeting enterprise SaaS environments",
+      "data_sources": [
+        "Cloud Audit Logs",
+        "API Call Logs",
+        "Identity Provider Logs",
+        "OAuth Token Events"
+      ],
+      "techniques": [
+        "T1078.004",
+        "T1550.001",
+        "T1528"
+      ],
+      "status": "PLANNED",
+      "findings": [],
+      "detection_rules": [],
+      "created_at": "2026-08-25T13:12:24.637461+00:00",
       "priority": "HIGH",
       "actor_tags": [
-        "UNK"
-      ],
-      "mitre_tactics": [
-        "T1078"
-      ],
-      "data_sources": [
-        "EDR Telemetry",
-        "Network Logs",
-        "Cloud Audit Logs"
-      ],
-      "status": "ACTIVE",
-      "created_at": "2026-08-25T09:13:40.280627+00:00"
+        "UNC-CDB-INGEST"
+      ]
     },
     {
-      "hunt_id": "HUNT-20A285AD",
-      "hypothesis": "Ransomware deployment using LOLBins for lateral movement",
-      "priority": "CRITICAL",
-      "actor_tags": [
-        "Lazarus Group"
-      ],
-      "mitre_tactics": [
-        "T1486"
-      ],
+      "hunt_id": "hunt--512535f4a2f7",
+      "hypothesis": "Threat actor UNC-CDB-INGEST conducting credential harvesting campaign using T1059 against enterprise infrastructure",
       "data_sources": [
-        "EDR Telemetry",
-        "Network Logs",
-        "Cloud Audit Logs"
+        "Authentication Logs",
+        "Process Access",
+        "Windows Event Log",
+        "Network Connection"
       ],
-      "status": "ACTIVE",
-      "created_at": "2026-08-25T09:13:40.280627+00:00"
+      "techniques": [
+        "T1003",
+        "T1003.001",
+        "T1003.006",
+        "T1110"
+      ],
+      "status": "PLANNED",
+      "findings": [],
+      "detection_rules": [],
+      "created_at": "2026-08-25T13:12:24.637527+00:00",
+      "priority": "HIGH",
+      "actor_tags": [
+        "UNC-CDB-INGEST"
+      ]
+    },
+    {
+      "hunt_id": "hunt--fe8ca6873f0d",
+      "hypothesis": "Threat actor UNC-CDB-INGEST conducting credential harvesting campaign using T1059 against enterprise infrastructure",
+      "data_sources": [
+        "Authentication Logs",
+        "Process Access",
+        "Windows Event Log",
+        "Network Connection"
+      ],
+      "techniques": [
+        "T1003",
+        "T1003.001",
+        "T1003.006",
+        "T1110"
+      ],
+      "status": "PLANNED",
+      "findings": [],
+      "detection_rules": [],
+      "created_at": "2026-08-25T13:12:24.637564+00:00",
+      "priority": "HIGH",
+      "actor_tags": [
+        "UNC-CDB-INGEST"
+      ]
+    },
+    {
+      "hunt_id": "hunt--15038d77646e",
+      "hypothesis": "Threat actor UNC-CDB-INGEST conducting credential harvesting campaign using T1059 against enterprise infrastructure",
+      "data_sources": [
+        "Authentication Logs",
+        "Process Access",
+        "Windows Event Log",
+        "Network Connection"
+      ],
+      "techniques": [
+        "T1003",
+        "T1003.001",
+        "T1003.006",
+        "T1110"
+      ],
+      "status": "PLANNED",
+      "findings": [],
+      "detection_rules": [],
+      "created_at": "2026-08-25T13:12:24.637597+00:00",
+      "priority": "HIGH",
+      "actor_tags": [
+        "UNC-CDB-INGEST"
+      ]
+    },
+    {
+      "hunt_id": "hunt--d4a2a84f795c",
+      "hypothesis": "Threat actor UNC-CDB-INGEST conducting credential harvesting campaign using T1059 against retail infrastructure",
+      "data_sources": [
+        "Authentication Logs",
+        "Process Access",
+        "Windows Event Log",
+        "Network Connection"
+      ],
+      "techniques": [
+        "T1003",
+        "T1003.001",
+        "T1003.006",
+        "T1110"
+      ],
+      "status": "PLANNED",
+      "findings": [],
+      "detection_rules": [],
+      "created_at": "2026-08-25T13:12:24.637636+00:00",
+      "priority": "HIGH",
+      "actor_tags": [
+        "UNC-CDB-INGEST"
+      ]
+    },
+    {
+      "hunt_id": "hunt--967837e46ea7",
+      "hypothesis": "Threat actor UNC-CDB-INGEST conducting credential harvesting campaign using T1059 against enterprise infrastructure",
+      "data_sources": [
+        "Authentication Logs",
+        "Process Access",
+        "Windows Event Log",
+        "Network Connection"
+      ],
+      "techniques": [
+        "T1003",
+        "T1003.001",
+        "T1003.006",
+        "T1110"
+      ],
+      "status": "PLANNED",
+      "findings": [],
+      "detection_rules": [],
+      "created_at": "2026-08-25T13:12:24.637714+00:00",
+      "priority": "HIGH",
+      "actor_tags": [
+        "UNC-CDB-INGEST"
+      ]
+    },
+    {
+      "hunt_id": "hunt--a32dbeed6da7",
+      "hypothesis": "Threat actor UNC-CDB-INGEST conducting credential harvesting campaign using T1059 against enterprise infrastructure",
+      "data_sources": [
+        "Authentication Logs",
+        "Process Access",
+        "Windows Event Log",
+        "Network Connection"
+      ],
+      "techniques": [
+        "T1003",
+        "T1003.001",
+        "T1003.006",
+        "T1110"
+      ],
+      "status": "PLANNED",
+      "findings": [],
+      "detection_rules": [],
+      "created_at": "2026-08-25T13:12:24.637767+00:00",
+      "priority": "HIGH",
+      "actor_tags": [
+        "UNC-CDB-INGEST"
+      ]
     }
   ],
   "campaigns": [
     {
-      "campaign_id": "CAMP-D144DBFF",
-      "campaign_name": "LOCKBIT_RANSOMWARE_GROUP",
-      "name": "LockBit Ransomware Group",
+      "campaign_id": "campaign--7bd97745def9",
+      "name": "Campaign: UNC-CDB-INGEST Multi-Vector Operation",
       "actors": [
-        "LockBit Ransomware Group"
+        "UNC-CDB-INGEST"
       ],
-      "threat_actor": "LockBit Ransomware Group",
-      "incidents": 10,
-      "avg_risk_score": 8.5,
-      "techniques": [
-        "T1059",
-        "T1190",
-        "T1041",
-        "T1078",
-        "T1486"
+      "techniques": [],
+      "iocs": {
+        "cve": [
+          "CVE-2024-66001",
+          "CVE-2025-11729",
+          "CVE-2025-15100",
+          "CVE-2025-24001",
+          "CVE-2025-26543",
+          "CVE-2025-27890",
+          "CVE-2025-31800",
+          "CVE-2025-41741",
+          "CVE-2026-10053",
+          "CVE-2026-11565",
+          "CVE-2026-11610",
+          "CVE-2026-11751",
+          "CVE-2026-12983",
+          "CVE-2026-13169",
+          "CVE-2026-13173",
+          "CVE-2026-13174",
+          "CVE-2026-13175",
+          "CVE-2026-13214",
+          "CVE-2026-13215",
+          "CVE-2026-15315",
+          "CVE-2026-15316",
+          "CVE-2026-15421",
+          "CVE-2026-15469",
+          "CVE-2026-16348",
+          "CVE-2026-17548",
+          "CVE-2026-18963",
+          "CVE-2026-19565",
+          "CVE-2026-19942",
+          "CVE-2026-21580",
+          "CVE-2026-21582",
+          "CVE-2026-21584",
+          "CVE-2026-21756",
+          "CVE-2026-21962",
+          "CVE-2026-27365",
+          "CVE-2026-32475",
+          "CVE-2026-41992",
+          "CVE-2026-47699",
+          "CVE-2026-48796",
+          "CVE-2026-49415",
+          "CVE-2026-49418",
+          "CVE-2026-49419",
+          "CVE-2026-50142",
+          "CVE-2026-50186",
+          "CVE-2026-50191",
+          "CVE-2026-50540",
+          "CVE-2026-52854",
+          "CVE-2026-52872",
+          "CVE-2026-52873",
+          "CVE-2026-52875",
+          "CVE-2026-52876",
+          "CVE-2026-52877",
+          "CVE-2026-5388",
+          "CVE-2026-5389",
+          "CVE-2026-53958",
+          "CVE-2026-53959",
+          "CVE-2026-54514",
+          "CVE-2026-5751",
+          "CVE-2026-59230",
+          "CVE-2026-60093",
+          "CVE-2026-62289",
+          "CVE-2026-62291",
+          "CVE-2026-62292",
+          "CVE-2026-62377",
+          "CVE-2026-62455",
+          "CVE-2026-62457",
+          "CVE-2026-62458",
+          "CVE-2026-62459",
+          "CVE-2026-62460",
+          "CVE-2026-62461",
+          "CVE-2026-62462",
+          "CVE-2026-62463",
+          "CVE-2026-62467",
+          "CVE-2026-62471",
+          "CVE-2026-62475",
+          "CVE-2026-62477",
+          "CVE-2026-62481",
+          "CVE-2026-62485",
+          "CVE-2026-62491",
+          "CVE-2026-62492",
+          "CVE-2026-62499",
+          "CVE-2026-62500",
+          "CVE-2026-62501",
+          "CVE-2026-62502",
+          "CVE-2026-62506",
+          "CVE-2026-62509",
+          "CVE-2026-62510",
+          "CVE-2026-62511",
+          "CVE-2026-62512",
+          "CVE-2026-62520",
+          "CVE-2026-62522",
+          "CVE-2026-62523",
+          "CVE-2026-62526",
+          "CVE-2026-62529",
+          "CVE-2026-62531",
+          "CVE-2026-62532",
+          "CVE-2026-62533",
+          "CVE-2026-62535",
+          "CVE-2026-62536",
+          "CVE-2026-62537",
+          "CVE-2026-62538",
+          "CVE-2026-62539",
+          "CVE-2026-62540",
+          "CVE-2026-62541",
+          "CVE-2026-62543",
+          "CVE-2026-62544",
+          "CVE-2026-62545",
+          "CVE-2026-62550",
+          "CVE-2026-62551",
+          "CVE-2026-62552",
+          "CVE-2026-62553",
+          "CVE-2026-62554",
+          "CVE-2026-62555",
+          "CVE-2026-62558",
+          "CVE-2026-62564",
+          "CVE-2026-62566",
+          "CVE-2026-62568",
+          "CVE-2026-62569",
+          "CVE-2026-62570",
+          "CVE-2026-62571",
+          "CVE-2026-62572",
+          "CVE-2026-62573",
+          "CVE-2026-62575",
+          "CVE-2026-62576",
+          "CVE-2026-62577",
+          "CVE-2026-62578",
+          "CVE-2026-62579",
+          "CVE-2026-62580",
+          "CVE-2026-62581",
+          "CVE-2026-62582",
+          "CVE-2026-62583",
+          "CVE-2026-62584",
+          "CVE-2026-62585",
+          "CVE-2026-62586",
+          "CVE-2026-62587",
+          "CVE-2026-62588",
+          "CVE-2026-62589",
+          "CVE-2026-62590",
+          "CVE-2026-62591",
+          "CVE-2026-62592",
+          "CVE-2026-62593",
+          "CVE-2026-62594",
+          "CVE-2026-62595",
+          "CVE-2026-62596",
+          "CVE-2026-62598",
+          "CVE-2026-62599",
+          "CVE-2026-62600",
+          "CVE-2026-62601",
+          "CVE-2026-62602",
+          "CVE-2026-62603",
+          "CVE-2026-62604",
+          "CVE-2026-62605",
+          "CVE-2026-62606",
+          "CVE-2026-62607",
+          "CVE-2026-62608",
+          "CVE-2026-62609",
+          "CVE-2026-62610",
+          "CVE-2026-62611",
+          "CVE-2026-62612",
+          "CVE-2026-62613",
+          "CVE-2026-62614",
+          "CVE-2026-62615",
+          "CVE-2026-62616",
+          "CVE-2026-62617",
+          "CVE-2026-62618",
+          "CVE-2026-62619",
+          "CVE-2026-62620",
+          "CVE-2026-62621",
+          "CVE-2026-62622",
+          "CVE-2026-62623",
+          "CVE-2026-62624",
+          "CVE-2026-62625",
+          "CVE-2026-62626",
+          "CVE-2026-62627",
+          "CVE-2026-62628",
+          "CVE-2026-62629",
+          "CVE-2026-62630",
+          "CVE-2026-62631",
+          "CVE-2026-62632",
+          "CVE-2026-62633",
+          "CVE-2026-62634",
+          "CVE-2026-62635",
+          "CVE-2026-62636",
+          "CVE-2026-62637",
+          "CVE-2026-62638",
+          "CVE-2026-62639",
+          "CVE-2026-62640",
+          "CVE-2026-62988",
+          "CVE-2026-63039",
+          "CVE-2026-63520",
+          "CVE-2026-63621",
+          "CVE-2026-65633",
+          "CVE-2026-66358",
+          "CVE-2026-66589",
+          "CVE-2026-66591",
+          "CVE-2026-66602",
+          "CVE-2026-66603",
+          "CVE-2026-66882",
+          "CVE-2026-66906",
+          "CVE-2026-66907",
+          "CVE-2026-66908",
+          "CVE-2026-66916",
+          "CVE-2026-66917",
+          "CVE-2026-67442",
+          "CVE-2026-67578",
+          "CVE-2026-6827",
+          "CVE-2026-69414",
+          "CVE-2026-70408",
+          "CVE-2026-70668",
+          "CVE-2026-70669",
+          "CVE-2026-70670",
+          "CVE-2026-70671",
+          "CVE-2026-70672",
+          "CVE-2026-70673",
+          "CVE-2026-70674",
+          "CVE-2026-70675",
+          "CVE-2026-70676",
+          "CVE-2026-70677",
+          "CVE-2026-70678",
+          "CVE-2026-70679",
+          "CVE-2026-70680",
+          "CVE-2026-70681",
+          "CVE-2026-70682",
+          "CVE-2026-70683",
+          "CVE-2026-70684",
+          "CVE-2026-70685",
+          "CVE-2026-70686",
+          "CVE-2026-70687",
+          "CVE-2026-70688",
+          "CVE-2026-70689",
+          "CVE-2026-70690",
+          "CVE-2026-70691",
+          "CVE-2026-70692",
+          "CVE-2026-70693",
+          "CVE-2026-70694",
+          "CVE-2026-70695",
+          "CVE-2026-70696",
+          "CVE-2026-70697",
+          "CVE-2026-70698",
+          "CVE-2026-70699",
+          "CVE-2026-70700",
+          "CVE-2026-70701",
+          "CVE-2026-70702",
+          "CVE-2026-70703",
+          "CVE-2026-70704",
+          "CVE-2026-70705",
+          "CVE-2026-70706",
+          "CVE-2026-70707",
+          "CVE-2026-70708",
+          "CVE-2026-70709",
+          "CVE-2026-70710",
+          "CVE-2026-70711",
+          "CVE-2026-70712",
+          "CVE-2026-70713",
+          "CVE-2026-70714",
+          "CVE-2026-70715",
+          "CVE-2026-70716",
+          "CVE-2026-70717",
+          "CVE-2026-70718",
+          "CVE-2026-70719",
+          "CVE-2026-70720",
+          "CVE-2026-70721",
+          "CVE-2026-70722",
+          "CVE-2026-70723",
+          "CVE-2026-70724",
+          "CVE-2026-70725",
+          "CVE-2026-70726",
+          "CVE-2026-70727",
+          "CVE-2026-70728",
+          "CVE-2026-70729",
+          "CVE-2026-70730",
+          "CVE-2026-70731",
+          "CVE-2026-70732",
+          "CVE-2026-70733",
+          "CVE-2026-70734",
+          "CVE-2026-70735",
+          "CVE-2026-70736",
+          "CVE-2026-70737",
+          "CVE-2026-70738",
+          "CVE-2026-70739",
+          "CVE-2026-70740",
+          "CVE-2026-70741",
+          "CVE-2026-70742",
+          "CVE-2026-70743",
+          "CVE-2026-70744",
+          "CVE-2026-70745",
+          "CVE-2026-70746",
+          "CVE-2026-70747",
+          "CVE-2026-70749",
+          "CVE-2026-70750",
+          "CVE-2026-70751",
+          "CVE-2026-70752",
+          "CVE-2026-70753",
+          "CVE-2026-70754",
+          "CVE-2026-70758",
+          "CVE-2026-70759",
+          "CVE-2026-70760",
+          "CVE-2026-70761",
+          "CVE-2026-70762",
+          "CVE-2026-70763",
+          "CVE-2026-70764",
+          "CVE-2026-70765",
+          "CVE-2026-70766",
+          "CVE-2026-70767",
+          "CVE-2026-70768",
+          "CVE-2026-70769",
+          "CVE-2026-70770",
+          "CVE-2026-70771",
+          "CVE-2026-70772",
+          "CVE-2026-70773",
+          "CVE-2026-70774",
+          "CVE-2026-70775",
+          "CVE-2026-70776",
+          "CVE-2026-70777",
+          "CVE-2026-70778",
+          "CVE-2026-70779",
+          "CVE-2026-70780",
+          "CVE-2026-70781",
+          "CVE-2026-70782",
+          "CVE-2026-70783",
+          "CVE-2026-70784",
+          "CVE-2026-70785",
+          "CVE-2026-70786",
+          "CVE-2026-70787",
+          "CVE-2026-70788",
+          "CVE-2026-70789",
+          "CVE-2026-70790",
+          "CVE-2026-70791",
+          "CVE-2026-70792",
+          "CVE-2026-70793",
+          "CVE-2026-70794",
+          "CVE-2026-70795",
+          "CVE-2026-70796",
+          "CVE-2026-70797",
+          "CVE-2026-70798",
+          "CVE-2026-70799",
+          "CVE-2026-70800",
+          "CVE-2026-70801",
+          "CVE-2026-70802",
+          "CVE-2026-70803",
+          "CVE-2026-70804",
+          "CVE-2026-70805",
+          "CVE-2026-70806",
+          "CVE-2026-70807",
+          "CVE-2026-70808",
+          "CVE-2026-70809",
+          "CVE-2026-70810",
+          "CVE-2026-70811",
+          "CVE-2026-70812",
+          "CVE-2026-70813",
+          "CVE-2026-70814",
+          "CVE-2026-70815",
+          "CVE-2026-70816",
+          "CVE-2026-70817",
+          "CVE-2026-70818",
+          "CVE-2026-70819",
+          "CVE-2026-70820",
+          "CVE-2026-70821",
+          "CVE-2026-70822",
+          "CVE-2026-70823",
+          "CVE-2026-70824",
+          "CVE-2026-70825",
+          "CVE-2026-70826",
+          "CVE-2026-70827",
+          "CVE-2026-70828",
+          "CVE-2026-70829",
+          "CVE-2026-70830",
+          "CVE-2026-70831",
+          "CVE-2026-70832",
+          "CVE-2026-70833",
+          "CVE-2026-70834",
+          "CVE-2026-70835",
+          "CVE-2026-70836",
+          "CVE-2026-70837",
+          "CVE-2026-70838",
+          "CVE-2026-70839",
+          "CVE-2026-70840",
+          "CVE-2026-70841",
+          "CVE-2026-70842",
+          "CVE-2026-70843",
+          "CVE-2026-70844",
+          "CVE-2026-70845",
+          "CVE-2026-70846",
+          "CVE-2026-70847",
+          "CVE-2026-70848",
+          "CVE-2026-70849",
+          "CVE-2026-70850",
+          "CVE-2026-70851",
+          "CVE-2026-70852",
+          "CVE-2026-70853",
+          "CVE-2026-70854",
+          "CVE-2026-70855",
+          "CVE-2026-70856",
+          "CVE-2026-70857",
+          "CVE-2026-70858",
+          "CVE-2026-70859",
+          "CVE-2026-70861",
+          "CVE-2026-70862",
+          "CVE-2026-70863",
+          "CVE-2026-70864",
+          "CVE-2026-70865",
+          "CVE-2026-70866",
+          "CVE-2026-70867",
+          "CVE-2026-70868",
+          "CVE-2026-70870",
+          "CVE-2026-70871",
+          "CVE-2026-70872",
+          "CVE-2026-70873",
+          "CVE-2026-70874",
+          "CVE-2026-70875",
+          "CVE-2026-70876",
+          "CVE-2026-70877",
+          "CVE-2026-70878",
+          "CVE-2026-70879",
+          "CVE-2026-70880",
+          "CVE-2026-70881",
+          "CVE-2026-70882",
+          "CVE-2026-70883",
+          "CVE-2026-70884",
+          "CVE-2026-70885",
+          "CVE-2026-70886",
+          "CVE-2026-70887",
+          "CVE-2026-70888",
+          "CVE-2026-70889",
+          "CVE-2026-70890",
+          "CVE-2026-70891",
+          "CVE-2026-70892",
+          "CVE-2026-70893",
+          "CVE-2026-70894",
+          "CVE-2026-70895",
+          "CVE-2026-70896",
+          "CVE-2026-70897",
+          "CVE-2026-70898",
+          "CVE-2026-70899",
+          "CVE-2026-70900",
+          "CVE-2026-70901",
+          "CVE-2026-70902",
+          "CVE-2026-70903",
+          "CVE-2026-70904",
+          "CVE-2026-70905",
+          "CVE-2026-70906",
+          "CVE-2026-70907",
+          "CVE-2026-70908",
+          "CVE-2026-70909",
+          "CVE-2026-70910",
+          "CVE-2026-70911",
+          "CVE-2026-70912",
+          "CVE-2026-70914",
+          "CVE-2026-70916",
+          "CVE-2026-70917",
+          "CVE-2026-70918",
+          "CVE-2026-70919",
+          "CVE-2026-70920",
+          "CVE-2026-70921",
+          "CVE-2026-70922",
+          "CVE-2026-70923",
+          "CVE-2026-70924",
+          "CVE-2026-70925",
+          "CVE-2026-70926",
+          "CVE-2026-70927",
+          "CVE-2026-70928",
+          "CVE-2026-70929",
+          "CVE-2026-70930",
+          "CVE-2026-70931",
+          "CVE-2026-70932",
+          "CVE-2026-70933",
+          "CVE-2026-70934",
+          "CVE-2026-70935",
+          "CVE-2026-70936",
+          "CVE-2026-70937",
+          "CVE-2026-70938",
+          "CVE-2026-70939",
+          "CVE-2026-70940",
+          "CVE-2026-70941",
+          "CVE-2026-70942",
+          "CVE-2026-70943",
+          "CVE-2026-70944",
+          "CVE-2026-70945",
+          "CVE-2026-70946",
+          "CVE-2026-70947",
+          "CVE-2026-70948",
+          "CVE-2026-70949",
+          "CVE-2026-70950",
+          "CVE-2026-70951",
+          "CVE-2026-70952",
+          "CVE-2026-70953",
+          "CVE-2026-70954",
+          "CVE-2026-70955",
+          "CVE-2026-70956",
+          "CVE-2026-70957",
+          "CVE-2026-70958",
+          "CVE-2026-70959",
+          "CVE-2026-70960",
+          "CVE-2026-70961",
+          "CVE-2026-70962",
+          "CVE-2026-70963",
+          "CVE-2026-70964",
+          "CVE-2026-70965",
+          "CVE-2026-70966",
+          "CVE-2026-70967",
+          "CVE-2026-70968",
+          "CVE-2026-70969",
+          "CVE-2026-70970",
+          "CVE-2026-70971",
+          "CVE-2026-70972",
+          "CVE-2026-70973",
+          "CVE-2026-70974",
+          "CVE-2026-70975",
+          "CVE-2026-70976",
+          "CVE-2026-70977",
+          "CVE-2026-70978",
+          "CVE-2026-70979",
+          "CVE-2026-70980",
+          "CVE-2026-70981",
+          "CVE-2026-70982",
+          "CVE-2026-70983",
+          "CVE-2026-70984",
+          "CVE-2026-70985",
+          "CVE-2026-70986",
+          "CVE-2026-70987",
+          "CVE-2026-70988",
+          "CVE-2026-70989",
+          "CVE-2026-70990",
+          "CVE-2026-70991",
+          "CVE-2026-70992",
+          "CVE-2026-70993",
+          "CVE-2026-70994",
+          "CVE-2026-70995",
+          "CVE-2026-70996",
+          "CVE-2026-70997",
+          "CVE-2026-70998",
+          "CVE-2026-70999",
+          "CVE-2026-71000",
+          "CVE-2026-71001",
+          "CVE-2026-71002",
+          "CVE-2026-71003",
+          "CVE-2026-71004",
+          "CVE-2026-71005",
+          "CVE-2026-71006",
+          "CVE-2026-71007",
+          "CVE-2026-71008",
+          "CVE-2026-71009",
+          "CVE-2026-71010",
+          "CVE-2026-71011",
+          "CVE-2026-71012",
+          "CVE-2026-71013",
+          "CVE-2026-71014",
+          "CVE-2026-71015",
+          "CVE-2026-71016",
+          "CVE-2026-71017",
+          "CVE-2026-71018",
+          "CVE-2026-71019",
+          "CVE-2026-71020",
+          "CVE-2026-71021",
+          "CVE-2026-71022",
+          "CVE-2026-71023",
+          "CVE-2026-71024",
+          "CVE-2026-71025",
+          "CVE-2026-71026",
+          "CVE-2026-71027",
+          "CVE-2026-71028",
+          "CVE-2026-71029",
+          "CVE-2026-71030",
+          "CVE-2026-71031",
+          "CVE-2026-71032",
+          "CVE-2026-71033",
+          "CVE-2026-71034",
+          "CVE-2026-71035",
+          "CVE-2026-71036",
+          "CVE-2026-71037",
+          "CVE-2026-71038",
+          "CVE-2026-71039",
+          "CVE-2026-71040",
+          "CVE-2026-71041",
+          "CVE-2026-71042",
+          "CVE-2026-71043",
+          "CVE-2026-71044",
+          "CVE-2026-71045",
+          "CVE-2026-71046",
+          "CVE-2026-71048",
+          "CVE-2026-71049",
+          "CVE-2026-71050",
+          "CVE-2026-71051",
+          "CVE-2026-71052",
+          "CVE-2026-71053",
+          "CVE-2026-71055",
+          "CVE-2026-71056",
+          "CVE-2026-71057",
+          "CVE-2026-71058",
+          "CVE-2026-71059",
+          "CVE-2026-71060",
+          "CVE-2026-71061",
+          "CVE-2026-71062",
+          "CVE-2026-71063",
+          "CVE-2026-71064",
+          "CVE-2026-71065",
+          "CVE-2026-71066",
+          "CVE-2026-71067",
+          "CVE-2026-71068",
+          "CVE-2026-71069",
+          "CVE-2026-71070",
+          "CVE-2026-71071",
+          "CVE-2026-71072",
+          "CVE-2026-71073",
+          "CVE-2026-71074",
+          "CVE-2026-71075",
+          "CVE-2026-71076",
+          "CVE-2026-71077",
+          "CVE-2026-71078",
+          "CVE-2026-71079",
+          "CVE-2026-71080",
+          "CVE-2026-71081",
+          "CVE-2026-71082",
+          "CVE-2026-71083",
+          "CVE-2026-71084",
+          "CVE-2026-71085",
+          "CVE-2026-71087",
+          "CVE-2026-71088",
+          "CVE-2026-71089",
+          "CVE-2026-71090",
+          "CVE-2026-71091",
+          "CVE-2026-71092",
+          "CVE-2026-71094",
+          "CVE-2026-71095",
+          "CVE-2026-71096",
+          "CVE-2026-71097",
+          "CVE-2026-71098",
+          "CVE-2026-71099",
+          "CVE-2026-71100",
+          "CVE-2026-71101",
+          "CVE-2026-71102",
+          "CVE-2026-71103",
+          "CVE-2026-71104",
+          "CVE-2026-71105",
+          "CVE-2026-71106",
+          "CVE-2026-71107",
+          "CVE-2026-71108",
+          "CVE-2026-71109",
+          "CVE-2026-71110",
+          "CVE-2026-71111",
+          "CVE-2026-71112",
+          "CVE-2026-71113",
+          "CVE-2026-71114",
+          "CVE-2026-71115",
+          "CVE-2026-71116",
+          "CVE-2026-71117",
+          "CVE-2026-71118",
+          "CVE-2026-71119",
+          "CVE-2026-71120",
+          "CVE-2026-71121",
+          "CVE-2026-71122",
+          "CVE-2026-71123",
+          "CVE-2026-71124",
+          "CVE-2026-71125",
+          "CVE-2026-71126",
+          "CVE-2026-71127",
+          "CVE-2026-71128",
+          "CVE-2026-71129",
+          "CVE-2026-71130",
+          "CVE-2026-71131",
+          "CVE-2026-71132",
+          "CVE-2026-71134",
+          "CVE-2026-71135",
+          "CVE-2026-71136",
+          "CVE-2026-71137",
+          "CVE-2026-71138",
+          "CVE-2026-71139",
+          "CVE-2026-71140",
+          "CVE-2026-71141",
+          "CVE-2026-71142",
+          "CVE-2026-71143",
+          "CVE-2026-71144",
+          "CVE-2026-71145",
+          "CVE-2026-71146",
+          "CVE-2026-71147",
+          "CVE-2026-71148",
+          "CVE-2026-71149",
+          "CVE-2026-71150",
+          "CVE-2026-71151",
+          "CVE-2026-71152",
+          "CVE-2026-71153",
+          "CVE-2026-71154",
+          "CVE-2026-71155",
+          "CVE-2026-71156",
+          "CVE-2026-71157",
+          "CVE-2026-71158",
+          "CVE-2026-71159",
+          "CVE-2026-71160",
+          "CVE-2026-71161",
+          "CVE-2026-71162",
+          "CVE-2026-71164",
+          "CVE-2026-71165",
+          "CVE-2026-71166",
+          "CVE-2026-71167",
+          "CVE-2026-71300",
+          "CVE-2026-73570",
+          "CVE-2026-73865",
+          "CVE-2026-73866",
+          "CVE-2026-73867",
+          "CVE-2026-73868",
+          "CVE-2026-73869",
+          "CVE-2026-73870",
+          "CVE-2026-73871",
+          "CVE-2026-73872",
+          "CVE-2026-73873",
+          "CVE-2026-73874",
+          "CVE-2026-73875",
+          "CVE-2026-73876",
+          "CVE-2026-73877",
+          "CVE-2026-73878",
+          "CVE-2026-73879",
+          "CVE-2026-73880",
+          "CVE-2026-73881",
+          "CVE-2026-73882",
+          "CVE-2026-73883",
+          "CVE-2026-73884",
+          "CVE-2026-73885",
+          "CVE-2026-73886",
+          "CVE-2026-73887",
+          "CVE-2026-73888",
+          "CVE-2026-73889",
+          "CVE-2026-73890",
+          "CVE-2026-73891",
+          "CVE-2026-73892",
+          "CVE-2026-73893",
+          "CVE-2026-73894",
+          "CVE-2026-73895",
+          "CVE-2026-73896",
+          "CVE-2026-73897",
+          "CVE-2026-73898",
+          "CVE-2026-73899",
+          "CVE-2026-73900",
+          "CVE-2026-73901",
+          "CVE-2026-73902",
+          "CVE-2026-73903",
+          "CVE-2026-73904",
+          "CVE-2026-73905",
+          "CVE-2026-73906",
+          "CVE-2026-73907",
+          "CVE-2026-73908",
+          "CVE-2026-73909",
+          "CVE-2026-73910",
+          "CVE-2026-73911",
+          "CVE-2026-73912",
+          "CVE-2026-73913",
+          "CVE-2026-73914",
+          "CVE-2026-73915",
+          "CVE-2026-73916",
+          "CVE-2026-73917",
+          "CVE-2026-73918",
+          "CVE-2026-73919",
+          "CVE-2026-73920",
+          "CVE-2026-73921",
+          "CVE-2026-73922",
+          "CVE-2026-73923",
+          "CVE-2026-73924",
+          "CVE-2026-73925",
+          "CVE-2026-73927",
+          "CVE-2026-73928",
+          "CVE-2026-73929",
+          "CVE-2026-73930",
+          "CVE-2026-73931",
+          "CVE-2026-73932",
+          "CVE-2026-73933",
+          "CVE-2026-73934",
+          "CVE-2026-73935",
+          "CVE-2026-73936",
+          "CVE-2026-73937",
+          "CVE-2026-73938",
+          "CVE-2026-73939",
+          "CVE-2026-73973",
+          "CVE-2026-73974",
+          "CVE-2026-74793",
+          "CVE-2026-75099",
+          "CVE-2026-75369",
+          "CVE-2026-75509",
+          "CVE-2026-75922",
+          "CVE-2026-75976",
+          "CVE-2026-75978",
+          "CVE-2026-75979",
+          "CVE-2026-75984",
+          "CVE-2026-75985",
+          "CVE-2026-75986",
+          "CVE-2026-75987",
+          "CVE-2026-76003",
+          "CVE-2026-76004",
+          "CVE-2026-76008",
+          "CVE-2026-76014",
+          "CVE-2026-76033",
+          "CVE-2026-76034",
+          "CVE-2026-76035",
+          "CVE-2026-76036",
+          "CVE-2026-76037",
+          "CVE-2026-76038",
+          "CVE-2026-76039",
+          "CVE-2026-76040",
+          "CVE-2026-76041",
+          "CVE-2026-76042",
+          "CVE-2026-76043",
+          "CVE-2026-76044",
+          "CVE-2026-76045",
+          "CVE-2026-76046",
+          "CVE-2026-76047",
+          "CVE-2026-76048",
+          "CVE-2026-76049",
+          "CVE-2026-76050",
+          "CVE-2026-76098",
+          "CVE-2026-76816",
+          "CVE-2026-76846",
+          "CVE-2026-77088",
+          "CVE-2026-77310",
+          "CVE-2026-77923",
+          "CVE-2026-77993",
+          "CVE-2026-77994",
+          "CVE-2026-7808",
+          "CVE-2026-78140",
+          "CVE-2026-78183",
+          "CVE-2026-78199",
+          "CVE-2026-78200",
+          "CVE-2026-78201",
+          "CVE-2026-78202",
+          "CVE-2026-78247",
+          "CVE-2026-78251",
+          "CVE-2026-78255",
+          "CVE-2026-78277",
+          "CVE-2026-78278",
+          "CVE-2026-78279",
+          "CVE-2026-78280",
+          "CVE-2026-78290",
+          "CVE-2026-78291",
+          "CVE-2026-78306",
+          "CVE-2026-78322",
+          "CVE-2026-78323",
+          "CVE-2026-78329",
+          "CVE-2026-78331",
+          "CVE-2026-78332",
+          "CVE-2026-78365",
+          "CVE-2026-78430",
+          "CVE-2026-78466",
+          "CVE-2026-78467",
+          "CVE-2026-78470",
+          "CVE-2026-78477",
+          "CVE-2026-78478",
+          "CVE-2026-78551",
+          "CVE-2026-78553",
+          "CVE-2026-78555",
+          "CVE-2026-78562",
+          "CVE-2026-78563",
+          "CVE-2026-78566",
+          "CVE-2026-78568",
+          "CVE-2026-78637",
+          "CVE-2026-78638",
+          "CVE-2026-78675",
+          "CVE-2026-78676",
+          "CVE-2026-78677",
+          "CVE-2026-78678",
+          "CVE-2026-78679",
+          "CVE-2026-78680",
+          "CVE-2026-78681",
+          "CVE-2026-78682",
+          "CVE-2026-78683",
+          "CVE-2026-78701",
+          "CVE-2026-8173",
+          "CVE-2026-8445",
+          "CVE-2026-8630",
+          "CVE-2026-9769"
+        ]
+      },
+      "severity": "CRITICAL",
+      "confidence": 95.0,
+      "kill_chain_phases": [],
+      "first_seen": "2026-08-18T21:17:02.083",
+      "last_seen": "2026-08-25T10:03:28Z",
+      "related_advisories": [
+        "indicator--6076dd529a608240b3b56a66abd5a315",
+        "indicator--33dd175eda4747e92d1aa512821aa2e2",
+        "indicator--40bc14b273a8a2852c752c2ca5927abb",
+        "indicator--c0b86a4520d00238d273079ab012cb86",
+        "indicator--158e1ecf1b401397b0c86e30c41e3825",
+        "indicator--7c9cea70a10a45e9e77bf9a77b89321f",
+        "indicator--4582b7d24cf1145735596677c4f41a32",
+        "indicator--20acf66de0c03b58fe3e2b3d08a374fd",
+        "indicator--272001056bac2145be4bfb3fdceff5cf",
+        "indicator--aed9610c98806b4aec8d1fdcd0979f04"
       ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
+      "geo_targets": [],
+      "sectors": [
+        "Healthcare",
+        "Financial Services",
+        "Government",
+        "Energy"
+      ]
     },
     {
-      "campaign_id": "CAMP-FB58CABB",
-      "campaign_name": "TURLA_(SNAKE_/_VENOMOUS_BEAR)",
-      "name": "Turla (Snake / Venomous Bear)",
+      "campaign_id": "campaign--f1c9e70b8d8a",
+      "name": "Coordinated Exploitation: CVE-2026-10053",
       "actors": [
-        "Turla (Snake / Venomous Bear)"
+        "UNC-CDB-INGEST"
       ],
-      "threat_actor": "Turla (Snake / Venomous Bear)",
-      "incidents": 8,
-      "avg_risk_score": 4.5,
-      "techniques": [
-        "T1059",
-        "T1190",
-        "T1566",
-        "T1041",
-        "T1078",
-        "T1083",
-        "T1555"
+      "techniques": [],
+      "iocs": {
+        "cve": [
+          "CVE-2026-10053"
+        ]
+      },
+      "severity": "HIGH",
+      "confidence": 50,
+      "kill_chain_phases": [
+        "Exploitation"
       ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
+      "first_seen": "",
+      "last_seen": "",
+      "related_advisories": [
+        "Exploit for CVE-2026-10053",
+        "CVE-2026-10053 - Improper Limitation of a Pathname to a Restricted Directory ('P"
+      ],
+      "geo_targets": [],
+      "sectors": []
     },
     {
-      "campaign_id": "CAMP-7152C326",
-      "campaign_name": "LAZARUS_GROUP",
-      "name": "Lazarus Group",
+      "campaign_id": "campaign--eb72ccd8321e",
+      "name": "Coordinated Exploitation: CVE-2026-9769",
       "actors": [
-        "Lazarus Group"
+        "UNC-CDB-INGEST"
       ],
-      "threat_actor": "Lazarus Group",
-      "incidents": 4,
-      "avg_risk_score": 5.5,
-      "techniques": [
-        "T1190",
-        "T1566",
-        "T1203",
-        "T1027",
-        "T1486"
+      "techniques": [],
+      "iocs": {
+        "cve": [
+          "CVE-2026-9769"
+        ],
+        "url": [
+          "[1 indicators]"
+        ]
+      },
+      "severity": "HIGH",
+      "confidence": 50,
+      "kill_chain_phases": [
+        "Exploitation"
       ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
+      "first_seen": "",
+      "last_seen": "",
+      "related_advisories": [
+        "CVE-2026-9769 - justhtml before 1.10.0 Denial of Service via deeply nested HTML",
+        "CVE-2026-9769 - justhtml before 1.10.0 Denial of Service via deeply nested HTML"
+      ],
+      "geo_targets": [],
+      "sectors": []
     },
     {
-      "campaign_id": "CAMP-C4139B17",
-      "campaign_name": "APT41_(DOUBLE_DRAGON)",
-      "name": "APT41 (Double Dragon)",
+      "campaign_id": "campaign--d1d10387c985",
+      "name": "Coordinated Exploitation: CVE-2026-8445",
       "actors": [
-        "APT41 (Double Dragon)"
+        "UNC-CDB-INGEST"
       ],
-      "threat_actor": "APT41 (Double Dragon)",
-      "incidents": 3,
-      "avg_risk_score": 4.4,
-      "techniques": [
-        "T1059",
-        "T1190"
+      "techniques": [],
+      "iocs": {
+        "cve": [
+          "CVE-2026-8445"
+        ],
+        "url": [
+          "[1 indicators]"
+        ]
+      },
+      "severity": "HIGH",
+      "confidence": 50,
+      "kill_chain_phases": [
+        "Exploitation"
       ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
+      "first_seen": "",
+      "last_seen": "",
+      "related_advisories": [
+        "CVE-2026-8445 - justhtml before 1.12.0 Sanitizer Bypass via Markdown",
+        "CVE-2026-8445 - justhtml before 1.12.0 Sanitizer Bypass via Markdown"
+      ],
+      "geo_targets": [],
+      "sectors": []
     },
     {
-      "campaign_id": "CAMP-677AB231",
-      "campaign_name": "CDB-APT-43",
-      "name": "CDB-APT-43",
+      "campaign_id": "campaign--50d3cfb012bd",
+      "name": "Coordinated Exploitation: CVE-2026-7808",
       "actors": [
-        "CDB-APT-43"
+        "UNC-CDB-INGEST"
       ],
-      "threat_actor": "CDB-APT-43",
-      "incidents": 2,
-      "avg_risk_score": 7.0,
-      "techniques": [
-        "T1059",
-        "T1190",
-        "T1203",
-        "T1566"
+      "techniques": [],
+      "iocs": {
+        "cve": [
+          "CVE-2026-7808"
+        ],
+        "url": [
+          "[1 indicators]"
+        ]
+      },
+      "severity": "HIGH",
+      "confidence": 50,
+      "kill_chain_phases": [
+        "Exploitation"
       ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
+      "first_seen": "",
+      "last_seen": "",
+      "related_advisories": [
+        "CVE-2026-7808 - justhtml before 1.16.0 Multiple Security Issues via Sanitization",
+        "CVE-2026-7808 - justhtml before 1.16.0 Multiple Security Issues via Sanitization"
+      ],
+      "geo_targets": [],
+      "sectors": []
     },
     {
-      "campaign_id": "CAMP-67C43AD5",
-      "campaign_name": "CDB-RAN-01",
-      "name": "CDB-RAN-01",
+      "campaign_id": "campaign--6045918d739a",
+      "name": "Coordinated Exploitation: CVE-2026-5388",
       "actors": [
-        "CDB-RAN-01"
+        "UNC-CDB-INGEST"
       ],
-      "threat_actor": "CDB-RAN-01",
-      "incidents": 2,
-      "avg_risk_score": 1.6,
-      "techniques": [
-        "T1059",
-        "T1190",
-        "T1548",
-        "T1566",
-        "T1203"
+      "techniques": [],
+      "iocs": {
+        "cve": [
+          "CVE-2026-5388"
+        ],
+        "url": [
+          "[1 indicators]"
+        ]
+      },
+      "severity": "HIGH",
+      "confidence": 50,
+      "kill_chain_phases": [
+        "Exploitation"
       ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
-    },
-    {
-      "campaign_id": "CAMP-D87AE23F",
-      "campaign_name": "CDB-MOB-01",
-      "name": "CDB-MOB-01",
-      "actors": [
-        "CDB-MOB-01"
+      "first_seen": "",
+      "last_seen": "",
+      "related_advisories": [
+        "CVE-2026-5388 - justhtml before 1.15.0 Multiple Security Issues",
+        "CVE-2026-5388 - justhtml before 1.15.0 Multiple Security Issues"
       ],
-      "threat_actor": "CDB-MOB-01",
-      "incidents": 2,
-      "avg_risk_score": 3.3,
-      "techniques": [
-        "T1059",
-        "T1476",
-        "T1071",
-        "T1542",
-        "T1203"
-      ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
-    },
-    {
-      "campaign_id": "CAMP-F51A01C2",
-      "campaign_name": "CDB-APT-28",
-      "name": "CDB-APT-28",
-      "actors": [
-        "CDB-APT-28"
-      ],
-      "threat_actor": "CDB-APT-28",
-      "incidents": 1,
-      "avg_risk_score": 8.5,
-      "techniques": [
-        "T1059",
-        "T1190",
-        "T1566"
-      ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
-    },
-    {
-      "campaign_id": "CAMP-0AB009AF",
-      "campaign_name": "AKIRA_RANSOMWARE_GROUP",
-      "name": "Akira Ransomware Group",
-      "actors": [
-        "Akira Ransomware Group"
-      ],
-      "threat_actor": "Akira Ransomware Group",
-      "incidents": 1,
-      "avg_risk_score": 8.5,
-      "techniques": [
-        "T1486"
-      ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
-    },
-    {
-      "campaign_id": "CAMP-FF22990F",
-      "campaign_name": "APT33_(CHARMING_KITTEN_/_REFINED_KITTEN)",
-      "name": "APT33 (Charming Kitten / Refined Kitten)",
-      "actors": [
-        "APT33 (Charming Kitten / Refined Kitten)"
-      ],
-      "threat_actor": "APT33 (Charming Kitten / Refined Kitten)",
-      "incidents": 1,
-      "avg_risk_score": 7.0,
-      "techniques": [
-        "T1566"
-      ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
-    },
-    {
-      "campaign_id": "CAMP-38BA52E0",
-      "campaign_name": "CDB-HACK-01",
-      "name": "CDB-HACK-01",
-      "actors": [
-        "CDB-HACK-01"
-      ],
-      "threat_actor": "CDB-HACK-01",
-      "incidents": 1,
-      "avg_risk_score": 2.6,
-      "techniques": [
-        "T1059",
-        "T1190",
-        "T1203",
-        "T1566"
-      ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
-    },
-    {
-      "campaign_id": "CAMP-AA58FFBA",
-      "campaign_name": "CDB-SUP-01",
-      "name": "CDB-SUP-01",
-      "actors": [
-        "CDB-SUP-01"
-      ],
-      "threat_actor": "CDB-SUP-01",
-      "incidents": 1,
-      "avg_risk_score": 5.0,
-      "techniques": [
-        "T1195"
-      ],
-      "status": "ACTIVE",
-      "last_seen": "2026-08-25T09:13:40.280627+00:00"
+      "geo_targets": [],
+      "sectors": []
     }
   ],
-  "attack_chains": [
-    {
-      "chain_id": "CHAIN-FE55C338",
-      "title": "Zimbra Collaboration Suite Vulnerability Actively Exploited ",
-      "techniques": [
-        "T1190",
-        "T1059"
-      ],
-      "steps": [
-        "T1190",
-        "T1059"
-      ],
-      "severity": "CRITICAL",
-      "actor": "UNK"
+  "attack_chains": [],
+  "exposure": {
+    "overall_score": 4.7,
+    "component_scores": {
+      "threat_velocity": 10,
+      "critical_density": 10,
+      "kev_exposure": 0.34,
+      "epss_pressure": 0.35,
+      "actor_diversity": 0.8,
+      "supply_chain_risk": 0
     },
-    {
-      "chain_id": "CHAIN-D4E10DD3",
-      "title": "Exploit for OS Command Injection in Synacor Zimbra_Collabora",
-      "techniques": [
-        "T1190",
-        "T1059"
-      ],
-      "steps": [
-        "T1190",
-        "T1059"
-      ],
-      "severity": "CRITICAL",
-      "actor": "UNK"
-    },
-    {
-      "chain_id": "CHAIN-E6DCE99C",
-      "title": "Exploit for Heap-based Buffer Overflow in Microsoft",
-      "techniques": [
-        "T1190"
-      ],
-      "steps": [
-        "T1190"
-      ],
-      "severity": "CRITICAL",
-      "actor": "UNK"
-    },
-    {
-      "chain_id": "CHAIN-3816C5B6",
-      "title": "Exploit for Code Injection in Langflow",
-      "techniques": [
-        "T1055",
-        "T1190",
-        "T1059"
-      ],
-      "steps": [
-        "T1055",
-        "T1190",
-        "T1059"
-      ],
-      "severity": "CRITICAL",
-      "actor": "UNK"
-    },
-    {
-      "chain_id": "CHAIN-D57620EE",
-      "title": "Exploit for Authentication Bypass Using an Alternate Path or",
-      "techniques": [
-        "T1078",
-        "T1190"
-      ],
-      "steps": [
-        "T1078",
-        "T1190"
-      ],
-      "severity": "CRITICAL",
-      "actor": "UNK"
-    },
-    {
-      "chain_id": "CHAIN-DF3C689E",
-      "title": "Exploit for Classic Buffer Overflow in Cisco Adaptive_Securi",
-      "techniques": [
-        "T1190"
-      ],
-      "steps": [
-        "T1190"
-      ],
-      "severity": "CRITICAL",
-      "actor": "UNK"
-    }
-  ],
-  "pir_coverage": {
-    "coverage_pct": 88,
-    "pirs": [
+    "trend": "increasing",
+    "forecast_7d": 6.11,
+    "forecast_30d": 7.52,
+    "top_risks": [
       {
-        "requirement": "Ransomware",
-        "status": "COVERED",
-        "priority": "HIGH"
+        "title": "CVE-2026-76008: A flaw has been found in Comfast CF-N1-S 2.6.0.1. This affects t",
+        "risk_score": 10.0,
+        "kev": false,
+        "actor": "UNC-CDB-INGEST"
       },
       {
-        "requirement": "APT",
-        "status": "COVERED",
-        "priority": "MEDIUM"
+        "title": "CVE-2026-70921: Vulnerability in the Oracle Hyperion Financial Management produc",
+        "risk_score": 10.0,
+        "kev": false,
+        "actor": "UNC-CDB-INGEST"
       },
       {
-        "requirement": "Zero-Days",
-        "status": "GAP",
-        "priority": "HIGH"
+        "title": "CVE-2026-70880: Vulnerability in the Oracle Hyperion Data Relationship Managemen",
+        "risk_score": 10.0,
+        "kev": false,
+        "actor": "UNC-CDB-INGEST"
       },
       {
-        "requirement": "Cloud Threats",
-        "status": "COVERED",
-        "priority": "MEDIUM"
+        "title": "CVE-2026-76004: A security vulnerability has been detected in UTT HiPER 1250GW u",
+        "risk_score": 9.9,
+        "kev": false,
+        "actor": "UNC-CDB-INGEST"
       },
       {
-        "requirement": "Supply Chain",
-        "status": "COVERED",
-        "priority": "HIGH"
-      },
-      {
-        "requirement": "IAB/Creds",
-        "status": "COVERED",
-        "priority": "MEDIUM"
-      },
-      {
-        "requirement": "Cloud",
-        "status": "COVERED",
-        "priority": "MEDIUM"
-      },
-      {
-        "requirement": "Exploits",
-        "status": "COVERED",
-        "priority": "MEDIUM"
+        "title": "CVE-2026-76003: A weakness has been identified in UTT HiPER 1200GW up to 2.5.3-1",
+        "risk_score": 9.9,
+        "kev": false,
+        "actor": "UNC-CDB-INGEST"
       }
-    ]
+    ],
+    "generated_at": "2026-08-25T13:12:24.718949+00:00"
   },
   "detection_pack": {
-    "total_rules": 124,
-    "sigma_rules": 62,
-    "yara_rules": 31,
-    "suricata_rules": 31
+    "sigma_rules": [
+      {
+        "title": "CDB Sentinel APEX - CVE202678701__389dsbase_389dsbase_cve202611610_incomplete_fi",
+        "id": "sigma--8a43e6d401dd",
+        "status": "experimental",
+        "description": "Detects activity related to CVE-2026-78701 - 389-ds-base: 389-ds-base: cve-2026-11610 incomplete fix may introduce a connection-",
+        "references": [
+          "https://intel.cyberdudebivash.com"
+        ],
+        "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+        "date": "2026/08/25",
+        "tags": [
+          "cve.cve-2026-78701",
+          "cve.cve-2026-11610"
+        ],
+        "logsource": {
+          "category": "process_creation",
+          "product": "windows"
+        },
+        "detection": {
+          "selection": {
+            "CommandLine|contains": [
+              "suspicious"
+            ]
+          },
+          "condition": "selection"
+        },
+        "level": "medium",
+        "falsepositives": [
+          "Legitimate administrative activity"
+        ]
+      },
+      {
+        "title": "CDB Sentinel APEX - CVE202678322__Fileroller_fileroller_stack_buffer_overflow_in",
+        "id": "sigma--0d2cc889fc0b",
+        "status": "experimental",
+        "description": "Detects activity related to CVE-2026-78322 - File-roller: file-roller: stack buffer overflow in parse_progress_line for 7z and r",
+        "references": [
+          "https://intel.cyberdudebivash.com"
+        ],
+        "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+        "date": "2026/08/25",
+        "tags": [
+          "cve.cve-2026-78322"
+        ],
+        "logsource": {
+          "category": "process_creation",
+          "product": "windows"
+        },
+        "detection": {
+          "selection": {
+            "CommandLine|contains": [
+              "suspicious"
+            ]
+          },
+          "condition": "selection"
+        },
+        "level": "medium",
+        "falsepositives": [
+          "Legitimate administrative activity"
+        ]
+      },
+      {
+        "title": "CDB Sentinel APEX - CVE202667578__FA50_Authentication_Bypass_Vulnerability",
+        "id": "sigma--597a52a15d4c",
+        "status": "experimental",
+        "description": "Detects activity related to CVE-2026-67578 - FA-50 Authentication Bypass Vulnerability",
+        "references": [
+          "https://intel.cyberdudebivash.com"
+        ],
+        "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+        "date": "2026/08/25",
+        "tags": [
+          "cve.cve-2026-67578"
+        ],
+        "logsource": {
+          "category": "process_creation",
+          "product": "windows"
+        },
+        "detection": {
+          "selection": {
+            "CommandLine|contains": [
+              "suspicious"
+            ]
+          },
+          "condition": "selection"
+        },
+        "level": "medium",
+        "falsepositives": [
+          "Legitimate administrative activity"
+        ]
+      },
+      {
+        "title": "CDB Sentinel APEX - CVE202665633__Purposelimited_JWT_accepted_as_full_bearer_aut",
+        "id": "sigma--b6a7ef695336",
+        "status": "experimental",
+        "description": "Detects activity related to CVE-2026-65633 - Purpose-limited JWT accepted as full bearer authentication in AshAuthentication",
+        "references": [
+          "https://intel.cyberdudebivash.com"
+        ],
+        "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+        "date": "2026/08/25",
+        "tags": [
+          "cve.cve-2026-65633"
+        ],
+        "logsource": {
+          "category": "process_creation",
+          "product": "windows"
+        },
+        "detection": {
+          "selection": {
+            "CommandLine|contains": [
+              "suspicious"
+            ]
+          },
+          "condition": "selection"
+        },
+        "level": "medium",
+        "falsepositives": [
+          "Legitimate administrative activity"
+        ]
+      },
+      {
+        "title": "CDB Sentinel APEX - CVE202678638__peerigon_unzipcrxunzipcrx3_Archive_Extraction",
+        "id": "sigma--aa21a4b3235e",
+        "status": "experimental",
+        "description": "Detects activity related to CVE-2026-78638 - peerigon unzip-crx/unzip-crx-3 Archive Extraction index.js unzip path traversal",
+        "references": [
+          "https://intel.cyberdudebivash.com"
+        ],
+        "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+        "date": "2026/08/25",
+        "tags": [
+          "cve.cve-2026-78638"
+        ],
+        "logsource": {
+          "category": "process_creation",
+          "product": "windows"
+        },
+        "detection": {
+          "selection": {
+            "CommandLine|contains": [
+              "suspicious"
+            ]
+          },
+          "condition": "selection"
+        },
+        "level": "medium",
+        "falsepositives": [
+          "Legitimate administrative activity"
+        ]
+      },
+      {
+        "title": "CDB Sentinel APEX - Exploit_for_CVE202616348",
+        "id": "sigma--6d1773e7f78a",
+        "status": "experimental",
+        "description": "Detects activity related to Exploit for CVE-2026-16348",
+        "references": [
+          "https://intel.cyberdudebivash.com"
+        ],
+        "author": "CyberDudeBivash GOC - Sentinel APEX v39.0",
+        "date": "2026/08/25",
+        "tags": [
+          "cve.cve-2026-16348"
+        ],
+        "logsource": {
+          "category": "process_creation",
+          "product": "windows"
+        },
+        "detection": {
+          "selection": {
+            "CommandLine|contains": [
+              "suspicious"
+            ]
+          },
+          "condition": "selection"
+        },
+        "level": "medium",
+        "falsepositives": [
+          "Legitimate administrative activity"
+        ]
+      }
+    ],
+    "yara_rules": [
+      {
+        "rule_name": "CDB_Silent_Patches_Dont_Stop_AttackersThey_B",
+        "rule_text": "rule CDB_Silent_Patches_Dont_Stop_AttackersThey_B {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Silent Patches Don\u2019t Stop Attackers\u2014They Blind Defenders\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_CISA_Warns_of_Oracle_HTTP_and_WebLogic_S",
+        "rule_text": "rule CDB_CISA_Warns_of_Oracle_HTTP_and_WebLogic_S {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CISA Warns of Oracle HTTP and WebLogic Server Vulnerability Exploited in Attacks\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"WebLogic\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_Hackers_Exploit_Critical_miniOrange_SAML",
+        "rule_text": "rule CDB_Hackers_Exploit_Critical_miniOrange_SAML {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Hackers Exploit Critical miniOrange SAML SSO Flaws to Hijack WordPress Admin Acc\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"WordPress\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_Critical_Red_Hat_Keycloak_Flaw_Lets_Unau",
+        "rule_text": "rule CDB_Critical_Red_Hat_Keycloak_Flaw_Lets_Unau {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Critical Red Hat Keycloak Flaw Lets Unauthenticated Attackers Take Over Any User\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_US_CISA_adds_maximumseverity_Oracle_flaw",
+        "rule_text": "rule CDB_US_CISA_adds_maximumseverity_Oracle_flaw {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for U.S. CISA adds maximum-severity Oracle flaw to its Known Exploited Vulnerabiliti\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_Attackers_Target_miniOrange_SAML_Flaws_T",
+        "rule_text": "rule CDB_Attackers_Target_miniOrange_SAML_Flaws_T {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Attackers Target miniOrange SAML Flaws That Can Grant WordPress Admin Access\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"WordPress\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_CVE202678701__389dsbase_389dsbase_cve202",
+        "rule_text": "rule CDB_CVE202678701__389dsbase_389dsbase_cve202 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-78701 - 389-ds-base: 389-ds-base: cve-2026-11610 incomplete fix may int\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $cve0 = \"CVE-2026-78701\" ascii wide nocase\n        $cve1 = \"cve-2026-11610\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_CVE202678322__Fileroller_fileroller_stac",
+        "rule_text": "rule CDB_CVE202678322__Fileroller_fileroller_stac {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-78322 - File-roller: file-roller: stack buffer overflow in parse_progre\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $cve0 = \"CVE-2026-78322\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_CVE202667578__FA50_Authentication_Bypass",
+        "rule_text": "rule CDB_CVE202667578__FA50_Authentication_Bypass {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-67578 - FA-50 Authentication Bypass Vulnerability\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $cve0 = \"CVE-2026-67578\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_CVE202665633__Purposelimited_JWT_accepte",
+        "rule_text": "rule CDB_CVE202665633__Purposelimited_JWT_accepte {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-65633 - Purpose-limited JWT accepted as full bearer authentication in A\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $cve0 = \"CVE-2026-65633\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"AshAuthentication\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_CISA_Warns_of_Exploited_Oracle_WebLogic_",
+        "rule_text": "rule CDB_CISA_Warns_of_Exploited_Oracle_WebLogic_ {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CISA Warns of Exploited Oracle WebLogic Vulnerability\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"WebLogic\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_Exploit_for_OS_Command_Injection_in_Toto",
+        "rule_text": "rule CDB_Exploit_for_OS_Command_Injection_in_Toto {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Exploit for OS Command Injection in Totolink N600R_Firmware\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_Multiple_TPLink_Archer_Vulnerabilities_E",
+        "rule_text": "rule CDB_Multiple_TPLink_Archer_Vulnerabilities_E {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Multiple TP-Link Archer Vulnerabilities Enable Command Injection Attacks\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_Actively_Exploited_Oracle_WebLogic_Flaw_",
+        "rule_text": "rule CDB_Actively_Exploited_Oracle_WebLogic_Flaw_ {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Actively Exploited Oracle WebLogic Flaw Lets Unauthenticated Attackers Access Cr\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"WebLogic\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_AI_supply_chain_risk_is_showing_up_in_de",
+        "rule_text": "rule CDB_AI_supply_chain_risk_is_showing_up_in_de {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for AI supply chain risk is showing up in developer workflows first\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_TruffleHog_AWS_Analyze_reduces_remediati",
+        "rule_text": "rule CDB_TruffleHog_AWS_Analyze_reduces_remediati {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for TruffleHog AWS Analyze reduces remediation time on leaked AWS credentials\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"TruffleHog\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_HOL_Guard_Opensource_antivirus_for_AI_ag",
+        "rule_text": "rule CDB_HOL_Guard_Opensource_antivirus_for_AI_ag {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for HOL Guard: Open-source antivirus for AI agents\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_CVE202678638__peerigon_unzipcrxunzipcrx3",
+        "rule_text": "rule CDB_CVE202678638__peerigon_unzipcrxunzipcrx3 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for CVE-2026-78638 - peerigon unzip-crx/unzip-crx-3 Archive Extraction index.js unzi\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $cve0 = \"CVE-2026-78638\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_The_cybercrime_supply_chain_has_five_sta",
+        "rule_text": "rule CDB_The_cybercrime_supply_chain_has_five_sta {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for The cybercrime supply chain has five stages, each with a price\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_PoCPodsUnauthenticatedPrivilegeEscalatio",
+        "rule_text": "rule CDB_PoCPodsUnauthenticatedPrivilegeEscalatio {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for PoC-Pods-Unauthenticated-Privilege-Escalation exploit\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_Exploit_for_Numeric_Truncation_Error_in_",
+        "rule_text": "rule CDB_Exploit_for_Numeric_Truncation_Error_in_ {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Exploit for Numeric Truncation Error in Fortinet Fortios\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_Cybersecurity_jobs_available_right_now_A",
+        "rule_text": "rule CDB_Cybersecurity_jobs_available_right_now_A {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Cybersecurity jobs available right now: August 25, 2026\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_Exploit_for_CVE202616348",
+        "rule_text": "rule CDB_Exploit_for_CVE202616348 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for Exploit for CVE-2026-16348\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $cve0 = \"CVE-2026-16348\" ascii wide nocase\n        $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_OpenPhish_Phishing_URL_httpopenuptoqyzf0",
+        "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpopenuptoqyzf0 {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://openup.to/qyzf0km4\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_OpenPhish_Phishing_URL_httpsp22ctravelbi",
+        "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpsp22ctravelbi {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://sp22ct-ravel-biz-kazu-pelo-f3p.pages.dev/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_OpenPhish_Phishing_URL_httpwwwsectionlat",
+        "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpwwwsectionlat {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://www.section.lat/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_OpenPhish_Phishing_URL_httpswwwj86bvip",
+        "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpswwwj86bvip {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://www.j86b.vip/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_OpenPhish_Phishing_URL_httpswwwrobloxcom",
+        "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpswwwrobloxcom {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://www.roblox.com.bi/games/120023201334582/-Bubbl\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_OpenPhish_Phishing_URL_httpssnifferipcom",
+        "rule_text": "rule CDB_OpenPhish_Phishing_URL_httpssnifferipcom {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: https://snifferip.com/26gUe\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+      },
+      {
+        "rule_name": "CDB_OpenPhish_Phishing_URL_httponewhatappcom",
+        "rule_text": "rule CDB_OpenPhish_Phishing_URL_httponewhatappcom {\n    meta:\n        author = \"CyberDudeBivash GOC - Sentinel APEX v39.0\"\n        description = \"Detection for [OpenPhish] Phishing URL: http://one-whatapp.com.cn/\"\n        severity = \"high\"\n        date = \"2026-08-25\"\n    strings:\n                $actor = \"UNC-CDB-INGEST\" ascii wide nocase\n        $kw0 = \"OpenPhish\" ascii wide nocase\n    condition:\n        any of them\n}"
+      }
+    ],
+    "snort_rules": [
+      {
+        "rule_name": "CVE202678701__389dsbase_389dsbase_cve202611610_incomplete_fi",
+        "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-78701 - 389-ds-base: 389-ds-base: cve-2026-11610 in\"; content:\"CVE-2026-78701\"; nocase; sid:7456891; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+        "sid": 7456891
+      },
+      {
+        "rule_name": "CVE202678322__Fileroller_fileroller_stack_buffer_overflow_in",
+        "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-78322 - File-roller: file-roller: stack buffer over\"; content:\"CVE-2026-78322\"; nocase; sid:2483831; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+        "sid": 2483831
+      },
+      {
+        "rule_name": "CVE202667578__FA50_Authentication_Bypass_Vulnerability",
+        "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-67578 - FA-50 Authentication Bypass Vulnerability\"; content:\"CVE-2026-67578\"; nocase; sid:6741829; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+        "sid": 6741829
+      },
+      {
+        "rule_name": "CVE202665633__Purposelimited_JWT_accepted_as_full_bearer_aut",
+        "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-65633 - Purpose-limited JWT accepted as full bearer\"; content:\"CVE-2026-65633\"; nocase; sid:7630466; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+        "sid": 7630466
+      },
+      {
+        "rule_name": "CVE202678638__peerigon_unzipcrxunzipcrx3_Archive_Extraction",
+        "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: CVE-2026-78638 - peerigon unzip-crx/unzip-crx-3 Archive Extr\"; content:\"CVE-2026-78638\"; nocase; sid:2273730; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+        "sid": 2273730
+      },
+      {
+        "rule_name": "Exploit_for_CVE202616348",
+        "rule_text": "alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:\"CDB SENTINEL APEX: Exploit for CVE-2026-16348\"; content:\"CVE-2026-16348\"; nocase; sid:1898325; rev:1; classtype:trojan-activity; reference:url,intel.cyberdudebivash.com;)",
+        "sid": 1898325
+      }
+    ],
+    "stats": {
+      "total_rules": 42,
+      "sigma_count": 6,
+      "yara_count": 30,
+      "snort_count": 6,
+      "coverage_techniques": 0,
+      "generated_at": "2026-08-25T13:12:24.750834+00:00"
+    }
   },
   "executive_briefing": {
-    "tlp": "TLP:AMBER",
-    "risk_level": "CRITICAL",
-    "exposure_index": 7.72,
-    "executive_summary": "During the current intelligence cycle, 1139 threat advisories have been processed. 27 are classified CRITICAL and 679 as HIGH risk. 21 advisories involve CISA KEV-confirmed active exploitation. Primary threat actor: LockBit Ransomware Group. Exposure index: 7.72/10 (INCREASING). IMMEDIATE executive attention required.",
-    "key_findings": [
-      "Top critical threat: CVE-2026-21962: Oracle HTTP Server and Oracle Weblogic Server Proxy Plug-in Impr",
-      "21 CISA KEV-confirmed vulnerabilities require immediate patching",
-      "5 active threat hunt hypotheses generated from feed analysis",
-      "Kill chain coverage: 7/9 phases observed",
-      "12 active threat actor campaigns identified via clustering"
+    "briefing_id": "briefing--9949ebb6921d",
+    "classification": "TLP:AMBER",
+    "generated_at": "2026-08-25T13:12:24.780187+00:00",
+    "period": "2026-08-18 to 2026-08-25",
+    "executive_summary": "During the reporting period, the CYBERDUDEBIVASH Sentinel APEX platform processed 1394 threat advisories. Of these, 109 are classified as CRITICAL risk and 847 as HIGH risk. 12 advisories involve vulnerabilities confirmed as actively exploited (CISA KEV). Primary threat actors include UNC-CDB-INGEST. The overall threat posture requires IMMEDIATE executive attention with focus on patch management and detection rule deployment.",
+    "threat_landscape": {
+      "total_advisories": 1394,
+      "risk_distribution": {
+        "critical": 109,
+        "high": 847,
+        "medium": 364,
+        "low": 74
+      },
+      "active_exploitation": 12,
+      "top_threat_actors": [
+        {
+          "actor": "UNC-CDB-INGEST",
+          "activity_count": 1295
+        }
+      ]
+    },
+    "key_recommendations": [
+      {
+        "priority": "P0",
+        "recommendation": "Immediate patching of 109 CRITICAL vulnerabilities",
+        "impact": "Reduces attack surface by eliminating highest-risk exposure vectors",
+        "timeline": "24-48 hours"
+      },
+      {
+        "priority": "P0",
+        "recommendation": "Address 12 CISA KEV-listed vulnerabilities under active exploitation",
+        "impact": "Mitigates confirmed in-the-wild exploitation campaigns",
+        "timeline": "Immediate"
+      },
+      {
+        "priority": "P1",
+        "recommendation": "Deploy auto-generated Sigma/YARA detection rules to SIEM/EDR",
+        "impact": "Provides layered detection coverage for identified TTPs",
+        "timeline": "48-72 hours"
+      },
+      {
+        "priority": "P2",
+        "recommendation": "Conduct threat hunting exercises based on generated hunt hypotheses",
+        "impact": "Proactive identification of undetected compromise indicators",
+        "timeline": "Weekly cadence"
+      }
     ],
-    "recommended_actions": [
-      "Immediately remediate 21 KEV-confirmed vulnerabilities (patch within 24h)",
-      "Monitor LockBit Ransomware Group campaign TTPs — 6 attack chains active",
-      "Deploy detection rules for 7 kill-chain phases"
-    ]
+    "priority_actions": [
+      {
+        "action": "Patch CVE-2026-21962: Oracle HTTP Server and Oracle Weblogic Serve",
+        "risk_score": 9.5,
+        "kev": true
+      },
+      {
+        "action": "Patch CVE-2026-76008: A flaw has been found in Comfast CF-N1-S 2.6",
+        "risk_score": 10.0,
+        "kev": false
+      },
+      {
+        "action": "Patch CVE-2026-76004: A security vulnerability has been detected i",
+        "risk_score": 9.9,
+        "kev": false
+      },
+      {
+        "action": "Patch CVE-2026-76003: A weakness has been identified in UTT HiPER ",
+        "risk_score": 9.9,
+        "kev": false
+      },
+      {
+        "action": "Patch CVE-2026-75976: A weakness has been identified in TRENDnet T",
+        "risk_score": 9.9,
+        "kev": false
+      }
+    ],
+    "prepared_by": "CyberDudeBivash GOC - Sentinel APEX v39.0 AI Engine"
   },
-  "intel_requirements": [
+  "emulation_exercises": [
     {
-      "requirement": "Ransomware",
-      "status": "COVERED",
-      "priority": "HIGH"
-    },
-    {
-      "requirement": "APT",
-      "status": "COVERED",
-      "priority": "MEDIUM"
-    },
-    {
-      "requirement": "Zero-Days",
-      "status": "GAP",
-      "priority": "HIGH"
-    },
-    {
-      "requirement": "Cloud Threats",
-      "status": "COVERED",
-      "priority": "MEDIUM"
-    },
-    {
-      "requirement": "Supply Chain",
-      "status": "COVERED",
-      "priority": "HIGH"
-    },
-    {
-      "requirement": "IAB/Creds",
-      "status": "COVERED",
-      "priority": "MEDIUM"
-    },
-    {
-      "requirement": "Cloud",
-      "status": "COVERED",
-      "priority": "MEDIUM"
-    },
-    {
-      "requirement": "Exploits",
-      "status": "COVERED",
-      "priority": "MEDIUM"
+      "exercise_id": "exercise--c1b8f0d76041",
+      "name": "Emulation: UNC-CDB-INGEST Attack Simulation",
+      "adversary": "UNC-CDB-INGEST",
+      "objective": "Validate detection and response capabilities against UNC-CDB-INGEST TTPs",
+      "difficulty": "Intermediate",
+      "techniques": [],
+      "kill_chain_phases": [],
+      "estimated_duration": "2 hours",
+      "prerequisites": [
+        "Purple-team coordination",
+        "SIEM/EDR monitoring active",
+        "Detection rules deployed",
+        "IR playbook reviewed"
+      ],
+      "success_criteria": [
+        "Detect 0+ techniques within exercise window",
+        "Trigger automated alert within 15 minutes of execution",
+        "Complete containment response within 1 hour",
+        "Document detection gaps and create remediation plan"
+      ],
+      "tools_required": [
+        "Atomic Red Team",
+        "Caldera / MITRE ATT&CK",
+        "Custom CDB detection pack"
+      ]
     }
   ],
-  "metrics": {
-    "total_items": 1139,
-    "critical_count": 27,
-    "high_count": 679,
-    "kev_count": 21,
-    "actor_count": 16,
-    "hunt_count": 5,
-    "campaign_count": 12
+  "intel_requirements": {
+    "pirs": [
+      {
+        "pir_id": "PIR-001",
+        "requirement": "Ransomware groups targeting our sector",
+        "category": "Ransomware"
+      },
+      {
+        "pir_id": "PIR-002",
+        "requirement": "Zero-day vulnerabilities in critical infrastructure",
+        "category": "Vulnerabilities"
+      },
+      {
+        "pir_id": "PIR-003",
+        "requirement": "Nation-state APT campaigns",
+        "category": "APT"
+      },
+      {
+        "pir_id": "PIR-004",
+        "requirement": "Supply chain compromise indicators",
+        "category": "Supply Chain"
+      },
+      {
+        "pir_id": "PIR-005",
+        "requirement": "Credential theft & initial access broker activity",
+        "category": "IAB"
+      },
+      {
+        "pir_id": "PIR-006",
+        "requirement": "Cloud infrastructure threats",
+        "category": "Cloud"
+      },
+      {
+        "pir_id": "PIR-007",
+        "requirement": "Insider threat indicators",
+        "category": "Insider"
+      },
+      {
+        "pir_id": "PIR-008",
+        "requirement": "Emerging exploit weaponization",
+        "category": "Exploits"
+      }
+    ],
+    "coverage": {
+      "PIR-001": {
+        "requirement": "Ransomware groups targeting our sector",
+        "matching_advisories": 49,
+        "coverage_level": "HIGH",
+        "sample_matches": [
+          "[RANSOMWARE] Unknown: Consultores de Seguros",
+          "[RANSOMWARE] Unknown: SHAHEEN LAW GROUP PLC - Richmond, Virg",
+          "[RANSOMWARE] Unknown: FBC"
+        ]
+      },
+      "PIR-002": {
+        "requirement": "Zero-day vulnerabilities in critical infrastructure",
+        "matching_advisories": 1027,
+        "coverage_level": "HIGH",
+        "sample_matches": [
+          "Unpatched Zimbra servers are falling to CVE-2026-73570 attac",
+          "CISA Warns of Oracle HTTP and WebLogic Server Vulnerability ",
+          "Hackers Exploit Critical miniOrange SAML SSO Flaws to Hijack"
+        ]
+      },
+      "PIR-003": {
+        "requirement": "Nation-state APT campaigns",
+        "matching_advisories": 5,
+        "coverage_level": "HIGH",
+        "sample_matches": [
+          "[OpenPhish] Phishing URL: http://itrust-captal-singin.pages.",
+          "[OpenPhish] Phishing URL: https://d30sec8k5ond2x.cloudfront.",
+          "Fake CAPTCHA Tricks Mac Users Into Installing a Backdoor Tha"
+        ]
+      },
+      "PIR-004": {
+        "requirement": "Supply chain compromise indicators",
+        "matching_advisories": 43,
+        "coverage_level": "HIGH",
+        "sample_matches": [
+          "AI supply chain risk is showing up in developer workflows fi",
+          "The cybercrime supply chain has five stages, each with a pri",
+          "CVE-2026-71089: Vulnerability in the Oracle Agile PLM MCAD C"
+        ]
+      },
+      "PIR-005": {
+        "requirement": "Credential theft & initial access broker activity",
+        "matching_advisories": 222,
+        "coverage_level": "HIGH",
+        "sample_matches": [
+          "Fake GTA 6 Demo Is Actually Malware That Steals Your Passwor",
+          "TikTok phishing: How to spot fake login and verification pag",
+          "TruffleHog AWS Analyze reduces remediation time on leaked AW"
+        ]
+      },
+      "PIR-006": {
+        "requirement": "Cloud infrastructure threats",
+        "matching_advisories": 29,
+        "coverage_level": "HIGH",
+        "sample_matches": [
+          "Hackers Exploit Critical miniOrange SAML SSO Flaws to Hijack",
+          "Attackers Target miniOrange SAML Flaws That Can Grant WordPr",
+          "TruffleHog AWS Analyze reduces remediation time on leaked AW"
+        ]
+      },
+      "PIR-007": {
+        "requirement": "Insider threat indicators",
+        "matching_advisories": 1,
+        "coverage_level": "LOW",
+        "sample_matches": [
+          "ShinyHunters taunts ReliaQuest after its own employee falls "
+        ]
+      },
+      "PIR-008": {
+        "requirement": "Emerging exploit weaponization",
+        "matching_advisories": 88,
+        "coverage_level": "HIGH",
+        "sample_matches": [
+          "CISA Warns of Oracle HTTP and WebLogic Server Vulnerability ",
+          "Hackers Exploit Critical miniOrange SAML SSO Flaws to Hijack",
+          "U.S. CISA adds maximum-severity Oracle flaw to its Known Exp"
+        ]
+      }
+    },
+    "gaps": [
+      "PIR-007"
+    ],
+    "gap_count": 1,
+    "overall_coverage_pct": 87.5,
+    "analyzed_at": "2026-08-25T13:12:24.847142+00:00"
   }
 }
