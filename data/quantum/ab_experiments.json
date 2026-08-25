@@ -1,9 +1,9 @@
 {
-  "total_experiments": 2,
+  "total_experiments": 4,
   "experiments": [
     {
-      "experiment_id": "abtest--2630ecf1fb21",
-      "name": "Detection Optimization: CVE-2026-78638 - peerigon unzip-crx/unzip-crx-3 Ar",
+      "experiment_id": "abtest--5f4cbc9b9500",
+      "name": "Detection Optimization: CVE-2026-78701 - 389-ds-base: 389-ds-base: cve-202",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -30,17 +30,18 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "CVE-2026-78638 - peerigon unzip-crx/unzip-crx-3 Archive Extraction index.js unzi",
+        "title": "CVE-2026-78701 - 389-ds-base: 389-ds-base: cve-2026-11610 incomplete fix may int",
         "risk_score": 7.0,
         "cves": [
-          "CVE-2026-78638"
+          "CVE-2026-78701",
+          "cve-2026-11610"
         ],
         "techniques": []
       }
     },
     {
-      "experiment_id": "abtest--482e8d89e55b",
-      "name": "Detection Optimization: Exploit for CVE-2026-16348",
+      "experiment_id": "abtest--d6562e35d681",
+      "name": "Detection Optimization: CVE-2026-78322 - File-roller: file-roller: stack b",
       "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
       "variant_a": {
         "name": "Broad Detection",
@@ -67,10 +68,84 @@
       "duration_days": 14,
       "status": "PROPOSED",
       "advisory_context": {
-        "title": "Exploit for CVE-2026-16348",
+        "title": "CVE-2026-78322 - File-roller: file-roller: stack buffer overflow in parse_progre",
         "risk_score": 7.0,
         "cves": [
-          "CVE-2026-16348"
+          "CVE-2026-78322"
+        ],
+        "techniques": []
+      }
+    },
+    {
+      "experiment_id": "abtest--d282009ce08b",
+      "name": "Detection Optimization: CVE-2026-67578 - FA-50 Authentication Bypass Vulne",
+      "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
+      "variant_a": {
+        "name": "Broad Detection",
+        "description": "Matches any related IOC or technique indicator",
+        "expected_recall": 0.95,
+        "expected_precision": 0.6,
+        "rule_type": "sigma",
+        "detection_logic": "selection: any technique OR any CVE mention"
+      },
+      "variant_b": {
+        "name": "Precise Detection",
+        "description": "Requires multiple correlated indicators",
+        "expected_recall": 0.75,
+        "expected_precision": 0.9,
+        "rule_type": "sigma",
+        "detection_logic": "selection: (technique AND CVE) OR (IOC AND actor_tag)"
+      },
+      "metrics": [
+        "true_positive_rate",
+        "false_positive_rate",
+        "mean_time_to_detect",
+        "analyst_triage_time"
+      ],
+      "duration_days": 14,
+      "status": "PROPOSED",
+      "advisory_context": {
+        "title": "CVE-2026-67578 - FA-50 Authentication Bypass Vulnerability",
+        "risk_score": 7.0,
+        "cves": [
+          "CVE-2026-67578"
+        ],
+        "techniques": []
+      }
+    },
+    {
+      "experiment_id": "abtest--9acf3d2ffd79",
+      "name": "Detection Optimization: CVE-2026-65633 - Purpose-limited JWT accepted as f",
+      "hypothesis": "Narrow detection rules reduce false positives without missing true threats",
+      "variant_a": {
+        "name": "Broad Detection",
+        "description": "Matches any related IOC or technique indicator",
+        "expected_recall": 0.95,
+        "expected_precision": 0.6,
+        "rule_type": "sigma",
+        "detection_logic": "selection: any technique OR any CVE mention"
+      },
+      "variant_b": {
+        "name": "Precise Detection",
+        "description": "Requires multiple correlated indicators",
+        "expected_recall": 0.75,
+        "expected_precision": 0.9,
+        "rule_type": "sigma",
+        "detection_logic": "selection: (technique AND CVE) OR (IOC AND actor_tag)"
+      },
+      "metrics": [
+        "true_positive_rate",
+        "false_positive_rate",
+        "mean_time_to_detect",
+        "analyst_triage_time"
+      ],
+      "duration_days": 14,
+      "status": "PROPOSED",
+      "advisory_context": {
+        "title": "CVE-2026-65633 - Purpose-limited JWT accepted as full bearer authentication in A",
+        "risk_score": 7.0,
+        "cves": [
+          "CVE-2026-65633"
         ],
         "techniques": []
       }
@@ -82,5 +157,5 @@
     "statistical_test": "chi_squared",
     "rollout_strategy": "gradual"
   },
-  "generated_at": "2026-08-25T07:09:23.674953+00:00"
+  "generated_at": "2026-08-25T13:12:25.561725+00:00"
 }
