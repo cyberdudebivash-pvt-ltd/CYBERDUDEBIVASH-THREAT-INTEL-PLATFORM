@@ -1425,9 +1425,17 @@ const DEMO_FALLBACK_THREATS = [
 // ─────────────────────────────────────────────────────────────────────────────
 // TIER CONFIGURATION
 // ─────────────────────────────────────────────────────────────────────────────
+// v185.2 FIX (Fortune-500 audit, Phase 9): PRO here previously said
+// price_usd:99/price_inr:8250 -- the actual Razorpay charge
+// (workers/intel-gateway/src/pricing-data.json, the live checkout source of
+// truth) is $49/mo (INR 4,100). This TIERS object drives real key issuance
+// and customer welcome emails (queueEmail() below), so the wrong price was
+// reaching customers directly, not just documentation. req_day/req_min
+// corrected to match the real enforced values (revenue-enforcement.js
+// LIMITS.PRO / index.js RATE_LIMITS.PRO in the intel-gateway Worker).
 const TIERS = {
   FREE:       { label:"Free",       req_day:25,     req_min:30,   price_usd:0,    price_inr:0,       trial_days:0,  features:["basic_feed","metadata","stix_ids"] },
-  PRO:        { label:"Pro",        req_day:1000,   req_min:100,  price_usd:99,   price_inr:8250,    trial_days:7,  features:["full_ioc","sigma","yara","kql","spl","stix_bundle","actor","kill_chain","playbook","misp_json","csv_export"] },
+  PRO:        { label:"Pro",        req_day:5000,   req_min:120,  price_usd:49,   price_inr:4100,    trial_days:7,  features:["full_ioc","sigma","yara","kql","spl","stix_bundle","actor","kill_chain","playbook","misp_json","csv_export"] },
   ENTERPRISE: { label:"Enterprise", req_day:50000,  req_min:500,  price_usd:999,  price_inr:83200,   trial_days:14, features:["siem_webhook","soar_export","navigator","hunt_queries","actor_tracking","campaign_intel","prediction_api","sector_feed","executive_brief","fair_model","reg_compliance","10_seats"] },
   MSSP:       { label:"MSSP",       req_day:200000, req_min:2000, price_usd:1999, price_inr:166500,  trial_days:14, features:["multi_tenant","white_label","partner_api","bulk_stix","tenant_keys","oem_resale","40pct_revshare","unlimited_seats"] },
 };
