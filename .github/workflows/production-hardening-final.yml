@@ -142,12 +142,18 @@ jobs:
         if: ${{ github.event.inputs.run_monetization != 'false' }}
         continue-on-error: true
         run: |
-          echo "=== MONETIZATION ANALYTICS ==="
-          mkdir -p data/monetization
+          echo "=== MONETIZATION ANALYTICS (CI SMOKE TEST -- SYNTHETIC DATA) ==="
+          mkdir -p data/monetization/ci_validation
           python3 -c "
           from agent.enterprise_monetization_analytics_engine import EnterpriseMonetizationAnalyticsEngine
           from datetime import datetime, timezone
-          engine = EnterpriseMonetizationAnalyticsEngine()
+          # v185.2 FIX (Workstream 17): this run uses synthetic ci-t1..ci-t4
+          # tenants to smoke-test that the engine executes and produces valid
+          # JSON -- it is NOT real production monetization data. Output is
+          # directed to a separate ci_validation/ subdirectory so it can never
+          # overwrite or be mistaken for data/monetization/monetization_report.json,
+          # which real customers/dashboards would read as production truth.
+          engine = EnterpriseMonetizationAnalyticsEngine(output_dir='data/monetization/ci_validation')
           # CI: synthetic tier snapshot
           tenant_tiers = {'ci-t1':'free','ci-t2':'free','ci-t3':'pro','ci-t4':'enterprise'}
           now = datetime.now(timezone.utc).isoformat()
@@ -195,7 +201,7 @@ jobs:
           checks = [
               ('data/quality/ci_quality_summary.json', False),
               ('data/tenant/tenant_isolation_report.json', True),
-              ('data/monetization/monetization_report.json', True),
+              ('data/monetization/ci_validation/monetization_report.json', True),
           ]
           passed = 0
           for path, required in checks:
