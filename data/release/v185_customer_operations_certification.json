@@ -1,118 +1,147 @@
 {
-  "version": "v185.6",
+  "version": "v185.7",
   "mission": "SENTINEL APEX v185.0 -- P0 Authenticated Commercial Certification, Expiry Cutover & Customer Access Release Gate",
-  "certified_at": "2026-08-26T11:15:00Z",
-  "release_sha": "0767f5223a1a01c041a942e38d2a5b2c3e3ac416 -- PR #254 merge commit, confirmed via GitHub Actions API (list_workflow_runs). This pass's own changes are on claude/v185-authenticated-expiry-cutover, not yet merged at time of writing.",
-  "worker_deploy_run": "32958169857 -- deploy-worker.yml, head_sha 0767f5223a1a01c041a942e38d2a5b2c3e3ac416, conclusion=success, confirmed via GitHub Actions API this pass (not carried forward as an unverified claim).",
+  "certified_at": "2026-08-26T12:13:00Z",
+  "release_sha": "0767f5223a1a01c041a942e38d2a5b2c3e3ac416 -- PR #254 merge commit (unchanged baseline). This pass's own changes are on claude/v185-live-lifecycle-certification (PR #256), open at time of writing.",
+  "worker_deploy_run": "32958169857 -- deploy-worker.yml, head_sha 0767f5223a1a01c041a942e38d2a5b2c3e3ac416, conclusion=success. This pass's own changes (certification workflow only, no Worker source changed) have not required a new Worker deploy.",
   "governance_grade": "A+",
   "duplicate_violations": 0,
   "hard_governance_violations": 0,
   "soft_governance_violations": 0,
   "governance_overall_pass": true,
 
+  "operator_actions_this_pass": {
+    "admin_secret_synced": "CONFIRMED FIXED. Two prior passes (runs 32955258475, 32961266467) found ADMIN_SECRET_PRESENT=false. This pass the operator added it, but the first re-run (32964666627) still failed provisioning ('ADMIN_SECRET likely does not match the Worker's env.ADMIN_SECRET') even though ADMIN_SECRET_PRESENT=true and GET /api/health independently confirmed admin_configured:true on the Worker side -- i.e. both sides had a secret set, but the two values differed. Operator resynced them; the next re-run (32965198572) succeeded end to end: 3 controlled keys provisioned, tested, and revoked live against production.",
+    "branch_protection_activated": "CONFIRMED FIXED. Prior passes reported BLOCKED_OPERATOR_ACTION (no tool in this session can read/write repository rulesets). Operator created ruleset 'SENTINEL APEX Production Main Protection' but it was initially in 'Evaluate' (dry-run/monitor-only, does not actually block anything) rather than 'Active' enforcement -- flagged explicitly before proceeding. Operator confirmed switching it to Active. Verified independently this pass via GET /repos/.../branches (list_branches, page 2): main now shows `\"protected\": true`. This is the GitHub API's own authoritative field, not a UI screenshot."
+  },
+
   "mandatory_first_step": {
-    "status": "COMPLETED -- BLOCKED_BY_SECRET (not a failure)",
-    "detail": "Re-triggered .github/workflows/commercial-customer-ops-certification.yml via workflow_dispatch this pass (run 32961266467, head_branch main, head_sha e90e1a71cab8243b214817d5c804391d6f08c4df). Verified via list_workflow_jobs AND by reading the actual job log (get_job_logs, return_content=true) for the 'Phase 2 - Secret Presence Gate' job's 'Check ADMIN_SECRET presence' step: the raw log line reads exactly `ADMIN_SECRET_PRESENT=false`, value never printed. 'Static Certification Checks' job passed (entitlement drift gate, worker JS integrity gate, regression suite all green). 'Authenticated Customer Ops Tests' job status=completed conclusion=skipped, consistent with its `if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'` guard. This is the second consecutive pass confirming ADMIN_SECRET absence (also confirmed in the PR #254 pass, run 32955258475) -- this is now an established, repeated finding, not a one-off."
+    "status": "COMPLETED -- PASS (no longer BLOCKED_BY_SECRET)",
+    "detail": "Re-triggered commercial-customer-ops-certification.yml four times this pass as the ADMIN_SECRET sync and the rate-limit-test fix landed (runs 32964666627 secret-mismatch-failure, 32965198572 first full pass, 32965657281 rate-limit-test-bug failure, 32966158049 full pass with fix, 32967117214 full pass with Phase 4 job added). Final run: all 8 jobs (secret-presence-gate, static-checks, authenticated-customer-ops-tests, expiry-shadow-validation, lifecycle-state-matrix, mssp-tenant-isolation, rate-limit-boundary, summary) conclusion=success."
   },
 
-  "test_harness_blocker_phase3": {
-    "status": "FIXED THIS PASS",
-    "detail": "subscription-lifecycle.test.js could not execute under `node --test` because it imported evaluateKeyRecordAccess() from index.js, which transitively imports pricing.js, which imports pricing-data.json without a `with {type:'json'}` import attribute -- fine for wrangler/esbuild, fatal for Node's native ESM loader (ERR_IMPORT_ATTRIBUTE_MISSING). Confirmed not test-file-specific by reproducing the same failure on the pre-existing, unrelated find-item-by-slug.test.js. Per the mission's explicit instruction not to blindly modify pricing.js, fixed via extraction: evaluateKeyRecordAccess() and its two Set constants moved to a new dependency-free workers/intel-gateway/src/subscription-lifecycle.js (zero imports of its own). index.js now imports from and re-exports this module unchanged -- single source of truth preserved, zero production behavior change.",
-    "verification": "node --test src/__tests__/subscription-lifecycle.test.js standalone: 12/12 pass. Combined with the other four CI-gated trust-boundary test files (certification-registry, publication-gate, reports-canonical-write-guard, detection-registry): 77/77 pass, exit 0. Re-verified again after rebasing onto fresh origin/main for this pass's branch: same 77/77 result.",
-    "ci_wiring": "deploy-worker.yml's existing 'GATE -- Publication/certification trust-boundary tests (HARD FAIL)' step now includes src/__tests__/subscription-lifecycle.test.js in its node --test file list. Subscription lifecycle behavior is no longer covered only by an unexecuted test file, per this mission's own explicit Phase 3 requirement."
+  "phase1_authenticated_baseline": {
+    "status": "PASS -- LIVE, run 32967117214 job 'Authenticated Customer Ops Tests'",
+    "checks": [
+      "anonymous denied on /api/sla/report (HTTP 401)",
+      "invalid key denied on /api/sla/report (HTTP 401)",
+      "PRO denied on /api/sla/report, Enterprise-only (HTTP 403)",
+      "ENTERPRISE allowed on /api/sla/report (HTTP 200)",
+      "MSSP allowed on /api/sla/report (HTTP 200)",
+      "revoked PRO key denied on /api/sla/report (HTTP 401)"
+    ],
+    "cleanup": "3 provisioned keys (PRO/ENTERPRISE/MSSP) all revoked via trap-based cleanup, confirmed no orphaned keys."
   },
 
-  "payment_security": {
-    "status": "FIXED (PR #252, unchanged this pass)",
-    "detail": "handleRazorpayVerify tier-escalation vulnerability fixed in PR #252 (merged, deployed, live-verified). Tier is derived exclusively from a server-side Razorpay Payments API lookup of the authoritative order/payment record, never from client input. Not re-tested live this pass -- no code on this path changed.",
-    "commercial_price_conflicts": 0,
-    "enterprise_price": { "usd": 499, "inr": 41600 }
+  "phase2_lifecycle_state_matrix": {
+    "status": "PASS -- LIVE, run 32967117214 job 'Phase 2/12 - Lifecycle State Matrix + JWT + Rotation', 27/27 total checks (25 expect_status/expect_denied assertions -- 19 single-shot call sites plus 2 call sites inside a 3-iteration cancelled/expired/refunded loop = 6 executions there -- plus 2 explicit non-assertion PASS confirmations for login-succeeded and rotation-returned-a-key). Corrected this pass from an initial miscount of 20/20 (CodeRabbit review finding on PR #256, verified by direct line count against the workflow file, not taken on faith).",
+    "checks": [
+      "implicit-active key allowed (200)",
+      "login succeeded for active key; JWT issued while active allowed (200)",
+      "PATCH to past_due accepted (200); past_due key still allowed -- grace period (200); pre-existing JWT still allowed under past_due (200)",
+      "PATCH to suspended accepted (200); suspended key denied (401); pre-existing JWT denied mid-session after suspension via the jwt_deny marker (401); fresh login refused for suspended key (401)",
+      "cancelled/expired/refunded: each independently PATCHed (200) and each independently denies access (401)",
+      "bogus subscription_status ('totally_made_up_status') rejected at the PATCH layer (400) -- live status-field-injection probe, Phase 12 attack class",
+      "reactivation PATCH with no X-Admin-Key rejected (403); key remains denied afterward, still refunded (401) -- live reactivation-without-authorization probe, Phase 12 attack class (added this pass; see security_findings.live_regression_this_pass below)",
+      "PATCH to active (reactivation) accepted (200); reactivated key allowed again (200); fresh login succeeds again after reactivation (200)",
+      "rotation returned a new key; old (pre-rotation) key denied immediately (401); new (post-rotation) key allowed, tier carried forward (200)",
+      "PATCH new key to suspended accepted (200); rotation of a suspended (terminal-state) key rejected (409) -- Phase 12 attack class"
+    ],
+    "note": "This is the first live exercise of the normalized subscription_status model (subscription-lifecycle.js, PR #254/v185.6) against production -- previously only unit-tested. Every deny-state transition, the JWT mid-session invalidation, the reactivation path, and all three admin-endpoint attack-class rejections (status injection, unauthorized reactivation, terminal-state rotation) are now proven against real production behavior, not just code inspection."
   },
 
-  "subscription_lifecycle_model": {
-    "status": "IMPLEMENTED (PR #254), test harness fixed this pass",
-    "detail": "Six canonical states (active/past_due/cancelled/expired/refunded/suspended) live via evaluateKeyRecordAccess(), now in its own dependency-free module (workers/intel-gateway/src/subscription-lifecycle.js, v185.6). resolveAuth() (API-key and JWT paths) and handleLogin() both delegate to it. Unknown status strings fail closed. Absent subscription_status (pre-v185.5 keys) treated as active.",
-    "static_reauditor_reference": "docs/V185_STATIC_SECURITY_REAUDIT.md -- Phase 12 static re-audit of the JWT-after-deny-state, rotation, reactivation-without-auth, and status-field-injection attack classes against this model's current code, all statically closed; live verification remains BLOCKED_BY_SECRET."
+  "phase4_expiry_shadow_validation": {
+    "status": "PASS -- LIVE, run 32967117214 job 'Phase 4 - Expiry Boundary Shadow Validation'",
+    "detail": "POST /api/admin/keys always honors an explicit expires_in_days directly, independent of the global SUBSCRIPTION_EXPIRY_ENABLED flag (that flag only gates the separate real-customer-provisioning path in provisionApiKey()) -- so a real expires_at boundary was exercised today with a controlled admin-provisioned key, without needing that flag flipped first. Provisioned one ENTERPRISE key with expires_in_days=0.0008 (~69s, chosen because Cloudflare KV's own expirationTtl -- set from the same value -- rejects anything below 60s), confirmed allowed before the boundary (200), waited 80s, confirmed denied after (401). Expected-vs-actual resolveAuth() decisions matched exactly, 0 unexpected differences -- the comparison Phase 4 itself asks for.",
+    "caveat": "This proves the expires_at enforcement mechanism itself works correctly. It does NOT prove SUBSCRIPTION_EXPIRY_ENABLED=true is safe to flip for the real customer-provisioning path -- that flag change is a distinct, larger-blast-radius production behavior change (every future real signup would get a real expiry instead of null) and is intentionally not bundled into this pass; see subscription_expiry_enabled below."
   },
 
   "subscription_expiry_enabled": false,
-  "subscription_expiry_status": "NOT_CHANGED_THIS_PASS -- deliberately left false. Live verification with controlled expired/cancelled/refunded/suspended test identities in production still requires ADMIN_SECRET (confirmed absent again this pass). Flipping without that live verification would violate this mission's own NO-REGRESSION / PRODUCTION-FIRST constraints. Rollback path unchanged: SUBSCRIPTION_EXPIRY_ENABLED=false, no destructive schema rollback needed since it was never enabled.",
+  "subscription_expiry_status": "STILL FALSE, deliberately not flipped this pass. Phase 4's shadow-validation prerequisite is now genuinely satisfied (see above) -- this is a real change from every prior pass, where Phase 4 itself was BLOCKED_BY_SECRET. But flipping SUBSCRIPTION_EXPIRY_ENABLED=true changes real behavior for every future real customer signup (provisionApiKey()'s billingCycle-based path), which is a materially larger and more consequential change than anything else shipped this pass. Per the mission's own NO-REGRESSION / PRODUCTION-FIRST posture and this engagement's established pattern of shipping one bounded, individually-verified change per pass, this is the next concrete follow-up (wrangler.toml [vars] and [env.production.vars], deploy, re-run this same certification workflow to confirm 0 regressions) rather than something to bundle into an already-large workflow-testing PR.",
 
   "entitlement_coverage": {
+    "resources_identified_paid_total": 46,
     "resources_defined_in_policy_engine": 31,
     "resources_wired_to_resolveEntitlement": 15,
     "resources_actually_enforced": 1,
     "entitlement_coverage_pct": 33,
-    "note": "Unchanged from the PR #254 baseline -- honestly reported as unchanged, not incremented without evidence. This pass's Phase 11 deliverable is docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md, a Wave A/B/C sequencing plan per the mission's own explicit structure. Zero resources moved from shadow to enforced this pass: confirming zero legacy/canonical divergence requires shadow-mismatch telemetry or ADMIN_SECRET-gated live traffic, neither available this pass -- flipping without that evidence would be the 'blind mass flip' Phase 11 explicitly forbids.",
-    "drift_guard": "scripts/entitlement_resource_drift_gate.py (STAGE 4.065, non-blocking with ::error:: annotation) -- confirmed still passing, 0 drift, via this pass's Static Certification Checks job (run 32961266467) and local regression_tests.py (24/24 PASS, including T24_entitlement_resource_drift_gate)."
+    "entitlement_coverage_pct_denominator": "resources_wired_to_resolveEntitlement / resources_identified_paid_total = 15/46 = 32.6%, rounded to 33%. NOT 15/31 (which would be 48%) -- resources_defined_in_policy_engine (31) is enforceTierGate()'s own catalogue, a narrower set than the full 46 identified paid routes across the codebase (some of which are gated ad hoc, outside enforceTierGate() entirely). Both 31 and 46 are real, correct, independently-sourced denominators for different questions; the 33% figure specifically answers 'wired / all identified paid routes,' not 'wired / policy-engine catalogue.' Clarified this pass after a CodeRabbit review finding on PR #256 correctly flagged the ambiguity of stating both denominators next to one percentage with no label.",
+    "note": "Unchanged this pass -- honestly reported as unchanged. docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md (previous pass) remains the sequencing plan; this pass's ADMIN_SECRET fix means future waves could now gather real shadow-mismatch evidence via authenticated traffic, but no resource was flipped from shadow to enforced this pass -- that is separate, bounded work per the wave plan's own exit criteria.",
+    "drift_guard": "scripts/entitlement_resource_drift_gate.py -- confirmed still passing, 0 drift, via this pass's Static Certification Checks job (run 32967117214) and local regression_tests.py (24/24 PASS)."
   },
 
   "expired_access_tests": {
-    "status": "UNIT_TESTED (now CI-gated) -- LIVE_NOT_RUN",
-    "reason": "evaluateKeyRecordAccess()'s deny paths are unit-tested and, as of this pass, actually execute in CI (see test_harness_blocker_phase3 above) -- previously they were correct but unexecuted. Live production verification with real provisioned test identities remains BLOCKED_BY_SECRET."
+    "status": "PASS -- LIVE this pass (see phase4_expiry_shadow_validation and phase2_lifecycle_state_matrix above)",
+    "reason": "Both the expires_at path (Phase 4) and the subscription_status='expired' path (Phase 2) are now live-verified against production, not just unit-tested."
   },
 
   "revoked_key_tests": {
-    "status": "BUILT_NOT_YET_RUN",
-    "reason": "BLOCKED_BY_SECRET, confirmed again this pass via the mandatory-first-step run (job cleanly skipped, log line read directly)."
+    "status": "PASS -- LIVE this pass (Phase 1 and Phase 2's rotation sub-test both independently verify immediate revocation)"
   },
 
   "tenant_isolation": {
-    "status": "ENFORCEMENT_MECHANISM_BUILT (PR #254) -- STATICALLY_REVERIFIED THIS PASS -- LIVE_TWO_TENANT_TEST_NOT_RUN",
-    "finding": "handleMSSPFeed enforces auth.managed_tenants.includes(tenant_id) when the field is present and an array; absent (legacy/unrestricted) preserves pre-existing behavior; malformed (present, non-array) fails closed to zero tenants. Re-read and re-confirmed against current code this pass (enterprise-endpoints.js / index.js:443-445) -- see docs/V185_STATIC_SECURITY_REAUDIT.md section 2.6. Response wording already corrected (PR #254) to state the underlying feed is shared, not private per-tenant data.",
-    "cross_tenant_read": "NOT_MEASURED live this pass -- statically re-confirmed correct by inspection, which is explicitly weaker than a live two-identity BOLA attempt and is reported as such",
+    "status": "PASS -- LIVE, run 32967117214 job 'Phase 7 - MSSP Two-Tenant Isolation', 6/6 assertions",
+    "checks": [
+      "key A (managed_tenants=[TENANT_A]) allowed on tenant A (200)",
+      "key A denied on tenant B, cross-tenant BOLA (403)",
+      "key B (managed_tenants=[TENANT_B]) allowed on tenant B (200)",
+      "key B denied on tenant A, cross-tenant BOLA (403)",
+      "legacy key (no managed_tenants) unrestricted on tenant A (200) -- documented backward-compatible default",
+      "legacy key unrestricted on tenant B (200) -- same documented default"
+    ],
+    "cross_tenant_read": "MEASURED live this pass: cross-tenant read attempts correctly denied (403) for both directions between two real provisioned MSSP identities -- previously only statically re-confirmed by code inspection.",
     "cross_tenant_write": "N/A -- no write operations exist on this endpoint",
     "cross_tenant_delete": "N/A -- no delete operations exist on this endpoint",
-    "cross_tenant_export": "NOT_MEASURED"
+    "cross_tenant_export": "Not separately measured -- the feed endpoint tested is the only export surface for this resource"
   },
 
-  "free_journey": "NOT_RUN -- BLOCKED_BY_SECRET",
-  "pro_journey": "NOT_RUN -- BLOCKED_BY_SECRET",
-  "enterprise_journey": "NOT_RUN -- BLOCKED_BY_SECRET",
-  "mssp_journey": "NOT_RUN -- BLOCKED_BY_SECRET",
+  "free_journey": "NOT_RUN -- not attempted this pass (secret/protection fixes and the lifecycle/tenant/rate-limit/expiry matrices were this pass's scope; full black-box journey scripts for all four tiers remain separate follow-up work)",
+  "pro_journey": "NOT_RUN -- see free_journey",
+  "enterprise_journey": "PARTIALLY COVERED -- Phase 1/2/4's ENTERPRISE-tier test keys exercise a substantial slice of enterprise-tier access control live (tier gate, lifecycle states, JWT, expiry), but this is not a full black-box customer journey script",
+  "mssp_journey": "PARTIALLY COVERED -- Phase 7's MSSP keys exercise tenant-scoped access live, same caveat as enterprise_journey",
 
   "rate_limit_tests": {
-    "status": "NOT_RUN",
+    "status": "PASS (FREE tier, live) -- PRO/ENTERPRISE/MSSP verified by code inspection only, deliberately not flood-tested",
+    "detail": "Live 33-request burst against /api/sla/status (switched from /api/feed mid-pass after discovering /api/feed's Cache-Control: public, max-age=120 let Cloudflare's edge cache serve repeat requests without ever re-invoking the Worker, masking the limiter entirely -- 0/33 requests hit 429 on that first attempt). Against the uncached /api/sla/status: first 429 appeared at request #31 (exactly the FREE tier's 30/min limit), with Retry-After: 60 present on the response.",
     "known_canonical_limits": { "FREE": "30 req/min", "PRO": "120 req/min / 5,000 req/day", "ENTERPRISE": "600 req/min", "MSSP": "1,200 req/min" },
-    "source": "workers/intel-gateway/src/index.js RATE_LIMITS constant (PR #250), not independently re-verified live this pass -- BLOCKED_BY_SECRET for a live boundary/429/Retry-After certification"
+    "source": "workers/intel-gateway/src/index.js RATE_LIMITS constant; checkRateLimit() applies the same code path per tier with no special-casing -- PRO/ENTERPRISE/MSSP boundaries not live flood-tested this pass to avoid the abusive load the mission itself warns against for marginal additional evidence over the FREE-tier proof."
   },
 
   "security_findings": {
     "critical_exploitable": 0,
     "high_exploitable": 0,
-    "static_reaudit_this_pass": "docs/V185_STATIC_SECURITY_REAUDIT.md -- 9 attack classes from Mission Phase 12 re-read against current code: JWT-after-deny-state (closed), old-key-after-rotation (closed), terminal-state-rotation (closed), reactivation-without-auth (closed), malformed-managed_tenants (closed), tenant-path-manipulation (closed for the enforced case, opt-in gap documented not new), payment/refund-replay (closed by construction, idempotent), status-field-injection (closed), tier-manipulation (closed, PR #252 unchanged). All 9 static verdicts closed at Critical=0/High=0; every corresponding LIVE verdict is BLOCKED_BY_SECRET and reported as such, not conflated with the static result.",
+    "live_regression_this_pass": "The following Phase 12 attack classes moved from static-only (docs/V185_STATIC_SECURITY_REAUDIT.md, prior pass) to LIVE-verified this pass: JWT-after-deny-state (Phase 2, mid-session suspension), old-key-after-rotation (Phase 2), terminal-state-rotation (Phase 2, 409), status-field-injection (Phase 2, 400), tenant-path-manipulation / cross-tenant BOLA (Phase 7, 403 both directions), reactivation-without-authorization (Phase 2 -- a real negative probe: PATCH .../status with subscription_status:active and no X-Admin-Key header, added after a CodeRabbit review finding on PR #256 correctly pointed out the initial version only asserted this was implicit rather than actually testing it; confirmed rejected with 403 and the key remained denied). Still static-only, not live: payment/refund-replay (would require a real signed Razorpay webhook, out of safe scope for live production testing), tier-manipulation (unchanged since PR #252, no code on that path touched this pass).",
     "informational": [
-      "MSSP tenant_id isolation: enforcement mechanism exists but is opt-in -- existing MSSP keys remain unrestricted until an admin explicitly sets managed_tenants on them. Documented trade-off (docs/MSSP_TENANT_IDENTITY_V185.md), not a new gap.",
-      "17 of 31 entitlement policy-engine resources still have zero call sites (dead policy logic) -- unchanged from PR #253's finding.",
-      "Two independent TAXII tier gates still exist (index.js's taxii_access vs. enterprise-endpoints.js's separate helper) -- flagged in docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md as a Wave A prerequisite, not yet reconciled."
+      "MSSP tenant_id isolation: enforcement mechanism now LIVE-verified for the enforced case (Phase 7) -- still opt-in, existing MSSP keys remain unrestricted until an admin explicitly sets managed_tenants on them. Documented trade-off, not a new gap.",
+      "17 of 31 entitlement policy-engine resources still have zero call sites (dead policy logic) -- unchanged.",
+      "Two independent TAXII tier gates still exist -- flagged in docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md as a Wave A prerequisite, not yet reconciled."
     ],
     "fixed_this_mission_series": [
-      "Payment tier-escalation (client-controlled tier field) -- PR #252",
-      "Enterprise pricing conflict ($199 vs $499) -- PR #252",
+      "Payment tier-escalation -- PR #252",
+      "Enterprise pricing conflict -- PR #252",
       "Trial-contract contradictions -- PR #251",
-      "Governance dedup gap (3-layer root cause) -- PR #249/#250/#251",
-      "MSSP tenant_id ownership enforcement (opt-in) -- PR #254",
-      "Key rotation endpoint, terminal-state rejection, managed_tenants carry-forward -- PR #254",
-      "JWT bypass of subscription_status at login and mid-session -- PR #254",
-      "Refund webhook -> subscription_status mapping, dual-write race fix -- PR #254",
-      "subscription-lifecycle.test.js CI execution blocker -- this pass (v185.6)"
+      "Governance dedup gap -- PR #249/#250/#251",
+      "MSSP tenant_id ownership enforcement (opt-in) -- PR #254, live-verified this pass",
+      "Key rotation endpoint, terminal-state rejection, managed_tenants carry-forward -- PR #254, live-verified this pass",
+      "JWT bypass of subscription_status at login and mid-session -- PR #254, live-verified this pass",
+      "Refund webhook -> subscription_status mapping, dual-write race fix -- PR #254 (not live-verified this pass, see payment/refund-replay above)",
+      "subscription-lifecycle.test.js CI execution blocker -- v185.6",
+      "rate-limit-boundary test targeting a cached endpoint (test-harness bug, not production bug) -- this pass"
     ]
   },
 
   "branch_protection": {
-    "status": "BLOCKED_OPERATOR_ACTION",
-    "detail": "No GitHub tool available in this session can read or write branch protection rules / repository rulesets on `main`. Re-confirmed this pass: no such tool exists in the current toolset (checked via ToolSearch for branch-protection/ruleset tools before writing this section). docs/MAIN_BRANCH_PROTECTION_V185.md contains the exact ruleset configuration and rollout sequence an operator must apply. Per the mission's own Final Release Rule, worldwide production release cannot be approved while this remains true, regardless of engineering completeness elsewhere."
+    "status": "ACTIVE -- CONFIRMED FIXED THIS PASS",
+    "detail": "GET /repos/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/branches (list_branches, page 2 of 2, perPage 100) shows main's `\"protected\": true` as of this pass -- confirmed via the GitHub API directly, not a screenshot or assumption. Operator created ruleset 'SENTINEL APEX Production Main Protection' and switched it from initial 'Evaluate' (monitor-only, non-blocking) to 'Active' enforcement after this was flagged. Per the mission's own Final Release Rule, this blocker -- independently sufficient for NO-GO in every prior pass -- is now resolved."
   },
 
   "remaining_blockers": [
-    "ADMIN_SECRET not configured as a GitHub Actions secret -- reconfirmed this pass (run 32961266467, job log read directly: ADMIN_SECRET_PRESENT=false). Blocks all live authenticated testing: expired/revoked/cancelled/refunded/suspended live verification, two-tenant BOLA test, all four customer journeys, rate-limit certification, live security gate (Phase 12).",
-    "SUBSCRIPTION_EXPIRY_ENABLED remains false -- prerequisite live verification still BLOCKED_BY_SECRET.",
-    "Canonical entitlement coverage unchanged at 33% (15/46 resources), 1 resource actually enforced -- Phase 11 wave plan produced (docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md), no flips executed this pass by design.",
-    "Main branch protection still disabled -- BLOCKED_OPERATOR_ACTION, no tool access. Per the mission's Final Release Rule, this alone is sufficient to keep the verdict NO-GO / release-blocked even if every other item were resolved.",
-    "MSSP tenant isolation is opt-in, not yet applied to any existing key -- unchanged from PR #254.",
-    "Full Free/Pro/Enterprise/MSSP black-box customer journeys not run live (BLOCKED_BY_SECRET).",
-    "Live exploit-style verification for all 9 Phase 12 attack classes remains BLOCKED_BY_SECRET -- static code-level re-audit completed this pass (docs/V185_STATIC_SECURITY_REAUDIT.md) but is explicitly weaker evidence and not a substitute for the mission's required live gate."
+    "Canonical entitlement coverage at 33% (15/46 resources wired, 1/31 enforced) -- real, sequenced, multi-PR work per docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md. This is now the PRIMARY remaining blocker to WORLDWIDE_PRODUCTION_RELEASE; ADMIN_SECRET and branch protection, the two blockers that were independently sufficient for NO-GO in every prior pass, are both resolved this pass.",
+    "SUBSCRIPTION_EXPIRY_ENABLED remains false -- Phase 4's shadow-validation prerequisite is now genuinely satisfied (live-verified this pass), but the flag itself has not been flipped; flipping it changes real behavior for future real customer signups and is scoped as its own follow-up rather than bundled here.",
+    "Phase 6 (payment/refund live-safe verification against a real signed webhook) not run this pass -- remains out of safe scope for automated live testing without a real Razorpay test-mode webhook fixture.",
+    "Full black-box Free/Pro/Enterprise/MSSP customer journey scripts not run this pass -- Phase 1/2/4/7 collectively exercise a substantial slice of Enterprise/MSSP access control live, but this is not equivalent to a dedicated journey script for all four tiers.",
+    "PRO/ENTERPRISE/MSSP rate-limit boundaries not live flood-tested (deliberate, to avoid abusive load) -- verified by code inspection only (checkRateLimit() applies an identical code path per tier)."
   ],
 
-  "verdict": "ENGINEERING CUTOVER PASS -- WORLDWIDE RELEASE STILL BLOCKED BY: (1) ADMIN_SECRET not configured, confirmed absent for the second consecutive pass, blocking every live authenticated/lifecycle/security test this mission requires before approval; (2) main branch protection still disabled, BLOCKED_OPERATOR_ACTION, independently sufficient for NO-GO per the mission's own Final Release Rule; (3) entitlement coverage at 33%, not 100%, migration remains real sequenced multi-PR work now with an explicit Wave A/B/C plan. What IS true and verified this pass: the subscription-lifecycle test harness blocker is fixed for real (77/77 CI-executed, not just correct-but-unexecuted), the subscription lifecycle model and its attack-surface fixes from PR #254 were re-read and statically re-confirmed against 9 specific attack classes (docs/V185_STATIC_SECURITY_REAUDIT.md), an honest Wave A/B/C entitlement migration plan now exists (docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md), and this pass's own mandatory-first-step certification run and its exact result were verified via direct job-log inspection rather than assumed from top-level status."
+  "verdict": "ENGINEERING CUTOVER PASS -- WORLDWIDE RELEASE STILL BLOCKED BY: entitlement coverage at 33%, not 100% (the sole blocker that was independently sufficient for NO-GO in every prior pass alongside ADMIN_SECRET absence and disabled branch protection -- both of those are now RESOLVED and live-verified this pass). What changed this pass, concretely: ADMIN_SECRET is confirmed synced between GitHub Actions and the Cloudflare Worker (live-verified via successful key provisioning against production); main branch protection is confirmed ACTIVE (GitHub API protected:true, not Evaluate/monitor-only); the full subscription lifecycle state matrix (6 canonical states, JWT mid-session invalidation, reactivation, rotation, terminal-state rejection, status-field-injection rejection -- 20 assertions) is live-verified against production for the first time, not just unit-tested; MSSP two-tenant cross-tenant isolation is live-verified (6 assertions, both directions denied, legacy key unrestricted as documented); the FREE-tier rate limit boundary is live-verified at the exact expected request (#31) with Retry-After present; the expires_at boundary itself is live-verified via a real ~70-second-lived key. This PR does not claim WORLDWIDE PRODUCTION RELEASE -- APPROVED: entitlement coverage must reach a documented, evidence-backed 100% (or an explicit, accepted lower bar) before that claim is honest."
 }
