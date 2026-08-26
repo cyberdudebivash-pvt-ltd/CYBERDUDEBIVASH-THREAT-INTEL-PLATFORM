@@ -43,9 +43,23 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WRANGLER_TOML = REPO_ROOT / "workers" / "intel-gateway" / "wrangler.toml"
 REVENUE_ENFORCEMENT_JS = REPO_ROOT / "workers" / "intel-gateway" / "src" / "revenue-enforcement.js"
+# Every file that is allowed to call resolveEntitlement() -- v185.9 Wave A
+# Phase 16 extended this gate to also check that a resource actually
+# *enforced* via wrangler.toml has a live resolveEntitlement() callsite
+# somewhere in the codebase. Without this, a resource could be removed from
+# every route (refactor, accidental deletion) while remaining in
+# ENTITLEMENT_ENFORCEMENT_RESOURCES -- the flag would still read as "on" to
+# an operator, but nothing would actually be gated by it. Two files today;
+# add a new one here if a future P-layer starts calling resolveEntitlement()
+# directly.
+RESOLVE_ENTITLEMENT_CALLSITE_FILES = [
+    REPO_ROOT / "workers" / "intel-gateway" / "src" / "index.js",
+    REPO_ROOT / "workers" / "intel-gateway" / "src" / "enterprise-endpoints.js",
+]
 
 CASE_RE = re.compile(r'case\s+"([a-zA-Z0-9_]+)"\s*:')
 ENFORCEMENT_RESOURCES_RE = re.compile(r'ENTITLEMENT_ENFORCEMENT_RESOURCES\s*=\s*"([^"]*)"')
+RESOLVE_ENTITLEMENT_CALL_RE = re.compile(r'resolveEntitlement\([^,]+,\s*[^,]+,\s*"([a-zA-Z0-9_]+)"')
 
 
 NEXT_FN_RE = re.compile(r'^(?:export\s+)?function\s', re.MULTILINE)
@@ -76,6 +90,18 @@ def _enforced_resources(section_label: str, section_text: str) -> set:
     return {r.strip() for r in m.group(1).split(",") if r.strip()}
 
 
+def _live_callsite_resources() -> set:
+    """Resources with at least one resolveEntitlement(ctx, env, "resource", ...)
+    call site across every file allowed to call it."""
+    found = set()
+    for path in RESOLVE_ENTITLEMENT_CALLSITE_FILES:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        found.update(RESOLVE_ENTITLEMENT_CALL_RE.findall(text))
+    return found
+
+
 def _wrangler_sections() -> dict:
     """Split wrangler.toml into [vars] and [env.production.vars] blocks."""
     text = WRANGLER_TOML.read_text(encoding="utf-8")
@@ -100,25 +126,48 @@ def main() -> int:
     print(f"[entitlement-drift-gate] {len(defined)} resource(s) defined in enforceTierGate(): "
           f"{', '.join(sorted(defined))}")
 
+    live_callsites = _live_callsite_resources()
+    print(f"[entitlement-drift-gate] {len(live_callsites)} resource(s) have a live "
+          f"resolveEntitlement() callsite: {', '.join(sorted(live_callsites))}")
+
     sections = _wrangler_sections()
-    failures = []
+    undefined_failures = []
+    no_callsite_failures = []
     for section_name, section_text in sections.items():
         enforced = _enforced_resources(section_name, section_text)
         undefined = enforced - defined
         if undefined:
-            failures.append((section_name, sorted(undefined)))
+            undefined_failures.append((section_name, sorted(undefined)))
+        # v185.9 Wave A Phase 16: a resource can be defined in
+        # enforceTierGate() (so the drift check above passes) yet have every
+        # call site removed elsewhere -- ENTITLEMENT_ENFORCEMENT_RESOURCES
+        # would then be "enforcing" a rule no route ever asks the engine
+        # about, which is a silent no-op, not protection.
+        no_callsite = enforced - live_callsites
+        if no_callsite:
+            no_callsite_failures.append((section_name, sorted(no_callsite)))
         print(f"[entitlement-drift-gate] [{section_name}] "
               f"ENTITLEMENT_ENFORCEMENT_RESOURCES = {sorted(enforced) or '(empty)'}")
 
-    if failures:
+    if undefined_failures:
         print("\n[entitlement-drift-gate] FAIL -- resource(s) enforced in wrangler.toml but "
               "UNDEFINED in enforceTierGate() (silent fail-open via the default case):")
-        for section_name, undefined in failures:
+        for section_name, undefined in undefined_failures:
             print(f"  [{section_name}]: {', '.join(undefined)}")
+
+    if no_callsite_failures:
+        print("\n[entitlement-drift-gate] FAIL -- resource(s) enforced in wrangler.toml but "
+              "with NO live resolveEntitlement() callsite in index.js/enterprise-endpoints.js "
+              "(the enforcement flag is a no-op -- no route ever asks the engine about this "
+              "resource):")
+        for section_name, no_callsite in no_callsite_failures:
+            print(f"  [{section_name}]: {', '.join(no_callsite)}")
+
+    if undefined_failures or no_callsite_failures:
         return 1
 
-    print("[entitlement-drift-gate] PASS -- no drift between wrangler.toml enforcement list "
-          "and enforceTierGate()'s defined resources")
+    print("[entitlement-drift-gate] PASS -- no drift between wrangler.toml enforcement list, "
+          "enforceTierGate()'s defined resources, and live resolveEntitlement() call sites")
     return 0
 
 

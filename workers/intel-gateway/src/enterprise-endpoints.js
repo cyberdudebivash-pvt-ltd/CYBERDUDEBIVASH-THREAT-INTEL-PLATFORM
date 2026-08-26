@@ -74,8 +74,11 @@ function proDenied(endpoint, req_id) {
  * TAXII 2.1 Server Discovery endpoint.
  * Returns server capabilities and available API roots.
  */
-export async function handleTaxiiDiscovery(req, env, ctx, tier, req_id) {
-  if (!requireProOrEnterprise(tier)) {
+export async function handleTaxiiDiscovery(req, env, ctx, tier, req_id, auth, resolveEntitlement) {
+  const taxiiAccessAllowed = resolveEntitlement
+    ? resolveEntitlement(ctx, env, "taxii_access", auth, requireProOrEnterprise(tier)).allowed
+    : requireProOrEnterprise(tier);
+  if (!taxiiAccessAllowed) {
     return proDenied("/api/taxii/", req_id);
   }
   const discovery = {
@@ -104,8 +107,11 @@ export async function handleTaxiiDiscovery(req, env, ctx, tier, req_id) {
  * GET /api/taxii/root/
  * TAXII 2.1 API Root information.
  */
-export async function handleTaxiiRoot(req, env, ctx, tier, req_id) {
-  if (!requireProOrEnterprise(tier)) {
+export async function handleTaxiiRoot(req, env, ctx, tier, req_id, auth, resolveEntitlement) {
+  const taxiiAccessAllowed = resolveEntitlement
+    ? resolveEntitlement(ctx, env, "taxii_access", auth, requireProOrEnterprise(tier)).allowed
+    : requireProOrEnterprise(tier);
+  if (!taxiiAccessAllowed) {
     return proDenied("/api/taxii/root/", req_id);
   }
   const root = {
@@ -128,8 +134,11 @@ export async function handleTaxiiRoot(req, env, ctx, tier, req_id) {
  * GET /api/taxii/root/collections/
  * TAXII 2.1 Collections listing.
  */
-export async function handleTaxiiCollections(req, env, ctx, tier, req_id) {
-  if (!requireProOrEnterprise(tier)) {
+export async function handleTaxiiCollections(req, env, ctx, tier, req_id, auth, resolveEntitlement) {
+  const taxiiAccessAllowed = resolveEntitlement
+    ? resolveEntitlement(ctx, env, "taxii_access", auth, requireProOrEnterprise(tier)).allowed
+    : requireProOrEnterprise(tier);
+  if (!taxiiAccessAllowed) {
     return proDenied("/api/taxii/root/collections/", req_id);
   }
   const collections = {
@@ -214,9 +223,40 @@ export async function handleTaxiiCollections(req, env, ctx, tier, req_id) {
  * live feed `items` instead of returning an empty array; (3) only when no real
  * data exists at all does this return a truthful 503, never a fabricated 200.
  */
-export async function handleTaxiiObjects(req, env, ctx, tier, collection_id, items, req_id) {
-  if (!requireEnterprise(tier)) {
-    return enterpriseDenied(`/api/taxii/root/collections/${collection_id}/objects/`, req_id);
+export async function handleTaxiiObjects(req, env, ctx, tier, collection_id, items, req_id, auth, resolveEntitlement) {
+  // v185.9 (Mission Wave A Phase 2): this gate previously blanket-required
+  // ENTERPRISE for every collection, which self-contradicted this file's own
+  // handleTaxiiCollections() above -- that handler advertises
+  // sentinel-apex-full/sentinel-apex-critical as can_read:true (PRO-readable)
+  // while this one denied PRO on all of them. Fixed to match
+  // handleTaxiiCollections' own per-collection can_read semantics exactly:
+  // full/critical are PRO+ (taxii_access), kev is Enterprise-only (taxii_kev,
+  // its own canonical resource), and ransomware/apt remain the pre-existing
+  // Enterprise-only legacy gate (handleTaxiiCollections already gates their
+  // can_read the same way via requireEnterprise(tier), so no behavior change
+  // there -- no canonical resource exists for those two yet and inventing one
+  // is out of this pass's certified scope).
+  const isKevCollection = collection_id === "sentinel-apex-kev";
+  const isEnterpriseOnlyCollection = collection_id === "sentinel-apex-ransomware" || collection_id === "sentinel-apex-apt";
+  let objectsAllowed, deniedResponse;
+  if (isKevCollection) {
+    objectsAllowed = resolveEntitlement
+      ? resolveEntitlement(ctx, env, "taxii_kev", auth, requireEnterprise(tier)).allowed
+      : requireEnterprise(tier);
+    deniedResponse = () => enterpriseDenied(`/api/taxii/root/collections/${collection_id}/objects/`, req_id);
+  } else if (isEnterpriseOnlyCollection) {
+    objectsAllowed = requireEnterprise(tier);
+    deniedResponse = () => enterpriseDenied(`/api/taxii/root/collections/${collection_id}/objects/`, req_id);
+  } else {
+    // sentinel-apex-full, sentinel-apex-critical, and any unrecognized
+    // collection id default to the base PRO+ TAXII access gate.
+    objectsAllowed = resolveEntitlement
+      ? resolveEntitlement(ctx, env, "taxii_access", auth, requireProOrEnterprise(tier)).allowed
+      : requireProOrEnterprise(tier);
+    deniedResponse = () => proDenied(`/api/taxii/root/collections/${collection_id}/objects/`, req_id);
+  }
+  if (!objectsAllowed) {
+    return deniedResponse();
   }
 
   const url = new URL(req.url);
@@ -341,8 +381,11 @@ export async function handleTaxiiObjects(req, env, ctx, tier, collection_id, ite
  * Export current feed as MISP-compatible JSON event collection.
  * Compatible with MISP 2.4+ direct import.
  */
-export async function handleMISPExport(req, env, ctx, tier, items, req_id) {
-  if (!requireEnterprise(tier)) {
+export async function handleMISPExport(req, env, ctx, tier, items, req_id, auth, resolveEntitlement) {
+  const mispExportAllowed = resolveEntitlement
+    ? resolveEntitlement(ctx, env, "misp_export", auth, requireEnterprise(tier)).allowed
+    : requireEnterprise(tier);
+  if (!mispExportAllowed) {
     return enterpriseDenied("/api/misp/export", req_id);
   }
 
@@ -773,8 +816,11 @@ export async function handleScoringVelocity(req, env, ctx, tier, items, req_id) 
  * GET /api/siem/splunk
  * Splunk-ready JSON feed for direct HTTP Event Collector (HEC) ingestion.
  */
-export async function handleSiemSplunk(req, env, ctx, tier, items, req_id) {
-  if (!requireEnterprise(tier)) {
+export async function handleSiemSplunk(req, env, ctx, tier, items, req_id, auth, resolveEntitlement) {
+  const siemAllowed = resolveEntitlement
+    ? resolveEntitlement(ctx, env, "siem", auth, requireEnterprise(tier)).allowed
+    : requireEnterprise(tier);
+  if (!siemAllowed) {
     return enterpriseDenied("/api/siem/splunk", req_id);
   }
 
@@ -830,8 +876,11 @@ export async function handleSiemSplunk(req, env, ctx, tier, items, req_id) {
  * GET /api/siem/sentinel
  * Microsoft Sentinel Watchlist-compatible CSV for TI Import.
  */
-export async function handleSiemSentinel(req, env, ctx, tier, items, req_id) {
-  if (!requireEnterprise(tier)) {
+export async function handleSiemSentinel(req, env, ctx, tier, items, req_id, auth, resolveEntitlement) {
+  const siemAllowed = resolveEntitlement
+    ? resolveEntitlement(ctx, env, "siem", auth, requireEnterprise(tier)).allowed
+    : requireEnterprise(tier);
+  if (!siemAllowed) {
     return enterpriseDenied("/api/siem/sentinel", req_id);
   }
 
@@ -889,8 +938,11 @@ export async function handleSiemSentinel(req, env, ctx, tier, items, req_id) {
  * GET /api/siem/qradar
  * IBM QRadar Reference Set format for IOC ingestion.
  */
-export async function handleSiemQRadar(req, env, ctx, tier, items, req_id) {
-  if (!requireEnterprise(tier)) {
+export async function handleSiemQRadar(req, env, ctx, tier, items, req_id, auth, resolveEntitlement) {
+  const siemAllowed = resolveEntitlement
+    ? resolveEntitlement(ctx, env, "siem", auth, requireEnterprise(tier)).allowed
+    : requireEnterprise(tier);
+  if (!siemAllowed) {
     return enterpriseDenied("/api/siem/qradar", req_id);
   }
 
@@ -1124,27 +1176,34 @@ export async function handleMSSPFeed(req, env, ctx, tier, items, tenant_id, req_
  * @param {string} tier       - Authenticated tier ('free'|'pro'|'enterprise')
  * @param {Array}  items      - Feed items from manifest
  * @param {string} req_id     - Request ID for correlation
+ * @param {object} auth       - Full resolveAuth() result (tier/sub/managed_tenants/...)
+ * @param {Function} [resolveEntitlement] - index.js's canonical entitlement decision
+ *   function, (ctx, env, resource, auth, adHocAllowed) => {allowed, enforced}. Passed
+ *   as a parameter rather than imported to avoid a circular import (index.js already
+ *   imports routeEnterpriseEndpoint from this file) -- same pattern already used for
+ *   `auth` above. Optional/nullable so this file has zero hard dependency on the
+ *   caller always supplying it (falls back to the pre-existing ad-hoc tier checks).
  * @returns {Response|null}   - Response or null if no match
  */
-export async function routeEnterpriseEndpoint(pathname, req, env, ctx, tier, items, req_id, auth) {
+export async function routeEnterpriseEndpoint(pathname, req, env, ctx, tier, items, req_id, auth, resolveEntitlement) {
   // TAXII 2.1
   if (pathname === "/api/taxii" || pathname === "/api/taxii/") {
-    return handleTaxiiDiscovery(req, env, ctx, tier, req_id);
+    return handleTaxiiDiscovery(req, env, ctx, tier, req_id, auth, resolveEntitlement);
   }
   if (pathname === "/api/taxii/root" || pathname === "/api/taxii/root/") {
-    return handleTaxiiRoot(req, env, ctx, tier, req_id);
+    return handleTaxiiRoot(req, env, ctx, tier, req_id, auth, resolveEntitlement);
   }
   if (pathname === "/api/taxii/root/collections" || pathname === "/api/taxii/root/collections/") {
-    return handleTaxiiCollections(req, env, ctx, tier, req_id);
+    return handleTaxiiCollections(req, env, ctx, tier, req_id, auth, resolveEntitlement);
   }
   const taxii_obj_match = pathname.match(/^\/api\/taxii\/root\/collections\/([^\/]+)\/objects\/?$/);
   if (taxii_obj_match) {
-    return handleTaxiiObjects(req, env, ctx, tier, taxii_obj_match[1], items, req_id);
+    return handleTaxiiObjects(req, env, ctx, tier, taxii_obj_match[1], items, req_id, auth, resolveEntitlement);
   }
 
   // MISP
   if (pathname === "/api/misp/export") {
-    return handleMISPExport(req, env, ctx, tier, items, req_id);
+    return handleMISPExport(req, env, ctx, tier, items, req_id, auth, resolveEntitlement);
   }
 
   // Sigma bulk
@@ -1173,13 +1232,13 @@ export async function routeEnterpriseEndpoint(pathname, req, env, ctx, tier, ite
 
   // SIEM connectors
   if (pathname === "/api/siem/splunk") {
-    return handleSiemSplunk(req, env, ctx, tier, items, req_id);
+    return handleSiemSplunk(req, env, ctx, tier, items, req_id, auth, resolveEntitlement);
   }
   if (pathname === "/api/siem/sentinel") {
-    return handleSiemSentinel(req, env, ctx, tier, items, req_id);
+    return handleSiemSentinel(req, env, ctx, tier, items, req_id, auth, resolveEntitlement);
   }
   if (pathname === "/api/siem/qradar") {
-    return handleSiemQRadar(req, env, ctx, tier, items, req_id);
+    return handleSiemQRadar(req, env, ctx, tier, items, req_id, auth, resolveEntitlement);
   }
 
   // Stream

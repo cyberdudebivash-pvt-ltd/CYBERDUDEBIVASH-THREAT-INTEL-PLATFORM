@@ -13,6 +13,21 @@ This document reports what is actually true in the code as of this pass, not
 the mission's assumed starting point, per this repository's own "verify
 actual production, do not fabricate results" standing rule.
 
+**v185.9 Wave A update:** TAXII (enterprise-endpoints.js's discovery/root/
+collections/objects handlers), MISP (`misp_export`, a new resource), SIEM
+(`siem`), and webhooks/alerts (`alerts`) were wired to shadow-mode
+`resolveEntitlement()` calls this pass — see
+`docs/WAVE_A_ROUTE_AUTHORITY_V185.md` for the full per-route table,
+including the TAXII self-contradiction fix and the premium-report discard
+bug fix. This raises live-callsite coverage from 15 to 18 of 32 defined
+resources (misp_export is new); `report_full`'s callsite bug (return value
+discarded, flag inert) is also fixed. No resource was newly *enforced* --
+`ENTITLEMENT_ENFORCEMENT_RESOURCES` remains `cve_detail_full` only, pending
+the Phase 8 shadow-divergence evidence gate the mission requires before any
+expansion. §2-§5 below are left as the Phase 3 snapshot (now historical for
+the resources just listed); treat `WAVE_A_ROUTE_AUTHORITY_V185.md` as
+authoritative for TAXII/MISP/SIEM/alerts going forward.
+
 ---
 
 ## 1. The existing entitlement engine (what it is, exactly)
