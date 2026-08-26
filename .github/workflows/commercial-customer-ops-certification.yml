@@ -262,9 +262,347 @@ jobs:
           echo ""
           echo "All authenticated customer-ops checks PASSED."
 
+  # ---------------------------------------------------------------------
+  # Phase 2 / Phase 12 (live): full six-state subscription lifecycle
+  # matrix plus JWT mid-session invalidation, reactivation, status-field
+  # injection rejection, and rotation (including terminal-state rotation
+  # rejection). v185.6 shipped the normalized subscription_status model
+  # (subscription-lifecycle.js) and its JWT-deny-marker wiring but could
+  # only unit-test it -- ADMIN_SECRET was absent every prior pass. This is
+  # the first live exercise of that model against production.
+  #
+  # Uses a single ENTERPRISE-tier controlled key throughout (so /api/sla/
+  # report, which requires ENTERPRISE, is a valid allow/deny probe for
+  # every state) and drives every transition through the same admin
+  # endpoints a real support action would use -- no direct KV writes.
+  # ---------------------------------------------------------------------
+  lifecycle-state-matrix:
+    name: "Phase 2/12 - Lifecycle State Matrix + JWT + Rotation"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+    steps:
+      - name: "Drive a single key through every lifecycle state"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+
+          expect_status() {
+            local desc="$1" expected="$2" actual="$3"
+            if [ "$actual" = "$expected" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP $expected, got $actual"
+              FAIL=1
+            fi
+          }
+
+          # Same 401/429 acceptance as the Phase 1 job: recordAuthFailure()
+          # runs on every unresolvable key, and this job produces several
+          # such failures from the same runner egress IP.
+          expect_denied() {
+            local desc="$1" actual="$2"
+            if [ "$actual" = "401" ] || [ "$actual" = "429" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP 401 or 429, got $actual"
+              FAIL=1
+            fi
+          }
+
+          patch_status() {
+            local key="$1" status="$2"
+            curl -sS -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/admin/keys/$key/status" \
+              -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+              -d "{\"subscription_status\":\"$status\",\"reason\":\"CI lifecycle matrix\"}"
+          }
+
+          revoke() {
+            local key="$1"
+            [ -z "$key" ] && return 0
+            curl -sS -X DELETE "$BASE/api/admin/keys/$key" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null
+          }
+
+          # Cleanup net: whichever key is live when the step exits (the
+          # original, or its post-rotation replacement) gets revoked.
+          CURRENT_KEY=""
+          cleanup_all() { [ -n "$CURRENT_KEY" ] && revoke "$CURRENT_KEY" || true; }
+          trap cleanup_all EXIT
+
+          echo "--- Provisioning one controlled ENTERPRISE key ---"
+          KEY_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d "{\"customer_id\":\"ci-lifecycle-$(date +%s)\",\"tier\":\"ENTERPRISE\",\"label\":\"CI lifecycle matrix (auto-expire 1d)\",\"expires_in_days\":1}")
+          KEY=$(echo "$KEY_JSON" | jq -r '.key // empty')
+          if [ -z "$KEY" ]; then
+            echo "FAIL: provisioning did not return a key"
+            exit 1
+          fi
+          CURRENT_KEY="$KEY"
+          echo "Provisioned 1 controlled test key (value not printed)."
+
+          echo "--- ACTIVE (implicit, no subscription_status set yet): allowed ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_status "implicit-active key allowed" "200" "$ST"
+
+          echo "--- Login: issue a JWT for this active key ---"
+          JWT=$(curl -sS -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\"}" | jq -r '.token // empty')
+          if [ -z "$JWT" ]; then
+            echo "FAIL: /auth/login did not return a token for an active key"
+            FAIL=1
+          else
+            echo "PASS: login succeeded for active key"
+          fi
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $JWT" "$BASE/api/sla/report")
+          expect_status "JWT (issued while active) allowed" "200" "$ST"
+
+          echo "--- PAST_DUE: grace period, access must remain allowed ---"
+          ST=$(patch_status "$KEY" "past_due"); expect_status "PATCH to past_due accepted" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_status "past_due key still allowed (grace period)" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $JWT" "$BASE/api/sla/report")
+          expect_status "pre-existing JWT still allowed under past_due" "200" "$ST"
+
+          echo "--- SUSPENDED: API key AND the already-issued JWT must both be denied immediately ---"
+          ST=$(patch_status "$KEY" "suspended"); expect_status "PATCH to suspended accepted" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_denied "suspended key denied" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $JWT" "$BASE/api/sla/report")
+          expect_denied "pre-existing JWT denied mid-session after suspension (jwt_deny marker)" "$ST"
+
+          echo "--- Fresh login must also be refused for a suspended key ---"
+          LOGIN_ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\"}")
+          expect_denied "fresh login refused for suspended key" "$LOGIN_ST"
+
+          echo "--- CANCELLED / EXPIRED / REFUNDED: each independently denies ---"
+          for st in cancelled expired refunded; do
+            PST=$(patch_status "$KEY" "$st"); expect_status "PATCH to $st accepted" "200" "$PST"
+            ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+            expect_denied "$st key denied" "$ST"
+          done
+
+          echo "--- Status-field injection: an unrecognized status string must be rejected at the PATCH layer (400), not silently applied ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/admin/keys/$KEY/status" \
+            -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d '{"subscription_status":"totally_made_up_status","reason":"CI injection probe"}')
+          expect_status "bogus subscription_status rejected" "400" "$ST"
+
+          echo "--- REACTIVATED: admin can restore access from any deny state ---"
+          ST=$(patch_status "$KEY" "active"); expect_status "PATCH to active accepted" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_status "reactivated key allowed again" "200" "$ST"
+          FRESH_LOGIN_ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\"}")
+          expect_status "fresh login succeeds again after reactivation" "200" "$FRESH_LOGIN_ST"
+
+          echo "--- ROTATED: new key works immediately, old key denied immediately, no overlap ---"
+          ROTATE_JSON=$(curl -sS -X POST "$BASE/api/admin/keys/$KEY/rotate" -H "X-Admin-Key: $ADMIN_SECRET")
+          NEW_KEY=$(echo "$ROTATE_JSON" | jq -r '.new_key // empty')
+          if [ -z "$NEW_KEY" ]; then
+            echo "FAIL: rotation did not return a new_key"
+            FAIL=1
+          else
+            echo "PASS: rotation returned a new key"
+            CURRENT_KEY="$NEW_KEY"
+          fi
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_denied "old (pre-rotation) key denied immediately" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $NEW_KEY" "$BASE/api/sla/report")
+          expect_status "new (post-rotation) key allowed, tier carried forward" "200" "$ST"
+
+          echo "--- TERMINAL-STATE ROTATION: rotating a suspended key must be refused (409), not silently reactivate it ---"
+          PST=$(patch_status "$NEW_KEY" "suspended"); expect_status "PATCH new key to suspended accepted" "200" "$PST"
+          ROTATE_DENY_ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/api/admin/keys/$NEW_KEY/rotate" -H "X-Admin-Key: $ADMIN_SECRET")
+          expect_status "rotation of a suspended (terminal-state) key rejected" "409" "$ROTATE_DENY_ST"
+
+          echo "--- Cleanup: revoking final live key ---"
+          revoke "$NEW_KEY"
+          CURRENT_KEY=""
+          echo "Cleanup complete."
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "One or more lifecycle-state-matrix checks FAILED -- see PASS/FAIL lines above."
+            exit 1
+          fi
+          echo ""
+          echo "All lifecycle-state-matrix checks PASSED."
+
+  # ---------------------------------------------------------------------
+  # Phase 7 (live): two real MSSP identities, cross-tenant access denied,
+  # own-tenant access allowed, and a legacy key (no managed_tenants) kept
+  # unrestricted per the documented backward-compatible default.
+  # ---------------------------------------------------------------------
+  mssp-tenant-isolation:
+    name: "Phase 7 - MSSP Two-Tenant Isolation"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+    steps:
+      - name: "Two-tenant BOLA probe against /api/mssp/tenants/{tenant_id}/feed"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+          TENANT_A="ci-tenant-a-$(date +%s)"
+          TENANT_B="ci-tenant-b-$(date +%s)"
+
+          expect_status() {
+            local desc="$1" expected="$2" actual="$3"
+            if [ "$actual" = "$expected" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP $expected, got $actual"
+              FAIL=1
+            fi
+          }
+
+          revoke() {
+            local key="$1"
+            [ -z "$key" ] && return 0
+            curl -sS -X DELETE "$BASE/api/admin/keys/$key" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null
+          }
+
+          PROVISIONED_KEYS=()
+          cleanup_all() {
+            local k
+            for k in "${PROVISIONED_KEYS[@]:-}"; do
+              [ -n "$k" ] && revoke "$k" || true
+            done
+          }
+          trap cleanup_all EXIT
+
+          echo "--- Provisioning MSSP key A (managed_tenants=[TENANT_A]) ---"
+          A_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d "{\"customer_id\":\"ci-mssp-a-$(date +%s)\",\"tier\":\"MSSP\",\"label\":\"CI tenant isolation A\",\"expires_in_days\":1,\"managed_tenants\":[\"$TENANT_A\"]}")
+          A_KEY=$(echo "$A_JSON" | jq -r '.key // empty')
+
+          echo "--- Provisioning MSSP key B (managed_tenants=[TENANT_B]) ---"
+          B_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d "{\"customer_id\":\"ci-mssp-b-$(date +%s)\",\"tier\":\"MSSP\",\"label\":\"CI tenant isolation B\",\"expires_in_days\":1,\"managed_tenants\":[\"$TENANT_B\"]}")
+          B_KEY=$(echo "$B_JSON" | jq -r '.key // empty')
+
+          echo "--- Provisioning legacy MSSP key (no managed_tenants) ---"
+          L_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d "{\"customer_id\":\"ci-mssp-legacy-$(date +%s)\",\"tier\":\"MSSP\",\"label\":\"CI tenant isolation legacy\",\"expires_in_days\":1}")
+          L_KEY=$(echo "$L_JSON" | jq -r '.key // empty')
+
+          if [ -z "$A_KEY" ] || [ -z "$B_KEY" ] || [ -z "$L_KEY" ]; then
+            echo "FAIL: provisioning did not return a key for one or more MSSP identities"
+            exit 1
+          fi
+          PROVISIONED_KEYS=("$A_KEY" "$B_KEY" "$L_KEY")
+          echo "Provisioned 3 controlled MSSP test keys (values not printed)."
+
+          echo "--- TENANT_A key on its own tenant: allowed ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $A_KEY" "$BASE/api/mssp/tenants/$TENANT_A/feed")
+          expect_status "key A allowed on tenant A" "200" "$ST"
+
+          echo "--- TENANT_A key on TENANT_B: denied (cross-tenant BOLA) ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $A_KEY" "$BASE/api/mssp/tenants/$TENANT_B/feed")
+          expect_status "key A denied on tenant B" "403" "$ST"
+
+          echo "--- TENANT_B key on its own tenant: allowed ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $B_KEY" "$BASE/api/mssp/tenants/$TENANT_B/feed")
+          expect_status "key B allowed on tenant B" "200" "$ST"
+
+          echo "--- TENANT_B key on TENANT_A: denied (cross-tenant BOLA) ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $B_KEY" "$BASE/api/mssp/tenants/$TENANT_A/feed")
+          expect_status "key B denied on tenant A" "403" "$ST"
+
+          echo "--- Legacy key (no managed_tenants) on TENANT_A: allowed (documented backward-compatible default) ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $L_KEY" "$BASE/api/mssp/tenants/$TENANT_A/feed")
+          expect_status "legacy key unrestricted on tenant A" "200" "$ST"
+
+          echo "--- Legacy key (no managed_tenants) on TENANT_B: allowed (same documented default) ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $L_KEY" "$BASE/api/mssp/tenants/$TENANT_B/feed")
+          expect_status "legacy key unrestricted on tenant B" "200" "$ST"
+
+          echo "--- Cleanup: revoking all 3 MSSP test keys ---"
+          revoke "$A_KEY"; revoke "$B_KEY"; revoke "$L_KEY"
+          PROVISIONED_KEYS=()
+          echo "Cleanup complete."
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "One or more MSSP tenant-isolation checks FAILED -- see PASS/FAIL lines above."
+            exit 1
+          fi
+          echo ""
+          echo "All MSSP tenant-isolation checks PASSED."
+
+  # ---------------------------------------------------------------------
+  # Phase 8 (partial, deliberately conservative): live boundary check for
+  # the FREE tier only (limit 30/min, the cheapest tier to verify). This
+  # job does NOT flood-test PRO(120)/ENTERPRISE(600)/MSSP(1200) live --
+  # checkRateLimit() (index.js) applies the exact same code path per tier
+  # with no special-casing, and driving 600-1200 requests/min at
+  # production to "prove" that would be the abusive load this mission
+  # explicitly warns against for marginal additional evidence. Runs on a
+  # fresh runner (fresh egress IP), independent of the other jobs' rate-
+  # limit counters, and does not require ADMIN_SECRET (unauthenticated =
+  # FREE tier) -- kept behind the same secret gate anyway so it only
+  # fires alongside the rest of the authenticated certification pass.
+  # ---------------------------------------------------------------------
+  rate-limit-boundary:
+    name: "Phase 8 - Rate Limit Boundary (FREE tier)"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: "Send 33 unauthenticated requests, expect the 31st+ to 429 with Retry-After"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+          FIRST_429=0
+          RETRY_AFTER_SEEN=""
+
+          for i in $(seq 1 33); do
+            RESP=$(curl -sS -D - -o /dev/null "$BASE/api/feed")
+            ST=$(echo "$RESP" | awk 'NR==1{print $2}')
+            if [ "$ST" = "429" ] && [ "$FIRST_429" -eq 0 ]; then
+              FIRST_429=$i
+              RETRY_AFTER_SEEN=$(echo "$RESP" | grep -i '^retry-after:' | tr -d '\r' || true)
+            fi
+          done
+
+          if [ "$FIRST_429" -ge 31 ] && [ "$FIRST_429" -le 33 ]; then
+            echo "PASS: FREE tier (limit 30/min) started returning 429 at request #$FIRST_429"
+          else
+            echo "FAIL: expected the 31st-33rd request to be the first 429, first 429 was at request #$FIRST_429 (0 = never seen)"
+            FAIL=1
+          fi
+
+          if [ -n "$RETRY_AFTER_SEEN" ]; then
+            echo "PASS: Retry-After header present on 429 ($RETRY_AFTER_SEEN)"
+          else
+            echo "FAIL: no Retry-After header seen on the 429 response"
+            FAIL=1
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "One or more rate-limit-boundary checks FAILED -- see PASS/FAIL lines above."
+            exit 1
+          fi
+          echo ""
+          echo "FREE-tier rate-limit boundary check PASSED. PRO/ENTERPRISE/MSSP boundaries are not"
+          echo "live flood-tested (see job header comment) -- verified by code inspection only:"
+          echo "checkRateLimit() applies the same RATE_LIMITS[tier] lookup with no tier-specific branch."
+
   summary:
     name: "Certification Summary"
-    needs: [secret-presence-gate, static-checks, authenticated-customer-ops-tests]
+    needs: [secret-presence-gate, static-checks, authenticated-customer-ops-tests, lifecycle-state-matrix, mssp-tenant-isolation, rate-limit-boundary]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -274,6 +612,9 @@ jobs:
           echo "ADMIN_SECRET_PRESENT=${{ needs.secret-presence-gate.outputs.admin_secret_present }}"
           echo "static-checks: ${{ needs.static-checks.result }}"
           echo "authenticated-customer-ops-tests: ${{ needs.authenticated-customer-ops-tests.result }}"
+          echo "lifecycle-state-matrix: ${{ needs.lifecycle-state-matrix.result }}"
+          echo "mssp-tenant-isolation: ${{ needs.mssp-tenant-isolation.result }}"
+          echo "rate-limit-boundary: ${{ needs.rate-limit-boundary.result }}"
           if [ "${{ needs.secret-presence-gate.outputs.admin_secret_present }}" != "true" ]; then
             echo "Authenticated phases: BLOCKED_BY_SECRET (ADMIN_SECRET not configured as a GitHub Actions secret -- see this workflow file's header comment for setup)"
           fi
