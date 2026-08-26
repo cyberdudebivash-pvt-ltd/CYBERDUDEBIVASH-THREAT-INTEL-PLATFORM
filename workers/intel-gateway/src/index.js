@@ -1544,8 +1544,16 @@ async function handleControlPlaneState(request, env, ctx) {
   );
 
   // --- P16.2+: Wire remaining subsystems from derived metrics (additive) -----
-  const { soc, automation, mssp, security_fabric, customer, commercial: commercialDerived } = buildSubsystems(env, threats);
-  const commercialFinal = commercial.available ? commercial : commercialDerived;
+  // v185.2 FIX (Fortune-500 audit, Phase 10-11): this previously preferred
+  // buildSubsystems()'s `commercial` block whenever the honest `commercial`
+  // computed above was unavailable -- backwards, since buildSubsystems()'s
+  // version was a hardcoded "operational/stable" fabrication with no real
+  // check, silently overwriting an accurate "not available" state with a
+  // fake "healthy" one. buildSubsystems() now returns its own honest
+  // notWired() for commercial (see p16-handlers.js), so this always uses
+  // the real, independently-computed `commercial` above.
+  const { soc, automation, mssp, security_fabric, customer } = buildSubsystems(env, threats);
+  const commercialFinal = commercial;
 
   return jsonResp({
     generated_at: now(),

@@ -142,18 +142,34 @@ export async function handleP16Health(request, env) {
   const feedHealth = (feedStats.total || 0) > 10 ? 95 : 60;
   const slaHealth = slaData.breaches ? Math.max(0, 100 - slaData.breaches * 10) : 92;
 
+  // v185.2 FIX (Fortune-500 audit, Phase 10-11): business_health,
+  // customer_health, commercial_health, and executive_health were hardcoded
+  // constants (88/91/85/90, always "healthy") with no backing KV key or
+  // computation anywhere in the codebase -- confirmed via repo-wide search.
+  // A customer or internal team polling this live, authenticated API would
+  // always see "healthy" regardless of actual state. No real data source
+  // exists yet for these four dimensions, so they now report
+  // not_available/null rather than a fabricated score -- consistent with
+  // the platform's own policy of truthful "unavailable" states over
+  // manufactured "healthy" ones (see the Dark Web Monitor and monetization
+  // report fixes). composite_score is computed only from the three
+  // dimensions that have a real, KV-derived basis.
   const dimensions = {
     platform_health:     { score: feedHealth,         status: feedHealth > 80 ? "healthy" : "degraded" },
-    business_health:     { score: 88,                  status: "healthy" },
-    customer_health:     { score: 91,                  status: "healthy" },
     security_health:     { score: slaHealth,           status: slaHealth > 75 ? "healthy" : "at_risk" },
     operational_health:  { score: Math.max(0, 95 - errorRate * 2), status: errorRate > 10 ? "degraded" : "healthy" },
-    commercial_health:   { score: 85,                  status: "healthy" },
-    executive_health:    { score: 90,                  status: "healthy" },
+    business_health:     { score: null, status: "not_available" },
+    customer_health:     { score: null, status: "not_available" },
+    commercial_health:   { score: null, status: "not_available" },
+    executive_health:    { score: null, status: "not_available" },
   };
 
-  const scores = Object.values(dimensions).map(d => d.score);
-  const composite = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+  const measuredScores = Object.values(dimensions)
+    .map(d => d.score)
+    .filter(s => typeof s === "number" && Number.isFinite(s));
+  const composite = measuredScores.length > 0
+    ? Math.round(measuredScores.reduce((a, b) => a + b, 0) / measuredScores.length)
+    : null;
 
   return _jsonResp({
     generated_at: _now(),
@@ -161,12 +177,13 @@ export async function handleP16Health(request, env) {
     version: "16.4",
     enterprise_health: {
       composite_score: composite,
-      status: composite > 85 ? "healthy" : composite > 70 ? "degraded" : "critical",
+      composite_score_basis: "platform_health, security_health, operational_health (KV-derived only)",
+      status: composite === null ? "not_available" : composite > 85 ? "healthy" : composite > 70 ? "degraded" : "critical",
       dimensions,
       trend: "stable",
       last_incident: slaData.last_breach || null,
     },
-    reuses: ["P6 Operations Platform", "P5 Customer Intelligence", "ANALYTICS_KV"],
+    reuses: ["P6 Operations Platform", "ANALYTICS_KV"],
   });
 }
 
@@ -330,7 +347,21 @@ export async function handleP16Observability(request, env) {
 export function buildSubsystems(env, threats) {
   const notWired = r => ({ available: false, reason: r });
 
-  // SOC: derive from threat stats already computed
+  // v185.2 FIX (Fortune-500 audit, Phase 10-11): automation_rate_pct,
+  // mean_response_time_min, sla_compliance_pct, health_score, mrr_trend, and
+  // every unconditional platform_status/status:"operational" below were
+  // hardcoded constants with no backing KV key, D1 query, or computation --
+  // confirmed via repo-wide search. This function's own JSON is returned
+  // directly by the live, authenticated /api/v1/control-plane/state
+  // endpoint, so a customer or ops team polling it always saw "operational/
+  // healthy" regardless of real state. No real data source exists yet for
+  // these dimensions, so they now report available:false / not_available
+  // rather than a fabricated value, consistent with the platform's own
+  // policy of truthful "unavailable" states over manufactured "healthy"
+  // ones (see the Dark Web Monitor and monetization report fixes).
+
+  // SOC: derive the real parts from threat stats already computed; drop the
+  // two fields that had no real source.
   let soc;
   try {
     const t = threats || {};
@@ -342,32 +373,25 @@ export function buildSubsystems(env, threats) {
       critical_alerts: stats.critical || 0,
       global_threat_level: t.global_threat_level || "UNKNOWN",
       defcon: t.defcon || null,
-      automation_rate_pct: 67.4,
-      mean_response_time_min: 12.8,
+      automation_rate_pct: null,
+      mean_response_time_min: null,
+      automation_metrics_status: "not_available",
     };
   } catch {
     soc = notWired("soc derivation failed");
   }
 
-  // Automation: static operational status (live data via /api/v1/automation/intelligence)
-  const automation = {
-    available: true,
-    source: "p16.7-automation-intelligence",
-    status: "operational",
-    full_endpoint: "/api/v1/automation/intelligence",
-    queue_health: "normal",
-  };
+  // Automation: no live queue/status computation exists yet.
+  const automation = notWired(
+    "automation queue/status has no live computation yet; see /api/v1/automation/intelligence for what is actually wired"
+  );
 
-  // MSSP: structural availability marker
-  const mssp = {
-    available: true,
-    source: "p16-mssp-status",
-    platform_status: "operational",
-    sla_compliance_pct: 98.1,
-    full_endpoint: "/api/v1/analytics/enterprise",
-  };
+  // MSSP: no live SLA computation exists yet.
+  const mssp = notWired(
+    "mssp platform_status/sla_compliance_pct has no live computation yet; see /api/v1/analytics/enterprise for what is actually wired"
+  );
 
-  // Security Fabric: derive from threat coverage
+  // Security Fabric: derive from threat coverage (this part is real).
   let security_fabric;
   try {
     const stats = (threats && threats.stats) || {};
@@ -383,24 +407,18 @@ export function buildSubsystems(env, threats) {
     security_fabric = notWired("security fabric derivation failed");
   }
 
-  // Customer: structural availability marker
-  const customer = {
-    available: true,
-    source: "p16-customer-status",
-    platform_status: "operational",
-    health_score: 91,
-    full_endpoint: "/api/v1/health/enterprise",
-  };
+  // Customer: no live health_score computation exists yet.
+  const customer = notWired(
+    "customer platform_status/health_score has no live computation yet; see /api/v1/health/enterprise for what is actually wired"
+  );
 
-  // Commercial: derived availability marker (revenue-engine has no public binding yet)
-  const commercial = {
-    available: true,
-    source: "p16-commercial-status",
-    platform_status: "operational",
-    mrr_trend: "stable",
-    full_endpoint: "/api/v1/analytics/enterprise",
-    note: "Full revenue metrics at /api/v1/analytics/enterprise",
-  };
+  // Commercial: revenue-engine has no public route binding yet (matches the
+  // honest `commercial` object already computed by handleControlPlaneState
+  // in index.js -- that caller must never prefer this fabricated fallback
+  // over its own real notWired() result).
+  const commercial = notWired(
+    "sentinel-revenue-engine has no public route binding; commercial data lives in its D1 CRM_DB and is not externally fetchable from this Worker"
+  );
 
   return { soc, automation, mssp, security_fabric, customer, commercial };
 }

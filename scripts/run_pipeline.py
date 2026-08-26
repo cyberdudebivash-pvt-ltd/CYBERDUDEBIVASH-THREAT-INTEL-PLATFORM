@@ -3337,6 +3337,64 @@ def stage_sync_root_feed_json() -> None:
     manifest_items.sort(key=sort_key, reverse=True)
     log.info("[3.9] v143.2.0 canonical final sort applied: %d entries", len(manifest_items))
 
+    # ---- v185.2 FIX (Fortune-500 audit, governance dedup gap) --------------
+    # ROOT CAUSE: enforce_manifest_uniqueness() (Phase 4, above) is documented
+    # as "Final pre-write manifest uniqueness guard... Applied immediately
+    # before manifest is written to disk" -- but it is NOT actually the last
+    # stage before the write. PHASE 5 (intel_quality_engine's source-balancing
+    # carry-forward logic) and sentinel_stability_lock.enforce_output_contract()
+    # both run after it and mutate manifest_items further; the stability lock's
+    # own docstring confirms it checks only stix_id and title, never source_url.
+    # Either stage can silently reintroduce a source_url duplicate that Phase 4
+    # already removed. Confirmed live: enterprise_governance_engine.py flagged
+    # a HARD source_url duplicate ("Weekly Cyber Security Newsletter Bulletin")
+    # that reached api/feed.json despite Phase 4 having run earlier in the same
+    # pipeline invocation -- governance grade flapped A+/C/D across consecutive
+    # scheduled runs on the same live feed, matching an intermittent
+    # reintroduction rather than a one-off ingestion glitch.
+    # FIX: re-run the same idempotent guard immediately before the write, so
+    # the guard's own documented contract ("immediately before... disk") is
+    # actually true. No reordering of Phase 4, no new dedup logic -- same
+    # function, called once more at the point closest to the real write.
+    try:
+        import sys as _sys_p4b
+        _scripts_dir_p4b = str(REPO_ROOT / "scripts")
+        if _scripts_dir_p4b not in _sys_p4b.path:
+            _sys_p4b.path.insert(0, _scripts_dir_p4b)
+        from intel_dedup_engine import enforce_manifest_uniqueness as _dedup_manifest_final
+        _before_dedup_final = len(manifest_items)
+        _dedup_result_final = _dedup_manifest_final(manifest_items)
+        if isinstance(_dedup_result_final, tuple) and len(_dedup_result_final) == 2:
+            manifest_items, _p4b_removed_count = _dedup_result_final
+        elif isinstance(_dedup_result_final, list):
+            manifest_items = _dedup_result_final
+            _p4b_removed_count = _before_dedup_final - len(manifest_items)
+        else:
+            log.error(
+                "[PHASE4B] CRITICAL: enforce_manifest_uniqueness returned unexpected type %s — "
+                "skipping final dedup result, keeping pre-call manifest_items to prevent data loss",
+                type(_dedup_result_final).__name__,
+            )
+            _p4b_removed_count = 0
+        if not isinstance(manifest_items, list):
+            log.error(
+                "[PHASE4B] CRITICAL: manifest_items is %s after final dedup — this should be unreachable",
+                type(manifest_items).__name__,
+            )
+            manifest_items = []
+        if _p4b_removed_count:
+            log.warning(
+                "[PHASE4B] Final pre-write dedup gate: %d duplicate(s) reintroduced by Phase 5/stability-lock "
+                "and blocked before write (%d → %d entries)",
+                _p4b_removed_count, _before_dedup_final, len(manifest_items),
+            )
+        else:
+            log.info("[PHASE4B] Final pre-write dedup gate: %d entries, no reintroduced duplicates", len(manifest_items))
+    except ImportError as _p4b_imp_e:
+        log.warning("[PHASE4B] enforce_manifest_uniqueness unavailable (%s) — final dedup skipped", _p4b_imp_e)
+    except Exception as _p4b_e:
+        log.warning("[PHASE4B] Final pre-write dedup error (non-fatal, continuing): %s", _p4b_e)
+
     # ---- Step 6: Write to all target feed.json paths --------------------
     if not manifest_items:
         log.error("[3.9] CRITICAL: Zero entries after all fallbacks — feed.json will be empty")
