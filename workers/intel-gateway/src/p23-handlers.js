@@ -201,7 +201,16 @@ function _buildComplianceMappings(item) {
   }
 
   // MITRE ATT&CK
-  const mitres = item.mitre_techniques || item.apex?.mitre_techniques || [];
+  // PRODUCTION-VERIFICATION FIX (2026-08-26): live-verified against production
+  // api/feed.json -- apex_mitre_attack_engine.py (the evidence-based ATT&CK
+  // mapping engine) writes technique data to attck_technique_ids/
+  // attck_techniques, and that data already covers 87/115 (75.7%) of live
+  // items. Every read site in this file only checked mitre_techniques, so
+  // real, already-computed technique coverage was invisible to every
+  // MITRE-based readiness/quality gate below. No new mapping, no new
+  // engine -- just reading the field the existing engine actually writes.
+  const mitres = [item.mitre_techniques, item.apex?.mitre_techniques, item.attck_technique_ids, item.attck_techniques]
+    .find(a => Array.isArray(a) && a.length > 0) || [];
   if (mitres.length > 0) {
     const techList = mitres.slice(0, 5).map(t =>
       `MITRE ATT&CK  -  ${typeof t === 'string' ? t : (t.technique_id || t.id || JSON.stringify(t))}`
@@ -245,7 +254,8 @@ function _buildHuntObjectives(item) {
   const cve    = item.cve_id || (item.cve_ids || [])[0] || null;
   const actor  = item.actor || item.actor_id || item.actor_tag || null;
   const iocs   = item.iocs || [];
-  const mitres = item.mitre_techniques || item.apex?.mitre_techniques || [];
+  const mitres = [item.mitre_techniques, item.apex?.mitre_techniques, item.attck_technique_ids, item.attck_techniques]
+    .find(a => Array.isArray(a) && a.length > 0) || [];
   const epss   = parseFloat(item.epss_score || 0);
 
   const objectives = [];
@@ -296,7 +306,8 @@ function _buildHuntObjectives(item) {
 export function buildThreatHuntingBlock(item) {
   if (!item || typeof item !== 'object') return '';
   const iocs   = item.iocs || [];
-  const mitres = item.mitre_techniques || item.apex?.mitre_techniques || [];
+  const mitres = [item.mitre_techniques, item.apex?.mitre_techniques, item.attck_technique_ids, item.attck_techniques]
+    .find(a => Array.isArray(a) && a.length > 0) || [];
   if (!iocs.length && !mitres.length && !(item.kev_present || item.kev) && !item.cve_id) return '';
 
   const hunt = _buildHuntObjectives(item);
@@ -464,7 +475,8 @@ export function buildIRPackageBlock(item) {
 
 function _computeDetectionCoverage(item) {
   const detections = item.detection_bundle || item.apex?.sigma_rules || item.apex?.detections || [];
-  const mitres     = item.mitre_techniques || item.apex?.mitre_techniques || [];
+  const mitres = [item.mitre_techniques, item.apex?.mitre_techniques, item.attck_technique_ids, item.attck_techniques]
+    .find(a => Array.isArray(a) && a.length > 0) || [];
   const iocs       = item.iocs || [];
   const iocTypes   = new Set(iocs.map(i => (i.type || "").toLowerCase()).filter(Boolean));
 
@@ -540,7 +552,8 @@ export function computeActionabilityScore(item) {
   const p21level = getP21CertificationLevel(p20total);
   const iocs      = item.iocs || [];
   const detects   = item.detection_bundle || item.apex?.sigma_rules || item.apex?.detections || [];
-  const mitres    = item.mitre_techniques || item.apex?.mitre_techniques || [];
+  const mitres = [item.mitre_techniques, item.apex?.mitre_techniques, item.attck_technique_ids, item.attck_techniques]
+    .find(a => Array.isArray(a) && a.length > 0) || [];
   const kev       = !!(item.kev_present || item.kev);
   const cvss      = parseFloat(item.cvss_score || item.cvss || 0);
   const epss      = parseFloat(item.epss_score || 0);
@@ -668,7 +681,8 @@ export function buildActionabilityScoreBlock(item) {
 export function computeOperationalReadiness(item) {
   const iocs     = item.iocs || [];
   const detects  = item.detection_bundle || item.apex?.sigma_rules || item.apex?.detections || [];
-  const mitres   = item.mitre_techniques || item.apex?.mitre_techniques || [];
+  const mitres = [item.mitre_techniques, item.apex?.mitre_techniques, item.attck_technique_ids, item.attck_techniques]
+    .find(a => Array.isArray(a) && a.length > 0) || [];
   const hasExec  = !!(item.apex?.ai_summary || item.description);
   const hasGuid  = iocs.some(i => i.response_guidance || i.detection_guidance);
   const ec       = item.evidence_chain;
@@ -829,7 +843,8 @@ export async function handleP23OperationalReadiness(request, env) {
 
     const iocs    = item.iocs || [];
     const detects = item.detection_bundle || item.apex?.sigma_rules || [];
-    const mitres  = item.mitre_techniques || item.apex?.mitre_techniques || [];
+    const mitres = [item.mitre_techniques, item.apex?.mitre_techniques, item.attck_technique_ids, item.attck_techniques]
+      .find(a => Array.isArray(a) && a.length > 0) || [];
     const hasGuid = iocs.some(i => i.response_guidance || i.detection_guidance);
     const ec      = item.evidence_chain;
     const cvss    = parseFloat(item.cvss_score || 0);
@@ -874,7 +889,8 @@ export async function handleP23OperationalReadiness(request, env) {
       iocs.length > 0,
       iocs.some(i => i.response_guidance || i.detection_guidance),
       detects.length > 0,
-      iocs.length > 0 && (item.mitre_techniques || item.apex?.mitre_techniques || []).length > 0,
+      iocs.length > 0 && ([item.mitre_techniques, item.apex?.mitre_techniques, item.attck_technique_ids, item.attck_techniques]
+        .find(a => Array.isArray(a) && a.length > 0) || []).length > 0,
       cvss >= 4 || kev,
       true,
       cvss > 0 || kev,

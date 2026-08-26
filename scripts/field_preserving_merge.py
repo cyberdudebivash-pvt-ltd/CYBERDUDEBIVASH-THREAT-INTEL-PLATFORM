@@ -105,6 +105,25 @@ PROTECTED_FIELDS: list[str] = [
     # Confidence
     "confidence_score",
     "confidence",
+    # PRODUCTION-VERIFICATION FIX (2026-08-26): apex_mitre_attack_engine.py's
+    # evidence-based ATT&CK backfill (stage_attack_mapping_backfill,
+    # run_pipeline.py) runs inside STAGE 1-3, BEFORE this merge step
+    # (STAGE 3.1.5/3.1.6). Confirmed live: running the engine standalone
+    # against the current manifest maps 166/239 items (69.5%) with real,
+    # evidence-based technique data -- but every one of those fields was
+    # absent from PROTECTED_FIELDS, so this merge's "base = incoming"
+    # (which never had them) silently discarded the mapping on every
+    # single pipeline run, leaving computeP20QualityScore's mitre score
+    # and computeOperationalReadiness's "Threat Hunting Package" gate at
+    # 0/0.00 for effectively the whole feed regardless of how well the
+    # engine itself performed. Same fix class as the apex_ai/risk_score
+    # protections above -- extending an existing, working mechanism to
+    # enrichment fields it was never updated to cover.
+    "ttps",
+    "mitre_techniques",
+    "attck_techniques",
+    "attck_technique_ids",
+    "ttp_count",
 ]
 
 # Fields used as merge keys (in priority order)
