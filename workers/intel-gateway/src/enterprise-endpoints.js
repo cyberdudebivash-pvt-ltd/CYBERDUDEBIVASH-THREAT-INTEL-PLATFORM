@@ -1039,11 +1039,31 @@ export async function handleStream(req, env, ctx, tier, items, req_id) {
 
 /**
  * GET /api/mssp/tenants/:tenant_id/feed
- * Tenant-scoped threat feed for MSSP multi-customer deployments.
+ * v185.5 (Mission Phase 6): tenant_id was previously accepted from the URL
+ * path with zero check that the caller is authorized for it -- any
+ * Enterprise/MSSP key could query any tenant_id string. Real per-tenant
+ * ownership is now enforced when the caller's key has an explicit
+ * managed_tenants list (see resolveAuth()'s comment and
+ * docs/MSSP_TENANT_IDENTITY_V185.md for the opt-in rollout rationale: a
+ * key with managed_tenants === null -- every key provisioned before this
+ * change -- keeps today's unrestricted behavior rather than being silently
+ * locked out). The underlying `items` are still the same shared global
+ * feed for every tenant either way (no per-tenant private data store
+ * exists in this codebase) -- this fixes WHO may request a given
+ * tenant_id, not what data is returned for it; the response note below
+ * says exactly that rather than the previous "tenant-scoped" language,
+ * which overstated data isolation this platform doesn't have.
  */
-export async function handleMSSPFeed(req, env, ctx, tier, items, tenant_id, req_id) {
+export async function handleMSSPFeed(req, env, ctx, tier, items, tenant_id, req_id, auth) {
   if (!requireEnterprise(tier)) {
     return enterpriseDenied(`/api/mssp/tenants/${tenant_id}/feed`, req_id);
+  }
+  const managedTenants = auth && Array.isArray(auth.managed_tenants) ? auth.managed_tenants : null;
+  if (managedTenants !== null && !managedTenants.includes(tenant_id)) {
+    return new Response(JSON.stringify({
+      error: "Forbidden: this key is not authorized for the requested tenant_id",
+      tenant_id, req_id,
+    }), { status: 403, headers: { "Content-Type": "application/json" } });
   }
 
   const url = new URL(req.url);
@@ -1075,7 +1095,10 @@ export async function handleMSSPFeed(req, env, ctx, tier, items, tenant_id, req_
     filters_applied: { severity, industry },
     items: page,
     _apex_version: ENTERPRISE_VERSION,
-    _mssp_note: "Tenant-scoped feed. Configure industry and severity filters for relevant intelligence.",
+    _tenant_authorization: managedTenants !== null ? "enforced" : "unrestricted_legacy_key",
+    _mssp_note: "Shared intelligence feed filtered by severity/industry, not private per-tenant data -- "
+      + "no per-tenant data store exists in this platform today. Configure industry and severity filters "
+      + "for relevant intelligence.",
   }), {
     status: 200,
     headers: {
@@ -1103,7 +1126,7 @@ export async function handleMSSPFeed(req, env, ctx, tier, items, tenant_id, req_
  * @param {string} req_id     - Request ID for correlation
  * @returns {Response|null}   - Response or null if no match
  */
-export async function routeEnterpriseEndpoint(pathname, req, env, ctx, tier, items, req_id) {
+export async function routeEnterpriseEndpoint(pathname, req, env, ctx, tier, items, req_id, auth) {
   // TAXII 2.1
   if (pathname === "/api/taxii" || pathname === "/api/taxii/") {
     return handleTaxiiDiscovery(req, env, ctx, tier, req_id);
@@ -1167,7 +1190,7 @@ export async function routeEnterpriseEndpoint(pathname, req, env, ctx, tier, ite
   // MSSP tenants
   const mssp_match = pathname.match(/^\/api\/mssp\/tenants\/([^\/]+)\/feed$/);
   if (mssp_match) {
-    return handleMSSPFeed(req, env, ctx, tier, items, mssp_match[1], req_id);
+    return handleMSSPFeed(req, env, ctx, tier, items, mssp_match[1], req_id, auth);
   }
 
   // No match

@@ -78,9 +78,10 @@ on a resource an operator believed was enforced.)
 | `sla_report` | ENTERPRISE/MSSP only | **Yes — added this pass** (index.js ~5217) | Shadow only |
 | `sla_incidents` | ENTERPRISE/MSSP only | **Yes — added this pass** (index.js ~5221) | Shadow only |
 | `sla_certificate` | ENTERPRISE/MSSP only | **Yes — added this pass** (index.js ~5228) | Shadow only |
-| `ioc_full`, `stix_bundle`, `ai_full`, `report_full`, `siem`, `alerts`, `api_keys`, `ioc_confidence_detail`, `stix_export_full`, `ai_predict`, `ai_campaigns`, `ai_anomalies`, `intel_graph`, `intel_graph_full`, `intel_relations`, `detection_rules`, `actor_attribution` | various (see file) | **No call sites anywhere in `src/`** | N/A — dead policy |
+| `report_full` | FREE blocked | **Yes — added v185.5** (index.js `/api/reports/premium` route) | Shadow only |
+| `ioc_full`, `stix_bundle`, `ai_full`, `siem`, `alerts`, `api_keys`, `ioc_confidence_detail`, `stix_export_full`, `ai_predict`, `ai_campaigns`, `ai_anomalies`, `intel_graph`, `intel_graph_full`, `intel_relations`, `detection_rules`, `actor_attribution` | various (see file) | **No call sites anywhere in `src/`** | N/A — dead policy |
 
-The 17 resources in the last row are defined logic with zero callers. Most
+The 16 resources in the last row are defined logic with zero callers. Most
 map conceptually to real ad-hoc-gated routes (`ai_predict` ↔ `/api/predict`,
 `intel_graph` ↔ `/api/v1/intel/graph`, `siem` ↔ `/api/siem/*`, etc.) but
 those handlers use their own inline `tier === "..."` checks in
@@ -146,13 +147,14 @@ SLA, sequenced to avoid a single oversized change:
    rather than adding a duplicate)
 5. **MISP** (confirm which of the two MISP export handlers is actually live
    before wiring either)
-6. **Premium reports** (`report_full`, defined, unwired — note
-   premium-reports.js already has stronger protection than most: real
-   per-customer ownership checks, not just a tier check)
+6. **Premium reports** — ✅ done in v185.5 (`report_full`,
+   `/api/reports/premium`, shadow-mode; note premium-reports.js already has
+   stronger protection than most: real per-customer ownership checks, not
+   just a tier check)
 7. **SIEM** (`siem`, defined, unwired — 3 routes in enterprise-endpoints.js)
 8. **Webhooks** (`/api/alerts/dispatch` and related — `alerts` resource
    defined, unwired)
-9. **SLA** — ✅ done this pass (`sla_report`, `sla_incidents`,
+9. **SLA** — ✅ done in v185.4/PR #253 (`sla_report`, `sla_incidents`,
    `sla_certificate`, shadow-mode)
 10. **Enterprise APIs** (`/api/scoring/*`, `/api/stream` — no matching
     `enforceTierGate` resource exists yet, needs new cases)
@@ -163,8 +165,10 @@ SLA, sequenced to avoid a single oversized change:
     `/api/v1/campaigns/intel`, `/api/v1/anomalies`, `/api/v1/intel/graph`,
     `/api/v1/intel/relations`)
 
-**`CANONICAL_ENTITLEMENT_COVERAGE` today: 14 of ~46 identified paid resources
-wired (≈30%), 1 of 31 defined resources actually enforced (≈3%). Not 100%.**
+**`CANONICAL_ENTITLEMENT_COVERAGE` today: 15 of ~46 identified paid resources
+wired (≈33%), 1 of 31 defined resources actually enforced (≈3%). Not 100%.**
+(v185.5: `report_full` added, `/api/reports/premium`, shadow mode, priority-6
+item from the backlog below.)
 Reaching 100% is real, sequenced, multi-PR work — not something to wildcard
 in one pass per the mission's own Phase 8 instruction ("Do not enable all via
 wildcard until each class is validated").
