@@ -48,18 +48,24 @@ CASE_RE = re.compile(r'case\s+"([a-zA-Z0-9_]+)"\s*:')
 ENFORCEMENT_RESOURCES_RE = re.compile(r'ENTITLEMENT_ENFORCEMENT_RESOURCES\s*=\s*"([^"]*)"')
 
 
+NEXT_FN_RE = re.compile(r'^(?:export\s+)?function\s', re.MULTILINE)
+
+
 def _defined_resources() -> set:
     text = REVENUE_ENFORCEMENT_JS.read_text(encoding="utf-8")
     # Only scan inside enforceTierGate() -- stop at the next top-level
-    # "function " after it so an unrelated switch elsewhere in the file
-    # (there is none today, but this keeps the scan honest) can't feed in
-    # unrelated case labels.
+    # function declaration after it (export or not -- revenue-enforcement.js
+    # mixes both, e.g. the very next function after enforceTierGate() is
+    # `export function buildUpgradeTrigger`, which a bare "\nfunction "
+    # search would skip right past) so an unrelated function's case labels
+    # can't silently feed into the "defined" set. That would only ever make
+    # this gate more permissive than intended, the opposite of its purpose.
     start = text.find("function enforceTierGate")
     if start == -1:
         print("[entitlement-drift-gate] FATAL: enforceTierGate() not found in revenue-enforcement.js")
         sys.exit(1)
-    next_fn = text.find("\nfunction ", start + 1)
-    body = text[start: next_fn if next_fn != -1 else len(text)]
+    m = NEXT_FN_RE.search(text, start + 1)
+    body = text[start: m.start() if m else len(text)]
     return set(CASE_RE.findall(body))
 
 

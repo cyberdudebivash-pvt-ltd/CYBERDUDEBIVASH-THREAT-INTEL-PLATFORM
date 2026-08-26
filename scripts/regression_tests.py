@@ -1030,16 +1030,41 @@ def t24():
         f"silently fail-opens via the default case in production right now."
     )
 
-    # Simulate real drift: a resource name guaranteed not to be a real case.
-    sections = gate._wrangler_sections()
-    assert sections, "T24: could not parse [vars]/[env.production.vars] from wrangler.toml"
+    # Simulate real drift and actually run it through gate.main()'s own
+    # detection + exit-code path (not just set arithmetic on the helper
+    # functions) -- writes a bogus resource into the real wrangler.toml,
+    # confirms main() now reports failure, then restores the original
+    # content in a finally block so this test can never leave the repo's
+    # wrangler.toml modified, pass or fail.
+    assert "vars" in gate._wrangler_sections(), "T24: wrangler.toml has no top-level [vars] block"
+    original_toml = gate.WRANGLER_TOML.read_text(encoding="utf-8")
     bogus = "t24_synthetic_undefined_resource"
-    fake_enforced = gate._enforced_resources("vars", sections["vars"]) | {bogus}
-    assert (fake_enforced - defined) == {bogus}, (
-        "T24: synthetic drift-detection sanity check failed to isolate the injected bogus resource"
+    try:
+        injected_toml = original_toml.replace(
+            'ENTITLEMENT_ENFORCEMENT_RESOURCES = "',
+            f'ENTITLEMENT_ENFORCEMENT_RESOURCES = "{bogus},',
+        )
+        assert injected_toml != original_toml, (
+            "T24: could not inject the synthetic resource -- ENTITLEMENT_ENFORCEMENT_RESOURCES "
+            "assignment pattern not found in wrangler.toml"
+        )
+        gate.WRANGLER_TOML.write_text(injected_toml, encoding="utf-8")
+        drift_exit = gate.main()
+        assert drift_exit == 1, (
+            f"v185.4 REGRESSION: entitlement_resource_drift_gate.py did not detect injected "
+            f"synthetic drift (exit={drift_exit}, expected 1) -- the gate's own failure path "
+            f"is broken, meaning it would silently pass real drift too."
+        )
+    finally:
+        gate.WRANGLER_TOML.write_text(original_toml, encoding="utf-8")
+
+    restored_exit = gate.main()
+    assert restored_exit == 0, (
+        "T24: wrangler.toml restore after synthetic-drift test left real drift behind "
+        f"(exit={restored_exit}) -- restore did not return the file to its clean state"
     )
     log.info("[T24] entitlement resource drift gate: clean against real config, "
-             "correctly detects synthetic drift")
+             "correctly detects and fails on injected synthetic drift, restore verified clean")
 
 
 # ---------------------------------------------------------------------------

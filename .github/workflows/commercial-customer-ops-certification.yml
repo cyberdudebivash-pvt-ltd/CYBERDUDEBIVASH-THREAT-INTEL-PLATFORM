@@ -154,6 +154,45 @@ jobs:
             fi
           }
 
+          # Denied-credential checks: 401 is the normal answer, but
+          # resolveAuth() (index.js) calls recordAuthFailure() on every
+          # unresolvable key -- BRUTE_FORCE_MAX=5 failures from the same IP
+          # within BRUTE_FORCE_TTL=900s locks that IP to HTTP 429 instead.
+          # This job produces 2 such failures (INVALID_KEY, REVOKED_KEY)
+          # per run from the runner's shared egress IP, so a few runs within
+          # 15 minutes can legitimately tip into 429 -- still a correct
+          # denial, just a different status. Accept both for the two checks
+          # that present a credential resolveAuth() can't resolve; the
+          # ANONYMOUS check presents no credential at all, so
+          # recordAuthFailure() never runs there and 401 stays deterministic
+          # (kept on expect_status).
+          expect_denied() {
+            local desc="$1" actual="$2"
+            if [ "$actual" = "401" ] || [ "$actual" = "429" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP 401 or 429, got $actual"
+              FAIL=1
+            fi
+          }
+
+          # Cleanup safety net: if any curl below this point fails, `set -e`
+          # aborts the step before its own explicit revoke calls run,
+          # leaving live ENTERPRISE/MSSP test keys until their 1-day
+          # expires_in_days TTL. Record provisioned keys as they're created
+          # and revoke every recorded one on EXIT regardless of how the
+          # step ends -- the explicit revoke calls later in this script
+          # become redundant-but-harmless (revoke() on an already-deleted
+          # key is a no-op) rather than the only cleanup path.
+          PROVISIONED_KEYS=()
+          cleanup_all() {
+            local k
+            for k in "${PROVISIONED_KEYS[@]:-}"; do
+              [ -n "$k" ] && revoke "$k" || true
+            done
+          }
+          trap cleanup_all EXIT
+
           echo "--- Provisioning controlled test keys (PRO, ENTERPRISE, MSSP) ---"
           PRO_JSON=$(provision PRO)
           ENT_JSON=$(provision ENTERPRISE)
@@ -166,6 +205,7 @@ jobs:
             echo "FAIL: provisioning did not return a key for one or more tiers -- ADMIN_SECRET likely does not match the Worker's env.ADMIN_SECRET, or /api/admin/keys is unreachable"
             exit 1
           fi
+          PROVISIONED_KEYS=("$PRO_KEY" "$ENT_KEY" "$MSSP_KEY")
           echo "Provisioned 3 controlled test keys (values not printed)."
 
           # NOTE: handleSLAReport (sla-monitor.js) has its own auth-presence
@@ -182,7 +222,7 @@ jobs:
 
           echo "--- INVALID_KEY: garbage key must be denied ---"
           ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: cdb_invalid_00000000000000000000000000000000000000" "$BASE/api/sla/report")
-          expect_status "invalid key denied on /api/sla/report" "401" "$ST"
+          expect_denied "invalid key denied on /api/sla/report" "$ST"
 
           echo "--- ACTIVE_PRO: PRO key denied on ENTERPRISE-only resource ---"
           ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $PRO_KEY" "$BASE/api/sla/report")
@@ -207,7 +247,7 @@ jobs:
           echo "--- REVOKED_KEY: PRO key denied immediately after admin revocation ---"
           revoke "$PRO_KEY"
           ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $PRO_KEY" "$BASE/api/sla/report")
-          expect_status "revoked PRO key denied on /api/sla/report" "401" "$ST"
+          expect_denied "revoked PRO key denied on /api/sla/report" "$ST"
 
           echo "--- Cleanup: revoking remaining test keys ---"
           revoke "$ENT_KEY"

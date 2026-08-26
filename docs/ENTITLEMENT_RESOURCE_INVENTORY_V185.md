@@ -163,8 +163,8 @@ SLA, sequenced to avoid a single oversized change:
     `/api/v1/campaigns/intel`, `/api/v1/anomalies`, `/api/v1/intel/graph`,
     `/api/v1/intel/relations`)
 
-**`CANONICAL_ENTITLEMENT_COVERAGE` today: 13 of ~46 identified paid resources
-wired (≈28%), 1 of 31 defined resources actually enforced (≈3%). Not 100%.**
+**`CANONICAL_ENTITLEMENT_COVERAGE` today: 14 of ~46 identified paid resources
+wired (≈30%), 1 of 31 defined resources actually enforced (≈3%). Not 100%.**
 Reaching 100% is real, sequenced, multi-PR work — not something to wildcard
 in one pass per the mission's own Phase 8 instruction ("Do not enable all via
 wildcard until each class is validated").

@@ -81,7 +81,11 @@ against what this codebase can actually populate today):
 | `provider` | Partial | inferable from `payment_metadata`/`source` (`"razorpay"`, `"gumroad"`, `"manual"`) but not a normalized field |
 | `provider_subscription_id` | **No** | Razorpay `order_id`/`payment_id` are recorded in `payment_metadata` and audit logs, but not linked forward into the key record as a queryable subscription id |
 
-**7 of 11 required fields do not exist in any form today.** Building this
+**7 of the 14 required decision fields do not exist in any form today**
+(`tenant_id`, `subscription_status`, `starts_at`, `cancel_at`, `revoked_at`,
+`suspended_at`, `provider_subscription_id`) — the other 7 exist fully or
+partially (`customer_id`, `tier`, `resource`, `expires_at` fully; `key_id`,
+`scope`, `provider` only partially, per the table above). Building this
 normalized model is a real data-model change to `API_KEYS_KV`'s record
 shape plus new admin/webhook code paths to populate `cancel_at`,
 `revoked_at`, `suspended_at`, and a proper `subscription_status` enum — not

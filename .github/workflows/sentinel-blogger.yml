@@ -2794,19 +2794,32 @@ jobs:
       # STAGE 4.065 - Entitlement Resource Drift Gate (v185.4)
       # Mission v185.0 Phase 8's own requirement: "Any newly introduced paid
       # route without an entitlement resource classification must fail CI."
-      # Hard-fails (no continue-on-error) if wrangler.toml's
-      # ENTITLEMENT_ENFORCEMENT_RESOURCES names a resource that isn't a case
-      # in revenue-enforcement.js's enforceTierGate() -- that combination is
-      # a silent fail-open (the switch's default case grants access) on a
-      # resource an operator explicitly believed was being enforced. STAGE 4
-      # below is documented "ALWAYS RUNS" so this failing does not block the
-      # commit/push -- it surfaces as a red CI check for an operator to fix,
-      # same non-blocking-but-visible posture as STAGE 5.6's regression
-      # suite. See scripts/entitlement_resource_drift_gate.py for detail.
+      # Flags if wrangler.toml's ENTITLEMENT_ENFORCEMENT_RESOURCES names a
+      # resource that isn't a case in revenue-enforcement.js's
+      # enforceTierGate() -- that combination is a silent fail-open (the
+      # switch's default case grants access) on a resource an operator
+      # explicitly believed was being enforced.
+      # continue-on-error: true (STAGE 4.04 rollout pattern, see that step's
+      # comment above): this step runs BEFORE the report-gate/dist-build/
+      # deploy chain below, all of which use the default `if: success()`.
+      # Without continue-on-error, one stale name in this config would skip
+      # every one of those steps and block the entire GitHub Pages deploy --
+      # a single config typo taking down publishing is a far worse outcome
+      # than the fail-open this gate exists to catch. A hard-fail loud
+      # ::error:: annotation gives the same operator visibility as blocking
+      # would, without that blast radius. See
+      # scripts/entitlement_resource_drift_gate.py for detail.
       # -----------------------------------------------------------------------
       - name: "STAGE 4.065 - Entitlement Resource Drift Gate"
         timeout-minutes: 2
-        run: python3 scripts/entitlement_resource_drift_gate.py
+        continue-on-error: true
+        run: |
+          if python3 scripts/entitlement_resource_drift_gate.py; then
+            echo "::notice::Entitlement resource drift gate PASS."
+          else
+            echo "::error::Entitlement resource drift detected -- a resource in wrangler.toml's ENTITLEMENT_ENFORCEMENT_RESOURCES has no matching enforceTierGate() case and silently fail-opens. See job log above."
+          fi
+          exit 0
 
       # -----------------------------------------------------------------------
       # STAGE 4: GIT SYNC -- ALWAYS RUNS

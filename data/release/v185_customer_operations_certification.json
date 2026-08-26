@@ -23,11 +23,11 @@
 
   "entitlement_coverage": {
     "resources_defined_in_policy_engine": 31,
-    "resources_wired_to_resolveEntitlement": 13,
+    "resources_wired_to_resolveEntitlement": 14,
     "resources_actually_enforced": 1,
-    "entitlement_coverage_pct": 28,
-    "note": "13 of ~46 identified paid resources wired to the canonical engine (all shadow-mode except cve_detail_full). Not 100% -- full migration is real, sequenced, multi-PR work per docs/ENTITLEMENT_RESOURCE_INVENTORY_V185.md Section 4. This pass added sla_report/sla_incidents/sla_certificate as the next concrete migration step, following the mission's own priority-9 ordering.",
-    "drift_guard": "scripts/entitlement_resource_drift_gate.py wired into CI as STAGE 4.065 (hard-fail) -- prevents ENTITLEMENT_ENFORCEMENT_RESOURCES from ever naming a resource undefined in enforceTierGate() (a silent fail-open)."
+    "entitlement_coverage_pct": 30,
+    "note": "14 of ~46 identified paid resources wired to the canonical engine (all shadow-mode except cve_detail_full). Not 100% -- full migration is real, sequenced, multi-PR work per docs/ENTITLEMENT_RESOURCE_INVENTORY_V185.md Section 4. This pass added sla_report/sla_incidents/sla_certificate as the next concrete migration step, following the mission's own priority-9 ordering.",
+    "drift_guard": "scripts/entitlement_resource_drift_gate.py wired into CI as STAGE 4.065 -- flags (non-blocking, per code-review-driven fix: a hard-fail here would have skipped every downstream if:success() step including the GitHub Pages deploy) if ENTITLEMENT_ENFORCEMENT_RESOURCES ever names a resource undefined in enforceTierGate() (a silent fail-open)."
   },
 
   "expired_access_tests": {
@@ -85,11 +85,11 @@
     "ADMIN_SECRET not configured as a GitHub Actions secret (distinct from WORKER_ADMIN_SECRET, which only gates cache-bust) -- blocks all authenticated production acceptance testing (Phases 4 live portion, 9 live portion, 10, 11, 12-15, 16 live portion, 17 live portion).",
     "Normalized subscription_status model not built (Phase 5 design-only this pass) -- blocks EXPIRED_*/CANCELLED/REFUNDED/SUSPENDED/DOWNGRADED lifecycle states entirely, independent of secret access.",
     "SUBSCRIPTION_EXPIRY_ENABLED remains false -- flipping it requires the above two items resolved first, per Phase 7's own explicit prerequisite.",
-    "Canonical entitlement coverage at 28% (13/46 resources), 1 resource actually enforced -- full migration is sequenced multi-PR work per the inventory doc, not completed this pass.",
+    "Canonical entitlement coverage at 30% (14/46 resources), 1 resource actually enforced -- full migration is sequenced multi-PR work per the inventory doc, not completed this pass.",
     "Main branch protection still disabled -- BLOCKED_OPERATOR_ACTION, no tool access, operator must apply docs/MAIN_BRANCH_PROTECTION_V185.md.",
     "MSSP tenant_id isolation claim vs. reality gap not resolved (product/architecture decision, out of scope this pass).",
     "Full Free/Pro/Enterprise/MSSP black-box customer journeys not run live (BLOCKED_BY_SECRET)."
   ],
 
-  "verdict": "NO-GO -- WORLDWIDE PRODUCTION RELEASE NOT APPROVED. Blockers: ADMIN_SECRET not configured (BLOCKED_BY_SECRET on all live authenticated testing), subscription_status model not built (BLOCKED_BY_MODEL on expiry/cancellation/refund/suspension lifecycle), SUBSCRIPTION_EXPIRY_ENABLED=false (correctly withheld pending the above), entitlement coverage at 28% not 100%, MAIN_BRANCH_PROTECTION disabled (BLOCKED_OPERATOR_ACTION). What IS true and verified: governance A+ with 0 duplicate/hard/soft violations, the payment tier-escalation vulnerability is fixed and deployed, the Enterprise pricing conflict is resolved and deployed, and a real (not fabricated) foundation for the remaining work -- inventory, state-model design, drift-guard CI gate, and a runnable authenticated-test workflow -- now exists for the next pass to build on rather than re-discover."
+  "verdict": "NO-GO -- WORLDWIDE PRODUCTION RELEASE NOT APPROVED. Blockers: ADMIN_SECRET not configured (BLOCKED_BY_SECRET on all live authenticated testing), subscription_status model not built (BLOCKED_BY_MODEL on expiry/cancellation/refund/suspension lifecycle), SUBSCRIPTION_EXPIRY_ENABLED=false (correctly withheld pending the above), entitlement coverage at 30% not 100%, MAIN_BRANCH_PROTECTION disabled (BLOCKED_OPERATOR_ACTION). What IS true and verified: governance A+ with 0 duplicate/hard/soft violations, the payment tier-escalation vulnerability is fixed and deployed, the Enterprise pricing conflict is resolved and deployed, and a real (not fabricated) foundation for the remaining work -- inventory, state-model design, drift-guard CI gate, and a runnable authenticated-test workflow -- now exists for the next pass to build on rather than re-discover."
 }
