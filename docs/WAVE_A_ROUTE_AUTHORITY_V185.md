@@ -16,6 +16,32 @@ level, and premium report *called* `resolveEntitlement()` but discarded its
 return value entirely (now fixed — see `report_full` row below). Do not
 re-trust either of those two original claims.
 
+## Proof Before Change
+
+| Field | Entry |
+|---|---|
+| **Objective** | Bring TAXII, MISP, SIEM, and webhook/alert routes onto the single canonical `resolveEntitlement()`/`enforceTierGate()` authorization chain, in shadow mode, so their access decisions are observable and comparable to their existing ad-hoc gates before any of them are ever enforced. |
+| **Affected files** | `workers/intel-gateway/src/enterprise-endpoints.js`, `workers/intel-gateway/src/index.js`, `workers/intel-gateway/src/revenue-enforcement.js`, `scripts/entitlement_resource_drift_gate.py`, `docs/ENTITLEMENT_RESOURCE_INVENTORY_V185.md`, `docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md`, `docs/WAVE_A_ROUTE_AUTHORITY_V185.md` (new), `data/release/v185_customer_operations_certification.json`. |
+| **Existing engine reused** | `resolveEntitlement()` and `enforceTierGate()` (both pre-existing in `index.js`/`revenue-enforcement.js`, called unchanged — not re-implemented). `taxii_access`, `taxii_kev`, `siem`, `alerts`, `report_full` were all pre-existing `enforceTierGate()` cases with zero or partial call sites; this pass calls them, it does not redefine their rules. Only one genuinely new case (`misp_export`) was added, because no canonical MISP resource existed at all. |
+| **Evidence modification is required** | Mission v185.9 Wave A, Phases 2/3/4/6/7 explicitly require TAXII dual-gate reconciliation, MISP live-handler resolution, premium-report re-validation, SIEM enforcement wiring, and webhook/alert entitlement wiring as named, bounded deliverables. |
+| **Risk classification** | LOW. Every new/changed call site consumes `resolveEntitlement()`'s `.allowed` in the established safe pattern — while `ENTITLEMENT_ENFORCEMENT_RESOURCES` does not name a resource (true for all of these today), `resolveEntitlement()` returns the caller's own ad-hoc decision unchanged, so behavior is provably identical to pre-PR for every route touched. The two real bugs fixed (`handleTaxiiObjects` self-contradiction, premium-report discarded return value) are the only rows with a production behavior implication, and both are corrections toward the code's own already-documented intended behavior, not new behavior. |
+| **Expected regression risk** | None to existing enforced behavior (`cve_detail_full` untouched). Shadow-mode `entitlement_shadow_mismatch` audit log volume increases (more resources now shadow-checked) — an observability-only effect, not a functional one. |
+| **Rollback plan** | Every change in this PR is either (a) a shadow-only `resolveEntitlement()` call whose removal reverts the route to its pre-PR ad-hoc-only gate with zero other side effects, or (b) a doc/JSON update. No schema, KV, or R2 change. Revert via `git revert` of this PR's merge commit; no data migration or coordinated rollback step is needed since nothing here is enforced. |
+
+## Reuse Report
+
+| Metric | Result |
+|---|---|
+| Existing P-layer/engine functions reused (called, not re-implemented) | `resolveEntitlement()`, `enforceTierGate()`, `shadowCheckEntitlement()`, `isEntitlementEnforced()`, `auditLog()` — all pre-existing, all called unchanged |
+| Existing API routes extended (not duplicated) | 12 (4 TAXII, 1 MISP, 3 SIEM, 4 alerts) |
+| Existing dashboards extended | 0 (no dashboard-facing change in this PR) |
+| New engines introduced (justified by gap analysis) | 0 — no new engine; 1 new `enforceTierGate()` *case* (`misp_export`), justified because no canonical MISP resource previously existed (Section 2 above) |
+| Duplicate engines introduced | **0** |
+| Duplicate routes introduced | **0** |
+| Backward compatibility preserved | PASS — every touched route's response shape and ad-hoc decision are unchanged while unenforced (see Risk classification above) |
+| Certification chain intact | PASS — `data/release/v185_customer_operations_certification.json` updated additively (new `wave_a_update` block), prior fields left as the historical record they measured |
+| Regression suite result | 24/24 PASS (`scripts/regression_tests.py`, including the strengthened drift gate's own self-test) |
+
 All resources in this document are **shadow-mode only** as of this PR —
 `resolveEntitlement()`'s decision is logged and compared, never enforced,
 unless a resource is separately confirmed present in
@@ -141,9 +167,15 @@ attempt against production is a Phase 15 item, not yet executed).
 ## 7. Summary counts
 
 - Paid Wave A routes traced this pass: **21** (rows above).
-- New `resolveEntitlement()` call sites added this pass: **16** (7 in
-  `enterprise-endpoints.js`, 9 in `index.js` — 4 alerts routes, 1 premium
-  report fix; SLA's 3 were pre-existing and unmodified).
+- New `resolveEntitlement()` call sites added this pass: **13** (9 in
+  `enterprise-endpoints.js` — 3 TAXII discovery/root/collections, 2 TAXII
+  objects, 1 MISP, 3 SIEM; 4 in `index.js` — the 4 alerts routes).
+  Additionally, 1 **pre-existing** `index.js` call site (`report_full`,
+  `/api/reports/premium`) is fixed this pass to actually consume its
+  previously-discarded return value — not a new call site, but newly
+  functional. SLA's 3 pre-existing call sites were re-verified, not modified.
+  (Corrected from an earlier "16 (7+9)" miscount in this doc, per CodeRabbit
+  review on PR #258 — verified against the live diff before correcting.)
 - New canonical resource cases added to `enforceTierGate()`: **1**
   (`misp_export`).
 - Resources still enforced (not shadow) after this pass: **1**

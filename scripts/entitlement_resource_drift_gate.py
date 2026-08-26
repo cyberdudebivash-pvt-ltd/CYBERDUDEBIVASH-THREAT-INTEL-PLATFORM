@@ -60,6 +60,24 @@ RESOLVE_ENTITLEMENT_CALLSITE_FILES = [
 CASE_RE = re.compile(r'case\s+"([a-zA-Z0-9_]+)"\s*:')
 ENFORCEMENT_RESOURCES_RE = re.compile(r'ENTITLEMENT_ENFORCEMENT_RESOURCES\s*=\s*"([^"]*)"')
 RESOLVE_ENTITLEMENT_CALL_RE = re.compile(r'resolveEntitlement\([^,]+,\s*[^,]+,\s*"([a-zA-Z0-9_]+)"')
+# Strips // line comments and /* */ block comments before the call-site scan
+# below (CodeRabbit review finding on PR #258: a comment mentioning
+# resolveEntitlement(ctx, env, "resource", ...) as example/reference text --
+# e.g. a doc comment describing what a nearby call does -- would otherwise
+# match the raw-text regex and be counted as a live callsite even after the
+# real call is deleted, defeating the point of this check. Does not also
+# exclude string literals (a resource name appearing inside an unrelated
+# string that happens to match the full call shape is vanishingly unlikely
+# in this codebase's style, and a real string-safe fix means parsing JS call
+# expressions properly -- out of this narrowly-scoped regex gate's reach,
+# same limitation this file's own docstring already documents for the
+# "detecting a wired route" problem).
+_LINE_COMMENT_RE = re.compile(r'//[^\n]*')
+_BLOCK_COMMENT_RE = re.compile(r'/\*.*?\*/', re.DOTALL)
+
+
+def _strip_js_comments(text: str) -> str:
+    return _LINE_COMMENT_RE.sub("", _BLOCK_COMMENT_RE.sub("", text))
 
 
 NEXT_FN_RE = re.compile(r'^(?:export\s+)?function\s', re.MULTILINE)
@@ -97,7 +115,7 @@ def _live_callsite_resources() -> set:
     for path in RESOLVE_ENTITLEMENT_CALLSITE_FILES:
         if not path.exists():
             continue
-        text = path.read_text(encoding="utf-8")
+        text = _strip_js_comments(path.read_text(encoding="utf-8"))
         found.update(RESOLVE_ENTITLEMENT_CALL_RE.findall(text))
     return found
 

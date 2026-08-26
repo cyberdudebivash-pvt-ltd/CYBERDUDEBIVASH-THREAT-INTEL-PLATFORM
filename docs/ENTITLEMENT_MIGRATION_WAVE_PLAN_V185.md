@@ -25,7 +25,7 @@ shadow to enforced without that evidence would be exactly the "blind mass
 flip" Phase 11 explicitly forbids — so this pass produces the wave
 sequencing only, per the mission's own required Wave A/B/C structure.
 
-## 2. Current state (unchanged this pass)
+## 2. Current state as of this pass's start (HISTORICAL — see the v185.9 Wave A update immediately below for what actually changed)
 
 - 31 resources defined in `enforceTierGate()` (revenue-enforcement.js).
 - 15 of ~46 identified paid resources wired to `resolveEntitlement()`
@@ -33,6 +33,13 @@ sequencing only, per the mission's own required Wave A/B/C structure.
 - 1 resource (`cve_detail_full`) actually enforced.
 - Drift guard: `scripts/entitlement_resource_drift_gate.py`, STAGE 4.065,
   non-blocking with `::error::` annotation, 0 drift as of this pass.
+
+**These three counts are now stale** — updated to 32 defined / 18 wired
+(policy-callsite coverage) / 1 enforced by the v185.9 Wave A update below;
+left unedited here as the accurate snapshot this section originally
+measured, not corrected in place, so the "what changed" framing in the note
+below stays meaningful (correcting a before/after comparison's "before" half
+in place would erase the comparison it's making).
 
 Full per-resource detail: `docs/ENTITLEMENT_RESOURCE_INVENTORY_V185.md`.
 
