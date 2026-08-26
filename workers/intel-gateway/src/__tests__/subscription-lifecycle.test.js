@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { evaluateKeyRecordAccess } from "../index.js";
+import { evaluateKeyRecordAccess } from "../subscription-lifecycle.js";
 
 // ---------------------------------------------------------------------------
 // Mission v185.0 Phase 1/3: unit coverage for the normalized subscription
 // lifecycle decision function. evaluateKeyRecordAccess() is the single
-// pure function resolveAuth() delegates to (see its own comment in
-// index.js) -- no KV, no network, no Cloudflare-specific globals, so it's
-// testable directly without mocking the Worker runtime.
+// pure function resolveAuth() (index.js) delegates to. Imported directly
+// from subscription-lifecycle.js (not index.js) -- a small dependency-free
+// module extracted in v185.6 specifically so this file can run under plain
+// `node --test` without pulling in index.js's full import chain (which
+// transitively fails Node's native ESM loader via pricing.js's
+// pricing-data.json import -- see subscription-lifecycle.js's header
+// comment for the full explanation). No KV, no network, no Cloudflare-
+// specific globals either way -- this was always a pure-function test.
 // ---------------------------------------------------------------------------
 
 test("a record with no expires_at and no subscription_status is allowed (pre-v185.5 key shape)", () => {

@@ -285,9 +285,24 @@ jobs:
         # class of "what can a customer see" surface as the gates above
         # (content, status, and evidence_context exposed via a new customer-
         # facing API), so it belongs in this same trust-boundary gate.
+        #
+        # Mission v185.0 Phase 3: subscription-lifecycle.test.js added --
+        # "what can a customer see" for this gate's purposes now also
+        # includes "does a cancelled/refunded/suspended/expired customer
+        # still get access," the same class of authorization-boundary
+        # question. Could not be added before v185.6: it previously
+        # imported evaluateKeyRecordAccess() from index.js, whose full
+        # import chain (via pricing.js's pricing-data.json import) fails
+        # Node's native ESM loader outside the wrangler/esbuild bundler --
+        # confirmed by reproducing the identical failure on the pre-existing
+        # find-item-by-slug.test.js (still not added to this gate, still
+        # broken the same way, out of scope for this pass). v185.6 extracted
+        # evaluateKeyRecordAccess() into subscription-lifecycle.js, a small
+        # dependency-free module, resolving this specific blocker without
+        # touching pricing.js.
         run: |
           cd ${WORKER_DIR}
-          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js src/__tests__/detection-registry.test.js
+          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js src/__tests__/detection-registry.test.js src/__tests__/subscription-lifecycle.test.js
 
       - name: " esbuild bundle pre-flight (HARD GATE)"
         run: |
