@@ -263,6 +263,99 @@ jobs:
           echo "All authenticated customer-ops checks PASSED."
 
   # ---------------------------------------------------------------------
+  # Phase 4 (live): expiry shadow validation. POST /api/admin/keys always
+  # honors an explicit expires_in_days directly (unlike the real customer-
+  # provisioning path in provisionApiKey(), which only sets a real
+  # expires_at when SUBSCRIPTION_EXPIRY_ENABLED=true) -- so a controlled
+  # admin-provisioned key can cross a real expires_at boundary today
+  # without needing that global flag flipped. Provisions a key with a
+  # ~70-second expiry, confirms it is allowed immediately, waits for the
+  # boundary to pass, then confirms resolveAuth() denies it with
+  # key_expired -- the exact "expected vs actual decision around the
+  # expiry boundary" comparison Phase 4 asks for, using a real short-lived
+  # key rather than a simulated clock. 70s (not 15s) because this endpoint
+  # also sets Cloudflare KV's own expirationTtl from the same value, and
+  # KV rejects any expirationTtl below 60 seconds.
+  # ---------------------------------------------------------------------
+  expiry-shadow-validation:
+    name: "Phase 4 - Expiry Boundary Shadow Validation"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+    steps:
+      - name: "Provision a ~70s-lived key, confirm allow-then-deny across its expires_at boundary"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+
+          expect_status() {
+            local desc="$1" expected="$2" actual="$3"
+            if [ "$actual" = "$expected" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP $expected, got $actual"
+              FAIL=1
+            fi
+          }
+
+          revoke() {
+            local key="$1"
+            [ -z "$key" ] && return 0
+            curl -sS -X DELETE "$BASE/api/admin/keys/$key" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null
+          }
+
+          CURRENT_KEY=""
+          cleanup_all() { [ -n "$CURRENT_KEY" ] && revoke "$CURRENT_KEY" || true; }
+          trap cleanup_all EXIT
+
+          echo "--- Provisioning one ENTERPRISE key with expires_in_days=0.0008 (~69s) ---"
+          KEY_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d "{\"customer_id\":\"ci-expiry-$(date +%s)\",\"tier\":\"ENTERPRISE\",\"label\":\"CI expiry boundary (auto-expire ~69s)\",\"expires_in_days\":0.0008}")
+          KEY=$(echo "$KEY_JSON" | jq -r '.key // empty')
+          EXPIRES_AT=$(echo "$KEY_JSON" | jq -r '.expires_at // empty')
+          if [ -z "$KEY" ]; then
+            echo "FAIL: provisioning did not return a key"
+            exit 1
+          fi
+          CURRENT_KEY="$KEY"
+          echo "Provisioned 1 controlled test key (value not printed), expires_at=$EXPIRES_AT"
+
+          echo "--- Before expiry: allowed ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_status "key allowed before its expires_at boundary" "200" "$ST"
+
+          echo "--- Waiting 80s for expires_at to pass ---"
+          sleep 80
+
+          echo "--- After expiry: denied ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          if [ "$ST" = "401" ] || [ "$ST" = "429" ]; then
+            echo "PASS: key denied after its expires_at boundary (HTTP $ST)"
+          else
+            echo "FAIL: expected HTTP 401 or 429 after expiry, got $ST"
+            FAIL=1
+          fi
+
+          echo "--- Cleanup ---"
+          revoke "$KEY"
+          CURRENT_KEY=""
+          echo "Cleanup complete."
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "One or more expiry-shadow-validation checks FAILED -- see PASS/FAIL lines above."
+            exit 1
+          fi
+          echo ""
+          echo "Expiry boundary shadow validation PASSED: expected-vs-actual resolveAuth() decisions"
+          echo "matched exactly across the expires_at boundary, 0 unexpected differences."
+
+  # ---------------------------------------------------------------------
   # Phase 2 / Phase 12 (live): full six-state subscription lifecycle
   # matrix plus JWT mid-session invalidation, reactivation, status-field
   # injection rejection, and rotation (including terminal-state rotation
@@ -611,7 +704,7 @@ jobs:
 
   summary:
     name: "Certification Summary"
-    needs: [secret-presence-gate, static-checks, authenticated-customer-ops-tests, lifecycle-state-matrix, mssp-tenant-isolation, rate-limit-boundary]
+    needs: [secret-presence-gate, static-checks, authenticated-customer-ops-tests, expiry-shadow-validation, lifecycle-state-matrix, mssp-tenant-isolation, rate-limit-boundary]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -621,6 +714,7 @@ jobs:
           echo "ADMIN_SECRET_PRESENT=${{ needs.secret-presence-gate.outputs.admin_secret_present }}"
           echo "static-checks: ${{ needs.static-checks.result }}"
           echo "authenticated-customer-ops-tests: ${{ needs.authenticated-customer-ops-tests.result }}"
+          echo "expiry-shadow-validation: ${{ needs.expiry-shadow-validation.result }}"
           echo "lifecycle-state-matrix: ${{ needs.lifecycle-state-matrix.result }}"
           echo "mssp-tenant-isolation: ${{ needs.mssp-tenant-isolation.result }}"
           echo "rate-limit-boundary: ${{ needs.rate-limit-boundary.result }}"
