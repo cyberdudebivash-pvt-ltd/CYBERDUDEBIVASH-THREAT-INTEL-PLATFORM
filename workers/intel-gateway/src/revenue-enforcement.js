@@ -46,19 +46,39 @@ export const REVENUE_CONFIG = {
     ENTERPRISE: "ENTERPRISE",
     MSSP:       "MSSP",
   },
+  // v185.2 FIX (Fortune-500 audit, Phase 9): rpm values here previously said
+  // 60/500/2000/-1 (FREE/PRO/ENTERPRISE/MSSP) and leaked into customer-facing
+  // text (getUpgradeFeatures(), the rate_limit field at buildUpgradeTrigger())
+  // even though these values were never consumed by the actual rate limiter
+  // (`cfg` is assigned here but never referenced below -- confirmed unused).
+  // The real, enforced sliding-window limiter is RATE_LIMITS in index.js
+  // (FREE:30, PRO:120, ENTERPRISE:600, MSSP:1200 req/min) -- corrected to
+  // match so this file stops emitting a promise the platform doesn't keep.
+  // MSSP was also wrongly marked unlimited (-1); it is rate-limited too, just
+  // at a higher ceiling than Enterprise.
   LIMITS: {
-    FREE:       { items: 20,   rpm: 60,   api_calls_day: 100,  stix: false, ioc: false,  ai_full: false },
-    PRO:        { items: 500,  rpm: 500,  api_calls_day: 5000, stix: "meta", ioc: true,  ai_full: true  },
-    ENTERPRISE: { items: 2000, rpm: 2000, api_calls_day: -1,   stix: true,  ioc: true,  ai_full: true  },
+    FREE:       { items: 20,   rpm: 30,   api_calls_day: 100,  stix: false, ioc: false,  ai_full: false },
+    PRO:        { items: 500,  rpm: 120,  api_calls_day: 5000, stix: "meta", ioc: true,  ai_full: true  },
+    ENTERPRISE: { items: 2000, rpm: 600,  api_calls_day: -1,   stix: true,  ioc: true,  ai_full: true  },
     // MSSP evidenced as >= ENTERPRISE everywhere else in this codebase
     // (every ad-hoc `auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP`
-    // check in index.js treats them identically) -- unlimited here for the
-    // same reason, not a new policy invented for this pass.
-    MSSP:       { items: -1,   rpm: -1,   api_calls_day: -1,   stix: true,  ioc: true,  ai_full: true  },
+    // check in index.js treats them identically) -- unlimited items/day here
+    // for the same reason, not a new policy invented for this pass. rpm is
+    // NOT unlimited -- matches RATE_LIMITS.MSSP in index.js.
+    MSSP:       { items: -1,   rpm: 1200, api_calls_day: -1,   stix: true,  ioc: true,  ai_full: true  },
   },
+  // v185.2 FIX (Fortune-500 audit, Phase 9): premium.monthly_usd was 29 --
+  // the actual Razorpay charge (pricing-data.json, the live checkout source
+  // of truth) is $49/mo (INR 4,100, 410000 paise). This object's price
+  // leaked into buildUpgradeTrigger()'s live paywall response
+  // (upgrade.price/cta_primary) as $29, a number no customer is ever
+  // actually charged. Enterprise pricing here is a separate, larger
+  // discrepancy against multiple other sources and is intentionally left
+  // for a dedicated business-approved pricing reconciliation, not touched
+  // in this pass.
   PRICING: {
     free:       { monthly_inr: 0,       monthly_usd: 0     },
-    premium:    { monthly_inr: 2499,    monthly_usd: 29    },
+    premium:    { monthly_inr: 4100,    monthly_usd: 49    },
     enterprise: { monthly_inr: 14999,   monthly_usd: 199   },
   },
   UPGRADE_URLS: {
@@ -501,8 +521,11 @@ export function buildUpgradeTrigger(context, currentTier) {
 
   const ctx = contextMessages[context] || { title: "Upgrade Your Plan", body: "Get more access, faster responses, and deeper intelligence." };
 
+  // v185.2 FIX (Fortune-500 audit, Phase 9): pro was "$29/mo" -- the actual
+  // Razorpay charge is $49/mo (INR 4,100). enterprise left untouched
+  // (separate, larger discrepancy pending business-approved reconciliation).
   const prices = {
-    pro:        { inr: "2,499/mo", usd: "$29/mo" },
+    pro:        { inr: "4,100/mo", usd: "$49/mo" },
     enterprise: { inr: "14,999/mo", usd: "$199/mo" },
   };
 
@@ -526,7 +549,9 @@ function getUpgradeFeatures(targetTier) {
   if (targetTier === "enterprise") {
     return ["Unlimited API calls", "Full STIX 2.1 bundles", "SIEM push integrations", "Dedicated SLA", "White-label API", "Priority support"];
   }
-  return ["500 req/min", "5,000 API calls/day", "Full IOC arrays", "Full AI analysis", "Threat alerts", "Priority email support"];
+  // v185.2 FIX (Fortune-500 audit, Phase 9): was "500 req/min" -- the actual
+  // enforced PRO rate limit (RATE_LIMITS.PRO, index.js) is 120 req/min.
+  return ["120 req/min", "5,000 API calls/day", "Full IOC arrays", "Full AI analysis", "Threat alerts", "Priority email support"];
 }
 
 // 
