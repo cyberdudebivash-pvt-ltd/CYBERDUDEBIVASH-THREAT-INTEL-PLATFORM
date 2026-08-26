@@ -198,8 +198,23 @@ export async function handleTaxiiCollections(req, env, ctx, tier, req_id) {
 /**
  * GET /api/taxii/root/collections/:collection_id/objects/
  * TAXII 2.1 Objects from a specific collection.
+ *
+ * PRODUCTION-VERIFICATION FIX (v185.2, Workstream 6): this route previously
+ * read env.SENTINEL_R2, a binding that does not exist in wrangler.toml (only
+ * INTEL_R2/REPORTS_R2 are bound), so it always fell through to a fabricated
+ * "bundle--apex-empty" envelope with HTTP 200 -- a Fortune-500 TAXII client
+ * would see a healthy 200 response carrying zero intelligence, indistinguishable
+ * from "no new indicators since added_after". `items` (real feed data, already
+ * loaded by index.js and passed to every other route in this file, e.g.
+ * handleMISPExport/handleSigmaBulk below) was in scope the whole time but never
+ * threaded through to this handler. Fixed to: (1) check the real bound R2
+ * resource at the same key pattern the working /taxii/collections/ route in
+ * index.js uses, for forward-compatibility with a future pre-built-bundle CI
+ * stage; (2) when no pre-built bundle exists, build real STIX objects from the
+ * live feed `items` instead of returning an empty array; (3) only when no real
+ * data exists at all does this return a truthful 503, never a fabricated 200.
  */
-export async function handleTaxiiObjects(req, env, ctx, tier, collection_id, req_id) {
+export async function handleTaxiiObjects(req, env, ctx, tier, collection_id, items, req_id) {
   if (!requireEnterprise(tier)) {
     return enterpriseDenied(`/api/taxii/root/collections/${collection_id}/objects/`, req_id);
   }
@@ -208,18 +223,56 @@ export async function handleTaxiiObjects(req, env, ctx, tier, collection_id, req
   const added_after = url.searchParams.get("added_after") || "";
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 1000);
 
-  // Load STIX data from R2
+  // Prefer a pre-built STIX bundle from the real, bound R2 resource (same key
+  // pattern as index.js's working /taxii/collections/:id/objects/ route).
   let stixBundle = null;
   try {
-    const r2Obj = await env.SENTINEL_R2?.get("stix/bundle_latest.json");
+    const r2Obj = await env.INTEL_R2?.get(`stix/bundle-${collection_id}.json`);
     if (r2Obj) {
       stixBundle = await r2Obj.json();
     }
   } catch (_) {}
 
   if (!stixBundle) {
-    // Return minimal valid STIX 2.1 envelope
-    stixBundle = { type: "bundle", id: "bundle--apex-empty", spec_version: "2.1", objects: [] };
+    const sourceItems = (items || []).filter(i => i && (i.title || i.id));
+    if (sourceItems.length === 0) {
+      return new Response(JSON.stringify({
+        title: "Intelligence Temporarily Unavailable",
+        description: "No STIX-eligible intelligence is currently available for this collection. This is not an empty result set -- retry shortly.",
+        request_id: req_id,
+      }), {
+        status: 503,
+        headers: { "Content-Type": "application/json", "Retry-After": "300", "X-Request-ID": req_id },
+      });
+    }
+    stixBundle = {
+      type: "bundle",
+      id: `bundle--apex-${collection_id}-${Date.now()}`,
+      spec_version: "2.1",
+      objects: sourceItems.slice(0, 500).map(item => ({
+        type: "indicator",
+        spec_version: "2.1",
+        id: item.stix_id || `indicator--${String(item.id || item.title || "").replace(/[^a-z0-9-]/gi, "-").toLowerCase()}`,
+        created: item.published || new Date().toISOString(),
+        modified: item.published || new Date().toISOString(),
+        name: item.title,
+        description: item.description || item.title,
+        indicator_types: ["malicious-activity"],
+        pattern: item.cve_ids?.[0] ? `[vulnerability:x_cve_id = '${item.cve_ids[0]}']` : "[x-apex-observable:reference = 'see external_references']",
+        pattern_type: "stix",
+        valid_from: item.published || new Date().toISOString(),
+        labels: [
+          ...(item.tags || []).slice(0, 10),
+          ...(item.kev_present ? ["kev-confirmed"] : []),
+          ...(String(item.severity || "").toUpperCase() === "CRITICAL" ? ["critical"] : []),
+          ...(/ransomware/i.test(item.threat_type || "") ? ["ransomware"] : []),
+          ...(/apt|nation-state/i.test(item.threat_type || "") ? ["apt"] : []),
+        ],
+        external_references: (item.cve_ids || []).map(cve => ({
+          source_name: "cve", external_id: cve, url: `https://nvd.nist.gov/vuln/detail/${cve}`,
+        })),
+      })),
+    };
   }
 
   let objects = stixBundle.objects || [];
@@ -1063,7 +1116,7 @@ export async function routeEnterpriseEndpoint(pathname, req, env, ctx, tier, ite
   }
   const taxii_obj_match = pathname.match(/^\/api\/taxii\/root\/collections\/([^\/]+)\/objects\/?$/);
   if (taxii_obj_match) {
-    return handleTaxiiObjects(req, env, ctx, tier, taxii_obj_match[1], req_id);
+    return handleTaxiiObjects(req, env, ctx, tier, taxii_obj_match[1], items, req_id);
   }
 
   // MISP
