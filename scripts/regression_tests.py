@@ -19,6 +19,7 @@ Tests cover:
   T11  STIX bundles directory has files
   T12  CI workflow YAML parses cleanly + no inline Python heredocs regression
   T21  v184.0 guard: all feed.json local-source report_urls present in dist/reports/
+  T22  v185.2 guard: source_url dedup survives late-pipeline reintroduction (Phase 5/stability-lock)
 
 Exit codes:
   0 = ALL PASS
@@ -838,6 +839,96 @@ def t21():
 
 
 # ---------------------------------------------------------------------------
+# T22: v185.2 final pre-write dedup gate -- exact escaped-duplicate class
+# ---------------------------------------------------------------------------
+
+@test("T22_source_url_dedup_survives_late_pipeline_reintroduction")
+def t22():
+    """Regression guard for the source_url duplicate that reached production.
+
+    Root cause: enforce_manifest_uniqueness() (scripts/intel_dedup_engine.py) is
+    documented as the "final pre-write manifest uniqueness guard" but previously
+    ran at Phase 4 of run_pipeline.py, BEFORE the Phase 5 quality engine's
+    source-balancing carry-forward logic and sentinel_stability_lock's output
+    contract enforcement (which checks stix_id and title only, never
+    source_url). Either later stage could silently reintroduce a source_url
+    duplicate that Phase 4 had already removed. Confirmed live via
+    data/governance/governance_report.json history: enterprise-governance CI
+    runs flapped governance_grade between A+/A and C/D across consecutive
+    ~2-hour scheduled runs on the same feed, with the C/D runs showing exactly
+    one HARD source_url duplicate (a syndicated "Weekly Cyber Security
+    Newsletter Bulletin" item under two different item-ID schemes). Fixed by
+    re-invoking the same idempotent enforce_manifest_uniqueness() guard
+    immediately before the Step 6 feed.json write in run_pipeline.py.
+
+    This test has two parts:
+      1. Unit-level: enforce_manifest_uniqueness() must block the exact escaped
+         duplicate class -- two items sharing a source_url (post-normalisation)
+         under two different item-ID formats -- regardless of call order.
+      2. Live-data: the actual committed api/feed.json must currently contain
+         zero source_url duplicates (post-normalisation), matching the
+         Phase-2 acceptance criterion that duplicates never reach customer feeds.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from intel_dedup_engine import enforce_manifest_uniqueness, _url_key  # noqa: E402
+
+    # Part 1: exact escaped-duplicate class, unit-level.
+    dup_url = "https://example-newsletter.test/weekly-bulletin?utm_source=rss"
+    synthetic_items = [
+        {"id": "intel--09ca06921ac33b95", "stix_id": "indicator--aaa1",
+         "title": "Weekly Cyber Security Newsletter Bulletin - Entra ID RCE +19 Stories",
+         "source_url": dup_url, "published": "2026-08-20T00:00:00Z"},
+        {"id": "intel--6f181fd3744a72102d33754c", "stix_id": "indicator--aaa2",
+         "title": "Weekly Cyber Security Newsletter Bulletin - Entra ID RCE +20 Stories",
+         "source_url": dup_url.upper(), "published": "2026-08-21T00:00:00Z"},
+        {"id": "intel--distinct001", "stix_id": "indicator--bbb1",
+         "title": "Unrelated advisory with its own source",
+         "source_url": "https://example-advisory.test/cve-2026-00001",
+         "published": "2026-08-21T00:00:00Z"},
+    ]
+    unique, removed = enforce_manifest_uniqueness(synthetic_items)
+    assert removed == 1, (
+        f"v185.2 REGRESSION: enforce_manifest_uniqueness() did not block the escaped "
+        f"duplicate class (same source_url, case/tracking-param variant, different "
+        f"item-ID scheme). Expected 1 removed, got {removed}."
+    )
+    assert len(unique) == 2, f"Expected 2 unique items after dedup, got {len(unique)}"
+    surviving_urls = {_url_key(i["source_url"]) for i in unique}
+    assert len(surviving_urls) == len(unique), "Duplicate source_url survived in unique output"
+
+    # Part 2: live committed api/feed.json must have zero source_url duplicates.
+    api_feed = REPO_ROOT / "api" / "feed.json"
+    if not api_feed.exists():
+        log.info("[T22] api/feed.json not present (fresh checkout pre-pipeline run) — skipping live-data check")
+        return
+    try:
+        raw = json.loads(api_feed.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log.warning("[T22] Could not parse api/feed.json (%s) — skipping live-data check", exc)
+        return
+    items = raw if isinstance(raw, list) else raw.get("items", raw.get("advisories", []))
+    seen_keys: dict[str, str] = {}
+    live_dupes: list[tuple[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        url = (item.get("source_url") or "").strip()
+        if not url:
+            continue
+        uk = _url_key(url)
+        if uk in seen_keys:
+            live_dupes.append((seen_keys[uk], item.get("id", "unknown")))
+        else:
+            seen_keys[uk] = item.get("id", "unknown")
+    assert not live_dupes, (
+        f"v185.2 REGRESSION: {len(live_dupes)} live source_url duplicate pair(s) in "
+        f"api/feed.json -- the exact class of duplicate the governance dedup gap "
+        f"allowed through has recurred. Pairs: {live_dupes[:5]}"
+    )
+    log.info("[T22] %d live feed items — 0 source_url duplicates", len(items))
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -849,7 +940,7 @@ def main() -> int:
     except Exception:
         _suite_ver = "UNKNOWN"
     log.info("=" * 60)
-    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T21)", _suite_ver)
+    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T22)", _suite_ver)
     log.info("=" * 60)
 
     pass_count = sum(1 for r in RESULTS if r["status"] == "PASS")
