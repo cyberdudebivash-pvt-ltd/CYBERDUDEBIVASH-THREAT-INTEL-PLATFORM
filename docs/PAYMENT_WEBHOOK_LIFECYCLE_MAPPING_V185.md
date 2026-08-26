@@ -57,7 +57,7 @@ extends the existing signed-webhook handler with one more event type.
 
 Single function backing both the refund webhook above and:
 
-```
+```text
 PATCH /api/admin/keys/{key}/status   body: {subscription_status, reason?}
 ```
 
@@ -69,7 +69,7 @@ implementation had to account for) and audit-logs every transition with
 
 ### Key rotation (Mission Phase 8)
 
-```
+```text
 POST /api/admin/keys/{key}/rotate
 ```
 

@@ -401,6 +401,18 @@ async function resolveAuth(request, env) {
     try {
       const revoked = await env.SECURITY_HUB_KV.get(`jwt_revoked:${raw.slice(-24)}`);
       if (revoked) return { tier: TIERS.FREE, key: null, sub: null, error: "token_revoked" };
+      // v185.5 CodeRabbit fix: handleLogin() now refuses to ISSUE a new JWT
+      // for a cancelled/refunded/suspended key, but a JWT issued before
+      // that transition would otherwise keep working for up to
+      // JWT_EXPIRY_SEC (24h) regardless -- this path never re-checked the
+      // underlying API_KEYS_KV record at all (jwt_revoked above is a
+      // self-service /auth/logout marker keyed by the raw token, which an
+      // admin acting via PATCH .../status doesn't have). Closed the same
+      // way: applySubscriptionStatusChange() writes jwt_deny:{customer_id}
+      // (TTL-bounded to JWT_EXPIRY_SEC, deleted again on reactivation) the
+      // moment a key transitions into a deny state, checked here by sub.
+      const denied = await env.SECURITY_HUB_KV.get(`jwt_deny:${payload.sub}`);
+      if (denied) return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
     } catch (_) {}
     return { tier: TIERS[payload.tier] || TIERS.PRO, key: raw, sub: payload.sub, jwt: true };
   }
@@ -440,20 +452,24 @@ async function resolveAuth(request, env) {
           sub: record.customer_id || raw.slice(0, 8),
           kv: true,
           // v185.5 (Mission Phase 6): MSSP tenant ownership, OPT-IN not
-          // fail-closed-by-default. `null` (every key provisioned before
-          // this change, and every non-MSSP key) means "no managed_tenants
-          // restriction recorded" -- handleMSSPFeed treats that as
-          // unrestricted, preserving today's exact live behavior for any
-          // existing MSSP customer. Only a key provisioned WITH an explicit
-          // managed_tenants array (including deliberately empty, meaning
-          // zero tenants authorized) gets real per-tenant enforcement. A
-          // fail-closed-by-default rollout would have silently cut off
-          // every existing MSSP customer's current access the moment this
-          // deployed -- see docs/MSSP_TENANT_IDENTITY_V185.md for why this
-          // opt-in path was chosen over that, and the remaining gap it
-          // leaves (existing MSSP keys stay unrestricted until an admin
-          // explicitly sets managed_tenants on them).
-          managed_tenants: Array.isArray(record.managed_tenants) ? record.managed_tenants : null,
+          // fail-closed-by-default. `null` means "field genuinely absent" --
+          // every key provisioned before this change, and every non-MSSP
+          // key -- and handleMSSPFeed treats that as unrestricted,
+          // preserving today's exact live behavior for any existing MSSP
+          // customer. A fail-closed-by-default rollout would have silently
+          // cut off every existing MSSP customer's current access the
+          // moment this deployed -- see docs/MSSP_TENANT_IDENTITY_V185.md.
+          // A record that HAS the field but with a malformed (non-array,
+          // non-undefined) value is a different case and must NOT collapse
+          // into the same permissive `null` -- that would make a KV write
+          // bug or corrupted record silently unrestricted instead of
+          // failing closed. Distinguished explicitly below (CodeRabbit
+          // review fix): undefined -> null (legacy/unrestricted); present
+          // but not an array -> [] (fails closed, authorizes zero tenants,
+          // same as an admin explicitly setting an empty list).
+          managed_tenants: record.managed_tenants === undefined
+            ? null
+            : (Array.isArray(record.managed_tenants) ? record.managed_tenants : []),
         };
       }
     } catch (_) {}
@@ -2016,9 +2032,14 @@ async function handleLogin(request, env, ctx, ip) {
     auditLog(ctx, env, { action: "login_failed", ip, reason: "invalid_key" });
     return jsonResp({ error: "Invalid API key" }, 401);
   }
-  if (record.expires_at && new Date(record.expires_at) < new Date()) {
-    auditLog(ctx, env, { action: "login_failed", ip, reason: "key_expired" });
-    return jsonResp({ error: "API key has expired" }, 401);
+  // v185.5 CodeRabbit fix: was only checking expires_at, bypassing the new
+  // subscription_status states entirely -- a cancelled/refunded/suspended
+  // key could still be exchanged for a fresh 24h JWT here. Reuses
+  // evaluateKeyRecordAccess(), same as resolveAuth()'s API-key path.
+  const loginAccess = evaluateKeyRecordAccess(record);
+  if (!loginAccess.allowed) {
+    auditLog(ctx, env, { action: "login_failed", ip, reason: loginAccess.error });
+    return jsonResp({ error: "API key is not active", code: loginAccess.error }, 401);
   }
 
   await clearAuthFailures(env, ip);
@@ -2267,11 +2288,27 @@ export async function handleAdmin(request, env, ctx, path, method) {
   // test already proves denies immediately) plus a fresh provisionApiKey()
   // call for the new one, both audited under a single rotation event so
   // the two are traceable as one action rather than two unrelated ones.
+  //
+  // v185.5 CodeRabbit fix: provisionApiKey() previously built a bare fresh
+  // record with no subscription_status or managed_tenants -- rotating a
+  // refunded/suspended/cancelled key silently produced a new ACTIVE key
+  // (evaluateKeyRecordAccess() treats absent subscription_status as
+  // active), and rotating a tenant-restricted MSSP key silently dropped
+  // its restriction. Terminal-state keys now reject rotation outright
+  // (reactivating requires an explicit PATCH .../status first -- rotation
+  // is not a way to bypass that); managed_tenants is now carried forward.
   const rotateMatch = path.match(/^\/api\/admin\/keys\/([^\/]+)\/rotate$/);
   if (rotateMatch && method === "POST") {
     const oldKey = rotateMatch[1];
     const existing = await env.API_KEYS_KV.get(oldKey, "json");
     if (!existing) return jsonResp({ error: "Key not found" }, 404);
+    if (existing.subscription_status && SUBSCRIPTION_STATUS_DENY_STATES.has(existing.subscription_status)) {
+      return jsonResp({
+        error: `Cannot rotate a key in '${existing.subscription_status}' status -- reactivate it first via `
+          + `PATCH /api/admin/keys/${oldKey}/status {"subscription_status":"active"} if that is genuinely intended.`,
+        subscription_status: existing.subscription_status,
+      }, 409);
+    }
     // provisionApiKey() computes a fresh billing-cycle expiry from now
     // (matching normal re-provisioning behavior) rather than preserving the
     // old key's exact remaining time -- rotation is a re-provision, not a
@@ -2280,13 +2317,15 @@ export async function handleAdmin(request, env, ctx, path, method) {
     const newKey = await provisionApiKey(
       env, ctx, existing.tier, existing.customer_id, "admin_rotation",
       { ...(existing.payment_metadata || {}), rotated_from: oldKey.slice(0, 12) + "...", rotation_reason: "admin_rotate" },
-      existing.billing_cycle || "monthly"
+      existing.billing_cycle || "monthly",
+      Array.isArray(existing.managed_tenants) ? existing.managed_tenants : undefined
     );
     await env.API_KEYS_KV.delete(oldKey);
-    auditLog(ctx, env, { action: "api_key_rotated", old_key_prefix: oldKey.slice(0, 12), new_key_prefix: newKey.slice(0, 12), customer_id: existing.customer_id, tier: existing.tier });
+    auditLog(ctx, env, { action: "api_key_rotated", old_key_prefix: oldKey.slice(0, 12), new_key_prefix: newKey.slice(0, 12), customer_id: existing.customer_id, tier: existing.tier, managed_tenants_carried: Array.isArray(existing.managed_tenants) });
     return jsonResp({
       new_key: newKey, tier: existing.tier, customer_id: existing.customer_id,
       old_key_prefix: oldKey.slice(0, 12), old_key_revoked: true,
+      managed_tenants_carried: Array.isArray(existing.managed_tenants) ? existing.managed_tenants : null,
       message: "Key rotated -- old key immediately revoked, no overlap window",
     }, 201);
   }
@@ -3010,6 +3049,16 @@ async function applySubscriptionStatusChange(env, ctx, key, subscription_status,
   const expiresAtSec = existing.expires_at ? Math.floor(new Date(existing.expires_at).getTime() / 1000) : null;
   const opts = expiresAtSec && expiresAtSec > Math.floor(Date.now() / 1000) + 60 ? { expiration: expiresAtSec } : undefined;
   await env.API_KEYS_KV.put(key, JSON.stringify(updated), opts);
+  // v185.5 CodeRabbit fix: also invalidate any JWT already issued for this
+  // customer, not just future API-key/login attempts -- see resolveAuth()'s
+  // jwt_deny comment. customer_id is what a JWT payload carries as `sub`,
+  // which is why this is keyed by customer_id rather than the raw key.
+  const sub = existing.customer_id || key.slice(0, 8);
+  if (SUBSCRIPTION_STATUS_DENY_STATES.has(subscription_status)) {
+    await env.SECURITY_HUB_KV.put(`jwt_deny:${sub}`, "1", { expirationTtl: JWT_EXPIRY_SEC });
+  } else if (subscription_status === "active") {
+    await env.SECURITY_HUB_KV.delete(`jwt_deny:${sub}`);
+  }
   auditLog(ctx, env, {
     action: "subscription_status_changed", key_prefix: key.slice(0, 12),
     from: existing.subscription_status || "active", to: subscription_status, reason: reason || null,
@@ -3017,7 +3066,7 @@ async function applySubscriptionStatusChange(env, ctx, key, subscription_status,
   return { ok: true, existing, updated };
 }
 
-async function provisionApiKey(env, ctx, tier, email, source, metadata, billingCycle = "monthly") {
+async function provisionApiKey(env, ctx, tier, email, source, metadata, billingCycle = "monthly", managedTenants = undefined) {
   const validTier = ["PRO", "ENTERPRISE", "MSSP"].includes(tier) ? tier : "PRO";
   const prefix = validTier === "ENTERPRISE" ? "cdb_ent" : validTier === "MSSP" ? "cdb_mssp" : "cdb_pro";
   const rand   = Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => b.toString(16).padStart(2, "0")).join("");
@@ -3032,6 +3081,12 @@ async function provisionApiKey(env, ctx, tier, email, source, metadata, billingC
     source, created_at: now(), expires_at: enforceExpiry ? shadowExpiresAt : null,
     billing_cycle: billingCycle,
     payment_metadata: metadata || {},
+    // v185.5 CodeRabbit fix: only set when the caller explicitly passes an
+    // array (e.g. key rotation carrying forward an MSSP key's tenant
+    // restriction) -- every other call site (webhook/verify/gumroad/admin-
+    // create) omits this, so those keys still get resolveAuth()'s
+    // managed_tenants: null (unrestricted) default, unchanged.
+    ...(Array.isArray(managedTenants) ? { managed_tenants: managedTenants } : {}),
   };
   await env.API_KEYS_KV.put(apiKey, JSON.stringify(record));
   auditLog(ctx, env, {
@@ -3251,6 +3306,14 @@ async function handleRazorpayVerify(request, env, ctx, method) {
   await env.SECURITY_HUB_KV.put(unifiedIdempKey, JSON.stringify({ email, tier: tierUp, ts: now(), source: "razorpay_checkout" }), { expirationTtl: 86400 * 365 });
   // Mark payment_id as consumed via per-path key (backward compat  -  1 year TTL)
   await env.SECURITY_HUB_KV.put(verifyIdempKey, JSON.stringify({ email, tier: tierUp, ts: now() }), { expirationTtl: 86400 * 365 });
+  // v185.5 CodeRabbit fix: this client-verify path -- not the webhook below --
+  // is documented (see the comment above this function) as the one that
+  // normally wins the provisioning race, since it runs synchronously right
+  // after checkout while the webhook arrives async and then exits through
+  // its own idempotency guard without ever reaching ITS payment_key_map
+  // write. Omitting the mapping here meant refund handling would silently
+  // find "no mapping" for the majority of real payments. Written here too.
+  await env.SECURITY_HUB_KV.put(`payment_key_map:${razorpay_payment_id}`, apiKey, { expirationTtl: 86400 * 365 });
 
   // P2.6.1-002: Send activation email  -  wrapped in try/catch, never blocks provisioning
   ctx.waitUntil((async () => {
