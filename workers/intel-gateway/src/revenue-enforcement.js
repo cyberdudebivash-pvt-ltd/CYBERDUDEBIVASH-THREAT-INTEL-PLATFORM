@@ -177,6 +177,24 @@ export function enforceTierGate(resource, tier) {
       };
       return { allowed: true };
 
+    // SLA compliance report / incident log / certificate  Enterprise+MSSP
+    // (v185.4 entitlement inventory: mirrors sla-monitor.js's own
+    // auth.tier==="ENTERPRISE"||"MSSP" ad-hoc gate exactly -- this case
+    // exists so index.js's new shadow-mode resolveEntitlement() calls at
+    // /api/sla/report, /api/sla/incidents, /api/sla/certificate compare
+    // against real logic instead of this switch's fail-open default.)
+    case "sla_report":
+    case "sla_incidents":
+    case "sla_certificate":
+      if (!isEnt) return {
+        allowed: false,
+        resource,
+        reason:  "enterprise_only",
+        message: "SLA compliance reports, incident logs, and certificates require Enterprise or MSSP tier.",
+        upgrade: buildUpgradeTrigger("sla", t),
+      };
+      return { allowed: true };
+
     // SIEM webhooks  Enterprise only
     case "siem":
       if (!isEnt) return {

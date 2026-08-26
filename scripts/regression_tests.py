@@ -999,6 +999,75 @@ def t23():
 
 
 # ---------------------------------------------------------------------------
+# T24: v185.4 entitlement resource drift gate
+# ---------------------------------------------------------------------------
+
+@test("T24_entitlement_resource_drift_gate")
+def t24():
+    """Regression guard for scripts/entitlement_resource_drift_gate.py.
+
+    Confirms the gate (a) passes clean against the real, committed
+    wrangler.toml + revenue-enforcement.js (no drift today), and (b) actually
+    detects drift when ENTITLEMENT_ENFORCEMENT_RESOURCES names a resource
+    enforceTierGate() doesn't define -- a silent fail-open via that switch's
+    `default: { allowed: true }` case, which is the exact bug class this
+    gate exists to catch before it reaches production.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    import importlib
+    if "entitlement_resource_drift_gate" in sys.modules:
+        importlib.reload(sys.modules["entitlement_resource_drift_gate"])
+    import entitlement_resource_drift_gate as gate
+
+    defined = gate._defined_resources()
+    assert defined, "T24: enforceTierGate() case scan returned zero resources -- parser or file drifted"
+
+    real_exit = gate.main()
+    assert real_exit == 0, (
+        f"v185.4 REGRESSION: entitlement_resource_drift_gate.py reports drift against the "
+        f"real committed wrangler.toml/revenue-enforcement.js (exit={real_exit}) -- an "
+        f"enforced resource name has no matching enforceTierGate() case, meaning it "
+        f"silently fail-opens via the default case in production right now."
+    )
+
+    # Simulate real drift and actually run it through gate.main()'s own
+    # detection + exit-code path (not just set arithmetic on the helper
+    # functions) -- writes a bogus resource into the real wrangler.toml,
+    # confirms main() now reports failure, then restores the original
+    # content in a finally block so this test can never leave the repo's
+    # wrangler.toml modified, pass or fail.
+    assert "vars" in gate._wrangler_sections(), "T24: wrangler.toml has no top-level [vars] block"
+    original_toml = gate.WRANGLER_TOML.read_text(encoding="utf-8")
+    bogus = "t24_synthetic_undefined_resource"
+    try:
+        injected_toml = original_toml.replace(
+            'ENTITLEMENT_ENFORCEMENT_RESOURCES = "',
+            f'ENTITLEMENT_ENFORCEMENT_RESOURCES = "{bogus},',
+        )
+        assert injected_toml != original_toml, (
+            "T24: could not inject the synthetic resource -- ENTITLEMENT_ENFORCEMENT_RESOURCES "
+            "assignment pattern not found in wrangler.toml"
+        )
+        gate.WRANGLER_TOML.write_text(injected_toml, encoding="utf-8")
+        drift_exit = gate.main()
+        assert drift_exit == 1, (
+            f"v185.4 REGRESSION: entitlement_resource_drift_gate.py did not detect injected "
+            f"synthetic drift (exit={drift_exit}, expected 1) -- the gate's own failure path "
+            f"is broken, meaning it would silently pass real drift too."
+        )
+    finally:
+        gate.WRANGLER_TOML.write_text(original_toml, encoding="utf-8")
+
+    restored_exit = gate.main()
+    assert restored_exit == 0, (
+        "T24: wrangler.toml restore after synthetic-drift test left real drift behind "
+        f"(exit={restored_exit}) -- restore did not return the file to its clean state"
+    )
+    log.info("[T24] entitlement resource drift gate: clean against real config, "
+             "correctly detects and fails on injected synthetic drift, restore verified clean")
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -1010,7 +1079,7 @@ def main() -> int:
     except Exception:
         _suite_ver = "UNKNOWN"
     log.info("=" * 60)
-    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T23)", _suite_ver)
+    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T24)", _suite_ver)
     log.info("=" * 60)
 
     pass_count = sum(1 for r in RESULTS if r["status"] == "PASS")
