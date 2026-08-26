@@ -66,8 +66,21 @@
     "resources_actually_enforced": 1,
     "entitlement_coverage_pct": 33,
     "entitlement_coverage_pct_denominator": "resources_wired_to_resolveEntitlement / resources_identified_paid_total = 15/46 = 32.6%, rounded to 33%. NOT 15/31 (which would be 48%) -- resources_defined_in_policy_engine (31) is enforceTierGate()'s own catalogue, a narrower set than the full 46 identified paid routes across the codebase (some of which are gated ad hoc, outside enforceTierGate() entirely). Both 31 and 46 are real, correct, independently-sourced denominators for different questions; the 33% figure specifically answers 'wired / all identified paid routes,' not 'wired / policy-engine catalogue.' Clarified this pass after a CodeRabbit review finding on PR #256 correctly flagged the ambiguity of stating both denominators next to one percentage with no label.",
-    "note": "Unchanged this pass -- honestly reported as unchanged. docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md (previous pass) remains the sequencing plan; this pass's ADMIN_SECRET fix means future waves could now gather real shadow-mismatch evidence via authenticated traffic, but no resource was flipped from shadow to enforced this pass -- that is separate, bounded work per the wave plan's own exit criteria.",
+    "note": "Snapshot as of v185.7/PR#254 -- superseded for entitlement counts by wave_a_update below (v185.9). Left unmodified here as the historical record this certification run actually measured.",
     "drift_guard": "scripts/entitlement_resource_drift_gate.py -- confirmed still passing, 0 drift, via this pass's Static Certification Checks job (run 32967117214) and local regression_tests.py (24/24 PASS)."
+  },
+
+  "wave_a_update": {
+    "mission": "SENTINEL APEX v185.9 -- P0 Entitlement Enforcement Wave A, Enterprise Integration Authority & Commercial Access Convergence",
+    "as_of_pr": "#258 (claude/v185-wave-a-entitlement-enforcement)",
+    "resources_defined_in_policy_engine": 32,
+    "resources_defined_in_policy_engine_denominator_change": "31 -> 32: one new case added, misp_export (Enterprise/MSSP), for /api/misp/export -- no canonical MISP resource previously existed.",
+    "policy_callsite_coverage": "18/32 -- resources_defined_in_policy_engine with at least one live resolveEntitlement() call site in index.js or enterprise-endpoints.js (verified via scripts/entitlement_resource_drift_gate.py's new no-live-callsite check, added this pass).",
+    "wired_coverage": "18/46 -- same 18 resources against resources_identified_paid_total; up from 15/46. New this pass: misp_export (new), plus live callsites added for taxii_access/taxii_kev (enterprise-endpoints.js's own TAXII handlers -- these two resources already had index.js call sites, now also wired on the enterprise-endpoints.js TAXII surface), siem, and alerts. report_full's pre-existing callsite (v185.5) is fixed: it previously discarded resolveEntitlement()'s return value entirely, making the flag inert regardless of enforcement state -- now actually consumed.",
+    "enforced_coverage": "1/46 -- unchanged. No resource newly enforced this pass; ENTITLEMENT_ENFORCEMENT_RESOURCES remains cve_detail_full only in both [vars] and [env.production.vars], pending the Phase 8 shadow-divergence evidence gate the mission requires before any expansion.",
+    "taxii_dual_gate": "Same-file self-contradiction fixed (enterprise-endpoints.js's handleTaxiiObjects previously blanket-required Enterprise for every collection, contradicting its own handleTaxiiCollections' advertised per-collection can_read flags for the full/critical collections). Cross-implementation reconciliation (index.js's 2 TAXII collections vs. enterprise-endpoints.js's 5, only sentinel-apex-kev in common) remains OPEN -- a product-catalogue decision, not a wiring gap, carried to Wave B/C.",
+    "misp_live_handler": "VERIFIED -- /api/misp/export is served by enterprise-endpoints.js's handleMISPExport (confirmed via router trace), now wired. /api/export/misp's separate scope-based gate (api-extensions.js) remains unreconciled, carried forward.",
+    "full_detail": "docs/WAVE_A_ROUTE_AUTHORITY_V185.md"
   },
 
   "expired_access_tests": {
@@ -136,7 +149,7 @@
   },
 
   "remaining_blockers": [
-    "Canonical entitlement coverage at 33% (15/46 resources wired, 1/31 enforced) -- real, sequenced, multi-PR work per docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md. This is now the PRIMARY remaining blocker to WORLDWIDE_PRODUCTION_RELEASE; ADMIN_SECRET and branch protection, the two blockers that were independently sufficient for NO-GO in every prior pass, are both resolved this pass.",
+    "Canonical entitlement coverage at 33% as of this JSON's own certification run (15/46 resources wired, 1/31 enforced) -- HISTORICAL, now stale: see wave_a_update above for the current 18/46 wired (policy_callsite_coverage 18/32), 1/46 enforced figures as of PR #258. Still real, sequenced, multi-PR work per docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md, and still the PRIMARY remaining blocker to WORLDWIDE_PRODUCTION_RELEASE either way; ADMIN_SECRET and branch protection, the two blockers that were independently sufficient for NO-GO in every prior pass, are both resolved this pass.",
     "SUBSCRIPTION_EXPIRY_ENABLED remains false -- Phase 4's shadow-validation prerequisite is now genuinely satisfied (live-verified this pass), but the flag itself has not been flipped; flipping it changes real behavior for future real customer signups and is scoped as its own follow-up rather than bundled here.",
     "Phase 6 (payment/refund live-safe verification against a real signed webhook) not run this pass -- remains out of safe scope for automated live testing without a real Razorpay test-mode webhook fixture.",
     "Full black-box Free/Pro/Enterprise/MSSP customer journey scripts not run this pass -- Phase 1/2/4/7 collectively exercise a substantial slice of Enterprise/MSSP access control live, but this is not equivalent to a dedicated journey script for all four tiers.",
