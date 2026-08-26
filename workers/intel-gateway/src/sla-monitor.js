@@ -127,9 +127,16 @@ export async function handleSLAStatus(request, env, rid) {
 /* ===========================================================================
    handleSLAReport  -- GET /api/sla/report  (Enterprise)
    =========================================================================== */
+// v185.2 FIX (Fortune-500 audit, entitlement inventory): all three gates in
+// this file checked only auth.tier !== "ENTERPRISE", excluding MSSP -- every
+// other Enterprise-tier gate in the codebase (enforceTierGate's isEnt,
+// requireEnterprise in enterprise-endpoints.js, the ~6 inline
+// TIERS.ENTERPRISE||TIERS.MSSP checks in index.js) treats MSSP as
+// Enterprise-or-above. This denied the platform's top-paying tier access to
+// SLA reports, incidents, and certificates that ENTERPRISE customers get.
 export async function handleSLAReport(request, env, auth, rid) {
   if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
-  if (auth.tier !== "ENTERPRISE") {
+  if (auth.tier !== "ENTERPRISE" && auth.tier !== "MSSP") {
     return _jsonErr(403, "SLA compliance reports require Enterprise tier. Upgrade at /upgrade.html", rid);
   }
 
@@ -200,7 +207,7 @@ export async function handleSLAReport(request, env, auth, rid) {
    =========================================================================== */
 export async function handleSLAIncidents(request, env, auth, rid) {
   if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
-  if (auth.tier !== "ENTERPRISE") return _jsonErr(403, "Enterprise tier required.", rid);
+  if (auth.tier !== "ENTERPRISE" && auth.tier !== "MSSP") return _jsonErr(403, "Enterprise tier required.", rid);
 
   const incidents = await _loadIncidents(env);
   const url = new URL(request.url);
@@ -271,7 +278,7 @@ export async function handleSLAPing(request, env, rid) {
    =========================================================================== */
 export async function handleSLACertificate(request, env, auth, rid) {
   if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
-  if (auth.tier !== "ENTERPRISE") return _jsonErr(403, "Enterprise tier required.", rid);
+  if (auth.tier !== "ENTERPRISE" && auth.tier !== "MSSP") return _jsonErr(403, "Enterprise tier required.", rid);
 
   const now = new Date();
   const periodEnd   = now.toISOString().split("T")[0];

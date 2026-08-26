@@ -595,6 +595,15 @@ def _phase4_trust_tiers(items: List[Dict]) -> Tuple[List[TrustScore], Dict[str, 
                 pass
 
         # +IOC richness
+        # v185.2 FIX (Fortune-500 audit, Phase 3): a pure CVE/vulnerability
+        # advisory legitimately carries zero *observed* indicators -- it
+        # describes a flaw, not an incident. Penalising that as "no_iocs" is
+        # a flawed generic model applied to an intelligence class where the
+        # field is not_applicable, not missing. Malware/campaign/phishing/
+        # actor items still need IOC evidence to be actionable, so the
+        # penalty is preserved for every other threat_type.
+        threat_type = str(item.get("threat_type") or item.get("category") or "").strip().lower()
+        is_vuln_class = threat_type in ("vulnerability", "cve")
         ioc_count = item.get("ioc_count", 0) or len(item.get("iocs", []))
         if ioc_count >= 5:
             score += 10
@@ -603,18 +612,40 @@ def _phase4_trust_tiers(items: List[Dict]) -> Tuple[List[TrustScore], Dict[str, 
             score += 5
             factors.append(f"ioc_present({ioc_count}):+5")
         elif ioc_count == 0:
-            score -= 5
-            deductions.append("no_iocs:-5")
+            if is_vuln_class:
+                factors.append("ioc_not_applicable(vulnerability):+0")
+            else:
+                score -= 5
+                deductions.append("no_iocs:-5")
 
         # +ATT&CK coverage
-        ttp_count = item.get("ttp_count", 0) or len(item.get("ttps", []))
+        # v185.2 FIX (Fortune-500 audit, Phase 3): ttp_count/ttps was the
+        # only field checked here, but real MITRE ATT&CK mappings for most
+        # live items are written under mitre_tactics (a separate enrichment
+        # field) or attck_technique_ids/attck_techniques -- the same
+        # field-fallback gap already fixed in p20-handlers.js/p23-handlers.js
+        # (PR #247). Confirmed live: every sampled CVE item carried a
+        # non-empty mitre_tactics list while ttps was [], so this scorer was
+        # applying no_ttps:-5 to items that actually have derived MITRE
+        # coverage. [] is falsy-safe here via explicit len() checks, not `or`.
+        ttp_source = next(
+            (v for v in (
+                item.get("ttps"), item.get("mitre_tactics"),
+                item.get("attck_technique_ids"), item.get("attck_techniques"),
+                item.get("mitre_techniques"),
+            ) if isinstance(v, list) and len(v) > 0),
+            [],
+        )
+        ttp_count = item.get("ttp_count", 0) or len(ttp_source)
         if ttp_count >= 5:
             score += 10
             factors.append(f"attck_rich({ttp_count}):+10")
         elif ttp_count >= 2:
             score += 5
             factors.append(f"attck_present({ttp_count}):+5")
-        elif ttp_count == 0:
+        elif ttp_count >= 1:
+            factors.append(f"attck_derived({ttp_count}):+0")
+        else:
             score -= 5
             deductions.append("no_ttps:-5")
 
