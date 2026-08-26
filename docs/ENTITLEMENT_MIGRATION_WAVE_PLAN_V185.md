@@ -25,7 +25,7 @@ shadow to enforced without that evidence would be exactly the "blind mass
 flip" Phase 11 explicitly forbids — so this pass produces the wave
 sequencing only, per the mission's own required Wave A/B/C structure.
 
-## 2. Current state (unchanged this pass)
+## 2. Current state as of this pass's start (HISTORICAL — see the v185.9 Wave A update immediately below for what actually changed)
 
 - 31 resources defined in `enforceTierGate()` (revenue-enforcement.js).
 - 15 of ~46 identified paid resources wired to `resolveEntitlement()`
@@ -34,7 +34,32 @@ sequencing only, per the mission's own required Wave A/B/C structure.
 - Drift guard: `scripts/entitlement_resource_drift_gate.py`, STAGE 4.065,
   non-blocking with `::error::` annotation, 0 drift as of this pass.
 
+**These three counts are now stale** — updated to 32 defined / 18 wired
+(policy-callsite coverage) / 1 enforced by the v185.9 Wave A update below;
+left unedited here as the accurate snapshot this section originally
+measured, not corrected in place, so the "what changed" framing in the note
+below stays meaningful (correcting a before/after comparison's "before" half
+in place would erase the comparison it's making).
+
 Full per-resource detail: `docs/ENTITLEMENT_RESOURCE_INVENTORY_V185.md`.
+
+**v185.9 Wave A update:** the wiring prerequisites this section's Wave A
+table calls out for STIX/TAXII, MISP, SIEM, and webhooks/alerts are now
+done — see `docs/WAVE_A_ROUTE_AUTHORITY_V185.md`. Specifically: the TAXII
+dual-gate reconciliation prerequisite (row 1-2 below) is resolved for
+same-file self-contradiction (enterprise-endpoints.js's `handleTaxiiObjects`
+now matches its own `handleTaxiiCollections`' advertised per-collection
+tiers) but the cross-implementation 5-vs-2 collection catalogue mismatch
+between index.js and enterprise-endpoints.js remains open — a
+product-catalogue decision, not a wiring gap, carried to Wave B/C. The MISP
+live-handler question (row 3) is resolved: `/api/misp/export` is served by
+enterprise-endpoints.js's `handleMISPExport`, now wired to a new
+`misp_export` resource; `/api/export/misp`'s separate scope-based gate
+remains unreconciled, carried forward. SIEM and webhooks/alerts (rows 5-6)
+are wired. All of this is **shadow-mode only** — the "zero resources move
+from shadow to enforced" rule in §1 above still holds for this pass; actual
+enforcement of any of these still requires the live shadow-divergence
+evidence this section already establishes isn't available yet.
 
 ## 3. Wave plan (sequencing only — each wave is separate, future, bounded work)
 

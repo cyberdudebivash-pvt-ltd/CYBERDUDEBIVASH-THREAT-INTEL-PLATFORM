@@ -366,6 +366,21 @@ export function enforceTierGate(resource, tier) {
       };
       return { allowed: true };
 
+    // MISP JSON export  -  Enterprise/MSSP only (v185.9 Wave A Phase 3: no
+    // canonical resource previously existed for /api/misp/export, which was
+    // gated only by enterprise-endpoints.js's own legacy requireEnterprise()
+    // inline check -- this case mirrors that exact rule, matching the
+    // taxii_kev/siem enterprise_only cases above.)
+    case "misp_export":
+      if (!isEnt) return {
+        allowed: false,
+        resource,
+        reason:  "enterprise_only",
+        message: "MISP JSON export requires ENTERPRISE or MSSP tier.",
+        upgrade: buildUpgradeTrigger("misp_export", t),
+      };
+      return { allowed: true };
+
     // Brand Protection (typosquatting/homograph scanning)  -  Free: BLOCKED, Pro+: ALLOWED
     case "brand_protection":
       if (isFree) return {

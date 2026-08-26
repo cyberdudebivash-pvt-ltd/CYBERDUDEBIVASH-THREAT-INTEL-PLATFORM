@@ -5456,7 +5456,7 @@ async function handleRequest(request, env, ctx) {
     // a clean 404 -- confirmed live against production (GET /api/sigma and
     // /api/yara both returned 500 before this fix). Fall through to the
     // standard 404 handler below instead of returning the null.
-    const eeResponse = await routeEnterpriseEndpoint(path, request, env, ctx, eeTier, eeItems, crypto.randomUUID(), auth);
+    const eeResponse = await routeEnterpriseEndpoint(path, request, env, ctx, eeTier, eeItems, crypto.randomUUID(), auth, resolveEntitlement);
     if (eeResponse) return eeResponse;
   }
 
@@ -5503,12 +5503,51 @@ async function handleRequest(request, env, ctx) {
     return await handleSLACertificate(request, env, auth, crypto.randomUUID());
   }
 
-  if (path === "/api/alerts/subscribe" && method === "POST")      return await handleAlertSubscribe(request, env, auth, crypto.randomUUID());
-  if (path === "/api/alerts/subscriptions")                       return await handleAlertSubscriptions(request, env, auth, crypto.randomUUID());
-  if (path === "/api/alerts/test" && method === "POST")           return await handleAlertTest(request, env, auth, crypto.randomUUID());
+  // v185.9 (Mission Wave A Phase 7): "alerts" already existed in
+  // enforceTierGate() (PRO+, Free blocked) with zero call sites. Wired here
+  // as a shadow-mode check on the 4 customer-facing routes whose own ad-hoc
+  // gate (auth.tier === "FREE" -> denied, everywhere else allowed) is exactly
+  // the same PRO+ rule "alerts" already encodes. handleAlertDispatch is
+  // internal/admin-secret-gated (not a customer tier decision) and
+  // handleAlertHistory enforces a *stricter*, different rule (Enterprise/MSSP
+  // only) that "alerts" does not represent -- both intentionally left off
+  // this resource rather than forcing an incorrect canonical mapping.
+  if (path === "/api/alerts/subscribe" && method === "POST") {
+    const alertsEnt = resolveEntitlement(ctx, env, "alerts", auth, auth.tier !== TIERS.FREE);
+    if (alertsEnt.enforced && !alertsEnt.allowed) {
+      return jsonResp({ error: "Alert subscriptions require Pro or Enterprise tier. Upgrade at /upgrade.html" }, 403);
+    }
+    return await handleAlertSubscribe(request, env, auth, crypto.randomUUID());
+  }
+  if (path === "/api/alerts/subscriptions") {
+    const alertsEnt = resolveEntitlement(ctx, env, "alerts", auth, auth.tier !== TIERS.FREE);
+    if (alertsEnt.enforced && !alertsEnt.allowed) {
+      return jsonResp({ error: "Alert subscriptions require Pro or Enterprise tier. Upgrade at /upgrade.html" }, 403);
+    }
+    return await handleAlertSubscriptions(request, env, auth, crypto.randomUUID());
+  }
+  if (path === "/api/alerts/test" && method === "POST") {
+    const alertsEnt = resolveEntitlement(ctx, env, "alerts", auth, auth.tier !== TIERS.FREE);
+    if (alertsEnt.enforced && !alertsEnt.allowed) {
+      return jsonResp({ error: "Alert subscriptions require Pro or Enterprise tier. Upgrade at /upgrade.html" }, 403);
+    }
+    return await handleAlertTest(request, env, auth, crypto.randomUUID());
+  }
   if (path === "/api/alerts/dispatch" && method === "POST")       return await handleAlertDispatch(request, env, auth, crypto.randomUUID());
   if (path === "/api/alerts/history")                             return await handleAlertHistory(request, env, auth, crypto.randomUUID());
-  if (path === "/api/alerts/unsubscribe" && method === "DELETE")  return await handleAlertUnsubscribe(request, env, auth, crypto.randomUUID());
+  if (path === "/api/alerts/unsubscribe" && method === "DELETE") {
+    // Unlike the 3 routes above, handleAlertUnsubscribe's own ad-hoc gate has
+    // no tier restriction at all (any authenticated identity may remove its
+    // own subscription -- verified via its ownership check, sub.sub !==
+    // auth.sub -> 403). adHocAllowed reflects that real behavior (`true`,
+    // not the PRO+ rule) so shadow mode reports the genuine divergence
+    // rather than a fabricated one; while unenforced this stays a no-op.
+    const alertsEnt = resolveEntitlement(ctx, env, "alerts", auth, true);
+    if (alertsEnt.enforced && !alertsEnt.allowed) {
+      return jsonResp({ error: "Alert subscriptions require Pro or Enterprise tier. Upgrade at /upgrade.html" }, 403);
+    }
+    return await handleAlertUnsubscribe(request, env, auth, crypto.randomUUID());
+  }
 
   // --- dark-web-monitor.js routes -- DISABLED (2026-08-26, production-truth
   // audit finding): dark-web-monitor.js's scan/status/leak-check handlers
@@ -5538,13 +5577,21 @@ async function handleRequest(request, env, ctx) {
   // routes above (line ~4223) are unaffected -- they match first as exact
   // string comparisons before this block is ever reached. ---
   if (path === "/api/reports/premium") {
-    // v185.5 (Mission Phase 5, Phase 8 migration backlog priority 6):
-    // shadow-mode only, mirrors handlePremiumReport()'s own
-    // tier.toLowerCase() === "free" gate exactly. resolveEntitlement()'s
-    // decision is logged, not consumed -- handlePremiumReport's ad-hoc
-    // check remains the sole thing deciding access. "report_full" already
-    // existed in enforceTierGate() (defined, previously unwired).
-    resolveEntitlement(ctx, env, "report_full", auth, auth.tier !== TIERS.FREE);
+    // v185.9 (Mission Wave A Phase 4): the shadow-only call this replaced
+    // discarded resolveEntitlement()'s return value entirely -- adding
+    // "report_full" to ENTITLEMENT_ENFORCEMENT_RESOURCES would have been
+    // inert for this specific route (handlePremiumReport's own ad-hoc
+    // tier.toLowerCase()==="free" check would still be the sole thing
+    // deciding access, same bug class the header comment above this block
+    // already flags for the SLA resources it contrasts against). Now
+    // consumed the same way as cve_detail_full/sla_report/etc: while
+    // unenforced this is a no-op (resolveEntitlement returns adHocAllowed
+    // unchanged), so today's behavior is identical -- but the flag is no
+    // longer inert.
+    const reportFullEnt = resolveEntitlement(ctx, env, "report_full", auth, auth.tier !== TIERS.FREE);
+    if (!reportFullEnt.allowed) {
+      return jsonResp({ error: "Full report text and attribution require Pro tier. Upgrade at /upgrade.html" }, 403);
+    }
     return await handlePremiumReport(request, env, auth, crypto.randomUUID());
   }
   if (path === "/api/reports/list") {
