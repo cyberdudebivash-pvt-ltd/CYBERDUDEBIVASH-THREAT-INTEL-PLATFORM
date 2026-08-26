@@ -344,6 +344,48 @@ const PREMIUM_INTEL_PATHS = new Set([
   "/api/v1/intel/ai_summary.json",
 ]);
 
+// v185.5: Normalized subscription lifecycle (Mission v185.0 Phase 1).
+// SIX canonical states -- deliberately no "trialing": this platform has no
+// real trial product (PR #251 confirmed "Start N-Day Trial" charges the
+// full price immediately, no distinct trial period exists in the backend).
+//
+// `subscription_status` is a NEW, OPTIONAL field on API_KEYS_KV records.
+// Every key provisioned before this change has no such field -- per
+// SUBSCRIPTION_STATUS_DENY_STATES / resolveAuth() below, an absent field is
+// treated identically to "active", so no existing valid customer key's
+// behavior changes. This is additive, not a migration: nothing is
+// backfilled, nothing is required to change on old records.
+//
+// PAST_DUE is deliberately NOT a deny state here: Mission Phase 3's own
+// required-deny list is expired/cancelled-after-end/refunded/suspended/
+// revoked/downgraded -- past_due is the conventional SaaS "payment failed,
+// grace period before hard cutoff" state, and denying on it immediately
+// would cut off a customer over a single failed charge with no recovery
+// window. Access stays allowed while past_due; only the terminal states
+// below deny.
+const SUBSCRIPTION_STATUS_DENY_STATES = new Set(["cancelled", "refunded", "suspended", "expired"]);
+const SUBSCRIPTION_STATUS_VALID_STATES = new Set(["active", "past_due", "cancelled", "expired", "refunded", "suspended"]);
+
+// v185.5 (Mission Phase 1/3): pure decision function, no KV/network access,
+// extracted specifically so it's unit-testable in isolation (see
+// workers/intel-gateway/src/__tests__/subscription-lifecycle.test.js) --
+// resolveAuth() below is the only caller in production, this is not a
+// second decision path (Principle 3: one canonical implementation).
+export function evaluateKeyRecordAccess(record) {
+  if (record.expires_at && new Date(record.expires_at) < new Date()) {
+    return { allowed: false, error: "key_expired" };
+  }
+  if (record.subscription_status) {
+    if (!SUBSCRIPTION_STATUS_VALID_STATES.has(record.subscription_status)) {
+      return { allowed: false, error: "subscription_status_invalid" };
+    }
+    if (SUBSCRIPTION_STATUS_DENY_STATES.has(record.subscription_status)) {
+      return { allowed: false, error: `subscription_${record.subscription_status}` };
+    }
+  }
+  return { allowed: true, error: null };
+}
+
 async function resolveAuth(request, env) {
   const apiKey = (request.headers.get("X-API-Key") || "").trim();
   const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
@@ -380,8 +422,15 @@ async function resolveAuth(request, env) {
     try {
       const record = await env.API_KEYS_KV.get(raw, "json");
       if (record) {
-        if (record.expires_at && new Date(record.expires_at) < new Date()) {
-          return { tier: TIERS.FREE, key: null, sub: null, error: "key_expired" };
+        // v185.5 (Mission Phase 1): subscription_status is optional on the
+        // record -- absent means "active" (every key provisioned before
+        // this change), so this is purely additive. An explicit but
+        // unrecognized status string fails closed rather than falling
+        // through as if unset, per Phase 1's own "unknown state must fail
+        // closed" requirement. See evaluateKeyRecordAccess()'s own comment.
+        const access = evaluateKeyRecordAccess(record);
+        if (!access.allowed) {
+          return { tier: TIERS.FREE, key: null, sub: null, error: access.error };
         }
         // Skip the extra KV write on the common case (no prior failures to clear)
         if (bf.count) await clearAuthFailures(env, ip);
@@ -390,6 +439,21 @@ async function resolveAuth(request, env) {
           key: raw,
           sub: record.customer_id || raw.slice(0, 8),
           kv: true,
+          // v185.5 (Mission Phase 6): MSSP tenant ownership, OPT-IN not
+          // fail-closed-by-default. `null` (every key provisioned before
+          // this change, and every non-MSSP key) means "no managed_tenants
+          // restriction recorded" -- handleMSSPFeed treats that as
+          // unrestricted, preserving today's exact live behavior for any
+          // existing MSSP customer. Only a key provisioned WITH an explicit
+          // managed_tenants array (including deliberately empty, meaning
+          // zero tenants authorized) gets real per-tenant enforcement. A
+          // fail-closed-by-default rollout would have silently cut off
+          // every existing MSSP customer's current access the moment this
+          // deployed -- see docs/MSSP_TENANT_IDENTITY_V185.md for why this
+          // opt-in path was chosen over that, and the remaining gap it
+          // leaves (existing MSSP keys stay unrestricted until an admin
+          // explicitly sets managed_tenants on them).
+          managed_tenants: Array.isArray(record.managed_tenants) ? record.managed_tenants : null,
         };
       }
     } catch (_) {}
@@ -2137,9 +2201,17 @@ export async function handleAdmin(request, env, ctx, path, method) {
   if (path === "/api/admin/keys" && method === "POST") {
     let body = {};
     try { body = await request.json(); } catch (_) {}
-    const { tier = "PRO", customer_id, label, expires_in_days } = body;
+    const { tier = "PRO", customer_id, label, expires_in_days, managed_tenants } = body;
     if (!customer_id) return jsonResp({ error: "customer_id is required" }, 400);
     if (!TIERS[tier])  return jsonResp({ error: `Invalid tier: ${tier}. Valid: ${Object.keys(TIERS).join(", ")}` }, 400);
+    // v185.5 (Mission Phase 6): optional, MSSP-oriented. Only meaningful
+    // when provided as an array -- omit entirely to get today's unrestricted
+    // MSSP tenant-feed behavior (see resolveAuth()'s managed_tenants
+    // comment); pass [] to explicitly authorize zero tenants, or a list of
+    // tenant_id strings to restrict this key to exactly those.
+    if (managed_tenants !== undefined && !Array.isArray(managed_tenants)) {
+      return jsonResp({ error: "managed_tenants, if provided, must be an array of tenant_id strings" }, 400);
+    }
 
     // v185.0 FIX: this mirrors provisionApiKey()'s prefix logic (~line 2820)
     // exactly, which already handles MSSP -- this copy had drifted and fell
@@ -2153,11 +2225,70 @@ export async function handleAdmin(request, env, ctx, path, method) {
       key: apiKey, tier, customer_id, label: label || customer_id,
       created_at: now(),
       expires_at: expires_in_days ? new Date(Date.now() + expires_in_days * 86400000).toISOString() : null,
+      ...(Array.isArray(managed_tenants) ? { managed_tenants } : {}),
     };
     const opts = expires_in_days ? { expirationTtl: expires_in_days * 86400 } : undefined;
     await env.API_KEYS_KV.put(apiKey, JSON.stringify(record), opts);
     auditLog(ctx, env, { action: "api_key_created", customer_id, tier });
     return jsonResp({ ...record, message: "API key created" }, 201);
+  }
+
+  // PATCH /api/admin/keys/{key}/status  body:{subscription_status, reason?}
+  // v185.5 (Mission Phase 2): the single admin-facing entry point for every
+  // subscription_status transition -- cancel, suspend, reactivate, and (for
+  // the refund webhook below) refund all route through this, so there is
+  // one auditable code path for the lifecycle change instead of one per
+  // action. Real cancellation/suspension have no Razorpay webhook signal in
+  // this integration (it uses the Orders API for one-time charges, not the
+  // Subscriptions API -- see docs/PAYMENT_WEBHOOK_LIFECYCLE_MAPPING_V185.md
+  // for the full accounting of what this platform's actual payment
+  // integration can and cannot signal), so they are necessarily
+  // admin-or-customer-support-initiated actions, not provider events.
+  const statusMatch = path.match(/^\/api\/admin\/keys\/([^\/]+)\/status$/);
+  if (statusMatch && method === "PATCH") {
+    const key = statusMatch[1];
+    let body = {};
+    try { body = await request.json(); } catch (_) {}
+    const { subscription_status, reason } = body;
+    const result = await applySubscriptionStatusChange(env, ctx, key, subscription_status, reason);
+    if (!result.ok) {
+      if (result.error === "invalid_status") {
+        return jsonResp({ error: `Invalid subscription_status. Valid: ${[...SUBSCRIPTION_STATUS_VALID_STATES].join(", ")}` }, 400);
+      }
+      return jsonResp({ error: "Key not found" }, 404);
+    }
+    return jsonResp({ key_prefix: key.slice(0, 12), subscription_status, message: "Subscription status updated" });
+  }
+
+  // POST /api/admin/keys/{key}/rotate
+  // Mission Phase 8: at minimum, new key issuance -> old key immediately
+  // revoked. Implemented as hard-delete of the old key (same mechanism the
+  // existing DELETE endpoint already uses and that Phase 3's REVOKED_KEY
+  // test already proves denies immediately) plus a fresh provisionApiKey()
+  // call for the new one, both audited under a single rotation event so
+  // the two are traceable as one action rather than two unrelated ones.
+  const rotateMatch = path.match(/^\/api\/admin\/keys\/([^\/]+)\/rotate$/);
+  if (rotateMatch && method === "POST") {
+    const oldKey = rotateMatch[1];
+    const existing = await env.API_KEYS_KV.get(oldKey, "json");
+    if (!existing) return jsonResp({ error: "Key not found" }, 404);
+    // provisionApiKey() computes a fresh billing-cycle expiry from now
+    // (matching normal re-provisioning behavior) rather than preserving the
+    // old key's exact remaining time -- rotation is a re-provision, not a
+    // clock-preserving swap. This is a no-op today regardless since
+    // SUBSCRIPTION_EXPIRY_ENABLED=false means expires_at is null either way.
+    const newKey = await provisionApiKey(
+      env, ctx, existing.tier, existing.customer_id, "admin_rotation",
+      { ...(existing.payment_metadata || {}), rotated_from: oldKey.slice(0, 12) + "...", rotation_reason: "admin_rotate" },
+      existing.billing_cycle || "monthly"
+    );
+    await env.API_KEYS_KV.delete(oldKey);
+    auditLog(ctx, env, { action: "api_key_rotated", old_key_prefix: oldKey.slice(0, 12), new_key_prefix: newKey.slice(0, 12), customer_id: existing.customer_id, tier: existing.tier });
+    return jsonResp({
+      new_key: newKey, tier: existing.tier, customer_id: existing.customer_id,
+      old_key_prefix: oldKey.slice(0, 12), old_key_revoked: true,
+      message: "Key rotated -- old key immediately revoked, no overlap window",
+    }, 201);
   }
 
   // DELETE /api/admin/keys/{key}
@@ -2226,7 +2357,9 @@ export async function handleAdmin(request, env, ctx, path, method) {
       "GET /api/admin/health",
       "GET /api/admin/audit?limit=50",
       "GET /api/admin/publication-audit?limit=100&cursor=...",
-      "POST /api/admin/keys  body:{customer_id,tier,label?,expires_in_days?}",
+      "POST /api/admin/keys  body:{customer_id,tier,label?,expires_in_days?,managed_tenants?}",
+      "PATCH /api/admin/keys/{key}/status  body:{subscription_status,reason?}",
+      "POST /api/admin/keys/{key}/rotate",
       "DELETE /api/admin/keys/{key}",
     ],
   }, 404);
@@ -2851,6 +2984,39 @@ async function handleCopilot(request, env, auth, method, path) {
 // While disabled, the real expiry is still computed and audit-logged
 // (shadow mode) so the correct values are observable before enforcement
 // flips on -- toggle the var to enable, no redeploy of logic required.
+// v185.5 (Mission Phase 2): single source of truth for every
+// subscription_status transition -- used by both the admin-facing
+// PATCH /api/admin/keys/{key}/status endpoint and the refund webhook below,
+// so there is exactly one code path that decides how a status change is
+// applied to a key record (Principle 3, no duplicate implementations).
+async function applySubscriptionStatusChange(env, ctx, key, subscription_status, reason) {
+  if (!SUBSCRIPTION_STATUS_VALID_STATES.has(subscription_status)) {
+    return { ok: false, error: "invalid_status" };
+  }
+  const existing = await env.API_KEYS_KV.get(key, "json");
+  if (!existing) return { ok: false, error: "not_found" };
+
+  const ts = now();
+  const updated = { ...existing, subscription_status };
+  if (subscription_status === "cancelled") updated.cancel_at = ts;
+  if (subscription_status === "suspended") updated.suspended_at = ts;
+  if (subscription_status === "active") {
+    delete updated.cancel_at;
+    delete updated.suspended_at;
+  }
+  // Cloudflare KV drops any prior TTL on a plain put() with no options --
+  // must re-specify it here or an existing key's KV-level expiration
+  // silently reverts to "never," independent of subscription_status.
+  const expiresAtSec = existing.expires_at ? Math.floor(new Date(existing.expires_at).getTime() / 1000) : null;
+  const opts = expiresAtSec && expiresAtSec > Math.floor(Date.now() / 1000) + 60 ? { expiration: expiresAtSec } : undefined;
+  await env.API_KEYS_KV.put(key, JSON.stringify(updated), opts);
+  auditLog(ctx, env, {
+    action: "subscription_status_changed", key_prefix: key.slice(0, 12),
+    from: existing.subscription_status || "active", to: subscription_status, reason: reason || null,
+  });
+  return { ok: true, existing, updated };
+}
+
 async function provisionApiKey(env, ctx, tier, email, source, metadata, billingCycle = "monthly") {
   const validTier = ["PRO", "ENTERPRISE", "MSSP"].includes(tier) ? tier : "PRO";
   const prefix = validTier === "ENTERPRISE" ? "cdb_ent" : validTier === "MSSP" ? "cdb_mssp" : "cdb_pro";
@@ -3154,6 +3320,14 @@ async function handleWebhookRazorpay(request, env, ctx) {
     await env.SECURITY_HUB_KV.put(unifiedIdempKey, JSON.stringify({ email, tier, ts: now(), source: "razorpay_webhook" }), { expirationTtl: 86400 * 365 });
     // Backward-compat per-path key (1 year TTL)
     await env.SECURITY_HUB_KV.put(whIdempKey, JSON.stringify({ email, tier, ts: now() }), { expirationTtl: 86400 * 365 });
+    // v185.5 (Mission Phase 2): payment_id -> api_key mapping so a later
+    // refund.* webhook for this same payment_id (Razorpay refunds are
+    // issued against Payments, not Orders/Subscriptions, so this event DOES
+    // exist for this integration even though subscription.* events don't --
+    // see the refund handler below) can find which key to mark refunded.
+    // Same 1-year TTL as the idempotency keys above; a refund past that
+    // window falls through to "no mapping found," logged, not silently lost.
+    await env.SECURITY_HUB_KV.put(`payment_key_map:${pid}`, apiKey, { expirationTtl: 86400 * 365 });
 
     // P2.6.1-002: Send activation email  -  wrapped in try/catch, never blocks provisioning
     ctx.waitUntil((async () => {
@@ -3173,6 +3347,16 @@ async function handleWebhookRazorpay(request, env, ctx) {
   }
 
   if (event === "payment.failed") {
+    // NOTE (Mission Phase 2): this fires when an INITIAL checkout payment
+    // attempt fails, before any key was ever provisioned for it -- there is
+    // no existing subscription to move to past_due here. This integration
+    // uses Razorpay's one-time Orders API (handleRazorpayCreateOrder,
+    // api.razorpay.com/v1/orders), not the recurring Subscriptions API, so
+    // there is no provider-driven "renewal failed" signal at all -- a real
+    // past_due transition in this architecture can only be admin-initiated
+    // (via PATCH /api/admin/keys/{key}/status) for a customer who was
+    // manually flagged as behind on a manual/offline renewal. See
+    // docs/PAYMENT_WEBHOOK_LIFECYCLE_MAPPING_V185.md for the full mapping.
     ctx.waitUntil(sendTelegramAlert(env,
       `[FAIL] <b>RAZORPAY PAYMENT FAILED</b>\n` +
       `Plan: ${tier} | Email: ${email}\n` +
@@ -3180,6 +3364,37 @@ async function handleWebhookRazorpay(request, env, ctx) {
       `Error: ${entity.error_description || "unknown"}`
     ));
     return jsonResp({ status: "noted", event });
+  }
+
+  // v185.5 (Mission Phase 2): refund.* IS a real webhook event Razorpay
+  // sends for this integration -- refunds are issued against Payment
+  // objects, which exist regardless of Orders vs Subscriptions API usage.
+  // Resolves payment_id -> the key issued for it (written at provisioning
+  // time above) and marks that key refunded via the same
+  // applySubscriptionStatusChange() the admin PATCH endpoint uses.
+  if (event === "refund.created" || event === "refund.processed") {
+    const refundEntity = payload.payload?.refund?.entity || {};
+    const refundedPaymentId = refundEntity.payment_id || pid;
+    const mappedKey = await env.SECURITY_HUB_KV.get(`payment_key_map:${refundedPaymentId}`);
+    if (!mappedKey) {
+      auditLog(ctx, env, { action: "refund_key_lookup_failed", payment_id: refundedPaymentId, refund_id: refundEntity.id || null });
+      ctx.waitUntil(sendTelegramAlert(env,
+        `[WARN] <b>RAZORPAY REFUND -- NO KEY MAPPING</b>\n` +
+        `Payment ID: <code>${refundedPaymentId}</code>\n` +
+        `Refund ID: <code>${refundEntity.id || "unknown"}</code>\n` +
+        `Manual follow-up required -- could not auto-revoke access.`
+      ));
+      return jsonResp({ status: "noted_no_mapping", event, payment_id: refundedPaymentId });
+    }
+    const result = await applySubscriptionStatusChange(env, ctx, mappedKey, "refunded", `razorpay_${event}:${refundEntity.id || "unknown"}`);
+    if (result.ok) {
+      ctx.waitUntil(sendTelegramAlert(env,
+        `<b>RAZORPAY REFUND PROCESSED</b>\n` +
+        `Payment ID: <code>${refundedPaymentId}</code>\n` +
+        `Key: <code>${mappedKey.slice(0, 16)}...</code> marked refunded -- access revoked.`
+      ));
+    }
+    return jsonResp({ status: result.ok ? "refunded" : "key_not_found", event, payment_id: refundedPaymentId });
   }
 
   return jsonResp({ status: "acknowledged", event });
@@ -5205,7 +5420,7 @@ async function handleRequest(request, env, ctx) {
     // a clean 404 -- confirmed live against production (GET /api/sigma and
     // /api/yara both returned 500 before this fix). Fall through to the
     // standard 404 handler below instead of returning the null.
-    const eeResponse = await routeEnterpriseEndpoint(path, request, env, ctx, eeTier, eeItems, crypto.randomUUID());
+    const eeResponse = await routeEnterpriseEndpoint(path, request, env, ctx, eeTier, eeItems, crypto.randomUUID(), auth);
     if (eeResponse) return eeResponse;
   }
 
@@ -5286,7 +5501,16 @@ async function handleRequest(request, env, ctx) {
   // /api/reports/index.json, /api/reports/latest.json, /api/reports/stats.json
   // routes above (line ~4223) are unaffected -- they match first as exact
   // string comparisons before this block is ever reached. ---
-  if (path === "/api/reports/premium") return await handlePremiumReport(request, env, auth, crypto.randomUUID());
+  if (path === "/api/reports/premium") {
+    // v185.5 (Mission Phase 5, Phase 8 migration backlog priority 6):
+    // shadow-mode only, mirrors handlePremiumReport()'s own
+    // tier.toLowerCase() === "free" gate exactly. resolveEntitlement()'s
+    // decision is logged, not consumed -- handlePremiumReport's ad-hoc
+    // check remains the sole thing deciding access. "report_full" already
+    // existed in enforceTierGate() (defined, previously unwired).
+    resolveEntitlement(ctx, env, "report_full", auth, auth.tier !== TIERS.FREE);
+    return await handlePremiumReport(request, env, auth, crypto.randomUUID());
+  }
   if (path === "/api/reports/list") {
     // CodeRabbit (PR #242 review): the public contract advertises "GET
     // /api/reports/list" only; nothing rejected POST/PUT/DELETE before this,
