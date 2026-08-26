@@ -72,14 +72,21 @@ export const REVENUE_CONFIG = {
   // of truth) is $49/mo (INR 4,100, 410000 paise). This object's price
   // leaked into buildUpgradeTrigger()'s live paywall response
   // (upgrade.price/cta_primary) as $29, a number no customer is ever
-  // actually charged. Enterprise pricing here is a separate, larger
-  // discrepancy against multiple other sources and is intentionally left
-  // for a dedicated business-approved pricing reconciliation, not touched
-  // in this pass.
+  // actually charged.
+  //
+  // v185.3 FIX (Fortune-500 audit, Phase 2 of the commercial-cutover
+  // mission): enterprise.monthly_usd was 199 -- traced the REAL checkout
+  // authority per the mission's own required method (frontend plan id ->
+  // handleRazorpayCreateOrder -> RAZORPAY_TIER_PRICES ->
+  // pricing-data.json.tiers.ENTERPRISE.monthly -> the actual Razorpay
+  // order amount): 4160000 paise = INR 41,600/mo, which is $499/mo, not
+  // $199. upgrade.html and pricing.html already advertise $499/INR 41,600
+  // consistently and match pricing-data.json exactly -- this object was
+  // the only remaining source still disagreeing with the real charge.
   PRICING: {
     free:       { monthly_inr: 0,       monthly_usd: 0     },
     premium:    { monthly_inr: 4100,    monthly_usd: 49    },
-    enterprise: { monthly_inr: 14999,   monthly_usd: 199   },
+    enterprise: { monthly_inr: 41600,   monthly_usd: 499   },
   },
   UPGRADE_URLS: {
     free_to_pro:       "https://intel.cyberdudebivash.com/upgrade.html?plan=pro",
@@ -521,12 +528,13 @@ export function buildUpgradeTrigger(context, currentTier) {
 
   const ctx = contextMessages[context] || { title: "Upgrade Your Plan", body: "Get more access, faster responses, and deeper intelligence." };
 
-  // v185.2 FIX (Fortune-500 audit, Phase 9): pro was "$29/mo" -- the actual
-  // Razorpay charge is $49/mo (INR 4,100). enterprise left untouched
-  // (separate, larger discrepancy pending business-approved reconciliation).
+  // v185.2/v185.3 FIX (Fortune-500 audit): pro was "$29/mo", enterprise was
+  // "$199/mo" -- both corrected to match the real Razorpay checkout amount
+  // (pricing-data.json, traced via handleRazorpayCreateOrder). See the
+  // matching comment on REVENUE_CONFIG.PRICING above for the full trace.
   const prices = {
     pro:        { inr: "4,100/mo", usd: "$49/mo" },
-    enterprise: { inr: "14,999/mo", usd: "$199/mo" },
+    enterprise: { inr: "41,600/mo", usd: "$499/mo" },
   };
 
   return {
