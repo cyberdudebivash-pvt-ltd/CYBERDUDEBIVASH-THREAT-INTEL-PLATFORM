@@ -1,0 +1,95 @@
+{
+  "version": "v185.4",
+  "mission": "SENTINEL APEX v185.0 -- Final Entitlement Lifecycle, Subscription Expiry & Commercial Customer Operations Certification",
+  "certified_at": "2026-08-26T08:43:18Z",
+  "release_sha": "PENDING_MERGE -- set to the PR #253 merge commit SHA once merged; the PR branch HEAD at certification time is the source of that squash merge",
+  "worker_deploy_run": "NOT_YET_TRIGGERED -- deploy-worker.yml fires on merge to main; no deploy has run for this change as of this certification",
+  "governance_grade": "A+",
+  "duplicate_violations": 0,
+  "hard_governance_violations": 0,
+  "soft_governance_violations": 0,
+  "governance_overall_pass": true,
+  "governance_report_source": "data/governance/governance_report.json, generated_at 2026-08-26T08:24:25Z (136 items, confirms the STAGE 4.06 dedup guard from PR #251 is holding in production)",
+
+  "payment_security": {
+    "status": "FIXED",
+    "detail": "handleRazorpayVerify tier-escalation vulnerability fixed in PR #252 (merged, deployed). Tier is now derived exclusively from a server-side Razorpay Payments API lookup of the authoritative order/payment record, never from client input.",
+    "commercial_price_conflicts": 0,
+    "enterprise_price": { "usd": 499, "inr": 41600, "resolved_via": "real checkout-authority trace, not inference -- see docs/COMMERCIAL_CONTRACT_AUTHORITY_V185.md" }
+  },
+
+  "subscription_expiry_enabled": false,
+  "subscription_expiry_status": "NOT_CHANGED_THIS_PASS -- deliberately left false. Mission Phase 7 requires proving the lifecycle regression matrix passes BEFORE flipping this flag; that matrix requires ADMIN_SECRET (BLOCKED_BY_SECRET) and a normalized subscription_status model that does not yet exist (see docs/SUBSCRIPTION_STATE_MODEL_V185.md). Flipping this flag without verified test evidence would violate this mission's own NO-REGRESSION / PRODUCTION-FIRST constraints.",
+
+  "entitlement_coverage": {
+    "resources_defined_in_policy_engine": 31,
+    "resources_wired_to_resolveEntitlement": 14,
+    "resources_actually_enforced": 1,
+    "entitlement_coverage_pct": 30,
+    "note": "14 of ~46 identified paid resources wired to the canonical engine (all shadow-mode except cve_detail_full). Not 100% -- full migration is real, sequenced, multi-PR work per docs/ENTITLEMENT_RESOURCE_INVENTORY_V185.md Section 4. This pass added sla_report/sla_incidents/sla_certificate as the next concrete migration step, following the mission's own priority-9 ordering.",
+    "drift_guard": "scripts/entitlement_resource_drift_gate.py wired into CI as STAGE 4.065 -- flags (non-blocking, per code-review-driven fix: a hard-fail here would have skipped every downstream if:success() step including the GitHub Pages deploy) if ENTITLEMENT_ENFORCEMENT_RESOURCES ever names a resource undefined in enforceTierGate() (a silent fail-open)."
+  },
+
+  "expired_access_tests": {
+    "status": "NOT_RUN",
+    "reason": "BLOCKED_BY_SECRET and BLOCKED_BY_MODEL -- requires both ADMIN_SECRET (to provision controlled expired-state test identities) and the normalized subscription_status model (not yet built, see docs/SUBSCRIPTION_STATE_MODEL_V185.md). Workflow scaffolding for this class of test does not yet exist; only the ACTIVE/INVALID/REVOKED subset below is built."
+  },
+
+  "revoked_key_tests": {
+    "status": "BUILT_NOT_YET_RUN",
+    "reason": "BLOCKED_BY_SECRET -- .github/workflows/commercial-customer-ops-certification.yml provisions a controlled PRO key, revokes it via DELETE /api/admin/keys/{key}, and asserts immediate denial on /api/sla/report. Requires the ADMIN_SECRET GitHub Actions secret (distinct from the already-configured WORKER_ADMIN_SECRET -- see that workflow's header comment for the exact correction and setup steps) to execute for the first time."
+  },
+
+  "tenant_isolation": {
+    "status": "NOT_TESTED",
+    "finding": "/api/mssp/tenants/{tenant_id}/feed does not verify the caller is authorized for the requested tenant_id -- it only checks tier (Enterprise/MSSP), then uses tenant_id purely as a response label/filter context. Lower severity than classic BOLA because this codebase has no per-tenant private data store today (the underlying feed is the same shared global data for every tenant_id string) -- but the endpoint's own documentation and response field ('Tenant-scoped threat feed') overstate isolation that does not exist. See docs/ENTITLEMENT_RESOURCE_INVENTORY_V185.md Section 5. Not fixed this pass: the real fix is a product/architecture decision (correct the claim, or build real per-tenant storage), out of scope for this certification pass.",
+    "cross_tenant_read": "NOT_MEASURED",
+    "cross_tenant_write": "NOT_MEASURED",
+    "cross_tenant_delete": "NOT_MEASURED",
+    "cross_tenant_export": "NOT_MEASURED"
+  },
+
+  "free_journey": "NOT_RUN -- BLOCKED_BY_SECRET (requires ADMIN_SECRET for a controlled comparison baseline; the free /api/apikeys/request-free path itself needs no secret but was not re-verified live this pass)",
+  "pro_journey": "NOT_RUN -- BLOCKED_BY_SECRET",
+  "enterprise_journey": "NOT_RUN -- BLOCKED_BY_SECRET",
+  "mssp_journey": "NOT_RUN -- BLOCKED_BY_SECRET",
+
+  "rate_limit_tests": {
+    "status": "NOT_RUN",
+    "known_canonical_limits": { "FREE": "30 req/min", "PRO": "120 req/min / 5,000 req/day", "ENTERPRISE": "600 req/min", "MSSP": "1,200 req/min" },
+    "source": "workers/intel-gateway/src/index.js RATE_LIMITS constant, corrected in PR #250, not independently re-verified live this pass"
+  },
+
+  "security_findings": {
+    "critical_exploitable": 0,
+    "high_exploitable": 0,
+    "informational": [
+      "MSSP tenant_id isolation gap (see tenant_isolation.finding above) -- informational/product-truth issue, not an exploitable vulnerability given current shared-feed architecture.",
+      "No key rotation endpoint exists (only create + delete via /api/admin/keys) -- rotation today is two non-atomic admin calls, no grace period, no dedicated audit event distinct from generic create/delete.",
+      "17 of 31 entitlement policy-engine resources have zero call sites (dead policy logic) -- not a risk since nothing depends on them, but should not be assumed to be protecting a real route without checking (see inventory doc Section 2)."
+    ],
+    "fixed_this_mission_series": [
+      "Payment tier-escalation (client-controlled tier field) -- PR #252",
+      "Enterprise pricing conflict ($199 vs $499) -- PR #252",
+      "Trial-contract contradictions -- PR #251",
+      "Governance dedup gap (3-layer root cause) -- PR #249/#250/#251"
+    ]
+  },
+
+  "branch_protection": {
+    "status": "BLOCKED_OPERATOR_ACTION",
+    "detail": "No GitHub tool available in this session can read or write branch protection rules / repository rulesets on `main`. docs/MAIN_BRANCH_PROTECTION_V185.md contains the exact ruleset configuration and rollout sequence an operator must apply. Re-confirmed this pass: still not enforced, and this certification does not claim otherwise."
+  },
+
+  "remaining_blockers": [
+    "ADMIN_SECRET not configured as a GitHub Actions secret (distinct from WORKER_ADMIN_SECRET, which only gates cache-bust) -- blocks all authenticated production acceptance testing (Phases 4 live portion, 9 live portion, 10, 11, 12-15, 16 live portion, 17 live portion).",
+    "Normalized subscription_status model not built (Phase 5 design-only this pass) -- blocks EXPIRED_*/CANCELLED/REFUNDED/SUSPENDED/DOWNGRADED lifecycle states entirely, independent of secret access.",
+    "SUBSCRIPTION_EXPIRY_ENABLED remains false -- flipping it requires the above two items resolved first, per Phase 7's own explicit prerequisite.",
+    "Canonical entitlement coverage at 30% (14/46 resources), 1 resource actually enforced -- full migration is sequenced multi-PR work per the inventory doc, not completed this pass.",
+    "Main branch protection still disabled -- BLOCKED_OPERATOR_ACTION, no tool access, operator must apply docs/MAIN_BRANCH_PROTECTION_V185.md.",
+    "MSSP tenant_id isolation claim vs. reality gap not resolved (product/architecture decision, out of scope this pass).",
+    "Full Free/Pro/Enterprise/MSSP black-box customer journeys not run live (BLOCKED_BY_SECRET)."
+  ],
+
+  "verdict": "NO-GO -- WORLDWIDE PRODUCTION RELEASE NOT APPROVED. Blockers: ADMIN_SECRET not configured (BLOCKED_BY_SECRET on all live authenticated testing), subscription_status model not built (BLOCKED_BY_MODEL on expiry/cancellation/refund/suspension lifecycle), SUBSCRIPTION_EXPIRY_ENABLED=false (correctly withheld pending the above), entitlement coverage at 30% not 100%, MAIN_BRANCH_PROTECTION disabled (BLOCKED_OPERATOR_ACTION). What IS true and verified: governance A+ with 0 duplicate/hard/soft violations, the payment tier-escalation vulnerability is fixed and deployed, the Enterprise pricing conflict is resolved and deployed, and a real (not fabricated) foundation for the remaining work -- inventory, state-model design, drift-guard CI gate, and a runnable authenticated-test workflow -- now exists for the next pass to build on rather than re-discover."
+}
