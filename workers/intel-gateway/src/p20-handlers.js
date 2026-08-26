@@ -182,7 +182,17 @@ export function computeP20QualityScore(item) {
   scores.multi_source = Math.min(15, corrCount * 5);
 
   // MITRE completeness (10 pts)
-  const ttps = item.mitre_tactics || item.ttps || [];
+  // PRODUCTION-VERIFICATION FIX (2026-08-26): apex_mitre_attack_engine.py
+  // writes technique data to attck_technique_ids/attck_techniques (already
+  // 75.7% coverage on live production data) -- this score never checked
+  // those field names, only the legacy mitre_tactics/ttps pair, so it read
+  // 0 for the large majority of items that already carry real coverage.
+  // Uses .find() rather than `||` chaining because items commonly carry an
+  // empty-but-present mitre_tactics: [] -- `[] || x` evaluates to `[]` in
+  // JS (empty arrays are truthy), which would otherwise short-circuit
+  // straight past every fallback before ever reaching real data.
+  const ttps = [item.mitre_tactics, item.ttps, item.attck_technique_ids, item.attck_techniques]
+    .find(a => Array.isArray(a) && a.length > 0) || [];
   const ttpCount = Array.isArray(ttps) ? ttps.length : 0;
   scores.mitre = Math.min(10, ttpCount >= 4 ? 10 : ttpCount >= 2 ? 7 : ttpCount >= 1 ? 4 : 0);
 
