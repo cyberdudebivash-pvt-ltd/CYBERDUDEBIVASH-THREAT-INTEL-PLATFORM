@@ -362,6 +362,20 @@ def enrich_attack_mapping(item: Dict) -> Dict:
 
     item_out = dict(item)
     item_out["ttps"]                 = resolved_entries
+    # PRODUCTION-VERIFICATION FIX (2026-08-26): workers/intel-gateway/src/
+    # p23-handlers.js's computeOperationalReadiness() (the "Threat Hunting
+    # Package" / "MITRE ATT&CK Mapping" publication-gate checks) reads
+    # item.mitre_techniques, not item.ttps -- a different field name than
+    # this engine wrote. The live per-item ingestion path (enterprise_
+    # intelligence_integrator.py:710) already sets mitre_techniques from
+    # its own MAE call; this backfill path (stage_attack_mapping_backfill,
+    # run_pipeline.py) never did, so items enriched only through the
+    # backfill (the majority, per its own docstring: 624/1075 items)
+    # carried real ttps but still failed every mitre_techniques-based
+    # readiness/quality check. Setting both field names here, from the
+    # same resolved_entries this function already computed, is a read-side
+    # compatibility fix -- no new mapping, no re-scoring, same evidence.
+    item_out["mitre_techniques"]     = resolved_entries
     item_out["attck_techniques"]     = resolved_entries
     item_out["attck_technique_ids"]  = [t["technique_id"] for t in resolved_entries]
     item_out["ttp_count"]            = len(resolved_entries)

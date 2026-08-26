@@ -224,6 +224,7 @@ def main() -> int:
     # 2. Build report_url map from feed_manifest.json
     # ------------------------------------------------------------------
     manifest_map: Dict[str, str] = {}  # id -> report_url
+    mitre_map: Dict[str, Dict[str, Any]] = {}  # id -> ATT&CK technique fields
 
     if FEED_MANIFEST.exists():
         mdata = _load_json_safe(FEED_MANIFEST)
@@ -252,6 +253,36 @@ def main() -> int:
             log.info(
                 "feed_manifest.json: %d items, %d have valid report_url",
                 len(manifest_items), len(manifest_map)
+            )
+
+            # PRODUCTION-VERIFICATION FIX (2026-08-26): scripts/apex_mitre_
+            # attack_engine.py's evidence-based ATT&CK backfill
+            # (stage_attack_mapping_backfill, run_pipeline.py, STAGE 1-3)
+            # only ever writes to feed_manifest.json -- confirmed live:
+            # running it standalone maps 166/239 manifest items (69.5%)
+            # with real technique data, but nothing in the pipeline ever
+            # carried those fields into api/feed.json, the file actually
+            # served to customers (Worker's _loadFeed(), R2 upload, every
+            # P20/P23 quality/readiness score). This is the exact same
+            # "manifest has it, api/feed.json never receives it" class of
+            # gap this script was already built to close for report_url --
+            # reusing the identical id-keyed pattern for the ATT&CK fields
+            # rather than adding a new script or pipeline stage.
+            for it in manifest_items:
+                if not isinstance(it, dict):
+                    continue
+                iid = it.get("id") or ""
+                if iid and it.get("ttps"):
+                    mitre_map[iid] = {
+                        "ttps":                it.get("ttps"),
+                        "mitre_techniques":    it.get("mitre_techniques") or it.get("ttps"),
+                        "attck_techniques":    it.get("attck_techniques") or it.get("ttps"),
+                        "attck_technique_ids": it.get("attck_technique_ids") or [],
+                        "ttp_count":           it.get("ttp_count") or len(it.get("ttps") or []),
+                    }
+            log.info(
+                "feed_manifest.json: %d items have ATT&CK technique mapping to sync",
+                len(mitre_map)
             )
     else:
         log.warning("feed_manifest.json not found — will use disk fallback only")
@@ -324,12 +355,34 @@ def main() -> int:
             log.warning("Error processing item %s: %s", item.get("id", "?"), e)
             errors += 1
 
+    # ------------------------------------------------------------------
+    # 3b. Sync ATT&CK technique mapping into each api/feed.json item
+    # (separate pass from report_url sync above -- purely additive, never
+    # touches report_url/internal_report_url/validation_status fields)
+    # ------------------------------------------------------------------
+    mitre_synced = 0
+    mitre_errors = 0
+    for item in feed_data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            if item.get("ttps"):
+                continue  # already has real technique data -- never overwrite
+            item_id = item.get("id") or ""
+            if item_id and item_id in mitre_map:
+                item.update(mitre_map[item_id])
+                mitre_synced += 1
+        except Exception as e:
+            log.warning("MITRE sync error for item %s: %s", item.get("id", "?"), e)
+            mitre_errors += 1
+
     elapsed = time.monotonic() - t_start
     log.info(
         "SYNC COMPLETE: manifest=%d disk=%d already_valid=%d not_found=%d "
-        "(of which cleared_invalid=%d) errors=%d total=%d elapsed=%.1fs",
+        "(of which cleared_invalid=%d) errors=%d mitre_synced=%d mitre_errors=%d "
+        "total=%d elapsed=%.1fs",
         synced_from_manifest, synced_from_disk, already_valid, not_found,
-        cleared_invalid, errors, len(feed_data), elapsed
+        cleared_invalid, errors, mitre_synced, mitre_errors, len(feed_data), elapsed
     )
 
     # ------------------------------------------------------------------
