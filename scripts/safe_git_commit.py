@@ -746,6 +746,65 @@ def main() -> None:
                     )
             # == END P0-FIX v184.2 ==
 
+            # == P0-FIX v185.2: Post-Restore Dedup Safety Net ==
+            # PROBLEM (Fortune-500 audit, Phase 1-2): the artifact-guard restore
+            # loop above assumes ORIG_HEAD's copy of api/feed.json/feed.json is
+            # always this run's own freshest generation and should always win --
+            # but ORIG_HEAD is this run's pre-reset commit, produced by whatever
+            # version of run_pipeline.py this run checked out at start. If a
+            # concurrent push that lost the race to this run's reset carried a
+            # newer run_pipeline.py fix (e.g. the source_url final-dedup gate
+            # added in PR #249), this restore step silently overwrites that
+            # newer, correct data with this run's own staler-code output --
+            # confirmed live: governance run #1114 (commit cad092ab4) showed
+            # grade=D with 2 source_url duplicates immediately after a
+            # conflict-recovery commit (8dff1c7d6) restored api/feed.json from
+            # ORIG_HEAD, reintroducing the exact duplicate PR #249 had just
+            # removed. Since enforce_manifest_uniqueness() is idempotent and
+            # cheap, re-run it here -- the last point before these files are
+            # committed -- regardless of which code path produced the content
+            # being restored.
+            try:
+                _scripts_dir_dedup = str(REPO_ROOT / "scripts")
+                if _scripts_dir_dedup not in sys.path:
+                    sys.path.insert(0, _scripts_dir_dedup)
+                from intel_dedup_engine import enforce_manifest_uniqueness as _post_restore_dedup
+                for _dg_rel in ("api/feed.json", "feed.json"):
+                    _dg_path = REPO_ROOT / _dg_rel
+                    if not _dg_path.exists():
+                        continue
+                    try:
+                        _dg_raw = json.loads(_dg_path.read_text(encoding="utf-8").rstrip("\x00"))
+                    except Exception as _dg_parse_e:
+                        log.warning("[post-restore-dedup] Could not parse %s (%s) -- skipping", _dg_rel, _dg_parse_e)
+                        continue
+                    _dg_items = _dg_raw if isinstance(_dg_raw, list) else _dg_raw.get("items", _dg_raw.get("advisories", []))
+                    _dg_unique, _dg_removed = _post_restore_dedup(_dg_items)
+                    if _dg_removed:
+                        if isinstance(_dg_raw, list):
+                            _dg_out = _dg_unique
+                        else:
+                            if "advisories" in _dg_raw:
+                                _dg_raw["advisories"] = _dg_unique
+                            elif "items" in _dg_raw:
+                                _dg_raw["items"] = _dg_unique
+                            _dg_out = _dg_raw
+                        _dg_tmp = Path(str(_dg_path) + ".tmp")
+                        _dg_tmp.write_text(json.dumps(_dg_out, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+                        os.replace(str(_dg_tmp), str(_dg_path))
+                        run_git("add", "-f", _dg_rel)
+                        log.warning(
+                            "[post-restore-dedup] %s: %d duplicate(s) reintroduced by ORIG_HEAD "
+                            "restore, removed and re-staged", _dg_rel, _dg_removed
+                        )
+                    else:
+                        log.info("[post-restore-dedup] %s: no duplicates after restore", _dg_rel)
+            except ImportError as _dg_imp_e:
+                log.warning("[post-restore-dedup] intel_dedup_engine unavailable (%s) -- skipped", _dg_imp_e)
+            except Exception as _dg_e:
+                log.warning("[post-restore-dedup] Failed (non-fatal): %s", _dg_e)
+            # == END P0-FIX v185.2 ==
+
             # == P0-FIX v145.1.0: Workflow YAML Conflict-Marker Guard ==
             # PROBLEM: git stash pop replays stashed changes on top of origin/main.
             # When .github/workflows/ files changed between the stash base and
