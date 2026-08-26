@@ -2770,6 +2770,27 @@ jobs:
           exit 0
 
       # -----------------------------------------------------------------------
+      # STAGE 4.06 - Final Feed Dedup Guard (v185.2)
+      # ROOT CAUSE: dozens of separate steps between "Stage 1-3 - Master
+      # Pipeline Orchestrator" (where run_pipeline.py's own dedup gates run)
+      # and STAGE 4 below independently read-modify-write api/feed.json --
+      # same documented root cause as STAGE 4.1's comment. Any of them can
+      # reintroduce a source_url duplicate that run_pipeline.py already
+      # removed. regression_tests.py's T22 catches this, but it runs at
+      # STAGE 5.6 -- AFTER STAGE 4 already committed and pushed -- so a
+      # failure there is purely informational. Runs the same idempotent
+      # enforce_manifest_uniqueness() one more time, immediately before the
+      # commit, so whichever stage reintroduced a duplicate, it is fixed
+      # before it reaches origin/main, not just reported after.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 4.06 - Final Feed Dedup Guard"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          python3 scripts/final_feed_dedup_guard.py
+          exit 0
+
+      # -----------------------------------------------------------------------
       # STAGE 4: GIT SYNC -- ALWAYS RUNS
       # Commits non-sensitive metadata and HTML reports. 4-attempt push retry.
       # Exit 0 guaranteed - never kills pipeline.
