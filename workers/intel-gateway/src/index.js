@@ -3004,7 +3004,10 @@ async function handleRazorpayVerify(request, env, ctx, method) {
   if (method !== "POST") return jsonResp({ error: "POST required" }, 405);
   let body = {};
   try { body = await request.json(); } catch (_) {}
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, tier = "PRO", email, billing = "monthly" } = body;
+  // NOTE: a client-supplied `tier` field is deliberately NOT read here.
+  // Tier is derived below from the verified Razorpay payment record only --
+  // see the v185.2 SECURITY FIX comment before provisioning.
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, email, billing = "monthly" } = body;
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     return jsonResp({ error: "razorpay_order_id, razorpay_payment_id, razorpay_signature required" }, 400);
   }
@@ -3031,7 +3034,50 @@ async function handleRazorpayVerify(request, env, ctx, method) {
     return jsonResp({ error: "Payment already verified and key provisioned", code: "ALREADY_PROVISIONED" }, 409);
   }
 
-  const tierUp = (tier || "PRO").toUpperCase();
+  // v185.2 SECURITY FIX (Fortune-500 audit, Phase 3): the HMAC check above
+  // only proves razorpay_order_id|razorpay_payment_id was genuinely signed
+  // by Razorpay -- it says nothing about which tier that specific payment
+  // was actually for. `tier` in the request body is client-supplied and
+  // was previously trusted directly for provisioning: a customer could pay
+  // the real PRO order (INR 4,100), then call this endpoint with
+  // tier:"ENTERPRISE" and be provisioned an Enterprise-tier key for PRO
+  // money. This path also normally wins the idempotency race against the
+  // signed server-to-server webhook (handleWebhookRazorpay, which already
+  // derives tier correctly from Razorpay's own signed notes.tier), since
+  // the client calls this synchronously right after checkout while the
+  // webhook arrives asynchronously -- making this the primary, not an
+  // edge-case, provisioning path. Fixed: fetch the payment record back
+  // from Razorpay's own API (authoritative, not client-suppliable), verify
+  // it is captured and bound to the claimed order_id, and derive tier from
+  // its own notes.tier (set server-side at order-creation time) -- the
+  // client's `tier` field is no longer trusted for provisioning.
+  const razorpayCreds = btoa(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`);
+  let paymentEntity;
+  try {
+    const payResp = await fetch(`https://api.razorpay.com/v1/payments/${razorpay_payment_id}`, {
+      headers: { "Authorization": `Basic ${razorpayCreds}` },
+    });
+    if (!payResp.ok) {
+      return jsonResp({ error: "Could not verify payment with Razorpay" }, 502);
+    }
+    paymentEntity = await payResp.json();
+  } catch (e) {
+    console.error(`[razorpay] payment lookup failed: ${e.message}`);
+    return jsonResp({ error: "Razorpay API unavailable" }, 503);
+  }
+  if (paymentEntity.order_id !== razorpay_order_id) {
+    auditLog(ctx, env, { action: "payment_order_mismatch", payment_id: razorpay_payment_id, claimed_order: razorpay_order_id, actual_order: paymentEntity.order_id });
+    return jsonResp({ error: "Payment does not match the specified order", code: "ORDER_MISMATCH" }, 400);
+  }
+  if (paymentEntity.status !== "captured") {
+    return jsonResp({ error: "Payment not captured", code: "NOT_CAPTURED", status: paymentEntity.status }, 400);
+  }
+  const authoritativeTier = String(paymentEntity.notes?.tier || "").toUpperCase();
+  if (!["PRO", "ENTERPRISE", "MSSP"].includes(authoritativeTier)) {
+    auditLog(ctx, env, { action: "payment_tier_unresolvable", payment_id: razorpay_payment_id });
+    return jsonResp({ error: "Could not determine tier from the verified payment record" }, 400);
+  }
+  const tierUp = authoritativeTier;
   const apiKey = await provisionApiKey(env, ctx, tierUp, email, "razorpay_checkout", {
     order_id: razorpay_order_id, payment_id: razorpay_payment_id,
   }, billing === "annual" ? "annual" : "monthly");
