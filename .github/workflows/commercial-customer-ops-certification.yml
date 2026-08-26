@@ -567,8 +567,17 @@ jobs:
           FIRST_429=0
           RETRY_AFTER_SEEN=""
 
+          # NOTE: the first attempt at this test used /api/feed, which
+          # carries `Cache-Control: public, max-age=120` -- Cloudflare's
+          # edge cache served every repeat request within that window
+          # without ever re-invoking the Worker, so checkRateLimit()
+          # never ran and no 429 ever appeared (confirmed live: 0/33
+          # requests hit 429 against /api/feed). /api/sla/status returns
+          # no Cache-Control header at all (confirmed live via curl -D-),
+          # so every request is a fresh Worker invocation that actually
+          # exercises the rate limiter.
           for i in $(seq 1 33); do
-            RESP=$(curl -sS -D - -o /dev/null "$BASE/api/feed")
+            RESP=$(curl -sS -D - -o /dev/null "$BASE/api/sla/status")
             ST=$(echo "$RESP" | awk 'NR==1{print $2}')
             if [ "$ST" = "429" ] && [ "$FIRST_429" -eq 0 ]; then
               FIRST_429=$i
