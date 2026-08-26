@@ -105,6 +105,12 @@ import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handle
 import { handlePremiumReport, handleReportList, handleReportGet } from './premium-reports.js';
 import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-meter.js';
 import { deductCredits } from './credit-system.js';
+import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
+// Re-exported unchanged for backward compatibility with any external
+// importer of index.js's own evaluateKeyRecordAccess export (Principle 5:
+// no silent removal of an existing export) -- the canonical implementation
+// now lives in subscription-lifecycle.js; see that file's header comment.
+export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES };
 const PLATFORM_VERSION    = "184.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -344,47 +350,14 @@ const PREMIUM_INTEL_PATHS = new Set([
   "/api/v1/intel/ai_summary.json",
 ]);
 
-// v185.5: Normalized subscription lifecycle (Mission v185.0 Phase 1).
-// SIX canonical states -- deliberately no "trialing": this platform has no
-// real trial product (PR #251 confirmed "Start N-Day Trial" charges the
-// full price immediately, no distinct trial period exists in the backend).
-//
-// `subscription_status` is a NEW, OPTIONAL field on API_KEYS_KV records.
-// Every key provisioned before this change has no such field -- per
-// SUBSCRIPTION_STATUS_DENY_STATES / resolveAuth() below, an absent field is
-// treated identically to "active", so no existing valid customer key's
-// behavior changes. This is additive, not a migration: nothing is
-// backfilled, nothing is required to change on old records.
-//
-// PAST_DUE is deliberately NOT a deny state here: Mission Phase 3's own
-// required-deny list is expired/cancelled-after-end/refunded/suspended/
-// revoked/downgraded -- past_due is the conventional SaaS "payment failed,
-// grace period before hard cutoff" state, and denying on it immediately
-// would cut off a customer over a single failed charge with no recovery
-// window. Access stays allowed while past_due; only the terminal states
-// below deny.
-const SUBSCRIPTION_STATUS_DENY_STATES = new Set(["cancelled", "refunded", "suspended", "expired"]);
-const SUBSCRIPTION_STATUS_VALID_STATES = new Set(["active", "past_due", "cancelled", "expired", "refunded", "suspended"]);
-
-// v185.5 (Mission Phase 1/3): pure decision function, no KV/network access,
-// extracted specifically so it's unit-testable in isolation (see
-// workers/intel-gateway/src/__tests__/subscription-lifecycle.test.js) --
-// resolveAuth() below is the only caller in production, this is not a
-// second decision path (Principle 3: one canonical implementation).
-export function evaluateKeyRecordAccess(record) {
-  if (record.expires_at && new Date(record.expires_at) < new Date()) {
-    return { allowed: false, error: "key_expired" };
-  }
-  if (record.subscription_status) {
-    if (!SUBSCRIPTION_STATUS_VALID_STATES.has(record.subscription_status)) {
-      return { allowed: false, error: "subscription_status_invalid" };
-    }
-    if (SUBSCRIPTION_STATUS_DENY_STATES.has(record.subscription_status)) {
-      return { allowed: false, error: `subscription_${record.subscription_status}` };
-    }
-  }
-  return { allowed: true, error: null };
-}
+// v185.6 (Mission Phase 3): moved to subscription-lifecycle.js, a small
+// dependency-free module, specifically so
+// __tests__/subscription-lifecycle.test.js can import it directly without
+// pulling in index.js's full import chain (pricing.js -> pricing-data.json
+// fails Node's native ESM loader outside the wrangler/esbuild bundler --
+// see that file's header comment for the full explanation). Re-exported
+// here unchanged so every existing call site keeps working with no
+// behavior change -- this is a pure move, not a logic change.
 
 async function resolveAuth(request, env) {
   const apiKey = (request.headers.get("X-API-Key") || "").trim();
