@@ -181,7 +181,6 @@ def compute_threat_category(item):
 def compute_ai_summary(item, soc_priority, pred_risk, ai_conf, ttp_density, category):
     title    = item.get("title") or ""
     sev      = (item.get("severity") or "MEDIUM").upper()
-    risk     = float(item.get("risk_score") or 0)
     kev      = bool(item.get("kev_present"))
     cvss     = item.get("cvss_score")
     epss     = item.get("epss_score")
@@ -199,8 +198,19 @@ def compute_ai_summary(item, soc_priority, pred_risk, ai_conf, ttp_density, cate
     lines = []
 
     # Risk signal
-    risk_desc = "critical" if risk >= 9 else "high" if risk >= 7 else "moderate" if risk >= 5 else "low"
-    lines.append(f"[{soc_priority}] {category} - {risk_desc} severity (Risk {risk}/10).")
+    # PRODUCTION-VERIFICATION FIX (2026-08-26, Fortune-500 audit finding):
+    # this line previously re-derived its own "risk" from item.risk_score,
+    # silently ignoring the pred_risk parameter this function is passed --
+    # the exact value written to apex_ai.predictive_risk two lines above the
+    # call site. Live-verified contradiction this caused: a P1/CRITICAL item
+    # (soc_priority correctly driven by CVSS) whose apex_ai.predictive_risk
+    # read 2.8 still generated ai_summary text reading "low severity (Risk
+    # 0.7574/10)" -- a stale, unrelated number, disagreeing with both the
+    # soc_priority label right next to it in the same sentence and the
+    # predictive_risk field in the same apex_ai block. Using pred_risk here
+    # makes this the single source of truth for "risk" in this sentence.
+    risk_desc = "critical" if pred_risk >= 9 else "high" if pred_risk >= 7 else "moderate" if pred_risk >= 5 else "low"
+    lines.append(f"[{soc_priority}] {category} - {risk_desc} severity (Risk {pred_risk}/10).")
 
     # KEV / EPSS / CVSS enrichment
     if kev:

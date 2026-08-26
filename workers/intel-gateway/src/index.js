@@ -100,7 +100,8 @@ import { applyTierGateV2, enforceTierGate } from './revenue-enforcement.js';
 import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
 import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handleAlertDispatch, handleAlertHistory, handleAlertUnsubscribe } from './alert-engine.js';
-import { handleDarkWebScan, handleDarkWebStatus, handleLeakCheck } from './dark-web-monitor.js';
+// dark-web-monitor.js's handlers are intentionally NOT imported -- see the
+// _darkWebUnavailable disable note at its route registration below.
 import { handlePremiumReport, handleReportList, handleReportGet } from './premium-reports.js';
 import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-meter.js';
 import { deductCredits } from './credit-system.js';
@@ -201,6 +202,22 @@ function jsonResp(data, status = 200, extra = {}) {
 
 function errorResp(msg, status = 500) {
   return jsonResp({ error: msg, status }, status);
+}
+
+// PRODUCTION-TRUTH FIX (2026-08-26): Dark Web Monitor / Leak Check were
+// disabled at the router (see route registration for the reasoning) because
+// their backend always returned a deterministic simulation, never real
+// breach data. This is the single truthful response every disabled route
+// returns -- a real 503, not a 200 with fabricated findings -- so a customer
+// or integration can tell the difference between "no result" and "feature
+// unavailable" instead of silently receiving synthetic data.
+function _darkWebUnavailable(rid) {
+  return jsonResp({
+    status:     "unavailable",
+    error:      "feature_temporarily_disabled",
+    message:    "Dark Web Monitor is temporarily unavailable while SENTINEL APEX integrates licensed breach-intelligence providers. No synthetic or simulated results are served.",
+    request_id: rid,
+  }, 503, { "Retry-After": "86400" });
 }
 
 function now() {
@@ -5154,13 +5171,22 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/alerts/history")                             return await handleAlertHistory(request, env, auth, crypto.randomUUID());
   if (path === "/api/alerts/unsubscribe" && method === "DELETE")  return await handleAlertUnsubscribe(request, env, auth, crypto.randomUUID());
 
-  // --- dark-web-monitor.js routes (previously unreachable -- now wired,
-  // same production-verification fix pattern as sla-monitor.js/alert-
-  // engine.js above; advertised live in api-key-manager.html's working
-  // "Dark Web Scan" button, which was 404ing before this) ---
-  if (path === "/api/dark-web/scan" && method === "POST") return await handleDarkWebScan(request, env, auth, crypto.randomUUID());
-  if (path === "/api/dark-web/status")                    return await handleDarkWebStatus(request, env, auth, crypto.randomUUID());
-  if (path === "/api/leak-check")                         return await handleLeakCheck(request, env, auth, crypto.randomUUID());
+  // --- dark-web-monitor.js routes -- DISABLED (2026-08-26, production-truth
+  // audit finding): dark-web-monitor.js's scan/status/leak-check handlers
+  // return a deterministic simulation keyed off a hash of the customer's
+  // input (its own header comment: "Here we produce a deterministic
+  // simulation ... until live API integrations are wired per-customer") --
+  // no real breach source is queried. Wiring this into the router (this
+  // block) made that simulated data reachable as a paid Pro+/Enterprise
+  // feature. Explicit decision: disable the endpoints and return a truthful
+  // 503 rather than continue serving synthetic breach findings as if
+  // observed. dark-web-monitor.js is kept on disk, unmodified, for when
+  // real provider integrations exist -- these three lines are the only
+  // wiring removed. Re-enable only once handleDarkWebScan/handleDarkWebStatus/
+  // handleLeakCheck call real, licensed data sources with provenance.
+  if (path === "/api/dark-web/scan" && method === "POST") return _darkWebUnavailable(crypto.randomUUID());
+  if (path === "/api/dark-web/status")                    return _darkWebUnavailable(crypto.randomUUID());
+  if (path === "/api/leak-check")                         return _darkWebUnavailable(crypto.randomUUID());
 
   // --- premium-reports.js routes (previously unreachable -- now wired, same
   // pattern as dark-web-monitor.js above; advertised live in soc-
