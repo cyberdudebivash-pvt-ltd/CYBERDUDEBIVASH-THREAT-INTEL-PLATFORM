@@ -531,8 +531,13 @@ class EnterpriseMonetizationAnalyticsEngine:
     Outputs atomic JSON reports to data/monetization/.
     """
 
-    def __init__(self):
-        self._output_dir = "data/monetization"
+    def __init__(self, output_dir: str = "data/monetization"):
+        # output_dir override (v185.2, Workstream 17): CI/smoke-test callers
+        # that feed this engine synthetic tenants (ci-t1..ci-tN) must write to
+        # a separate path, never to the canonical data/monetization/ report
+        # real customers/dashboards read as production monetization truth.
+        # Default preserves prior behavior for any real-data caller.
+        self._output_dir = output_dir
         os.makedirs(self._output_dir, exist_ok=True)
         self.ledger    = RevenueLedger(
             os.path.join(self._output_dir, "revenue_ledger.jsonl"))
@@ -640,7 +645,12 @@ class EnterpriseMonetizationAnalyticsEngine:
             recs.append(f"Upgrade rate {upgrade_rate}% below 5% target — improve paywall UX")
         if mrr.expansion_mrr > 0:
             recs.append(f"Expansion MRR ${mrr.expansion_mrr:.0f} detected — nurture expansion accounts")
-        if not recs:
+        # v185.2 fix (Workstream 17): a $0-revenue period must never be
+        # auto-labeled "healthy" just because no other rule fired -- that
+        # combination previously slipped through every check above.
+        if rev_30d <= 0 and rev_90d <= 0:
+            recs.append("Zero revenue recorded in the last 90 days — verify billing pipeline and payment provider webhooks before treating this period as healthy")
+        elif not recs:
             recs.append("Monetization metrics healthy — maintain current growth trajectory")
 
         report = MonetizationReport(
