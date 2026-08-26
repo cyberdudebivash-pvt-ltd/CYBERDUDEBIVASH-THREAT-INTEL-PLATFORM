@@ -1372,6 +1372,46 @@ jobs:
             echo "::warning::regenerate_engine_data.py exited ${ENG_EXIT} — non-fatal, prior engine data retained"
           fi
 
+      # -----------------------------------------------------------------------
+      # STAGE 3.1.23: APEX AI RECOMPUTE (v185.2 -- SCORING CONTRADICTION FIX)
+      # PRODUCTION-VERIFICATION FIX (2026-08-26, Fortune-500 audit finding):
+      # STAGE 3.1 (enrich_feed_apex.py, which computes apex_ai.predictive_risk/
+      # ai_confidence/soc_priority) runs BEFORE STAGE 3.1.2 (CVSS/EPSS) and
+      # STAGE 3.1.3 (KEV) -- confirmed by exact line numbers in this file. Its
+      # compute_predictive_risk()/compute_ai_confidence()/compute_soc_priority()
+      # functions read item.cvss_score/epss_score/kev_present directly, so on
+      # first run they see whatever value existed BEFORE those two later stages
+      # populate the real data -- typically 0/absent. Live-verified: current
+      # production items sit at CVSS 9.1-10.0 / CRITICAL severity with
+      # apex_ai.predictive_risk of 0.76-1.58 out of 10 and 25% confidence,
+      # because the score was computed from CVSS=0 before STAGE 3.1.2 ran.
+      # enrich_item() always unconditionally overwrites item["apex_ai"] (see
+      # its own "Inject apex_ai (always...)" comment) from the item's CURRENT
+      # field state -- it is a pure recomputation, not a one-time stamp -- so
+      # re-running the identical script here, after every stage that feeds it
+      # (CVSS/EPSS, KEV, IOC hardening, TTP/MITRE mapping) has finished, is
+      # safe and idempotent: it corrects exactly the items whose first-pass
+      # score was computed from incomplete data, and produces the exact same
+      # output for anything already complete at STAGE 3.1's original position.
+      # No new engine, no reordering of the existing STAGE 3.1 call (avoiding
+      # any risk to what already depends on apex_ai existing early) -- purely
+      # additive, matching this pipeline's established pattern for this exact
+      # class of "computed-too-early" bug (see STAGE 3.1.5's apex_ai sync note).
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.1.23 - APEX AI Recompute (v185.2 -- post-enrichment correctness pass)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          set +e
+          python3 scripts/enrich_feed_apex.py 2>&1
+          RECOMPUTE_EXIT=$?
+          set -e
+          if [ "$RECOMPUTE_EXIT" -eq 0 ]; then
+            echo "[PASS] STAGE 3.1.23: apex_ai recomputed from final CVSS/EPSS/KEV/IOC/TTP data"
+          else
+            echo "::warning::enrich_feed_apex.py recompute pass exited ${RECOMPUTE_EXIT} -- non-fatal, STAGE 3.1's earlier (possibly stale) apex_ai values retained"
+          fi
+
       - name: "STAGE 3.2 - Generate Internal HTML Reports (report_generator)"
         # v184.4 FIX: had no `if:` at all (bare default success()), so under an
         # active .PIPELINE_LOCK -- where STAGE 1-3 (which produces the feed
