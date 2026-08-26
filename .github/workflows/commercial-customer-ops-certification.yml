@@ -1,0 +1,239 @@
+name: "SENTINEL APEX -- Commercial Customer Operations Certification"
+
+# Mission v185.0 Phase 1/2: controlled, authenticated production acceptance
+# tests against the payment -> subscription -> entitlement -> API key ->
+# customer access lifecycle. Static checks always run. Authenticated checks
+# require ADMIN_SECRET (see SECURITY NOTE below) and are cleanly marked
+# BLOCKED_BY_SECRET when it isn't configured -- never fabricated as passing.
+#
+# SECURITY NOTE -- secret architecture correction (v185.4):
+# The mission brief that requested this workflow assumed WORKER_ADMIN_SECRET
+# is interchangeable with the Worker's ADMIN_SECRET ("documents that it must
+# match"). The live code does not support that: workers/intel-gateway/src/
+# index.js's handleAdmin() gates /api/admin/cache/bust[-prefix] against
+# env.WORKER_ADMIN_SECRET via an "X-Admin-Secret" header, and gates every
+# other /api/admin/* route (including POST /api/admin/keys, which this
+# workflow needs to provision controlled test keys) against a DIFFERENT,
+# independent env.ADMIN_SECRET via an "X-Admin-Key" header. No existing
+# GitHub Actions secret named ADMIN_SECRET was found wired into any workflow
+# in this repository as of this pass -- only WORKER_ADMIN_SECRET is
+# configured today, and it cannot authenticate against /api/admin/keys.
+# This workflow therefore checks presence of `secrets.ADMIN_SECRET`
+# specifically (the correct secret for this purpose) and reports
+# ADMIN_SECRET_PRESENT=true/false. An operator must add that secret (Repo
+# Settings -> Secrets and variables -> Actions -> New repository secret,
+# name ADMIN_SECRET, value must equal the Worker's own ADMIN_SECRET) before
+# any authenticated phase below can run for the first time. Its value is
+# never echoed, logged, printed, or written to any artifact by this
+# workflow -- only the boolean presence flag ever leaves the secret context.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why is this certification being run?"
+        required: false
+        default: "Manual certification run"
+        type: string
+
+concurrency:
+  group: commercial-customer-ops-certification
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  WORKER_BASE: "https://intel.cyberdudebivash.com"
+
+jobs:
+
+  # ---------------------------------------------------------------------
+  # Phase 2: safe secret presence gate. Never echoes a secret value --
+  # only a boolean is ever produced, and it is produced with `set +x` /
+  # no verbose curl so nothing leaks into step logs even accidentally.
+  # ---------------------------------------------------------------------
+  secret-presence-gate:
+    name: "Phase 2 - Secret Presence Gate"
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      admin_secret_present: ${{ steps.check.outputs.present }}
+    steps:
+      - name: "Check ADMIN_SECRET presence (value never printed)"
+        id: check
+        env:
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+        run: |
+          set +x
+          if [ -n "$ADMIN_SECRET" ]; then
+            echo "ADMIN_SECRET_PRESENT=true"
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ADMIN_SECRET_PRESENT=false"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------
+  # Static checks: run regardless of secret availability. Reuses the same
+  # scripts the main pipeline (sentinel-blogger.yml) already runs, as a
+  # standalone on-demand entry point per Phase 1's own requirement for a
+  # dedicated certification workflow.
+  # ---------------------------------------------------------------------
+  static-checks:
+    name: "Static Certification Checks"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6.0.2
+        timeout-minutes: 3
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: "Install dependencies"
+        run: pip install --quiet -r requirements.txt || true
+      - name: "Entitlement resource drift gate"
+        run: python3 scripts/entitlement_resource_drift_gate.py
+      - name: "Worker JS integrity gate"
+        run: python3 scripts/worker_js_integrity_gate.py
+      - name: "Regression test suite"
+        run: python3 scripts/regression_tests.py
+
+  # ---------------------------------------------------------------------
+  # Phase 4 (partial) / 9 / 10-15: controlled authenticated acceptance
+  # tests. Only runs when ADMIN_SECRET is present. Provisions short-lived
+  # (1-day expires_in_days) controlled test keys via the existing
+  # POST /api/admin/keys admin endpoint -- no real payment, no synthetic
+  # customer records outside this mechanism, no uncontrolled charge.
+  # Covers the subset of the mission's lifecycle-state matrix this
+  # codebase can actually exercise today (ANONYMOUS, INVALID_KEY,
+  # ACTIVE_PRO, ACTIVE_ENTERPRISE, ACTIVE_MSSP, REVOKED_KEY): the
+  # remaining states (EXPIRED_*, CANCELLED, REFUNDED, SUSPENDED,
+  # DOWNGRADED) require the normalized subscription_status model designed
+  # in docs/SUBSCRIPTION_STATE_MODEL_V185.md but not yet built -- those
+  # are BLOCKED_BY_MODEL, not BLOCKED_BY_SECRET, and are not silently
+  # skipped here as if they were the same thing.
+  # ---------------------------------------------------------------------
+  authenticated-customer-ops-tests:
+    name: "Authenticated Customer Ops Tests"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+    steps:
+      - name: "Provision + test controlled tier keys, then revoke"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+
+          provision() {
+            local tier="$1"
+            curl -sS -X POST "$BASE/api/admin/keys" \
+              -H "X-Admin-Key: $ADMIN_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"customer_id\":\"ci-test-${tier,,}-$(date +%s)\",\"tier\":\"$tier\",\"label\":\"CI customer-ops cert (auto-expire 1d)\",\"expires_in_days\":1}"
+          }
+
+          revoke() {
+            local key="$1"
+            [ -z "$key" ] && return 0
+            curl -sS -X DELETE "$BASE/api/admin/keys/$key" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null
+          }
+
+          expect_status() {
+            local desc="$1" expected="$2" actual="$3"
+            if [ "$actual" = "$expected" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP $expected, got $actual"
+              FAIL=1
+            fi
+          }
+
+          echo "--- Provisioning controlled test keys (PRO, ENTERPRISE, MSSP) ---"
+          PRO_JSON=$(provision PRO)
+          ENT_JSON=$(provision ENTERPRISE)
+          MSSP_JSON=$(provision MSSP)
+          PRO_KEY=$(echo "$PRO_JSON" | jq -r '.key // empty')
+          ENT_KEY=$(echo "$ENT_JSON" | jq -r '.key // empty')
+          MSSP_KEY=$(echo "$MSSP_JSON" | jq -r '.key // empty')
+
+          if [ -z "$PRO_KEY" ] || [ -z "$ENT_KEY" ] || [ -z "$MSSP_KEY" ]; then
+            echo "FAIL: provisioning did not return a key for one or more tiers -- ADMIN_SECRET likely does not match the Worker's env.ADMIN_SECRET, or /api/admin/keys is unreachable"
+            exit 1
+          fi
+          echo "Provisioned 3 controlled test keys (values not printed)."
+
+          # NOTE: handleSLAReport (sla-monitor.js) has its own auth-presence
+          # gate (`!auth.key && !auth.jwt` -> 401 "Authentication required")
+          # that runs BEFORE the tier check. resolveAuth() sets auth.key to
+          # null for both "no credential" and "invalid credential" (only
+          # `error` differs) -- so both ANONYMOUS and INVALID_KEY hit this
+          # same 401 branch on this specific resource, not the 403 tier-gate
+          # branch. Confirmed by reading sla-monitor.js:139 before writing
+          # this test, not assumed.
+          echo "--- ANONYMOUS / FREE: no key on an ENTERPRISE-only resource must be denied ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" "$BASE/api/sla/report")
+          expect_status "anonymous denied on /api/sla/report" "401" "$ST"
+
+          echo "--- INVALID_KEY: garbage key must be denied ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: cdb_invalid_00000000000000000000000000000000000000" "$BASE/api/sla/report")
+          expect_status "invalid key denied on /api/sla/report" "401" "$ST"
+
+          echo "--- ACTIVE_PRO: PRO key denied on ENTERPRISE-only resource ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $PRO_KEY" "$BASE/api/sla/report")
+          expect_status "PRO denied on /api/sla/report (Enterprise-only)" "403" "$ST"
+
+          echo "--- ACTIVE_ENTERPRISE: ENTERPRISE key allowed on ENTERPRISE-only resource ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $ENT_KEY" "$BASE/api/sla/report")
+          expect_status "ENTERPRISE allowed on /api/sla/report" "200" "$ST"
+
+          echo "--- ACTIVE_MSSP: MSSP key allowed on ENTERPRISE-only resource (Enterprise+MSSP gate) ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $MSSP_KEY" "$BASE/api/sla/report")
+          expect_status "MSSP allowed on /api/sla/report" "200" "$ST"
+
+          # NOTE: /api/feed always returns HTTP 200 (redacted for FREE, full
+          # for PRO+) -- it is not a hard-error resource, so it cannot be
+          # used to test "denied". /api/sla/report is used instead: after
+          # KV deletion, resolveAuth() returns the same auth.key=null shape
+          # as an invalid key, so a revoked key must produce the identical
+          # 401 "Authentication required" this handler gives any key it
+          # can't resolve -- proving revocation takes effect immediately,
+          # not just eventually.
+          echo "--- REVOKED_KEY: PRO key denied immediately after admin revocation ---"
+          revoke "$PRO_KEY"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $PRO_KEY" "$BASE/api/sla/report")
+          expect_status "revoked PRO key denied on /api/sla/report" "401" "$ST"
+
+          echo "--- Cleanup: revoking remaining test keys ---"
+          revoke "$ENT_KEY"
+          revoke "$MSSP_KEY"
+          echo "Cleanup complete."
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "One or more authenticated customer-ops checks FAILED -- see PASS/FAIL lines above."
+            exit 1
+          fi
+          echo ""
+          echo "All authenticated customer-ops checks PASSED."
+
+  summary:
+    name: "Certification Summary"
+    needs: [secret-presence-gate, static-checks, authenticated-customer-ops-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: "Report outcome"
+        run: |
+          echo "ADMIN_SECRET_PRESENT=${{ needs.secret-presence-gate.outputs.admin_secret_present }}"
+          echo "static-checks: ${{ needs.static-checks.result }}"
+          echo "authenticated-customer-ops-tests: ${{ needs.authenticated-customer-ops-tests.result }}"
+          if [ "${{ needs.secret-presence-gate.outputs.admin_secret_present }}" != "true" ]; then
+            echo "Authenticated phases: BLOCKED_BY_SECRET (ADMIN_SECRET not configured as a GitHub Actions secret -- see this workflow file's header comment for setup)"
+          fi

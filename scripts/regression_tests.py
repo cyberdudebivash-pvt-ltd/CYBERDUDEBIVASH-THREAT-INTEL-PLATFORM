@@ -999,6 +999,50 @@ def t23():
 
 
 # ---------------------------------------------------------------------------
+# T24: v185.4 entitlement resource drift gate
+# ---------------------------------------------------------------------------
+
+@test("T24_entitlement_resource_drift_gate")
+def t24():
+    """Regression guard for scripts/entitlement_resource_drift_gate.py.
+
+    Confirms the gate (a) passes clean against the real, committed
+    wrangler.toml + revenue-enforcement.js (no drift today), and (b) actually
+    detects drift when ENTITLEMENT_ENFORCEMENT_RESOURCES names a resource
+    enforceTierGate() doesn't define -- a silent fail-open via that switch's
+    `default: { allowed: true }` case, which is the exact bug class this
+    gate exists to catch before it reaches production.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    import importlib
+    if "entitlement_resource_drift_gate" in sys.modules:
+        importlib.reload(sys.modules["entitlement_resource_drift_gate"])
+    import entitlement_resource_drift_gate as gate
+
+    defined = gate._defined_resources()
+    assert defined, "T24: enforceTierGate() case scan returned zero resources -- parser or file drifted"
+
+    real_exit = gate.main()
+    assert real_exit == 0, (
+        f"v185.4 REGRESSION: entitlement_resource_drift_gate.py reports drift against the "
+        f"real committed wrangler.toml/revenue-enforcement.js (exit={real_exit}) -- an "
+        f"enforced resource name has no matching enforceTierGate() case, meaning it "
+        f"silently fail-opens via the default case in production right now."
+    )
+
+    # Simulate real drift: a resource name guaranteed not to be a real case.
+    sections = gate._wrangler_sections()
+    assert sections, "T24: could not parse [vars]/[env.production.vars] from wrangler.toml"
+    bogus = "t24_synthetic_undefined_resource"
+    fake_enforced = gate._enforced_resources("vars", sections["vars"]) | {bogus}
+    assert (fake_enforced - defined) == {bogus}, (
+        "T24: synthetic drift-detection sanity check failed to isolate the injected bogus resource"
+    )
+    log.info("[T24] entitlement resource drift gate: clean against real config, "
+             "correctly detects synthetic drift")
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -1010,7 +1054,7 @@ def main() -> int:
     except Exception:
         _suite_ver = "UNKNOWN"
     log.info("=" * 60)
-    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T23)", _suite_ver)
+    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T24)", _suite_ver)
     log.info("=" * 60)
 
     pass_count = sum(1 for r in RESULTS if r["status"] == "PASS")

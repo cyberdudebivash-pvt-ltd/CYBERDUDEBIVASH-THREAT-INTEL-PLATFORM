@@ -2791,6 +2791,24 @@ jobs:
           exit 0
 
       # -----------------------------------------------------------------------
+      # STAGE 4.065 - Entitlement Resource Drift Gate (v185.4)
+      # Mission v185.0 Phase 8's own requirement: "Any newly introduced paid
+      # route without an entitlement resource classification must fail CI."
+      # Hard-fails (no continue-on-error) if wrangler.toml's
+      # ENTITLEMENT_ENFORCEMENT_RESOURCES names a resource that isn't a case
+      # in revenue-enforcement.js's enforceTierGate() -- that combination is
+      # a silent fail-open (the switch's default case grants access) on a
+      # resource an operator explicitly believed was being enforced. STAGE 4
+      # below is documented "ALWAYS RUNS" so this failing does not block the
+      # commit/push -- it surfaces as a red CI check for an operator to fix,
+      # same non-blocking-but-visible posture as STAGE 5.6's regression
+      # suite. See scripts/entitlement_resource_drift_gate.py for detail.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 4.065 - Entitlement Resource Drift Gate"
+        timeout-minutes: 2
+        run: python3 scripts/entitlement_resource_drift_gate.py
+
+      # -----------------------------------------------------------------------
       # STAGE 4: GIT SYNC -- ALWAYS RUNS
       # Commits non-sensitive metadata and HTML reports. 4-attempt push retry.
       # Exit 0 guaranteed - never kills pipeline.

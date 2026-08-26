@@ -5212,11 +5212,28 @@ async function handleRequest(request, env, ctx) {
   // --- sla-monitor.js / alert-engine.js routes (previously unreachable --
   // now wired, fixed to the real resolveAuth() contract; see each file's
   // header comment for the production-verification fix details) ---
+  // v185.4 (entitlement inventory, Phase 8 priority 9): sla-monitor.js's own
+  // ad-hoc gate ("ENTERPRISE"||"MSSP") remains the sole thing that decides
+  // access below -- resolveEntitlement() here only logs a shadow-mode
+  // comparison against the canonical engine (same "sla_report"/"sla_incidents"/
+  // "sla_certificate" resources would need adding to revenue-enforcement.js's
+  // enforceTierGate() switch to compare against anything but its fail-open
+  // default; that addition + real shadow data is future work, tracked in
+  // docs/ENTITLEMENT_RESOURCE_INVENTORY_V185.md). Zero behavior change.
   if (path === "/api/sla/status")       return await handleSLAStatus(request, env, crypto.randomUUID());
-  if (path === "/api/sla/report")       return await handleSLAReport(request, env, auth, crypto.randomUUID());
-  if (path === "/api/sla/incidents")    return await handleSLAIncidents(request, env, auth, crypto.randomUUID());
+  if (path === "/api/sla/report") {
+    resolveEntitlement(ctx, env, "sla_report", auth, auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP);
+    return await handleSLAReport(request, env, auth, crypto.randomUUID());
+  }
+  if (path === "/api/sla/incidents") {
+    resolveEntitlement(ctx, env, "sla_incidents", auth, auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP);
+    return await handleSLAIncidents(request, env, auth, crypto.randomUUID());
+  }
   if (path === "/api/sla/ping" && method === "POST") return await handleSLAPing(request, env, crypto.randomUUID());
-  if (path === "/api/sla/certificate")  return await handleSLACertificate(request, env, auth, crypto.randomUUID());
+  if (path === "/api/sla/certificate") {
+    resolveEntitlement(ctx, env, "sla_certificate", auth, auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP);
+    return await handleSLACertificate(request, env, auth, crypto.randomUUID());
+  }
 
   if (path === "/api/alerts/subscribe" && method === "POST")      return await handleAlertSubscribe(request, env, auth, crypto.randomUUID());
   if (path === "/api/alerts/subscriptions")                       return await handleAlertSubscriptions(request, env, auth, crypto.randomUUID());
