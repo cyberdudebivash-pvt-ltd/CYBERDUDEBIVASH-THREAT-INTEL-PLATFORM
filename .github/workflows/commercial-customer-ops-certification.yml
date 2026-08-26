@@ -484,6 +484,14 @@ jobs:
             -d '{"subscription_status":"totally_made_up_status","reason":"CI injection probe"}')
           expect_status "bogus subscription_status rejected" "400" "$ST"
 
+          echo "--- AUTHZ: reactivation PATCH without a valid admin key must be denied, not silently reactivate the key ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/admin/keys/$KEY/status" \
+            -H "Content-Type: application/json" \
+            -d '{"subscription_status":"active","reason":"CI unauthorized reactivation probe"}')
+          expect_status "reactivation PATCH without X-Admin-Key rejected" "403" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_denied "key still denied after the unauthorized reactivation attempt (still refunded)" "$ST"
+
           echo "--- REACTIVATED: admin can restore access from any deny state ---"
           ST=$(patch_status "$KEY" "active"); expect_status "PATCH to active accepted" "200" "$ST"
           ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
@@ -576,22 +584,29 @@ jobs:
           A_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
             -d "{\"customer_id\":\"ci-mssp-a-$(date +%s)\",\"tier\":\"MSSP\",\"label\":\"CI tenant isolation A\",\"expires_in_days\":1,\"managed_tenants\":[\"$TENANT_A\"]}")
           A_KEY=$(echo "$A_JSON" | jq -r '.key // empty')
+          # Recorded immediately, not after all three provisioning calls
+          # complete -- otherwise a failure on B or L would exit 1 with
+          # PROVISIONED_KEYS still empty, leaking an already-provisioned
+          # A key until its 1-day TTL (CodeRabbit review finding on
+          # PR #256, confirmed real).
+          [ -n "$A_KEY" ] && PROVISIONED_KEYS+=("$A_KEY")
 
           echo "--- Provisioning MSSP key B (managed_tenants=[TENANT_B]) ---"
           B_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
             -d "{\"customer_id\":\"ci-mssp-b-$(date +%s)\",\"tier\":\"MSSP\",\"label\":\"CI tenant isolation B\",\"expires_in_days\":1,\"managed_tenants\":[\"$TENANT_B\"]}")
           B_KEY=$(echo "$B_JSON" | jq -r '.key // empty')
+          [ -n "$B_KEY" ] && PROVISIONED_KEYS+=("$B_KEY")
 
           echo "--- Provisioning legacy MSSP key (no managed_tenants) ---"
           L_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
             -d "{\"customer_id\":\"ci-mssp-legacy-$(date +%s)\",\"tier\":\"MSSP\",\"label\":\"CI tenant isolation legacy\",\"expires_in_days\":1}")
           L_KEY=$(echo "$L_JSON" | jq -r '.key // empty')
+          [ -n "$L_KEY" ] && PROVISIONED_KEYS+=("$L_KEY")
 
           if [ -z "$A_KEY" ] || [ -z "$B_KEY" ] || [ -z "$L_KEY" ]; then
             echo "FAIL: provisioning did not return a key for one or more MSSP identities"
             exit 1
           fi
-          PROVISIONED_KEYS=("$A_KEY" "$B_KEY" "$L_KEY")
           echo "Provisioned 3 controlled MSSP test keys (values not printed)."
 
           echo "--- TENANT_A key on its own tenant: allowed ---"
@@ -669,14 +684,38 @@ jobs:
           # no Cache-Control header at all (confirmed live via curl -D-),
           # so every request is a fresh Worker invocation that actually
           # exercises the rate limiter.
-          for i in $(seq 1 33); do
-            RESP=$(curl -sS -D - -o /dev/null "$BASE/api/sla/status")
-            ST=$(echo "$RESP" | awk 'NR==1{print $2}')
-            if [ "$ST" = "429" ] && [ "$FIRST_429" -eq 0 ]; then
-              FIRST_429=$i
-              RETRY_AFTER_SEEN=$(echo "$RESP" | grep -i '^retry-after:' | tr -d '\r' || true)
-            fi
-          done
+          #
+          # checkRateLimit() (index.js) buckets by Math.floor(Date.now()
+          # / 60000) -- a wall-clock minute boundary, not a rolling
+          # window. If this 33-request burst happens to start late enough
+          # in a minute that the boundary falls mid-burst, the counter
+          # resets and no 429 appears within 33 requests even though the
+          # limiter is working correctly (CodeRabbit review finding on
+          # PR #256, confirmed real against the actual bucketing logic).
+          # One bounded retry after a 65s wait (long enough to guarantee
+          # landing inside a single fresh minute) distinguishes that
+          # boundary case from an actual limiter regression without
+          # masking a real failure -- if the retry also fails to see a
+          # 429 in the 31-33 range, that's reported as a real FAIL.
+          burst() {
+            FIRST_429=0
+            RETRY_AFTER_SEEN=""
+            for i in $(seq 1 33); do
+              RESP=$(curl -sS --max-time 15 -D - -o /dev/null "$BASE/api/sla/status")
+              ST=$(echo "$RESP" | awk 'NR==1{print $2}')
+              if [ "$ST" = "429" ] && [ "$FIRST_429" -eq 0 ]; then
+                FIRST_429=$i
+                RETRY_AFTER_SEEN=$(echo "$RESP" | grep -i '^retry-after:' | tr -d '\r' || true)
+              fi
+            done
+          }
+
+          burst
+          if [ "$FIRST_429" -eq 0 ]; then
+            echo "No 429 in the first burst (possible rate-limit minute-boundary reset mid-burst). Waiting 65s and retrying once."
+            sleep 65
+            burst
+          fi
 
           if [ "$FIRST_429" -ge 31 ] && [ "$FIRST_429" -le 33 ]; then
             echo "PASS: FREE tier (limit 30/min) started returning 429 at request #$FIRST_429"

@@ -34,7 +34,7 @@
   },
 
   "phase2_lifecycle_state_matrix": {
-    "status": "PASS -- LIVE, run 32967117214 job 'Phase 2/12 - Lifecycle State Matrix + JWT + Rotation', 20/20 assertions",
+    "status": "PASS -- LIVE, run 32967117214 job 'Phase 2/12 - Lifecycle State Matrix + JWT + Rotation', 27/27 total checks (25 expect_status/expect_denied assertions -- 19 single-shot call sites plus 2 call sites inside a 3-iteration cancelled/expired/refunded loop = 6 executions there -- plus 2 explicit non-assertion PASS confirmations for login-succeeded and rotation-returned-a-key). Corrected this pass from an initial miscount of 20/20 (CodeRabbit review finding on PR #256, verified by direct line count against the workflow file, not taken on faith).",
     "checks": [
       "implicit-active key allowed (200)",
       "login succeeded for active key; JWT issued while active allowed (200)",
@@ -42,11 +42,12 @@
       "PATCH to suspended accepted (200); suspended key denied (401); pre-existing JWT denied mid-session after suspension via the jwt_deny marker (401); fresh login refused for suspended key (401)",
       "cancelled/expired/refunded: each independently PATCHed (200) and each independently denies access (401)",
       "bogus subscription_status ('totally_made_up_status') rejected at the PATCH layer (400) -- live status-field-injection probe, Phase 12 attack class",
+      "reactivation PATCH with no X-Admin-Key rejected (403); key remains denied afterward, still refunded (401) -- live reactivation-without-authorization probe, Phase 12 attack class (added this pass; see security_findings.live_regression_this_pass below)",
       "PATCH to active (reactivation) accepted (200); reactivated key allowed again (200); fresh login succeeds again after reactivation (200)",
       "rotation returned a new key; old (pre-rotation) key denied immediately (401); new (post-rotation) key allowed, tier carried forward (200)",
       "PATCH new key to suspended accepted (200); rotation of a suspended (terminal-state) key rejected (409) -- Phase 12 attack class"
     ],
-    "note": "This is the first live exercise of the normalized subscription_status model (subscription-lifecycle.js, PR #254/v185.6) against production -- previously only unit-tested. Every deny-state transition, the JWT mid-session invalidation, the reactivation path, and both admin-endpoint attack-class rejections (status injection, terminal-state rotation) are now proven against real production behavior, not just code inspection."
+    "note": "This is the first live exercise of the normalized subscription_status model (subscription-lifecycle.js, PR #254/v185.6) against production -- previously only unit-tested. Every deny-state transition, the JWT mid-session invalidation, the reactivation path, and all three admin-endpoint attack-class rejections (status injection, unauthorized reactivation, terminal-state rotation) are now proven against real production behavior, not just code inspection."
   },
 
   "phase4_expiry_shadow_validation": {
@@ -59,10 +60,12 @@
   "subscription_expiry_status": "STILL FALSE, deliberately not flipped this pass. Phase 4's shadow-validation prerequisite is now genuinely satisfied (see above) -- this is a real change from every prior pass, where Phase 4 itself was BLOCKED_BY_SECRET. But flipping SUBSCRIPTION_EXPIRY_ENABLED=true changes real behavior for every future real customer signup (provisionApiKey()'s billingCycle-based path), which is a materially larger and more consequential change than anything else shipped this pass. Per the mission's own NO-REGRESSION / PRODUCTION-FIRST posture and this engagement's established pattern of shipping one bounded, individually-verified change per pass, this is the next concrete follow-up (wrangler.toml [vars] and [env.production.vars], deploy, re-run this same certification workflow to confirm 0 regressions) rather than something to bundle into an already-large workflow-testing PR.",
 
   "entitlement_coverage": {
+    "resources_identified_paid_total": 46,
     "resources_defined_in_policy_engine": 31,
     "resources_wired_to_resolveEntitlement": 15,
     "resources_actually_enforced": 1,
     "entitlement_coverage_pct": 33,
+    "entitlement_coverage_pct_denominator": "resources_wired_to_resolveEntitlement / resources_identified_paid_total = 15/46 = 32.6%, rounded to 33%. NOT 15/31 (which would be 48%) -- resources_defined_in_policy_engine (31) is enforceTierGate()'s own catalogue, a narrower set than the full 46 identified paid routes across the codebase (some of which are gated ad hoc, outside enforceTierGate() entirely). Both 31 and 46 are real, correct, independently-sourced denominators for different questions; the 33% figure specifically answers 'wired / all identified paid routes,' not 'wired / policy-engine catalogue.' Clarified this pass after a CodeRabbit review finding on PR #256 correctly flagged the ambiguity of stating both denominators next to one percentage with no label.",
     "note": "Unchanged this pass -- honestly reported as unchanged. docs/ENTITLEMENT_MIGRATION_WAVE_PLAN_V185.md (previous pass) remains the sequencing plan; this pass's ADMIN_SECRET fix means future waves could now gather real shadow-mismatch evidence via authenticated traffic, but no resource was flipped from shadow to enforced this pass -- that is separate, bounded work per the wave plan's own exit criteria.",
     "drift_guard": "scripts/entitlement_resource_drift_gate.py -- confirmed still passing, 0 drift, via this pass's Static Certification Checks job (run 32967117214) and local regression_tests.py (24/24 PASS)."
   },
@@ -107,7 +110,7 @@
   "security_findings": {
     "critical_exploitable": 0,
     "high_exploitable": 0,
-    "live_regression_this_pass": "The following Phase 12 attack classes moved from static-only (docs/V185_STATIC_SECURITY_REAUDIT.md, prior pass) to LIVE-verified this pass: JWT-after-deny-state (Phase 2, mid-session suspension), old-key-after-rotation (Phase 2), terminal-state-rotation (Phase 2, 409), status-field-injection (Phase 2, 400), tenant-path-manipulation / cross-tenant BOLA (Phase 7, 403 both directions), reactivation-without-authorization (implicit in every admin call requiring the synced ADMIN_SECRET). Still static-only, not live: payment/refund-replay (would require a real signed Razorpay webhook, out of safe scope for live production testing), tier-manipulation (unchanged since PR #252, no code on that path touched this pass).",
+    "live_regression_this_pass": "The following Phase 12 attack classes moved from static-only (docs/V185_STATIC_SECURITY_REAUDIT.md, prior pass) to LIVE-verified this pass: JWT-after-deny-state (Phase 2, mid-session suspension), old-key-after-rotation (Phase 2), terminal-state-rotation (Phase 2, 409), status-field-injection (Phase 2, 400), tenant-path-manipulation / cross-tenant BOLA (Phase 7, 403 both directions), reactivation-without-authorization (Phase 2 -- a real negative probe: PATCH .../status with subscription_status:active and no X-Admin-Key header, added after a CodeRabbit review finding on PR #256 correctly pointed out the initial version only asserted this was implicit rather than actually testing it; confirmed rejected with 403 and the key remained denied). Still static-only, not live: payment/refund-replay (would require a real signed Razorpay webhook, out of safe scope for live production testing), tier-manipulation (unchanged since PR #252, no code on that path touched this pass).",
     "informational": [
       "MSSP tenant_id isolation: enforcement mechanism now LIVE-verified for the enforced case (Phase 7) -- still opt-in, existing MSSP keys remain unrestricted until an admin explicitly sets managed_tenants on them. Documented trade-off, not a new gap.",
       "17 of 31 entitlement policy-engine resources still have zero call sites (dead policy logic) -- unchanged.",
