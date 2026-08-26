@@ -20,6 +20,7 @@ Tests cover:
   T12  CI workflow YAML parses cleanly + no inline Python heredocs regression
   T21  v184.0 guard: all feed.json local-source report_urls present in dist/reports/
   T22  v185.2 guard: source_url dedup survives late-pipeline reintroduction (Phase 5/stability-lock)
+  T23  v185.2 guard: governance scorer recognises mitre_tactics field, vulnerability-class IOC semantics
 
 Exit codes:
   0 = ALL PASS
@@ -929,6 +930,75 @@ def t22():
 
 
 # ---------------------------------------------------------------------------
+# T23: v185.2 governance trust-scorer mitre_tactics field-fallback
+# ---------------------------------------------------------------------------
+
+@test("T23_governance_scorer_recognises_mitre_tactics_field")
+def t23():
+    """Regression guard for enterprise_governance_engine.py's ATT&CK-coverage scoring.
+
+    Root cause: _phase4_trust_tiers() computed ttp_count from
+    item.get("ttp_count", 0) or len(item.get("ttps", [])) only. Live data
+    shows real MITRE ATT&CK mappings written under mitre_tactics (a separate
+    enrichment field) while ttps is frequently []. This applied a no_ttps:-5
+    penalty to items that actually have derived MITRE coverage -- the same
+    field-fallback gap already fixed once in p20-handlers.js/p23-handlers.js
+    (PR #247), found again in this separate Python scorer. Confirmed live:
+    every sampled Vulnerability-class item in api/feed.json carried a
+    non-empty mitre_tactics list with an empty ttps list.
+
+    Also guards the companion fix: a zero-IOC Vulnerability-class item must
+    not take the no_iocs:-5 penalty (IOC=not_applicable for a pure CVE
+    advisory), while a non-vulnerability item with zero IOCs still does.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    import importlib
+    if "enterprise_governance_engine" in sys.modules:
+        importlib.reload(sys.modules["enterprise_governance_engine"])
+    from enterprise_governance_engine import _phase4_trust_tiers  # noqa: E402
+
+    synthetic_items = [
+        {  # mitre_tactics populated, ttps empty -- must NOT take no_ttps:-5
+            "id": "intel--t23-mitre-only", "stix_id": "indicator--t23a",
+            "title": "CVE-2026-99999 - synthetic test advisory for T23 regression",
+            "threat_type": "Vulnerability", "cve_id": "CVE-2026-99999",
+            "source_url": "https://cvefeed.io/vuln/detail/CVE-2026-99999",
+            "ttps": [], "ttp_count": 0,
+            "mitre_tactics": [{"id": "T1190", "name": "Exploit Public-Facing Application"}],
+            "ioc_count": 0, "iocs": [],
+        },
+        {  # genuinely zero TTP evidence anywhere -- no_ttps:-5 must still apply
+            "id": "intel--t23-no-ttp", "stix_id": "indicator--t23b",
+            "title": "Generic advisory with no MITRE mapping at all for T23 regression",
+            "threat_type": "Malware",
+            "source_url": "https://unknown-blog.example.test/post",
+            "ttps": [], "ttp_count": 0, "mitre_tactics": [],
+            "ioc_count": 3, "iocs": [{"type": "ip", "value": "10.0.0.1"}] * 3,
+        },
+    ]
+    scores, _dist, _avg = _phase4_trust_tiers(synthetic_items)
+    by_id = {s.item_id: s for s in scores}
+
+    mitre_only = by_id["intel--t23-mitre-only"]
+    assert "no_ttps:-5" not in mitre_only.deductions, (
+        "v185.2 REGRESSION: governance scorer applied no_ttps:-5 to an item with a "
+        f"populated mitre_tactics list. Deductions: {mitre_only.deductions}"
+    )
+    assert "no_iocs:-5" not in mitre_only.deductions, (
+        "v185.2 REGRESSION: governance scorer applied no_iocs:-5 to a zero-IOC "
+        f"Vulnerability-class item (IOC should be not_applicable). Deductions: {mitre_only.deductions}"
+    )
+
+    no_ttp = by_id["intel--t23-no-ttp"]
+    assert "no_ttps:-5" in no_ttp.deductions, (
+        "v185.2 REGRESSION: governance scorer must still penalise genuine absence of "
+        f"any MITRE evidence. Deductions: {no_ttp.deductions}"
+    )
+
+    log.info("[T23] governance trust scorer: mitre_tactics fallback + vulnerability-class IOC semantics correct")
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -940,7 +1010,7 @@ def main() -> int:
     except Exception:
         _suite_ver = "UNKNOWN"
     log.info("=" * 60)
-    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T22)", _suite_ver)
+    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T23)", _suite_ver)
     log.info("=" * 60)
 
     pass_count = sum(1 for r in RESULTS if r["status"] == "PASS")
