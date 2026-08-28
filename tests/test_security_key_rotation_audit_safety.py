@@ -70,13 +70,27 @@ class TestSecurityKeyRotationAuditSafety(unittest.TestCase):
 
     def test_no_log_call_references_the_raw_key_field(self):
         # entry["_raw_key"] (or a bare _raw_key) is the one place the actual
-        # secret value lives in memory. No log.* call may reference it --
-        # only entry["key_prefix"] (the masked form) is fit to log.
+        # secret value lives in memory. No log.* call may reference it.
         log_calls = re.findall(r"log\.\w+\([^)]*\)", self.source, flags=re.DOTALL)
         offending = [c for c in log_calls if "_raw_key" in c]
         self.assertEqual(
             offending, [],
             f"Found log call(s) referencing the raw key field: {offending}",
+        )
+
+    def test_no_log_call_references_key_prefix_either(self):
+        # Even the masked form (entry["key_prefix"], derived from mask(key))
+        # must not reach a log.* call -- a CodeQL clear-text-logging taint
+        # check flagged this line even though mask() truncates the secret,
+        # since it can't prove a string slice is a sanitizer. Fixed by
+        # dropping it from every log call entirely (tenant_id/tier/org_name
+        # already identify the record); key_prefix stays in the JSON report,
+        # which this test doesn't touch.
+        log_calls = re.findall(r"log\.\w+\([^)]*\)", self.source, flags=re.DOTALL)
+        offending = [c for c in log_calls if "key_prefix" in c]
+        self.assertEqual(
+            offending, [],
+            f"Found log call(s) referencing key_prefix (derived from the raw key): {offending}",
         )
 
     def test_mask_never_returns_the_full_key(self):

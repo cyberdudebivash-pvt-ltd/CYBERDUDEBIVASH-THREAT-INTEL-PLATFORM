@@ -83,7 +83,12 @@ def load_pre_redaction_tenants() -> dict:
 
 
 def kv_check_live(session: requests.Session, account_id: str, token: str, key: str) -> int:
-    """Read-only Cloudflare KV GET. Returns HTTP status (200 = live, 404 = not found)."""
+    """Read-only Cloudflare KV GET. Returns HTTP status (200 = live, 404 = not found).
+
+    May raise requests.RequestException -- callers handle it per-key so one
+    transient network failure among 2,260 sequential lookups doesn't abort
+    the whole audit.
+    """
     url = (
         f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
         f"/storage/kv/namespaces/{API_KEYS_KV_NAMESPACE_ID}/values/{key}"
@@ -93,7 +98,10 @@ def kv_check_live(session: requests.Session, account_id: str, token: str, key: s
 
 
 def worker_revoke(session: requests.Session, admin_secret: str, key: str) -> int:
-    """DELETE /api/admin/keys/{key} -- the Worker's own audited revoke path."""
+    """DELETE /api/admin/keys/{key} -- the Worker's own audited revoke path.
+
+    May raise requests.RequestException -- see kv_check_live.
+    """
     url = f"{ADMIN_BASE_URL}/api/admin/keys/{key}"
     resp = session.delete(url, headers={"X-Admin-Key": admin_secret}, timeout=REQUEST_TIMEOUT)
     return resp.status_code
@@ -129,7 +137,13 @@ def main() -> int:
         if not isinstance(key, str) or not key:
             continue
 
-        status = kv_check_live(session, cf_account, cf_token, key)
+        try:
+            status = kv_check_live(session, cf_account, cf_token, key)
+        except requests.RequestException as exc:
+            errors.append({"tenant_id": tenant_id, "phase": "check", "error_type": type(exc).__name__})
+            time.sleep(PACE_SECONDS)
+            continue
+
         if status == 200:
             live.append({
                 "tenant_id": tenant_id,
@@ -141,7 +155,7 @@ def main() -> int:
         elif status == 404:
             dead.append(tenant_id)
         else:
-            errors.append({"tenant_id": tenant_id, "http_status": status})
+            errors.append({"tenant_id": tenant_id, "phase": "check", "http_status": status})
         time.sleep(PACE_SECONDS)
 
     log.info("Live in API_KEYS_KV: %d", len(live))
@@ -149,14 +163,22 @@ def main() -> int:
     log.info("Lookup errors: %d", len(errors))
 
     if live:
+        # Deliberately no key-derived value here (not even the masked prefix)
+        # -- tenant_id/tier/org_name fully identify the record for a human
+        # reading the log stream, and the masked prefix is still available in
+        # the JSON report below for anyone cross-referencing it.
         for entry in live:
-            log.warning("  LIVE  tenant=%s tier=%s org=%r key=%s",
-                         entry["tenant_id"], entry["tier"], entry["org_name"], entry["key_prefix"])
+            log.warning("  LIVE  tenant=%s tier=%s org=%r", entry["tenant_id"], entry["tier"], entry["org_name"])
 
     if confirm_revoke and live:
         log.info("--confirm-revoke set: revoking %d live key(s) via the Worker's admin API...", len(live))
         for entry in live:
-            rstatus = worker_revoke(session, admin_secret, entry["_raw_key"])
+            try:
+                rstatus = worker_revoke(session, admin_secret, entry["_raw_key"])
+            except requests.RequestException as exc:
+                errors.append({"tenant_id": entry["tenant_id"], "phase": "revoke", "error_type": type(exc).__name__})
+                time.sleep(PACE_SECONDS)
+                continue
             ok = rstatus in (200, 404)  # 404 here means another process already revoked it -- fine
             revoked.append({
                 "tenant_id": entry["tenant_id"],
@@ -164,8 +186,7 @@ def main() -> int:
                 "revoke_http_status": rstatus,
                 "ok": ok,
             })
-            log.info("  %s revoked %s (tenant %s): HTTP %d",
-                     "OK" if ok else "FAIL", entry["key_prefix"], entry["tenant_id"], rstatus)
+            log.info("  %s revoked (tenant %s): HTTP %d", "OK" if ok else "FAIL", entry["tenant_id"], rstatus)
             time.sleep(PACE_SECONDS)
 
     report = {
