@@ -639,6 +639,15 @@ function handleSubmit(e) {
     .then(function(res) {
       if (res.ok && res.d && res.d.api_key) {
         showInstantKey(res.d.api_key);
+      } else if (res.ok && res.d && res.d.status === 'check_email') {
+        // Repeat signup for an email that already has a key: the backend
+        // deliberately does not hand the key back here (no proof this
+        // request owns that inbox) -- it re-sends to the address on file
+        // instead. This is success, not a failure, so don't fall back to
+        // Formspree.
+        showSuccess();
+        var copy = document.getElementById('success-copy');
+        if (copy) copy.innerHTML = 'If that email already has a free key, we’ve re-sent it to your inbox.';
       } else {
         submitViaFormspree();
       }

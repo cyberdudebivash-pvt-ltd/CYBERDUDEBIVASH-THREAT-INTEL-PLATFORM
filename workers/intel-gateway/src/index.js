@@ -3102,14 +3102,27 @@ async function handleFreeKeyRequest(request, env, ctx, method) {
     return jsonResp({ error: "A valid email is required" }, 400);
   }
 
-  // Idempotent: a repeat request from the same email returns the same key
-  // instead of minting a new one each time -- also doubles as the
-  // "I lost my key" recovery path with zero extra code.
+  // Idempotent, but NOT by returning the key in this response: this request
+  // has no proof the caller owns `email` (it's just a JSON field), so
+  // handing back an *existing* key here would let anyone who knows or
+  // guesses a signed-up address pull back that person's live, permanent
+  // credential -- CodeRabbit correctly flagged this on the first version
+  // of this endpoint. Re-sending to the address on file is the only
+  // channel that actually proves ownership, and the response is identical
+  // whether or not the email has an account, so this can't be used to
+  // enumerate who has signed up either. A brand-new email still gets its
+  // key instantly below -- there's no existing credential to leak yet.
   const emailIdempKey = `free_key_email:${email}`;
   const existingKey = await env.SECURITY_HUB_KV.get(emailIdempKey);
   if (existingKey) {
+    ctx.waitUntil((async () => {
+      try { await sendActivationEmail(env, email, "FREE", existingKey); } catch (err) {
+        console.error("[handleFreeKeyRequest] resend error:", err?.message || err);
+      }
+    })());
     return jsonResp({
-      status: "activated", api_key: existingKey, tier: "FREE",
+      status: "check_email",
+      message: "If that email already has a free key, we've re-sent it.",
       docs_url: "https://intel.cyberdudebivash.com/api-docs.html",
     }, 200);
   }
