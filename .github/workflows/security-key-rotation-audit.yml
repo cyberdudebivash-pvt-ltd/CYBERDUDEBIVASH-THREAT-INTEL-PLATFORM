@@ -1,0 +1,90 @@
+name: "SEC-2026-08-28 - Leaked Tenant Key Rotation Audit (manual-only)"
+
+# =============================================================================
+# BOUNDED, MANUAL-ONLY. Runs scripts/security_key_rotation_audit.py.
+#
+# commit bd25a21dc (2026-08-23) stripped 2,260 real plaintext tenant
+# api_key values (904 enterprise-tier) out of the tracked copy of
+# data/sovereign/tenants.json, after revenue-orchestrator.yml's own
+# SEC-2026-07-25 comment documented they had been force-committed to this
+# PUBLIC repository on every purchase. That commit explicitly left two
+# things outstanding: the real keys were never rotated, and were never
+# purged from git history. This workflow closes the rotation half.
+#
+# Default (no input, or confirm_revoke=false): CHECK ONLY. Read-only
+# Cloudflare KV lookups (CF_API_TOKEN/CF_ACCOUNT_ID, already used the same
+# way by revenue-orchestrator.yml against a different namespace) against
+# every pre-redaction key value pulled from git history. Zero mutation.
+#
+# confirm_revoke=true: additionally revokes every key the check phase
+# found live, via the Worker's own DELETE /api/admin/keys/{key} admin
+# endpoint (ADMIN_SECRET -- already an Actions secret, see
+# commercial-customer-ops-certification.yml) -- the same audited path a
+# human admin would use, not a parallel deletion mechanism.
+#
+# Needs full history (fetch-depth: 0): the real key values only exist in
+# the commit before the redaction, not in the current working tree.
+# persist-credentials: false -- this job never pushes.
+#
+# workflow_dispatch only: no schedule, no push trigger. Not wired into the
+# production pipeline or any existing CI stage.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_revoke:
+        description: "Also revoke every live key the check phase finds (not just report). Leave false to check only."
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-key-rotation-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: "Leaked Tenant Key Rotation Audit"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run rotation audit
+        timeout-minutes: 15
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+        run: |
+          if [ "${{ inputs.confirm_revoke }}" = "true" ]; then
+            python3 scripts/security_key_rotation_audit.py --confirm-revoke
+          else
+            python3 scripts/security_key_rotation_audit.py
+          fi
+
+      - name: Upload audit report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-key-rotation-audit-report
+          path: data/quality/security_key_rotation_audit_report.json
+          retention-days: 90
