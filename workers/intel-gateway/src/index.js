@@ -3084,7 +3084,21 @@ async function handleFreeKeyRequest(request, env, ctx, method) {
   let body = {};
   try { body = await request.json(); } catch (_) {}
   const email = String(body.email || "").trim().toLowerCase();
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  // Deliberately not a single /^[^\s@]+@[^\s@]+\.[^\s@]+$/-style regex:
+  // that pattern is polynomial-time on attacker-controlled input (CodeQL
+  // js/polynomial-redos) -- ambiguous backtracking between the two
+  // [^\s@]+ groups around a "." that neither excludes, on this public,
+  // unauthenticated endpoint. Plain O(n) string ops give the same
+  // "looks like an email" sanity check without that risk.
+  const atIndex   = email.indexOf("@");
+  const domain    = atIndex >= 0 ? email.slice(atIndex + 1) : "";
+  const dotIndex  = domain.lastIndexOf(".");
+  const validEmail = atIndex > 0
+    && atIndex === email.lastIndexOf("@")
+    && !/\s/.test(email)
+    && dotIndex > 0
+    && dotIndex < domain.length - 1;
+  if (!validEmail) {
     return jsonResp({ error: "A valid email is required" }, 400);
   }
 
