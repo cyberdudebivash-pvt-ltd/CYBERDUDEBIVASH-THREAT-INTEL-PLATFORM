@@ -3143,7 +3143,12 @@ async function handleFreeKeyRequest(request, env, ctx, method) {
   } catch (_) {}
 
   const apiKey = await provisionApiKey(env, ctx, "FREE", email, "self_serve_free", {});
-  await env.SECURITY_HUB_KV.put(emailIdempKey, apiKey, { expirationTtl: 86400 * 365 });
+  // No TTL here, deliberately: the FREE key itself never expires (see
+  // provisionApiKey above), so if this mapping expired first, the same
+  // email's next request would fall through the "existing key" check
+  // above and mint a second, permanent, orphaned key instead of finding
+  // the first one.
+  await env.SECURITY_HUB_KV.put(emailIdempKey, apiKey);
 
   // Never blocks the response -- same pattern as the Razorpay paths.
   ctx.waitUntil((async () => {
