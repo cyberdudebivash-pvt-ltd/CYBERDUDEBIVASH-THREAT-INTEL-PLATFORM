@@ -274,7 +274,14 @@
       <div id="success-panel">
         <div class="success-icon">⚡</div>
         <h2>Request Received</h2>
-        <p>Your API key request has been received. Your key and integration docs will be delivered to your email within <strong>2 hours</strong> (typically under 30 minutes during business hours).</p>
+        <p id="success-copy">Your API key request has been received. Your key and integration docs will be delivered to your email within <strong>2 hours</strong> (typically under 30 minutes during business hours).</p>
+
+        <!-- INSTANT KEY: free self-serve signup -->
+        <div id="instant-key-box" style="display:none;margin:22px 0;padding:20px;background:var(--bg3);border:1px solid var(--accent);border-radius:12px;text-align:left;">
+          <div style="font-size:11px;font-family:var(--font-mono);color:var(--accent);letter-spacing:1.5px;font-weight:700;margin-bottom:10px;">YOUR API KEY &mdash; READY NOW</div>
+          <code id="instant-key-value" style="display:block;word-break:break-all;background:var(--bg2);padding:12px;border-radius:8px;font-size:13px;color:var(--text);margin-bottom:10px;"></code>
+          <button type="button" onclick="copyInstantKey()" id="instant-key-copy-btn" style="width:100%;padding:10px;background:var(--accent);color:#000;border:none;border-radius:8px;font-family:var(--font-mono);font-size:12px;font-weight:800;letter-spacing:1px;cursor:pointer;">COPY KEY</button>
+        </div>
 
         <!-- PAID PLAN: immediate payment CTA -->
         <div id="paid-cta" style="display:none;margin-top:22px;padding:20px;background:rgba(0,255,198,0.06);border:1px solid rgba(0,255,198,0.25);border-radius:12px;">
@@ -565,6 +572,16 @@ function handleSubmit(e) {
     }
   }
 
+  function showInstantKey(apiKey) {
+    showSuccess();
+    var copy = document.getElementById('success-copy');
+    if (copy) copy.innerHTML = 'Your FREE API key is active — shown below. A copy is also on its way to your inbox.';
+    var box = document.getElementById('instant-key-box');
+    var val = document.getElementById('instant-key-value');
+    if (val) val.textContent = apiKey;
+    if (box) box.style.display = 'block';
+  }
+
   function mailtoFallback() {
     var subject = '[SENTINEL APEX] API Key Request \u2014 ' + plan.toUpperCase() + ' \u2014 ' + company;
     var body = [
@@ -592,21 +609,62 @@ function handleSubmit(e) {
     document.body.removeChild(link);
   }
 
-  // Primary: Formspree
-  fetch('https://formspree.io/f/xpzgdkoe', {
-    method: 'POST',
-    body: formData,
-    headers: { 'Accept': 'application/json' }
-  })
-  .then(function(r) {
-    showSuccess();
-    if (!r.ok) { mailtoFallback(); } // also fire mailto on server error as backup
-  })
-  .catch(function() {
-    // Network failure \u2014 fall back to mailto so no lead is ever lost
-    mailtoFallback();
-    showSuccess();
-  });
+  function submitViaFormspree() {
+    fetch('https://formspree.io/f/xpzgdkoe', {
+      method: 'POST',
+      body: formData,
+      headers: { 'Accept': 'application/json' }
+    })
+    .then(function(r) {
+      showSuccess();
+      if (!r.ok) { mailtoFallback(); } // also fire mailto on server error as backup
+    })
+    .catch(function() {
+      // Network failure \u2014 fall back to mailto so no lead is ever lost
+      mailtoFallback();
+      showSuccess();
+    });
+  }
+
+  if (plan === 'community') {
+    // Self-serve: instant key, no manual step. Formspree/mailto only fire
+    // as a fallback if the platform's own endpoint is unreachable, so a
+    // free signup is never silently lost even if this path fails.
+    fetch('https://intel.cyberdudebivash.com/api/keys/free', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email })
+    })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+    .then(function(res) {
+      if (res.ok && res.d && res.d.api_key) {
+        showInstantKey(res.d.api_key);
+      } else {
+        submitViaFormspree();
+      }
+    })
+    .catch(submitViaFormspree);
+  } else {
+    submitViaFormspree();
+  }
+}
+
+function copyInstantKey() {
+  var val = document.getElementById('instant-key-value');
+  var btn = document.getElementById('instant-key-copy-btn');
+  if (!val) return;
+  var text = val.textContent;
+  var done = function() {
+    if (!btn) return;
+    var orig = btn.textContent;
+    btn.textContent = 'COPIED';
+    setTimeout(function() { btn.textContent = orig; }, 1500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(done);
+  } else {
+    done();
+  }
 }
 
 function resetForm() {

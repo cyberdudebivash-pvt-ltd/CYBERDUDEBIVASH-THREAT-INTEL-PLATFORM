@@ -118,6 +118,7 @@ const BRUTE_FORCE_TTL     = 900;          // 15-minute lockout (seconds)
 const AUDIT_TTL           = 86400 * 30;   // 30-day audit log retention
 const NEWS_TTL_SEC        = 300;
 const PREVIEW_LIMIT       = 25;
+const FREE_SIGNUP_IP_DAILY_CAP = 5; // self-serve free-key requests per IP per day
 const LATEST_JSON_KEY     = "api/v1/intel/latest.json";
 const LATEST_PRO_JSON_KEY = "api/v1/intel/latest_pro.json"; // PRO/ENTERPRISE: includes report_url
 const APEX_JSON_KEY       = "api/v1/intel/apex.json";
@@ -3040,14 +3041,17 @@ async function applySubscriptionStatusChange(env, ctx, key, subscription_status,
 }
 
 async function provisionApiKey(env, ctx, tier, email, source, metadata, billingCycle = "monthly", managedTenants = undefined) {
-  const validTier = ["PRO", "ENTERPRISE", "MSSP"].includes(tier) ? tier : "PRO";
-  const prefix = validTier === "ENTERPRISE" ? "cdb_ent" : validTier === "MSSP" ? "cdb_mssp" : "cdb_pro";
+  const validTier = ["FREE", "PRO", "ENTERPRISE", "MSSP"].includes(tier) ? tier : "PRO";
+  const prefix = validTier === "ENTERPRISE" ? "cdb_ent" : validTier === "MSSP" ? "cdb_mssp" : validTier === "FREE" ? "cdb_free" : "cdb_pro";
   const rand   = Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => b.toString(16).padStart(2, "0")).join("");
   const apiKey = `${prefix}_${rand}`;
 
   const cycleDays      = billingCycle === "annual" ? 365 : 30;
   const shadowExpiresAt = new Date(Date.now() + cycleDays * 86400000).toISOString();
-  const enforceExpiry   = env.SUBSCRIPTION_EXPIRY_ENABLED === "true";
+  // FREE has no billing cycle to expire against -- it is not a paid
+  // subscription, so it never gets a shadow/enforced expiry regardless of
+  // SUBSCRIPTION_EXPIRY_ENABLED (which governs paid-tier renewal lifecycle only).
+  const enforceExpiry   = validTier !== "FREE" && env.SUBSCRIPTION_EXPIRY_ENABLED === "true";
 
   const record = {
     key: apiKey, tier: validTier, customer_id: email, label: email,
@@ -3069,6 +3073,71 @@ async function provisionApiKey(env, ctx, tier, email, source, metadata, billingC
   return apiKey;
 }
 
+// POST /api/keys/free  (no auth required -- self-serve free-tier signup)
+// get-api-key.html's "community" plan previously only submitted to a
+// Formspree lead form with no automated delivery (API key arrived, if at
+// all, only once a human read the email and provisioned one by hand --
+// the same top-of-funnel gap the paid Razorpay flow had before it was
+// wired to provisionApiKey()). This reuses that exact same engine.
+async function handleFreeKeyRequest(request, env, ctx, method) {
+  if (method !== "POST") return jsonResp({ error: "POST required" }, 405);
+  let body = {};
+  try { body = await request.json(); } catch (_) {}
+  const email = String(body.email || "").trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return jsonResp({ error: "A valid email is required" }, 400);
+  }
+
+  // Idempotent: a repeat request from the same email returns the same key
+  // instead of minting a new one each time -- also doubles as the
+  // "I lost my key" recovery path with zero extra code.
+  const emailIdempKey = `free_key_email:${email}`;
+  const existingKey = await env.SECURITY_HUB_KV.get(emailIdempKey);
+  if (existingKey) {
+    return jsonResp({
+      status: "activated", api_key: existingKey, tier: "FREE",
+      docs_url: "https://intel.cyberdudebivash.com/api-docs.html",
+    }, 200);
+  }
+
+  // Per-IP daily cap -- the idempotency check above already stops one email
+  // from farming multiple keys; this stops one IP farming many distinct
+  // emails. Fails open (allows the request) on a KV read error rather than
+  // blocking a real signup over an infrastructure hiccup.
+  const ip = request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "unknown";
+  const day = new Date().toISOString().slice(0, 10);
+  const ipCapKey = `free_signup_ip:${ip}:${day}`;
+  try {
+    const ipCount = parseInt((await env.RATE_LIMIT_KV.get(ipCapKey)) || "0", 10);
+    if (ipCount >= FREE_SIGNUP_IP_DAILY_CAP) {
+      return jsonResp({ error: "Too many free-key requests from this network today. Try again tomorrow, or contact support@cyberdudebivash.com." }, 429);
+    }
+    await env.RATE_LIMIT_KV.put(ipCapKey, String(ipCount + 1), { expirationTtl: 86400 });
+  } catch (_) {}
+
+  const apiKey = await provisionApiKey(env, ctx, "FREE", email, "self_serve_free", {});
+  await env.SECURITY_HUB_KV.put(emailIdempKey, apiKey, { expirationTtl: 86400 * 365 });
+
+  // Never blocks the response -- same pattern as the Razorpay paths.
+  ctx.waitUntil((async () => {
+    try { await sendActivationEmail(env, email, "FREE", apiKey); } catch (err) {
+      console.error("[handleFreeKeyRequest] sendActivationEmail error:", err?.message || err);
+    }
+  })());
+  ctx.waitUntil(sendTelegramAlert(env,
+    `[FREE] <b>SELF-SERVE FREE KEY ISSUED</b>\n` +
+    `Email: ${email}\n` +
+    `API Key: <code>${apiKey.slice(0, 16)}...</code>`
+  ));
+
+  return jsonResp({
+    status: "activated",
+    message: "Free API key provisioned instantly.",
+    api_key: apiKey, tier: "FREE",
+    docs_url: "https://intel.cyberdudebivash.com/api-docs.html",
+  }, 201);
+}
+
 async function sendTelegramAlert(env, text) {
   if (!env.TG_BOT_TOKEN || !env.TG_CHAT_ID) return false;
   try {
@@ -3088,7 +3157,7 @@ async function sendActivationEmail(env, email, tier, apiKey) {
     return false;
   }
   try {
-    const tierLabel = tier === "ENTERPRISE" ? "ENTERPRISE" : tier === "MSSP" ? "MSSP" : "PRO";
+    const tierLabel = tier === "ENTERPRISE" ? "ENTERPRISE" : tier === "MSSP" ? "MSSP" : tier === "FREE" ? "FREE" : "PRO";
     const htmlBody = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>Your CYBERDUDEBIVASH(R) Sentinel APEX API Key</title></head>
@@ -5110,6 +5179,10 @@ async function handleRequest(request, env, ctx) {
   }
   if (path === "/api/payment/razorpay/verify") {
     return await handleRazorpayVerify(request, env, ctx, method);
+  }
+  // --- Free-tier self-serve signup (no auth required) --------------------------
+  if (path === "/api/keys/free") {
+    return await handleFreeKeyRequest(request, env, ctx, method);
   }
 
   // --- Webhook Endpoints (no auth  -  webhook secret/sig verifies) --------------
