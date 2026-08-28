@@ -4365,6 +4365,11 @@ async function handleRequest(request, env, ctx) {
     const feedData = await loadFeedItems(env);
     const stats    = computeStats(feedData.items || []);
     const kvOk     = await env.RATE_LIMIT_KV.get("health:ping").then(() => "ok").catch(() => "error");
+    // A secret set to "" or whitespace-only (e.g. `wrangler secret put` given an
+    // empty/blank value by mistake) is truthy under a plain !!(env.X) check, so
+    // it would silently read as "configured" here while still being useless to
+    // every caller that needs the actual value. Require non-whitespace content.
+    const isSet = (v) => typeof v === "string" && v.trim().length > 0;
     return jsonResp({
       status: "ok", version: PLATFORM_VERSION,
       advisory_count: stats.total, critical_count: stats.critical,
@@ -4379,7 +4384,17 @@ async function handleRequest(request, env, ctx) {
         // Additive: surfaces the exact outage verified live on 2026-08-03 -- create-order
         // 503s with "Razorpay not configured on server" whenever either secret is unset,
         // silently blocking 100% of checkouts with no prior signal in /api/health.
-        razorpay_configured: !!(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET),
+        razorpay_configured: isSet(env.RAZORPAY_KEY_ID) && isSet(env.RAZORPAY_KEY_SECRET),
+        // Same blind spot, same fix, for the two secrets the rest of the checkout
+        // pipeline depends on: an unset RAZORPAY_WEBHOOK_SECRET makes the async
+        // webhook path (handleWebhookRazorpay) 500 on every delivery with no
+        // signal here; an unset RESEND_API_KEY makes sendActivationEmail() a
+        // silent no-op (it warns to the Worker log and returns false, but the
+        // customer still gets a 201 with their key, so nothing customer-facing
+        // ever surfaces the failure). Both would otherwise be invisible for
+        // months the same way razorpay_configured was before 2026-08-03.
+        razorpay_webhook_configured: isSet(env.RAZORPAY_WEBHOOK_SECRET),
+        resend_configured: isSet(env.RESEND_API_KEY),
       },
       security: {
         auth: "JWT_HS256+KV",
