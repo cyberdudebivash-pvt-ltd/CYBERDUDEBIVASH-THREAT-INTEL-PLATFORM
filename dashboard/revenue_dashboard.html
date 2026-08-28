@@ -439,6 +439,29 @@ async function loadLiveData() {
       MRR_DATA.tier_distribution = sd.tier_distribution || MRR_DATA.tier_distribution;
     }
   } catch(e) { /* use defaults */ }
+
+  // Reconciliation check: mrr_report.json / platform_stats.json are written
+  // by the sovereign engine and have been observed reporting large MRR/tenant
+  // figures (e.g. 2,260 "active" tenants with 0 api_calls/exports/reports —
+  // internally inconsistent with actually being active) that don't trace to
+  // any confirmed payment. monetization_status.json is written directly from
+  // the real transaction ledger and is the trustworthy source when the two
+  // disagree. Prefer it, and say so on-screen, rather than silently showing
+  // an unreconciled number as if it were live revenue.
+  try {
+    const rs = await fetch('../data/commercial/monetization_status.json');
+    if (rs.ok) {
+      const s2 = await rs.json();
+      if ((s2.transaction_count || 0) === 0 && MRR_DATA.total_mrr > 0) {
+        MRR_DATA.unreconciled = true;
+        MRR_DATA.total_mrr = 0;
+        MRR_DATA.arr = 0;
+        MRR_DATA.mrr_by_tier = { enterprise: 0, pro: 0, mssp: 0, free: 0 };
+        MRR_DATA.active_tenants = 0;
+      }
+    }
+  } catch(e) { /* reconciliation fetch failed -- fall back to the unreconciled figures above rather than hide them */ }
+
   renderAll();
 }
 
@@ -451,6 +474,15 @@ function fmt(n) {
 function renderAll() {
   const mrr = MRR_DATA.total_mrr;
   const arr = MRR_DATA.arr || mrr * 12;
+
+  if (MRR_DATA.unreconciled && !document.getElementById('unreconciled-banner')) {
+    document.body.insertAdjacentHTML('afterbegin',
+      '<div id="unreconciled-banner" style="background:#3a1410;color:#ff8266;' +
+      'border-bottom:1px solid #ff4757;padding:10px 24px;font-size:12px;' +
+      'font-weight:700;letter-spacing:.3px;text-align:center;">' +
+      '⚠ data/sovereign/mrr_report.json reported revenue with zero matching ' +
+      'transactions in the confirmed ledger — showing $0 until reconciled.</div>');
+  }
 
   document.getElementById('kpi-mrr').textContent = fmt(mrr);
   document.getElementById('kpi-arr').textContent = fmt(arr);
