@@ -439,6 +439,31 @@ async function loadLiveData() {
       MRR_DATA.tier_distribution = sd.tier_distribution || MRR_DATA.tier_distribution;
     }
   } catch(e) { /* use defaults */ }
+
+  // Reconciliation check: sovereign-engine figures above have been observed
+  // reporting revenue and tenant counts that don't trace to any confirmed
+  // payment. Treat a positive MRR as unverified -- and show $0 instead --
+  // unless the real transaction ledger explicitly confirms it. Fail closed:
+  // if the ledger can't be reached at all, that still counts as "not
+  // confirmed," not "assume the sovereign figures are right."
+  if (MRR_DATA.total_mrr > 0) {
+    let confirmed = false;
+    try {
+      const rs = await fetch('../data/commercial/monetization_status.json');
+      if (rs.ok) {
+        const s2 = await rs.json();
+        confirmed = (s2.transaction_count || 0) > 0;
+      }
+    } catch (e) { /* ledger unreachable -- falls through as not confirmed */ }
+    if (!confirmed) {
+      MRR_DATA.unreconciled = true;
+      MRR_DATA.total_mrr = 0;
+      MRR_DATA.arr = 0;
+      MRR_DATA.mrr_by_tier = { enterprise: 0, pro: 0, mssp: 0, free: 0 };
+      MRR_DATA.active_tenants = 0;
+    }
+  }
+
   renderAll();
 }
 
@@ -451,6 +476,15 @@ function fmt(n) {
 function renderAll() {
   const mrr = MRR_DATA.total_mrr;
   const arr = MRR_DATA.arr || mrr * 12;
+
+  if (MRR_DATA.unreconciled && !document.getElementById('unreconciled-banner')) {
+    document.body.insertAdjacentHTML('afterbegin',
+      '<div id="unreconciled-banner" style="background:#3a1410;color:#ff8266;' +
+      'border-bottom:1px solid #ff4757;padding:10px 24px;font-size:12px;' +
+      'font-weight:700;letter-spacing:.3px;text-align:center;">' +
+      '⚠ Reported revenue could not be confirmed against real transactions ' +
+      '— showing $0 until verified.</div>');
+  }
 
   document.getElementById('kpi-mrr').textContent = fmt(mrr);
   document.getElementById('kpi-arr').textContent = fmt(arr);
