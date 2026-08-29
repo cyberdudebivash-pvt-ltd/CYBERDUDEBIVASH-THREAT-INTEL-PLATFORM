@@ -7,7 +7,16 @@ import { TelemetryProvider } from "@/components/providers/TelemetryProvider";
 
 const inter = Inter({ subsets: ["latin"] });
 
-const BASE_URL = "https://intel.cyberdudebivash.com";
+// PRODUCTION-TRUTH FIX (release hardening -- revenue mandate): was
+// "https://intel.cyberdudebivash.com" -- the domain of this repo's existing,
+// separately-hosted, already-live static site (confirmed via curl: that
+// site's /cves is a different, non-Next.js page; /blog, /threat-actors/*,
+// /playground -- all real routes in *this* app -- 404 there). Deploying
+// this app's canonical URLs/OpenGraph/sitemap under that same domain would
+// claim a domain it doesn't run on and collide with real, live, indexed
+// paths. Points at the new subdomain this app is actually being deployed
+// to; update here if that subdomain changes before going live.
+const BASE_URL = "https://app.cyberdudebivash.com";
 
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
@@ -204,6 +213,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="dark">
       <head>
+        {/* Static-export equivalent of next.config.js's former headers() --
+            see that file's comment. Only CSP and Referrer-Policy have a
+            meta-tag form; X-Frame-Options/nosniff/Permissions-Policy/HSTS
+            are HTTP-header-only and come from public/_headers on hosts
+            that honor it (e.g. Cloudflare Pages). frame-ancestors is
+            listed for documentation but browsers ignore it in meta
+            delivery per spec -- real clickjacking protection needs the
+            X-Frame-Options header from public/_headers. */}
+        <meta
+          httpEquiv="Content-Security-Policy"
+          content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src * data:; connect-src *; frame-ancestors 'none';"
+        />
+        <meta name="referrer" content="strict-origin-when-cross-origin" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationSchema) }}
