@@ -618,6 +618,16 @@ def main() -> int:
                                 # two fixes above -- enterprise-knowledge-center.html
                                 # links to /apex_openapi_v3.yaml but this file was
                                 # never in include_singles, so the link 404'd.
+        # v185.7 FIX: same 404 class again. robots.txt's own Sitemap: directives
+        # (added 2026-06-22) point crawlers at these 5 topic sitemaps plus the
+        # index -- all 5 exist at repo root with real content (sitemap-programmatic.xml
+        # alone has 118 URLs) and were being generated correctly, but were never
+        # added here, so every one of them 404'd on the live site while robots.txt
+        # kept advertising them. sitemap.xml itself (already above) stayed in
+        # dist/ the whole time, which is why this went unnoticed -- the one
+        # sitemap a human would think to check by hand was always fine.
+        "sitemap-index.xml", "sitemap-cves.xml", "sitemap-threats.xml",
+        "sitemap-reports.xml", "sitemap-iocs.xml", "sitemap-programmatic.xml",
     ]
     for fname in include_singles:
         src = REPO_ROOT / fname
