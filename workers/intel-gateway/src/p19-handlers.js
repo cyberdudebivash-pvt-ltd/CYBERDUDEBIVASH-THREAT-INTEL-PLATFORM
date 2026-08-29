@@ -307,8 +307,8 @@ export function buildIOCDetailBlock(item) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    ${extraCount > 0 ? `<div style="margin-top:10px;font-size:11px;color:#4b5563;font-family:monospace;">+${extraCount} additional indicators available via <a href="/api/v1/ioc/enriched" style="color:#00d4aa;">/api/v1/ioc/enriched</a> (enriched, 16-field format) or <a href="/api/exports/feed.stix.json" style="color:#a78bfa;">/api/exports/feed.stix.json</a></div>` : ""}
-    <div style="margin-top:10px;padding:8px 12px;background:rgba(0,0,0,.2);border-radius:5px;font-family:monospace;font-size:10px;color:#374151;">Machine-readable: <a href="/api/v1/ioc/enriched" style="color:#00d4aa;">/api/v1/ioc/enriched</a> &nbsp;*&nbsp; STIX 2.1: <a href="/api/exports/feed.stix.json" style="color:#a78bfa;">/api/exports/feed.stix.json</a> &nbsp;*&nbsp; MISP: <a href="/api/misp/export" style="color:#d97706;">/api/misp/export</a> (PRO+)</div>
+    ${extraCount > 0 ? `<div style="margin-top:10px;font-size:11px;color:#4b5563;font-family:monospace;">+${extraCount} additional indicators available via <a href="/api/v1/ioc/enriched" style="color:#00d4aa;">/api/v1/ioc/enriched</a> (enriched, 16-field format) or <a href="/api/taxii/" style="color:#a78bfa;">/api/taxii/</a></div>` : ""}
+    <div style="margin-top:10px;padding:8px 12px;background:rgba(0,0,0,.2);border-radius:5px;font-family:monospace;font-size:10px;color:#374151;">Machine-readable: <a href="/api/v1/ioc/enriched" style="color:#00d4aa;">/api/v1/ioc/enriched</a> &nbsp;*&nbsp; STIX 2.1: <a href="/api/taxii/" style="color:#a78bfa;">/api/taxii/</a> &nbsp;*&nbsp; MISP: <a href="/api/misp/export" style="color:#d97706;">/api/misp/export</a> (PRO+)</div>
   </div>`;
 }
 
