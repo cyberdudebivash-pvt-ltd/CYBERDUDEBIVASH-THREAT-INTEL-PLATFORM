@@ -4010,12 +4010,30 @@ async function handleGeopolitical(request, env, auth, method, path, url, ctx) {
       return { code, ofac: OFAC_SANCTIONED.has(code), eu: EU_SANCTIONED.has(code), sanctioned: OFAC_SANCTIONED.has(code)||EU_SANCTIONED.has(code), risk_tier: GEO_DB[code]?.tier||"UNKNOWN" };
     });
     const hit = results.some(r => r.sanctioned);
+    // PRODUCTION-TRUTH FIX (post-launch platform audit): this never actually
+    // screened `entity_name` against any real sanctions list -- OFAC_SANCTIONED/
+    // EU_SANCTIONED above are a static ~24-country jurisdiction set, not the
+    // real OFAC SDN / EU consolidated lists (thousands of specifically named
+    // individuals, companies, and vessels, updated on an ongoing basis). The
+    // old response returned "SANCTIONS_DETECTED"/"CLEAR" and a "BLOCK"/
+    // "PROCEED: No active sanctions detected" verdict that reads as a real
+    // entity-level compliance determination regardless of whether entity_name
+    // was even supplied. A customer treating "PROCEED: No active sanctions
+    // detected" as evidence a specific entity is unsanctioned -- when it was
+    // never checked against a real sanctions-list at all -- would be making
+    // an actual legal/compliance decision on a false negative. Field names
+    // and shape kept unchanged for existing integrations; wording changed so
+    // neither value can be read as an entity-level clearance.
     return jsonResp({
       status: "ok", module: "Geopolitical Risk Intelligence",
       entity: entity_name || "N/A",
-      sanctions_result: hit ? "SANCTIONS_DETECTED" : "CLEAR",
+      sanctions_result: hit ? "JURISDICTION_SANCTIONED" : "JURISDICTION_CLEAR_ENTITY_NOT_SCREENED",
       countries: results,
-      compliance_action: hit ? "BLOCK: Engagement requires OFAC/government authorization" : "PROCEED: No active sanctions detected",
+      compliance_action: hit
+        ? "BLOCK: Submitted country code matches a sanctioned jurisdiction in this reference list -- obtain legal/compliance authorization before engagement."
+        : "REVIEW REQUIRED: No sanctioned jurisdiction matched in this reference list. This does NOT mean the named entity is unsanctioned.",
+      entity_level_screening_performed: false,
+      disclaimer: "This checks submitted country codes against a static reference list of sanctioned jurisdictions only (~24 countries). It does not screen the named entity against the real OFAC SDN list, EU consolidated sanctions list, or any other authoritative entity-level sanctions database, and the jurisdiction list itself is a point-in-time snapshot, not a live feed. Do not use this result as a substitute for an authoritative sanctions-screening service or your compliance team's review.",
       generated_at: now(),
     });
   }

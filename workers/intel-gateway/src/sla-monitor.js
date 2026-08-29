@@ -111,12 +111,23 @@ export async function handleSLAStatus(request, env, rid) {
     last_ping_age_seconds: lastPingAge,
     incidents_30d:         recentIncidents.length,
     total_downtime_seconds: Math.round(totalDownMs / 1000),
+    // PRODUCTION-TRUTH FIX (post-launch platform audit): the 4 entries below
+    // "intel-gateway" were hardcoded operational/99.9x%+ uptime figures with
+    // no ping mechanism ever recording per-component data for any of them --
+    // nothing calls POST /api/sla/ping with component "stix-feed"/"ai-engine"/
+    // "dark-web-monitor"/"premium-reports" anywhere in this codebase (checked:
+    // no cron, no workflow, no admin script). "intel-gateway" alone reflects
+    // real measured data (displayUptime, computed above from actual pings/
+    // incidents). "dark-web-monitor" specifically claimed 99.95% uptime for a
+    // feature whose routes return 503 unavailable on every call (see index.js
+    // dark-web-monitor.js route registration) -- reported honestly as disabled
+    // rather than fabricated-operational.
     components: {
-      "intel-gateway":  { status: !hasData ? "insufficient_data" : (isLikelyUp ? "operational" : "degraded"), uptime: displayUptime },
-      "stix-feed":      { status: "operational", uptime: 100 },
-      "ai-engine":      { status: "operational", uptime: 99.98 },
-      "dark-web-monitor": { status: "operational", uptime: 99.95 },
-      "premium-reports":  { status: "operational", uptime: 99.99 },
+      "intel-gateway":    { status: !hasData ? "insufficient_data" : (isLikelyUp ? "operational" : "degraded"), uptime: displayUptime },
+      "stix-feed":        { status: "not_separately_monitored", uptime: null },
+      "ai-engine":        { status: "not_separately_monitored", uptime: null },
+      "dark-web-monitor": { status: "disabled", uptime: null, note: "Simulated-data endpoints intentionally disabled pending real data-source integration -- see dark-web-monitor.js" },
+      "premium-reports":  { status: "not_separately_monitored", uptime: null },
     },
     version: "143.0.0",
     ts:      new Date().toISOString(),
@@ -188,12 +199,15 @@ export async function handleSLAReport(request, env, auth, rid) {
     incidents_count:     recentIncidents.length,
     incidents:           recentIncidents.slice(-20),
     daily_breakdown:     dailyStats,
+    // PRODUCTION-TRUTH FIX: same fabricated-per-component-uptime issue as
+    // handleSLAStatus above (see that function's matching comment) -- no
+    // real per-component ping data exists for these 4 entries.
     components: {
-      "intel-gateway":    { sla: ENTERPRISE_SLA, actual: Math.min(100, uptimePct) },
-      "stix-feed":        { sla: ENTERPRISE_SLA, actual: 100   },
-      "ai-engine":        { sla: ENTERPRISE_SLA, actual: 99.98 },
-      "dark-web-monitor": { sla: 99.5,           actual: 99.95 },
-      "premium-reports":  { sla: ENTERPRISE_SLA, actual: 99.99 },
+      "intel-gateway":    { sla: ENTERPRISE_SLA, actual: hasData ? Math.min(100, uptimePct) : null },
+      "stix-feed":        { sla: ENTERPRISE_SLA, actual: null, status: "not_separately_monitored" },
+      "ai-engine":        { sla: ENTERPRISE_SLA, actual: null, status: "not_separately_monitored" },
+      "dark-web-monitor": { sla: 99.5,           actual: null, status: "disabled" },
+      "premium-reports":  { sla: ENTERPRISE_SLA, actual: null, status: "not_separately_monitored" },
     },
     credit_policy: "SLA credit of 10% per day of breach, up to 30% of monthly fee. Contact bivash@cyberdudebivash.com with this report to claim.",
     certifier:     "CYBERDUDEBIVASH SENTINEL APEX -- v143.0.0 GOD-MODE",
@@ -276,6 +290,19 @@ export async function handleSLAPing(request, env, rid) {
    handleSLACertificate  -- GET /api/sla/certificate  (Enterprise)
    Returns SLA compliance certificate as JSON (can be rendered to PDF)
    =========================================================================== */
+// PRODUCTION-TRUTH FIX (post-launch platform audit): this certificate --
+// the one formal document an Enterprise customer can hand to their OWN
+// auditors as compliance evidence -- hardcoded sla_status: "COMPLIANT"
+// unconditionally. It never called _loadPings/_loadIncidents, the same real
+// data handleSLAStatus and handleSLAReport (both fixed for this exact class
+// of bug in PR #237 -- "previously defaulted to a fabricated 100%/'MET'
+// when there was zero ping data") already load two functions above. A
+// customer requesting this certificate during a real outage, or before any
+// monitoring history existed at all, still received a signed-looking
+// "COMPLIANT" document. Fixed to compute the same real uptime/incident
+// data as its siblings and report INSUFFICIENT_DATA honestly, matching
+// their established precedent, rather than issue a certificate with no
+// verification behind it.
 export async function handleSLACertificate(request, env, auth, rid) {
   if (!auth || (!auth.key && !auth.jwt)) return _jsonErr(401, "Authentication required.", rid);
   if (auth.tier !== "ENTERPRISE" && auth.tier !== "MSSP") return _jsonErr(403, "Enterprise tier required.", rid);
@@ -283,6 +310,28 @@ export async function handleSLACertificate(request, env, auth, rid) {
   const now = new Date();
   const periodEnd   = now.toISOString().split("T")[0];
   const periodStart = new Date(now - SLA_WINDOW_DAYS * 86400000).toISOString().split("T")[0];
+
+  const pings    = await _loadPings(env);
+  const incidents = await _loadIncidents(env);
+  const nowMs    = now.getTime();
+  const windowMs = SLA_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+  const recentPings = pings.filter(p => (nowMs - p.ts) <= windowMs);
+  const upCount      = recentPings.filter(p => p.ok).length;
+  const hasData      = recentPings.length > 0;
+  const pingUptime   = hasData ? (upCount / recentPings.length) * 100 : null;
+
+  const recentIncidents = incidents.filter(i => (nowMs - new Date(i.start).getTime()) <= windowMs);
+  const totalDownMs     = recentIncidents.reduce((acc, i) => acc + (i.duration_ms || 0), 0);
+  const incidentUptime  = Math.min(100, ((windowMs - totalDownMs) / windowMs) * 100);
+
+  // Same "take the more conservative real signal" combination handleSLAStatus
+  // uses -- an incident can be recorded (and thus count against uptime) even
+  // in a window with sparse ping coverage.
+  const actualUptime = hasData ? Math.max(pingUptime, incidentUptime) : null;
+  const slaStatus = !hasData
+    ? "INSUFFICIENT_DATA"
+    : (actualUptime >= ENTERPRISE_SLA ? "COMPLIANT" : "BREACHED");
 
   return _json(200, {
     certificate: {
@@ -292,7 +341,12 @@ export async function handleSLACertificate(request, env, auth, rid) {
       gstin:          "21ARKPN8270G1ZP",
       period:         `${periodStart} to ${periodEnd}`,
       sla_target:     `${ENTERPRISE_SLA}% uptime`,
-      sla_status:     "COMPLIANT",
+      sla_status:     slaStatus,
+      measured_uptime_pct: hasData ? parseFloat(actualUptime.toFixed(4)) : null,
+      incidents_in_period: recentIncidents.length,
+      monitoring_basis:    hasData
+        ? `${recentPings.length} health check(s) + ${recentIncidents.length} recorded incident(s) over the period`
+        : "No monitoring data recorded for this period -- compliance cannot be verified.",
       platform_url:   "https://intel.cyberdudebivash.com",
       support_email:  "bivash@cyberdudebivash.com",
       version:        "143.0.0 GOD-MODE",
