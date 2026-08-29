@@ -444,8 +444,17 @@ jobs:
           fi
 
       - name: Deployment summary
+        # CodeRabbit (PR #268 review): the previous wording here -- "Helm
+        # charts linted; Terraform validated" -- still overstated what
+        # validate-helm/terraform-validate actually guarantee. Every check
+        # step in both jobs ends in `|| true` (Helm lint, Terraform
+        # Validate, Terraform Format Check) or an `|| echo "WARNING..."`
+        # fallback (Helm dependency update, Helm template render), so
+        # both jobs report success even if the underlying command found
+        # real errors -- confirmed by reading every step in both jobs.
+        # Said plainly rather than implying a real pass/fail signal exists.
         run: |
           echo "🚀 SENTINEL APEX v184.0 — Platform build COMPLETE"
           echo "Commit: ${{ github.sha }}"
-          echo "Service images built and pushed to GHCR (not deployed to any cluster by this workflow); Helm charts linted; Terraform validated"
+          echo "Service images built and pushed to GHCR (not deployed to any cluster by this workflow); Helm/Terraform checks ran (non-blocking -- every check step tolerates failure, so a green job here is not proof the charts/config are actually valid)"
           echo "Independently live (deployed by deploy-worker.yml, unaffected by this workflow): https://intel.cyberdudebivash.com"
