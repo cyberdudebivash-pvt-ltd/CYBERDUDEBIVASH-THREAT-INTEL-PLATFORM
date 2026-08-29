@@ -1,0 +1,20 @@
+# Cloudflare Pages header rules (https://developers.cloudflare.com/pages/configuration/headers/).
+# Copied into the export output's root by `next build` (output: "export"),
+# so Pages picks this up automatically on deploy.
+#
+# Restores, as real HTTP response headers, everything next.config.js's
+# headers() used to declare before this app moved to static export (where
+# that function is a no-op) -- see next.config.js and src/app/layout.tsx
+# for the rest of that story. X-Frame-Options, X-Content-Type-Options,
+# Permissions-Policy, and Strict-Transport-Security have no meta-tag
+# equivalent, so this file is the only place they're enforced; CSP and
+# Referrer-Policy are also set here (in addition to the meta-tag fallback
+# in layout.tsx) since a real header takes precedence and also correctly
+# enforces frame-ancestors, which meta-tag CSP cannot.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src * data:; connect-src *; frame-ancestors 'none';
