@@ -369,6 +369,35 @@ jobs:
   # ─────────────────────────────────────────────
   # 7. PRODUCTION HEALTH VERIFY
   # ─────────────────────────────────────────────
+  # PRODUCTION-TRUTH FIX (release hardening audit): job id/name left
+  # unchanged (unknown whether branch protection or an external integration
+  # keys off this exact check name -- no tooling available this session to
+  # verify either way, and this job's own pass/fail signal is genuinely
+  # useful, so the safer fix is clarifying what it actually checks, not
+  # renaming it). Despite the name, this job does NOT verify that this
+  # workflow's own build was deployed -- it cannot. None of its four
+  # dependencies apply anything to a running environment, though each does
+  # more than a one-line summary can capture (CodeRabbit, PR #268: describe
+  # accurately rather than implying these are each job's only command):
+  # build-services pushes container images to GHCR, but only on pushes to
+  # main (PR runs build only -- push is gated on github.ref); nothing in
+  # this repo's CI ever pulls/runs those images either way (confirmed via
+  # repo-wide search for kubectl apply/docker-compose up/helm install/SSH
+  # deploy steps). build-frontend runs both `npx tsc --noEmit` and
+  # `npm run build` (both tolerant of failure), with no publish step after
+  # either. validate-helm lints/templates charts locally. terraform-validate
+  # runs `terraform init` (best-effort) then `terraform validate`/
+  # `fmt -check` (also failure-tolerant -- see the Deployment summary step
+  # below). The checks below hit intel.cyberdudebivash.com, which is
+  # deployed entirely by the separate deploy-worker.yml workflow: whenever
+  # this job actually runs, its result is independent of whether this
+  # workflow's own build succeeded. It doesn't always run, though -- it's
+  # gated by `needs:` on all four jobs above, so a hard failure in one of
+  # them (not the failure-tolerated kind, an actual job failure) skips this
+  # health check entirely rather than reporting healthy. Still a genuinely
+  # useful external smoke test when it runs (it does catch a real site
+  # outage) -- just not evidence that this workflow deployed anything,
+  # which the "Deployment summary" step below used to imply.
   post-deploy-verify:
     name: Live Platform Health Check
     runs-on: ubuntu-24.04
@@ -376,7 +405,7 @@ jobs:
     needs: [build-services, build-frontend, validate-helm, terraform-validate]
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Check intel.cyberdudebivash.com
+      - name: Check intel.cyberdudebivash.com (external, independently-deployed -- see job comment)
         # v184.3 FIX: neither check here could ever fail the job (the `&&
         # echo ... || echo ...` pattern always exits 0 regardless of which
         # branch runs), despite this job being named "Live Platform Health
@@ -424,8 +453,17 @@ jobs:
           fi
 
       - name: Deployment summary
+        # CodeRabbit (PR #268 review): the previous wording here -- "Helm
+        # charts linted; Terraform validated" -- still overstated what
+        # validate-helm/terraform-validate actually guarantee. Every check
+        # step in both jobs ends in `|| true` (Helm lint, Terraform
+        # Validate, Terraform Format Check) or an `|| echo "WARNING..."`
+        # fallback (Helm dependency update, Helm template render), so
+        # both jobs report success even if the underlying command found
+        # real errors -- confirmed by reading every step in both jobs.
+        # Said plainly rather than implying a real pass/fail signal exists.
         run: |
           echo "🚀 SENTINEL APEX v184.0 — Platform build COMPLETE"
           echo "Commit: ${{ github.sha }}"
-          echo "All services built, Helm validated, Terraform validated"
-          echo "Live: https://intel.cyberdudebivash.com"
+          echo "Service images built and pushed to GHCR (not deployed to any cluster by this workflow); Helm/Terraform checks ran (non-blocking -- every check step tolerates failure, so a green job here is not proof the charts/config are actually valid)"
+          echo "Independently live (deployed by deploy-worker.yml, unaffected by this workflow): https://intel.cyberdudebivash.com"
