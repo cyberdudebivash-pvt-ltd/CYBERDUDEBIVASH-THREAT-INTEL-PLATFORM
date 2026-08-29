@@ -297,11 +297,17 @@ def update_version_json(rel_path, ver, apply):
         # containment (`ver in value`), so "v200.0" would incorrectly pass
         # against a stale "v200.01" or an unrelated string that happens to
         # contain the digits. Extract the actual trailing "vX.Y[.Z]" token
-        # and compare it exactly; a display with no such token at all is
-        # untouched by this function's own write path below, so it can't be
-        # judged stale here either -- treat it as passing.
+        # and compare it exactly.
         m = re.search(r"v\d+\.\d+(?:\.\d+)?$", str(value))
-        return (m.group(0) == expected_display_token) if m else True
+        # v200.0 FIX (CodeRabbit, post-merge follow-up): a display with NO
+        # version token at all used to pass here ("nothing to compare, so
+        # call it fine"), but apply mode below does NOT agree -- it replaces
+        # a token-less display wholesale with the bare "vX.Y", discarding
+        # whatever text was there. --check silently missing a change
+        # --apply would actually make is exactly the inconsistency this
+        # function exists to prevent. Fail closed instead: no token means
+        # apply has something to do, so check must report drift.
+        return bool(m) and m.group(0) == expected_display_token
 
     field_checks = [found == ver]
     if "label" in data:
@@ -310,6 +316,13 @@ def update_version_json(rel_path, ver, apply):
         field_checks.append(data["full"] == expected_full)
     if "display" in data:
         field_checks.append(_display_matches(data["display"]))
+    # v200.0 FIX (CodeRabbit, post-merge follow-up): same inconsistency as
+    # "display" above -- apply mode (below) rewrites a version-shaped
+    # "platform" value, but nothing here ever checked it, so --check could
+    # report "ok" on a stale platform version that --apply would then
+    # change. Mirrors apply's own condition for what counts as version-shaped.
+    if "platform" in data and re.match(r"^\d+\.\d+", str(data["platform"])):
+        field_checks.append(str(data["platform"]) == ver)
     if all(field_checks):
         return True, found, "ok"
 

@@ -174,7 +174,16 @@ jobs:
             BASE_SHA="${{ github.event.before }}"
             HEAD_SHA="${{ github.sha }}"
           fi
-          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BASE_SHA" 2>/dev/null; then
+          # CodeRabbit (post-merge follow-up): only BASE_SHA was validated --
+          # HEAD_SHA is always populated by GitHub itself for both event
+          # types used here (a PR's real head commit, or the commit that
+          # just triggered this push), so it can't actually be invalid in
+          # practice, but validating it too costs nothing and removes the
+          # theoretical case where gitleaks gets a range with a bad right
+          # side instead of hitting the --all fallback.
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] \
+             && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null \
+             && [ -n "$HEAD_SHA" ] && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
             LOG_OPTS="${BASE_SHA}..${HEAD_SHA}"
           else
             echo "::notice::gitleaks: no valid base commit for an incremental scan — falling back to full history"

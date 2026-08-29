@@ -339,11 +339,35 @@ jobs:
             --skip-editable
           SERVICES_EXIT=$?
 
-          jq -s '{dependencies: ((.[0].dependencies // []) + (.[1].dependencies // []))}' \
+          # CodeRabbit (post-merge follow-up): the previous version of this
+          # merge fell back to copying just the core report, or to an empty
+          # one, whenever the jq merge itself failed -- meaning a genuinely
+          # broken services scan (crashed jq, truncated/corrupt JSON) could
+          # silently degrade to "0 vulnerabilities" instead of failing the
+          # gate, since the downstream parse step never re-checks
+          # PIP_AUDIT_EXIT once pip-audit-report.json exists and isn't
+          # trivially small. Validate both source reports explicitly before
+          # merging; if either is missing or isn't valid JSON with a
+          # .dependencies key, don't write pip-audit-report.json at all and
+          # use exit code 2 (pip-audit itself only ever returns 0 or 1; 2 is
+          # unambiguously "the scan didn't complete", matching this file's
+          # own 0/1/anything-else contract above) -- the parse step's
+          # existing "report missing + exit >1" branch already fails the
+          # gate correctly for that case, so it doesn't need to change.
+          for f in pip-audit-report-core.json pip-audit-report-services.json; do
+            if [ ! -s "$f" ] || ! jq -e '.dependencies' "$f" >/dev/null 2>&1; then
+              echo "::error::pip-audit: $f is missing or not valid JSON with a .dependencies key -- that scan did not actually complete. Failing rather than silently merging partial results."
+              rm -f pip-audit-report.json
+              echo "2" > /tmp/pip_audit_exit_code
+              set -e
+              echo "pip-audit scan incomplete: $f invalid"
+              exit 0
+            fi
+          done
+
+          jq -s '{dependencies: (.[0].dependencies + .[1].dependencies)}' \
             pip-audit-report-core.json pip-audit-report-services.json \
-            > pip-audit-report.json 2>/dev/null \
-            || cp pip-audit-report-core.json pip-audit-report.json 2>/dev/null \
-            || echo '{"dependencies":[]}' > pip-audit-report.json
+            > pip-audit-report.json
 
           PIP_AUDIT_EXIT=$CORE_EXIT
           if [ "$SERVICES_EXIT" -gt "$PIP_AUDIT_EXIT" ]; then
