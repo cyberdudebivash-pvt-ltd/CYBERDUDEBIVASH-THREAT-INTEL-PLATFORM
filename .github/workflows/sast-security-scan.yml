@@ -354,9 +354,19 @@ jobs:
           # own 0/1/anything-else contract above) -- the parse step's
           # existing "report missing + exit >1" branch already fails the
           # gate correctly for that case, so it doesn't need to change.
+          # CodeRabbit (PR #266 review): `jq -e '.dependencies'` alone treats
+          # any truthy value as valid, including {"dependencies":{}} -- a
+          # report that's syntactically fine JSON but semantically not a
+          # pip-audit report would pass this check, then the merge/parse
+          # step's `.dependencies[].vulns[]` would silently walk nothing
+          # (TOTAL=0, gate reports clean) instead of erroring. Require
+          # .dependencies to actually be an array, and every entry's .vulns
+          # to be an array too (verified against jq itself: {}, null, and a
+          # non-array vulns are all correctly rejected; a real report and a
+          # legitimately empty [] both still pass).
           for f in pip-audit-report-core.json pip-audit-report-services.json; do
-            if [ ! -s "$f" ] || ! jq -e '.dependencies' "$f" >/dev/null 2>&1; then
-              echo "::error::pip-audit: $f is missing or not valid JSON with a .dependencies key -- that scan did not actually complete. Failing rather than silently merging partial results."
+            if [ ! -s "$f" ] || ! jq -e '(.dependencies | type) == "array" and (.dependencies | all(.vulns | type == "array"))' "$f" >/dev/null 2>&1; then
+              echo "::error::pip-audit: $f is missing or does not have a valid pip-audit report shape (.dependencies array of entries each with a .vulns array) -- that scan did not actually complete. Failing rather than silently merging partial results."
               rm -f pip-audit-report.json
               echo "2" > /tmp/pip_audit_exit_code
               set -e
@@ -365,9 +375,22 @@ jobs:
             fi
           done
 
-          jq -s '{dependencies: (.[0].dependencies + .[1].dependencies)}' \
+          # CodeRabbit (PR #266 review): this merge's own exit status was
+          # never checked -- set +e is active for this whole step, so a
+          # failure here (e.g. a jq bug neither source-report check above
+          # would catch) would still leave PIP_AUDIT_EXIT computed from
+          # CORE_EXIT/SERVICES_EXIT alone and could write a truncated or
+          # empty pip-audit-report.json that the gate then treats as clean.
+          if ! jq -s '{dependencies: (.[0].dependencies + .[1].dependencies)}' \
             pip-audit-report-core.json pip-audit-report-services.json \
-            > pip-audit-report.json
+            > pip-audit-report.json; then
+            echo "::error::pip-audit: the report merge itself failed -- treating as incomplete rather than trusting whatever partial output was written."
+            rm -f pip-audit-report.json
+            echo "2" > /tmp/pip_audit_exit_code
+            set -e
+            echo "pip-audit scan incomplete: merge failed"
+            exit 0
+          fi
 
           PIP_AUDIT_EXIT=$CORE_EXIT
           if [ "$SERVICES_EXIT" -gt "$PIP_AUDIT_EXIT" ]; then
