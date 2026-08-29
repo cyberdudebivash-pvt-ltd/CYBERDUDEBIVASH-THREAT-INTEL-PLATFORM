@@ -203,6 +203,17 @@ REGEX_TARGETS = [
         r'(SENTINEL APEX <span>)v[0-9]+\.[0-9]+(?:\.[0-9]+)?(</span>)',
         r'\g<1>v{VER}\g<2>',
     ),
+    # index.html -- PLATFORM_VERSION JS constant (root landing page). Single-
+    # quoted, unlike index.js's double-quoted constant of the same name --
+    # CodeRabbit caught this drifting on the v200.0 PR (still 184.0 after
+    # every other public version surface was fixed). Shown to every visitor
+    # as an "immediate, no flash" fallback before the async /version.json
+    # sync resolves, and stays stale permanently if that fetch ever fails.
+    (
+        "index.html",
+        r"(const PLATFORM_VERSION = ')[0-9]+\.[0-9]+(?:\.[0-9]+)?(')",
+        r"\g<1>{VER}\g<2>",
+    ),
     # data/health/sla_status.json -- version field (governance: keep current)
     # Handled by update_version_json below.
 ]
