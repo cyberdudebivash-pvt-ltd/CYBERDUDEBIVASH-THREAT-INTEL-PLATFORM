@@ -369,6 +369,26 @@ jobs:
   # ─────────────────────────────────────────────
   # 7. PRODUCTION HEALTH VERIFY
   # ─────────────────────────────────────────────
+  # PRODUCTION-TRUTH FIX (release hardening audit): job id/name left
+  # unchanged (unknown whether branch protection or an external integration
+  # keys off this exact check name -- no tooling available this session to
+  # verify either way, and this job's own pass/fail signal is genuinely
+  # useful, so the safer fix is clarifying what it actually checks, not
+  # renaming it). Despite the name, this job does NOT verify that this
+  # workflow's own build was deployed -- it cannot: build-services only
+  # pushes container images to GHCR (nothing in this repo's CI ever
+  # pulls/runs them -- confirmed via repo-wide search for kubectl apply/
+  # docker-compose up/helm install/SSH deploy steps), build-frontend only
+  # runs `npm run build` with no publish step, validate-helm only lints/
+  # templates charts locally, and terraform-validate only runs `terraform
+  # validate`/`fmt -check` -- none of the four apply anything to a running
+  # environment. The checks below hit intel.cyberdudebivash.com, which is
+  # deployed entirely by the separate deploy-worker.yml workflow and would
+  # report the exact same "healthy" result whether or not this workflow's
+  # build succeeded. Still a genuinely useful external smoke test (it does
+  # catch a real site outage) -- just not evidence that this workflow
+  # deployed anything, which the "Deployment summary" step below used to
+  # imply.
   post-deploy-verify:
     name: Live Platform Health Check
     runs-on: ubuntu-24.04
@@ -376,7 +396,7 @@ jobs:
     needs: [build-services, build-frontend, validate-helm, terraform-validate]
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Check intel.cyberdudebivash.com
+      - name: Check intel.cyberdudebivash.com (external, independently-deployed -- see job comment)
         # v184.3 FIX: neither check here could ever fail the job (the `&&
         # echo ... || echo ...` pattern always exits 0 regardless of which
         # branch runs), despite this job being named "Live Platform Health
@@ -427,5 +447,5 @@ jobs:
         run: |
           echo "🚀 SENTINEL APEX v184.0 — Platform build COMPLETE"
           echo "Commit: ${{ github.sha }}"
-          echo "All services built, Helm validated, Terraform validated"
-          echo "Live: https://intel.cyberdudebivash.com"
+          echo "Service images built and pushed to GHCR (not deployed to any cluster by this workflow); Helm charts linted; Terraform validated"
+          echo "Independently live (deployed by deploy-worker.yml, unaffected by this workflow): https://intel.cyberdudebivash.com"
