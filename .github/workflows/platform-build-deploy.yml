@@ -100,8 +100,9 @@ jobs:
     # consecutive runs, same commit): checkout ~4min + gitleaks still mid-scan
     # at the 15min mark, job cancelled with no secrets finding ever emitted --
     # not a detected leak, a starved budget. That means this gate had been
-    # silently producing no result on every run, not "no secrets found".
-    # 30min observed as sufficient at current repo size; revisit if it grows
+    # silently producing no result on both observed runs, not "no secrets found".
+    # 30min is expected to be sufficient at current repo size; confirm with this run
+    # and revisit if it grows
     # into that ceiling again (scoping gitleaks to just the new commits in
     # each push/PR via --log-opts, instead of the full history every time,
     # is the real long-term fix -- not done here to keep this change to the
