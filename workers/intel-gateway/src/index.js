@@ -111,7 +111,7 @@ import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_
 // no silent removal of an existing export) -- the canonical implementation
 // now lives in subscription-lifecycle.js; see that file's header comment.
 export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES };
-const PLATFORM_VERSION    = "184.0";
+const PLATFORM_VERSION    = "200.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
 const BRUTE_FORCE_TTL     = 900;          // 15-minute lockout (seconds)

@@ -81,10 +81,19 @@ def now_iso():
 # Each tuple: (relative_path, pattern, replacement_template)
 # {VER} -> full semver, {VERMAJ} -> major integer only
 REGEX_TARGETS = [
-    # workers/intel-gateway/src/index.js -- GATEWAY_VERSION
+    # workers/intel-gateway/src/index.js -- PLATFORM_VERSION
+    # v200.0 FIX: this target was written for a `GATEWAY_VERSION:` object-key
+    # pattern that no longer exists anywhere in this file -- confirmed via
+    # --report on PR #265, which showed "pattern not found -- skip" on every
+    # run. The real constant is `const PLATFORM_VERSION = "..."`, referenced
+    # in 35+ places including live customer-facing API responses (`version:
+    # PLATFORM_VERSION`), the X-Sentinel-Version header, and generated report
+    # HTML -- meaning this file's actual live version string had never been
+    # touched by any run of this script (CodeRabbit caught the resulting
+    # drift on the v200.0 PR: /api/health still reporting 184.0).
     (
         "workers/intel-gateway/src/index.js",
-        r'(GATEWAY_VERSION:\s*")[0-9]+\.[0-9]+(?:\.[0-9]+)?"',
+        r'(const PLATFORM_VERSION\s*=\s*")[0-9]+\.[0-9]+(?:\.[0-9]+)?"',
         r'\g<1>{VER}"',
     ),
     # workers/intel-gateway/src/index.js -- X-Powered-By major version
@@ -270,13 +279,26 @@ def update_version_json(rel_path, ver, apply):
     # match no longer short-circuits before the stale ones are caught.
     expected_label = "v%s" % ver.split(".")[0]
     expected_full = "SENTINEL APEX v%s" % ver
+    expected_display_token = "v%s" % ver
+
+    def _display_matches(value):
+        # v200.0 FIX (CodeRabbit, PR #265): the original check used substring
+        # containment (`ver in value`), so "v200.0" would incorrectly pass
+        # against a stale "v200.01" or an unrelated string that happens to
+        # contain the digits. Extract the actual trailing "vX.Y[.Z]" token
+        # and compare it exactly; a display with no such token at all is
+        # untouched by this function's own write path below, so it can't be
+        # judged stale here either -- treat it as passing.
+        m = re.search(r"v\d+\.\d+(?:\.\d+)?$", str(value))
+        return (m.group(0) == expected_display_token) if m else True
+
     field_checks = [found == ver]
     if "label" in data:
         field_checks.append(data["label"] == expected_label)
     if "full" in data:
         field_checks.append(data["full"] == expected_full)
-    if "display" in data and str(data["display"]).startswith(("v", "SENTINEL", "CYBERDUDEBIVASH")):
-        field_checks.append(ver in str(data["display"]))
+    if "display" in data:
+        field_checks.append(_display_matches(data["display"]))
     if all(field_checks):
         return True, found, "ok"
 
@@ -289,7 +311,14 @@ def update_version_json(rel_path, ver, apply):
     for key in ("version", "pipeline_version"):
         if key in data:
             data[key] = ver
-    for key in ("platform", "api_gateway", "report_engine", "ai_engine", "nexus",
+    # v200.0 FIX: "platform" is a version-bearing field in some schemas
+    # (config/platform_version.json's components block) but a brand-name
+    # identifier in others (data/health/sla_status.json's top-level
+    # "platform": "CYBERDUDEBIVASH(R) SENTINEL APEX") -- CodeRabbit caught
+    # this unconditionally overwriting the name with a bare version number
+    # on PR #265. Only treat it as version-bearing if the existing value
+    # already looks like one; leave name strings alone.
+    for key in ("api_gateway", "report_engine", "ai_engine", "nexus",
                 "genesis", "cortex", "quantum", "sovereign", "bug_hunter", "tip_soar",
                 "worker", "pipeline"):
         if key in data:
@@ -309,6 +338,15 @@ def update_version_json(rel_path, ver, apply):
             data["display"] = re.sub(r"v\d+\.\d+(?:\.\d+)?$", "v%s" % ver, original_display)
         else:
             data["display"] = "v%s" % ver
+    # v200.0 FIX: "platform" is a version-bearing field in some schemas
+    # (config/platform_version.json's components block) but a brand-name
+    # identifier in others (data/health/sla_status.json's top-level
+    # "platform": "CYBERDUDEBIVASH(R) SENTINEL APEX") -- CodeRabbit caught
+    # this unconditionally overwriting the name with a bare version number
+    # on PR #265. Only treat it as version-bearing if the existing value
+    # already looks like one; leave name strings alone.
+    if "platform" in data and re.match(r"^\d+\.\d+", str(data["platform"])):
+        data["platform"] = ver
 
     if "release" in data:
         data["release"] = "v%s" % ver
