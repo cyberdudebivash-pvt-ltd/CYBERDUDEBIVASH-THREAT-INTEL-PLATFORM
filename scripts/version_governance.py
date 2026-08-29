@@ -261,7 +261,23 @@ def update_version_json(rel_path, ver, apply):
         return False, "?", "read error: %s" % e
 
     found = data.get("version", "?")
-    if found == ver:
+    # v200.0 FIX: this used to return "ok" the moment "version" alone matched,
+    # even when "label"/"full"/"display" (the fields actually rendered to
+    # customers) still carried a stale release number -- confirmed live in
+    # version.json and config/version.json, both stuck on "v185"/"v184" for
+    # weeks while "version" itself correctly tracked 184.0. Widened the drift
+    # check to cover every field this function is able to fix, so a partial
+    # match no longer short-circuits before the stale ones are caught.
+    expected_label = "v%s" % ver.split(".")[0]
+    expected_full = "SENTINEL APEX v%s" % ver
+    field_checks = [found == ver]
+    if "label" in data:
+        field_checks.append(data["label"] == expected_label)
+    if "full" in data:
+        field_checks.append(data["full"] == expected_full)
+    if "display" in data and str(data["display"]).startswith(("v", "SENTINEL", "CYBERDUDEBIVASH")):
+        field_checks.append(ver in str(data["display"]))
+    if all(field_checks):
         return True, found, "ok"
 
     if not apply:
@@ -278,6 +294,21 @@ def update_version_json(rel_path, ver, apply):
                 "worker", "pipeline"):
         if key in data:
             data[key] = ver
+    if "label" in data:
+        data["label"] = expected_label
+    if "full" in data:
+        data["full"] = expected_full
+    if "display" in data:
+        # Preserve any leading brand text before the version token; replace
+        # only the trailing "vX.Y" so a display like "CYBERDUDEBIVASH(R)
+        # SENTINEL APEX v184.0" becomes "...v200.0" rather than being
+        # clobbered wholesale. If there's no version token to replace, set
+        # the whole field to the bare "vX.Y" instead of leaving it untouched.
+        original_display = str(data["display"])
+        if re.search(r"v\d+\.\d+", original_display):
+            data["display"] = re.sub(r"v\d+\.\d+(?:\.\d+)?$", "v%s" % ver, original_display)
+        else:
+            data["display"] = "v%s" % ver
 
     if "release" in data:
         data["release"] = "v%s" % ver
