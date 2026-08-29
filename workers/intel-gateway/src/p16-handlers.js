@@ -55,10 +55,20 @@ export async function handleP16Workflows(request, env) {
     "executive_reporting", "commercial_actions",
   ];
 
+  // PRODUCTION-TRUTH FIX (post-launch platform audit): avg_latency_ms was
+  // Math.random()-generated on every request -- not stale fake data but
+  // actively fabricated telemetry that changes on every poll, and status
+  // was hardcoded "operational" for all 8 phases regardless of real state.
+  // No KV key or computation anywhere in this file tracks per-phase latency
+  // or health -- confirmed via repo-wide search; only the aggregate
+  // queue_depth/last_run/failure_count_24h below are real. Reporting
+  // not_separately_monitored/null rather than a fabricated figure, the same
+  // fix already applied to the SLA Certificate's per-component uptime
+  // breakdown and to handleP16Analytics()/handleP16Health() above.
   const phaseStatus = phases.map(p => ({
     phase: p,
-    status: "operational",
-    avg_latency_ms: Math.floor(Math.random() * 80) + 20,
+    status: "not_separately_monitored",
+    avg_latency_ms: null,
   }));
 
   return _jsonResp({
@@ -71,6 +81,7 @@ export async function handleP16Workflows(request, env) {
       last_run: lastRun,
       failure_count_24h: failureCount,
       phases: phaseStatus,
+      phase_metrics_basis: "aggregate only (queue_depth, last_run, failure_count_24h); per-phase status/latency not separately instrumented",
       bottlenecks: failureCount > 3 ? ["customer_notification"] : [],
       efficiency_pct: Math.max(0, 100 - failureCount * 5),
     },
@@ -201,6 +212,19 @@ export async function handleP16Analytics(request, env) {
     _kv(kv, "analytics:api_calls_24h", 0),
   ]);
 
+  // PRODUCTION-TRUTH FIX (post-launch platform audit): mean_detection_time_min,
+  // mean_response_time_min, mrr_trend, escalation_rate_pct, automation_rate_pct,
+  // sla_compliance_pct, platform_uptime_pct, security_posture, risk_trend, and
+  // roi_multiplier were hardcoded constants with no backing KV key or
+  // computation anywhere in this file -- the exact same class of bug already
+  // fixed in handleP16Health() immediately above (v185.2 FIX, Fortune-500
+  // audit) for business_health/customer_health/commercial_health/
+  // executive_health, just missed in this sibling function. A customer
+  // polling this live, authenticated /api/v1/analytics/enterprise endpoint
+  // would always see "strong" security posture, "decreasing" risk, and a
+  // fixed 99.8% uptime regardless of actual state. Reporting not_available
+  // rather than a fabricated figure, consistent with that same fix and the
+  // platform's established policy (Dark Web Monitor, SLA Certificate).
   return _jsonResp({
     generated_at: _now(),
     component: "enterprise-analytics",
@@ -209,33 +233,38 @@ export async function handleP16Analytics(request, env) {
       threat_kpis: {
         total_indicators: feedStats.total || 0,
         critical_alerts_24h: feedStats.critical || 0,
-        mean_detection_time_min: 4.2,
-        mean_response_time_min: 12.8,
+        mean_detection_time_min: null,
+        mean_response_time_min: null,
       },
       commercial_kpis: {
         api_calls_24h: apiCallStats || 0,
         active_api_keys: usageData.active_keys || 0,
         trial_conversions_7d: usageData.trial_conversions || 0,
-        mrr_trend: "stable",
+        mrr_trend: "not_available",
       },
       soc_kpis: {
         incidents_open: usageData.open_incidents || 0,
         incidents_closed_24h: usageData.closed_incidents || 0,
-        escalation_rate_pct: 8.3,
-        automation_rate_pct: 67.4,
+        escalation_rate_pct: null,
+        automation_rate_pct: null,
       },
       mssp_kpis: {
         managed_tenants: usageData.mssp_tenants || 0,
         tickets_24h: usageData.mssp_tickets || 0,
-        sla_compliance_pct: 98.1,
+        sla_compliance_pct: null,
       },
       executive_kpis: {
-        platform_uptime_pct: 99.8,
-        security_posture: "strong",
-        risk_trend: "decreasing",
-        roi_multiplier: 4.2,
+        platform_uptime_pct: null,
+        security_posture: "not_available",
+        risk_trend: "not_available",
+        roi_multiplier: null,
       },
       trend_window: "7d",
+      kpis_not_yet_measured: [
+        "mean_detection_time_min", "mean_response_time_min", "mrr_trend",
+        "escalation_rate_pct", "automation_rate_pct", "sla_compliance_pct",
+        "platform_uptime_pct", "security_posture", "risk_trend", "roi_multiplier",
+      ],
     },
     reuses: ["P10 Executive Intelligence", "P8 API Ecosystem", "ANALYTICS_KV"],
   });
