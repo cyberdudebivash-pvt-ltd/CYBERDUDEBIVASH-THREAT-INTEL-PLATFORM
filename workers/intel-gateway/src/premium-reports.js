@@ -426,6 +426,7 @@ export async function handlePremiumReport(request, env, auth, rid) {
       pricing_url:      "https://intel.cyberdudebivash.com/pricing.html",
       report_ttl_days:  REPORT_CONFIG.REPORT_TTL_DAYS,
       pdf_download_url: `https://intel.cyberdudebivash.com/api/reports/${reportId}/pdf`,
+      csv_download_url: `https://intel.cyberdudebivash.com/api/reports/${reportId}/csv`,
       json_download_url:`https://intel.cyberdudebivash.com/api/reports/${reportId}`,
       export_formats:   ["json", "csv", "pdf"],
       contact:          "root@cyberdudebivash.in",
