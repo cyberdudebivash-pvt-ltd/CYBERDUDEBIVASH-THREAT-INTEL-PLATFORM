@@ -5789,6 +5789,16 @@ async function handleRequest(request, env, ctx) {
     // and answer honestly instead of falling through to invalid_report_id.
     const isPdfRequest = rawSegment.endsWith("/pdf");
     if (isPdfRequest) rawSegment = rawSegment.slice(0, -"/pdf".length);
+    // PRODUCTION-TRUTH FIX (release hardening): premium-reports.js's
+    // export_formats always listed "csv" alongside "json"/"pdf" on this
+    // paid ($49/report, $149/mo) product, but unlike pdf_download_url there
+    // was no csv_download_url and no route at all -- a customer following
+    // the advertised format list to a URL that doesn't exist, not even a
+    // 501. Now advertises csv_download_url (premium-reports.js) and
+    // answers it the same honest way pdf already is, rather than leaving
+    // it silently unreachable.
+    const isCsvRequest = rawSegment.endsWith("/csv");
+    if (isCsvRequest) rawSegment = rawSegment.slice(0, -"/csv".length);
     let reportId;
     try {
       reportId = decodeURIComponent(rawSegment);
@@ -5801,6 +5811,13 @@ async function handleRequest(request, env, ctx) {
       return jsonResp({
         error:      "not_yet_available",
         message:    "PDF export is not yet available for this report. Use the JSON format at GET /api/reports/{id}.",
+        request_id: crypto.randomUUID(),
+      }, 501);
+    }
+    if (isCsvRequest) {
+      return jsonResp({
+        error:      "not_yet_available",
+        message:    "CSV export is not yet available for this report. Use the JSON format at GET /api/reports/{id}.",
         request_id: crypto.randomUUID(),
       }, 501);
     }
