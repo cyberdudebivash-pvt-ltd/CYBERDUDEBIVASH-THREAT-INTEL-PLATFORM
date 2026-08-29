@@ -111,7 +111,7 @@ import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_
 // no silent removal of an existing export) -- the canonical implementation
 // now lives in subscription-lifecycle.js; see that file's header comment.
 export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES };
-const PLATFORM_VERSION    = "184.0";
+const PLATFORM_VERSION    = "200.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
 const BRUTE_FORCE_TTL     = 900;          // 15-minute lockout (seconds)
@@ -405,8 +405,30 @@ async function resolveAuth(request, env) {
     if (bf.locked) {
       return { tier: TIERS.FREE, key: null, sub: null, error: "rate_limited" };
     }
+    // v200.0 FIX: API_KEYS_KV.get() throwing (genuine KV outage) and it
+    // resolving to null (key genuinely not found) used to hit the same
+    // catch-all below -- both fell through to recordAuthFailure() +
+    // "invalid_key". checkRateLimit/checkBruteForce/recordAuthFailure all
+    // fail OPEN on a KV error (see their own try/catch above) so a KV blip
+    // can't turn into a hard outage, but this path did the opposite: it
+    // turned a KV blip into a recorded auth failure for every legitimate
+    // paying customer whose request landed during the window, and 5 of
+    // those (very plausible for one customer's normal retry/polling
+    // behavior during a sustained blip) brute-force-locks their IP for 15
+    // minutes -- outliving the KV blip itself. Can't grant a paid tier
+    // without being able to read the record either way (no fail-open-to-
+    // premium risk introduced), but "we couldn't check" and "we checked and
+    // it's wrong" are different failure modes and now get different
+    // handling and a distinct error code (mirrors the existing
+    // "rate_limited" -> 429 special case below, not folded into generic
+    // "invalid_key" -> 401).
+    let record;
     try {
-      const record = await env.API_KEYS_KV.get(raw, "json");
+      record = await env.API_KEYS_KV.get(raw, "json");
+    } catch (_) {
+      return { tier: TIERS.FREE, key: null, sub: null, error: "auth_service_unavailable" };
+    }
+    try {
       if (record) {
         // v185.5 (Mission Phase 1): subscription_status is optional on the
         // record -- absent means "active" (every key provisioned before
@@ -4295,6 +4317,18 @@ async function handleRequest(request, env, ctx) {
     // so a locked-out IP sees the same signal everywhere in the gateway.
     if (auth.error === "rate_limited") {
       return jsonResp({ error: "Too many failed attempts", retry_after: 60 }, 429, { "Retry-After": "60" });
+    }
+    // v200.0 FIX: a genuine API_KEYS_KV outage (resolveAuth's error, not a
+    // wrong/unknown key) is an infra fault on our side, not a bad credential
+    // -- 401 "Unauthorized" tells a paying customer their key is wrong when
+    // it isn't, and could prompt an unnecessary key rotation. 503 + Retry-After
+    // matches how this same distinction is already signalled for rate_limited.
+    if (auth.error === "auth_service_unavailable") {
+      return jsonResp(
+        { error: "Service Unavailable", reason: auth.error, hint: "Auth backend is temporarily unavailable -- your credential was not rejected, retry shortly." },
+        503,
+        { "Retry-After": "10" }
+      );
     }
     return jsonResp(
       { error: "Unauthorized", reason: auth.error, hint: "Provide a valid X-API-Key header or Authorization: Bearer <token>." },

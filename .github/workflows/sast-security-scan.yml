@@ -83,6 +83,7 @@ on:
       - "requirements-ci-light.txt"
       - "api/requirements.txt"
       - "syndicate/requirements_syndicate.txt"
+      - "platform/services/*/requirements.txt"
       - ".github/workflows/sast-security-scan.yml"
   pull_request:
     branches: [main, develop]
@@ -93,6 +94,7 @@ on:
       - "requirements-ci-light.txt"
       - "api/requirements.txt"
       - "syndicate/requirements_syndicate.txt"
+      - "platform/services/*/requirements.txt"
       - ".github/workflows/sast-security-scan.yml"
   schedule:
     - cron: "0 2 * * *"
@@ -286,6 +288,30 @@ jobs:
           # syndicate.yml) both carried pre-fix floors with no gate ever
           # scanning them. Bumped in-place to the same already-audited
           # versions from requirements.txt and added here.
+          #
+          # v200.0 FIX: same gap again, the 9 platform/services/*/requirements.txt
+          # files -- each installed into its own container image and pushed to
+          # GHCR by platform-build-deploy.yml's build-services matrix (agentshield,
+          # ai-engine, api-gateway, billing-engine, exec-risk, intel-core,
+          # intel-exchange, soc-automation, surfacewatch), i.e. genuinely live
+          # production surfaces -- had no gate ever scanning them either, on push,
+          # PR, or the unrestricted daily schedule. Verified clean via a direct
+          # pip-audit run against each (0 vulnerabilities) before adding; this
+          # closes the coverage gap so future drift gets caught, it doesn't fix
+          # a current finding.
+          #
+          # These 9 files can't just join the -r list above: they independently
+          # pin uvicorn[standard]==0.30.1 (all 9 agree with each other) against
+          # requirements.txt's uvicorn[standard]==0.52.4 -- pip-audit's -r union
+          # does a single combined `pip install --dry-run` across every -r file,
+          # so mixing the two groups fails with ResolutionImpossible before any
+          # vulnerability scan even runs. That's also the technically correct
+          # model, not just a workaround: these are 9 independent Docker images,
+          # never actually installed into one shared environment in production.
+          # Scanned as a second, separately-resolvable union instead, then both
+          # reports are merged into the single pip-audit-report.json the parse
+          # step and artifact upload below already expect, so neither needs to
+          # change.
           set +e
           pip-audit \
             --requirement requirements.txt \
@@ -293,12 +319,39 @@ jobs:
             --requirement api/requirements.txt \
             --requirement syndicate/requirements_syndicate.txt \
             --format json \
-            --output pip-audit-report.json \
+            --output pip-audit-report-core.json \
             --ignore-vuln GHSA-wj6h-64fc-37mp \
             --skip-editable
-          echo $? > /tmp/pip_audit_exit_code
+          CORE_EXIT=$?
+
+          pip-audit \
+            --requirement platform/services/agentshield/requirements.txt \
+            --requirement platform/services/ai-engine/requirements.txt \
+            --requirement platform/services/api-gateway/requirements.txt \
+            --requirement platform/services/billing-engine/requirements.txt \
+            --requirement platform/services/exec-risk/requirements.txt \
+            --requirement platform/services/intel-core/requirements.txt \
+            --requirement platform/services/intel-exchange/requirements.txt \
+            --requirement platform/services/soc-automation/requirements.txt \
+            --requirement platform/services/surfacewatch/requirements.txt \
+            --format json \
+            --output pip-audit-report-services.json \
+            --skip-editable
+          SERVICES_EXIT=$?
+
+          jq -s '{dependencies: ((.[0].dependencies // []) + (.[1].dependencies // []))}' \
+            pip-audit-report-core.json pip-audit-report-services.json \
+            > pip-audit-report.json 2>/dev/null \
+            || cp pip-audit-report-core.json pip-audit-report.json 2>/dev/null \
+            || echo '{"dependencies":[]}' > pip-audit-report.json
+
+          PIP_AUDIT_EXIT=$CORE_EXIT
+          if [ "$SERVICES_EXIT" -gt "$PIP_AUDIT_EXIT" ]; then
+            PIP_AUDIT_EXIT=$SERVICES_EXIT
+          fi
+          echo "$PIP_AUDIT_EXIT" > /tmp/pip_audit_exit_code
           set -e
-          echo "pip-audit exit code: $(cat /tmp/pip_audit_exit_code)"
+          echo "pip-audit exit code: core=$CORE_EXIT services=$SERVICES_EXIT combined=$PIP_AUDIT_EXIT"
           echo "pip-audit scan complete"
 
       - name: Parse pip-audit results

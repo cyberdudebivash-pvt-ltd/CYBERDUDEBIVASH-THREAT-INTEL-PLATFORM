@@ -101,12 +101,17 @@ jobs:
     # at the 15min mark, job cancelled with no secrets finding ever emitted --
     # not a detected leak, a starved budget. That means this gate had been
     # silently producing no result on both observed runs, not "no secrets found".
-    # 30min is expected to be sufficient at current repo size; confirm with this run
-    # and revisit if it grows
-    # into that ceiling again (scoping gitleaks to just the new commits in
-    # each push/PR via --log-opts, instead of the full history every time,
-    # is the real long-term fix -- not done here to keep this change to the
-    # one line the timeout defect actually needs).
+    # 30min was set as an interim ceiling, with the real long-term fix (scoping
+    # gitleaks to just the new commits via --log-opts, instead of replaying
+    # full history every run) deferred at the time.
+    #
+    # v200.0 FIX: the 30min ceiling itself got starved on PR #265 (job
+    # cancelled at 30:16 -- same "no verdict" failure mode as #261), confirming
+    # this comment's own prediction. Implemented the deferred fix in the
+    # gitleaks step below: --log-opts now scopes each scan to just the commits
+    # introduced by the current push/PR instead of the full history, falling
+    # back to a full --all scan only when there's no valid base commit to diff
+    # against. timeout-minutes stays at 30 as a safety net for that fallback.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6.0.2
@@ -154,9 +159,33 @@ jobs:
             "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz" \
             | tar -xz -C /tmp gitleaks 2>/dev/null \
             || { echo "gitleaks download failed — skipping secret scan"; exit 0; }
+
+          # Scope the scan to just the commits this push/PR introduces instead
+          # of replaying the whole repo history every run -- see the
+          # timeout-minutes comment above for why (full-history scans were
+          # getting starved by the 30min ceiling). Falls back to a full --all
+          # scan when there's no valid base commit to diff against (e.g. a
+          # brand-new branch, or a `before` SHA this shallow-of-history-minus-0
+          # checkout can't resolve), so coverage never silently narrows.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+          fi
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BASE_SHA" 2>/dev/null; then
+            LOG_OPTS="${BASE_SHA}..${HEAD_SHA}"
+          else
+            echo "::notice::gitleaks: no valid base commit for an incremental scan — falling back to full history"
+            LOG_OPTS="--all"
+          fi
+          echo "gitleaks --log-opts: $LOG_OPTS"
+
           /tmp/gitleaks detect \
             --config .gitleaks.toml \
             --source . \
+            --log-opts="$LOG_OPTS" \
             --log-level warn \
             --redact
           GITLEAKS_EXIT=$?
