@@ -94,7 +94,20 @@ jobs:
   security-scan:
     name: Security Scanning
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # v185.6 FIX: was timeout-minutes: 15. gitleaks detect (no --no-git) scans
+    # full commit history by default, and checkout uses fetch-depth: 0 for the
+    # same reason -- both grow with the repo. Confirmed on PR #261 (two
+    # consecutive runs, same commit): checkout ~4min + gitleaks still mid-scan
+    # at the 15min mark, job cancelled with no secrets finding ever emitted --
+    # not a detected leak, a starved budget. That means this gate had been
+    # silently producing no result on both observed runs, not "no secrets found".
+    # 30min is expected to be sufficient at current repo size; confirm with this run
+    # and revisit if it grows
+    # into that ceiling again (scoping gitleaks to just the new commits in
+    # each push/PR via --log-opts, instead of the full history every time,
+    # is the real long-term fix -- not done here to keep this change to the
+    # one line the timeout defect actually needs).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6.0.2
         with:
