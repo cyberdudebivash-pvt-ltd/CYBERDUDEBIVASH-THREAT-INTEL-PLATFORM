@@ -1231,7 +1231,7 @@ ${commercialGateBanner}
       <div><div style="font-size:13px;color:#c4d0e3;font-weight:600;">Indicators of Compromise extracted</div><div style="font-size:12px;color:#4b5563;margin-top:3px;">IOC details available in STIX export. Use SENTINEL APEX STIX/TAXII feed for machine-readable consumption.</div></div>
     </div>`}
     <div style="margin-top:12px;padding:10px 14px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);border-radius:5px;font-size:12px;color:#374151;font-family:monospace;">
-      ? STIX 2.1 bundle available via TAXII endpoint &nbsp;*&nbsp; MISP export: <a href="/api/exports/feed.misp.json" style="color:#374151;">/api/exports/feed.misp.json</a>
+      ? STIX 2.1 bundle available via TAXII endpoint &nbsp;*&nbsp; MISP export: <a href="/api/misp/export" style="color:#374151;">/api/misp/export</a>
     </div>
   </div>` : ""}
 
@@ -1277,7 +1277,7 @@ ${commercialGateBanner}
     <div class="sec-title">10 * Related Resources &amp; Feeds</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
       <a href="https://intel.cyberdudebivash.com" style="padding:12px 16px;background:rgba(0,212,170,.05);border:1px solid rgba(0,212,170,.15);border-radius:6px;display:block;"><div style="font-family:monospace;font-size:10px;color:#00d4aa;font-weight:800;letter-spacing:1px;margin-bottom:4px;">SENTINEL APEX DASHBOARD -></div><div style="font-size:12px;color:#4b5563;">Live threat monitoring &amp; SOC console</div></a>
-      <a href="/api/exports/feed.stix.json" style="padding:12px 16px;background:rgba(139,92,246,.05);border:1px solid rgba(139,92,246,.15);border-radius:6px;display:block;"><div style="font-family:monospace;font-size:10px;color:#a78bfa;font-weight:800;letter-spacing:1px;margin-bottom:4px;">STIX 2.1 EXPORT -></div><div style="font-size:12px;color:#4b5563;">Machine-readable threat intelligence bundle</div></a>
+      <a href="/api/taxii/" style="padding:12px 16px;background:rgba(139,92,246,.05);border:1px solid rgba(139,92,246,.15);border-radius:6px;display:block;"><div style="font-family:monospace;font-size:10px;color:#a78bfa;font-weight:800;letter-spacing:1px;margin-bottom:4px;">STIX 2.1 EXPORT -></div><div style="font-size:12px;color:#4b5563;">Machine-readable threat intelligence bundle via TAXII 2.1</div></a>
       <a href="/api/reports/index.json" style="padding:12px 16px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);border-radius:6px;display:block;"><div style="font-family:monospace;font-size:10px;color:#60a5fa;font-weight:800;letter-spacing:1px;margin-bottom:4px;">REPORTS INDEX -></div><div style="font-size:12px;color:#4b5563;">Full library of 43,000+ intelligence reports</div></a>
       ${srcSafe ? `<a href="${srcSafe}" target="_blank" rel="noopener" style="padding:12px 16px;background:rgba(100,116,139,.04);border:1px solid rgba(100,116,139,.12);border-radius:6px;display:block;"><div style="font-family:monospace;font-size:10px;color:#94a3b8;font-weight:800;letter-spacing:1px;margin-bottom:4px;">ORIGINAL SOURCE -></div><div style="font-size:12px;color:#4b5563;">${srcName}</div></a>` : ""}
     </div>
