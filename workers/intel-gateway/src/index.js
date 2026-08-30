@@ -5824,6 +5824,51 @@ async function handleRequest(request, env, ctx) {
     return await handleReportGet(request, env, auth, crypto.randomUUID(), reportId);
   }
 
+  // -----------------------------------------------------------------------
+  // PRODUCTION-TRUTH FIX (v200.0 audit): ai-threat-tracker.html fetches
+  // /api/ai/tracker.json, /api/ai/health.json, /api/ai/executive-brief.json
+  // client-side on load -- but wrangler.toml routes this Worker to the
+  // entire intel.cyberdudebivash.com/api/* namespace, so those requests
+  // never reached the static Pages origin where the files actually live.
+  // Every request 404'd here instead (no handler existed for this path),
+  // so every metric on that page (AI ANOMALIES, CAMPAIGNS TRACKED, GLOBAL
+  // RISK INDEX, etc.) permanently showed the "--" loading placeholder.
+  // Confirmed this is a reachability bug, not a data bug, for tracker.json
+  // at least: gh-pages serves a copy regenerated fresh every sentinel-blogger
+  // run (verified via raw.githubusercontent.com -- generated_at within the
+  // last few hours). health.json / executive-brief.json are also reachable
+  // through this same fix but were independently found ~4 days stale on
+  // gh-pages (regenerate_engine_data.py, called every sentinel-blogger run,
+  // only writes tracker.json; health/executive-brief are meant to come from
+  // generate_ai_endpoints.py via generate-and-sync.yml's 6h schedule, which
+  // does not appear to be updating them -- a separate issue from this proxy
+  // fix, not yet root-caused). Proxy the already-deployed static file
+  // through rather than reimplementing its generation here. Filenames are
+  // whitelisted; this is not an open path-passthrough proxy.
+  // -----------------------------------------------------------------------
+  const AI_STATIC_PROXY_FILES = new Set(["tracker.json", "health.json", "executive-brief.json"]);
+  if (path.startsWith("/api/ai/") && AI_STATIC_PROXY_FILES.has(path.slice("/api/ai/".length))) {
+    if (method !== "GET") {
+      return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
+    }
+    const filename = path.slice("/api/ai/".length);
+    const upstreamUrl = `https://raw.githubusercontent.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/gh-pages/api/ai/${filename}`;
+    try {
+      const resp = await fetch(upstreamUrl, {
+        cf: { cacheEverything: true, cacheTtl: 300 },
+        headers: { "User-Agent": `SENTINEL-APEX/${PLATFORM_VERSION} (+https://intel.cyberdudebivash.com)` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!resp.ok) {
+        return jsonResp({ error: "upstream_unavailable", filename, upstream_status: resp.status, request_id: crypto.randomUUID() }, 502, { "Cache-Control": "no-store" });
+      }
+      const data = await resp.json();
+      return jsonResp(data, 200, { "Cache-Control": "public, max-age=300" });
+    } catch (e) {
+      return jsonResp({ error: "upstream_unavailable", filename, message: e.message, request_id: crypto.randomUUID() }, 502, { "Cache-Control": "no-store" });
+    }
+  }
+
   // --- 404 --------------------------------------------------------------------
   return jsonResp({
     error: "Not found", path,
