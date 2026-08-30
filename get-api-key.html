@@ -295,7 +295,7 @@
           <h3>WHAT HAPPENS NEXT</h3>
           <div class="step">
             <div class="step-num">1</div>
-            <div>Check your inbox at <strong id="confirm-email"></strong> — API key delivered within 2 hours</div>
+            <div id="step1-text">Check your inbox at <strong id="confirm-email"></strong> — API key delivered within 2 hours</div>
           </div>
           <div class="step">
             <div class="step-num">2</div>
@@ -336,7 +336,7 @@
       </div>
       <div class="timeline-item">
         <div class="timeline-dot">~1m</div>
-        <div class="timeline-text"><strong>Email delivered</strong><span>API key + docs link sent</span></div>
+        <div class="timeline-text" id="timeline-step2"><strong>Email delivered</strong><span>API key + docs link sent</span></div>
       </div>
       <div class="timeline-item">
         <div class="timeline-dot">~5m</div>
@@ -580,6 +580,13 @@ function handleSubmit(e) {
     var val = document.getElementById('instant-key-value');
     if (val) val.textContent = apiKey;
     if (box) box.style.display = 'block';
+    // Instant keys don't wait on email delivery -- correct the static
+    // "check your inbox" / "~1m: email delivered" copy above, which was
+    // written for the manual-provisioning (paid) path only.
+    var step1 = document.getElementById('step1-text');
+    if (step1) step1.innerHTML = 'Your key is active now (shown above) — no email wait required.';
+    var timelineStep2 = document.getElementById('timeline-step2');
+    if (timelineStep2) timelineStep2.innerHTML = '<strong>Key activated</strong><span>Ready to use immediately</span>';
   }
 
   function mailtoFallback() {
