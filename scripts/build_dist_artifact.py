@@ -168,6 +168,49 @@ HTML_EXCLUDE_PREFIXES = {
     "SENTINEL_APEX_ENTERPRISE",
     "SENTINEL_APEX_P0", "dashboard-api-sync", "gh_pages_",
     "intel_card_enhanced", "index.html.bak", "index.html.pre",
+    # v200.1 P0 FIX: same class of bug as SENTINEL-APEX-GLOBAL above -- three
+    # more internal-only files with filenames that didn't match any existing
+    # prefix, confirmed LIVE on production (fetched and read their actual
+    # rendered content, not just filename pattern-matching) before this fix:
+    #   - SENTINEL-APEX-PRODUCTION-BACKLOG.html: an internal engineering
+    #     backlog/maturity roadmap with P0-P3 priority pills.
+    #   - SENTINEL-APEX-CEO-CTO-CISO-EXECUTIVE-AUDIT-REPORT-v161.html: an
+    #     internal executive audit report.
+    #   - sentinel-master-ops-center.html: an internal business-operations
+    #     dashboard (ARR, named at-risk accounts, renewal pipeline, support
+    #     ticket detail) -- unauthenticated and public. Whether the specific
+    #     figures on it are real or illustrative was NOT determined here;
+    #     either way this is not customer- or prospect-facing content.
+    "SENTINEL-APEX-PRODUCTION-BACKLOG",
+    "SENTINEL-APEX-CEO-CTO-CISO-EXECUTIVE-AUDIT-REPORT",
+    "sentinel-master-ops-center",
+    # v200.2 P0 FIX: same class of bug, found by a wider filename-pattern sweep
+    # (ops-center/console/intelligence/-platform naming) after the v200.1 fix
+    # above. Each confirmed LIVE and read for actual content before adding:
+    #   - customer-health-platform.html, customer-ops-center.html,
+    #     customer-success-center.html: internal Customer Success tooling
+    #     (per-account health/churn scores, "CS Team View" label, a
+    #     "Simulate +1,000 Customers" admin test control).
+    #   - monetization-ops.html, mssp-console.html: internal revenue/MSSP
+    #     admin tooling (detailed MRR/ARR/subscription breakdowns; an
+    #     "MSSP Operations Console" with tenant-provisioning UI).
+    #   - lead-intelligence.html, customer-intelligence.html,
+    #     revenue-intelligence.html: internal sales/revenue-ops tooling --
+    #     own in-page nav literally reads "... Admin". Two of the three
+    #     render all-empty ("--"/"0") placeholders live, same as the other
+    #     two currently-broken empty-metric dashboards fixed earlier this
+    #     session (PR #273) -- still internal-tool-framed regardless of
+    #     whether the data loads, so still excluded.
+    # NOT added here (kept live, deliberately -- read and judged to be
+    # legitimate customer-facing product/feature showcases rather than
+    # leaked internal tools, though worth a "sample data" disclaimer):
+    # dependency-platform.html, graph-ops-center.html,
+    # telemetry-visibility-ops.html. admin.html was also checked and is
+    # fine as-is -- it's gated behind the real ADMIN_SECRET Worker secret,
+    # not security-through-obscurity.
+    "customer-health-platform", "customer-ops-center",
+    "customer-success-center", "monetization-ops", "mssp-console",
+    "lead-intelligence", "customer-intelligence", "revenue-intelligence",
 }
 
 
