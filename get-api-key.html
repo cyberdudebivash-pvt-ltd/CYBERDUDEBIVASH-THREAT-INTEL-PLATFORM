@@ -691,6 +691,20 @@ function resetForm() {
   document.getElementById('plan-selector').style.display = 'flex';
   document.getElementById('submit-btn').disabled = false;
   document.getElementById('api-key-form').reset();
+  // showInstantKey() overwrites #step1-text's innerHTML, which destroys the
+  // nested #confirm-email element it contains -- showSuccess() (the paid/
+  // manual path) needs that element on every call. Restore the original
+  // markup here so a later request in the same page session doesn't throw
+  // on a null #confirm-email. Also reset the flow-specific panels it shows,
+  // so a second request doesn't display stale state from the first.
+  var step1 = document.getElementById('step1-text');
+  if (step1) step1.innerHTML = 'Check your inbox at <strong id="confirm-email"></strong> — API key delivered within 2 hours';
+  var timelineStep2 = document.getElementById('timeline-step2');
+  if (timelineStep2) timelineStep2.innerHTML = '<strong>Email delivered</strong><span>API key + docs link sent</span>';
+  var instantBox = document.getElementById('instant-key-box');
+  if (instantBox) instantBox.style.display = 'none';
+  var paidCta = document.getElementById('paid-cta');
+  if (paidCta) paidCta.style.display = 'none';
   selectPlan('community');
 }
 </script>

@@ -176,7 +176,7 @@ resp.raise_for_status()
 
 for adv in resp.json()["items"]:
     print(f"[{adv['severity']}] {adv['title']}")
-    print(f"  CVSS: {adv.get('cvss_score')}  EPSS: {adv.get('epss_score')}%  IOCs: {adv.get('indicator_count',0)}")
+    print(f"  CVSS: {adv.get('cvss_score')}  EPSS: {adv.get('epss_score')}%  IOCs: {adv.get('ioc_count',0)}")
 
 # Fetch Sigma rules for SIEM
 print(requests.get(f"{BASE}/feed/sigma", headers=headers).text)</pre>
@@ -188,7 +188,7 @@ async function getThreats() {
     headers: { 'X-API-Key': API_KEY }
   });
   const data = await resp.json();
-  data.items.forEach(adv => console.log(`[${adv.severity}] ${adv.title} — CVSS:${adv.cvss_score}`));
+  data.items.forEach(adv =&gt; console.log(`[${adv.severity}] ${adv.title} — CVSS:${adv.cvss_score}`));
 }
 
 // Register SIEM webhook (Enterprise+)
@@ -328,7 +328,7 @@ Invoke-RestMethod "$Base/feed/sigma" -Headers $Hdrs | Out-File sentinel_rules.ya
       "source_url": "https://cisa.gov/...",
       "actor_tag": "APT29",
       "mitre_tactics": [{ "id": "T1190", "name": "Exploit Public-Facing Application", "tactic": "Initial Access" }],
-      "indicator_count": 14,
+      "ioc_count": 14,
       "ioc_counts": { "ipv4": 6, "domain": 8 },
       "kev_present": true,
       "tlp": "TLP:CLEAR"
