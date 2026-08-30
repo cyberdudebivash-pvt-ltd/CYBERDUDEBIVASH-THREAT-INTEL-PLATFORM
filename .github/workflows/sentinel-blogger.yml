@@ -1373,6 +1373,47 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
+      # STAGE 3.1.22b: AI HEALTH / EXECUTIVE-BRIEF REGENERATOR (v200.0 audit)
+      # PRODUCTION-TRUTH FIX: api/ai/health.json and api/ai/executive-brief.json
+      # were frozen at their 2026-08-26 09:32 UTC values -- the last moment any
+      # automated pipeline could still push to main before branch protection
+      # started requiring PRs (confirmed via git log: every commit on main
+      # since is a PR merge). generate-and-sync.yml, the workflow that owns
+      # these two files, still tries `git push origin main` directly and has
+      # been failing that push on every run since -- warning-and-continuing
+      # rather than hard-failing, so nothing surfaced the staleness.
+      #
+      # This does NOT fix that push -- redirecting the ~34 workflows still
+      # pushing straight to a now-protected main is a real architecture/policy
+      # call, not a drive-by fix (see issue #274). Instead this reuses
+      # generate_ai_tracker.py (unchanged; verified directly to produce
+      # correct output) from inside THIS pipeline, which already reaches
+      # production via its gh-pages deploy (STAGE 5 below) rather than a
+      # main-branch git push. api/ is already in build_dist_artifact.py's
+      # INCLUDE_DIRS, so no further wiring is needed for these files to
+      # actually deploy once written here.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.1.22b - AI Health/Executive-Brief Regenerator (v200.0 — reachability fix)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          set +e
+          python3 scripts/generate_ai_tracker.py --out api/ai/tracker.json 2>&1
+          AIT_EXIT=$?
+          set -e
+          if [ "$AIT_EXIT" -eq 0 ]; then
+            for ENG_FILE in api/ai/health.json api/ai/executive-brief.json; do
+              if [ -f "$ENG_FILE" ]; then
+                LINES=$(wc -l < "$ENG_FILE" 2>/dev/null || echo "?")
+                echo "[PASS] ${ENG_FILE}: ${LINES} lines"
+              fi
+            done
+            echo "::notice::AI HEALTH/BRIEF: regenerated from live intel feed"
+          else
+            echo "::warning::generate_ai_tracker.py exited ${AIT_EXIT} — non-fatal, prior health/brief data retained"
+          fi
+
+      # -----------------------------------------------------------------------
       # STAGE 3.1.23: APEX AI RECOMPUTE (v185.2 -- SCORING CONTRADICTION FIX)
       # PRODUCTION-VERIFICATION FIX (2026-08-26, Fortune-500 audit finding):
       # STAGE 3.1 (enrich_feed_apex.py, which computes apex_ai.predictive_risk/
