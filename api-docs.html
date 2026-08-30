@@ -174,7 +174,7 @@ resp = requests.get(f"{BASE}/feed", headers=headers,
                     params={"limit": 10, "severity": "CRITICAL"})
 resp.raise_for_status()
 
-for adv in resp.json():
+for adv in resp.json()["items"]:
     print(f"[{adv['severity']}] {adv['title']}")
     print(f"  CVSS: {adv.get('cvss_score')}  EPSS: {adv.get('epss_score')}%  IOCs: {adv.get('ioc_count',0)}")
 
@@ -188,7 +188,7 @@ async function getThreats() {
     headers: { 'X-API-Key': API_KEY }
   });
   const data = await resp.json();
-  data.forEach(adv => console.log(`[${adv.severity}] ${adv.title} — CVSS:${adv.cvss_score}`));
+  data.items.forEach(adv =&gt; console.log(`[${adv.severity}] ${adv.title} — CVSS:${adv.cvss_score}`));
 }
 
 // Register SIEM webhook (Enterprise+)
@@ -221,9 +221,11 @@ func main() {
     resp, _ := http.DefaultClient.Do(req)
     defer resp.Body.Close()
     body, _ := io.ReadAll(resp.Body)
-    var advisories []map[string]interface{}
-    json.Unmarshal(body, &advisories)
-    for _, adv := range advisories {
+    var result struct {
+        Items []map[string]interface{} `json:"items"`
+    }
+    json.Unmarshal(body, &result)
+    for _, adv := range result.Items {
         fmt.Printf("[%s] %s — CVSS:%v\n", adv["severity"], adv["title"], adv["cvss_score"])
     }
 }</pre>
@@ -232,7 +234,7 @@ $Key  = "YOUR_API_KEY"; $Base = "https://intel.cyberdudebivash.com/api"
 $Hdrs = @{ "X-API-Key" = $Key }
 
 # Critical advisories
-Invoke-RestMethod "$Base/feed?limit=10&severity=CRITICAL" -Headers $Hdrs |
+(Invoke-RestMethod "$Base/feed?limit=10&severity=CRITICAL" -Headers $Hdrs).items |
   ForEach-Object { Write-Host "[$($_.severity)] $($_.title) CVSS:$($_.cvss_score)" }
 
 # Save Sigma rules for Microsoft Sentinel / Splunk
@@ -308,26 +310,31 @@ Invoke-RestMethod "$Base/feed/sigma" -Headers $Hdrs | Out-File sentinel_rules.ya
       <tr><td>actor</td><td>string</td><td><span class="tag opt">optional</span></td><td>Filter by threat actor name</td></tr>
     </table>
     <h3>Example Response</h3>
-    <pre>[
-  {
-    "id": "advisory-20260523-001",
-    "title": "Critical RCE in Apache HTTP Server 2.4.x",
-    "severity": "CRITICAL",
-    "risk_score": 9.1,
-    "cvss_score": 9.8,
-    "epss_score": 73.4,
-    "cve_ids": ["CVE-2026-5194"],
-    "threat_actor": "APT29",
-    "published_at": "2026-05-23T08:00:00Z",
-    "source_url": "https://cisa.gov/...",
-    "blog_url": "https://blog.cyberdudebivash.in/...",
-    "dossier_url": "https://intel.cyberdudebivash.com/dossiers/...",
-    "report_url": "https://intel.cyberdudebivash.com/reports/...",
-    "mitre_techniques": ["T1190", "T1059"],
-    "ioc_count": 14,
-    "tlp": "TLP:CLEAR"
-  }
-]</pre>
+    <p>Responses are wrapped in an envelope — advisories are under <code>items</code>, not a bare array:</p>
+    <pre>{
+  "schema_version": "1.0",
+  "generated_at": "2026-08-30T13:13:06Z",
+  "version": "v200.0",
+  "count": 182,
+  "items": [
+    {
+      "id": "intel--d93f5e9478999968ccd2dfb4",
+      "title": "Critical RCE in Apache HTTP Server 2.4.x",
+      "severity": "CRITICAL",
+      "risk_score": 9.1,
+      "cvss_score": 9.8,
+      "epss_score": 73.4,
+      "published_at": "2026-05-23T08:00:00Z",
+      "source_url": "https://cisa.gov/...",
+      "actor_tag": "APT29",
+      "mitre_tactics": [{ "id": "T1190", "name": "Exploit Public-Facing Application", "tactic": "Initial Access" }],
+      "ioc_count": 14,
+      "ioc_counts": { "ipv4": 6, "domain": 8 },
+      "kev_present": true,
+      "tlp": "TLP:CLEAR"
+    }
+  ]
+}</pre>
 
     <h2 id="stix">GET /api/stix/bundle</h2>
     <p>Returns a STIX 2.1 compliant bundle of all current threat intelligence. Compatible with all STIX-aware SIEMs.</p>

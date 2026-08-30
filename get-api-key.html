@@ -136,7 +136,7 @@
     <a href="/">Dashboard</a>
     <a href="/api-docs.html">API Docs</a>
     <a href="/pricing.html">Pricing</a>
-    <a href="/dashboard/">SOC V2</a>
+    <a href="/dashboard">SOC V2</a>
     <a href="/get-api-key.html" class="nav-cta">GET API KEY →</a>
   </div>
 </nav>
@@ -265,7 +265,7 @@
           REQUEST API ACCESS →
         </button>
         <p class="privacy-note">
-          By requesting access you agree to our <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>.<br>
+          By requesting access you agree to our <a href="/terms.html">Terms of Service</a> and <a href="/privacy.html">Privacy Policy</a>.<br>
           We never sell your data. API keys are revokable at any time.
         </p>
       </form>
@@ -295,7 +295,7 @@
           <h3>WHAT HAPPENS NEXT</h3>
           <div class="step">
             <div class="step-num">1</div>
-            <div>Check your inbox at <strong id="confirm-email"></strong> — API key delivered within 2 hours</div>
+            <div id="step1-text">Check your inbox at <strong id="confirm-email"></strong> — API key delivered within 2 hours</div>
           </div>
           <div class="step">
             <div class="step-num">2</div>
@@ -336,7 +336,7 @@
       </div>
       <div class="timeline-item">
         <div class="timeline-dot">~1m</div>
-        <div class="timeline-text"><strong>Email delivered</strong><span>API key + docs link sent</span></div>
+        <div class="timeline-text" id="timeline-step2"><strong>Email delivered</strong><span>API key + docs link sent</span></div>
       </div>
       <div class="timeline-item">
         <div class="timeline-dot">~5m</div>
@@ -403,7 +403,7 @@
     <a href="/api-docs.html">API Docs</a>
     <a href="/pricing.html">Pricing</a>
     <a href="/get-api-key.html">Get API Key</a>
-    <a href="/dashboard/">SOC V2</a>
+    <a href="/dashboard">SOC V2</a>
     <a href="mailto:enterprise@cyberdudebivash.com">Contact</a>
   </div>
   <p>&copy; 2026 CYBERDUDEBIVASH &middot; SENTINEL APEX Threat Intelligence Platform &middot; All rights reserved</p>
@@ -580,6 +580,13 @@ function handleSubmit(e) {
     var val = document.getElementById('instant-key-value');
     if (val) val.textContent = apiKey;
     if (box) box.style.display = 'block';
+    // Instant keys don't wait on email delivery -- correct the static
+    // "check your inbox" / "~1m: email delivered" copy above, which was
+    // written for the manual-provisioning (paid) path only.
+    var step1 = document.getElementById('step1-text');
+    if (step1) step1.innerHTML = 'Your key is active now (shown above) — no email wait required.';
+    var timelineStep2 = document.getElementById('timeline-step2');
+    if (timelineStep2) timelineStep2.innerHTML = '<strong>Key activated</strong><span>Ready to use immediately</span>';
   }
 
   function mailtoFallback() {
@@ -684,6 +691,20 @@ function resetForm() {
   document.getElementById('plan-selector').style.display = 'flex';
   document.getElementById('submit-btn').disabled = false;
   document.getElementById('api-key-form').reset();
+  // showInstantKey() overwrites #step1-text's innerHTML, which destroys the
+  // nested #confirm-email element it contains -- showSuccess() (the paid/
+  // manual path) needs that element on every call. Restore the original
+  // markup here so a later request in the same page session doesn't throw
+  // on a null #confirm-email. Also reset the flow-specific panels it shows,
+  // so a second request doesn't display stale state from the first.
+  var step1 = document.getElementById('step1-text');
+  if (step1) step1.innerHTML = 'Check your inbox at <strong id="confirm-email"></strong> — API key delivered within 2 hours';
+  var timelineStep2 = document.getElementById('timeline-step2');
+  if (timelineStep2) timelineStep2.innerHTML = '<strong>Email delivered</strong><span>API key + docs link sent</span>';
+  var instantBox = document.getElementById('instant-key-box');
+  if (instantBox) instantBox.style.display = 'none';
+  var paidCta = document.getElementById('paid-cta');
+  if (paidCta) paidCta.style.display = 'none';
   selectPlan('community');
 }
 </script>
