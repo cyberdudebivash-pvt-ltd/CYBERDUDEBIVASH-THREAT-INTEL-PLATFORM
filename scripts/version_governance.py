@@ -216,6 +216,296 @@ REGEX_TARGETS = [
     ),
     # data/health/sla_status.json -- version field (governance: keep current)
     # Handled by update_version_json below.
+
+    # -------------------------------------------------------------------------
+    # v200.0 live-display audit (this file's own --report showed "all
+    # consistent" while the sites below were still showing v185.0/v184.0 as
+    # the CURRENT version -- these targets did not exist yet, so nothing
+    # flagged the drift). Purely additive: no existing target above is
+    # modified. Covers exactly the literal-text and JS-fallback locations a
+    # manual audit found still live in production, so the next version bump
+    # cannot silently miss them the same way.
+    # -------------------------------------------------------------------------
+    # index.html -- JSON-LD structured-data "name" field
+    (
+        "index.html",
+        r'("name": "CYBERDUDEBIVASH\\u00ae SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?(")',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # index.html -- #platform-version span (brand-sub tagline)
+    (
+        "index.html",
+        r'(letter-spacing:1px;">)v[0-9]+\.[0-9]+(?:\.[0-9]+)?(</span> // AI-Powered)',
+        r'\g<1>v{VER}\g<2>',
+    ),
+    # index.html -- #engine-version-number span. This is the exact element
+    # the live "v185.0" bug was reported against (ENGINE status strip); the
+    # span itself was added by the fix that finally wired it to the real
+    # version source instead of a second, independent, silently-stale value.
+    (
+        "index.html",
+        r'(id="engine-version-number">)[0-9]+\.[0-9]+(?:\.[0-9]+)?(</span>)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # index.html -- #footer-version span
+    (
+        "index.html",
+        r'(id="footer-version" style="color:var\(--accent\);font-size:11px;letter-spacing:2px;">)v[0-9]+\.[0-9]+(?:\.[0-9]+)?(</span>)',
+        r'\g<1>v{VER}\g<2>',
+    ),
+    # index.html -- #footer-version-copy span
+    (
+        "index.html",
+        r'(id="footer-version-copy">SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?(</span>)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # index.html -- CURRENT_VER JS fallback inside _syncEngineVersion(). This
+    # constant was the actual root cause of the live v185.0 bug: a second
+    # fallback independent of the PLATFORM_VERSION constant already governed
+    # above, left stale while PLATFORM_VERSION was correctly updated.
+    (
+        "index.html",
+        r"(const CURRENT_VER = ')[0-9]+\.[0-9]+(?:\.[0-9]+)?(')",
+        r"\g<1>{VER}\g<2>",
+    ),
+    # status.html -- page-sub header text
+    (
+        "status.html",
+        r'(Real-time health monitoring — CYBERDUDEBIVASH SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # status.html -- footer
+    (
+        "status.html",
+        r'(CYBERDUDEBIVASH® SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( — System Status)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # status.html -- fetchHealth() JS fallback. Guards the same bug class as
+    # CURRENT_VER above: api.intel.cyberdudebivash.com (the old fetch target)
+    # does not resolve in DNS at all, so this fallback rendered on every
+    # single page load, unconditionally labeled "LIVE" in green.
+    (
+        "status.html",
+        r"(\(d\.version\|\|')[0-9]+\.[0-9]+(?:\.[0-9]+)?('\))",
+        r"\g<1>{VER}\g<2>",
+    ),
+    # about.html -- footer
+    (
+        "about.html",
+        r'(CYBERDUDEBIVASH SENTINEL APEX - PROFESSIONAL THREAT INTELLIGENCE PLATFORM - v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # alternative-to-mandiant.html -- footer
+    (
+        "alternative-to-mandiant.html",
+        r'(All Rights Reserved\. SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # alternative-to-recorded-future.html -- footer
+    (
+        "alternative-to-recorded-future.html",
+        r'(All Rights Reserved\. SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # pricing.html -- footer (same copy as the two "alternative-to-" pages)
+    (
+        "pricing.html",
+        r'(All Rights Reserved\. SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # api-docs.html -- <title> tag (additive: the pre-existing HTML_TITLE_TARGETS
+    # entry for this file was written for an earlier title format that no
+    # longer exists -- confirmed via --report showing "pattern not found" on
+    # every run -- so it is left in place harmlessly and this covers the
+    # real current title instead of editing that dead entry)
+    (
+        "api-docs.html",
+        r'(<title>API Reference v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( — CYBERDUDEBIVASH® SENTINEL APEX \| STIX 2\.1 · TAXII · IOC · Threat Intelligence API</title>)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # api-docs.html -- meta description
+    (
+        "api-docs.html",
+        r'(<meta name="description" content="SENTINEL APEX API v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( — Real-time threat intelligence API\.)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # api-docs.html -- og:title
+    (
+        "api-docs.html",
+        r'(<meta property="og:title" content="SENTINEL APEX API v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( — Threat Intelligence API">)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # api-docs.html -- twitter:title
+    (
+        "api-docs.html",
+        r'(<meta name="twitter:title" content="SENTINEL APEX API v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( — Threat Intelligence API">)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # api-docs.html -- JSON-LD "name" field
+    (
+        "api-docs.html",
+        r'("name": "SENTINEL APEX Threat Intelligence API v)[0-9]+\.[0-9]+(?:\.[0-9]+)?(",)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # api-docs.html -- logo <span> (additive, same rationale as the <title> entry above)
+    (
+        "api-docs.html",
+        r'(<span>API Reference v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( · STIX 2\.1 · TAXII 2\.1</span>)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # api-docs.html -- H1 small-tag version
+    (
+        "api-docs.html",
+        r'(<h1>SENTINEL APEX API Reference <small style="font-size:\.55em;color:#546e7a;font-weight:400">)v[0-9]+\.[0-9]+(?:\.[0-9]+)?(</small></h1>)',
+        r'\g<1>v{VER}\g<2>',
+    ),
+    # api-docs.html -- footer
+    (
+        "api-docs.html",
+        r'(GSTIN: 21ARKPN8270G1ZP · SENTINEL APEX API v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # case-studies.html -- footer
+    (
+        "case-studies.html",
+        r'(CYBERDUDEBIVASH PRIVATE LIMITED &nbsp;·&nbsp; SENTINEL APEX &nbsp;·&nbsp; v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # testimonials.html -- footer (identical copy to case-studies.html)
+    (
+        "testimonials.html",
+        r'(CYBERDUDEBIVASH PRIVATE LIMITED &nbsp;·&nbsp; SENTINEL APEX &nbsp;·&nbsp; v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # compare.html -- vendor-strip tier chip
+    (
+        "compare.html",
+        r'(<div class="vc-tier">API-first CTI · v)[0-9]+\.[0-9]+(?:\.[0-9]+)?(</div>)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # enterprise-procurement-pack.html -- <title>
+    (
+        "enterprise-procurement-pack.html",
+        r'(<title>Enterprise Procurement Pack — SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?(</title>)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # enterprise-procurement-pack.html -- hero-meta Document Version
+    (
+        "enterprise-procurement-pack.html",
+        r'(Document Version: v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # enterprise-procurement-pack.html -- info-card Version value
+    (
+        "enterprise-procurement-pack.html",
+        r'(<div class="ic-val">v)[0-9]+\.[0-9]+(?:\.[0-9]+)?(</div>)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # enterprise-procurement-pack.html -- Data Flow Architecture code block
+    (
+        "enterprise-procurement-pack.html",
+        r'(SENTINEL APEX — Data Flow Architecture v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # enterprise-procurement-pack.html -- RFP template PLATFORM VERSION line.
+    # Only the version number is governed; the trailing "(Month Year)" is a
+    # separate human editorial decision each release, not something this
+    # script should invent on its own.
+    (
+        "enterprise-procurement-pack.html",
+        r'(PLATFORM VERSION: v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( \()',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # enterprise-procurement-pack.html -- footer
+    (
+        "enterprise-procurement-pack.html",
+        r'(© 2026 CYBERDUDEBIVASH® SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( &nbsp;&middot;&nbsp; GSTIN)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # executive-briefing.html -- footer
+    (
+        "executive-briefing.html",
+        r'(© 2026 CYBERDUDEBIVASH® SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( · GSTIN: 21ARKPN8270G1ZP)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # mssp-partner-onboarding.html -- <title>
+    (
+        "mssp-partner-onboarding.html",
+        r'(<title>MSSP Partner Onboarding — SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?(</title>)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # mssp-partner-onboarding.html -- hero-badge
+    (
+        "mssp-partner-onboarding.html",
+        r'(MSSP PARTNER ONBOARDING GUIDE v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # mssp-partner-onboarding.html -- footer
+    (
+        "mssp-partner-onboarding.html",
+        r'(© 2026 CYBERDUDEBIVASH® SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( &nbsp;·&nbsp; GSTIN)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # mssp.html -- hero-badge
+    (
+        "mssp.html",
+        r'(🏢 MSSP PARTNER PROGRAM · v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # mssp.html -- footer
+    (
+        "mssp.html",
+        r'(CYBERDUDEBIVASH® SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( · MSSP PARTNER PROGRAM)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # payment-confirmation.html -- footer
+    (
+        "payment-confirmation.html",
+        r'(CyberDudeBivash Pvt\. Ltd\. &mdash; SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( &mdash; GSTIN)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # payment-confirmation.html -- JS-built receipt-text array line
+    (
+        "payment-confirmation.html",
+        r"('SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?(',)",
+        r"\g<1>{VER}\g<2>",
+    ),
+    # reference-architecture.html -- hero-sub
+    (
+        "reference-architecture.html",
+        r'(MSSP multi-tenant topology\. v)[0-9]+\.[0-9]+(?:\.[0-9]+)?(\.</p>)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # reference-architecture.html -- footer
+    (
+        "reference-architecture.html",
+        r'(© 2026 CYBERDUDEBIVASH® SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # referral.html -- footer
+    (
+        "referral.html",
+        r'(© 2026 CYBERDUDEBIVASH® SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # security-compliance.html -- <title>
+    (
+        "security-compliance.html",
+        r'(<title>Security &amp; Compliance — SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?(</title>)',
+        r'\g<1>{VER}\g<2>',
+    ),
+    # security-compliance.html -- hero-badge
+    (
+        "security-compliance.html",
+        r'(⬡ SECURITY &amp; COMPLIANCE v)[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+        r'\g<1>{VER}',
+    ),
+    # security-compliance.html -- footer
+    (
+        "security-compliance.html",
+        r'(© 2026 CYBERDUDEBIVASH® SENTINEL APEX v)[0-9]+\.[0-9]+(?:\.[0-9]+)?( · GSTIN)',
+        r'\g<1>{VER}\g<2>',
+    ),
 ]
 
 # HTML targets with simple title tag governance
