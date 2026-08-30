@@ -168,6 +168,22 @@ HTML_EXCLUDE_PREFIXES = {
     "SENTINEL_APEX_ENTERPRISE",
     "SENTINEL_APEX_P0", "dashboard-api-sync", "gh_pages_",
     "intel_card_enhanced", "index.html.bak", "index.html.pre",
+    # v200.1 P0 FIX: same class of bug as SENTINEL-APEX-GLOBAL above -- three
+    # more internal-only files with filenames that didn't match any existing
+    # prefix, confirmed LIVE on production (fetched and read their actual
+    # rendered content, not just filename pattern-matching) before this fix:
+    #   - SENTINEL-APEX-PRODUCTION-BACKLOG.html: an internal engineering
+    #     backlog/maturity roadmap with P0-P3 priority pills.
+    #   - SENTINEL-APEX-CEO-CTO-CISO-EXECUTIVE-AUDIT-REPORT-v161.html: an
+    #     internal executive audit report.
+    #   - sentinel-master-ops-center.html: an internal business-operations
+    #     dashboard (ARR, named at-risk accounts, renewal pipeline, support
+    #     ticket detail) -- unauthenticated and public. Whether the specific
+    #     figures on it are real or illustrative was NOT determined here;
+    #     either way this is not customer- or prospect-facing content.
+    "SENTINEL-APEX-PRODUCTION-BACKLOG",
+    "SENTINEL-APEX-CEO-CTO-CISO-EXECUTIVE-AUDIT-REPORT",
+    "sentinel-master-ops-center",
 }
 
 
