@@ -114,7 +114,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   <div class="page-header">
     <div class="status-overall"><span class="dot"></span><span class="label">All Systems Operational</span></div>
     <h1 class="page-title">System Status</h1>
-    <p class="page-sub">Real-time health monitoring — CYBERDUDEBIVASH SENTINEL APEX v185.0</p>
+    <p class="page-sub">Real-time health monitoring — CYBERDUDEBIVASH SENTINEL APEX v200.0</p>
     <div class="last-updated" id="last-updated">Initializing...</div>
     <div id="live-health-badge" style="margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.5px">Loading live API health...</div>
   </div>
@@ -198,7 +198,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 </div>
 
 <div class="footer">
-  <div>CYBERDUDEBIVASH® SENTINEL APEX v185.0 — System Status</div>
+  <div>CYBERDUDEBIVASH® SENTINEL APEX v200.0 — System Status</div>
   <div><a href="https://intel.cyberdudebivash.com">Platform</a> · <a href="https://intel.cyberdudebivash.com/enterprise.html">Enterprise</a> · <a href="https://intel.cyberdudebivash.com/trust-center.html">Trust Center</a> · <a href="mailto:enterprise@cyberdudebivash.com">Support</a></div>
 </div>
 
@@ -209,26 +209,38 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   tick();setInterval(tick,60000);
 
   /* Live API Health Pull */
+  // PRODUCTION-TRUTH FIX (release hardening -- version audit): this fetched
+  // https://api.intel.cyberdudebivash.com/health -- a subdomain confirmed
+  // (direct DNS lookup) to not resolve at all, unlike intel.cyberdudebivash.com
+  // which does. Every single load of this page therefore hit the network
+  // error path below, not the success path -- meaning the catch() block's
+  // hardcoded "v185.0 -- 39 advisories -- 2 KEV -- 2026-06-22 17:01 UTC"
+  // wasn't a rare fallback, it was the ONLY thing this badge had ever shown,
+  // unconditionally labeled "LIVE" in green. Fixed to the real, confirmed-
+  // working endpoint, and the catch() path now reports honestly that the
+  // check failed instead of presenting frozen fabricated numbers as live.
   (function fetchHealth(){
-    fetch('https://api.intel.cyberdudebivash.com/health', {
+    fetch('https://intel.cyberdudebivash.com/api/health', {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     })
     .then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
-      if (!d) return;
       var el = document.getElementById('live-health-badge');
-      if (el) {
-        el.innerHTML = '<span style="color:var(--green);font-weight:700;">&#9679; LIVE</span>'
-          + ' &nbsp;v' + (d.version||'185.0')
-          + ' &nbsp;&middot;&nbsp; ' + (d.advisory_count||'39') + ' advisories'
-          + ' &nbsp;&middot;&nbsp; ' + (d.kev_confirmed||'2') + ' KEV'
-          + ' &nbsp;&middot;&nbsp; Last sync: ' + (d.last_sync ? d.last_sync.replace('T',' ').replace('Z',' UTC') : '—');
+      if (!el) return;
+      if (!d) {
+        el.innerHTML = '<span style="color:var(--muted);font-weight:700;">&#9679; STATUS CHECK UNAVAILABLE</span> &nbsp;Could not reach the live health endpoint just now.';
+        return;
       }
+      el.innerHTML = '<span style="color:var(--green);font-weight:700;">&#9679; LIVE</span>'
+        + ' &nbsp;v' + (d.version||'200.0')
+        + ' &nbsp;&middot;&nbsp; ' + (d.advisory_count||'&mdash;') + ' advisories'
+        + ' &nbsp;&middot;&nbsp; ' + (d.kev_confirmed||'&mdash;') + ' KEV'
+        + ' &nbsp;&middot;&nbsp; Last sync: ' + (d.last_sync ? d.last_sync.replace('T',' ').replace('Z',' UTC') : '&mdash;');
     })
     .catch(function(){
       var el = document.getElementById('live-health-badge');
-      if (el) el.innerHTML = '<span style="color:var(--green);font-weight:700;">&#9679; LIVE</span> &nbsp;v185.0 &nbsp;&middot;&nbsp; 39 advisories &nbsp;&middot;&nbsp; 2 KEV &nbsp;&middot;&nbsp; 2026-06-22 17:01 UTC';
+      if (el) el.innerHTML = '<span style="color:var(--muted);font-weight:700;">&#9679; STATUS CHECK UNAVAILABLE</span> &nbsp;Could not reach the live health endpoint just now &mdash; this does not necessarily mean the platform is down. <a href="https://intel.cyberdudebivash.com/api/health" target="_blank" rel="noopener" style="color:var(--accent)">Check directly</a>.';
     });
     setTimeout(fetchHealth, 120000);
   })();
