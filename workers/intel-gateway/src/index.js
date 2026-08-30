@@ -5860,12 +5860,14 @@ async function handleRequest(request, env, ctx) {
         signal: AbortSignal.timeout(8000),
       });
       if (!resp.ok) {
-        return jsonResp({ error: "upstream_unavailable", filename, upstream_status: resp.status, request_id: crypto.randomUUID() }, 502, { "Cache-Control": "no-store" });
+        console.error(`[api/ai proxy] ${filename}: upstream returned ${resp.status}`);
+        return jsonResp({ error: "upstream_unavailable", filename, request_id: crypto.randomUUID() }, 502, { "Cache-Control": "no-store" });
       }
       const data = await resp.json();
       return jsonResp(data, 200, { "Cache-Control": "public, max-age=300" });
     } catch (e) {
-      return jsonResp({ error: "upstream_unavailable", filename, message: e.message, request_id: crypto.randomUUID() }, 502, { "Cache-Control": "no-store" });
+      console.error(`[api/ai proxy] ${filename}: ${e && e.message ? e.message : e}`);
+      return jsonResp({ error: "upstream_unavailable", filename, request_id: crypto.randomUUID() }, 502, { "Cache-Control": "no-store" });
     }
   }
 
