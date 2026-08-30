@@ -1398,19 +1398,45 @@ jobs:
         continue-on-error: true
         run: |
           set +e
+          # NOT applying --feed api/feed.json here (CodeRabbit's suggestion,
+          # PR #275): api/feed.json is more enriched than the default
+          # data/feed.json this script picks -- confirmed regenerate_engine_data.py
+          # (the sibling step above) already prefers api/feed.baseline.json /
+          # api/feed.json for that reason -- but tested directly and
+          # api/feed.json's epss_score is a percent-formatted string (e.g.
+          # "5.58%"), which crashes generate_ai_tracker.py's
+          # float(apex.get("epss_score", ...)) with ValueError. Forcing that
+          # feed here would make this step fail every run, exactly the
+          # regression this PR exists to fix. Fixing generate_ai_tracker.py's
+          # parser to accept both formats is a real, separate change to a
+          # script another pipeline also depends on -- not folded into this
+          # PR. Left as the default (data/feed.json) search order, which is
+          # confirmed working end-to-end.
           python3 scripts/generate_ai_tracker.py --out api/ai/tracker.json 2>&1
           AIT_EXIT=$?
           set -e
+          # CodeRabbit (PR #275): generate_ai_tracker.py's no-feed path exits 0
+          # after writing only a tracker.json stub, so exit code alone can't
+          # prove health.json/executive-brief.json were actually produced --
+          # check both files exist before claiming success.
+          HEALTH_OK=0
+          BRIEF_OK=0
           if [ "$AIT_EXIT" -eq 0 ]; then
-            for ENG_FILE in api/ai/health.json api/ai/executive-brief.json; do
-              if [ -f "$ENG_FILE" ]; then
-                LINES=$(wc -l < "$ENG_FILE" 2>/dev/null || echo "?")
-                echo "[PASS] ${ENG_FILE}: ${LINES} lines"
-              fi
-            done
+            if [ -f api/ai/health.json ]; then
+              HEALTH_OK=1
+              LINES=$(wc -l < api/ai/health.json 2>/dev/null || echo "?")
+              echo "[PASS] api/ai/health.json: ${LINES} lines"
+            fi
+            if [ -f api/ai/executive-brief.json ]; then
+              BRIEF_OK=1
+              LINES=$(wc -l < api/ai/executive-brief.json 2>/dev/null || echo "?")
+              echo "[PASS] api/ai/executive-brief.json: ${LINES} lines"
+            fi
+          fi
+          if [ "$AIT_EXIT" -eq 0 ] && [ "$HEALTH_OK" -eq 1 ] && [ "$BRIEF_OK" -eq 1 ]; then
             echo "::notice::AI HEALTH/BRIEF: regenerated from live intel feed"
           else
-            echo "::warning::generate_ai_tracker.py exited ${AIT_EXIT} — non-fatal, prior health/brief data retained"
+            echo "::warning::generate_ai_tracker.py exited ${AIT_EXIT} but did not produce both health.json and executive-brief.json (e.g. its no-feed stub path writes only a tracker.json stub) — prior health/brief data retained"
           fi
 
       # -----------------------------------------------------------------------
