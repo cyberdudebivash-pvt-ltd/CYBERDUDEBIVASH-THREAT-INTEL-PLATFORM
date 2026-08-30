@@ -51,7 +51,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .service-status{display:flex;align-items:center;gap:6px;margin-left:16px;white-space:nowrap}
 .status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .status-dot.green{background:var(--green);box-shadow:0 0 6px rgba(34,197,94,0.5);animation:pulse 3s ease-in-out infinite}
+.status-dot.gray{background:var(--muted)}
 .status-text{font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--green)}
+.status-text.gray{color:var(--muted)}
+.badge-unmonitored{background:rgba(122,132,153,0.1);border:1px solid rgba(122,132,153,0.25);color:var(--muted)}
 .uptime-bar-item{background:var(--panel);border:1px solid var(--border2);border-radius:var(--radius);padding:18px 22px;margin-bottom:10px}
 .uptime-bar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .uptime-bar-name{font-size:13px;font-weight:600;color:var(--text)}
@@ -120,57 +123,61 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   </div>
 
   <div class="uptime-banner">
-    <div class="uptime-metric"><div class="uptime-num">99.97%</div><div class="uptime-label">30-Day Uptime</div></div>
-    <div class="uptime-metric"><div class="uptime-num">99.99%</div><div class="uptime-label">90-Day API Uptime</div></div>
-    <div class="uptime-metric"><div class="uptime-num">&lt;120ms</div><div class="uptime-label">API P95 Latency</div></div>
-    <div class="uptime-metric"><div class="uptime-num">0</div><div class="uptime-label">Active Incidents</div></div>
+    <div class="uptime-metric"><div class="uptime-num" id="m-uptime30">&mdash;</div><div class="uptime-label">30-Day Uptime</div></div>
+    <div class="uptime-metric"><div class="uptime-num" id="m-target">99.9%</div><div class="uptime-label">Enterprise SLA Target</div></div>
+    <div class="uptime-metric"><div class="uptime-num" id="m-downtime">&mdash;</div><div class="uptime-label">Downtime (30d)</div></div>
+    <div class="uptime-metric"><div class="uptime-num" id="m-incidents">&mdash;</div><div class="uptime-label">Incidents (30d)</div></div>
   </div>
+  <div style="text-align:center;margin:-24px 0 32px;font-size:11px;color:var(--muted)" id="uptime-note"></div>
 
   <div class="section-label">Core Platform Services</div>
   <div class="services-block">
-    <div class="services-header"><span class="services-header-title">Infrastructure</span><span class="services-header-badge badge-operational">All Operational</span></div>
-    <div class="service-row"><div class="service-name">Main Platform</div><div class="service-desc">intel.cyberdudebivash.com — dashboard, advisories, search</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">REST API v1</div><div class="service-desc">JSON advisory feed, IOC endpoints, CVSS scoring, full-text search</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">STIX 2.1 / TAXII 2.1 Feed</div><div class="service-desc">Machine-readable threat intel bundles for SIEM ingestion</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">API Documentation</div><div class="service-desc">intel.cyberdudebivash.com/api-docs.html</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">CDN / Cloudflare Edge</div><div class="service-desc">Global static asset delivery — sub-50ms worldwide</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
+    <div class="services-header"><span class="services-header-title">Infrastructure</span><span class="services-header-badge badge-operational" id="badge-infra">Checking&hellip;</span></div>
+    <div class="service-row"><div class="service-name">Main Platform</div><div class="service-desc">intel.cyberdudebivash.com — dashboard, advisories, search</div><div class="service-status" data-svc="intel-gateway"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">REST API v1</div><div class="service-desc">JSON advisory feed, IOC endpoints, CVSS scoring, full-text search</div><div class="service-status" data-svc="intel-gateway"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">STIX 2.1 / TAXII 2.1 Feed</div><div class="service-desc">Machine-readable threat intel bundles for SIEM ingestion</div><div class="service-status" data-svc="stix-feed"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">API Documentation</div><div class="service-desc">intel.cyberdudebivash.com/api-docs.html</div><div class="service-status" data-svc="_unmonitored"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">CDN / Cloudflare Edge</div><div class="service-desc">Global static asset delivery — sub-50ms worldwide</div><div class="service-status" data-svc="_unmonitored"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
   </div>
 
   <div class="services-block">
-    <div class="services-header"><span class="services-header-title">Intelligence Pipeline</span><span class="services-header-badge badge-operational">All Operational</span></div>
-    <div class="service-row"><div class="service-name">CVE Ingestion Engine</div><div class="service-desc">NVD + MITRE feed ingestion, EPSS scoring, CISA KEV sync</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">AI Cyber Brain Engine</div><div class="service-desc">Campaign clustering, anomaly scoring, predictive forecasting, attribution</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">Intel Quality Engine</div><div class="service-desc">Advisory enrichment, MITRE mapping, FAIR risk, STIX export</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">Detection Rule Generator</div><div class="service-desc">Sigma, KQL, SPL, EQL, YARA rule synthesis per advisory</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">Weekly Analyst Briefing</div><div class="service-desc">Automated PDF + HTML briefing generation and delivery</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
+    <div class="services-header"><span class="services-header-title">Intelligence Pipeline</span><span class="services-header-badge badge-operational" id="badge-pipeline">Checking&hellip;</span></div>
+    <div class="service-row"><div class="service-name">CVE Ingestion Engine</div><div class="service-desc">NVD + MITRE feed ingestion, EPSS scoring, CISA KEV sync</div><div class="service-status" data-svc="_unmonitored"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">AI Cyber Brain Engine</div><div class="service-desc">Campaign clustering, anomaly scoring, predictive forecasting, attribution</div><div class="service-status" data-svc="ai-engine"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">Intel Quality Engine</div><div class="service-desc">Advisory enrichment, MITRE mapping, FAIR risk, STIX export</div><div class="service-status" data-svc="_unmonitored"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">Detection Rule Generator</div><div class="service-desc">Sigma, KQL, SPL, EQL, YARA rule synthesis per advisory</div><div class="service-status" data-svc="_unmonitored"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">Weekly Analyst Briefing</div><div class="service-desc">Automated PDF + HTML briefing generation and delivery</div><div class="service-status" data-svc="_unmonitored"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
   </div>
 
   <div class="services-block">
-    <div class="services-header"><span class="services-header-title">Third-Party Dependencies</span><span class="services-header-badge badge-operational">All Operational</span></div>
-    <div class="service-row"><div class="service-name">GitHub Pages (Hosting)</div><div class="service-desc">Platform deployment infrastructure</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">NVD / NIST Feed</div><div class="service-desc">CVE source data — National Vulnerability Database</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">FIRST EPSS API</div><div class="service-desc">Exploit Prediction Scoring System v3</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
-    <div class="service-row"><div class="service-name">CISA KEV Feed</div><div class="service-desc">Known Exploited Vulnerabilities catalog</div><div class="service-status"><span class="status-dot green"></span><span class="status-text">Operational</span></div></div>
+    <div class="services-header"><span class="services-header-title">Third-Party Dependencies</span><span class="services-header-badge badge-operational" id="badge-thirdparty">Checking&hellip;</span></div>
+    <div class="service-row"><div class="service-name">GitHub Pages (Hosting)</div><div class="service-desc">Platform deployment infrastructure</div><div class="service-status" data-svc="_unmonitored"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">NVD / NIST Feed</div><div class="service-desc">CVE source data — National Vulnerability Database</div><div class="service-status" data-svc="_unmonitored"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">FIRST EPSS API</div><div class="service-desc">Exploit Prediction Scoring System v3</div><div class="service-status" data-svc="_unmonitored"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+    <div class="service-row"><div class="service-name">CISA KEV Feed</div><div class="service-desc">Known Exploited Vulnerabilities catalog</div><div class="service-status" data-svc="_unmonitored"><span class="status-dot"></span><span class="status-text">Checking&hellip;</span></div></div>
+  </div>
+  <p style="font-size:11px;color:var(--muted);margin:-8px 0 20px">Rows marked <strong>Not Independently Monitored</strong> are real, live product capabilities without a dedicated automated health check yet — not a claim that they're down.</p>
+
+  <div class="section-label">Last Full Intel Sync</div>
+  <div class="uptime-bar-item" style="margin-bottom:28px">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span style="font-size:13px;color:var(--muted2)">Most recent completed sync of the live advisory feed</span>
+      <span class="uptime-bar-pct" id="last-sync-val">&mdash;</span>
+    </div>
   </div>
 
-  <div class="section-label">90-Day Uptime History</div>
-  <div id="uptime-bars"></div>
-
-  <div class="section-label">Intelligence Feed Freshness</div>
-  <div class="feed-grid" id="feed-cards"></div>
-
-  <div class="section-label">SLA Performance — Current Month</div>
+  <div class="section-label">SLA Performance</div>
   <div class="sla-grid">
-    <div class="sla-card"><div class="sla-card-title">CRITICAL CVE SLA</div><div class="sla-card-val">&lt;2h</div><div class="sla-card-sub">Avg this month: 47m · Target: ≤2h ✓</div></div>
-    <div class="sla-card"><div class="sla-card-title">Platform Uptime</div><div class="sla-card-val">99.97%</div><div class="sla-card-sub">30-day rolling · Target: 99.9% ✓</div></div>
-    <div class="sla-card"><div class="sla-card-title">API Response P95</div><div class="sla-card-val">118ms</div><div class="sla-card-sub">Target: &lt;200ms · 59% headroom ✓</div></div>
+    <div class="sla-card"><div class="sla-card-title">Enterprise SLA Target</div><div class="sla-card-val">99.9%</div><div class="sla-card-sub" id="sla-ent-sub">30-day rolling</div></div>
+    <div class="sla-card"><div class="sla-card-title">Pro SLA Target</div><div class="sla-card-val">99.5%</div><div class="sla-card-sub" id="sla-pro-sub">30-day rolling</div></div>
+    <div class="sla-card"><div class="sla-card-title">Measured Uptime (30d)</div><div class="sla-card-val" id="sla-measured-val">&mdash;</div><div class="sla-card-sub" id="sla-measured-sub">Loading&hellip;</div></div>
   </div>
 
   <div class="section-label">Incident History — Last 30 Days</div>
-  <div class="incident-card" style="text-align:center;padding:36px 20px">
-    <div style="font-size:26px;margin-bottom:10px">✅</div>
-    <div style="font-size:15px;font-weight:700;margin-bottom:6px">No Incidents in the Past 30 Days</div>
-    <div style="font-size:13px;color:var(--muted2)">All platform services fully operational. Zero SLA breaches recorded.</div>
+  <div class="incident-card" style="text-align:center;padding:36px 20px" id="incident-30d-card">
+    <div style="font-size:26px;margin-bottom:10px">&hellip;</div>
+    <div style="font-size:15px;font-weight:700;margin-bottom:6px">Loading incident history&hellip;</div>
+    <div style="font-size:13px;color:var(--muted2)"></div>
   </div>
 
   <div class="section-label">Past Incidents</div>
@@ -237,6 +244,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         + ' &nbsp;&middot;&nbsp; ' + (d.advisory_count||'&mdash;') + ' advisories'
         + ' &nbsp;&middot;&nbsp; ' + (d.kev_confirmed||'&mdash;') + ' KEV'
         + ' &nbsp;&middot;&nbsp; Last sync: ' + (d.last_sync ? d.last_sync.replace('T',' ').replace('Z',' UTC') : '&mdash;');
+      var syncEl = document.getElementById('last-sync-val');
+      if (syncEl) syncEl.textContent = d.last_sync ? d.last_sync.replace('T',' ').replace('Z',' UTC') : 'Unavailable';
     })
     .catch(function(){
       var el = document.getElementById('live-health-badge');
@@ -245,34 +254,115 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     setTimeout(fetchHealth, 120000);
   })();
 
-  /* Uptime bars */
-  var svcs=[
-    {n:'Platform (intel.cyberdudebivash.com)',u:99.97},
-    {n:'REST API v1',u:99.99},
-    {n:'STIX 2.1 / TAXII Feed',u:100},
-    {n:'AI Cyber Brain Engine',u:99.95},
-    {n:'Intelligence Pipeline',u:99.92},
-    {n:'Cloudflare CDN Edge',u:100}
-  ];
-  var seed=12345;function rng(){seed=(seed*1664525+1013904223)>>>0;return(seed&0xffff)/65536;}
-  document.getElementById('uptime-bars').innerHTML=svcs.map(function(s){
-    var days='';for(var i=0;i<90;i++){days+='<div class="uptime-day '+(rng()>0.003?'up':'partial')+'"></div>';}
-    return '<div class="uptime-bar-item"><div class="uptime-bar-header"><span class="uptime-bar-name">'+s.n+'</span><span class="uptime-bar-pct">'+s.u+'%</span></div><div class="uptime-bar-days">'+days+'</div><div class="uptime-bar-footer"><span>90 days ago</span><span style="color:var(--green)">No incidents</span><span>Today</span></div></div>';
-  }).join('');
+  /* PRODUCTION-TRUTH FIX (v200.0 audit): the uptime banner, all 14 service
+     rows, the "90-Day Uptime History" chart, the per-feed "X ago" cards, the
+     SLA cards, and the "No Incidents" claim below were ALL static HTML or
+     client-side fabrication -- the 90-day chart was a seeded PRNG
+     (seed=12345, so byte-identical on every load for every visitor), the
+     feed "X ago" timestamps never updated after page load, and every
+     "Operational" badge had no check behind it at all. Replaced with a real
+     fetch of /api/sla/status -- the endpoint this same audit already fixed
+     to report honestly (PR #267: "insufficient_data" / "not_separately_
+     monitored" instead of fabricated uptime) -- so this page finally shows
+     what that endpoint actually says instead of a disconnected fake.
+     Sections with literally no real backing data (the 90-day history, the
+     per-feed freshness cards) were removed rather than re-fabricated against
+     a different fake source. */
+  function fmtPct(v){ return (v === null || v === undefined) ? null : (Math.round(v*100)/100) + '%'; }
 
-  /* Feed cards */
-  var feeds=[
-    {n:'NVD CVE Feed',d:'NVD full sync · CVSS + EPSS enrichment · MITRE ATT&CK v15 tagged',a:'3m ago',p:99,b:'live'},
-    {n:'CISA KEV Feed',d:'Known Exploited Vulnerabilities · KEV flag injected into feed',a:'8m ago',p:98,b:'live'},
-    {n:'FIRST EPSS Scores',d:'Exploit Prediction Scoring System v3 · &lt;1h refresh cadence',a:'42m ago',p:95,b:'live'},
-    {n:'STIX 2.1 Export Bundle',d:'Machine-readable bundles · ATT&CK TTP tags · TLP enforced',a:'15m ago',p:98,b:'stix'},
-    {n:'AI Cyber Brain Cache',d:'Campaign clustering · anomaly scoring · GRI composite refresh',a:'28s ago',p:100,b:'live'},
-    {n:'Weekly Analyst Briefing',d:'Automated PDF + HTML · SIEM-ready · delivered every Sunday',a:'4d 6h ago',p:40,b:'stix'}
-  ];
-  document.getElementById('feed-cards').innerHTML=feeds.map(function(f){
-    var col=f.p>=90?'var(--green)':f.p>=60?'var(--yellow)':'var(--red)';
-    return '<div class="feed-card"><div class="feed-header"><span class="feed-name">'+f.n+'</span><span class="feed-badge '+f.b+'">'+f.b.toUpperCase()+'</span></div><div class="feed-meta">'+f.d+'</div><div class="feed-age">Last sync: '+f.a+'</div><div class="feed-progress"><div class="feed-progress-fill" style="width:'+f.p+'%;background:'+col+'"></div></div></div>';
-  }).join('');
+  function renderSLAUnavailable(){
+    var note = document.getElementById('uptime-note');
+    if (note) note.textContent = 'Live SLA data unavailable right now.';
+    var texts = document.querySelectorAll('.service-status .status-text');
+    for (var i=0;i<texts.length;i++){ texts[i].textContent='Unknown'; texts[i].classList.add('gray'); }
+    var dots = document.querySelectorAll('.service-status .status-dot');
+    for (var j=0;j<dots.length;j++){ dots[j].classList.add('gray'); }
+  }
+
+  function renderUptimeBanner(d){
+    var u30 = document.getElementById('m-uptime30');
+    if (u30) u30.textContent = fmtPct(d.uptime_pct_30d) || 'N/A';
+    var note = document.getElementById('uptime-note');
+    if (note) note.textContent = (d.uptime_pct_30d === null || d.uptime_pct_30d === undefined)
+      ? 'Uptime measurement is live but does not yet have 30 days of ping history to report a figure.'
+      : '';
+    var downtime = document.getElementById('m-downtime');
+    if (downtime) { var secs = d.total_downtime_seconds || 0; downtime.textContent = secs === 0 ? '0m' : Math.round(secs/60) + 'm'; }
+    var inc = document.getElementById('m-incidents');
+    if (inc) inc.textContent = (d.incidents_30d != null ? d.incidents_30d : '0');
+  }
+
+  function renderServiceRows(components){
+    var rows = document.querySelectorAll('.service-status[data-svc]');
+    for (var i=0;i<rows.length;i++){
+      var row = rows[i];
+      var key = row.getAttribute('data-svc');
+      var dot = row.querySelector('.status-dot');
+      var text = row.querySelector('.status-text');
+      if (!dot || !text) continue;
+      var comp = components[key];
+      if (key === '_unmonitored' || !comp) {
+        dot.classList.add('gray'); text.classList.add('gray'); text.textContent = 'Not Independently Monitored';
+      } else if (comp.status === 'insufficient_data') {
+        dot.classList.add('gray'); text.classList.add('gray'); text.textContent = 'Monitoring (Building History)';
+      } else if (comp.status === 'not_separately_monitored' || comp.status === 'disabled') {
+        dot.classList.add('gray'); text.classList.add('gray'); text.textContent = 'Not Independently Monitored';
+      } else if (comp.status === 'operational' || comp.status === 'ok') {
+        dot.classList.add('green'); text.textContent = 'Operational';
+      } else {
+        dot.classList.add('gray'); text.classList.add('gray'); text.textContent = comp.status || 'Unknown';
+      }
+    }
+    // No block can honestly claim "All Operational" while its mapped
+    // components are still building ping history -- reflect that instead
+    // of defaulting back to a green claim with nothing behind it.
+    ['badge-infra','badge-pipeline','badge-thirdparty'].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) { el.textContent = 'See Below'; el.className = 'services-header-badge badge-unmonitored'; }
+    });
+  }
+
+  function renderSLACards(d){
+    var mv = document.getElementById('sla-measured-val');
+    var ms = document.getElementById('sla-measured-sub');
+    if (mv) mv.textContent = fmtPct(d.uptime_pct_30d) || 'N/A';
+    if (ms) ms.textContent = (d.uptime_pct_30d === null || d.uptime_pct_30d === undefined)
+      ? 'Insufficient ping history yet' : (d.total_pings_30d + ' checks, ' + d.successful_pings_30d + ' successful');
+    var es = document.getElementById('sla-ent-sub');
+    if (es) es.textContent = d.sla_met_enterprise === null || d.sla_met_enterprise === undefined ? 'Not yet measurable' : (d.sla_met_enterprise ? 'Target met (30d)' : 'Target missed (30d)');
+    var ps = document.getElementById('sla-pro-sub');
+    if (ps) ps.textContent = d.sla_met_pro === null || d.sla_met_pro === undefined ? 'Not yet measurable' : (d.sla_met_pro ? 'Target met (30d)' : 'Target missed (30d)');
+  }
+
+  function renderIncidentCard(d){
+    var card = document.getElementById('incident-30d-card');
+    if (!card) return;
+    var n = d.incidents_30d || 0;
+    if (n === 0) {
+      card.innerHTML = '<div style="font-size:26px;margin-bottom:10px">&#9989;</div>'
+        + '<div style="font-size:15px;font-weight:700;margin-bottom:6px">No Incidents Recorded in the Past 30 Days</div>'
+        + '<div style="font-size:13px;color:var(--muted2)">Based on ' + (d.total_pings_30d||0) + ' automated checks in this window.</div>';
+    } else {
+      card.innerHTML = '<div style="font-size:26px;margin-bottom:10px">&#9888;&#65039;</div>'
+        + '<div style="font-size:15px;font-weight:700;margin-bottom:6px">' + n + ' Incident' + (n===1?'':'s') + ' Recorded in the Past 30 Days</div>'
+        + '<div style="font-size:13px;color:var(--muted2)">See Past Incidents below for details.</div>';
+    }
+  }
+
+  function fetchSLAStatus(){
+    fetch('https://intel.cyberdudebivash.com/api/sla/status', { headers: { 'Accept': 'application/json' } })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if (!d) { renderSLAUnavailable(); return; }
+        renderUptimeBanner(d);
+        renderServiceRows(d.components || {});
+        renderSLACards(d);
+        renderIncidentCard(d);
+      })
+      .catch(renderSLAUnavailable);
+  }
+  fetchSLAStatus();
+  setInterval(fetchSLAStatus, 120000);
 })();
 </script>
 </body>
