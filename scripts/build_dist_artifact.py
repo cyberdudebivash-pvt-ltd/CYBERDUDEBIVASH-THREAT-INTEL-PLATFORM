@@ -89,6 +89,17 @@ INCLUDE_DIRS = [
                    # (workers/revenue-engine handleFreeKeyRequest) was unreachable via the
                    # real site. customer/ contains exactly one file today -- safe to ship
                    # wholesale, unlike docs/ below.
+    "assets",      # v200.1 FIX: assets/ (assets/icons/icon-192x192.png) was missing from
+                   # dist/ -- same class of bug as dashboard/ and customer/ above. index.html's
+                   # own <link rel="icon"> and og:image, plus api-docs.html's og:image and the
+                   # sitewide JSON-LD logo, all reference /assets/icons/icon-192x192.png --
+                   # confirmed live 404 on every page that references it.
+    ".well-known", # v200.1 FIX: .well-known/ (.well-known/security.txt) was missing from
+                   # dist/ -- security-compliance.html documents this path as the PGP/security
+                   # contact reference; confirmed live 404 despite the file existing and being
+                   # git-tracked. copy_item()'s EXCLUDE_PATTERNS (.git, .env, __pycache__, etc.)
+                   # do not match this directory or its contents, so this is a pure inclusion
+                   # gap, not a conflict with the exclude list.
 ]
 
 INCLUDE_FILES_PATTERN = [
