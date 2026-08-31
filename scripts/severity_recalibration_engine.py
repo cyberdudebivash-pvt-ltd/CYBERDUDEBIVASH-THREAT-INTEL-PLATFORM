@@ -37,7 +37,7 @@ Usage:
 import json, os, sys, re, argparse, datetime, pathlib
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VERSION = "182.0"
+VERSION = "184.0"
 
 _SEV_RANK = {"NONE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 _RANK_SEV = {v: k for k, v in _SEV_RANK.items()}

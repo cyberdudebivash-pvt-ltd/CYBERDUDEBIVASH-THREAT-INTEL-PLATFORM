@@ -117,6 +117,13 @@ import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_
 export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES };
 import { checkDailyQuota, buildQuotaExceededBody } from './daily-quota.js';
 import { resolveCheckoutUrl } from './billing-checkout.js';
+import { handleAdminCacheBust } from './admin-cache-bust.js';
+import { LATEST_JSON_KEY, LATEST_PRO_JSON_KEY, FEED_MANIFEST_FALLBACK_KEY, r2Get, findItemBySlug } from './feed-lookup.js';
+// Re-exported unchanged for backward compatibility with any external
+// importer of index.js's own findItemBySlug export (Principle 5: no silent
+// removal of an existing export) -- the canonical implementation now lives
+// in feed-lookup.js; see that file's header comment.
+export { findItemBySlug };
 const PLATFORM_VERSION    = "200.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -125,8 +132,6 @@ const AUDIT_TTL           = 86400 * 30;   // 30-day audit log retention
 const NEWS_TTL_SEC        = 300;
 const PREVIEW_LIMIT       = 25;
 const FREE_SIGNUP_IP_DAILY_CAP = 5; // self-serve free-key requests per IP per day
-const LATEST_JSON_KEY     = "api/v1/intel/latest.json";
-const LATEST_PRO_JSON_KEY = "api/v1/intel/latest_pro.json"; // PRO/ENTERPRISE: includes report_url
 const APEX_JSON_KEY       = "api/v1/intel/apex.json";
 const AI_SUMMARY_KEY      = "api/v1/intel/ai_summary.json";
 const REPORTS_KEY         = "api/reports/index.json";
@@ -578,16 +583,6 @@ function resolveEntitlement(ctx, env, resource, auth, adHocAllowed) {
 // R2 READER
 // =============================================================================
 
-async function r2Get(env, key) {
-  try {
-    const obj = await env.INTEL_R2.get(key);
-    if (!obj) return null;
-    const text = await obj.text();
-    if (!text || text.trim() === "") return null;
-    return JSON.parse(text);
-  } catch (_) { return null; }
-}
-
 // =============================================================================
 // FEED / COMPUTE FUNCTIONS (unchanged logic from v184.0)
 // =============================================================================
@@ -721,49 +716,11 @@ function buildCommercialGateBanner(certLevel) {
 // a full HTML intel report on-the-fly, then cache it back to R2.
 // =============================================================================
 
-// RX-PUB-A0.6C: last-resort fallback source, checked only when none of the
-// four enriched feed products above resolve the slug. docs/RX_PUB_A0_6_
-// PROOF_BEFORE_CHANGE.md's live evidence (2026-08-14): api/v1/intel/
-// latest.json and api/feed.json are kept in sync with each other (472
-// items each, identical population) by generate_api_manifests.py, but both
-// are a smaller population than data/stix/feed_manifest.json (518 items) --
-// the same in-window source scripts/generate_intel_reports.py's Zero-skip
-// policy regenerates every run and scripts/r2_reports_verifier.py treats as
-// authoritative. 69 confirmed real in-window reports were unresolvable
-// through every one of the four sources above, and (per that fail-open gap)
-// served straight from R2 with zero evaluatePublicationGate() evaluation.
-// feed_manifest.json's leaner per-item schema (no precomputed P20-P26
-// scores) is not a problem: evaluatePublicationGate() computes every score
-// fresh from base content fields (title, description, severity, iocs, ttps,
-// etc.) via the canonical engine functions -- it never reads a precomputed
-// score off the item -- and fails CLOSED if any engine errors on a missing
-// field, never open. Uploaded every run by scripts/r2_upload.py to this
-// exact key (BUCKET_DATA, "intel/feed_manifest.json").
-const FEED_MANIFEST_FALLBACK_KEY = "intel/feed_manifest.json";
-
-export async function findItemBySlug(env, slug) {
-  const sources = [
-    LATEST_PRO_JSON_KEY,
-    LATEST_JSON_KEY,
-    "api/v1/intel/top10.json",
-    "api/v1/intel/apex.json",
-    FEED_MANIFEST_FALLBACK_KEY,
-  ];
-  for (const key of sources) {
-    try {
-      const data = await r2Get(env, key);
-      if (!data) continue;
-      const items = Array.isArray(data) ? data : (data.items || data.data || []);
-      const found = items.find(i => {
-        const id = (i.stix_id || i.id || "").replace(/\.html?$/, "");
-        return id === slug || id === `intel--${slug}` ||
-               slug === id || slug.startsWith(id) || id.startsWith(slug);
-      });
-      if (found) return found;
-    } catch (_) { /* continue to next source */ }
-  }
-  return null;
-}
+// findItemBySlug/r2Get/LATEST_JSON_KEY/LATEST_PRO_JSON_KEY/
+// FEED_MANIFEST_FALLBACK_KEY now live in feed-lookup.js (imported above)
+// -- extracted so findItemBySlug is unit-testable in CI under plain
+// `node --test`; see that file's header comment. Pure move, no logic
+// change -- RX-PUB-A0.6C's fallback-source rationale is preserved there.
 
 /**
  * GET /api/v1/reports/{id}/publication-status  -  the source of truth for
@@ -2106,66 +2063,11 @@ export async function handleAdmin(request, env, ctx, path, method) {
   // the route + auth pair it needs simply didn't exist. Authenticated the same
   // way as the existing WORKER_ADMIN_SECRET consumers (alert-engine.js
   // handleAlertDispatch, sla-monitor.js handleSLAPing) so no new secret is
-  // required. Cache data for the keys/prefixes this busts lives in
-  // SECURITY_HUB_KV (see fetchReportsIndexExt's "idx:reports" read in
-  // api-extensions.js and kvGet/kvPut in dark-web-monitor.js); deleting a key
-  // that was never written is a harmless no-op, so this is safe for the
-  // several legacy target names in CACHE_KEYS that have no live writer today.
+  // required. Logic lives in admin-cache-bust.js (extracted so it's
+  // unit-testable in CI under plain `node --test` -- see that file's header
+  // comment); this is an unchanged call, not a rewrite.
   if (path === "/api/admin/cache/bust" || path === "/api/admin/cache/bust-prefix") {
-    const cacheSecret = request.headers.get("X-Admin-Secret") || "";
-    if (!env.WORKER_ADMIN_SECRET || !timingSafeEqual(cacheSecret, env.WORKER_ADMIN_SECRET)) {
-      auditLog(ctx, env, { action: "admin_auth_failed", path, method });
-      return jsonResp({ error: "Forbidden: invalid admin credentials" }, 403);
-    }
-    if (method !== "POST") {
-      return jsonResp({ error: "Method not allowed", allowed: ["POST"] }, 405);
-    }
-    // Canonical cache-key namespace this endpoint is scoped to, mirroring
-    // scripts/bust_kv_cache.py's CACHE_KEYS. SECURITY_HUB_KV also holds
-    // unrelated data (audit:* from auditLog() above, fingerprint:* etc.) --
-    // without this allowlist, an authenticated cache-bust call could be used
-    // to erase that data instead of just cache entries.
-    const ALLOWED_EXACT_KEYS = new Set([
-      "idx:reports", "idx:preview", "ai:index", "ai:analyze", "ai:respond", "ai:correlate",
-    ]);
-    const ALLOWED_PREFIXES = new Set([
-      "darkweb:scan", "darkweb:status", "reports:premium", "reports:list", "checkout",
-    ]);
-    const qs = new URL(request.url).searchParams;
-    try {
-      if (path === "/api/admin/cache/bust") {
-        const key = qs.get("key") || "";
-        if (!key) return jsonResp({ error: "Missing 'key' query parameter" }, 400);
-        if (!ALLOWED_EXACT_KEYS.has(key)) {
-          return jsonResp({ error: "Unknown cache key", allowed: [...ALLOWED_EXACT_KEYS] }, 400);
-        }
-        await env.SECURITY_HUB_KV.delete(key);
-        return jsonResp({ busted: key }, 200);
-      }
-      const prefix = qs.get("prefix") || "";
-      if (!prefix) return jsonResp({ error: "Missing 'prefix' query parameter" }, 400);
-      if (!ALLOWED_PREFIXES.has(prefix)) {
-        return jsonResp({ error: "Unknown cache prefix", allowed: [...ALLOWED_PREFIXES] }, 400);
-      }
-      // KV list() returns at most 1,000 keys per call; loop on the cursor
-      // until list_complete so a prefix with more entries than that is fully
-      // busted, not silently left partially stale.
-      let cursor;
-      let deleted = 0;
-      for (;;) {
-        const listed = await env.SECURITY_HUB_KV.list({ prefix, cursor });
-        await Promise.all(listed.keys.map((k) => env.SECURITY_HUB_KV.delete(k.name)));
-        deleted += listed.keys.length;
-        if (listed.list_complete) break;
-        cursor = listed.cursor;
-      }
-      return jsonResp({ busted_prefix: prefix, count: deleted }, 200);
-    } catch (e) {
-      // Never return KV/provider exception text to the caller -- log
-      // server-side only (visible via wrangler tail / Logpush).
-      console.error(`[handleAdmin cache-bust] KV operation failed: ${e && e.message ? e.message : e}`);
-      return jsonResp({ error: "Cache bust failed" }, 500);
-    }
+    return await handleAdminCacheBust(request, env, ctx, path, method, { timingSafeEqual, auditLog, jsonResp });
   }
 
   const adminKey = (

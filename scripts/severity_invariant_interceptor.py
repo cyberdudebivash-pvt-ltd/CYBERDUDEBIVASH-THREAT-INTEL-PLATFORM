@@ -64,7 +64,7 @@ log = logging.getLogger("sentinel.severity_invariant")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-VERSION = "182.0"
+VERSION = "184.0"
 MODULE  = "SeverityInvariantInterceptor"
 
 _SEV_RANK: Dict[str, int] = {

@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findItemBySlug } from "../index.js";
+import { findItemBySlug } from "../feed-lookup.js";
 
 // ---------------------------------------------------------------------------
+// findItemBySlug() previously lived in index.js and was imported from
+// "../index.js" here; that transitively imports pricing.js ->
+// pricing-data.json, which Node's native ESM loader rejects outside the
+// wrangler/esbuild bundler (see subscription-lifecycle.js's header
+// comment), so this suite could never actually run. findItemBySlug() (plus
+// r2Get() and the feed-key constants it uses) was extracted into its own
+// dependency-free feed-lookup.js specifically to fix that -- same pattern
+// as subscription-lifecycle.js/daily-quota.js/admin-cache-bust.js. Pure
+// move, no logic or call-signature change -- every test below is unchanged.
+//
 // Mock R2 environment -- mirrors rx-pub-a0-handlers.test.js's mockEnv,
 // matching the real Cloudflare R2Object contract (env.INTEL_R2.get(key).text()).
 // ---------------------------------------------------------------------------

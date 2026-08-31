@@ -40,10 +40,20 @@ def test_health_still_works():
 
 def test_tiers_still_returns_real_pricing_data():
     """/tiers was never fabricated (it echoes the real TIER_LIMITS constant)
-    and must keep working exactly as before."""
+    and must keep working exactly as before.
+
+    499 is the ENTERPRISE tier's price, not PRO's -- main.py's own v184.4
+    FIX comment documents that PRO/ENTERPRISE were cross-verified against
+    three independent live sources (pricing.html, payment_gateway.py's
+    PRICES_USD/PRICES_INR, api/main.py's /api/v1/tiers) and corrected from
+    a previously-fabricated 499/4,999 split to the real 49/499 one. This
+    assertion had the tier keys transposed.
+    """
     r = client.get("/tiers")
     assert r.status_code == 200
-    assert r.json()["tiers"]["pro"]["price_monthly_usd"] == 499
+    tiers = r.json()["tiers"]
+    assert tiers["pro"]["price_monthly_usd"] == 49
+    assert tiers["enterprise"]["price_monthly_usd"] == 499
 
 
 def test_mrr_no_longer_returns_fabricated_numbers():

@@ -81,14 +81,26 @@ class TestMetricsExporter:
     """Tests for observability metrics"""
     
     def test_metrics_init(self):
-        from agent.v27.observability.metrics import MetricsExporter
-        
-        metrics = MetricsExporter()
+        # MetricsExporter registers its Prometheus collectors (Counter/Gauge/
+        # etc.) into the process-global default REGISTRY unconditionally at
+        # construction time, with no guard against being constructed twice --
+        # get_metrics() (this module's own documented usage: "from
+        # agent.v27.observability import get_metrics; metrics =
+        # get_metrics()") is the only safe way to obtain an instance, since it
+        # only ever constructs one. Calling MetricsExporter() directly here
+        # (bypassing that singleton) registered a second, independent set of
+        # same-named collectors the moment any other test in this class also
+        # touched the exporter (e.g. test_inc_threats via get_metrics()),
+        # raising prometheus_client.registry.DuplicateTimeseries regardless
+        # of run order.
+        from agent.v27.observability.metrics import get_metrics
+
+        metrics = get_metrics()
         assert metrics._initialized is True
-    
+
     def test_inc_threats(self):
         from agent.v27.observability.metrics import get_metrics
-        
+
         metrics = get_metrics()
         metrics.inc_threats(severity="critical", source="feed")
         # Should not raise
