@@ -1838,7 +1838,7 @@ async function provisionCustomer(env, { email, tier, billing_cycle, payment_id, 
     dashboard_url:"https://intel.cyberdudebivash.com", api_docs_url:"https://intel.cyberdudebivash.com/api-docs.html",
     customer_id:custRecord.id, sub_id:subId,
     portal_url: portalToken
-      ? `https://intel.cyberdudebivash.com/api/customer/portal?email=${encodeURIComponent(email)}&token=${portalToken}`
+      ? `https://intel.cyberdudebivash.com/customer/api-keys.html?email=${encodeURIComponent(email)}&token=${portalToken}`
       : "https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html",
   };
   await queueEmail(env, { to:email, template:"welcome_provisioned", vars:welcomeVars });
