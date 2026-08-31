@@ -1057,9 +1057,9 @@ async function initiateRazorpayCheckout() {
           if (btn) { btn.disabled = false; btn.innerHTML = orig; }
         }
       },
-      handler: function() {
+      handler: function(response) {
         if (btn) btn.innerHTML = '&#9203; Confirming subscription...';
-        pollSubscriptionStatus(sub.subscription_id, tier, email, btn, orig, 0);
+        pollSubscriptionStatus(sub.subscription_id, response.razorpay_payment_id, response.razorpay_signature, tier, email, btn, orig, 0);
       },
     };
     var subRzp = new Razorpay(subOptions);
@@ -1073,10 +1073,18 @@ async function initiateRazorpayCheckout() {
 // subscription.activated webhook, not synchronously in the Checkout
 // handler callback above (unlike the one-time-order flow's /verify
 // call below) -- poll briefly rather than assume the key already
-// exists the instant the modal's handler fires.
-function pollSubscriptionStatus(subscriptionId, tier, email, btn, orig, attempt) {
+// exists the instant the modal's handler fires. paymentId/signature come
+// straight from Razorpay's own handler callback (response.razorpay_
+// payment_id / .razorpay_signature) and are required by the status
+// endpoint as proof this poller actually completed this checkout --
+// subscription_id alone isn't a secret, so the endpoint would otherwise
+// hand out another customer's live api_key to anyone who obtained it.
+function pollSubscriptionStatus(subscriptionId, paymentId, signature, tier, email, btn, orig, attempt) {
   var MAX_ATTEMPTS = 15; // ~30s at 2s intervals
-  fetch('/api/v2/billing/subscriptions/status?subscription_id=' + encodeURIComponent(subscriptionId))
+  var qs = 'subscription_id=' + encodeURIComponent(subscriptionId) +
+           '&payment_id=' + encodeURIComponent(paymentId) +
+           '&signature=' + encodeURIComponent(signature);
+  fetch('/api/v2/billing/subscriptions/status?' + qs)
     .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
     .then(function(res) {
       if (res.ok && res.d && res.d.status === 'active' && res.d.api_key) {
@@ -1090,7 +1098,7 @@ function pollSubscriptionStatus(subscriptionId, tier, email, btn, orig, attempt)
         if (btn) { btn.disabled = false; btn.innerHTML = orig; }
         return;
       }
-      setTimeout(function() { pollSubscriptionStatus(subscriptionId, tier, email, btn, orig, attempt + 1); }, 2000);
+      setTimeout(function() { pollSubscriptionStatus(subscriptionId, paymentId, signature, tier, email, btn, orig, attempt + 1); }, 2000);
     })
     .catch(function() {
       if (attempt >= MAX_ATTEMPTS) {
@@ -1098,7 +1106,7 @@ function pollSubscriptionStatus(subscriptionId, tier, email, btn, orig, attempt)
         if (btn) { btn.disabled = false; btn.innerHTML = orig; }
         return;
       }
-      setTimeout(function() { pollSubscriptionStatus(subscriptionId, tier, email, btn, orig, attempt + 1); }, 2000);
+      setTimeout(function() { pollSubscriptionStatus(subscriptionId, paymentId, signature, tier, email, btn, orig, attempt + 1); }, 2000);
     });
 }
 

@@ -227,23 +227,43 @@ export async function handleBillingSubscriptionCreate(request, env, ctx, rid) {
  * needs something to poll after the Checkout modal's handler fires. Reuses
  * getProviderLink() (the same lookup putProviderLink()/the webhook handler
  * already maintain) rather than introducing a second record of the same
- * state. Same "know the opaque id, get the status" shape as the pre-existing
- * GET /api/payment/status?review_id= route on the one-time-order flow.
+ * state.
  *
- * @param {Request} request - must carry a `subscription_id` query param.
- * @param {object} env - Worker bindings (REVENUE_CRM_KV via getProviderLink).
+ * Requires payment_id + signature (Razorpay Checkout's own handler callback
+ * for a subscription returns {razorpay_payment_id, razorpay_subscription_id,
+ * razorpay_signature}, with signature = HMAC_SHA256(payment_id + "|" +
+ * subscription_id, key_secret)) -- the same proof-of-checkout-completion
+ * pattern the one-time-order flow's /api/payment/razorpay/verify already
+ * requires via razorpay_signature, adapted to the Subscriptions signature
+ * formula. subscription_id alone is not a secret: it's returned directly to
+ * the browser by the create-subscription response above and handed to
+ * Razorpay's own Checkout widget client-side, so anyone who observed it
+ * (shared logs, a support ticket, browser history) could otherwise read
+ * another customer's live api_key with nothing but that ID (IDOR).
+ *
+ * @param {Request} request - must carry `subscription_id`, `payment_id`,
+ *   and `signature` query params.
+ * @param {object} env - Worker bindings (REVENUE_CRM_KV via getProviderLink,
+ *   RAZORPAY_KEY_SECRET for signature verification).
  * @param {object} ctx - Worker execution context (unused, kept for the same
  *   (request, env, ctx, rid) signature every route handler in this file uses).
  * @param {string} rid - request id, accepted for signature consistency with
  *   the other handlers though not currently used in the response.
  * @returns {Promise<Response>} `{status, tier, billing_cycle}`, plus
  *   `api_key` only once status is "active" -- before that there is nothing
- *   to hand back yet.
+ *   to hand back yet. 401 if payment_id/signature don't match subscription_id.
  */
 export async function handleBillingSubscriptionStatus(request, env, ctx, rid) {
   const url = new URL(request.url);
   const providerId = url.searchParams.get("subscription_id");
+  const paymentId  = url.searchParams.get("payment_id");
+  const signature  = url.searchParams.get("signature");
   if (!providerId) return json({ error: "subscription_id is required" }, 400);
+  if (!paymentId || !signature) return json({ error: "payment_id and signature are required" }, 400);
+  if (!env.RAZORPAY_KEY_SECRET) return json({ error: "Razorpay not configured on server" }, 503);
+
+  const validProof = await verifyRazorpayHmac(`${paymentId}|${providerId}`, signature, env.RAZORPAY_KEY_SECRET);
+  if (!validProof) return json({ error: "Invalid payment signature" }, 401);
 
   const link = await getProviderLink(env, providerId);
   if (!link) return json({ status: "not_found" }, 404);
@@ -343,10 +363,20 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
         await trackEvent(env, "subscription_billing_anomaly", { reason: "charged_event_with_no_provider_link", razorpay_subscription_id: providerId, rid });
         break;
       }
-      const periodEnd = unixToIso(subEntity?.current_end);
+      // ACTIVE -> ACTIVE is a valid self-transition (a normal renewal), so
+      // tryTransition() alone doesn't protect against a delayed/out-of-order
+      // "charged" event (Razorpay's delivery is at-least-once, unordered)
+      // whose current_end is OLDER than what a later event already recorded
+      // -- that would regress a paying customer's expires_at backward and
+      // could prematurely deny them access. Take whichever period end is
+      // actually later, regardless of delivery order.
+      const receivedPeriodEnd = unixToIso(subEntity?.current_end);
+      const periodEnd = (receivedPeriodEnd && link.current_period_end)
+        ? (new Date(receivedPeriodEnd) > new Date(link.current_period_end) ? receivedPeriodEnd : link.current_period_end)
+        : (receivedPeriodEnd || link.current_period_end);
       const transitioned = await tryTransition(env, link.internal_sub_id, SUB_STATUS.ACTIVE, {
         current_period_start: unixToIso(subEntity?.current_start),
-        current_period_end: periodEnd || link.current_period_end,
+        current_period_end: periodEnd,
         renewal_reminder_sent: false,
         renewal_count: (link.renewal_count || 0) + 1,
       }, rid);
@@ -360,8 +390,8 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
         // door, so neither runs.
         break;
       }
-      await patchApiKeyEntitlement(env, link.api_key, { expires_at: periodEnd || link.current_period_end });
-      await putProviderLink(env, providerId, { ...link, status: "active", current_period_end: periodEnd || link.current_period_end, renewal_count: (link.renewal_count || 0) + 1 });
+      await patchApiKeyEntitlement(env, link.api_key, { expires_at: periodEnd });
+      await putProviderLink(env, providerId, { ...link, status: "active", current_period_end: periodEnd, renewal_count: (link.renewal_count || 0) + 1 });
       await trackEvent(env, "subscription_renewed", { email: link.email, tier: link.tier, razorpay_subscription_id: providerId, rid });
       break;
     }

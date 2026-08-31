@@ -170,6 +170,53 @@ test("handleBillingWebhook: subscription.charged for an ACTIVE subscription rene
   assert.equal(linkAfter.renewal_count, 3);
 });
 
+test("handleBillingWebhook: a delayed/out-of-order charged event with an OLDER period end must not regress a paying customer's expiry", async () => {
+  // ACTIVE -> ACTIVE is a valid self-transition (an ordinary renewal), so
+  // tryTransition() alone doesn't catch this: Razorpay's webhook delivery
+  // is at-least-once and NOT ordering-guaranteed, so an earlier charge's
+  // event can arrive after a later charge's event already recorded a newer
+  // current_period_end. Applying the stale (older) value would push the
+  // live API key's expires_at backward -- silently locking out a customer
+  // who has already paid through the later date.
+  const NEWER_END = 1780000000; // already recorded, further in the future
+  const OLDER_END = 1769904000; // this delayed event's (stale) current_end
+  const newerIso = new Date(NEWER_END * 1000).toISOString();
+
+  const env = {
+    REVENUE_CRM_KV: fakeKV({
+      "sub:isub_4": {
+        id: "isub_4", email: "paying2@customer.test", tier: "PRO", status: "active",
+        billing_cycle: "monthly", renewal_count: 5, current_period_end: newerIso,
+      },
+      "razorpay_sub:rzp_sub_4": {
+        razorpay_subscription_id: "rzp_sub_4", email: "paying2@customer.test", tier: "PRO",
+        billing_cycle: "monthly", status: "active", internal_sub_id: "isub_4",
+        api_key: "sk_live_test4", renewal_count: 5, current_period_end: newerIso,
+      },
+    }),
+    API_KEYS_KV: fakeKV({
+      "sk_live_test4": { tier: "PRO", customer_id: "cust_4", expires_at: newerIso },
+    }),
+    RAZORPAY_WEBHOOK_SECRET: "whsec_test",
+  };
+
+  const req = signedRequest(
+    chargedPayload({ providerId: "rzp_sub_4", paymentId: "pay_delayed_1", currentEnd: OLDER_END }),
+    { eventId: "evt_delayed_1" }
+  );
+  const res = await handleBillingWebhook(req, env, {}, "rid_test");
+  assert.equal(res.status, 200);
+
+  const subAfter = await env.REVENUE_CRM_KV.get("sub:isub_4", "json");
+  assert.equal(subAfter.current_period_end, newerIso, "must keep the later period end, not the stale delayed one");
+
+  const keyAfter = await env.API_KEYS_KV.get("sk_live_test4", "json");
+  assert.equal(keyAfter.expires_at, newerIso, "a delayed event must not push a paying customer's key expiry backward");
+
+  const linkAfter = await env.REVENUE_CRM_KV.get("razorpay_sub:rzp_sub_4", "json");
+  assert.equal(linkAfter.current_period_end, newerIso);
+});
+
 test("handleBillingWebhook: redelivery of the same event id is not reprocessed (Razorpay is at-least-once)", async () => {
   const env = {
     REVENUE_CRM_KV: fakeKV({
@@ -210,22 +257,76 @@ test("handleBillingWebhook: subscription.charged with no provider link logs an a
 // /verify call.
 // ---------------------------------------------------------------------------
 
-function statusRequest(subscriptionId) {
-  const url = subscriptionId
-    ? `https://x.test/api/v2/billing/subscriptions/status?subscription_id=${encodeURIComponent(subscriptionId)}`
-    : "https://x.test/api/v2/billing/subscriptions/status";
-  return new Request(url, { method: "GET" });
+const KEY_SECRET = "key_secret_test";
+
+// Mirrors Razorpay's own signature formula for a subscription checkout
+// completion: HMAC_SHA256(payment_id + "|" + subscription_id, key_secret).
+// verifyRazorpayHmac() (subscription-engine.js) checks against exactly this.
+function statusSignature(paymentId, subscriptionId, secret = KEY_SECRET) {
+  return crypto.createHmac("sha256", secret).update(`${paymentId}|${subscriptionId}`).digest("hex");
+}
+
+function statusRequest({ subscriptionId, paymentId = "pay_test1", signature } = {}) {
+  const params = new URLSearchParams();
+  if (subscriptionId !== undefined) params.set("subscription_id", subscriptionId);
+  if (paymentId !== undefined) params.set("payment_id", paymentId);
+  const sig = signature !== undefined ? signature
+    : (subscriptionId !== undefined && paymentId !== undefined ? statusSignature(paymentId, subscriptionId) : undefined);
+  if (sig !== undefined) params.set("signature", sig);
+  return new Request(`https://x.test/api/v2/billing/subscriptions/status?${params.toString()}`, { method: "GET" });
 }
 
 test("handleBillingSubscriptionStatus: missing subscription_id is a 400, not a crash", async () => {
-  const env = { REVENUE_CRM_KV: fakeKV() };
-  const res = await handleBillingSubscriptionStatus(statusRequest(null), env, {}, "rid_test");
+  const env = { REVENUE_CRM_KV: fakeKV(), RAZORPAY_KEY_SECRET: KEY_SECRET };
+  const res = await handleBillingSubscriptionStatus(statusRequest({}), env, {}, "rid_test");
   assert.equal(res.status, 400);
 });
 
+test("handleBillingSubscriptionStatus: missing payment_id/signature is a 400", async () => {
+  const env = { REVENUE_CRM_KV: fakeKV(), RAZORPAY_KEY_SECRET: KEY_SECRET };
+  const res = await handleBillingSubscriptionStatus(
+    new Request("https://x.test/api/v2/billing/subscriptions/status?subscription_id=rzp_sub_live", { method: "GET" }),
+    env, {}, "rid_test"
+  );
+  assert.equal(res.status, 400);
+});
+
+test("handleBillingSubscriptionStatus: an invalid signature is rejected with 401, never reaches the KV lookup", async () => {
+  const env = { REVENUE_CRM_KV: fakeKV(), RAZORPAY_KEY_SECRET: KEY_SECRET };
+  const res = await handleBillingSubscriptionStatus(
+    statusRequest({ subscriptionId: "rzp_sub_live", paymentId: "pay_test1", signature: "00".repeat(32) }),
+    env, {}, "rid_test"
+  );
+  assert.equal(res.status, 401);
+});
+
+test("handleBillingSubscriptionStatus: IDOR -- knowing only another customer's subscription_id cannot retrieve its api_key", async () => {
+  // Reproduces CodeRabbit's finding: subscription_id is not a secret (the
+  // browser holds it, Razorpay's own Checkout widget receives it) -- an
+  // attacker's real-world position is "I have victim's subscription_id" and
+  // nothing else. Without RAZORPAY_KEY_SECRET (server-only, never sent to
+  // any client), they cannot produce a signature that verifies for it, so a
+  // guessed/copied signature must be rejected before the KV lookup ever
+  // returns victim's record.
+  const env = {
+    REVENUE_CRM_KV: fakeKV({
+      "razorpay_sub:rzp_sub_victim": {
+        razorpay_subscription_id: "rzp_sub_victim", email: "victim@customer.test",
+        tier: "ENTERPRISE", billing_cycle: "annual", status: "active", api_key: "sk_live_victim_key",
+      },
+    }),
+    RAZORPAY_KEY_SECRET: KEY_SECRET,
+  };
+  const res = await handleBillingSubscriptionStatus(
+    statusRequest({ subscriptionId: "rzp_sub_victim", paymentId: "pay_attacker_guess", signature: "deadbeef".repeat(8) }),
+    env, {}, "rid_test"
+  );
+  assert.equal(res.status, 401);
+});
+
 test("handleBillingSubscriptionStatus: unknown subscription_id is a 404", async () => {
-  const env = { REVENUE_CRM_KV: fakeKV() };
-  const res = await handleBillingSubscriptionStatus(statusRequest("rzp_sub_never_seen"), env, {}, "rid_test");
+  const env = { REVENUE_CRM_KV: fakeKV(), RAZORPAY_KEY_SECRET: KEY_SECRET };
+  const res = await handleBillingSubscriptionStatus(statusRequest({ subscriptionId: "rzp_sub_never_seen" }), env, {}, "rid_test");
   assert.equal(res.status, 404);
 });
 
@@ -237,8 +338,9 @@ test("handleBillingSubscriptionStatus: 'created' (not yet paid) status never inc
         tier: "PRO", billing_cycle: "monthly", status: "created",
       },
     }),
+    RAZORPAY_KEY_SECRET: KEY_SECRET,
   };
-  const res = await handleBillingSubscriptionStatus(statusRequest("rzp_sub_pending"), env, {}, "rid_test");
+  const res = await handleBillingSubscriptionStatus(statusRequest({ subscriptionId: "rzp_sub_pending" }), env, {}, "rid_test");
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.status, "created");
@@ -253,8 +355,9 @@ test("handleBillingSubscriptionStatus: 'active' status includes the provisioned 
         tier: "ENTERPRISE", billing_cycle: "annual", status: "active", api_key: "sk_live_abc123",
       },
     }),
+    RAZORPAY_KEY_SECRET: KEY_SECRET,
   };
-  const res = await handleBillingSubscriptionStatus(statusRequest("rzp_sub_live"), env, {}, "rid_test");
+  const res = await handleBillingSubscriptionStatus(statusRequest({ subscriptionId: "rzp_sub_live" }), env, {}, "rid_test");
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.deepEqual(body, { status: "active", tier: "ENTERPRISE", billing_cycle: "annual", api_key: "sk_live_abc123" });
