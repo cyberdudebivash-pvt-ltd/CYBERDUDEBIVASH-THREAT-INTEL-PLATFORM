@@ -1321,9 +1321,20 @@ async function computePortalToken(env, email) {
   return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-// GET /api/health -- public observability endpoint. Mirrors the shape/intent
-// of intel-gateway's /api/health (binding pings + config presence), scaled
-// down to what this Worker actually has.
+/**
+ * GET /api/health -- public observability endpoint. Mirrors the shape/intent
+ * of intel-gateway's /api/health (binding pings + config presence), scaled
+ * down to what this Worker actually has.
+ *
+ * @param {Request} request - unused; accepted for the standard route-handler
+ *   signature used throughout this file.
+ * @param {object} env - Worker bindings/secrets whose presence is reported.
+ * @param {string} rid - request id, echoed back in the response for log
+ *   correlation.
+ * @returns {Promise<Response>} binding health + boolean config-presence
+ *   flags only -- never secret values, including the per-tier/cycle
+ *   `razorpay_plan_ids_configured` booleans.
+ */
 export async function handleRevenueEngineHealth(request, env, rid) {
   const kvOk  = env.REVENUE_CRM_KV ? await env.REVENUE_CRM_KV.get("health:ping").then(() => "ok").catch(() => "error") : "not_bound";
   const d1Ok  = env.CRM_DB ? await env.CRM_DB.prepare("SELECT 1").first().then(() => "ok").catch(() => "error") : "not_bound";

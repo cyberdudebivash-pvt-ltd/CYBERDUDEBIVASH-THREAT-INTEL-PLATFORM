@@ -217,16 +217,29 @@ export async function handleBillingSubscriptionCreate(request, env, ctx, rid) {
 // =============================================================================
 // GET /api/v2/billing/subscriptions/status?subscription_id=...
 // =============================================================================
-// Subscription activation happens asynchronously via the webhook above, not
-// synchronously in the Razorpay Checkout response the way the one-time-order
-// flow's /api/payment/razorpay/verify works -- the checkout-page frontend
-// needs something to poll after the Checkout modal's handler fires. Reuses
-// getProviderLink() (the same lookup putProviderLink()/the webhook handler
-// already maintain) rather than introducing a second record of the same
-// state. Same "know the opaque id, get the status" shape as the pre-existing
-// GET /api/payment/status?review_id= route on the one-time-order flow.
-// Only returns api_key once status is "active" -- before that there is
-// nothing to hand back yet.
+/**
+ * Polling target for the checkout page: reports whether a Razorpay
+ * subscription has been activated yet.
+ *
+ * Subscription activation happens asynchronously via the webhook above, not
+ * synchronously in the Razorpay Checkout response the way the one-time-order
+ * flow's /api/payment/razorpay/verify works -- the checkout-page frontend
+ * needs something to poll after the Checkout modal's handler fires. Reuses
+ * getProviderLink() (the same lookup putProviderLink()/the webhook handler
+ * already maintain) rather than introducing a second record of the same
+ * state. Same "know the opaque id, get the status" shape as the pre-existing
+ * GET /api/payment/status?review_id= route on the one-time-order flow.
+ *
+ * @param {Request} request - must carry a `subscription_id` query param.
+ * @param {object} env - Worker bindings (REVENUE_CRM_KV via getProviderLink).
+ * @param {object} ctx - Worker execution context (unused, kept for the same
+ *   (request, env, ctx, rid) signature every route handler in this file uses).
+ * @param {string} rid - request id, accepted for signature consistency with
+ *   the other handlers though not currently used in the response.
+ * @returns {Promise<Response>} `{status, tier, billing_cycle}`, plus
+ *   `api_key` only once status is "active" -- before that there is nothing
+ *   to hand back yet.
+ */
 export async function handleBillingSubscriptionStatus(request, env, ctx, rid) {
   const url = new URL(request.url);
   const providerId = url.searchParams.get("subscription_id");
