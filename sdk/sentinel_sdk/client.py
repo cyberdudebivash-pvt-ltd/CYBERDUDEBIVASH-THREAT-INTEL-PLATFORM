@@ -8,10 +8,25 @@ Features:
   - Connection pooling via urllib (no external deps required)
   - Response deserialization to typed model objects
   - Thread-safe: single instance safe for multi-threaded use
-  - Full OpenAPI coverage: advisories, search, STIX, health, IOC lookup
+  - Covers every capability the deployed API actually serves: feed-derived
+    advisories/search (client-side filtered — the live worker has no
+    server-side query params on its feed route), TAXII/STIX export,
+    IOC lookup, health.
 
 Zero external dependencies — stdlib only (urllib, json, hmac, hashlib).
 Optional: install 'requests' for HTTP/2 and connection reuse improvements.
+
+Every method below is verified against the deployed Cloudflare Worker
+(workers/intel-gateway/src/index.js) — the only backend this API is
+actually served from, at https://intel.cyberdudebivash.com. Earlier
+versions of this file pointed at
+https://api.sentinelapex.cyberdudebivash.com, a domain with no Worker
+route, DNS entry, or any other backing infrastructure anywhere in this
+repository (see wrangler.toml's `routes` block) — every call would have
+failed outright. A handful of methods below have no real server-side
+equivalent at all (key rotation, ingestion status); those raise
+SDKConfigurationError with an explanation instead of silently hitting a
+route that would 404/401 for every real customer.
 """
 from __future__ import annotations
 
@@ -45,7 +60,7 @@ from .models import (
 
 logger = logging.getLogger("sentinel_sdk.client")
 
-_DEFAULT_BASE_URL = "https://api.sentinelapex.cyberdudebivash.com"
+_DEFAULT_BASE_URL = "https://intel.cyberdudebivash.com"
 _DEFAULT_TIMEOUT  = 30
 _MAX_RETRIES      = 4
 _RETRY_BASE_S     = 1.0
@@ -105,53 +120,94 @@ class SentinelClient:
         """
         Fetch threat intelligence advisories.
 
+        The deployed API serves the advisory manifest from a single route
+        (GET /api/feed — the same data as /api/v1/intel/latest.json) with
+        no server-side severity/threat_type/kev_only/pagination params;
+        the worker only tier-gates which fields are visible per API key.
+        This method fetches that manifest and applies the filters below
+        client-side.
+
         Args:
             severity:    Filter by severity: CRITICAL | HIGH | MEDIUM | LOW
-            threat_type: Filter by type: ransomware | apt | malware | vulnerability
-            limit:       Results per page (1–500, tier-dependent)
+            threat_type: Filter by type (substring match against the
+                         item's threat_type, e.g. "ransomware", "apt")
+            limit:       Results per page
             page:        Page number (1-indexed)
             kev_only:    Only return CISA KEV entries
 
         Returns:
             Page object with .items (List[AdvisoryItem]) and .metadata (FeedMetadata)
         """
-        params: Dict[str, Any] = {"limit": limit, "page": page}
-        if severity:
-            params["severity"] = severity.upper()
-        if threat_type:
-            params["threat_type"] = threat_type
-        if kev_only:
-            params["kev_only"] = "true"
+        raw   = self._get("/api/feed")
+        items_raw = raw.get("items", [])
 
-        raw = self._get("/api/v1/advisories", params=params)
-        items = [AdvisoryItem.from_dict(d) for d in raw.get("data", [])]
-        meta  = FeedMetadata.from_dict(raw)
+        if severity:
+            s = severity.upper()
+            items_raw = [d for d in items_raw if str(d.get("severity", "")).upper() == s]
+        if threat_type:
+            t = threat_type.lower()
+            items_raw = [d for d in items_raw if t in str(d.get("threat_type", "")).lower()]
+        if kev_only:
+            items_raw = [d for d in items_raw if d.get("kev_present")]
+
+        total = len(items_raw)
+        start = max(page - 1, 0) * limit
+        page_raw = items_raw[start:start + limit]
+        items = [AdvisoryItem.from_dict(d) for d in page_raw]
+        meta = FeedMetadata(
+            total=total, returned=len(items), page=page,
+            tier=str(raw.get("tier", "")), feed_version=str(raw.get("version", "")),
+            last_updated=str(raw.get("generated_at", "")),
+            critical_count=sum(1 for d in items_raw if str(d.get("severity", "")).upper() == "CRITICAL"),
+            high_count=sum(1 for d in items_raw if str(d.get("severity", "")).upper() == "HIGH"),
+            kev_count=sum(1 for d in items_raw if d.get("kev_present")),
+        )
         return Page(items=items, metadata=meta, raw=raw)
 
     def get_advisory(self, stix_id: str) -> AdvisoryItem:
         """
         Fetch a single advisory by STIX ID.
 
+        There is no single-resource advisory route in the deployed API;
+        this looks the ID up client-side against the same feed manifest
+        get_advisories() uses.
+
         Raises:
             NotFoundError: If the advisory does not exist.
         """
-        raw = self._get(f"/api/v1/advisories/{stix_id}")
-        return AdvisoryItem.from_dict(raw.get("data", raw))
+        raw = self._get("/api/feed")
+        for d in raw.get("items", []):
+            if d.get("stix_id") == stix_id or d.get("id") == stix_id:
+                return AdvisoryItem.from_dict(d)
+        raise NotFoundError(f"No advisory found with stix_id={stix_id!r}", status_code=404)
 
     def search_advisories(self, query: str, limit: int = 20) -> Page:
         """
-        Full-text search across advisory titles and descriptions (PRO+).
+        Search across advisory titles and descriptions.
+
+        There is no dedicated full-text search route in the deployed API;
+        this filters the same feed manifest get_advisories() uses. Data
+        depth still depends on your API key's tier, since the feed route
+        itself masks IOCs/detection rules for FREE-tier keys.
 
         Args:
             query: Search string (CVE IDs, actor names, keywords)
             limit: Max results to return
-
-        Raises:
-            TierPermissionError: If on FREE tier (search requires PRO+)
         """
-        raw = self._get("/api/v1/search", params={"q": query, "limit": limit})
-        items = [AdvisoryItem.from_dict(d) for d in raw.get("data", [])]
-        meta  = FeedMetadata.from_dict(raw)
+        raw   = self._get("/api/feed")
+        q     = query.lower()
+        matched = [
+            d for d in raw.get("items", [])
+            if q in str(d.get("title", "")).lower() or q in str(d.get("description", "")).lower()
+        ]
+        total = len(matched)
+        page_raw = matched[:limit]
+        items = [AdvisoryItem.from_dict(d) for d in page_raw]
+        meta = FeedMetadata(
+            total=total, returned=len(items), page=1,
+            tier=str(raw.get("tier", "")), feed_version=str(raw.get("version", "")),
+            last_updated=str(raw.get("generated_at", "")),
+        )
         return Page(items=items, metadata=meta, raw=raw)
 
     def iter_advisories(
@@ -193,14 +249,24 @@ class SentinelClient:
         stix_ids: Optional[List[str]] = None,
         severity: Optional[str] = None,
         limit: int = 50,
+        collection: str = "sentinel-apex-main",
     ) -> StixBundle:
         """
-        Export advisories as a STIX 2.1 bundle (PRO+).
+        Export advisories as a STIX 2.1 bundle via the deployed TAXII 2.1
+        server (PRO+ — the worker 401s FREE-tier keys on this route).
+
+        There is no dedicated /stix/export route; this calls the real
+        TAXII object-collection route (GET /taxii/collections/{id}/objects/)
+        and applies stix_ids/severity/limit client-side. The other real
+        collection is "sentinel-apex-kev" (ENTERPRISE-only, CISA KEV
+        entries only).
 
         Args:
-            stix_ids: Optional list of specific STIX IDs to export
-            severity: Optional severity filter
-            limit:    Max items in bundle
+            stix_ids:   Optional list of specific STIX object IDs to keep
+            severity:   Optional severity filter (matches each object's
+                        custom_properties.x_sentinel_severity)
+            limit:      Max objects in the returned bundle
+            collection: TAXII collection ID (default: main collection)
 
         Returns:
             StixBundle with .objects (list of STIX objects)
@@ -208,13 +274,22 @@ class SentinelClient:
         Raises:
             TierPermissionError: Requires PRO tier or higher
         """
-        params: Dict[str, Any] = {"limit": limit}
-        if stix_ids:
-            params["ids"] = ",".join(stix_ids)
+        raw = self._get(f"/taxii/collections/{collection}/objects/")
+        objects = raw.get("objects", [])
         if severity:
-            params["severity"] = severity.upper()
-        raw = self._get("/api/v1/stix/export", params=params)
-        return StixBundle.from_dict(raw)
+            s = severity.upper()
+            objects = [
+                o for o in objects
+                if str((o.get("custom_properties") or {}).get("x_sentinel_severity", "")).upper() == s
+            ]
+        if stix_ids:
+            id_set = set(stix_ids)
+            objects = [o for o in objects if o.get("id") in id_set]
+        objects = objects[:limit]
+        return StixBundle(
+            type=raw.get("type", "bundle"), id=raw.get("id", ""),
+            objects=objects, spec_version=raw.get("spec_version", "2.1"),
+        )
 
     # ─────────────────────────────────────────────────────────────────────────
     # IOC Lookup (PRO+)
@@ -227,11 +302,17 @@ class SentinelClient:
         Args:
             ioc:      The IOC value to look up
             ioc_type: Hint for type: ip | hash | domain | cve | auto
+                      (accepted for forward compatibility; the deployed
+                      route does not currently filter on it — it infers
+                      the type from the query itself)
 
         Returns:
             Raw dict with matched advisories and threat context
         """
-        params = {"value": ioc, "type": ioc_type}
+        # The deployed route reads the query from "q" (or "query"/"ioc" in
+        # a POST body) — it has never accepted "value", so every lookup
+        # previously 400'd/ignored the query entirely.
+        params = {"q": ioc, "type": ioc_type}
         return self._get("/api/v1/ioc/lookup", params=params)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -247,8 +328,9 @@ class SentinelClient:
 
         Note:
             Does not consume API quota. Safe to call frequently.
+            No authentication required — this is a public route.
         """
-        raw = self._get("/api/v1/health/")
+        raw = self._get("/api/health")
         return HealthStatus.from_dict(raw)
 
     def ping(self) -> bool:
@@ -270,35 +352,45 @@ class SentinelClient:
 
     def get_key_info(self) -> ApiKeyInfo:
         """
-        Retrieve metadata and usage stats for the current API key.
+        Retrieve metadata for the current API key.
+
+        There is no /monetize/key/info route in the deployed API. The
+        closest real equivalent is the auth-validation route, which only
+        confirms validity and tier — it does not report usage_today,
+        daily_limit, or expires_at, so those fields stay at their
+        ApiKeyInfo defaults (0 / None) rather than fabricated values.
 
         Returns:
-            ApiKeyInfo with tier, usage_today, daily_limit, etc.
+            ApiKeyInfo with .tier and .is_active populated from the live
+            API; usage/quota fields are not available from any current
+            endpoint.
         """
-        raw = self._get("/api/v1/monetize/key/info")
-        return ApiKeyInfo.from_dict(raw)
+        raw = self._get("/api/auth/validate")
+        return ApiKeyInfo(
+            key=self._api_key, tier=str(raw.get("tier", "")),
+            owner="", label="", created_at="",
+            is_active=bool(raw.get("valid", False)),
+        )
 
     def rotate_key(self, confirm: bool = False) -> ApiKeyInfo:
         """
         Rotate the current API key (generates a new key, invalidates old one).
 
-        Args:
-            confirm: Must be True to perform the rotation (safety guard)
+        Not supported: the deployed API only exposes key issuance/rotation
+        under /api/admin/keys, gated by an operator-only ADMIN_SECRET header
+        no customer API key can supply — there is no self-service rotation
+        endpoint for customers today.
 
         Raises:
-            SDKConfigurationError: If confirm=False
+            SDKConfigurationError: Always — see above. Contact support to
+                rotate a key until a self-service route exists.
         """
-        if not confirm:
-            raise SDKConfigurationError(
-                "Set confirm=True to confirm key rotation. "
-                "This will invalidate your current key immediately."
-            )
-        raw = self._post("/api/v1/monetize/key/rotate", body={})
-        new_key = raw.get("new_key", "")
-        if new_key:
-            self._api_key = new_key
-            logger.info("API key rotated successfully — client updated with new key")
-        return ApiKeyInfo.from_dict(raw)
+        raise SDKConfigurationError(
+            "Key rotation is not available through the public API. "
+            "Key management is operator-only (ADMIN_SECRET-gated); "
+            "contact support to rotate your key.",
+            param="confirm",
+        )
 
     # ─────────────────────────────────────────────────────────────────────────
     # Ingestion Status (ENTERPRISE+)
@@ -308,19 +400,34 @@ class SentinelClient:
         """
         Get live ingestion pipeline status (ENTERPRISE+).
 
-        Returns:
-            Dict with source health, queue depth, and throughput metrics
+        Not supported: the deployed API has no customer-facing ingestion
+        status route. Source-health/observability data exists only under
+        the internal P30/P40 platform routes, which
+        docs/developer-portal-guide.md explicitly documents as
+        platform-internal infrastructure, not part of the customer
+        developer surface.
+
+        Raises:
+            SDKConfigurationError: Always — see above.
         """
-        return self._get("/api/v1/ingestion/status")
+        raise SDKConfigurationError(
+            "Ingestion status is not available through the public API. "
+            "Source-health data is internal-only platform infrastructure."
+        )
 
     def trigger_ingestion(self, source_id: str = "all") -> Dict[str, Any]:
         """
         Manually trigger a data source fetch (ENTERPRISE+).
 
-        Args:
-            source_id: Source to trigger: nvd_cve | cisa_kev | malwarebazaar | abuseipdb | all
+        Not supported: no ingestion-trigger route exists anywhere in the
+        deployed API for customers to call.
+
+        Raises:
+            SDKConfigurationError: Always — see above.
         """
-        return self._post("/api/v1/ingestion/trigger", body={"source_id": source_id})
+        raise SDKConfigurationError(
+            "Manually triggering ingestion is not available through the public API."
+        )
 
     # ─────────────────────────────────────────────────────────────────────────
     # Internal HTTP layer
@@ -437,7 +544,10 @@ class SentinelClient:
     def _build_url(self, path: str,
                    params: Optional[Dict[str, Any]] = None) -> str:
         """Construct full URL with query string."""
-        base = self.base_url.rstrip("/")
+        # Bug fix: __init__ stores this as self._base_url; every call here
+        # previously read the never-set self.base_url, so _build_url raised
+        # AttributeError on the very first request the SDK ever made.
+        base = self._base_url.rstrip("/")
         url  = f"{base}{path}"
         if params:
             from urllib.parse import urlencode

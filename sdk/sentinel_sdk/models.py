@@ -42,8 +42,11 @@ class AdvisoryItem:
             title            = d.get("title", ""),
             severity         = d.get("severity", ""),
             risk_score       = float(d.get("risk_score", 0)),
-            timestamp        = d.get("timestamp", ""),
-            blog_url         = d.get("blog_url", ""),
+            timestamp        = d.get("timestamp", d.get("published", "")),
+            # Deployed feed items use "report_url" (workers/intel-gateway
+            # data/feed.json), not "blog_url" -- keep blog_url as a fallback
+            # in case an older payload shape is ever served.
+            blog_url         = d.get("report_url", d.get("blog_url", "")),
             source_url       = d.get("source_url", ""),
             tlp_label        = d.get("tlp_label", ""),
             confidence_score = float(d.get("confidence_score", 0)),
@@ -222,31 +225,23 @@ class StixBundle:
 
 @dataclass
 class Page:
-    """Generic paginated result container with cursor/offset metadata."""
-    items:           List[Any]
-    total_available: int       = 0
-    offset:          int       = 0
-    limit:           int       = 0
-    tier:            str       = ""
-    generated:       str       = ""
+    """
+    Paginated result container.
+
+    Bug fix: this class previously declared total_available/offset/limit/
+    tier/generated fields that no call site ever populated -- client.py
+    has always constructed Page(items=..., metadata=..., raw=...), which
+    raised TypeError on every call (unexpected keyword argument
+    'metadata') before a single HTTP request was even made. The fields
+    below match what client.py and cli.py actually pass and read
+    (page.metadata.total, page.metadata.returned, etc.).
+    """
+    items:    List[Any]
+    metadata: "FeedMetadata"
+    raw:      Dict[str, Any] = field(default_factory=dict)
 
     @property
     def has_more(self) -> bool:
-        return (self.offset + len(self.items)) < self.total_available
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any], item_class=None) -> "Page":
-        raw_items = d.get("data", d.get("items", []))
-        if item_class is not None:
-            items = [item_class.from_dict(i) if isinstance(i, dict) else i
-                     for i in raw_items]
-        else:
-            items = raw_items
-        return cls(
-            items           = items,
-            total_available = d.get("total_available", len(items)),
-            offset          = d.get("offset", 0),
-            limit           = d.get("limit", len(items)),
-            tier            = d.get("tier", ""),
-            generated       = d.get("generated", ""),
-        )
+        if not self.metadata.returned:
+            return False
+        return (self.metadata.page * self.metadata.returned) < self.metadata.total
