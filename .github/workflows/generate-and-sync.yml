@@ -1123,6 +1123,25 @@ jobs:
           git add data/governance/ 2>/dev/null || true
           git add internal/governance/quarantine.json 2>/dev/null || true
 
+          # Stage Detection Engineering Core outputs (STAGE 3.1.11 above).
+          # ROOT CAUSE FIX: this stage was missing from the add list entirely --
+          # scripts/stage_3_1_11_detection_engineering_core.py runs successfully
+          # every scheduled execution and correctly writes per-advisory detection
+          # files (api/detections/{id}.json, {id}_full.json) plus the aggregate
+          # detection-index.json for the FULL current feed, but none of it was
+          # ever staged, so it was generated fresh on the runner and discarded
+          # every run. Confirmed live: the committed data/audit/
+          # stage_3_1_11_detection_engineering.json and api/detections/
+          # detection-index.json were frozen at "11 advisories" since a one-time
+          # commit around 2026-05-25, while a direct run against the current
+          # feed (109 items, 2026-08-31) correctly processed all of them in
+          # under half a second. api/detections/ is a directory add (matching
+          # the data/ai-telemetry/ and data/governance/ precedent above) because
+          # per-advisory filenames aren't fixed paths -- new advisories need new
+          # files staged automatically, not enumerated one by one.
+          git add api/detections/ 2>/dev/null || true
+          git add data/audit/stage_3_1_11_detection_engineering.json 2>/dev/null || true
+
           # Check if anything changed
           if git diff --staged --quiet; then
             echo "[INFO] No AI output changes detected — skipping commit (feed unchanged)"
