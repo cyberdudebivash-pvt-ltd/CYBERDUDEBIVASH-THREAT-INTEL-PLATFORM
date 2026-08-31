@@ -97,6 +97,7 @@ import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
 import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger } from './revenue-enforcement.js';
+import { evaluateDailyQuota, utcDateString, dailyQuotaKey, quotaAlertDedupeKey, secondsUntilNextUtcMidnight } from './daily-quota.js';
 import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
 import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handleAlertDispatch, handleAlertHistory, handleAlertUnsubscribe } from './alert-engine.js';
@@ -324,6 +325,61 @@ async function clearAuthFailures(env, ip) {
 // =============================================================================
 // SLIDING-WINDOW RATE LIMITING
 // =============================================================================
+
+// =============================================================================
+// DAILY QUOTA (business decision 2026-08-31) -- additive to, not a
+// replacement for, the per-minute RATE_LIMITS above. Keyed by API key when
+// authenticated (so a customer's quota is per-account, not multiplied by
+// however many IPs their infrastructure happens to call from) and by IP
+// only for anonymous/unauthenticated traffic, which has no account to key
+// by. Reuses REVENUE_CRM_KV's revenue-engine sibling namespace, RATE_LIMIT_KV
+// (this Worker's own existing blocking-quota namespace), rather than
+// ANALYTICS_KV (usage-meter.js's shadow-mode-only, non-blocking namespace) --
+// this mechanism actually denies requests, so it belongs with the other
+// mechanism that already does that, not the observe-only one.
+// =============================================================================
+
+async function checkDailyQuota(env, identifier, tier) {
+  const dateStr = utcDateString();
+  const key = dailyQuotaKey(identifier, dateStr);
+  try {
+    const val = await env.RATE_LIMIT_KV.get(key);
+    const countAfter = (val ? parseInt(val, 10) : 0) + 1;
+    await env.RATE_LIMIT_KV.put(key, String(countAfter), { expirationTtl: 172800 }); // 48h per spec
+    return { ...evaluateDailyQuota(tier, countAfter), dateStr, count: countAfter };
+  } catch (_) {
+    // Same fail-open posture checkRateLimit() already takes on a KV error --
+    // a transient KV outage must not itself become an outage for customers.
+    return { ...evaluateDailyQuota(tier, 0), dateStr, count: 0 };
+  }
+}
+
+// Fire-and-forget (called via ctx.waitUntil, never on the request's own
+// critical path): looks up the account's email and asks revenue-engine to
+// queue the "approaching your daily limit" email, deduplicated to once per
+// UTC day via a KV flag -- crossedAlertThreshold uses >= (see
+// daily-quota.js), so this can be reached more than once per day for the
+// same key under a racy counter; the dedup flag, not the threshold check
+// itself, is what actually guarantees one email per day.
+async function maybeDispatchQuotaAlert(env, identifier, tier, auth, dateStr) {
+  if (!auth?.key) return; // anonymous/IP-only traffic has no account to email
+  try {
+    const dedupeKey = quotaAlertDedupeKey(identifier, dateStr);
+    if (await env.RATE_LIMIT_KV.get(dedupeKey)) return;
+    const record = await env.API_KEYS_KV?.get(auth.key, "json");
+    if (!record?.email) return;
+    await env.RATE_LIMIT_KV.put(dedupeKey, "1", { expirationTtl: 90000 }); // 25h, safely spans the UTC day
+    if (!env.REVENUE_ADMIN_SECRET) return; // not yet provisioned on this Worker -- skip, don't crash
+    await fetch("https://revenue.intel.cyberdudebivash.com/api/automation/trigger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Secret": env.REVENUE_ADMIN_SECRET },
+      body: JSON.stringify({ trigger: "usage_80pct", email: record.email, context: `daily_quota:${tier}` }),
+    });
+  } catch (_) {
+    // Best-effort notification -- never let a failure here surface to the
+    // customer whose actual API request already succeeded.
+  }
+}
 
 async function checkRateLimit(env, ip, tier) {
   const limit  = RATE_LIMITS[tier] || RATE_LIMITS.FREE;
@@ -4455,6 +4511,33 @@ async function handleRequest(request, env, ctx) {
         body,
         429,
         { "Retry-After": "60", "X-RateLimit-Limit": String(rl.limit), "X-RateLimit-Remaining": "0" }
+      );
+    }
+
+    // Daily quota (business decision 2026-08-31) -- additive second gate,
+    // independent of the per-minute limit above. Keyed by API key when
+    // authenticated, IP only for anonymous traffic (see checkDailyQuota's
+    // own header comment for why).
+    const dailyIdentifier = auth.key || ip;
+    const dq = await checkDailyQuota(env, dailyIdentifier, auth.tier);
+    if (dq.crossedAlertThreshold) {
+      ctx.waitUntil(maybeDispatchQuotaAlert(env, dailyIdentifier, auth.tier, auth, dq.dateStr));
+    }
+    if (dq.exceeded) {
+      auditLog(ctx, env, { action: "daily_quota_exceeded", ip, path, method, tier: auth.tier });
+      const body = { error: "Too Many Requests", reason: "daily_quota_exceeded", limit: dq.limit, reset_utc: new Date(Date.now() + secondsUntilNextUtcMidnight() * 1000).toISOString() };
+      if (auth.tier === TIERS.FREE || auth.tier === TIERS.PRO) {
+        body.upgrade = buildUpgradeTrigger("usage_limit", auth.tier);
+      }
+      return jsonResp(
+        body,
+        429,
+        {
+          "Retry-After": String(secondsUntilNextUtcMidnight()),
+          "X-DailyLimit-Limit": String(dq.limit),
+          "X-DailyLimit-Remaining": "0",
+          "X-DailyLimit-Reset": new Date(Date.now() + secondsUntilNextUtcMidnight() * 1000).toISOString(),
+        }
       );
     }
   }

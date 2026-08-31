@@ -708,7 +708,22 @@ async function enterpriseContractTrigger(request, env, rid) {
 // PHASE 5 — REVENUE AUTOMATION ENGINE
 // =============================================================================
 
+// Real defect found and fixed while wiring intel-gateway's daily-quota alert
+// into this endpoint: /api/automation/trigger had NO authentication -- any
+// external caller could POST an arbitrary `email` and fire any of the seven
+// trigger cases below, using this platform's own SendGrid sending
+// reputation/domain to relay email to any address, for free, with no rate
+// limit. The only file that ever called it, revenue-crm/frontend-injection.js
+// ("Inject this as a <script> block in index.html"), is never actually
+// included in any real page (confirmed: zero matches for it across every
+// .html file in this repo) -- so there was no live legitimate caller whose
+// behavior this breaks. Gated the same way every other admin-only route in
+// this file already is (isAdmin(), X-Admin-Secret / REVENUE_ADMIN_SECRET) --
+// intel-gateway's new caller sends that header; nothing else has ever needed
+// unauthenticated access to this route.
 async function automationTrigger(request, env, rid) {
+  if (!(await isAdmin(request, env))) return json({ error: "unauthorized" }, 401);
+
   let body;
   try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
 
@@ -2410,5 +2425,5 @@ function getCommercialEmailTemplate(name, vars) {
 // =============================================================================
 export {
   json, sanitizeEmail, genId, TIERS, SUB_STATUS,
-  provisionCustomer, trackEvent, isAdmin,
+  provisionCustomer, trackEvent, isAdmin, automationTrigger,
 };
