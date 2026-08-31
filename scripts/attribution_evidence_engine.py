@@ -36,10 +36,18 @@ HIGH_CONFIDENCE_REQUIRED = frozenset([
     "sandworm","equation group","darkside","revil","conti","hive","alphv","blackcat",
     "cl0p","clop","lapsus",
 ])
-BANNED_SYNTHETIC = frozenset([
-    "CDB-UNATTR-CVE","CDB-UNATTR-APT","CDB-UNATTR-RAN","CDB-UNATTR-PHI",
-    "CDB-UNATTR-MAL","CDB-UNATTR-INT","UNC-CDB",
-])
+# v1.0.1 FIX: this was a frozenset of exact strings checked with `in` (set
+# membership), but every entry is actually an ID *prefix* the ingestion
+# pipeline stamps a category suffix onto (e.g. "CDB-UNATTR-CVE",
+# "UNC-CDB-INGEST") -- an exact-match check can never catch a suffixed
+# value. Verified against the live feed: 72/109 items (66%) carried
+# "UNC-CDB-INGEST" specifically, none ever nulled, because "UNC-CDB-INGEST"
+# != "UNC-CDB". A 7th real category, "CDB-UNATTR-RAT", was also missing
+# from the enumeration entirely. Switched to prefix matching so no future
+# category suffix can silently bypass this check the same way.
+BANNED_SYNTHETIC_PREFIXES = (
+    "CDB-UNATTR-", "UNC-CDB",
+)
 BANNED_SYNTHETIC_NAMES = frozenset([
     "web application threat cluster","vulnerability exploitation cluster",
     "unknown threat actor","untracked threat cluster","unattributed apt cluster",
@@ -60,7 +68,7 @@ def score_attribution(item: Dict) -> Dict:
     mitre_id = str(item.get("actor_mitre_id") or "")
     signals = item.get("attribution_signals") or []
 
-    if actor_tag in BANNED_SYNTHETIC:
+    if actor_tag.startswith(BANNED_SYNTHETIC_PREFIXES):
         return {"actor_status":"BANNED_SYNTHETIC","actor_confidence":"NONE","evidence_count":0,
                 "verdict":"REJECT — synthetic actor tag","action":"null_actor"}
     for banned_name in BANNED_SYNTHETIC_NAMES:

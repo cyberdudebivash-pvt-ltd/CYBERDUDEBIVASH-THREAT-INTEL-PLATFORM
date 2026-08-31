@@ -281,7 +281,13 @@ def build_detection_rules_section(item: Dict) -> str:
         if isinstance(i, (str, dict))
     ]
     domains = [i.get("value","") for i in _iocs_norm if isinstance(i, dict) and i.get("type")=="domain"][:3]
-    actor   = item.get("actor_tag","Unknown Threat Actor")
+    # v1.0.1 FIX: .get(key, default) only applies default when the key is
+    # ABSENT, not when it's present with value None -- attribution_evidence_engine.py
+    # legitimately sets actor_tag=None for unattributed items (correct
+    # behavior), which without `or` fell through to the literal text
+    # "None" in rendered output (e.g. 'description = "None campaign
+    # indicator"' in a YARA rule shown to paying customers).
+    actor   = item.get("actor_tag") or "Unknown Threat Actor"
 
     splunk_dest = " OR ".join('dest="' + d + '"' for d in domains[:2]) or 'dest="c2.example.com"'
     splunk_q    = siem_q.get("splunk") or f"index=* ({splunk_dest})"
@@ -326,7 +332,7 @@ def build_detection_rules_section(item: Dict) -> str:
 def build_soc_playbook_section(item: Dict) -> str:
     severity = (item.get("severity") or "HIGH").upper()
     sev_col  = SEV_COLORS.get(severity, C_ORG)
-    actor    = item.get("actor_tag","Threat Actor")
+    actor    = item.get("actor_tag") or "Threat Actor"
     cvss     = item.get("cvss_score","N/A")
     ioc_count = item.get("ioc_count", len(item.get("iocs") or []))
     sector   = item.get("target_sector","all sectors")
@@ -524,7 +530,7 @@ def build_monetization_banner(item: Dict, tier: str = "free") -> str:
     severity = (item.get("severity") or "HIGH").upper()
     sev_col  = SEV_COLORS.get(severity, C_ORG)
     ioc_count = item.get("ioc_count", len(item.get("iocs") or []))
-    actor    = item.get("actor_tag","Threat Actors")
+    actor    = item.get("actor_tag") or "Threat Actors"
 
     if tier == "enterprise":
         return ""
