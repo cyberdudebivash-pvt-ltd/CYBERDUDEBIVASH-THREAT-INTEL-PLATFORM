@@ -96,7 +96,7 @@ import { loadCertificationIndex, persistCertificationRecords, resolveCertificati
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
-import { applyTierGateV2, enforceTierGate } from './revenue-enforcement.js';
+import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger } from './revenue-enforcement.js';
 import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
 import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handleAlertDispatch, handleAlertHistory, handleAlertUnsubscribe } from './alert-engine.js';
@@ -4439,8 +4439,20 @@ async function handleRequest(request, env, ctx) {
     const rl = await checkRateLimit(env, ip, auth.tier);
     if (!rl.allowed) {
       auditLog(ctx, env, { action: "rate_limited", ip, path, method, tier: auth.tier });
+      // Real conversion-funnel gap: this was the one live, customer-facing
+      // "you've hit a wall" moment on the entire platform that carried zero
+      // upgrade messaging, on every single request that ever got throttled.
+      // Only attach it for FREE/PRO -- buildUpgradeTrigger() always targets
+      // "enterprise" once you're off FREE, which would be backwards for an
+      // ENTERPRISE or MSSP caller (MSSP's own RATE_LIMITS entry is *higher*
+      // than ENTERPRISE's, so "upgrade to enterprise" would read as a
+      // downgrade suggestion for them).
+      const body = { error: "Too Many Requests", retry_after: 60, limit: rl.limit };
+      if (auth.tier === TIERS.FREE || auth.tier === TIERS.PRO) {
+        body.upgrade = buildUpgradeTrigger("usage_limit", auth.tier);
+      }
       return jsonResp(
-        { error: "Too Many Requests", retry_after: 60, limit: rl.limit },
+        body,
         429,
         { "Retry-After": "60", "X-RateLimit-Limit": String(rl.limit), "X-RateLimit-Remaining": "0" }
       );
