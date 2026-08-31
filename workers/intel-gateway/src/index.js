@@ -3059,6 +3059,34 @@ async function applySubscriptionStatusChange(env, ctx, key, subscription_status,
     action: "subscription_status_changed", key_prefix: key.slice(0, 12),
     from: existing.subscription_status || "active", to: subscription_status, reason: reason || null,
   });
+  // Mirror the new status into REVENUE_CRM_KV and notify the customer. Before
+  // this, a cancelled/refunded/suspended customer's own portal
+  // (handleCustomerPortal(), revenue-engine) kept showing "active" forever --
+  // this function only ever wrote API_KEYS_KV (the entitlement store), never
+  // the customer-facing display copy in REVENUE_CRM_KV, and never sent any
+  // notification. Best-effort/non-blocking, same pattern as
+  // provisionApiKey()'s own mirror write: a KV/email hiccup here can't affect
+  // the real status change above, which has already committed by this point.
+  const custEmail = existing.customer_id;
+  if (custEmail && env.REVENUE_CRM_KV) {
+    ctx.waitUntil((async () => {
+      try {
+        const cust = await env.REVENUE_CRM_KV.get(`customer:${custEmail}`, "json");
+        if (cust) {
+          await env.REVENUE_CRM_KV.put(`customer:${custEmail}`, JSON.stringify({ ...cust, status: subscription_status, updated_at: ts }));
+        }
+        const subEmail = await env.REVENUE_CRM_KV.get(`sub:email:${custEmail}`, "json");
+        if (subEmail) {
+          await env.REVENUE_CRM_KV.put(`sub:email:${custEmail}`, JSON.stringify({ ...subEmail, status: subscription_status, updated_at: ts }));
+        }
+      } catch (err) {
+        console.error("[applySubscriptionStatusChange] REVENUE_CRM_KV mirror write failed (portal display only, access unaffected):", err?.message || err);
+      }
+    })());
+    if (SUBSCRIPTION_STATUS_DENY_STATES.has(subscription_status)) {
+      ctx.waitUntil(sendStatusChangeEmail(env, custEmail, existing.tier, subscription_status, reason));
+    }
+  }
   return { ok: true, existing, updated };
 }
 
@@ -3124,11 +3152,32 @@ async function provisionApiKey(env, ctx, tier, email, source, metadata, billingC
         };
         const prevKeys = (await env.REVENUE_CRM_KV.get(`apikeys:${email}`, "json")) || [];
         await env.REVENUE_CRM_KV.put(`apikeys:${email}`, JSON.stringify([...prevKeys, keyRecord]));
+        // Also write the singular apikey:{key} record -- handleApiKeySelfRotate()
+        // and GET /api/apikeys/validate look this up directly (not the
+        // apikeys:{email} array above). Before this line neither ever found a
+        // real checkout customer's key, so self-rotate 401'd for 100% of them.
+        await env.REVENUE_CRM_KV.put(`apikey:${apiKey}`, JSON.stringify(keyRecord));
         await env.REVENUE_CRM_KV.put(`sub:email:${email}`, JSON.stringify({
           customer_id: email, email, tier: validTier, billing_cycle: billingCycle, status: "active",
           created_at: now(), current_period_start: now(), current_period_end: periodEnd,
           auto_renew: false, // matches the platform-wide "no automated recurring billing" contract
         }));
+        // Also write sub:{id} and append to subscriptions:index, matching
+        // provisionCustomer()'s shape (revenue-engine/src/index.js) exactly --
+        // handleSubExpireCheck(), the only renewal-reminder cron that exists,
+        // reads subscriptions:index then sub:{id} per entry. Without these,
+        // real checkout customers were invisible to it and never got a 7d/3d
+        // renewal reminder before access silently lapsed.
+        const subId = `sub_${crypto.randomUUID()}`;
+        await env.REVENUE_CRM_KV.put(`sub:${subId}`, JSON.stringify({
+          id: subId, customer_id: email, email, tier: validTier, billing_cycle: billingCycle,
+          status: "active", created_at: now(), current_period_start: now(), current_period_end: periodEnd,
+          trial_ends_at: null, payment_id: (metadata && metadata.payment_id) || null,
+          renewal_reminder_sent: false, renewal_count: 0, auto_renew: false,
+        }));
+        const subIdx = (await env.REVENUE_CRM_KV.get("subscriptions:index", "json")) || [];
+        subIdx.unshift({ id: subId, email, tier: validTier, status: "active", current_period_end: periodEnd, created_at: now() });
+        await env.REVENUE_CRM_KV.put("subscriptions:index", JSON.stringify(subIdx.slice(0, 1000)));
       } catch (err) {
         console.error("[provisionApiKey] REVENUE_CRM_KV mirror write failed (portal display only, access unaffected):", err?.message || err);
       }
@@ -3338,6 +3387,56 @@ async function sendActivationEmail(env, email, tier, apiKey) {
     return true;
   } catch (err) {
     console.error("[sendActivationEmail] Failed to send activation email:", err?.message || err);
+    return false;
+  }
+}
+
+async function sendStatusChangeEmail(env, email, tier, status, reason) {
+  if (!env.RESEND_API_KEY) {
+    console.warn("[sendStatusChangeEmail] RESEND_API_KEY not configured  -  skipping notification email");
+    return false;
+  }
+  const copy = {
+    cancelled: { subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX subscription was cancelled", headline: "Subscription Cancelled" },
+    refunded:  { subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX payment was refunded",       headline: "Payment Refunded" },
+    suspended: { subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX access was suspended",        headline: "Access Suspended" },
+    expired:   { subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX access has expired",          headline: "Access Expired" },
+  }[status] || { subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX subscription status changed", headline: "Subscription Status Changed" };
+  try {
+    const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>${copy.subject}</title></head>
+<body style="background:#0a0a0f;color:#e2e8f0;font-family:system-ui,sans-serif;margin:0;padding:32px;">
+  <div style="max-width:600px;margin:0 auto;background:#111827;border:1px solid #1e40af;border-radius:12px;padding:40px;">
+    <h1 style="color:#60a5fa;margin-top:0;">CYBERDUDEBIVASH(R) Sentinel APEX</h1>
+    <h2 style="color:#e2e8f0;">${copy.headline}</h2>
+    <p style="color:#94a3b8;">Your <strong style="color:#60a5fa;">${tier || "PRO"}</strong> plan access has been updated to: <strong style="color:#60a5fa;">${status}</strong>.${reason ? ` Reason: ${reason}.` : ""}</p>
+    <p style="color:#94a3b8;">If this wasn't expected, or you have questions, contact us at <a href="mailto:support@cyberdudebivash.com" style="color:#60a5fa;">support@cyberdudebivash.com</a></p>
+    <p style="color:#475569;font-size:12px;margin-bottom:0;">CYBERDUDEBIVASH(R) SENTINEL APEX  -  Enterprise Threat Intelligence Platform</p>
+  </div>
+</body>
+</html>`;
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({
+        from: "CYBERDUDEBIVASH(R) Sentinel APEX <noreply@cyberdudebivash.com>",
+        to: [email],
+        subject: copy.subject,
+        html: htmlBody,
+      }),
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      console.error(`[sendStatusChangeEmail] Resend API error ${resp.status}: ${errText}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[sendStatusChangeEmail] Failed to send status-change email:", err?.message || err);
     return false;
   }
 }
