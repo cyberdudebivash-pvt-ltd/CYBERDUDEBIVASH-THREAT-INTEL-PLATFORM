@@ -39,6 +39,8 @@ export interface CveRecord {
   risk_score: number;
   advisory_count: number;
   mitre_tactics: MitreTactic[];
+  /** Real NVD description, when available -- may be empty for records without one. */
+  description: string;
 }
 
 export type IocType = "ip" | "domain" | "hash_sha256" | "url";

@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { IntelPageLayout } from "@/components/intel-pages/IntelPageLayout";
 import { ThreatLevelBadge } from "@/components/intel-pages/ThreatLevelBadge";
+import { IocSearchWidget } from "@/components/intel-pages/IocSearchWidget";
+import { ProTelemetryTeaser } from "@/components/intel-pages/ProTelemetryTeaser";
 import { CVE_RECORDS, getCveBySlug } from "@/lib/intel-data";
 
 interface Props {
@@ -13,13 +15,21 @@ export async function generateStaticParams() {
   return CVE_RECORDS.map((cve) => ({ slug: cve.slug }));
 }
 
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const cve = getCveBySlug(slug);
   if (!cve) return { title: "CVE Not Found" };
 
   const title = `${cve.id} — Vulnerability Intelligence & Exploitation Analysis`;
-  const description = `${cve.id} vulnerability intelligence: severity ${cve.severity}, ${cve.advisory_count} advisories, MITRE ATT&CK techniques ${cve.mitre_tactics.map((t) => t.id).join(", ")}. EPSS scoring and KEV status tracked by CYBERDUDEBIVASH® SENTINEL APEX.`;
+  const mitreClause = cve.mitre_tactics.length > 0 ? `, MITRE ATT&CK techniques ${cve.mitre_tactics.map((t) => t.id).join(", ")}` : "";
+  const description = cve.description
+    ? truncate(`${cve.id}: ${cve.description}`, 155)
+    : `${cve.id} vulnerability intelligence: severity ${cve.severity}, ${cve.advisory_count} advisories${mitreClause}. EPSS scoring and KEV status tracked by CYBERDUDEBIVASH® SENTINEL APEX.`;
   const url = `https://intel.cyberdudebivash.com/cves/${cve.slug}`;
 
   return {
@@ -44,7 +54,11 @@ export default async function CvePage({ params }: Props) {
     "@type": "TechArticle",
     "@id": url,
     headline: `${cve.id} — Vulnerability Intelligence Profile`,
-    description: `Severity: ${cve.severity}. Advisory coverage: ${cve.advisory_count} advisories. CISA KEV: ${cve.kev_present ? "Yes" : "No"}. MITRE techniques: ${cve.mitre_tactics.map((t) => t.id).join(", ")}.`,
+    description: cve.description
+      ? `${cve.description} Severity: ${cve.severity}. Advisory coverage: ${cve.advisory_count} advisories. CISA KEV: ${cve.kev_present ? "Yes" : "No"}.`
+      : `Severity: ${cve.severity}. Advisory coverage: ${cve.advisory_count} advisories. CISA KEV: ${cve.kev_present ? "Yes" : "No"}.${
+          cve.mitre_tactics.length > 0 ? ` MITRE techniques: ${cve.mitre_tactics.map((t) => t.id).join(", ")}.` : ""
+        }`,
     url,
     datePublished: cve.published_at || "2026-06-01",
     dateModified: "2026-06-19",
@@ -93,8 +107,12 @@ export default async function CvePage({ params }: Props) {
 
         <h1 className="text-3xl sm:text-4xl font-bold font-mono text-white mb-2">{cve.id}</h1>
         <p className="text-gray-400 text-base">
-          Vulnerability intelligence profile — severity {cve.severity}, {cve.advisory_count} correlated advisories,
-          tracked across {cve.mitre_tactics.length} MITRE ATT&CK technique{cve.mitre_tactics.length !== 1 ? "s" : ""}.
+          {cve.description || (
+            <>
+              Vulnerability intelligence profile — severity {cve.severity}, {cve.advisory_count} correlated advisories,
+              tracked across {cve.mitre_tactics.length} MITRE ATT&CK technique{cve.mitre_tactics.length !== 1 ? "s" : ""}.
+            </>
+          )}
         </p>
       </div>
 
@@ -172,6 +190,12 @@ export default async function CvePage({ params }: Props) {
               </div>
             </section>
           )}
+
+          {/* Instant IOC Analysis */}
+          <IocSearchWidget prefill={cve.id} />
+
+          {/* Pro telemetry teaser */}
+          <ProTelemetryTeaser contextLabel="C2 Threat Attribution & YARA" refTag="cve_page" />
 
           {/* Remediation guidance */}
           <section className="rounded-xl border border-gray-800 bg-gray-900/40 p-6">
@@ -269,7 +293,9 @@ export default async function CvePage({ params }: Props) {
                   <span className="font-mono text-sm font-semibold text-cyan-400 group-hover:text-cyan-300">{rc.id}</span>
                   <ThreatLevelBadge level={rc.severity} />
                 </div>
-                <p className="text-xs text-gray-500">{rc.advisory_count} advisories · {rc.mitre_tactics.map((t) => t.id).join(", ")}</p>
+                <p className="text-xs text-gray-500">
+                  {rc.advisory_count} advisories{rc.mitre_tactics.length > 0 ? ` · ${rc.mitre_tactics.map((t) => t.id).join(", ")}` : ""}
+                </p>
               </Link>
             ))}
           </div>

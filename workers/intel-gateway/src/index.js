@@ -68,6 +68,9 @@
  *                                            redirects to the real, live
  *                                            Gumroad/Razorpay checkout, see
  *                                            billing-checkout.js)
+ *   GET  /feeds/active-c2-ips.txt          (NEW - public lead-magnet feed)
+ *   GET  /feeds/ransomware-domains.txt     (NEW - public lead-magnet feed)
+ *   GET  /feeds/cve-exploited-summary.json (NEW - public lead-magnet feed)
  */
 
 // --- Constants ----------------------------------------------------------------
@@ -118,6 +121,7 @@ export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_
 import { checkDailyQuota, buildQuotaExceededBody } from './daily-quota.js';
 import { resolveCheckoutUrl } from './billing-checkout.js';
 import { handleAdminCacheBust } from './admin-cache-bust.js';
+import { buildC2IpList, buildRansomwareDomainList, buildCveExploitedSummary, renderPlaintextFeed } from './feeds.js';
 import { LATEST_JSON_KEY, LATEST_PRO_JSON_KEY, FEED_MANIFEST_FALLBACK_KEY, r2Get, findItemBySlug } from './feed-lookup.js';
 // Re-exported unchanged for backward compatibility with any external
 // importer of index.js's own findItemBySlug export (Principle 5: no silent
@@ -5313,6 +5317,41 @@ async function handleRequest(request, env, ctx, quotaOut) {
     return await handlePaymentStatus(request, env, url);
   }
 
+  // --- Public lead-magnet feeds (no auth required) -----------------------------
+  // GET /feeds/active-c2-ips.txt, /feeds/ransomware-domains.txt,
+  // /feeds/cve-exploited-summary.json -- free, high-volume feeds with an
+  // embedded upgrade banner. Logic lives in feeds.js (pure, unit-testable);
+  // this reuses the SAME loadFeedItems() every other endpoint reads -- one
+  // source of feed data, not a second one. Edge-cached at Cloudflare
+  // (s-maxage) so high-concurrency scraping never reaches the backend.
+  if (path.startsWith("/feeds/")) {
+    const feedHeaders = { "Cache-Control": "public, max-age=3600, s-maxage=21600" };
+    const feedData = await loadFeedItems(env);
+    const items = feedData.items || [];
+
+    if (path === "/feeds/active-c2-ips.txt") {
+      const ips = buildC2IpList(items, 100);
+      return new Response(renderPlaintextFeed("Active C2 IP", ips, 100, "c2_feed"), {
+        status: 200,
+        headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Type": "text/plain; charset=utf-8", ...feedHeaders },
+      });
+    }
+    if (path === "/feeds/ransomware-domains.txt") {
+      const domains = buildRansomwareDomainList(items, 100);
+      return new Response(renderPlaintextFeed("Ransomware Domain", domains, 100, "ransomware_feed"), {
+        status: 200,
+        headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Type": "text/plain; charset=utf-8", ...feedHeaders },
+      });
+    }
+    if (path === "/feeds/cve-exploited-summary.json") {
+      return jsonResp(buildCveExploitedSummary(items, 25), 200, feedHeaders);
+    }
+    return jsonResp({
+      error: "Unknown feed",
+      feeds: ["/feeds/active-c2-ips.txt", "/feeds/ransomware-domains.txt", "/feeds/cve-exploited-summary.json"],
+    }, 404);
+  }
+
   // --- Billing checkout router (no auth required) -----------------------------
   // GET /api/billing/checkout?tier=pro|enterprise&currency=usd|inr[&email=...]
   // Redirects to the correct already-live checkout destination -- see
@@ -5940,6 +5979,7 @@ async function handleRequest(request, env, ctx, quotaOut) {
       "POST /api/webhooks/razorpay", "POST /api/webhooks/gumroad",
       "POST /api/payment/manual-notify", "GET /api/payment/status?review_id=",
       "GET /api/billing/checkout?tier=pro|enterprise&currency=usd|inr",
+      "GET /feeds/active-c2-ips.txt", "GET /feeds/ransomware-domains.txt", "GET /feeds/cve-exploited-summary.json",
       "POST /api/v1/brand/scan (PRO+)", "POST /api/v1/brand/check (PRO+)",
       "POST /api/v1/vendor-risk/assess (PRO+)", "POST /api/v1/vendor-risk/bulk (ENT)",
       "GET /api/v1/geopolitical/country/{code} (PRO+)", "GET /api/v1/geopolitical/landscape (PRO+)",

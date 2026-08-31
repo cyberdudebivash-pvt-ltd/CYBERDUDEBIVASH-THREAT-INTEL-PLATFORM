@@ -1,5 +1,5 @@
 """
-sentinel_sdk — CYBERDUDEBIVASH® Sentinel APEX Python SDK v134.0
+sentinel_sdk — CYBERDUDEBIVASH® Sentinel APEX Python SDK v1.0.0
 ================================================================
 Official Python client for the Sentinel APEX Threat Intelligence API.
 
@@ -53,7 +53,7 @@ from .exceptions import (
     SDKConfigurationError,
 )
 
-__version__ = "100.0.0"
+__version__ = "1.0.0"
 __author__  = "CYBERDUDEBIVASH Pvt. Ltd."
 __all__ = [
     # Client

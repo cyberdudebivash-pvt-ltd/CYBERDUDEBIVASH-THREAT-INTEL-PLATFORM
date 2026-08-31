@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { IntelPageLayout } from "@/components/intel-pages/IntelPageLayout";
 import { ThreatLevelBadge } from "@/components/intel-pages/ThreatLevelBadge";
+import { IocSearchWidget } from "@/components/intel-pages/IocSearchWidget";
+import { ProTelemetryTeaser } from "@/components/intel-pages/ProTelemetryTeaser";
 import { THREAT_ACTORS, getActorBySlug } from "@/lib/intel-data";
 
 interface Props {
@@ -208,6 +210,12 @@ export default async function ThreatActorPage({ params }: Props) {
               ))}
             </div>
           </section>
+
+          {/* Instant IOC Analysis */}
+          <IocSearchWidget prefill={actor.display_name} />
+
+          {/* Pro telemetry teaser */}
+          <ProTelemetryTeaser contextLabel="Infrastructure & C2 Attribution" refTag="actor_page" />
         </div>
 
         {/* Sidebar */}

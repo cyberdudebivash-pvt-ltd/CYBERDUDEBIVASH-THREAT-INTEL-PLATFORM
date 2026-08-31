@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentinel-apex-sdk"
+version = "1.0.0"
+description = "Official Python SDK for CYBERDUDEBIVASH® Sentinel APEX Threat Intelligence API"
+readme = "README.md"
+requires-python = ">=3.9"
+# The platform's own LICENSE.txt (repo root) is a proprietary "All Rights
+# Reserved" commercial license, not MIT/Apache/BSD -- setup.py previously
+# claimed "License :: OSI Approved :: MIT License" here, which would have
+# been a materially false claim to every downstream pip install (MIT
+# grants free reuse/modification/redistribution rights the real license
+# does not). Whether this client SDK specifically should ship under a
+# separate, more permissive license (a common pattern for official SDKs
+# even when the core platform stays proprietary) is a business decision
+# this file does not make on its own -- left as "Proprietary" until that
+# decision is made explicitly.
+license = "LicenseRef-Proprietary"
+authors = [
+  { name = "CyberDudeBivash Pvt. Ltd.", email = "api@cyberdudebivash.com" },
+]
+keywords = [
+  "cybersecurity", "threat-intelligence", "cve", "vulnerability",
+  "sentinel", "siem", "soc", "stix", "cisa-kev", "threat-intel",
+]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "Topic :: Security",
+  "Topic :: Internet :: WWW/HTTP",
+  # No "License :: ..." trove classifier here: PEP 639 (enforced by
+  # current setuptools) rejects combining the modern `license` expression
+  # above with a legacy license classifier -- confirmed by an actual
+  # `python -m build` failure (InvalidConfigError) during this change, not
+  # assumed. The `license` field above is the single source of truth.
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+requests = ["requests>=2.28.0"]
+dev = ["pytest>=7.0", "pytest-cov", "responses", "mypy"]
+
+[project.urls]
+Homepage = "https://intel.cyberdudebivash.com"
+"API Reference" = "https://intel.cyberdudebivash.com/api-docs.html"
+"Source" = "https://github.com/cyberdudebivash/sentinel-apex-sdk"
+"Issue Tracker" = "https://github.com/cyberdudebivash/sentinel-apex-sdk/issues"
+
+[project.scripts]
+sentinel = "sentinel_sdk.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sentinel_sdk*"]

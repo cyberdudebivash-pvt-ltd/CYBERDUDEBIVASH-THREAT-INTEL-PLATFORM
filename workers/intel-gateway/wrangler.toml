@@ -26,6 +26,14 @@ routes = [
   { pattern = "intel.cyberdudebivash.com/reports/*", zone_name = "cyberdudebivash.com" },
   { pattern = "intel.cyberdudebivash.com/taxii/*",   zone_name = "cyberdudebivash.com" },
   { pattern = "intel.cyberdudebivash.com/auth/*",    zone_name = "cyberdudebivash.com" },
+  # /feeds/*    -- public lead-magnet feeds (feeds.js), added alongside this
+  #                fix. Without this route, GET /feeds/* falls through to the
+  #                same CF Pages static hosting /reports/* used to 404 against
+  #                (see the v167.2 note above) -- index.js's route handling
+  #                for /feeds/* is unreachable in production until this is
+  #                deployed (requires an actual `wrangler deploy`, not just a
+  #                merge -- same as every other route in this file).
+  { pattern = "intel.cyberdudebivash.com/feeds/*",   zone_name = "cyberdudebivash.com" },
 ]
 
 # v143.0.0: Cron trigger for scheduled webhook push + cache refresh

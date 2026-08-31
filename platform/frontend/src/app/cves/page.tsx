@@ -7,8 +7,7 @@ import type { Severity } from "@/lib/intel-data";
 
 export const metadata: Metadata = {
   title: "CVE Intelligence — Real-Time Vulnerability Tracking with EPSS & KEV",
-  description:
-    "Real-time CVE intelligence with EPSS scoring, CISA KEV integration, CVSS v4.0, and MITRE ATT&CK mapping. Track 28+ active vulnerabilities with exploitation probability and advisory correlation — CYBERDUDEBIVASH® SENTINEL APEX.",
+  description: `Real-time CVE intelligence with EPSS scoring, CISA KEV integration, CVSS v4.0, and MITRE ATT&CK mapping. Track ${CVE_RECORDS.length} active vulnerabilities with exploitation probability and advisory correlation — CYBERDUDEBIVASH® SENTINEL APEX.`,
   alternates: { canonical: "https://intel.cyberdudebivash.com/cves" },
   openGraph: {
     title: "CVE Intelligence | CYBERDUDEBIVASH® SENTINEL APEX",

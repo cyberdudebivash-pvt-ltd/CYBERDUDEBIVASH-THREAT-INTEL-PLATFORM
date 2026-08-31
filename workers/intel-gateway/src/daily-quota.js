@@ -104,7 +104,12 @@ export function buildQuotaExceededBody(quota) {
     status: 429,
     tier: quota.tier,
     message,
-    upgrade_url: "https://intel.cyberdudebivash.com/pricing?ref=api_429",
+    // .html suffix required -- this site has no clean-URL routing (no
+    // Jekyll/_redirects config, .nojekyll at root); every other real
+    // internal link on the site (88 of them) uses /pricing.html, zero use
+    // bare /pricing, and premium-reports.js/revenue-enforcement.js's own
+    // pricing links already agree on .html. Bare /pricing was a dead link.
+    upgrade_url: "https://intel.cyberdudebivash.com/pricing.html?ref=api_429",
     ...(directCheckout ? { direct_checkout: directCheckout } : {}),
   };
 }

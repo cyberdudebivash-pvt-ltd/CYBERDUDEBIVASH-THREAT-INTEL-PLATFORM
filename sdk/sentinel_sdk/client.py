@@ -1,5 +1,5 @@
 """
-sdk/sentinel_sdk/client.py — CYBERDUDEBIVASH® Sentinel APEX Python SDK v134.0
+sdk/sentinel_sdk/client.py — CYBERDUDEBIVASH® Sentinel APEX Python SDK v1.0.0
 Production-grade synchronous API client.
 
 Features:
@@ -65,7 +65,7 @@ _DEFAULT_TIMEOUT  = 30
 _MAX_RETRIES      = 4
 _RETRY_BASE_S     = 1.0
 _RETRY_MAX_S      = 30.0
-_SDK_VERSION      = "100.0.0"
+_SDK_VERSION      = "1.0.0"
 _USER_AGENT       = f"SentinelAPEX-Python-SDK/{_SDK_VERSION}"
 
 

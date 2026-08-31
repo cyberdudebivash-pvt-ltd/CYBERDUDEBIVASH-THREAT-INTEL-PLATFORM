@@ -105,7 +105,7 @@ test("FREE-tier 429 body matches the required schema exactly, with pro_usd/pro_i
   assert.match(body.message, /Daily request quota reached \(50\/50\)/);
   assert.match(body.message, /Sentinel Pro/);
   assert.match(body.message, /5,000 requests\/day/);
-  assert.equal(body.upgrade_url, "https://intel.cyberdudebivash.com/pricing?ref=api_429");
+  assert.equal(body.upgrade_url, "https://intel.cyberdudebivash.com/pricing.html?ref=api_429");
   assert.deepEqual(body.direct_checkout, {
     pro_usd: "https://intel.cyberdudebivash.com/api/billing/checkout?tier=pro&currency=usd",
     pro_inr: "https://intel.cyberdudebivash.com/api/billing/checkout?tier=pro&currency=inr",
