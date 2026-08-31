@@ -1142,6 +1142,42 @@ jobs:
           git add api/detections/ 2>/dev/null || true
           git add data/audit/stage_3_1_11_detection_engineering.json 2>/dev/null || true
 
+          # Same bug class, swept across the rest of this workflow's stages
+          # (2026-08-31): a background audit cross-referenced every STAGE X.Y
+          # script's declared output paths (docstring "OUTPUT FILES" headers
+          # + write-call greps) against this add list and found the same gap
+          # in at least 15 more paths -- each script runs successfully every
+          # scheduled execution and writes real output, none of it was ever
+          # staged. Some (data/health/intelligence_quality_hardener_report.json,
+          # data/threat_actors/, data/health/campaign_correlation_report.json,
+          # data/detection/, data/reports/executive-briefs/,
+          # data/golden_baseline/, data/health/runtime_stability.json) have
+          # ZERO commits in repo history -- never committed even once.
+          # Others (data/health/kev_marker_report.json,
+          # api/v1/intel/daily_brief_meta.json,
+          # data/health/feed_health_gate.json, data/campaigns/, data/malware/,
+          # data/graph/, data/health/advisory_immutability.json) are frozen at
+          # a one-time snapshot from 2026-08-26 or earlier, only ever
+          # "refreshed" by an unrelated conflict-recovery job restoring that
+          # same stale content -- never by this stage. Directory-level adds
+          # for the same reason as api/detections/ above: per-item filenames
+          # (per-actor, per-advisory, per-campaign) aren't fixed paths.
+          git add data/health/intelligence_quality_hardener_report.json 2>/dev/null || true
+          git add data/threat_actors/ 2>/dev/null || true
+          git add data/health/actor_attribution_report.json 2>/dev/null || true
+          git add data/health/campaign_correlation_report.json 2>/dev/null || true
+          git add data/detection/ 2>/dev/null || true
+          git add data/reports/executive-briefs/ 2>/dev/null || true
+          git add data/golden_baseline/ 2>/dev/null || true
+          git add data/health/runtime_stability.json 2>/dev/null || true
+          git add data/health/kev_marker_report.json 2>/dev/null || true
+          git add api/v1/intel/daily_brief_meta.json 2>/dev/null || true
+          git add data/health/feed_health_gate.json 2>/dev/null || true
+          git add data/campaigns/ 2>/dev/null || true
+          git add data/malware/ 2>/dev/null || true
+          git add data/graph/ 2>/dev/null || true
+          git add data/health/advisory_immutability.json 2>/dev/null || true
+
           # Check if anything changed
           if git diff --staged --quiet; then
             echo "[INFO] No AI output changes detected — skipping commit (feed unchanged)"
