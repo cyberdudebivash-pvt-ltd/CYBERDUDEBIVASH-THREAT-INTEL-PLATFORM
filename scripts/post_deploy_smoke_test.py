@@ -105,7 +105,11 @@ smoke("Analyst Dashboard",      PLATFORM_URL + "/dashboard/analyst_dashboard.htm
 print("\n[API ENDPOINTS]")
 smoke("AI Brain Summary",        PLATFORM_URL + "/api/v1/intel/ai_summary.json", 200, 1_000)
 smoke("Live Feed",              PLATFORM_URL + "/feed.json",               200, 10_000)
-smoke("Latest Feed",            PLATFORM_URL + "/latest.json",             200, 10_000)
+# /latest.json is a frozen, one-time-committed static file (last regenerated
+# 2026-03-22) that was never wired to the live pipeline -- this check was silently
+# verifying a stale artifact's mere presence, never its freshness. Pointed at the
+# real canonical feed api/v1/intel/latest.json (workers/intel-gateway) instead.
+smoke("Latest Feed",            PLATFORM_URL + "/api/v1/intel/latest.json", 200, 10_000)
 smoke("Feed Manifest",          PLATFORM_URL + "/feed_manifest.json",      200, 500)
 
 # ── ASSETS ────────────────────────────────────────────────────────

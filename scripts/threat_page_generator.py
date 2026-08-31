@@ -269,7 +269,7 @@ a:hover{{text-decoration:underline}}
 
 <div class="cta-box">
 <h3>Get Premium Threat Intelligence</h3>
-<p style="color:#9FB3C8;font-size:14px;">Access STIX bundles, detection rules (Sigma, YARA, Suricata), IOC feeds, and API access.</p>
+<p style="color:#9FB3C8;font-size:14px;">Access STIX bundles, detection rules (Sigma, YARA), IOC feeds, and API access.</p>
 <a href="{GUMROAD_URL}/?utm_source=threat-page&utm_medium={slug[:30]}&utm_campaign=cta" class="cta-btn" target="_blank" rel="noopener">VIEW PRODUCTS</a>
 </div>
 
