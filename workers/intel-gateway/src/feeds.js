@@ -26,7 +26,10 @@
 // (e.g. a PoC host) is not the same claim as "this IP is C2
 // infrastructure," and labeling it that way in a feed security teams
 // paste into firewall rules would be a real, actionable false claim.
-const C2_THREAT_TYPES = new Set(["Malware", "Ransomware", "APT", "Phishing", "DDoS", "Supply Chain"]);
+// Exported so taxii.js's "c2-indicators" TAXII collection classifies items
+// the identical way this public teaser feed does -- one definition of
+// "active malicious infrastructure," not two that could quietly drift.
+export const C2_THREAT_TYPES = new Set(["Malware", "Ransomware", "APT", "Phishing", "DDoS", "Supply Chain"]);
 
 const SITE_BASE = "https://intel.cyberdudebivash.com";
 

@@ -58,8 +58,11 @@
  *   GET  /api/feed(.json)
  *   GET  /reports/**
  *   GET  /taxii/                            (NEW v184.0 - TAXII 2.1 server discovery)
- *   GET  /taxii/collections/               (NEW v184.0)
- *   GET  /taxii/collections/{id}/objects/  (NEW v184.0 - PRO/ENTERPRISE)
+ *   GET  /taxii/collections/               (NEW v184.0; 5 collections registered in
+ *                                            taxii.js - sentinel-apex-main, sentinel-apex-kev,
+ *                                            c2-indicators, active-ransomware, apt-attribution)
+ *   GET  /taxii/collections/{id}/objects/  (NEW v184.0 - PRO/ENTERPRISE; added_after/
+ *                                            limit/next pagination via taxii.js)
  *   GET  /api/admin/health                 (NEW v184.0 - ADMIN_SECRET)
  *   GET  /api/admin/audit                  (NEW v184.0 - ADMIN_SECRET)
  *   POST /api/admin/keys                   (NEW v184.0 - ADMIN_SECRET)
@@ -71,6 +74,13 @@
  *   GET  /feeds/active-c2-ips.txt          (NEW - public lead-magnet feed)
  *   GET  /feeds/ransomware-domains.txt     (NEW - public lead-magnet feed)
  *   GET  /feeds/cve-exploited-summary.json (NEW - public lead-magnet feed)
+ *   POST /api/org/create                   (NEW - B2B team seats, see teams.js; paid tier)
+ *   POST /api/org/invite                   (NEW - org ADMIN only)
+ *   POST /api/org/invite/accept            (NEW - invite token is the credential)
+ *   GET  /api/org/usage                    (NEW - org member; aggregates usage-meter.js)
+ *   POST /api/org/keys/rotate              (NEW - org ADMIN only)
+ *   POST /api/org/invoice/generate         (NEW - org ADMIN only; GST invoice)
+ *   GET  /api/org/invoice/{id}             (NEW - printable HTML invoice)
  */
 
 // --- Constants ----------------------------------------------------------------
@@ -110,7 +120,7 @@ import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handle
 // dark-web-monitor.js's handlers are intentionally NOT imported -- see the
 // _darkWebUnavailable disable note at its route registration below.
 import { handlePremiumReport, handleReportList, handleReportGet } from './premium-reports.js';
-import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-meter.js';
+import { trackApiUsage, calculateCostPerCall, slugifyEndpoint, getUsageSummary } from './usage-meter.js';
 import { deductCredits } from './credit-system.js';
 import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
 // Re-exported unchanged for backward compatibility with any external
@@ -121,8 +131,10 @@ export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_
 import { checkDailyQuota, buildQuotaExceededBody } from './daily-quota.js';
 import { resolveCheckoutUrl } from './billing-checkout.js';
 import { handleAdminCacheBust } from './admin-cache-bust.js';
-import { buildC2IpList, buildRansomwareDomainList, buildCveExploitedSummary, renderPlaintextFeed } from './feeds.js';
+import { buildC2IpList, buildRansomwareDomainList, buildCveExploitedSummary, renderPlaintextFeed, C2_THREAT_TYPES } from './feeds.js';
 import { LATEST_JSON_KEY, LATEST_PRO_JSON_KEY, FEED_MANIFEST_FALLBACK_KEY, r2Get, findItemBySlug } from './feed-lookup.js';
+import { TAXII_COLLECTIONS, tierMeetsCollection, findCollection, filterItemsForCollection, tagC2Eligibility, paginateFeedItems, buildTaxiiUpgradeBody } from './taxii.js';
+import { ORG_PLANS, isValidEmail, isValidRole, isValidPlan, buildOrgId, buildInviteToken, hashApiKey, buildOrgRecord, buildOrgMemberRecord, buildInviteRecord, isInviteExpired, computeSeatUsage, aggregateOrgUsage, buildOrgInviteEmailHtml, resolveSeatAddonContactUrl, buildGstInvoiceRecord, renderInvoiceHtml } from './teams.js';
 // Re-exported unchanged for backward compatibility with any external
 // importer of index.js's own findItemBySlug export (Principle 5: no silent
 // removal of an existing export) -- the canonical implementation now lives
@@ -143,8 +155,6 @@ const CVE_LIVE_KEY        = "api/v1/cve/live.json";
 const CVE_STATS_KEY       = "api/v1/cve/stats.json";
 const CVE_TTL_SEC         = 900;  // 15 min
 const NVD_API             = "https://services.nvd.nist.gov/rest/json/cves/2.0";
-const TAXII_COLLECTION_ID = "sentinel-apex-main";
-const TAXII_KEV_COLL      = "sentinel-apex-kev";
 const TAXII_CT            = "application/taxii+json;version=2.1";
 const STIX_CT             = "application/stix+json;version=2.1";
 
@@ -380,9 +390,28 @@ async function resolveAuth(request, env) {
   // validation, same tier resolution below. Not a second auth path: it's
   // just another header name resolveAuth() will accept for the same key.
   const apiKey = (request.headers.get("X-API-Key") || request.headers.get("X-Sentinel-Key") || "").trim();
-  const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  const authHeader = request.headers.get("Authorization") || "";
+  const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+  // Authorization: Basic <base64(anything:api_key)> -- an additive alias
+  // for TAXII 2.1 clients (many enterprise TIPs/SIEM TAXII pullers only
+  // support HTTP Basic, not Bearer) for the exact same opaque API key,
+  // not a second credential type: the password half is looked up in
+  // API_KEYS_KV/verified as a JWT exactly like `bearer` below, and the
+  // username half is ignored (this platform's keys are single opaque
+  // tokens, not username+password pairs). Never overrides X-API-Key/
+  // X-Sentinel-Key/Bearer when one of those is already present.
+  const basicMatch = /^Basic\s+(\S+)/i.exec(authHeader);
+  let basicKey = "";
+  if (basicMatch) {
+    try {
+      const decoded = atob(basicMatch[1]);
+      basicKey = (decoded.includes(":") ? decoded.slice(decoded.indexOf(":") + 1) : decoded).trim();
+    } catch (_) {
+      // malformed Basic header -- ignored, falls through
+    }
+  }
   const qKey   = new URL(request.url).searchParams.get("api_key") || "";
-  const raw    = apiKey || bearer || qKey;
+  const raw    = apiKey || bearer || basicKey || qKey;
 
   if (!raw) return { tier: TIERS.FREE, key: null, sub: null };
 
@@ -2344,31 +2373,34 @@ async function handleTAXII(request, env, ctx, path, auth) {
     });
   }
 
-  // All other TAXII endpoints require PRO or ENTERPRISE
+  // All other TAXII endpoints require PRO or ENTERPRISE. A real,
+  // provisioned FREE/Community key (auth.key set, tier FREE) is
+  // distinguishable from no credentials at all (auth.key null): the
+  // former gets 403 (authenticated, insufficient tier, upgrade payload
+  // attached) per TAXII enterprise-gating convention; the latter keeps the
+  // original 401 (not authenticated at all).
   const taxiiAccessAllowed = !(!auth || auth.tier === TIERS.FREE);
   if (!resolveEntitlement(ctx, env, "taxii_access", auth, taxiiAccessAllowed).allowed) {
-    return taxiiResp({ title: "Unauthorized", description: "TAXII data endpoints require PRO or ENTERPRISE tier. POST api_key to /auth/login for a JWT." }, 401);
+    const upgradeUrl = resolveCheckoutUrl({ tier: "pro" }, request.cf?.country);
+    const body = buildTaxiiUpgradeBody(null, upgradeUrl);
+    const status = auth?.key ? 403 : 401;
+    return taxiiResp(body, status);
   }
 
   // Collections list
   if (path === "/taxii/collections/" || path === "/taxii/collections") {
-    const canReadKevAdHoc = auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
-    const canReadKev = resolveEntitlement(ctx, env, "taxii_kev", auth, canReadKevAdHoc).allowed;
     return taxiiResp({
-      collections: [
-        {
-          id: TAXII_COLLECTION_ID,
-          title: "SENTINEL APEX - Primary Threat Intelligence",
-          description: "CVEs, IOCs, APT activity, ransomware alerts, dark web findings",
-          can_read: true, can_write: false, media_types: [STIX_CT],
-        },
-        {
-          id: TAXII_KEV_COLL,
-          title: "SENTINEL APEX - CISA KEV Confirmed",
-          description: "Known Exploited Vulnerabilities confirmed in CISA KEV catalog (ENTERPRISE only)",
-          can_read: canReadKev, can_write: false, media_types: [STIX_CT],
-        },
-      ],
+      collections: TAXII_COLLECTIONS.map((c) => {
+        const adHoc = tierMeetsCollection(auth.tier, c);
+        // taxii_kev is the one pre-existing entitlement-shadow resource
+        // name for the KEV collection; every other collection (including
+        // the three new ones) uses the ad-hoc tier check directly, same as
+        // sentinel-apex-main always has.
+        const allowed = c.id === "sentinel-apex-kev"
+          ? resolveEntitlement(ctx, env, "taxii_kev", auth, adHoc).allowed
+          : adHoc;
+        return { id: c.id, title: c.title, description: c.description, can_read: allowed, can_write: false, media_types: [STIX_CT] };
+      }),
     });
   }
 
@@ -2376,32 +2408,50 @@ async function handleTAXII(request, env, ctx, path, auth) {
   const objMatch = path.match(/^\/taxii\/collections\/([^/]+)\/objects\/?$/);
   if (objMatch) {
     const collId = objMatch[1];
-    const kevAllowedAdHoc = auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
-    let kevAllowed = kevAllowedAdHoc;
-    if (collId === TAXII_KEV_COLL) kevAllowed = resolveEntitlement(ctx, env, "taxii_kev", auth, kevAllowedAdHoc).allowed;
-    if (collId === TAXII_KEV_COLL && !kevAllowed) {
-      return taxiiResp({ title: "Forbidden", description: "KEV collection requires ENTERPRISE tier" }, 403);
+    const collection = findCollection(collId);
+    if (!collection) return taxiiResp({ title: "Not Found", description: `Unknown collection: ${collId}` }, 404);
+
+    const adHoc = tierMeetsCollection(auth.tier, collection);
+    const allowed = collId === "sentinel-apex-kev"
+      ? resolveEntitlement(ctx, env, "taxii_kev", auth, adHoc).allowed
+      : adHoc;
+    if (!allowed) {
+      const upgradeUrl = resolveCheckoutUrl({ tier: collection.minTier.toLowerCase() }, request.cf?.country);
+      return taxiiResp(buildTaxiiUpgradeBody(collection, upgradeUrl), 403);
     }
 
-    const feedData   = await loadFeedItems(env);
-    const allItems   = (feedData.items || []).filter(isCustomerReady);
-    const sourceItems = collId === TAXII_KEV_COLL ? allItems.filter(i => i.kev_present) : allItems;
+    const feedData  = await loadFeedItems(env);
+    const allItems  = tagC2Eligibility((feedData.items || []).filter(isCustomerReady), C2_THREAT_TYPES);
+    const sourceItems = filterItemsForCollection(allItems, collId);
 
-    // Prefer pre-built STIX bundle from R2. NOTE (P0 follow-through, Section
-    // 15 residual scope): this pre-built bundle is written by a separate
-    // Python CI stage, not this route -- the same documented scope boundary
-    // as report_generator.py in publication-gate.js's header. The inline
-    // fallback bundle below (this route's own output) is gated above.
-    const r2Bundle = await r2Get(env, `stix/bundle-${collId}.json`);
-    if (r2Bundle) {
-      return new Response(JSON.stringify(r2Bundle), {
-        status: 200,
-        headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Type": STIX_CT, "X-TAXII-Date-Added-Last": now() },
-      });
+    const url = new URL(request.url);
+    const { page: pagedItems, more, next } = paginateFeedItems(sourceItems, {
+      addedAfter: url.searchParams.get("added_after"),
+      limit: url.searchParams.get("limit"),
+      cursor: url.searchParams.get("next"),
+    });
+
+    // Prefer pre-built STIX bundle from R2 -- ONLY for the two original
+    // collections and only on an unpaginated first request: the separate
+    // Python CI stage that writes stix/bundle-{id}.json (P0 follow-through,
+    // Section 15 residual scope, same boundary as report_generator.py in
+    // publication-gate.js's header) has no concept of added_after/limit/
+    // next and only ever produces bundles for sentinel-apex-main/-kev. Any
+    // paginated or new-collection request falls through to the inline
+    // path below, which does honor pagination.
+    const isFirstUnpagedRequest = !url.searchParams.get("added_after") && !url.searchParams.get("limit") && !url.searchParams.get("next");
+    if (isFirstUnpagedRequest && (collId === "sentinel-apex-main" || collId === "sentinel-apex-kev")) {
+      const r2Bundle = await r2Get(env, `stix/bundle-${collId}.json`);
+      if (r2Bundle) {
+        return new Response(JSON.stringify(r2Bundle), {
+          status: 200,
+          headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Type": STIX_CT, "X-TAXII-Date-Added-Last": now() },
+        });
+      }
     }
 
     // Inline STIX 2.1 bundle
-    const stixObjects = sourceItems.slice(0, 200).map(item => ({
+    const stixObjects = pagedItems.map(item => ({
       type: "indicator",
       spec_version: "2.1",
       id: item.stix_id || `indicator--${(item.id || "").replace(/[^a-z0-9-]/gi, "-").toLowerCase()}`,
@@ -2431,6 +2481,14 @@ async function handleTAXII(request, env, ctx, path, auth) {
       id: `bundle--sentinel-${collId}-${Date.now().toString(36)}`,
       spec_version: "2.1",
       objects: stixObjects,
+      // TAXII 2.1 (S3.1) objects-endpoint pagination fields, added
+      // alongside the pre-existing STIX Bundle envelope rather than
+      // replacing it with the spec's bare {more,next,objects} shape --
+      // any existing consumer reading .objects/.type==="bundle" keeps
+      // working unchanged (Principle 5), and a pagination-aware client
+      // gets .more/.next too.
+      more: more,
+      next: next,
     };
     return new Response(JSON.stringify(bundle), {
       status: 200,
@@ -5372,6 +5430,228 @@ async function handleRequest(request, env, ctx, quotaOut) {
     return Response.redirect(target, 302);
   }
 
+  // --- B2B Organization & Team Seats -----------------------------------------
+  // See teams.js's header for the full architecture note (additive, KV-only,
+  // no new infrastructure). All state lives in REVENUE_CRM_KV, the existing
+  // customer-account binding provisionApiKey() already mirrors into.
+  if (path.startsWith("/api/org/")) {
+    if (!env.REVENUE_CRM_KV) return jsonResp({ error: "org_service_unavailable" }, 503);
+
+    if (path === "/api/org/create" && method === "POST") {
+      if (!auth || !auth.key || auth.tier === TIERS.FREE) {
+        return jsonResp({ error: "A paid (PRO/ENTERPRISE) API key is required to create an organization." }, 403);
+      }
+      const existingOrgId = await env.REVENUE_CRM_KV.get(`org_owner:${auth.sub}`);
+      if (existingOrgId) return jsonResp({ error: "already_owns_org", org_id: existingOrgId }, 409);
+
+      let body = {};
+      try { body = await request.json(); } catch (_) {}
+      const name = String(body.name || "").trim();
+      const plan = String(body.plan || "TEAM_PRO").toUpperCase();
+      const billingEmail = String(body.billing_email || auth.sub || "").trim().toLowerCase();
+      if (!name) return jsonResp({ error: "name is required" }, 400);
+      if (!isValidPlan(plan)) return jsonResp({ error: "plan must be one of: " + Object.keys(ORG_PLANS).join(", ") }, 400);
+      if (!isValidEmail(billingEmail)) return jsonResp({ error: "billing_email is invalid" }, 400);
+
+      const orgId = buildOrgId();
+      const org = buildOrgRecord({ orgId, name, ownerUserId: auth.sub, plan, billingEmail, maxSeats: body.max_seats, customRateLimit: body.custom_rate_limit });
+      const ownerHash = await hashApiKey(auth.key);
+      const ownerMember = buildOrgMemberRecord({ orgId, email: auth.sub, role: "ADMIN", apiKeyHash: ownerHash, invitedBy: null });
+
+      await Promise.all([
+        env.REVENUE_CRM_KV.put(`org:${orgId}`, JSON.stringify(org)),
+        env.REVENUE_CRM_KV.put(`orgmember:${orgId}:${auth.sub}`, JSON.stringify(ownerMember)),
+        env.REVENUE_CRM_KV.put(`org_owner:${auth.sub}`, orgId),
+        env.REVENUE_CRM_KV.put(`org_member_index:${ownerHash}`, JSON.stringify({ org_id: orgId, email: auth.sub })),
+      ]);
+      auditLog(ctx, env, { action: "org_created", org_id: orgId, owner: auth.sub, plan });
+      return jsonResp({ org, member: ownerMember }, 201);
+    }
+
+    // Every route below requires the caller's own API key to resolve to an
+    // existing org membership (org_member_index:<hash(their key)>) --
+    // proof of membership is "you can present a key that was issued to
+    // you as a member," the same standard every other authenticated route
+    // on this platform already uses, not a second identity system.
+    // KNOWN LIMITATION: this only resolves raw-API-key auth (X-API-Key/
+    // X-Sentinel-Key/Basic/raw-Bearer) -- a caller using a JWT from
+    // /auth/login (auth.jwt === true) has auth.key set to the JWT itself,
+    // which was never hashed into org_member_index (only the underlying
+    // API key was, at membership-creation time), so a JWT session cannot
+    // currently reach these routes. Documented rather than silently
+    // dropped; raw-API-key auth (what every code sample on this platform
+    // already tells customers to use) is unaffected.
+    if (!auth || !auth.key) return jsonResp({ error: "Authentication required." }, 401);
+    const callerHash = await hashApiKey(auth.key);
+    const membership = await env.REVENUE_CRM_KV.get(`org_member_index:${callerHash}`, "json");
+    if (!membership) return jsonResp({ error: "This key is not a member of any organization." }, 403);
+    const org = await env.REVENUE_CRM_KV.get(`org:${membership.org_id}`, "json");
+    if (!org) return jsonResp({ error: "org_not_found" }, 404);
+    const callerMember = await env.REVENUE_CRM_KV.get(`orgmember:${membership.org_id}:${membership.email}`, "json");
+    if (!callerMember || callerMember.status !== "active") return jsonResp({ error: "membership_inactive" }, 403);
+
+    if (path === "/api/org/invite" && method === "POST") {
+      if (callerMember.role !== "ADMIN") return jsonResp({ error: "Only an org ADMIN can invite members." }, 403);
+
+      let body = {};
+      try { body = await request.json(); } catch (_) {}
+      const email = String(body.email || "").trim().toLowerCase();
+      const role  = String(body.role || "ANALYST").toUpperCase();
+      if (!isValidEmail(email)) return jsonResp({ error: "email is invalid" }, 400);
+      if (!isValidRole(role)) return jsonResp({ error: "role must be one of: ADMIN, ANALYST, AUDITOR" }, 400);
+
+      const existingMember = await env.REVENUE_CRM_KV.get(`orgmember:${org.id}:${email}`, "json");
+      if (existingMember) return jsonResp({ error: "already_a_member" }, 409);
+
+      const memberList = await env.REVENUE_CRM_KV.list({ prefix: `orgmember:${org.id}:` });
+      const seats = computeSeatUsage(org, memberList.keys.length);
+      if (seats.at_capacity) {
+        return jsonResp({
+          error: "seat_limit_reached", ...seats,
+          seat_addon_contact_url: resolveSeatAddonContactUrl({ orgId: org.id, orgName: org.name, seatsRequested: seats.seats_used + 1, billingEmail: org.billing_email }),
+        }, 402);
+      }
+
+      const token = buildInviteToken();
+      const invite = buildInviteRecord({ orgId: org.id, email, role, invitedBy: auth.sub });
+      await env.REVENUE_CRM_KV.put(`org_invite:${token}`, JSON.stringify(invite), { expirationTtl: 7 * 86400 });
+
+      const inviteUrl = `https://intel.cyberdudebivash.com/customer/org-invite.html?token=${encodeURIComponent(token)}`;
+      let emailSent = false;
+      if (env.RESEND_API_KEY) {
+        try {
+          const resp = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.RESEND_API_KEY}` },
+            body: JSON.stringify({
+              from: "CYBERDUDEBIVASH(R) Sentinel APEX <noreply@cyberdudebivash.com>",
+              to: [email],
+              subject: `You're invited to join ${org.name} on Sentinel APEX`,
+              html: buildOrgInviteEmailHtml({ orgName: org.name, inviterEmail: auth.sub, role, inviteUrl }),
+            }),
+          });
+          emailSent = resp.ok;
+        } catch (_) {
+          // invite record still created -- inviteUrl returned in response either way
+        }
+      }
+      auditLog(ctx, env, { action: "org_invite_sent", org_id: org.id, email, role, invited_by: auth.sub, email_sent: emailSent });
+      return jsonResp({ invite_url: inviteUrl, expires_at: invite.expires_at, email_sent: emailSent }, 201);
+    }
+
+    if (path === "/api/org/usage" && method === "GET") {
+      const date = url.searchParams.get("date") || undefined;
+      const memberList = await env.REVENUE_CRM_KV.list({ prefix: `orgmember:${org.id}:` });
+      const members = (await Promise.all(memberList.keys.map(k => env.REVENUE_CRM_KV.get(k.name, "json")))).filter(Boolean);
+      const summaries = await Promise.all(members.map(m => getUsageSummary(env, m.email, date)));
+      const usage = aggregateOrgUsage(summaries, date || new Date().toISOString().slice(0, 10));
+      const seats = computeSeatUsage(org, members.length);
+      return jsonResp({ org_id: org.id, org_name: org.name, plan: org.plan, seats, usage });
+    }
+
+    if (path === "/api/org/keys/rotate" && method === "POST") {
+      if (callerMember.role !== "ADMIN") return jsonResp({ error: "Only an org ADMIN can rotate a member's key." }, 403);
+
+      let body = {};
+      try { body = await request.json(); } catch (_) {}
+      const targetEmail = String(body.email || "").trim().toLowerCase();
+      const targetMember = await env.REVENUE_CRM_KV.get(`orgmember:${org.id}:${targetEmail}`, "json");
+      if (!targetMember) return jsonResp({ error: "not_a_member_of_this_org" }, 404);
+
+      // Find the member's current raw key value the same place the
+      // customer portal (customer/api-keys.html) already reads it from --
+      // REVENUE_CRM_KV's apikeys:<email> mirror, which provisionApiKey()
+      // has written a real `key` field into since v185.x. Never stores a
+      // second copy of the key in the org records themselves (only its
+      // hash, for auth resolution above) -- this reuses the one existing
+      // at-rest copy rather than adding another.
+      const existingKeys = (await env.REVENUE_CRM_KV.get(`apikeys:${targetEmail}`, "json")) || [];
+      let oldKeyValue = null;
+      for (const k of existingKeys) {
+        if (k.key && (await hashApiKey(k.key)) === targetMember.api_key_hash) { oldKeyValue = k.key; break; }
+      }
+
+      const planTier = ORG_PLANS[org.plan]?.includedTier || "PRO";
+      const newKey = await provisionApiKey(env, ctx, planTier, targetEmail, "org_admin_rotation", { org_id: org.id, rotated_by: auth.sub }, "monthly");
+      if (oldKeyValue) await env.API_KEYS_KV.delete(oldKeyValue);
+
+      const newHash = await hashApiKey(newKey);
+      const updatedMember = { ...targetMember, api_key_hash: newHash };
+      await Promise.all([
+        env.REVENUE_CRM_KV.put(`orgmember:${org.id}:${targetEmail}`, JSON.stringify(updatedMember)),
+        env.REVENUE_CRM_KV.put(`org_member_index:${newHash}`, JSON.stringify({ org_id: org.id, email: targetEmail })),
+        targetMember.api_key_hash ? env.REVENUE_CRM_KV.delete(`org_member_index:${targetMember.api_key_hash}`) : Promise.resolve(),
+      ]);
+      await sendActivationEmail(env, targetEmail, planTier, newKey);
+      auditLog(ctx, env, { action: "org_member_key_rotated", org_id: org.id, email: targetEmail, rotated_by: auth.sub, old_key_found: !!oldKeyValue });
+      return jsonResp({ message: "Key rotated -- new key emailed to the member.", email: targetEmail, old_key_revoked: !!oldKeyValue });
+    }
+
+    if (path === "/api/org/invoice/generate" && method === "POST") {
+      if (callerMember.role !== "ADMIN") return jsonResp({ error: "Only an org ADMIN can generate an invoice." }, 403);
+      let body = {};
+      try { body = await request.json(); } catch (_) {}
+      const memberList = await env.REVENUE_CRM_KV.list({ prefix: `orgmember:${org.id}:` });
+      const invoiceId = `inv_${org.id.slice(4)}_${Date.now().toString(36)}`;
+      const invoice = buildGstInvoiceRecord({
+        invoiceId, org, seatsBilled: memberList.keys.length,
+        periodStart: body.period_start || new Date().toISOString().slice(0, 10),
+        periodEnd: body.period_end || new Date().toISOString().slice(0, 10),
+        buyerGstin: body.buyer_gstin || null,
+      });
+      await env.REVENUE_CRM_KV.put(`org_invoice:${invoiceId}`, JSON.stringify(invoice));
+      auditLog(ctx, env, { action: "org_invoice_generated", org_id: org.id, invoice_id: invoiceId, total_usd: invoice.total_usd });
+      return jsonResp({ invoice, view_url: `https://intel.cyberdudebivash.com/api/org/invoice/${invoiceId}` }, 201);
+    }
+
+    const invoiceMatch = path.match(/^\/api\/org\/invoice\/(inv_[a-z0-9_]+)$/);
+    if (invoiceMatch && method === "GET") {
+      const invoice = await env.REVENUE_CRM_KV.get(`org_invoice:${invoiceMatch[1]}`, "json");
+      if (!invoice || invoice.org_id !== org.id) return jsonResp({ error: "invoice_not_found" }, 404);
+      return new Response(renderInvoiceHtml(invoice), { status: 200, headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Type": "text/html; charset=utf-8" } });
+    }
+
+    return jsonResp({ error: "not_found", org_routes: ["POST /api/org/create", "POST /api/org/invite", "GET /api/org/usage", "POST /api/org/keys/rotate", "POST /api/org/invoice/generate", "GET /api/org/invoice/{id}"] }, 404);
+  }
+
+  // POST /api/org/invite/accept -- deliberately OUTSIDE the auth-required
+  // block above: an invite token IS the credential (nothing about the
+  // recipient has a Sentinel APEX key yet -- that's what this route issues).
+  if (path === "/api/org/invite/accept" && method === "POST") {
+    let body = {};
+    try { body = await request.json(); } catch (_) {}
+    const token = String(body.token || "").trim();
+    if (!token) return jsonResp({ error: "token is required" }, 400);
+    const invite = await env.REVENUE_CRM_KV.get(`org_invite:${token}`, "json");
+    if (!invite) return jsonResp({ error: "invite_not_found_or_already_used" }, 404);
+    if (isInviteExpired(invite)) {
+      await env.REVENUE_CRM_KV.delete(`org_invite:${token}`);
+      return jsonResp({ error: "invite_expired" }, 410);
+    }
+    const org = await env.REVENUE_CRM_KV.get(`org:${invite.org_id}`, "json");
+    if (!org) return jsonResp({ error: "org_not_found" }, 404);
+
+    const existingMember = await env.REVENUE_CRM_KV.get(`orgmember:${org.id}:${invite.email}`, "json");
+    if (existingMember) {
+      await env.REVENUE_CRM_KV.delete(`org_invite:${token}`);
+      return jsonResp({ error: "already_a_member" }, 409);
+    }
+
+    const planTier = ORG_PLANS[org.plan]?.includedTier || "PRO";
+    const newKey = await provisionApiKey(env, ctx, planTier, invite.email, "org_invite_accept", { org_id: org.id, invited_by: invite.invited_by }, "monthly");
+    const keyHash = await hashApiKey(newKey);
+    const member = buildOrgMemberRecord({ orgId: org.id, email: invite.email, role: invite.role, apiKeyHash: keyHash, invitedBy: invite.invited_by });
+
+    await Promise.all([
+      env.REVENUE_CRM_KV.put(`orgmember:${org.id}:${invite.email}`, JSON.stringify(member)),
+      env.REVENUE_CRM_KV.put(`org_member_index:${keyHash}`, JSON.stringify({ org_id: org.id, email: invite.email })),
+      env.REVENUE_CRM_KV.delete(`org_invite:${token}`),
+    ]);
+    await sendActivationEmail(env, invite.email, planTier, newKey);
+    auditLog(ctx, env, { action: "org_invite_accepted", org_id: org.id, email: invite.email, role: invite.role });
+    return jsonResp({ message: "Welcome! Your API key has been emailed to you.", org_name: org.name, role: invite.role, api_key: newKey, tier: planTier }, 201);
+  }
+
   // --- Canonical Pricing (Phase 1 architecture consolidation) ----------------
   // TRANSITIONAL values - see pricing.js / pricing-data.json. Reflects exactly
   // what Razorpay actually charges today; not yet the final business-approved
@@ -5980,6 +6260,9 @@ async function handleRequest(request, env, ctx, quotaOut) {
       "POST /api/payment/manual-notify", "GET /api/payment/status?review_id=",
       "GET /api/billing/checkout?tier=pro|enterprise&currency=usd|inr",
       "GET /feeds/active-c2-ips.txt", "GET /feeds/ransomware-domains.txt", "GET /feeds/cve-exploited-summary.json",
+      "POST /api/org/create (paid tier)", "POST /api/org/invite (org ADMIN)", "POST /api/org/invite/accept",
+      "GET /api/org/usage (org member)", "POST /api/org/keys/rotate (org ADMIN)",
+      "POST /api/org/invoice/generate (org ADMIN)", "GET /api/org/invoice/{id}",
       "POST /api/v1/brand/scan (PRO+)", "POST /api/v1/brand/check (PRO+)",
       "POST /api/v1/vendor-risk/assess (PRO+)", "POST /api/v1/vendor-risk/bulk (ENT)",
       "GET /api/v1/geopolitical/country/{code} (PRO+)", "GET /api/v1/geopolitical/landscape (PRO+)",

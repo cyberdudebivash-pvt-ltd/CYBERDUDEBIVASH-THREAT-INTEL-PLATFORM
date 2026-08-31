@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team Invite — SENTINEL APEX</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="/favicon.ico">
+<style>
+:root{--bg:#050c18;--bg2:#090f1e;--border:#162030;--accent:#00ffc6;--text:#e2e8f0;--muted:#64748b;--green:#10b981;--red:#ef4444;--card:#0b1422;--accent2:#7c3aed;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;}
+nav{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;background:rgba(5,12,24,0.97);border-bottom:1px solid var(--border);}
+.nav-logo{font-family:monospace;font-weight:900;font-size:13px;color:var(--accent);letter-spacing:2px;text-decoration:none;}
+.main{max-width:520px;margin:0 auto;padding:60px 24px;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:36px;text-align:center;}
+.card h2{font-size:20px;font-weight:800;margin-bottom:10px;}
+.card p{font-size:13px;color:var(--muted);margin-bottom:22px;line-height:1.6;}
+.accept-btn{padding:13px 28px;background:var(--accent);color:#000;font-size:13px;font-weight:800;border:none;border-radius:8px;cursor:pointer;}
+.accept-btn:disabled{opacity:0.5;cursor:default;}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(0,0,0,0.3);border-top-color:#000;border-radius:50%;animation:spin 0.7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.err-msg{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:14px 16px;font-size:13px;color:var(--red);margin-top:16px;}
+.success-box{display:none;}
+.key-display{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;font-family:monospace;font-size:13px;font-weight:700;color:var(--accent);letter-spacing:1px;word-break:break-all;margin:16px 0;}
+.key-warn{font-size:11px;color:var(--muted);margin-bottom:16px;}
+.pending-box{display:none;}
+</style>
+</head>
+<body>
+<nav><a href="/" class="nav-logo">⬡ SENTINEL APEX</a></nav>
+
+<div class="main">
+  <div class="card" id="pendingBox">
+    <div style="font-size:32px;margin-bottom:12px;">🤝</div>
+    <h2 id="titleText">Team Invitation</h2>
+    <p id="descText">Checking your invite link…</p>
+    <button class="accept-btn" id="acceptBtn" onclick="acceptInvite()" style="display:none;">Accept &amp; Get My API Key</button>
+    <div class="err-msg" id="errMsg" style="display:none;"></div>
+  </div>
+
+  <div class="card success-box" id="successBox">
+    <div style="font-size:32px;margin-bottom:12px;">✅</div>
+    <h2>You're in!</h2>
+    <p>Your Sentinel APEX API key has also been emailed to you for safekeeping.</p>
+    <div class="key-display" id="keyDisplay"></div>
+    <p class="key-warn">This is the only time your full key is shown on this page — store it securely now.</p>
+    <a href="/customer/api-keys.html" style="font-size:12px;color:var(--accent);">Go to My API Keys →</a>
+  </div>
+</div>
+
+<script>
+const API = 'https://intel.cyberdudebivash.com';
+const params = new URLSearchParams(location.search);
+const token = params.get('token');
+
+function showError(msg) {
+  const el = document.getElementById('errMsg');
+  el.textContent = msg;
+  el.style.display = 'block';
+  document.getElementById('acceptBtn').style.display = 'none';
+}
+
+if (!token) {
+  document.getElementById('descText').textContent = 'This link is missing its invite token.';
+  showError('Ask whoever invited you to resend the invite from their Sentinel APEX team dashboard.');
+} else {
+  document.getElementById('descText').textContent = 'Click below to accept this invite and receive your own Sentinel APEX API key.';
+  document.getElementById('acceptBtn').style.display = 'inline-block';
+}
+
+async function acceptInvite() {
+  const btn = document.getElementById('acceptBtn');
+  btn.innerHTML = '<span class="spinner"></span>';
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/api/org/invite/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      showError(data.error === 'invite_expired'
+        ? 'This invite has expired (invites are valid for 7 days). Ask for a new one.'
+        : data.error === 'already_a_member'
+          ? 'This invite was already used. Check your email for your existing key, or visit /customer/api-keys.html.'
+          : (data.message || data.error || 'Could not accept this invite.'));
+      btn.style.display = 'none';
+      return;
+    }
+    document.getElementById('titleText').textContent = `Welcome to ${data.org_name}`;
+    document.getElementById('keyDisplay').textContent = data.api_key;
+    document.getElementById('pendingBox').style.display = 'none';
+    document.getElementById('successBox').style.display = 'block';
+  } catch (e) {
+    showError('Network error. Please try again.');
+    btn.textContent = 'Accept & Get My API Key';
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>

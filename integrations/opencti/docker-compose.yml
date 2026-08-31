@@ -1,0 +1,42 @@
+# CYBERDUDEBIVASH(R) SENTINEL APEX -- OpenCTI TAXII 2.1 Connector
+#
+# OpenCTI ships a built-in generic TAXII 2.1 connector (opencti/connector-taxii2)
+# rather than a MISP-style "feed" concept -- this points that connector at the
+# REAL, live /taxii/ server implemented in workers/intel-gateway/src/index.js
+# (handleTAXII) + taxii.js (collection registry, pagination), not a separate
+# OpenCTI-specific endpoint. Requires a Sentinel APEX PRO/ENTERPRISE/MSSP key
+# for /taxii/ access at all; apt-attribution and sentinel-apex-kev additionally
+# require ENTERPRISE (see integrations/opencti/README.md).
+#
+# Add this service block to your existing OpenCTI docker-compose.yml stack
+# (alongside the opencti/connector-* services already there) -- it is not a
+# standalone stack of its own.
+#
+# Usage: copy .env.sample to .env, fill in SENTINEL_APEX_API_KEY, then
+#   docker compose up -d connector-sentinel-apex-taxii
+
+services:
+  connector-sentinel-apex-taxii:
+    image: opencti/connector-taxii2:${OPENCTI_VERSION:-latest}
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL}
+      - OPENCTI_TOKEN=${OPENCTI_TOKEN}
+      - CONNECTOR_ID=${SENTINEL_APEX_CONNECTOR_ID:-b7e6c4a2-9f1d-4e3a-8b2c-sentinelapex01}
+      - CONNECTOR_NAME=CyberDudeBivash Sentinel APEX
+      - CONNECTOR_SCOPE=taxii2
+      - CONNECTOR_LOG_LEVEL=info
+      # TAXII 2.1 discovery root -- the real, live server this repo ships.
+      - TAXII2_V21=true
+      - TAXII2_DISCOVERY_URL=https://intel.cyberdudebivash.com/taxii/
+      - TAXII2_API_ROOT=https://intel.cyberdudebivash.com/taxii/
+      # Basic auth: username is ignored server-side (resolveAuth() only
+      # reads the password half as the API key -- see index.js's
+      # Authorization:-Basic handling), so any non-empty username works.
+      - TAXII2_USERNAME=sentinel-apex
+      - TAXII2_PASSWORD=${SENTINEL_APEX_API_KEY}
+      # Comma-separated collection ids to pull -- pick any subset of the
+      # 5 real collections (see taxii.js's TAXII_COLLECTIONS registry).
+      # apt-attribution and sentinel-apex-kev need an ENTERPRISE key.
+      - TAXII2_COLLECTIONS=${SENTINEL_APEX_TAXII_COLLECTIONS:-sentinel-apex-main,c2-indicators,active-ransomware}
+      - TAXII2_INTERVAL=${SENTINEL_APEX_POLL_INTERVAL:-10}
+    restart: always

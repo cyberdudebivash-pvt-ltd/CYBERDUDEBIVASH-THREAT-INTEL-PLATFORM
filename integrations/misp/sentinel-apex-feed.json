@@ -1,0 +1,28 @@
+{
+  "_comment": "CYBERDUDEBIVASH(R) SENTINEL APEX -- MISP Feed descriptor. Add via MISP's Administration > Feeds > Add Feed, or import this file directly (Feeds > Import feed metadata from URL/file). Points at the REAL, live, Enterprise-gated GET /api/misp/export endpoint (workers/intel-gateway/src/enterprise-endpoints.js, handleMISPExport) -- a genuine MISP 2.4 Event/Attribute/Tag JSON export built from the platform's live feed, not a fabricated placeholder. Requires a Sentinel APEX ENTERPRISE (or MSSP) API key; PRO/FREE keys receive a 403.",
+  "Feed": {
+    "name": "CYBERDUDEBIVASH SENTINEL APEX",
+    "provider": "CyberDudeBivash Pvt. Ltd.",
+    "url": "https://intel.cyberdudebivash.com/api/misp/export?limit=100",
+    "rules": "",
+    "enabled": true,
+    "distribution": "1",
+    "sharing_group_id": "",
+    "tag_id": "",
+    "default": false,
+    "source_format": "misp",
+    "fixed_event": false,
+    "delta_merge": true,
+    "event_id": "",
+    "publish": false,
+    "override_ids": false,
+    "settings": "",
+    "input_source": "network",
+    "delete_local_file": false,
+    "lookup_visible": true,
+    "headers": "X-API-Key: <YOUR-SENTINEL-APEX-ENTERPRISE-KEY>\nAccept: application/json",
+    "_headers_comment": "MISP >=2.4.130 supports custom per-feed HTTP headers via this field (tested against modern MISP releases at the time this was written; older installs without header support should instead run the response through a reverse proxy that injects the X-API-Key header). Never commit a real key into this file -- replace the placeholder locally after import."
+  },
+  "_pagination_note": "handleMISPExport supports since/report_id/limit query params (see /api-docs.html#misp-export) -- MISP's own feed puller re-fetches the full URL on each cache-refresh interval, so this descriptor deliberately omits `since` and relies on delta_merge:true for incremental updates within MISP itself.",
+  "_alternative_taxii_note": "For organizations preferring TAXII 2.1 pull over MISP's native feed format, see integrations/opencti/ for the same Enterprise-gated data via the platform's real /taxii/ server (collections: sentinel-apex-main, sentinel-apex-kev, c2-indicators, active-ransomware, apt-attribution)."
+}

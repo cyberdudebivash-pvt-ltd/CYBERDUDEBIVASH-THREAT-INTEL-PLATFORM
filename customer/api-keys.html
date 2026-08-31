@@ -141,6 +141,18 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:14px 2
       <a href="/api-docs.html" style="font-size:12px;color:var(--accent);">Full API Documentation →</a>
     </div>
 
+    <!-- SIEM / SOAR / TAXII integrations -->
+    <div class="key-card" id="siemCard" style="display:none;">
+      <div class="key-label" style="margin-bottom:14px;">SIEM, SOAR & TAXII Integrations</div>
+      <div id="siemSections"></div>
+      <p style="font-size:11px;color:var(--muted);margin-top:12px;">
+        Ready-to-run connector scripts (Splunk modular input, Logstash pipeline, MISP feed, OpenCTI TAXII2
+        connector) ship in the platform repository's <code style="color:var(--accent);">integrations/</code>
+        directory. Ask <a href="mailto:support@cyberdudebivash.com?subject=SIEM%20connector%20files" style="color:var(--accent);">support@cyberdudebivash.com</a>
+        if your onboarding package didn't already include them.
+      </p>
+    </div>
+
     <!-- Upgrade banner for lower tiers -->
     <div class="upgrade-banner" id="upgradeBanner" style="display:none;">
       <h3>🚀 Upgrade for More Power</h3>
@@ -259,7 +271,59 @@ function renderPortal(data) {
   // Upgrade banner for FREE/PRO
   if (tier === 'FREE' || tier === 'PRO') document.getElementById('upgradeBanner').style.display = 'block';
 
+  renderSiemSection(tier);
+
   document.getElementById('portalSection').classList.add('show');
+}
+
+// SIEM/SOAR connector snippets, gated to match the real backend exactly:
+// /taxii/ requires PRO+ (workers/intel-gateway/src/index.js, handleTAXII);
+// /api/siem/*, /api/misp/export require ENTERPRISE+ (enterprise-endpoints.js,
+// requireEnterprise()). A PRO customer sees the TAXII quick-start only; an
+// ENTERPRISE/MSSP customer sees the full set. Every snippet uses the
+// [YOUR-API-KEY] placeholder -- this page never holds the real key
+// client-side (see revealKey() above), same as the existing cURL/Python
+// examples already on this page.
+function renderSiemSection(tier) {
+  const card = document.getElementById('siemCard');
+  if (tier === 'FREE') { card.style.display = 'none'; return; }
+
+  const codeBox = (label, code) =>
+    `<div style="margin-bottom:14px;">
+       <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">${label}</div>
+       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:monospace;font-size:11px;color:var(--accent);overflow-x:auto;white-space:pre;">${code}</div>
+     </div>`;
+
+  let html = codeBox(
+    'TAXII 2.1 -- collections list (curl)',
+    `curl -u sentinel-apex:[YOUR-API-KEY] \\\n  https://intel.cyberdudebivash.com/taxii/collections/`
+  );
+
+  if (tier === 'ENTERPRISE' || tier === 'MSSP') {
+    html += codeBox(
+      'Splunk -- KV store threat_intel.csv export',
+      `python3 sentinel_apex_splunk.py --export-csv threat_intel.csv \\\n  --api-key [YOUR-API-KEY]`
+    );
+    html += codeBox(
+      'Elastic / Logstash -- pipeline poll URL',
+      `GET https://intel.cyberdudebivash.com/api/siem/splunk?limit=500\nX-API-Key: [YOUR-API-KEY]\nAccept: application/x-ndjson`
+    );
+    html += codeBox(
+      'MISP -- feed URL',
+      `https://intel.cyberdudebivash.com/api/misp/export?limit=100\n(Header: X-API-Key: [YOUR-API-KEY])`
+    );
+    html += codeBox(
+      'QRadar -- reference set export',
+      `curl -H "X-API-Key: [YOUR-API-KEY]" \\\n  https://intel.cyberdudebivash.com/api/siem/qradar`
+    );
+  } else {
+    html += `<p style="font-size:12px;color:var(--muted);">Splunk/Elastic/MISP/QRadar pull connectors and the
+      apt-attribution / CISA-KEV TAXII collections require ENTERPRISE.
+      <a href="/PAYMENT-GATEWAY.html" style="color:var(--accent);">Upgrade →</a></p>`;
+  }
+
+  document.getElementById('siemSections').innerHTML = html;
+  card.style.display = 'block';
 }
 
 function copyKey(elId) {
