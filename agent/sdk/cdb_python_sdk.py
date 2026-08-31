@@ -27,7 +27,16 @@ Usage:
 
 Author: CyberDudeBivash Pvt. Ltd.
 Platform: https://intel.cyberdudebivash.com
-Docs: https://api.cyberdudebivash.com/docs
+
+Every route this client calls is verified against the deployed Cloudflare
+Worker (workers/intel-gateway/src/index.js) — the only backend this API is
+actually served from (see wrangler.toml's `routes` block, which registers
+only intel.cyberdudebivash.com; api.cyberdudebivash.com has no Worker
+route, DNS entry, or any other backing infrastructure in this repository).
+Methods with no real deployed equivalent (per-item exploit forecasting,
+batch forecasting, supply-chain intel, risk trend) raise
+agent.sdk.exceptions.FeatureNotDeployedError instead of calling a route
+that would 404 for every real customer.
 """
 
 import json
@@ -35,6 +44,8 @@ import time
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
+
+from agent.sdk.exceptions import FeatureNotDeployedError
 
 try:
     import requests
@@ -48,7 +59,7 @@ logger = logging.getLogger("CDB-SDK")
 # SDK Constants
 # ----------------------------------------------
 SDK_VERSION       = "1.0.0"
-DEFAULT_BASE_URL  = "https://api.cyberdudebivash.com"
+DEFAULT_BASE_URL  = "https://intel.cyberdudebivash.com"
 DEFAULT_TIMEOUT   = 30
 DEFAULT_MAX_RETRY = 3
 DEFAULT_RETRY_BACKOFF = 2  # seconds
@@ -124,7 +135,12 @@ class CDBClient:
             "X-SDK-Version":    SDK_VERSION,
         }
         if self.api_key:
-            headers["X-CDB-API-Key"] = self.api_key
+            # Bug fix: the deployed worker reads "X-API-Key" (or an
+            # Authorization: Bearer JWT, or a ?api_key= query param) --
+            # it has never recognized "X-CDB-API-Key". Every unauthenticated
+            # request previously fell through to anonymous/FREE-tier
+            # handling regardless of the caller's real tier.
+            headers["X-API-Key"] = self.api_key
         if self._jwt_token and time.time() < self._jwt_expiry:
             headers["Authorization"] = f"Bearer {self._jwt_token}"
         return headers
@@ -202,16 +218,16 @@ class CDBClient:
 
     def authenticate(self) -> Dict:
         """
-        Exchange API key for a 24hr JWT token.
+        Exchange API key for a JWT token via the real login route.
         Automatically used for subsequent requests.
 
         Returns:
-            dict: {access_token, tier, identity, expires_in_seconds}
+            dict: {token, token_type, tier, sub, expires_in, expires_at, issued_at}
         """
-        result = self._request("POST", "/api/v1/auth/token")
-        self._jwt_token  = result.get("access_token")
-        self._jwt_expiry = time.time() + result.get("expires_in_seconds", 86400) - 60
-        logger.info(f"Authenticated. Tier: {result.get('tier')}. Token valid 24hr.")
+        result = self._request("POST", "/api/auth/login", json_body={"api_key": self.api_key})
+        self._jwt_token  = result.get("token")
+        self._jwt_expiry = time.time() + result.get("expires_in", 86400) - 60
+        logger.info(f"Authenticated. Tier: {result.get('tier')}. Token valid {result.get('expires_in')}s.")
         return result
 
     # ------------------------------------------
@@ -220,7 +236,7 @@ class CDBClient:
 
     def health(self) -> Dict:
         """Platform health check (FREE). Returns operational status."""
-        return self._request("GET", "/api/v1/health")
+        return self._request("GET", "/api/health")
 
     def stats(self) -> Dict:
         """Platform statistics (FREE). Returns advisory counts, KEV stats, avg EPSS."""
@@ -228,23 +244,36 @@ class CDBClient:
 
     def get_threats(self) -> Dict:
         """
-        Latest 10 threat advisories - FREE tier.
-        IOC details stripped. Use PRO/ENTERPRISE for full data.
+        Threat advisory feed manifest - FREE tier.
+
+        The deployed API serves one feed route for every tier; the worker
+        masks IOCs/detection rules/actor attribution for FREE-tier keys
+        server-side (there is no separate "latest 10" route).
         """
-        return self._request("GET", "/api/v1/threats")
+        return self._request("GET", "/api/feed")
 
     def get_feed(self) -> Dict:
-        """Public threat feed manifest (FREE)."""
-        return self._request("GET", "/api/v1/feed")
+        """Public threat feed manifest (FREE). Same route as get_threats()."""
+        return self._request("GET", "/api/feed")
 
     def get_threat(self, threat_id: str) -> Dict:
         """
         Single threat summary by ID (FREE).
 
+        There is no single-resource route in the deployed API; this looks
+        the ID up client-side against the feed manifest get_threats() uses.
+
         Args:
-            threat_id: Threat/bundle ID from the manifest.
+            threat_id: stix_id (or legacy id) from the manifest.
+
+        Raises:
+            CDBAPIError: 404 if no matching item is found.
         """
-        return self._request("GET", f"/api/v1/threat/{threat_id}")
+        data = self.get_feed()
+        for item in data.get("items", []):
+            if item.get("stix_id") == threat_id or item.get("id") == threat_id:
+                return item
+        raise CDBAPIError(404, f"No threat found with id={threat_id!r}")
 
     # ------------------------------------------
     # PRO Tier Endpoints
@@ -255,24 +284,47 @@ class CDBClient:
         Full threat list with extended metadata (PRO tier).
         Includes: severity, TLP, MITRE, actor, CVSS/EPSS.
 
+        There is no separate /pro/threats route -- the deployed API serves
+        richer fields on the same feed route once the API key resolves to
+        PRO/ENTERPRISE server-side. This applies `limit` client-side.
+
         Args:
-            limit: Max threats to return (up to 100).
+            limit: Max threats to return.
 
         Requires: PRO API key
         """
-        return self._request("GET", "/api/v1/pro/threats", params={"limit": limit})
+        data = self.get_feed()
+        items = (data.get("items") or [])[:limit]
+        return {**data, "items": items}
 
     def get_iocs(self, limit: int = 50) -> Dict:
         """
         IOC export feed - IPs, domains, hashes, URLs, CVEs (PRO tier).
         Ready for SIEM ingestion.
 
+        There is no dedicated bulk-IOC-export route; this aggregates the
+        `iocs_by_type` field already present on each feed item into a flat
+        list, client-side.
+
         Args:
-            limit: Max IOCs to return (up to 200).
+            limit: Max IOCs to return.
 
         Requires: PRO API key
         """
-        return self._request("GET", "/api/v1/pro/iocs", params={"limit": limit})
+        data = self.get_feed()
+        iocs: List[Dict[str, Any]] = []
+        for item in data.get("items", []):
+            by_type = item.get("iocs_by_type") or {}
+            for ioc_type, values in by_type.items():
+                for value in values:
+                    iocs.append({
+                        "type": ioc_type, "value": value,
+                        "source_stix_id": item.get("stix_id") or item.get("id"),
+                        "severity": item.get("severity"),
+                    })
+                    if len(iocs) >= limit:
+                        return {"data": iocs, "count": len(iocs)}
+        return {"data": iocs, "count": len(iocs)}
 
     def get_detections(self) -> Dict:
         """
@@ -281,7 +333,7 @@ class CDBClient:
 
         Requires: PRO API key
         """
-        return self._request("GET", "/api/v1/pro/detections")
+        return self._request("GET", "/api/v1/premium/detections/")
 
     # ------------------------------------------
     # Enterprise Tier Endpoints
@@ -291,35 +343,53 @@ class CDBClient:
         """
         Full threat intelligence with complete IOC details (ENTERPRISE tier).
 
+        There is no separate /enterprise/threats route -- same feed route
+        as get_full_threats(), which the worker serves at full depth once
+        the key resolves to ENTERPRISE server-side. `include_archived` has
+        no effect: the deployed feed has no archived-item concept to filter.
+
         Args:
-            limit: Max threats (up to 500).
-            include_archived: Include archived threats.
+            limit: Max threats to return.
+            include_archived: Accepted for signature compatibility; ignored
+                (no real archived-item filter exists).
 
         Requires: ENTERPRISE API key
         """
-        return self._request(
-            "GET", "/api/v1/enterprise/threats",
-            params={"limit": limit, "include_archived": include_archived}
-        )
+        return self.get_full_threats(limit=limit)
 
     def get_stix_bundle(self, bundle_id: str) -> Dict:
         """
         Full STIX 2.1 bundle by ID (ENTERPRISE tier).
 
+        There is no /enterprise/stix/{id} route; this pulls the real TAXII
+        2.1 bundle (GET /taxii/collections/{id}/objects/) and, if bundle_id
+        matches the bundle's own `id` (e.g. 'bundle--...'), returns it
+        whole. If it instead matches one object's `id` within the bundle,
+        returns a single-object bundle containing just that object.
+
         Args:
-            bundle_id: STIX bundle ID (e.g., 'bundle--abc123').
+            bundle_id: STIX bundle ID, or a single object ID within it.
 
         Requires: ENTERPRISE API key
         """
-        return self._request("GET", f"/api/v1/enterprise/stix/{bundle_id}")
+        bundle = self._request("GET", "/taxii/collections/sentinel-apex-main/objects/")
+        if bundle.get("id") == bundle_id:
+            return bundle
+        for obj in bundle.get("objects", []):
+            if obj.get("id") == bundle_id:
+                return {**bundle, "objects": [obj]}
+        raise CDBAPIError(404, f"No STIX bundle or object found with id={bundle_id!r}")
 
     def get_actors(self) -> Dict:
         """
-        Actor intelligence registry - APT groups, nation-state actors (ENTERPRISE tier).
+        Actor/APT intelligence (ENTERPRISE tier).
+
+        There is no dedicated actor registry route; this is the closest
+        real analog -- APT-tagged intelligence from the feed.
 
         Requires: ENTERPRISE API key
         """
-        return self._request("GET", "/api/v1/enterprise/actors")
+        return self._request("GET", "/api/v1/intel/apt")
 
     def get_campaigns(self) -> Dict:
         """
@@ -327,40 +397,49 @@ class CDBClient:
 
         Requires: ENTERPRISE API key
         """
-        return self._request("GET", "/api/v1/enterprise/campaigns")
+        return self._request("GET", "/api/v1/intel/campaigns")
 
     def get_exploit_forecast(self, threat_id: str) -> Dict:
         """
         Exploit probability forecast for a threat (ENTERPRISE tier).
 
-        Args:
-            threat_id: Threat ID to forecast.
+        Not available: no per-item exploit-forecasting route exists
+        anywhere in the deployed API.
 
-        Requires: ENTERPRISE API key
+        Raises:
+            FeatureNotDeployedError: Always -- see above.
         """
-        return self._request("GET", f"/api/v1/enterprise/forecast/{threat_id}")
+        raise FeatureNotDeployedError(
+            "Per-item exploit forecasting has no deployed backend route.",
+            feature="exploit_forecast",
+        )
 
     def get_batch_forecast(self, threat_ids: List[str]) -> Dict:
         """
         Batch exploit probability forecasting (ENTERPRISE tier).
 
-        Args:
-            threat_ids: List of threat IDs.
+        Not available: no batch-forecasting route exists anywhere in the
+        deployed API.
 
-        Requires: ENTERPRISE API key
+        Raises:
+            FeatureNotDeployedError: Always -- see above.
         """
-        return self._request(
-            "POST", "/api/v1/enterprise/forecast/batch",
-            json_body={"threat_ids": threat_ids}
+        raise FeatureNotDeployedError(
+            "Batch exploit forecasting has no deployed backend route.",
+            feature="batch_forecast",
         )
 
     def get_metrics(self) -> Dict:
         """
         Platform telemetry metrics (ENTERPRISE tier).
 
+        There is no per-key /enterprise/metrics route; this returns the
+        real platform-wide stats route instead (same data every caller
+        sees, not scoped to your account).
+
         Requires: ENTERPRISE API key
         """
-        return self._request("GET", "/api/v1/enterprise/metrics")
+        return self._request("GET", "/api/platform/stats")
 
     def search_threats(
         self,
@@ -374,57 +453,92 @@ class CDBClient:
         """
         Full-text + filtered threat search (ENTERPRISE tier).
 
+        There is no dedicated search route; this filters the feed
+        manifest client-side.
+
         Args:
-            query:    Free-text search query.
+            query:    Free-text search query (matches title/description).
             severity: Filter by severity (CRITICAL/HIGH/MEDIUM/LOW).
-            actor:    Filter by threat actor name.
-            cve:      Filter by CVE ID.
+            actor:    Filter by threat actor tag.
+            cve:      Filter by CVE ID (matched against each item's IOCs).
             mitre:    Filter by MITRE technique ID.
             tlp:      Filter by TLP classification.
 
         Requires: ENTERPRISE API key
         """
-        body = {"query": query}
-        if severity: body["severity"] = severity
-        if actor:    body["actor"]    = actor
-        if cve:      body["cve"]      = cve
-        if mitre:    body["mitre"]    = mitre
-        if tlp:      body["tlp"]      = tlp
+        data  = self.get_feed()
+        items = data.get("items", [])
 
-        return self._request("POST", "/api/v1/enterprise/search", json_body=body)
+        q = (query or "").lower()
+        if q:
+            items = [i for i in items if q in str(i.get("title", "")).lower()
+                     or q in str(i.get("description", "")).lower()]
+        if severity:
+            s = severity.upper()
+            items = [i for i in items if str(i.get("severity", "")).upper() == s]
+        if actor:
+            a = actor.lower()
+            items = [i for i in items if a in str(i.get("actor_tag", "")).lower()]
+        if cve:
+            c = cve.upper()
+            items = [i for i in items if c in [str(x).upper() for x in i.get("iocs", [])]]
+        if mitre:
+            m = mitre.upper()
+            items = [i for i in items if m in [str(t.get("id", "")).upper()
+                     for t in i.get("mitre_tactics", []) if isinstance(t, dict)]]
+        if tlp:
+            t = tlp.upper()
+            items = [i for i in items if t in str(i.get("tlp_label", "")).upper()]
+
+        return {"data": items, "total": len(items)}
 
     def get_supply_chain_intel(self) -> Dict:
         """
         Supply chain attack intelligence feed (ENTERPRISE tier).
 
-        Requires: ENTERPRISE API key
+        Not available: no supply-chain-specific route exists anywhere in
+        the deployed API.
+
+        Raises:
+            FeatureNotDeployedError: Always -- see above.
         """
-        return self._request("GET", "/api/v1/enterprise/supply-chain")
+        raise FeatureNotDeployedError(
+            "Supply-chain intelligence has no deployed backend route.",
+            feature="supply_chain_intel",
+        )
 
     def get_epss_enrichment(self, cve_ids: List[str]) -> Dict:
         """
         Bulk EPSS score enrichment for CVE IDs (ENTERPRISE tier).
+
+        Uses the real EPSS route (GET /api/v1/intel/epss), which returns a
+        top_cves list drawn from the feed; this filters it down to the
+        requested CVE IDs client-side. Only CVEs already present in that
+        list can be enriched -- there is no arbitrary-CVE EPSS lookup.
 
         Args:
             cve_ids: List of CVE IDs (e.g., ['CVE-2024-1234', 'CVE-2024-5678']).
 
         Requires: ENTERPRISE API key
         """
-        cve_str = ",".join(cve_ids)
-        return self._request("GET", "/api/v1/enterprise/epss", params={"cve_ids": cve_str})
+        raw = self._request("GET", "/api/v1/intel/epss")
+        wanted = {c.upper() for c in cve_ids}
+        matched = [c for c in raw.get("top_cves", []) if str(c.get("cve_id", "")).upper() in wanted]
+        return {**raw, "top_cves": matched}
 
     def get_risk_trend(self, window_hours: int = 168) -> Dict:
         """
         Risk trend analytics over a rolling window (ENTERPRISE tier).
 
-        Args:
-            window_hours: Analysis window in hours (default: 168 = 7 days, max: 720).
+        Not available: no risk-trend route exists anywhere in the deployed
+        API.
 
-        Requires: ENTERPRISE API key
+        Raises:
+            FeatureNotDeployedError: Always -- see above.
         """
-        return self._request(
-            "GET", "/api/v1/enterprise/risk-trend",
-            params={"window_hours": window_hours}
+        raise FeatureNotDeployedError(
+            "Risk trend analytics has no deployed backend route.",
+            feature="risk_trend",
         )
 
     # ------------------------------------------
@@ -433,22 +547,25 @@ class CDBClient:
 
     def get_taxii_collections(self) -> Dict:
         """TAXII 2.1 collection listing (FREE)."""
-        return self._request("GET", "/api/v1/taxii/collections")
+        return self._request("GET", "/taxii/collections/")
 
     def get_taxii_objects(self, collection_id: str, limit: int = 20) -> Dict:
         """
-        TAXII 2.1 object fetch (ENTERPRISE tier).
+        TAXII 2.1 object fetch (ENTERPRISE tier for the KEV collection).
+
+        The deployed route has no `limit` query param; it's applied
+        client-side against the returned bundle's objects.
 
         Args:
-            collection_id: TAXII collection ID.
+            collection_id: TAXII collection ID (e.g. "sentinel-apex-main"
+                           or the ENTERPRISE-only "sentinel-apex-kev").
             limit:         Max objects to return.
 
-        Requires: ENTERPRISE API key
+        Requires: ENTERPRISE API key for the KEV collection.
         """
-        return self._request(
-            "GET", f"/api/v1/taxii/collections/{collection_id}/objects",
-            params={"limit": limit}
-        )
+        bundle = self._request("GET", f"/taxii/collections/{collection_id}/objects/")
+        objects = (bundle.get("objects") or [])[:limit]
+        return {**bundle, "objects": objects}
 
     # ------------------------------------------
     # Convenience / Helper Methods
@@ -523,7 +640,7 @@ class CDBClient:
             "health":        health,
             "stats":         stats,
             "platform":      "CYBERDUDEBIVASH SENTINEL APEX",
-            "documentation": "https://api.cyberdudebivash.com/docs",
+            "documentation": "https://intel.cyberdudebivash.com/api-docs.html",
         }
 
     def __repr__(self) -> str:
@@ -546,7 +663,7 @@ if __name__ == "__main__":
 +==========================================================+
 |  CyberDudeBivash Python SDK v{SDK_VERSION}                       |
 |  Platform: https://intel.cyberdudebivash.com             |
-|  API Docs: https://api.cyberdudebivash.com/docs          |
+|  API Docs: https://intel.cyberdudebivash.com/api-docs.html |
 +==========================================================+
     """)
 
