@@ -46,6 +46,13 @@ const COST_TABLE = {
   "stix_export":           { free: 15, premium: 8, enterprise: 3 },
   "export_misp":           { free: 15, premium: 8, enterprise: 3 },
   "export_csv":            { free: 10, premium: 5, enterprise: 2 },
+  // v201.0: routes/exports.js's /api/v1/export/* (Suricata/Snort/YARA/
+  // Splunk/STIX bulk exports). Same bandwidth-heavy philosophy as the
+  // three entries above; FREE is capped at a 25-rule sample by the route
+  // itself so this cost is somewhat nominal there, but kept consistent
+  // with the rest of this table rather than silently falling back to
+  // "default" (1 credit) for a bulk export.
+  "export_bulk":           { free: 20, premium: 8, enterprise: 3 },
 
   // Alerts + webhooks
   "alerts":                { free: 5,  premium: 3, enterprise: 1 },
@@ -81,6 +88,7 @@ const ENDPOINT_SLUG_MAP = [
   { prefix: "/api/stix/",              slug: "stix_export"     },
   { prefix: "/api/export/misp",        slug: "export_misp"     },
   { prefix: "/api/export/csv",         slug: "export_csv"      },
+  { prefix: "/api/v1/export/",         slug: "export_bulk"     },
   { prefix: "/api/alerts",             slug: "alerts"          },
   { prefix: "/api/webhooks/siem",      slug: "webhooks_siem"   },
   { prefix: "/api/auth",               slug: "auth"            },

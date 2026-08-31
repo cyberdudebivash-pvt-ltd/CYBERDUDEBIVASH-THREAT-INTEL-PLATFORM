@@ -513,6 +513,7 @@ footer{text-align:center;padding:32px 20px;color:#334155;font-size:12px;border-t
   <p style="margin-top:4px;"><a href="/" style="color:#334155;">Dashboard</a> · <a href="/get-api-key.html" style="color:#334155;">API</a> · <a href="/upgrade.html" style="color:#334155;">Upgrade</a> · <a href="/compare.html" style="color:#334155;">Compare</a> · <a href="/case-studies.html" style="color:#334155;">Case Studies</a> · <a href="/testimonials.html" style="color:#334155;">Testimonials</a> · <a href="/referral.html" style="color:#334155;">Referral Program</a> · <a href="/partner.html" style="color:#334155;">Partner</a> · <a href="mailto:enterprise@cyberdudebivash.com" style="color:#334155;">Contact</a> · <a href="/privacy.html" style="color:#334155;">Privacy Policy</a> · <a href="/terms.html" style="color:#334155;">Terms of Service</a></p>
 </footer>
 
+<script src="/js/checkout.js"></script>
 <script>
 (function(){
   /* R-08: Multi-currency pricing — USD / INR / EUR / GBP */
@@ -608,6 +609,11 @@ footer{text-align:center;padding:32px 20px;color:#334155;font-size:12px;border-t
     render();
     try { sessionStorage.setItem('currency', cur); } catch(e) {}
   };
+
+  // Region-aware default (js/checkout.js) -- India visitors see INR by
+  // default instead of USD; the manual USD/INR/EUR/GBP selector above is
+  // untouched and always wins if the visitor clicks it.
+  if (window.SentinelCheckout) window.SentinelCheckout.detectRegionDefaultCurrency();
 })();
 </script>
 </body>

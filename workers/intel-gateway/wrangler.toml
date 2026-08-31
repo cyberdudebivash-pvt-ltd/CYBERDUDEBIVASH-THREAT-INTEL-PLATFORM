@@ -30,8 +30,14 @@ routes = [
 
 # v143.0.0: Cron trigger for scheduled webhook push + cache refresh
 # Fires every 15 minutes -- matches typical CTI pipeline run cadence
-[triggers]
-crons = ["*/15 * * * *"]
+#
+# v201.0: second cron string added for the live threat-indicator ingestion
+# pipeline (src/ingestion/cron_worker.js -- CISA KEV + URLhaus + Tor exit
+# nodes). Cloudflare Workers support multiple cron schedules on one
+# `scheduled()` handler; index.js's scheduled() branches on event.cron so
+# the "*/15 * * * *" entry above keeps calling fetchAndCacheCVEs() exactly
+# as before -- purely additive, zero change to the existing schedule.
+crons = ["*/15 * * * *", "0 */6 * * *"]
 
 [vars]
 GATEWAY_VERSION = "200.0"

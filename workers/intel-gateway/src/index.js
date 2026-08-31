@@ -111,6 +111,8 @@ import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_
 // no silent removal of an existing export) -- the canonical implementation
 // now lives in subscription-lifecycle.js; see that file's header comment.
 export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES };
+import { runScheduledIngestion, getLiveIndicatorsSummary, getLiveIndicators } from './ingestion/cron_worker.js';
+import { routeExports } from './routes/exports.js';
 const PLATFORM_VERSION    = "200.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -362,9 +364,16 @@ const PREMIUM_INTEL_PATHS = new Set([
 
 async function resolveAuth(request, env) {
   const apiKey = (request.headers.get("X-API-Key") || "").trim();
+  // v201.0: X-Sentinel-Key is an additive header alias for the same API key
+  // lookup below -- the SIEM/SOAR export routes (routes/exports.js) document
+  // this header name, but it resolves through the exact same tier/JWT/brute-
+  // force logic as X-API-Key, not a parallel auth path. Lowest precedence of
+  // the three so no existing X-API-Key or Authorization caller's behavior
+  // changes.
+  const sentinelKey = (request.headers.get("X-Sentinel-Key") || "").trim();
   const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
   const qKey   = new URL(request.url).searchParams.get("api_key") || "";
-  const raw    = apiKey || bearer || qKey;
+  const raw    = apiKey || bearer || qKey || sentinelKey;
 
   if (!raw) return { tier: TIERS.FREE, key: null, sub: null };
 
@@ -4928,12 +4937,20 @@ async function handleRequest(request, env, ctx) {
     // by design) -- so IOCs, detection rules, and actor attribution must be
     // masked the same way the FREE branch of every other endpoint is.
     const items    = (feedData.items || []).slice(0, PREVIEW_LIMIT).map(i => applyTierGateV2(i, "free", null));
+    // v201.0: additive-only field sourced from the new cron_worker.js
+    // ingestion pipeline's cached summary (threat-indicators/summary.json,
+    // a NEW R2 key -- distinct from LATEST_JSON_KEY). getLiveIndicatorsSummary
+    // never throws and returns null until the 6-hourly cron has run at least
+    // once, so this is zero-behavior-change for every existing consumer that
+    // doesn't look at the new key.
+    const liveIndicators = await getLiveIndicatorsSummary(env);
     return jsonResp({
       status: "ok",
       preview: {
         items, total_preview: items.length, feed_total: (feedData.items || []).length,
         preview_limit: PREVIEW_LIMIT, generated_at: now(), version: PLATFORM_VERSION,
         _tier: TIERS.FREE, _upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html",
+        ...(liveIndicators ? { live_indicators_summary: liveIndicators } : {}),
       },
     }, 200, { "Cache-Control": "public, max-age=120" });
   }
@@ -4946,6 +4963,9 @@ async function handleRequest(request, env, ctx) {
     if (auth.tier !== TIERS.PRO && auth.tier !== TIERS.ENTERPRISE && auth.tier !== TIERS.MSSP && Array.isArray(data.items)) {
       data = { ...data, items: data.items.map(i => applyTierGateV2(i, "free", null)) };
     }
+    // v201.0: same additive-only live-indicators field as /api/preview above.
+    const liveIndicators = await getLiveIndicatorsSummary(env);
+    if (liveIndicators) data = { ...data, live_indicators_summary: liveIndicators };
     return jsonResp(data, 200, { "Cache-Control": "public, max-age=120" });
   }
 
@@ -5956,6 +5976,17 @@ async function handleRequest(request, env, ctx) {
     }
   }
 
+  // --- routes/exports.js -- tier-gated multi-format SIEM/SOAR exports (v201.0) ---
+  // buildStixPattern/resolveEntitlement passed by reference rather than
+  // imported into exports.js, to avoid a circular import (index.js already
+  // imports routeExports from that file) -- same documented reason
+  // routeEnterpriseEndpoint() above takes resolveEntitlement as a parameter.
+  if (path.startsWith("/api/v1/export/")) {
+    const feedData  = await loadFeedItems(env);
+    const exportRes = await routeExports(path, request, env, ctx, auth.tier, feedData.items || [], crypto.randomUUID(), auth, buildStixPattern, resolveEntitlement);
+    if (exportRes) return exportRes;
+  }
+
   // --- 404 --------------------------------------------------------------------
   return jsonResp({
     error: "Not found", path,
@@ -6041,6 +6072,11 @@ async function handleRequest(request, env, ctx) {
       "GET /api/alerts/history (ENT)", "DELETE /api/alerts/unsubscribe (PRO+)",
       "POST /api/dark-web/scan (PRO+)", "GET /api/dark-web/status", "GET|POST /api/leak-check (PRO+)",
       "POST /api/reports/premium (PRO+, $49/report)", "GET /api/reports/list (PRO+)", "GET /api/reports/{id} (PRO+)",
+      "GET /api/v1/export/suricata.rules (FREE sample / PRO+ full)",
+      "GET /api/v1/export/snort.rules (FREE sample / PRO+ full)",
+      "GET /api/v1/export/yara.yar (FREE sample / PRO+ full)",
+      "GET /api/v1/export/splunk.csv (FREE sample / PRO+ full)",
+      "GET /api/v1/export/taxii.json (FREE sample / PRO+ full)",
     ],
   }, 404);
 }
@@ -6079,6 +6115,28 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // v201.0: second cron schedule added (wrangler.toml `[triggers]`) for the
+    // live threat-indicator ingestion pipeline -- dispatched by event.cron so
+    // the pre-existing 15-minute CVE cache refresh below is completely
+    // unaffected (same handler, same behavior, for that schedule).
+    //
+    // Built via concatenation rather than one string literal so this
+    // file's source text never contains an asterisk immediately followed
+    // by a slash: scripts/entitlement_resource_drift_gate.py strips JS
+    // comments with a regex that treats any slash-asterisk ... asterisk-
+    // slash span as a block comment without understanding string
+    // literals, and a pre-existing "/api/admin/*" mention inside a //
+    // comment elsewhere in this file reads as an accidental block-comment
+    // opener -- that stray closing sequence anywhere after it gets read
+    // as that opener's match, silently hiding every real
+    // resolveEntitlement() call site in between (confirmed root cause of
+    // a real T24_entitlement_resource_drift_gate regression during this
+    // change; fixed here rather than in the shared gate script).
+    const SIX_HOURLY_INGESTION_CRON = "0 " + "*" + "/6 * * *";
+    if (event.cron === SIX_HOURLY_INGESTION_CRON) {
+      ctx.waitUntil(runScheduledIngestion(env));
+      return;
+    }
     ctx.waitUntil(fetchAndCacheCVEs(env));
   },
 };
