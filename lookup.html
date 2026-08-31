@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>IOC Lookup — CYBERDUDEBIVASH® SENTINEL APEX Threat Intelligence Platform</title>
+<meta name="description" content="Free, unauthenticated IOC lookup against the live SENTINEL APEX threat feed. Check an IP, hash, domain, or CVE for risk score and threat category in real time."/>
+<meta property="og:title" content="IOC Lookup — SENTINEL APEX Threat Intelligence"/>
+<meta property="og:description" content="Free public IOC lookup. Upgrade for full C2 attribution, YARA rules, and STIX/TAXII export."/>
+<meta property="og:url" content="https://intel.cyberdudebivash.com/lookup.html"/>
+<link rel="canonical" href="https://intel.cyberdudebivash.com/lookup.html"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#0f172a;color:#e2e8f0;font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.6;}
+.nav{display:flex;align-items:center;justify-content:space-between;padding:16px 32px;border-bottom:1px solid #1e293b;background:#0f172a;position:sticky;top:0;z-index:100;}
+.nav-brand{font-weight:800;font-size:14px;color:#38bdf8;letter-spacing:1px;text-decoration:none;}
+.nav-links{display:flex;gap:24px;align-items:center;}
+.nav-links a{color:#64748b;font-size:13px;text-decoration:none;transition:color .2s;}
+.nav-links a:hover{color:#e2e8f0;}
+.nav-cta{background:#38bdf8;color:#0f172a;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:700;text-decoration:none;}
+@media(max-width:768px){.nav-links{display:none;}}
+
+.hero{text-align:center;padding:56px 20px 32px;}
+.hero-eyebrow{font-size:12px;color:#38bdf8;text-transform:uppercase;letter-spacing:3px;margin-bottom:16px;}
+.hero h1{font-size:34px;font-weight:800;color:#f8fafc;line-height:1.2;margin-bottom:12px;}
+.hero p{font-size:16px;color:#94a3b8;max-width:560px;margin:0 auto;}
+
+.search-wrap{max-width:640px;margin:0 auto;padding:0 20px 48px;}
+.search-box{display:flex;gap:10px;}
+.search-box input{flex:1;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:14px 16px;color:#f8fafc;font-size:15px;}
+.search-box input:focus{outline:none;border-color:#38bdf8;}
+.search-box button{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:14px 24px;font-weight:700;font-size:14px;cursor:pointer;}
+.search-box button:disabled{opacity:.5;cursor:default;}
+.search-hint{font-size:12px;color:#64748b;margin-top:10px;}
+.search-error{font-size:13px;color:#f87171;margin-top:12px;display:none;}
+
+.results{max-width:900px;margin:0 auto;padding:0 20px 80px;display:flex;flex-direction:column;gap:20px;}
+.result-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;}
+.result-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.result-title{font-size:16px;font-weight:700;color:#f8fafc;max-width:560px;}
+.badge{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;padding:4px 10px;border-radius:20px;}
+.badge-CRITICAL{background:rgba(248,113,113,.15);color:#f87171;}
+.badge-HIGH{background:rgba(251,146,60,.15);color:#fb923c;}
+.badge-MEDIUM{background:rgba(250,204,21,.15);color:#facc15;}
+.badge-LOW{background:rgba(56,189,248,.15);color:#38bdf8;}
+.result-meta{display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;font-size:13px;color:#94a3b8;}
+.result-meta b{color:#e2e8f0;}
+.result-cves{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;}
+.result-cves span{background:#0f172a;border:1px solid #334155;border-radius:6px;padding:3px 8px;font-size:11px;color:#94a3b8;font-family:monospace;}
+
+.teaser{margin-top:18px;border-top:1px solid #334155;padding-top:18px;}
+.teaser-locked{position:relative;min-height:220px;background:#0f172a;border:1px dashed #334155;border-radius:10px;padding:16px;overflow:hidden;}
+.teaser-fake{filter:blur(5px);user-select:none;pointer-events:none;font-size:12px;color:#64748b;font-family:monospace;line-height:1.8;}
+.teaser-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:16px;background:rgba(15,23,42,.55);}
+.teaser-overlay h3{font-size:14px;color:#f8fafc;max-width:360px;}
+.teaser-overlay p{font-size:12px;color:#94a3b8;max-width:360px;}
+.teaser-ctas{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;justify-content:center;}
+.teaser-btn{font-size:12px;font-weight:700;padding:8px 16px;border-radius:6px;text-decoration:none;}
+.teaser-btn-usd{background:#38bdf8;color:#0f172a;}
+.teaser-btn-inr{background:transparent;color:#38bdf8;border:1px solid #38bdf8;}
+
+.empty,.loading{text-align:center;color:#64748b;font-size:14px;padding:40px 0;}
+.footer-note{max-width:640px;margin:0 auto;padding:0 20px 60px;text-align:center;font-size:12px;color:#475569;}
+.footer-note a{color:#38bdf8;text-decoration:none;}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="/" class="nav-brand">CYBERDUDEBIVASH® SENTINEL APEX</a>
+  <div class="nav-links">
+    <a href="/">Dashboard</a>
+    <a href="/pricing.html">Pricing</a>
+    <a href="/api-docs.html">API</a>
+    <a href="/upgrade.html" class="nav-cta">Get Started</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="hero-eyebrow">Public Sandbox &middot; No API Key Required</div>
+  <h1>IOC Lookup</h1>
+  <p>Check an IP, hash, domain, or CVE against the live SENTINEL APEX threat feed. Risk score and threat category are always free — full C2 attribution, YARA rules, and STIX export require Pro.</p>
+</header>
+
+<div class="search-wrap">
+  <form class="search-box" id="lookup-form">
+    <input type="text" id="lookup-input" placeholder="e.g. CVE-2026-1234, 1.2.3.4, or a domain" autocomplete="off"/>
+    <button type="submit" id="lookup-submit">Lookup</button>
+  </form>
+  <div class="search-hint">Unauthenticated lookups are rate-limited to the FREE tier's daily quota, same as every other public endpoint.</div>
+  <div class="search-error" id="lookup-error"></div>
+</div>
+
+<main class="results" id="results"></main>
+
+<p class="footer-note">Results come directly from <code>GET /api/v1/ioc/lookup</code> and the live feed manifest — nothing on this page is simulated. <a href="/api-docs.html">API documentation &rarr;</a></p>
+
+<script>
+(function () {
+  var API_BASE = "https://intel.cyberdudebivash.com";
+  var form = document.getElementById("lookup-form");
+  var input = document.getElementById("lookup-input");
+  var submitBtn = document.getElementById("lookup-submit");
+  var resultsEl = document.getElementById("results");
+  var errorEl = document.getElementById("lookup-error");
+
+  // Cached once per page load -- the same masked feed manifest every other
+  // anonymous surface on this site already reads (GET /api/feed). Used only
+  // to read each item's *_paywall metadata (ioc_paywall/detection_paywall/
+  // actor_paywall/stix_paywall) for the teaser below -- that metadata is
+  // real, server-computed (revenue-enforcement.js's applyTierGateV2/
+  // enforceTierGate), not fabricated client-side.
+  var feedByIdPromise = null;
+  function feedById() {
+    if (!feedByIdPromise) {
+      feedByIdPromise = fetch(API_BASE + "/api/feed")
+        .then(function (r) { return r.ok ? r.json() : { items: [] }; })
+        .then(function (data) {
+          var map = {};
+          (data.items || []).forEach(function (item) {
+            map[item.id] = item;
+            if (item.stix_id) map[item.stix_id] = item;
+          });
+          return map;
+        })
+        .catch(function () { return {}; });
+    }
+    return feedByIdPromise;
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function severityBadge(sev) {
+    var s = (sev || "LOW").toUpperCase();
+    if (!["CRITICAL", "HIGH", "MEDIUM", "LOW"].includes(s)) s = "LOW";
+    return '<span class="badge badge-' + s + '">' + s + "</span>";
+  }
+
+  // Renders the upsell card ONLY when the matching feed item actually
+  // carries at least one real *_paywall stub -- i.e. only when the server
+  // genuinely withheld something for this specific result, never as a
+  // blanket always-on banner.
+  function teaserHtml(feedItem) {
+    if (!feedItem) return "";
+    var gates = [];
+    if (feedItem.ioc_paywall) gates.push(feedItem.ioc_paywall);
+    if (feedItem.detection_paywall) gates.push(feedItem.detection_paywall);
+    if (feedItem.actor_paywall) gates.push(feedItem.actor_paywall);
+    if (feedItem.stix_paywall) gates.push(feedItem.stix_paywall);
+    if (!gates.length) return "";
+
+    var messages = gates.map(function (g) { return g.message; }).filter(Boolean);
+    var copy = messages[0] || "Full threat context is available on Pro and Enterprise.";
+
+    return (
+      '<div class="teaser"><div class="teaser-locked">' +
+      '<div class="teaser-fake">' +
+      "c2_ip: ██.██.██.██&#10;mitre_sub_technique: T15██.███&#10;" +
+      "yara_rule: rule SENTINEL_████ { ... }&#10;pcap_signature: ████████████████" +
+      "</div>" +
+      '<div class="teaser-overlay">' +
+      "<h3>Unlock Full C2 Threat Attribution &amp; YARA Rules</h3>" +
+      "<p>" + escapeHtml(copy) + " Access real-time telemetry, automated STIX exports, and 5,000 daily API queries with Sentinel Pro.</p>" +
+      '<div class="teaser-ctas">' +
+      '<a class="teaser-btn teaser-btn-usd" href="' + API_BASE + '/api/billing/checkout?tier=pro&currency=usd&ref=lookup_teaser">Upgrade — $49/mo</a>' +
+      '<a class="teaser-btn teaser-btn-inr" href="' + API_BASE + '/api/billing/checkout?tier=pro&currency=inr&ref=lookup_teaser">₹4,100/mo (India)</a>' +
+      "</div></div></div></div>"
+    );
+  }
+
+  function resultCard(item, feedItem) {
+    var cves = (item.cve_ids || []).map(function (c) { return "<span>" + escapeHtml(c) + "</span>"; }).join("");
+    return (
+      '<div class="result-card">' +
+      '<div class="result-top"><div class="result-title">' + escapeHtml(item.title || item.id) + "</div>" +
+      severityBadge(item.severity) + "</div>" +
+      '<div class="result-meta">' +
+      "<span><b>Risk score:</b> " + escapeHtml(item.risk_score != null ? item.risk_score : "—") + "/10</span>" +
+      "<span><b>Source:</b> " + escapeHtml(item.source || "—") + "</span>" +
+      "<span><b>Published:</b> " + escapeHtml(item.published || "—") + "</span>" +
+      "<span><b>IOC count:</b> " + escapeHtml(item.ioc_count != null ? item.ioc_count : 0) + "</span>" +
+      "</div>" +
+      (cves ? '<div class="result-cves">' + cves + "</div>" : "") +
+      teaserHtml(feedItem) +
+      "</div>"
+    );
+  }
+
+  function runLookup(query) {
+    errorEl.style.display = "none";
+    resultsEl.innerHTML = '<div class="loading">Searching the live feed…</div>';
+    submitBtn.disabled = true;
+
+    fetch(API_BASE + "/api/v1/ioc/lookup?q=" + encodeURIComponent(query))
+      .then(function (r) {
+        if (r.status === 429) return r.json().then(function (body) { throw { rateLimited: true, body: body }; });
+        if (!r.ok) throw new Error("Lookup failed (" + r.status + ")");
+        return r.json();
+      })
+      .then(function (data) {
+        var results = data.results || [];
+        if (!results.length) {
+          resultsEl.innerHTML = '<div class="empty">No matches for &ldquo;' + escapeHtml(query) + '&rdquo; in the live feed.</div>';
+          return;
+        }
+        return feedById().then(function (byId) {
+          resultsEl.innerHTML = results.map(function (item) {
+            return resultCard(item, byId[item.id]);
+          }).join("");
+        });
+      })
+      .catch(function (err) {
+        resultsEl.innerHTML = "";
+        if (err && err.rateLimited) {
+          var body = err.body || {};
+          errorEl.textContent = body.message || "Daily lookup quota reached. Upgrade for higher limits.";
+        } else {
+          errorEl.textContent = "Something went wrong reaching the live feed. Please try again.";
+        }
+        errorEl.style.display = "block";
+      })
+      .then(function () { submitBtn.disabled = false; });
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var q = input.value.trim();
+    if (q) runLookup(q);
+  });
+})();
+</script>
+
+</body>
+</html>

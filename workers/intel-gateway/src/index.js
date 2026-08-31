@@ -64,6 +64,10 @@
  *   GET  /api/admin/audit                  (NEW v184.0 - ADMIN_SECRET)
  *   POST /api/admin/keys                   (NEW v184.0 - ADMIN_SECRET)
  *   DELETE /api/admin/keys/{key}           (NEW v184.0 - ADMIN_SECRET)
+ *   GET  /api/billing/checkout             (NEW - 24h daily-quota 429 upsell;
+ *                                            redirects to the real, live
+ *                                            Gumroad/Razorpay checkout, see
+ *                                            billing-checkout.js)
  */
 
 // --- Constants ----------------------------------------------------------------
@@ -111,6 +115,8 @@ import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_
 // no silent removal of an existing export) -- the canonical implementation
 // now lives in subscription-lifecycle.js; see that file's header comment.
 export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES };
+import { checkDailyQuota, buildQuotaExceededBody } from './daily-quota.js';
+import { resolveCheckoutUrl } from './billing-checkout.js';
 const PLATFORM_VERSION    = "200.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -136,7 +142,7 @@ const STIX_CT             = "application/stix+json;version=2.1";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, X-API-Key, X-Admin-Key",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, X-API-Key, X-Sentinel-Key, X-Admin-Key",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -361,7 +367,10 @@ const PREMIUM_INTEL_PATHS = new Set([
 // behavior change -- this is a pure move, not a logic change.
 
 async function resolveAuth(request, env) {
-  const apiKey = (request.headers.get("X-API-Key") || "").trim();
+  // X-Sentinel-Key is an additive alias for X-API-Key -- same lookup, same
+  // validation, same tier resolution below. Not a second auth path: it's
+  // just another header name resolveAuth() will accept for the same key.
+  const apiKey = (request.headers.get("X-API-Key") || request.headers.get("X-Sentinel-Key") || "").trim();
   const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
   const qKey   = new URL(request.url).searchParams.get("api_key") || "";
   const raw    = apiKey || bearer || qKey;
@@ -4370,7 +4379,7 @@ async function handleIncidentResponse(request, env, auth, method, path, url, ctx
 // MAIN REQUEST HANDLER
 // =============================================================================
 
-async function handleRequest(request, env, ctx) {
+async function handleRequest(request, env, ctx, quotaOut) {
   const url      = new URL(request.url);
   const path     = url.pathname;
   const pathname = path; // gate-required alias: PREMIUM_INTEL_PATHS.has(pathname)
@@ -4444,6 +4453,38 @@ async function handleRequest(request, env, ctx) {
         429,
         { "Retry-After": "60", "X-RateLimit-Limit": String(rl.limit), "X-RateLimit-Remaining": "0" }
       );
+    }
+  }
+
+  // Daily quota (24h rolling window) -- additive to the per-minute limiter
+  // just above; see daily-quota.js's header comment for why these are two
+  // independent counters (burst cap vs. daily cap) sharing one identity/
+  // tier resolution (auth, from resolveAuth() above), not two independent
+  // auth paths. Same route scope as the auth.error gate earlier in this
+  // function: skip infra/account routes (health, billing/checkout,
+  // payment, auth, admin, preview, bare TAXII discovery) so a caller who
+  // has already exhausted quota can still reach login, checkout, and the
+  // public preview teaser. quotaOut lets the top-level fetch() handler
+  // (below) stamp X-RateLimit-* on the eventual 200 response too, without
+  // re-deriving auth/ip a second time.
+  if (path !== "/api/health" && path !== "/api/health/"
+      && (path.startsWith("/api/") || path.startsWith("/taxii"))
+      && !path.startsWith("/api/admin") && !path.startsWith("/api/auth")
+      && !path.startsWith("/api/preview") && !path.startsWith("/api/payment")
+      && !path.startsWith("/api/billing")
+      && path !== "/api/pricing"
+      && path !== "/taxii" && path !== "/taxii/") {
+    const quota = await checkDailyQuota(env, auth, ip);
+    const quotaHeaders = {
+      "X-RateLimit-Limit": String(quota.limit),
+      "X-RateLimit-Remaining": String(quota.remaining),
+      "X-RateLimit-Reset": String(quota.reset),
+    };
+    if (quotaOut) quotaOut.headers = quotaHeaders;
+
+    if (!quota.allowed) {
+      auditLog(ctx, env, { action: "daily_quota_exceeded", ip, path, method, tier: quota.tier });
+      return jsonResp(buildQuotaExceededBody(quota), 429, quotaHeaders);
     }
   }
 
@@ -5370,6 +5411,26 @@ async function handleRequest(request, env, ctx) {
     return await handlePaymentStatus(request, env, url);
   }
 
+  // --- Billing checkout router (no auth required) -----------------------------
+  // GET /api/billing/checkout?tier=pro|enterprise&currency=usd|inr[&email=...]
+  // Redirects to the correct already-live checkout destination -- see
+  // billing-checkout.js's header comment. Not a new payment integration:
+  // India/INR goes to upgrade.html's existing Razorpay flow, Global/USD
+  // goes to the real, live Gumroad product links. currency falls back to
+  // request.cf.country when omitted (429 direct_checkout links always pass
+  // it explicitly).
+  if (path === "/api/billing/checkout") {
+    const target = resolveCheckoutUrl(
+      {
+        tier: url.searchParams.get("tier"),
+        currency: url.searchParams.get("currency"),
+        email: url.searchParams.get("email"),
+      },
+      request.cf && request.cf.country
+    );
+    return Response.redirect(target, 302);
+  }
+
   // --- Canonical Pricing (Phase 1 architecture consolidation) ----------------
   // TRANSITIONAL values - see pricing.js / pricing-data.json. Reflects exactly
   // what Razorpay actually charges today; not yet the final business-approved
@@ -5976,6 +6037,7 @@ async function handleRequest(request, env, ctx) {
       "POST /api/payment/razorpay/create-order", "POST /api/payment/razorpay/verify",
       "POST /api/webhooks/razorpay", "POST /api/webhooks/gumroad",
       "POST /api/payment/manual-notify", "GET /api/payment/status?review_id=",
+      "GET /api/billing/checkout?tier=pro|enterprise&currency=usd|inr",
       "POST /api/v1/brand/scan (PRO+)", "POST /api/v1/brand/check (PRO+)",
       "POST /api/v1/vendor-risk/assess (PRO+)", "POST /api/v1/vendor-risk/bulk (ENT)",
       "GET /api/v1/geopolitical/country/{code} (PRO+)", "GET /api/v1/geopolitical/landscape (PRO+)",
@@ -6061,10 +6123,27 @@ function withBaselineHeaders(response) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+// Same pattern as withBaselineHeaders() just above: stamps X-RateLimit-*
+// onto whatever Response handleRequest() produced, from the quotaOut side
+// channel handleRequest()'s daily-quota check populates. This is how a
+// successful (200) response gets the headers too, not just the 429 --
+// the 429 path already sets its own copy directly (jsonResp call in
+// handleRequest), and Headers.set() here is idempotent against that, not
+// a duplicate. No-op (headers unchanged) for any route the daily-quota
+// check doesn't cover (health, billing, payment, auth, admin, preview).
+function withRateLimitHeaders(response, quotaHeaders) {
+  if (!quotaHeaders) return response;
+  const headers = new Headers(response.headers);
+  for (const [k, v] of Object.entries(quotaHeaders)) headers.set(k, v);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 export default {
   async fetch(request, env, ctx) {
+    const quotaOut = {};
     try {
-      return withBaselineHeaders(await handleRequest(request, env, ctx));
+      const response = await handleRequest(request, env, ctx, quotaOut);
+      return withBaselineHeaders(withRateLimitHeaders(response, quotaOut.headers));
     } catch (err) {
       // Logged server-side (visible via wrangler tail / any configured
       // Logpush) but never returned to the caller -- this is the top-level

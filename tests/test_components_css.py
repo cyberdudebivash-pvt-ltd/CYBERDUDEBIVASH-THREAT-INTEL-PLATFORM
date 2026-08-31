@@ -26,6 +26,7 @@ EXPECTED_COMPONENT_FILES = [
     "feature-card.html", "metric-card.html", "integration-grid.html",
     "announcement.html", "button.html", "section.html", "container.html",
     "badge.html", "pricing-cta.html", "newsletter.html",
+    "data-teaser-overlay.html",
 ]
 
 

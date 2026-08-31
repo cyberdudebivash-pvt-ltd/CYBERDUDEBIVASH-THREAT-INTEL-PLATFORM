@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Component Reference: Data Teaser Overlay — SENTINEL APEX</title>
+<link rel="stylesheet" href="../css/tokens.css">
+<link rel="stylesheet" href="../css/components.css">
+<!--
+  SENTINEL APEX — Component Reference: Data Teaser Overlay
+  ==========================================================
+  Standalone, previewable reference markup for .sapx-data-teaser — a
+  blurred-content-plus-upgrade-card pattern for gated intelligence
+  fields (raw C2 IOCs, MITRE sub-technique mappings, YARA/Sigma rules,
+  actor attribution, STIX bundles).
+
+  This is styling for a REAL server-computed signal, not a fabricated
+  always-on marketing banner: revenue-enforcement.js's
+  applyTierGateV2()/enforceTierGate() already attach *_paywall stubs
+  (ioc_paywall/detection_paywall/actor_paywall/stix_paywall) to a feed
+  item whenever something was genuinely withheld for the caller's tier —
+  each stub carries a real `message` and `upgrade` object. Render this
+  component only when at least one such stub is present on the item;
+  never render it unconditionally. See lookup.html for a live,
+  working integration against the real feed (GET /api/feed) and the
+  real IOC lookup route (GET /api/v1/ioc/lookup).
+
+  Blur content shown below is a static illustrative placeholder
+  (fake hex/rule text) since blurred real data was never sent to an
+  unauthenticated caller in the first place — the platform's backend
+  genuinely strips these fields server-side for FREE tier, it doesn't
+  send them and hide them client-side.
+
+  This file is NOT included or imported by any page automatically —
+  copy the fragment below into a page and adjust copy/prices/hrefs.
+  The checkout links point at GET /api/billing/checkout (workers/
+  intel-gateway/src/billing-checkout.js), which redirects to the real,
+  live Gumroad (USD) or Razorpay-via-upgrade.html (INR) destination —
+  do not hardcode a gateway URL directly in a new page.
+
+  Requires, in this order:
+    <link rel="stylesheet" href="/css/tokens.css">
+    <link rel="stylesheet" href="/css/components.css">
+-->
+<style>
+  body { background: var(--sapx-color-bg-base); margin: 0; }
+</style>
+</head>
+<body>
+
+<section class="sapx-section" aria-labelledby="teaser-heading">
+  <div class="sapx-container-narrow">
+    <p class="sapx-section-kicker">Component Reference</p>
+    <h2 class="sapx-section-heading" id="teaser-heading">Data Teaser Overlay</h2>
+    <p class="sapx-section-desc">Render only when the item actually has a real *_paywall stub from the server — never as an unconditional banner.</p>
+
+    <div class="sapx-card" style="padding: var(--sapx-space-5);">
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap: var(--sapx-space-4); flex-wrap: wrap;">
+        <p class="sapx-card-title" style="max-width: 420px;">CVE-2026-8162 — Remote Code Execution</p>
+        <span class="sapx-badge sapx-badge-severity-critical">Critical</span>
+      </div>
+      <p class="sapx-card-desc">Risk score 9.4/10 · Source: Vulners · Published 2026-05-12 — these fields are always free, on every tier.</p>
+
+      <!-- .sapx-data-teaser: only rendered because this example item has
+           ioc_paywall + detection_paywall + actor_paywall stubs present. -->
+      <div class="sapx-data-teaser" style="margin-top: var(--sapx-space-4);">
+        <div class="sapx-data-teaser-content" aria-hidden="true">
+          c2_ip: &#9608;&#9608;.&#9608;&#9608;.&#9608;&#9608;.&#9608;&#9608;<br>
+          mitre_sub_technique: T15&#9608;&#9608;.&#9608;&#9608;&#9608;<br>
+          yara_rule: rule SENTINEL_&#9608;&#9608;&#9608;&#9608; { ... }<br>
+          pcap_signature: &#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;
+        </div>
+        <div class="sapx-data-teaser-overlay">
+          <p class="sapx-data-teaser-heading">Unlock Full C2 Threat Attribution &amp; YARA Rules</p>
+          <p class="sapx-data-teaser-copy">Access real-time telemetry, automated STIX exports, and 5,000 daily API queries with Sentinel Pro.</p>
+          <div class="sapx-data-teaser-ctas">
+            <a class="sapx-btn sapx-btn-primary" href="https://intel.cyberdudebivash.com/api/billing/checkout?tier=pro&amp;currency=usd&amp;ref=teaser_component">Upgrade — $49/mo</a>
+            <a class="sapx-btn sapx-btn-secondary" href="https://intel.cyberdudebivash.com/api/billing/checkout?tier=pro&amp;currency=inr&amp;ref=teaser_component">&#8377;4,100/mo (India)</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

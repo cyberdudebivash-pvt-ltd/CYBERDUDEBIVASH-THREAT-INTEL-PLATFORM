@@ -920,3 +920,62 @@
   font-size: var(--sapx-font-size-xs);
   color: var(--sapx-color-text-tertiary);
 }
+
+/* Data Teaser Overlay: blurs a locked content block and overlays an
+   upgrade card. Intended for gated intelligence fields (raw IOCs, YARA/
+   Sigma rules, actor attribution, STIX bundles) mirroring the real
+   *_paywall stubs revenue-enforcement.js's applyTierGateV2()/
+   enforceTierGate() already attach server-side to a masked feed item --
+   this is styling for that real signal, not a fabricated always-on banner.
+   Reference/usage: components/data-teaser-overlay.html. */
+.sapx-data-teaser {
+  position: relative;
+  min-height: 220px;
+  border: 1px dashed var(--sapx-color-border-strong);
+  border-radius: var(--sapx-radius-lg);
+  background: var(--sapx-color-bg-surface);
+  overflow: hidden;
+}
+.sapx-data-teaser-content {
+  filter: blur(5px);
+  user-select: none;
+  pointer-events: none;
+  padding: var(--sapx-space-5);
+  font-family: var(--sapx-font-mono);
+  font-size: var(--sapx-font-size-sm);
+  color: var(--sapx-color-text-tertiary);
+  line-height: 1.8;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sapx-data-teaser-content { transition: filter 0.2s var(--sapx-ease-standard); }
+}
+.sapx-data-teaser-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sapx-space-3);
+  text-align: center;
+  padding: var(--sapx-space-5);
+  background: color-mix(in srgb, var(--sapx-color-bg-base) 55%, transparent);
+}
+.sapx-data-teaser-heading {
+  font-size: var(--sapx-font-size-base);
+  font-weight: var(--sapx-font-weight-bold);
+  color: var(--sapx-color-text-primary);
+  max-width: 360px;
+}
+.sapx-data-teaser-copy {
+  font-size: var(--sapx-font-size-sm);
+  color: var(--sapx-color-text-secondary);
+  max-width: 360px;
+}
+.sapx-data-teaser-ctas {
+  display: flex;
+  gap: var(--sapx-space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: var(--sapx-space-1);
+}
