@@ -3092,6 +3092,49 @@ async function provisionApiKey(env, ctx, tier, email, source, metadata, billingC
     action: "key_auto_provisioned", email, tier: validTier, source,
     billing_cycle: billingCycle, expiry_enforced: enforceExpiry, shadow_expires_at: shadowExpiresAt,
   });
+
+  // Mirror into REVENUE_CRM_KV, the namespace handleCustomerPortal() (revenue-
+  // engine) actually reads -- reverse direction of the exact same pattern
+  // already used for API_KEYS_KV (see that binding's own wrangler.toml
+  // comment): additive only, never touches API_KEYS_KV.put() above (still
+  // the sole authoritative grant of access), non-blocking so a KV hiccup here
+  // can never fail or slow down a real checkout response, and best-effort
+  // (logged, never thrown) since this only feeds the read-only self-service
+  // portal display, not entitlement. Before this, provisionApiKey() (the
+  // real, live checkout path) never wrote here at all, so the portal's
+  // token now validates (PR #281) but still 404s "not_found" on every real
+  // customer -- this closes that gap. Only fields this function genuinely
+  // has real values for; never fabricates payment/usage history the way
+  // revenue-engine's own richer provisionCustomer() record does.
+  if (env.REVENUE_CRM_KV) {
+    ctx.waitUntil((async () => {
+      try {
+        const periodEnd = enforceExpiry ? shadowExpiresAt : null;
+        await env.REVENUE_CRM_KV.put(`customer:${email}`, JSON.stringify({
+          id: email, email, tier: validTier, status: "active",
+          billing_cycle: billingCycle, plan_started_at: now(), current_period_end: periodEnd,
+          payment_id: (metadata && metadata.payment_id) || null,
+          onboarding_completed: false, first_api_call_at: null, first_report_access_at: null,
+          api_calls_total: 0, created_at: now(), updated_at: now(), source,
+        }));
+        const keyRecord = {
+          id: apiKey, key: apiKey, tier: validTier, status: "active", email, customer_id: email,
+          created_at: now(), expires_at: periodEnd, req_day: null, req_min: RATE_LIMITS[validTier] ?? RATE_LIMITS.FREE,
+          features: [], rotation_count: 0, billing_cycle: billingCycle,
+        };
+        const prevKeys = (await env.REVENUE_CRM_KV.get(`apikeys:${email}`, "json")) || [];
+        await env.REVENUE_CRM_KV.put(`apikeys:${email}`, JSON.stringify([...prevKeys, keyRecord]));
+        await env.REVENUE_CRM_KV.put(`sub:email:${email}`, JSON.stringify({
+          customer_id: email, email, tier: validTier, billing_cycle: billingCycle, status: "active",
+          created_at: now(), current_period_start: now(), current_period_end: periodEnd,
+          auto_renew: false, // matches the platform-wide "no automated recurring billing" contract
+        }));
+      } catch (err) {
+        console.error("[provisionApiKey] REVENUE_CRM_KV mirror write failed (portal display only, access unaffected):", err?.message || err);
+      }
+    })());
+  }
+
   return apiKey;
 }
 
@@ -3204,6 +3247,36 @@ async function sendTelegramAlert(env, text) {
   } catch (_) { return false; }
 }
 
+// Customer-portal HMAC token: deliberately identical algorithm to
+// revenue-engine's own computePortalToken() (workers/revenue-engine/src/index.js)
+// -- HMAC-SHA256(REVENUE_ADMIN_SECRET, "portal:"+email), hex-encoded, domain-
+// separated with the same "portal:" prefix. Duplicated rather than imported
+// because these are two independently deployed Workers with no shared module
+// boundary (same pattern already used for pricing.js's own documented
+// duplication-with-cross-reference elsewhere in this codebase) -- but the
+// *value* must come from the exact same REVENUE_ADMIN_SECRET so a token
+// computed here validates against revenue-engine's handleCustomerPortal(),
+// the only place any such token is ever checked. This is the real, live
+// checkout path (Razorpay/Gumroad -> provisionApiKey() -> here); before this,
+// only the separate, rarely-reachable provisionCustomer() path (revenue-engine)
+// ever computed a portal token, so no real paying customer's welcome email
+// ever contained a working "manage your subscription" link. See
+// docs/BILLING_ENTITLEMENT_ARCHITECTURE_AUDIT.md and PR #281 for the full
+// trace. Returns null (never a fabricated token) when the secret isn't set,
+// so this ships as a no-op addition to the email until a human runs
+// `wrangler secret put REVENUE_ADMIN_SECRET` with revenue-engine's value.
+async function computePortalToken(env, email) {
+  if (!env?.REVENUE_ADMIN_SECRET) return null;
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(env.REVENUE_ADMIN_SECRET),
+      { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+    const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("portal:" + email.toLowerCase()));
+    return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+  } catch (_) { return null; }
+}
+
 // P2.6.1-002: Activation email via Resend API  -  fails silently, never blocks provisioning
 async function sendActivationEmail(env, email, tier, apiKey) {
   if (!env.RESEND_API_KEY) {
@@ -3212,6 +3285,13 @@ async function sendActivationEmail(env, email, tier, apiKey) {
   }
   try {
     const tierLabel = tier === "ENTERPRISE" ? "ENTERPRISE" : tier === "MSSP" ? "MSSP" : tier === "FREE" ? "FREE" : "PRO";
+    const portalToken = await computePortalToken(env, email);
+    const portalBlock = portalToken
+      ? `<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:20px;margin:24px 0;">
+      <p style="color:#94a3b8;margin:0 0 8px;">Manage your subscription:</p>
+      <a href="https://intel.cyberdudebivash.com/customer/api-keys.html?email=${encodeURIComponent(email)}&token=${portalToken}" style="color:#60a5fa;">View your keys & subscription status &rarr;</a>
+    </div>`
+      : "";
     const htmlBody = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>Your CYBERDUDEBIVASH(R) Sentinel APEX API Key</title></head>
@@ -3230,7 +3310,7 @@ async function sendActivationEmail(env, email, tier, apiKey) {
       <p style="color:#94a3b8;margin:0 0 8px;">Quick Start:</p>
       <code style="color:#fbbf24;font-size:13px;word-break:break-all;">curl -H "X-API-Key: ${apiKey}" https://intel.cyberdudebivash.com/api/feed</code>
     </div>
-
+    ${portalBlock}
     <p style="color:#94a3b8;">Need help? Contact us at <a href="mailto:support@cyberdudebivash.com" style="color:#60a5fa;">support@cyberdudebivash.com</a></p>
     <p style="color:#475569;font-size:12px;margin-bottom:0;">CYBERDUDEBIVASH(R) SENTINEL APEX  -  Enterprise Threat Intelligence Platform</p>
   </div>
@@ -4548,6 +4628,11 @@ async function handleRequest(request, env, ctx) {
         // months the same way razorpay_configured was before 2026-08-03.
         razorpay_webhook_configured: isSet(env.RAZORPAY_WEBHOOK_SECRET),
         resend_configured: isSet(env.RESEND_API_KEY),
+        // Same blind-spot pattern (PR #281): an unset REVENUE_ADMIN_SECRET makes
+        // computePortalToken() return null and sendActivationEmail() silently omit
+        // the "manage your subscription" link -- customer still gets their key,
+        // nothing customer-facing ever surfaces that the portal link is missing.
+        revenue_admin_secret_configured: isSet(env.REVENUE_ADMIN_SECRET),
       },
       security: {
         auth: "JWT_HS256+KV",

@@ -89,6 +89,18 @@ id      = "baa66e510f7247d4b268af943bfb7213"
 binding = "SECURITY_HUB_KV"
 id      = "95faae90943f43afa26d552b8385d339"
 
+[[kv_namespaces]]
+# PR #281: same namespace ID as workers/revenue-engine's own REVENUE_CRM_KV
+# binding -- the reverse direction of the exact pattern already used for
+# API_KEYS_KV (revenue-engine binds this Worker's namespace so its writes
+# land where resolveAuth() reads). Bound here so provisionApiKey() -- the
+# real, live Razorpay/Gumroad checkout path -- can mirror customer/key/
+# subscription records into the namespace handleCustomerPortal()
+# (revenue-engine) actually reads. Additive only; API_KEYS_KV remains the
+# sole authoritative grant of access.
+binding = "REVENUE_CRM_KV"
+id      = "1740d5dba5e74c3aafff1c683588395b"
+
 # -- R2 Buckets --
 # INTEL_R2: Primary intel storage (feed, STIX, manifests, CTI data)
 # Create: npx wrangler r2 bucket create sentinel-apex-data
@@ -124,6 +136,16 @@ bucket_name = "sentinel-apex-reports"
 #                                                     Get from: Razorpay Dashboard -> Webhooks
 # npx wrangler secret put STRIPE_PRO_PRICE_ID      -> Stripe Price ID for PRO plan ($29/mo)
 # npx wrangler secret put STRIPE_ENT_PRICE_ID      -> Stripe Price ID for ENTERPRISE plan ($199/mo)
+# npx wrangler secret put REVENUE_ADMIN_SECRET     -> MUST be set to the exact same value as
+#                                                     workers/revenue-engine's own REVENUE_ADMIN_SECRET.
+#                                                     Used only to compute the customer-portal HMAC
+#                                                     token (see computePortalToken() in src/index.js)
+#                                                     so the welcome email's portal link validates
+#                                                     against revenue-engine's handleCustomerPortal() --
+#                                                     not used for admin auth in this Worker. Optional:
+#                                                     if unset, portal_url is simply omitted from the
+#                                                     activation email (see computePortalToken()), so
+#                                                     this ships with zero behavior change until set.
 # v142.4.0: GOD-MODE PAYMENT ALERTS + BSC AUTO-VERIFY
 # npx wrangler secret put TG_BOT_TOKEN             -> Telegram bot token (from @BotFather)
 #                                                     Create: t.me/BotFather -> /newbot -> copy token
@@ -162,6 +184,10 @@ id      = "baa66e510f7247d4b268af943bfb7213"
 [[env.production.kv_namespaces]]
 binding = "SECURITY_HUB_KV"
 id      = "95faae90943f43afa26d552b8385d339"
+
+[[env.production.kv_namespaces]]
+binding = "REVENUE_CRM_KV"
+id      = "1740d5dba5e74c3aafff1c683588395b"
 
 [[env.production.r2_buckets]]
 binding     = "INTEL_R2"

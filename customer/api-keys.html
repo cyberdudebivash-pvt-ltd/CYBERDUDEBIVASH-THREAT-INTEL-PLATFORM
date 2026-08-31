@@ -81,12 +81,13 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:14px 2
   <div class="lookup-card">
     <div style="font-size:32px;margin-bottom:12px;">🔑</div>
     <h2>My API Keys & Subscription</h2>
-    <p>Enter your registered email to access your API key, rate limits, and subscription status.</p>
+    <p>Open this page from the secure link in your subscription confirmation email to access your API key, rate limits, and subscription status. For security, your key and subscription details can't be looked up by email alone.</p>
     <div class="lookup-row">
       <input type="email" id="lookupEmail" class="lookup-input" placeholder="you@company.com" onkeydown="if(event.key==='Enter')lookupAccount()">
       <button class="lookup-btn" onclick="lookupAccount()" id="lookupBtn">Look Up →</button>
     </div>
     <div class="err-msg" id="lookupErr"></div>
+    <p style="font-size:11px;color:var(--muted);margin-top:12px;">Can't find your email? Contact <a href="mailto:support@cyberdudebivash.com" style="color:var(--accent);">support@cyberdudebivash.com</a> and we'll resend your portal link.</p>
   </div>
 
   <div class="portal-section" id="portalSection">
@@ -154,6 +155,10 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:14px 2
 <script>
 const API = 'https://revenue.intel.cyberdudebivash.com';
 let currentKey = '';
+// Set from the URL's ?token= param (see bottom of this script) -- the portal
+// API requires this on every request (HMAC of the email, checked server-side)
+// and refuses email-only lookups by design, so there is no email-only path.
+let portalToken = '';
 
 async function lookupAccount() {
   const email = document.getElementById('lookupEmail').value.trim();
@@ -163,10 +168,15 @@ async function lookupAccount() {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     errEl.textContent = 'Please enter a valid email address.'; errEl.style.display = 'block'; return;
   }
+  if (!portalToken) {
+    errEl.textContent = "This page needs the secure link from your subscription confirmation email -- an email address alone can't unlock your keys. Contact support@cyberdudebivash.com if you can't find it.";
+    errEl.style.display = 'block';
+    return;
+  }
   btn.innerHTML = '<span class="spinner"></span>';
   btn.disabled = true;
   try {
-    const res = await fetch(`${API}/api/customer/portal?email=${encodeURIComponent(email)}`);
+    const res = await fetch(`${API}/api/customer/portal?email=${encodeURIComponent(email)}&token=${encodeURIComponent(portalToken)}`);
     const data = await res.json();
     if (!res.ok || data.error) {
       errEl.textContent = data.message || 'No account found. Check your email or subscribe at /PAYMENT-GATEWAY.html';
@@ -258,13 +268,14 @@ function copyKey(elId) {
 }
 
 async function requestRotation(email) {
-  if (!confirm('Rotate your API key? Your current key will stop working immediately.')) return;
-  // This calls admin rotate — in production, use a signed token
-  showToast('Rotation request sent. New key will be emailed to you within 2 hours.');
+  // Rotating from here would need the real (unmasked) key as proof of
+  // possession for POST /api/apikeys/self-rotate -- this page only ever
+  // holds the masked version, so it can't call that endpoint itself.
+  showToast('Email support@cyberdudebivash.com from your registered address to rotate this key.');
 }
 
 function revealKey(i) {
-  showToast('For security, your full key was sent to your registered email. Contact support@cyberdudebivash.in');
+  showToast('For security, full keys are not re-displayed here. Check your original welcome email, or contact support@cyberdudebivash.com.');
 }
 
 function showToast(msg) {
@@ -273,10 +284,12 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-// Auto-lookup from URL param
+// Auto-lookup from the portal link's URL params (?email=...&token=...)
 const params = new URLSearchParams(location.search);
 const emailParam = params.get('email');
-if (emailParam) { document.getElementById('lookupEmail').value = emailParam; lookupAccount(); }
+const tokenParam = params.get('token');
+if (tokenParam) portalToken = tokenParam;
+if (emailParam) { document.getElementById('lookupEmail').value = emailParam; if (portalToken) lookupAccount(); }
 </script>
 </body>
 </html>
