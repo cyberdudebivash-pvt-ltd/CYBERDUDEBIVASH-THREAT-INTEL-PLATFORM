@@ -8,7 +8,7 @@
 // Phase 2 (foundational pass): Razorpay Subscriptions -- subscription
 // creation, webhook lifecycle, entitlement sync. See subscription-engine.js
 // for scope notes (refunds/upgrades/downgrades/checkout-cutover deferred).
-import { handleBillingSubscriptionCreate, handleBillingSubscriptionStatus, handleBillingWebhook, patchApiKeyEntitlement, patchInternalSub, tryTransition } from "./subscription-engine.js";
+import { handleBillingSubscriptionCreate, handleBillingSubscriptionStatus, handleBillingWebhook, patchApiKeyEntitlement, patchInternalSub, tryTransition, PLAN_ID_ENV_KEYS } from "./subscription-engine.js";
 
 const ENGINE = {
   VERSION:  "183.0",
@@ -1324,9 +1324,23 @@ async function computePortalToken(env, email) {
 // GET /api/health -- public observability endpoint. Mirrors the shape/intent
 // of intel-gateway's /api/health (binding pings + config presence), scaled
 // down to what this Worker actually has.
-async function handleRevenueEngineHealth(request, env, rid) {
+export async function handleRevenueEngineHealth(request, env, rid) {
   const kvOk  = env.REVENUE_CRM_KV ? await env.REVENUE_CRM_KV.get("health:ping").then(() => "ok").catch(() => "error") : "not_bound";
   const d1Ok  = env.CRM_DB ? await env.CRM_DB.prepare("SELECT 1").first().then(() => "ok").catch(() => "error") : "not_bound";
+
+  // Per-tier/cycle Plan ID presence -- booleans only, never the values
+  // themselves. Built off PLAN_ID_ENV_KEYS (the same map
+  // handleBillingSubscriptionCreate's 503 check reads) so this can never
+  // silently drift from what actually gates checkout: a tier/cycle showing
+  // false here is exactly the one that falls back to the one-time-order
+  // flow in upgrade.html today.
+  const planIdsConfigured = {};
+  for (const [tier, cycles] of Object.entries(PLAN_ID_ENV_KEYS)) {
+    for (const [cycle, envKey] of Object.entries(cycles)) {
+      planIdsConfigured[`${tier.toLowerCase()}_${cycle}`] = !!env[envKey];
+    }
+  }
+
   return json({
     status: "ok",
     engine: ENGINE.NAME,
@@ -1338,6 +1352,7 @@ async function handleRevenueEngineHealth(request, env, rid) {
       crm_db: d1Ok,
       razorpay_orders_configured: !!(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET),
       razorpay_subscriptions_configured: !!env.RAZORPAY_WEBHOOK_SECRET,
+      razorpay_plan_ids_configured: planIdsConfigured,
     },
     generated_at: new Date().toISOString(),
     rid,

@@ -38,7 +38,7 @@ const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
 // One Razorpay Plan (pre-created in the Razorpay Dashboard or via the Plans
 // API -- a one-time manual step outside what this session can do without
 // live credentials) per tier/cycle. Missing plan_id => 503, not a crash.
-const PLAN_ID_ENV_KEYS = {
+export const PLAN_ID_ENV_KEYS = {
   PRO:        { monthly: "RAZORPAY_PLAN_ID_PRO_MONTHLY",        annual: "RAZORPAY_PLAN_ID_PRO_ANNUAL" },
   ENTERPRISE: { monthly: "RAZORPAY_PLAN_ID_ENTERPRISE_MONTHLY",  annual: "RAZORPAY_PLAN_ID_ENTERPRISE_ANNUAL" },
   MSSP:       { monthly: "RAZORPAY_PLAN_ID_MSSP_MONTHLY",        annual: "RAZORPAY_PLAN_ID_MSSP_ANNUAL" },
