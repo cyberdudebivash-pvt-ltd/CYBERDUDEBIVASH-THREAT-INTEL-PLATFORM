@@ -43,6 +43,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Reuses the same eligibility test detection_bundle_injector.py already gates
+# generation on (scripts/p38_shared_validators.py) -- see v134.1 fix below:
+# this file used to render a fabricated Sigma/SIEM/YARA block for every item
+# regardless of report type, including pure IOC/phishing-indicator items that
+# were never CVE/vuln-class eligible for a detection rule in the first place.
+from p38_shared_validators import is_detection_eligible
+
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] REPORT-ENHANCER %(levelname)s %(message)s",
                     datefmt="%Y-%m-%dT%H:%M:%SZ")
 log = logging.getLogger("CDB-REPORT-ENHANCER")
@@ -233,7 +240,35 @@ def build_ioc_table_section(item: Dict) -> str:
     return _card("INDICATORS OF COMPROMISE — FULL TABLE", content, icon="🔍")
 
 def build_detection_rules_section(item: Dict) -> str:
-    sigma   = item.get("sigma_rule") or ""
+    """
+    Only called for is_detection_eligible() items (gated at the call site in
+    enhance_report_html()). Renders the real, generator-C-produced rule when
+    present; otherwise an honest "queued" notice.
+
+    v134.1 FIX: this function previously fabricated a full Sigma/Splunk/
+    Elastic/KQL/YARA block for EVERY item whenever item["sigma_rule"] was
+    empty -- including items that were never CVE/vuln-class eligible for a
+    rule at all (now excluded upstream by the call-site gate) and eligible
+    items generator C simply hadn't reached yet in its per-run budget
+    (scripts/detection_bundle_injector.py, MAX_DETECT_ITEMS). The fabricated
+    block used the item's own real IOC domains/IPs when available, else the
+    literal placeholders "malicious-c2.example.com" / "185.220.101.1" --
+    rendered under a "DETECTION RULES" heading indistinguishable from a real,
+    generated rule. For an eligible-but-not-yet-processed item this now shows
+    an honest pending notice instead of synthesizing content ahead of time.
+    """
+    sigma = item.get("sigma_rule") or ""
+    if not sigma:
+        content = (
+            f'<div style="color:{C_MUTED};font-size:12px;line-height:1.6;">'
+            f'This advisory is eligible for detection engineering (confirmed CVE / '
+            f'vulnerability classification) and is queued for rule generation on an '
+            f'upcoming intelligence refresh. Sigma, SIEM query, and YARA content will '
+            f'appear here once generated — nothing is fabricated ahead of that.'
+            f'</div>'
+        )
+        return _card("DETECTION RULES — SIGMA + SIEM + YARA", content, icon="🛡️")
+
     siem_q  = item.get("siem_queries") or {}
     if not isinstance(siem_q, dict):
         siem_q = {}
@@ -246,32 +281,7 @@ def build_detection_rules_section(item: Dict) -> str:
         if isinstance(i, (str, dict))
     ]
     domains = [i.get("value","") for i in _iocs_norm if isinstance(i, dict) and i.get("type")=="domain"][:3]
-    ips     = [i.get("value","") for i in _iocs_norm if isinstance(i, dict) and i.get("type")=="ipv4"][:3]
-    hashes  = [i.get("value","") for i in _iocs_norm if isinstance(i, dict) and i.get("type") in ("sha256","md5")][:2]
     actor   = item.get("actor_tag","Unknown Threat Actor")
-
-    if not sigma:
-        sigma = f"""title: CDB-APEX {item_id} - {actor} IOC Detection
-status: stable
-description: Detects IOCs associated with {actor} campaign
-author: CYBERDUDEBIVASH(R) SENTINEL APEX v134
-date: {datetime.now(timezone.utc).strftime('%Y/%m/%d')}
-tags:
-    - attack.command_and_control
-    - attack.t1071.001
-    - attack.t1041
-    - attack.t1566.001
-logsource:
-    category: proxy
-detection:
-    selection_domain:
-        cs-host|contains:{chr(10) + chr(10).join(f'            - "{d}"' for d in domains) if domains else chr(10)+'            - "malicious-c2.example.com"'}
-    selection_ip:
-        dst_ip|contains:{chr(10) + chr(10).join(f'            - "{ip}"' for ip in ips) if ips else chr(10)+'            - "185.220.101.1"'}
-    condition: selection_domain or selection_ip
-level: critical
-falsepositives:
-    - Legitimate CDN traffic (verify against asset baseline)"""
 
     splunk_dest = " OR ".join('dest="' + d + '"' for d in domains[:2]) or 'dest="c2.example.com"'
     splunk_q    = siem_q.get("splunk") or f"index=* ({splunk_dest})"
@@ -610,7 +620,15 @@ def enhance_report_html(html: str, item: Dict, tier: str = "free") -> str:
     # Build all enterprise sections
     kill_chain   = build_kill_chain_section(item)
     ioc_table    = build_ioc_table_section(item)
-    det_rules    = _tier_gate(build_detection_rules_section(item), "pro", tier)
+    # v134.1 FIX: the detection-rules card is CVE/vuln-class-specific content
+    # (Sigma host/network selectors, SIEM queries) -- it is NOT_APPLICABLE for
+    # pure indicator/phishing-URL items by the same report-type contract
+    # scripts/report_type_contracts.py already defines for INDICATOR_FEED.
+    # Omit the card entirely for ineligible items instead of rendering it
+    # (previously: build_detection_rules_section() ran unconditionally and
+    # fabricated a rule for every item, eligible or not -- see that
+    # function's own v134.1 fix below for the eligible-but-pending case).
+    det_rules    = _tier_gate(build_detection_rules_section(item), "pro", tier) if is_detection_eligible(item) else ""
     soc_playbook = _tier_gate(build_soc_playbook_section(item), "pro", tier)
     biz_impact   = build_business_impact_section(item)
     def_matrix   = _tier_gate(build_defensive_matrix_section(item), "pro", tier)
@@ -734,8 +752,20 @@ def run_enhancement(manifest_path: Path = MANIFEST_PATH, tier: str = "free") -> 
         report_path = REPO_ROOT / report_url.lstrip("/") if report_url else None
 
         if not report_path or not report_path.exists():
-            # Try common paths
-            for yr_mo in ["2026/04","2026/05","2026/03"]:
+            # v134.1 FIX: this was a hardcoded, point-in-time list
+            # (["2026/04","2026/05","2026/03"]) that goes stale by
+            # construction -- every month after May 2026 this fallback could
+            # never find a report file for any item with an empty
+            # report_url (100% of the live manifest window as of
+            # 2026-08-31). Derive a rolling 6-month window from "now"
+            # instead so it can't go stale again.
+            _now = datetime.now(timezone.utc)
+            _months = []
+            for _back in range(6):
+                _idx = _now.month - 1 - _back
+                _y, _m = _now.year + _idx // 12, _idx % 12 + 1
+                _months.append(f"{_y:04d}/{_m:02d}")
+            for yr_mo in _months:
                 candidate = REPORTS_ROOT / yr_mo / f"{item_id}.html"
                 if candidate.exists():
                     report_path = candidate
