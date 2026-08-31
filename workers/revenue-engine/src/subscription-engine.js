@@ -215,6 +215,32 @@ export async function handleBillingSubscriptionCreate(request, env, ctx, rid) {
 }
 
 // =============================================================================
+// GET /api/v2/billing/subscriptions/status?subscription_id=...
+// =============================================================================
+// Subscription activation happens asynchronously via the webhook above, not
+// synchronously in the Razorpay Checkout response the way the one-time-order
+// flow's /api/payment/razorpay/verify works -- the checkout-page frontend
+// needs something to poll after the Checkout modal's handler fires. Reuses
+// getProviderLink() (the same lookup putProviderLink()/the webhook handler
+// already maintain) rather than introducing a second record of the same
+// state. Same "know the opaque id, get the status" shape as the pre-existing
+// GET /api/payment/status?review_id= route on the one-time-order flow.
+// Only returns api_key once status is "active" -- before that there is
+// nothing to hand back yet.
+export async function handleBillingSubscriptionStatus(request, env, ctx, rid) {
+  const url = new URL(request.url);
+  const providerId = url.searchParams.get("subscription_id");
+  if (!providerId) return json({ error: "subscription_id is required" }, 400);
+
+  const link = await getProviderLink(env, providerId);
+  if (!link) return json({ status: "not_found" }, 404);
+
+  const body = { status: link.status, tier: link.tier, billing_cycle: link.billing_cycle };
+  if (link.status === "active" && link.api_key) body.api_key = link.api_key;
+  return json(body);
+}
+
+// =============================================================================
 // POST /api/v2/billing/webhooks/razorpay
 // =============================================================================
 export async function handleBillingWebhook(request, env, ctx, rid) {

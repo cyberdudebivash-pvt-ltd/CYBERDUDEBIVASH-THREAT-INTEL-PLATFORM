@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { test } from "node:test";
-import { handleBillingWebhook } from "../subscription-engine.js";
+import { handleBillingWebhook, handleBillingSubscriptionStatus } from "../subscription-engine.js";
 
 // ---------------------------------------------------------------------------
 // Phase 2 (Razorpay Subscriptions): coverage for handleBillingWebhook(), the
@@ -201,4 +201,61 @@ test("handleBillingWebhook: subscription.charged with no provider link logs an a
   );
   const res = await handleBillingWebhook(req, env, {}, "rid_test");
   assert.equal(res.status, 200);
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v2/billing/subscriptions/status -- the checkout page polls this
+// after Razorpay Checkout's handler fires, since subscription activation is
+// webhook-driven (async), unlike the one-time-order flow's synchronous
+// /verify call.
+// ---------------------------------------------------------------------------
+
+function statusRequest(subscriptionId) {
+  const url = subscriptionId
+    ? `https://x.test/api/v2/billing/subscriptions/status?subscription_id=${encodeURIComponent(subscriptionId)}`
+    : "https://x.test/api/v2/billing/subscriptions/status";
+  return new Request(url, { method: "GET" });
+}
+
+test("handleBillingSubscriptionStatus: missing subscription_id is a 400, not a crash", async () => {
+  const env = { REVENUE_CRM_KV: fakeKV() };
+  const res = await handleBillingSubscriptionStatus(statusRequest(null), env, {}, "rid_test");
+  assert.equal(res.status, 400);
+});
+
+test("handleBillingSubscriptionStatus: unknown subscription_id is a 404", async () => {
+  const env = { REVENUE_CRM_KV: fakeKV() };
+  const res = await handleBillingSubscriptionStatus(statusRequest("rzp_sub_never_seen"), env, {}, "rid_test");
+  assert.equal(res.status, 404);
+});
+
+test("handleBillingSubscriptionStatus: 'created' (not yet paid) status never includes an api_key", async () => {
+  const env = {
+    REVENUE_CRM_KV: fakeKV({
+      "razorpay_sub:rzp_sub_pending": {
+        razorpay_subscription_id: "rzp_sub_pending", email: "waiting@customer.test",
+        tier: "PRO", billing_cycle: "monthly", status: "created",
+      },
+    }),
+  };
+  const res = await handleBillingSubscriptionStatus(statusRequest("rzp_sub_pending"), env, {}, "rid_test");
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, "created");
+  assert.equal(body.api_key, undefined, "no key must be handed out before the subscription is actually active");
+});
+
+test("handleBillingSubscriptionStatus: 'active' status includes the provisioned api_key", async () => {
+  const env = {
+    REVENUE_CRM_KV: fakeKV({
+      "razorpay_sub:rzp_sub_live": {
+        razorpay_subscription_id: "rzp_sub_live", email: "paid@customer.test",
+        tier: "ENTERPRISE", billing_cycle: "annual", status: "active", api_key: "sk_live_abc123",
+      },
+    }),
+  };
+  const res = await handleBillingSubscriptionStatus(statusRequest("rzp_sub_live"), env, {}, "rid_test");
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body, { status: "active", tier: "ENTERPRISE", billing_cycle: "annual", api_key: "sk_live_abc123" });
 });

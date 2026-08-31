@@ -8,7 +8,7 @@
 // Phase 2 (foundational pass): Razorpay Subscriptions -- subscription
 // creation, webhook lifecycle, entitlement sync. See subscription-engine.js
 // for scope notes (refunds/upgrades/downgrades/checkout-cutover deferred).
-import { handleBillingSubscriptionCreate, handleBillingWebhook, patchApiKeyEntitlement, patchInternalSub, tryTransition } from "./subscription-engine.js";
+import { handleBillingSubscriptionCreate, handleBillingSubscriptionStatus, handleBillingWebhook, patchApiKeyEntitlement, patchInternalSub, tryTransition } from "./subscription-engine.js";
 
 const ENGINE = {
   VERSION:  "183.0",
@@ -65,6 +65,8 @@ export default {
         return await handleBillingSubscriptionCreate(request, env, ctx, rid);
       if (path === "/api/v2/billing/webhooks/razorpay" && method === "POST")
         return await handleBillingWebhook(request, env, ctx, rid);
+      if (path === "/api/v2/billing/subscriptions/status" && method === "GET")
+        return await handleBillingSubscriptionStatus(request, env, ctx, rid);
 
       // ── Public: customer-facing commercial routes ──────────────────────────
       // Moved here from dispatchCommercialRoutes() (further below), which is
