@@ -305,12 +305,22 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
         break;
       }
       const periodEnd = unixToIso(subEntity?.current_end);
-      await tryTransition(env, link.internal_sub_id, SUB_STATUS.ACTIVE, {
+      const transitioned = await tryTransition(env, link.internal_sub_id, SUB_STATUS.ACTIVE, {
         current_period_start: unixToIso(subEntity?.current_start),
         current_period_end: periodEnd || link.current_period_end,
         renewal_reminder_sent: false,
         renewal_count: (link.renewal_count || 0) + 1,
       }, rid);
+      if (!transitioned) {
+        // tryTransition() already logged subscription_invalid_transition and
+        // left sub:{internal_sub_id} untouched (fail-safe, not fail-open) --
+        // e.g. a late/out-of-order "charged" event arriving after this
+        // subscription was already CANCELLED/SUSPENDED/EXPIRED. Extending
+        // the live API key's expiry or flipping the provider link back to
+        // "active" here would silently undo that fail-safe through a side
+        // door, so neither runs.
+        break;
+      }
       await patchApiKeyEntitlement(env, link.api_key, { expires_at: periodEnd || link.current_period_end });
       await putProviderLink(env, providerId, { ...link, status: "active", current_period_end: periodEnd || link.current_period_end, renewal_count: (link.renewal_count || 0) + 1 });
       await trackEvent(env, "subscription_renewed", { email: link.email, tier: link.tier, razorpay_subscription_id: providerId, rid });

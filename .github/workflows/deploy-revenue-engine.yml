@@ -84,6 +84,20 @@ jobs:
           fi
           echo "OK: all Worker JS files passed syntax check"
 
+      - name: "GATE — Razorpay Subscriptions lifecycle unit tests (HARD FAIL)"
+        # subscription-domain.js (transition state machine) and
+        # subscription-engine.js (handleBillingWebhook, the entry point that
+        # turns a Razorpay webhook into a real customer's entitlement change)
+        # shipped with zero test coverage and no CI gate -- this Worker's
+        # deploy pipeline only ever ran a syntax check + bundle pre-flight,
+        # neither of which can catch a logic defect in how subscription
+        # state transitions gate API-key access. Same node --test pattern
+        # deploy-worker.yml already uses for intel-gateway's analogous
+        # subscription-lifecycle.test.js trust-boundary gate.
+        run: |
+          cd ${WORKER_DIR}
+          node --test src/__tests__/subscription-domain.test.js src/__tests__/subscription-engine.test.js
+
       - name: "esbuild bundle pre-flight (HARD GATE)"
         # This is the exact check that would have caught the duplicate
         # top-level `getEmailTemplate` declaration that made this Worker
