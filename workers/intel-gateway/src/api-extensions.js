@@ -18,6 +18,7 @@
 // =============================================================================
 
 import { applyTierGateV2 } from './revenue-enforcement.js';
+import { extractDetectionArtifacts, toPublicArtifact } from './detection-registry.js';
 
 // 
 // SCOPES SYSTEM
@@ -44,6 +45,12 @@ export const SCOPE_DEFINITIONS = {
   // reports, real ioc_count) remains premium -- see TIER_DEFAULT_SCOPES.free
   // below, now including this scope for exactly that masked-access reason.
   "read:cves":          { tier: "free",        desc: "CVE aggregate data (masked for free tier -- see handleCVEs)" },
+  // Public lookup sandbox (2026-09-01): same free-tier-masked shape as
+  // read:cves above -- a basic verdict (malicious yes/no, confidence,
+  // first/last seen, report/source counts) is free; correlated report
+  // detail, actor attribution, and detection artifacts (YARA/Sigma/KQL/
+  // Suricata) require Pro. See handleIOCLookup.
+  "read:iocs":          { tier: "free",        desc: "IOC reputation lookup (masked for free tier -- see handleIOCLookup)" },
   "export:misp":        { tier: "enterprise",  desc: "MISP JSON event export"                               },
   "export:csv":         { tier: "premium",     desc: "IOC CSV bulk export"                                  },
   "export:stix:full":   { tier: "enterprise",  desc: "Raw STIX bundle download"                             },
@@ -58,10 +65,10 @@ export const SCOPE_DEFINITIONS = {
 };
 
 export const TIER_DEFAULT_SCOPES = {
-  free:       ["read:intel:preview", "read:cves"],
-  premium:    ["read:intel","read:stix","read:actors","read:cves","export:csv",
+  free:       ["read:intel:preview", "read:cves", "read:iocs"],
+  premium:    ["read:intel","read:stix","read:actors","read:cves","read:iocs","export:csv",
                "read:ai:predict","read:ai:campaigns","read:ai:anomalies","read:intel:graph"],
-  enterprise: ["read:intel","read:stix","read:stix:full","read:actors","read:cves",
+  enterprise: ["read:intel","read:stix","read:stix:full","read:actors","read:cves","read:iocs",
                "export:misp","export:csv","export:stix:full","admin:webhooks",
                "read:ai:predict","read:ai:campaigns","read:ai:anomalies",
                "read:intel:graph","read:intel:graph:full"],
@@ -71,7 +78,7 @@ export const TIER_DEFAULT_SCOPES = {
   // Without this entry, "mssp" matched no key here and silently fell back to
   // the free scope set -- the same failure mode the pro/premium alias below
   // already documents, just for the top-paying tier instead of the mid tier.
-  mssp: ["read:intel","read:stix","read:stix:full","read:actors","read:cves",
+  mssp: ["read:intel","read:stix","read:stix:full","read:actors","read:cves","read:iocs",
          "export:misp","export:csv","export:stix:full","admin:webhooks",
          "read:ai:predict","read:ai:campaigns","read:ai:anomalies",
          "read:intel:graph","read:intel:graph:full"],
@@ -555,6 +562,162 @@ export async function handleCVEs(request, env, auth, rid) {
     });
   } catch (e) {
     return extJson({ error: "cves_failed", message: e.message, request_id: rid }, 500);
+  }
+}
+
+// =============================================================================
+// ENDPOINT: GET /api/ioc/lookup?value=<indicator>
+// Public IOC reputation sandbox: does this IP/domain/URL/hash appear in the
+// live feed? Free tier gets a basic verdict; Pro+ gets full correlation
+// (reports, actor attribution, detection artifacts).
+// Scope: read:iocs (free-tier default -- see TIER_DEFAULT_SCOPES above)
+// =============================================================================
+
+const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
+
+/**
+ * Infers an indicator's type from its literal shape. Pure, no I/O -- the
+ * same "detect from format" job iocTypeToMISP()/iocCategoryMISP() above do
+ * for an already-typed IOC record, just working backward from raw user
+ * input instead. Returns null for input that matches no known indicator
+ * shape, which the caller treats as a 400, not a silent guess.
+ */
+export function detectIndicatorType(raw) {
+  const v = String(raw || "").trim();
+  if (!v) return null;
+  if (/^CVE-\d{4}-\d{4,7}$/i.test(v)) return "cve";
+  if (/^[a-f0-9]{64}$/i.test(v)) return "sha256";
+  if (/^[a-f0-9]{40}$/i.test(v)) return "sha1";
+  if (/^[a-f0-9]{32}$/i.test(v)) return "md5";
+  if (/^https?:\/\//i.test(v)) return "url";
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(v)) {
+    return v.split(".").every(o => Number(o) <= 255) ? "ipv4" : null;
+  }
+  if (/^[0-9a-f:]+$/i.test(v) && v.includes(":") && v.split(":").length >= 3) return "ipv6";
+  // Domain: at least one dot, only label-valid characters, no protocol/path
+  // (that's a URL, matched above) -- deliberately permissive on TLD length
+  // since new gTLDs vary widely; this is a shape check, not a live DNS
+  // validation the caller can't cheaply do inside a Worker request anyway.
+  if (/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i.test(v)) return "domain";
+  return null;
+}
+
+/**
+ * Applies this endpoint's free-tier mask to an already-fully-built lookup
+ * result. Pure, no I/O -- mirrors handleCVEs()'s inline free-tier reduction
+ * above (truncate correlated detail, null the deep fields, attach an
+ * upgrade prompt) as its own testable function rather than inline, since
+ * this endpoint has two deep-detail arrays (reports + detection_artifacts)
+ * to mask instead of one.
+ */
+export function maskIOCLookupForTier(full, tier) {
+  if (normalizeTier(tier) !== "free") return { ...full, locked: false };
+  return {
+    ...full,
+    sources: [],
+    actor_tags: [],
+    reports: [],
+    detection_artifacts: [],
+    locked: true,
+    upgrade: { message: "Full correlation, actor attribution, and detection rules require Pro.", url: "https://intel.cyberdudebivash.com/upgrade.html?plan=pro" },
+  };
+}
+
+export async function handleIOCLookup(request, env, auth, rid) {
+  const scopeErr = enforceScopeMiddleware(auth, "read:iocs", rid);
+  if (scopeErr) return scopeErr;
+
+  const url   = new URL(request.url);
+  const value = sanitizeParam(url.searchParams.get("value") || url.searchParams.get("q") || "", 512);
+  if (!value) {
+    return extJson({ error: "value_required", message: "Provide an IP, domain, URL, or file hash to look up." }, 400);
+  }
+
+  const type = detectIndicatorType(value);
+  if (!type) {
+    return extJson({ error: "unrecognized_indicator", message: "Value does not match a known IP, domain, URL, CVE, or hash format." }, 400);
+  }
+
+  try {
+    const index = await fetchReportsIndexExt(env);
+    if (!index?.reports?.length) return extJson({ error: "feed_unavailable" }, 503);
+
+    const needle = value.toLowerCase();
+    const sources = new Set();
+    const actorTags = new Set();
+    const reports = [];
+    const detectionArtifacts = [];
+    const seenArtifactIds = new Set();
+    let confidence = null;
+    let firstSeen = null;
+    let lastSeen = null;
+    let severityMax = null;
+
+    for (const item of index.reports) {
+      const matches = (Array.isArray(item.iocs) ? item.iocs : [])
+        .filter(i => String(i?.value || "").toLowerCase() === needle);
+      if (!matches.length) continue;
+
+      for (const m of matches) {
+        if (m.source) sources.add(m.source);
+        if (typeof m.confidence === "number") confidence = Math.max(confidence ?? 0, m.confidence);
+      }
+
+      const ts = item.processed_at || item.timestamp || "";
+      if (ts && (!firstSeen || ts < firstSeen)) firstSeen = ts;
+      if (ts && (!lastSeen  || ts > lastSeen))  lastSeen  = ts;
+
+      const sev = (item.severity || "").toLowerCase();
+      if (SEVERITY_RANK[sev] && (!severityMax || SEVERITY_RANK[sev] > SEVERITY_RANK[severityMax])) severityMax = sev;
+
+      if (item.actor_tag && item.actor_tag !== "UNATTRIBUTED") actorTags.add(item.actor_tag);
+
+      if (reports.length < 10) {
+        reports.push({
+          id:         item.stix_id || item.id,
+          title:      (item.title || "").slice(0, 100),
+          date:       ts?.slice(0, 10) || "",
+          severity:   item.severity || "unknown",
+          risk_score: item.risk_score || 0,
+        });
+      }
+
+      // Reuses detection-registry.js's canonical extractor (Principle 4 --
+      // the same normalized sigma/kql/suricata/yara shape /api/sigma,
+      // /api/yara, and the P33 detection registry already produce) rather
+      // than re-reading item.sigma_rule/item.yara_rule/... inline here.
+      if (detectionArtifacts.length < 10) {
+        for (const a of extractDetectionArtifacts(item)) {
+          if (seenArtifactIds.has(a.artifact_id)) continue;
+          seenArtifactIds.add(a.artifact_id);
+          detectionArtifacts.push(a);
+          if (detectionArtifacts.length >= 10) break;
+        }
+      }
+    }
+
+    const full = {
+      value, type,
+      malicious:     reports.length > 0,
+      confidence,
+      first_seen:    firstSeen,
+      last_seen:     lastSeen,
+      report_count:  reports.length,
+      source_count:  sources.size,
+      severity_max:  severityMax,
+      sources:       [...sources],
+      actor_tags:    [...actorTags],
+      reports,
+      detection_artifacts: detectionArtifacts.map(toPublicArtifact),
+    };
+
+    return extJson({
+      status: "ok",
+      data:   maskIOCLookupForTier(full, auth.tier),
+      request_id: rid,
+    });
+  } catch (e) {
+    return extJson({ error: "ioc_lookup_failed", message: e.message, request_id: rid }, 500);
   }
 }
 

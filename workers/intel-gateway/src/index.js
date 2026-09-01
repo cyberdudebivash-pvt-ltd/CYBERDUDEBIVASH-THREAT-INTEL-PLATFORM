@@ -94,7 +94,7 @@ import { handleRxPubA0ReportsIdentity, handleRxPubA0Observability } from './rx-p
 import { evaluatePublicationGate, isCustomerReady, buildGateRejectedResponseBody, buildUnresolvableReportResponseBody } from './publication-gate.js';
 import { loadCertificationIndex, persistCertificationRecords, resolveCertification, CERTIFICATION_POLICY_VERSION } from './certification-registry.js';
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
-import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
+import { handleSearch, handleActors, handleCVEs, handleIOCLookup, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
 import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger } from './revenue-enforcement.js';
 import { evaluateDailyQuota, utcDateString, dailyQuotaKey, quotaAlertDedupeKey, secondsUntilNextUtcMidnight } from './daily-quota.js';
@@ -6070,6 +6070,7 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/search")                       return await handleSearch(request, env, auth, crypto.randomUUID());
   if (path === "/api/actors")                       return await handleActors(request, env, auth, crypto.randomUUID());
   if (path === "/api/cves")                         return await handleCVEs(request, env, auth, crypto.randomUUID());
+  if (path === "/api/ioc/lookup")                    return await handleIOCLookup(request, env, auth, crypto.randomUUID());
   if (path === "/api/export/misp")                  return await handleMISPExportExt(request, env, auth, crypto.randomUUID());
   if (path === "/api/export/csv")                   return await handleCSVExport(request, env, auth, crypto.randomUUID());
   if (path === "/api/intel/correlate")              return await handleCorrelate(request, env, auth, crypto.randomUUID());
