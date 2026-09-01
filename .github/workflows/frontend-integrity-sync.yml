@@ -56,6 +56,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write  # needed only by the GH013 fallback path below (opening/updating the resync PR)
 
 concurrency:
   group: frontend-integrity-sync-${{ github.ref }}
@@ -85,6 +86,7 @@ jobs:
         run: python3 scripts/frontend_integrity.py verify
 
       - name: Commit and push if the registry changed
+        id: sync
         run: |
           git config user.name "CYBERDUDEBIVASH"
           git config user.email "bivash@cyberdudebivash.com"
@@ -101,6 +103,15 @@ jobs:
           # regenerating from current disk state on every attempt guarantees
           # the pushed registry always reflects whatever is on main at push
           # time, however many times main moved while this job was retrying.
+          #
+          # ROOT CAUSE FIX (P0, 2026-09-01): a repository ruleset now requires
+          # all changes to main go through a pull request (GH013). Direct
+          # `git push origin HEAD:main` therefore fails deterministically --
+          # not a race -- on every attempt, and retrying 5x just wastes ~20s
+          # burning through attempts that can never succeed (confirmed live:
+          # run #18 did exactly this). That rejection is detected below and
+          # breaks out of the retry loop immediately into the PR-based
+          # fallback in the next step, instead of exhausting all 5 attempts.
           for attempt in 1 2 3 4 5; do
             git fetch origin main
             git reset --hard origin/main
@@ -111,14 +122,20 @@ jobs:
             git add config/frontend_checksums.json
             if git diff --cached --quiet config/frontend_checksums.json; then
               echo "Registry already up to date -- nothing to commit."
+              echo "pushed=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             git commit -m "ci(frontend-integrity): resync checksum registry after protected-asset change [skip ci]"
 
-            if git push origin HEAD:main; then
-              echo "Pushed on attempt ${attempt}."
+            push_log=$(git push origin HEAD:main 2>&1) && { echo "Pushed directly to main on attempt ${attempt}."; echo "pushed=true" >> "$GITHUB_OUTPUT"; exit 0; }
+            echo "$push_log"
+
+            if echo "$push_log" | grep -qi "must be made through a pull request"; then
+              echo "main requires all changes via PR (branch ruleset) -- direct push cannot succeed here. Falling back to PR mode."
+              echo "pushed=pr_required" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+
             echo "Push attempt ${attempt} failed (main moved again) -- retrying against latest main."
             sleep $((attempt * 2))
           done
@@ -127,3 +144,28 @@ jobs:
           # visible workflow failure, never a false green.
           echo "FATAL: could not push the regenerated registry after 5 attempts." >&2
           exit 1
+
+      - name: Open or update a resync PR when main requires pull requests
+        if: steps.sync.outputs.pushed == 'pr_required'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="ci/frontend-integrity-resync"
+          git checkout -B "$branch"
+          git push origin "$branch" --force
+
+          existing=$(gh pr list --repo "${GITHUB_REPOSITORY}" --head "$branch" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Updated existing resync PR #${existing} with the latest regenerated registry."
+          else
+            pr_url=$(gh pr create --repo "${GITHUB_REPOSITORY}" \
+              --title "ci(frontend-integrity): resync checksum registry" \
+              --body "Automated resync of \`config/frontend_checksums.json\` after a protected frontend asset changed on \`main\`. Generated and independently re-verified by \`scripts/frontend_integrity.py\` in this workflow -- mechanical, no manual edits. Safe to merge once checks pass." \
+              --base main --head "$branch")
+            echo "Opened resync PR: ${pr_url}"
+            # Best-effort only: enabling auto-merge still respects any required
+            # reviews/checks the branch ruleset demands -- it does not bypass
+            # them. If auto-merge isn't enabled for this repo, this no-ops
+            # rather than failing the job (the PR above already exists either way).
+            gh pr merge --repo "${GITHUB_REPOSITORY}" --auto --squash "$pr_url" || echo "Auto-merge not enabled/available -- PR left open for manual merge."
+          fi
