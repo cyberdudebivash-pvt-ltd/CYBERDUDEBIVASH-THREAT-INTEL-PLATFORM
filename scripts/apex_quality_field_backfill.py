@@ -45,12 +45,15 @@ REPO          = Path(__file__).parent.parent
 MANIFEST_PATH = REPO / "data" / "feed_manifest.json"
 NOW_ISO       = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-# ── TLP mapping (mirrors apex_intelligence_engine._TLP_MAP) ──────────────────
+# ── TLP mapping (mirrors the corrected apex_intelligence_engine._TLP_MAP) ────
+# TLP reflects disclosure restriction, not threat severity (FIRST.org TLP
+# 2.0). Every source in this pipeline is public -- there is no non-public
+# ingestion path today -- so backfill is capped at CLEAR/GREEN.
 _TLP_MAP: dict[str, str] = {
-    "CRITICAL":      "TLP:RED",
-    "HIGH":          "TLP:AMBER",
-    "MEDIUM":        "TLP:AMBER",
-    "LOW":           "TLP:GREEN",
+    "CRITICAL":      "TLP:GREEN",
+    "HIGH":          "TLP:GREEN",
+    "MEDIUM":        "TLP:CLEAR",
+    "LOW":           "TLP:CLEAR",
     "INFORMATIONAL": "TLP:CLEAR",
 }
 _TLP_VALID = {"TLP:CLEAR", "TLP:GREEN", "TLP:AMBER", "TLP:RED"}
@@ -85,12 +88,12 @@ def _backfill_item(item: dict) -> dict[str, int]:
     # ── GATE-12: tlp ─────────────────────────────────────────────────────────
     if not item.get("tlp"):
         raw_risk = str(item.get("risk_level") or item.get("severity") or "").upper()
-        item["tlp"] = _TLP_MAP.get(raw_risk, "TLP:AMBER")
+        item["tlp"] = _TLP_MAP.get(raw_risk, "TLP:CLEAR")
         changed["tlp"] = 1
     elif item.get("tlp") not in _TLP_VALID:
         # Normalize to valid label (e.g. "amber" → "TLP:AMBER")
         raw_tlp = str(item["tlp"]).upper().replace("TLP:", "")
-        item["tlp"] = f"TLP:{raw_tlp}" if f"TLP:{raw_tlp}" in _TLP_VALID else "TLP:AMBER"
+        item["tlp"] = f"TLP:{raw_tlp}" if f"TLP:{raw_tlp}" in _TLP_VALID else "TLP:CLEAR"
         changed["tlp_normalized"] = 1
 
     # ── GATE-12: processed_ts ─────────────────────────────────────────────────

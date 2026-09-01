@@ -1,16 +1,17 @@
 {
   "platform": "CYBERDUDEBIVASH\u00ae SENTINEL APEX",
   "assessment_type": "SOC 2 Type II Readiness",
-  "generated_at": "2026-05-26T16:21:07.978463+00:00",
+  "disclaimer": "This is an automated internal self-assessment, not an independent audit, and does not constitute SOC 2 certification of any kind. An accredited CPA firm must complete a SOC 2 Type II examination before any certification claim can be made to customers or prospects.",
+  "generated_at": "2026-09-01T10:04:15.478546+00:00",
   "engine_version": "162.0.0",
-  "composite_score": 100.0,
-  "readiness_level": "SOC 2 TYPE II READY",
+  "composite_score": 99.8,
+  "readiness_level": "SELF-ASSESSMENT: HIGH READINESS",
   "summary": {
     "criteria_passing": 13,
     "criteria_partial": 0,
     "criteria_failing": 0,
     "total_gaps": 0,
-    "total_evidence": 127
+    "total_evidence": 128
   },
   "criteria": {
     "CC6": {
@@ -27,8 +28,8 @@
           "status": "PASS",
           "score": 100.0,
           "evidence": [
-            "api/main.py",
-            "  \u2192 keywords: ['api_key']",
+            "workers/intel-gateway/src/index.js",
+            "  \u2192 keywords: ['jwt', 'bearer', 'api_key', 'authentication']",
             "api/auth.py",
             "  \u2192 keywords: ['bearer', 'api_key', 'authentication']",
             "scripts/api_auth_middleware.py",
@@ -58,6 +59,7 @@
           "score": 100.0,
           "evidence": [
             "api/rbac.py [role, permission, rbac, tier, access_level]",
+            "workers/intel-gateway/src/index.js [role, permission, tier]",
             "Keyword coverage: 5/5 (100%)"
           ],
           "gaps": [],
@@ -70,8 +72,7 @@
           "status": "PASS",
           "score": 100.0,
           "evidence": [
-            "Dockerfile [https]",
-            "railway.json [https]",
+            "workers/intel-gateway/wrangler.toml [https, ssl]",
             "infrastructure/terraform/main.tf [https, tls, ssl, redirect-to-https]",
             "Keyword coverage: 4/5 (80%)"
           ],
@@ -85,8 +86,8 @@
           "status": "PASS",
           "score": 100.0,
           "evidence": [
-            "api/main.py [rate_limit, throttle]",
-            "Keyword coverage: 2/4 (50%)"
+            "workers/intel-gateway/src/index.js [rate_limit, rate-limit, throttle, quota]",
+            "Keyword coverage: 4/4 (100%)"
           ],
           "gaps": [],
           "remediation": ""
@@ -110,7 +111,7 @@
       "name": "System Operations",
       "score": 100.0,
       "status": "PASS",
-      "evidence_count": 9,
+      "evidence_count": 10,
       "gap_count": 0,
       "checks": [
         {
@@ -160,6 +161,7 @@
           "status": "PASS",
           "score": 100.0,
           "evidence": [
+            "workers/intel-gateway/src/index.js [log, audit, logger]",
             "scripts/api_auth_middleware.py [log, audit, logger, access_log]",
             "Keyword coverage: 4/4 (100%)"
           ],
@@ -170,7 +172,7 @@
     },
     "CC8": {
       "name": "Change Management",
-      "score": 100.0,
+      "score": 97.5,
       "status": "PASS",
       "evidence_count": 16,
       "gap_count": 0,
@@ -182,7 +184,7 @@
           "status": "PASS",
           "score": 100.0,
           "evidence": [
-            "48 GitHub Actions workflows in .github/workflows/ (live-verified)",
+            "59 GitHub Actions workflows in .github/workflows/ (live-verified)",
             "5/5 quality gate workflows present",
             "sast-security-scan.yml -- automated SAST scanning",
             "sbom-generation.yml -- software bill of materials",
@@ -199,10 +201,10 @@
           "criterion": "CC8",
           "description": "Version control with commit history",
           "status": "PASS",
-          "score": 100.0,
+          "score": 90.0,
           "evidence": [
-            "Git repository: 10,175 commits (live-verified)",
-            "Latest: 6db6ec85fc CRITICAL P0 FIX v161.8: Remove duplicate main() stub in build_dist_artifact.py",
+            "Git repository: 50 commits (live-verified)",
+            "Latest: 9004799b8 Premium interactive threat map + real self-hosted demo video (#299)",
             "Governance: enterprise-governance.yml grade=A contract=PASS",
             "Branch protection + commit signing enforced via workflow gates"
           ],
@@ -600,5 +602,5 @@
     }
   },
   "open_remediations": [],
-  "certification_verdict": "\ud83c\udfc6 SOC 2 CERTIFIED"
+  "certification_verdict": "NOT CERTIFIED -- self-assessment indicates high readiness; engage an accredited CPA firm for a SOC 2 Type II examination"
 }

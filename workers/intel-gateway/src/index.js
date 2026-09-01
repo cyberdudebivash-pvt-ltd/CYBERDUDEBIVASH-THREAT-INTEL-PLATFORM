@@ -2620,11 +2620,14 @@ async function handleTAXII(request, env, ctx, path, auth) {
       });
     }
 
-    // Inline STIX 2.1 bundle
+    // Inline STIX 2.1 bundle. IDs must match `{type}--{UUID}` (RFC 4122) --
+    // item.stix_id/item.id are internal identifiers, not UUIDs, and reusing
+    // them here previously produced bundles that failed schema validation on
+    // every sampled object (kept as x_sentinel_item_id below for traceability).
     const stixObjects = sourceItems.slice(0, 200).map(item => ({
       type: "indicator",
       spec_version: "2.1",
-      id: item.stix_id || `indicator--${(item.id || "").replace(/[^a-z0-9-]/gi, "-").toLowerCase()}`,
+      id: `indicator--${crypto.randomUUID()}`,
       created: item.published || now(),
       modified: item.published || now(),
       name: item.title,
@@ -2643,12 +2646,13 @@ async function handleTAXII(request, env, ctx, path, auth) {
         x_sentinel_risk_score: item.risk_score,
         x_sentinel_source: item.source,
         x_sentinel_kev: item.kev_present || false,
+        x_sentinel_item_id: item.stix_id || item.id,
       },
     }));
 
     const bundle = {
       type: "bundle",
-      id: `bundle--sentinel-${collId}-${Date.now().toString(36)}`,
+      id: `bundle--${crypto.randomUUID()}`,
       spec_version: "2.1",
       objects: stixObjects,
     };

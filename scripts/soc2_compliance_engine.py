@@ -763,11 +763,15 @@ class SOC2ComplianceEngine:
                 if c.remediation:
                     all_remed.append({"check": c.control_id, "action": c.remediation})
 
+        # This engine performs an automated internal self-assessment, not an
+        # independent audit -- it must never emit a status that reads as an
+        # actual certification (that requires an accredited CPA firm's SOC 2
+        # Type II examination). Every tier below is explicitly self-scoped.
         readiness_level = (
-            "SOC 2 TYPE II READY"    if composite >= 95 else
-            "SUBSTANTIALLY READY"    if composite >= 80 else
-            "PREPARATION REQUIRED"   if composite >= 60 else
-            "SIGNIFICANT GAPS"
+            "SELF-ASSESSMENT: HIGH READINESS"      if composite >= 95 else
+            "SELF-ASSESSMENT: SUBSTANTIALLY READY" if composite >= 80 else
+            "SELF-ASSESSMENT: PREPARATION REQUIRED" if composite >= 60 else
+            "SELF-ASSESSMENT: SIGNIFICANT GAPS"
         )
 
         total_evidence = sum(len(c.evidence) for r in self.results.values() for c in r.checks)
@@ -776,6 +780,12 @@ class SOC2ComplianceEngine:
         report = {
             "platform":         "CYBERDUDEBIVASH® SENTINEL APEX",
             "assessment_type":  "SOC 2 Type II Readiness",
+            "disclaimer":       (
+                "This is an automated internal self-assessment, not an independent "
+                "audit, and does not constitute SOC 2 certification of any kind. "
+                "An accredited CPA firm must complete a SOC 2 Type II examination "
+                "before any certification claim can be made to customers or prospects."
+            ),
             "generated_at":     datetime.now(timezone.utc).isoformat(),
             "engine_version":   ENGINE_VERSION,
             "composite_score":  composite,
@@ -812,10 +822,10 @@ class SOC2ComplianceEngine:
             },
             "open_remediations": all_remed,
             "certification_verdict": (
-                "\U0001f3c6 SOC 2 CERTIFIED"         if composite >= 95 else
-                "✅ SUBSTANTIALLY READY"         if composite >= 80 else
-                "PREPARATION REQUIRED"   if composite >= 60 else
-                "SIGNIFICANT GAPS"
+                "NOT CERTIFIED -- self-assessment indicates high readiness; engage an accredited CPA firm for a SOC 2 Type II examination" if composite >= 95 else
+                "NOT CERTIFIED -- self-assessment indicates substantial readiness" if composite >= 80 else
+                "NOT CERTIFIED -- preparation required"  if composite >= 60 else
+                "NOT CERTIFIED -- significant gaps"
             ),
         }
 
