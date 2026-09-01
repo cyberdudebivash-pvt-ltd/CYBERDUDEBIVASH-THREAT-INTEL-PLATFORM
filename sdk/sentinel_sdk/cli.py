@@ -104,7 +104,7 @@ def cmd_ioc(args) -> None:
 
 def cmd_stix_export(args) -> None:
     client = _get_client()
-    bundle = client.export_stix(severity=args.severity, limit=args.limit)
+    bundle = client.export_stix(kev_only=args.kev_only, limit=args.limit)
     output = json.dumps(
         {"type": bundle.type, "id": bundle.id,
          "spec_version": bundle.spec_version, "objects": bundle.objects},
@@ -182,7 +182,8 @@ def main() -> None:
 
     # stix-export
     p_stix = sub.add_parser("stix-export", help="Export STIX bundle (PRO+)")
-    p_stix.add_argument("--severity")
+    p_stix.add_argument("--kev-only", dest="kev_only", action="store_true",
+                         help="Export the CISA-KEV-only collection (ENTERPRISE+)")
     p_stix.add_argument("--limit", type=int, default=50)
     p_stix.add_argument("--out", help="Output file path (default: stdout)")
 

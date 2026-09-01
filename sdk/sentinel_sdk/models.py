@@ -34,28 +34,36 @@ class AdvisoryItem:
     iocs:             Dict[str, Any] = field(default_factory=dict)
     ai_summary:       Optional[str] = None
     recommendations:  List[str] = field(default_factory=list)
+    cve_ids:          List[str] = field(default_factory=list)
+    actor:            Optional[str] = None
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "AdvisoryItem":
+        # Field names below check both the documented name and the name
+        # actually observed on a live feed export (api/feed_public.json),
+        # which don't always agree (tlp vs tlp_label, confidence vs
+        # confidence_score) -- verified 2026-09-01 against a real sample.
         return cls(
-            stix_id          = d.get("stix_id", ""),
+            stix_id          = d.get("stix_id", d.get("id", "")),
             title            = d.get("title", ""),
             severity         = d.get("severity", ""),
-            risk_score       = float(d.get("risk_score", 0)),
-            timestamp        = d.get("timestamp", ""),
+            risk_score       = float(d.get("risk_score", 0) or 0),
+            timestamp        = d.get("timestamp", d.get("published_at", "")),
             blog_url         = d.get("blog_url", ""),
             source_url       = d.get("source_url", ""),
-            tlp_label        = d.get("tlp_label", ""),
-            confidence_score = float(d.get("confidence_score", 0)),
+            tlp_label        = d.get("tlp_label", d.get("tlp", "")),
+            confidence_score = float(d.get("confidence_score", d.get("confidence", 0)) or 0),
             threat_type      = d.get("threat_type", ""),
-            feed_source      = d.get("feed_source", ""),
-            kev_present      = bool(d.get("kev_present", False)),
+            feed_source      = d.get("feed_source", d.get("source", "")),
+            kev_present      = bool(d.get("kev_present", str(d.get("kev", "")).upper() == "YES")),
             cvss_score       = d.get("cvss_score"),
             epss_score       = d.get("epss_score"),
             mitre_tactics    = d.get("mitre_tactics") or [],
             iocs             = d.get("iocs") or {},
             ai_summary       = d.get("ai_summary"),
             recommendations  = d.get("recommendations") or [],
+            cve_ids          = d.get("cve_ids") or ([d["cve_id"]] if d.get("cve_id") else []),
+            actor            = d.get("actor") or d.get("actor_display_name") or d.get("actor_tag"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -78,6 +86,8 @@ class AdvisoryItem:
             "iocs":             self.iocs,
             "ai_summary":       self.ai_summary,
             "recommendations":  self.recommendations,
+            "cve_ids":          self.cve_ids,
+            "actor":            self.actor,
         }
 
     @property
