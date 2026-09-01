@@ -727,16 +727,29 @@
       return;
     }
     result.className = "cdb-ioc-result hit";
-    result.innerHTML = data.results.map(r => `
+    const resultsHtml = data.results.map(r => `
       <div style="padding:6px 8px; margin-bottom:4px; background:rgba(255,136,0,0.1);
         border-left:3px solid #ff8800; border-radius:3px; font-size:12px; text-align:left;">
-        <div style="font-weight:bold; color:#ff8800;">${esc(r.severity)} — RISK ${fmtRisk(r.risk_score)}</div>
+        <div style="font-weight:bold; color:#ff8800;">${esc(r.severity)} — RISK ${r.risk_score == null ? "PRO+" : fmtRisk(r.risk_score)}</div>
         <div style="color:#e0e0e0;">${esc(r.title)}</div>
         <div style="color:#888; font-size:11px; margin-top:2px;">
           IOCs: ${r.ioc_count || 0} · ${esc(r.source)} · ${fmtRelTime(r.published)}
         </div>
       </div>
     `).join("");
+    // Free/anonymous tier: server caps results and nulls risk_score/cve_ids
+    // (see iocLookup(), workers/intel-gateway/src/index.js) and returns
+    // _upgrade_url/_note when it did -- render that as a real CTA instead of
+    // silently dropping it, matching the paywall tease already used
+    // elsewhere on this page (the "N IOCs LOCKED" feed-item cards).
+    const upgradeHtml = data._upgrade_url ? `
+      <div style="padding:8px; margin-top:4px; background:rgba(59,130,246,0.12);
+        border:1px solid rgba(96,165,250,0.4); border-radius:4px; font-size:11px; text-align:left;">
+        <div style="color:#93c5fd; margin-bottom:6px;">${esc(data._note || "Upgrade to PRO for full results, risk scores, and CVE mapping.")}</div>
+        <a href="${data._upgrade_url}?utm_source=ioc-lookup-widget" target="_blank"
+           style="color:#fff; background:#2563eb; padding:4px 10px; border-radius:3px; text-decoration:none; font-weight:bold;">Unlock Full Analysis →</a>
+      </div>` : "";
+    result.innerHTML = resultsHtml + upgradeHtml;
   }
 
   function initIOCLookup() {
