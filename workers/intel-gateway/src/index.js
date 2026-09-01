@@ -108,6 +108,11 @@ import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-me
 import { deductCredits } from './credit-system.js';
 import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
 import { inferGumroadTier, inferGumroadBillingCycle, isGumroadCancellationEvent, isGumroadAccessRevokingEvent } from './gumroad-lifecycle.js';
+// Issue #288: Durable Object class the Workers runtime instantiates via the
+// GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
+// of the Worker's main module -- see gumroad-provisioning-lock.js's header
+// comment for the full activation rationale.
+export { GumroadProvisioningLock } from './gumroad-provisioning-lock.js';
 // Re-exported unchanged for backward compatibility with any external
 // importer of index.js's own evaluateKeyRecordAccess export (Principle 5:
 // no silent removal of an existing export) -- the canonical implementation
@@ -3940,6 +3945,32 @@ async function handleWebhookGumroad(request, env, ctx) {
   // Map product/variant to tier
   const tier = inferGumroadTier(product_name, variants);
   const billingCycle = inferGumroadBillingCycle(recurrence, product_name, variants);
+
+  // Issue #288: atomic claim via Durable Object, closing the race the
+  // KV-only check below can't -- Cloudflare KV has no atomic check-and-set,
+  // so two concurrent deliveries of the same sale_id could both read
+  // "absent" before either write lands. Routing every request for a given
+  // sale_id to the same DO instance gives that instance's storage real
+  // serialization (Cloudflare's "input gate"), so decideProvisioningClaim()
+  // running inside its own fetch handler is genuinely atomic in a way the
+  // KV get-then-put sequence below never can be. See
+  // gumroad-provisioning-lock.js's header comment for the full rationale.
+  // The KV check is kept as defense-in-depth, unchanged: if the DO call
+  // itself fails (e.g. a transient binding error), processing falls back to
+  // it rather than crashing the whole webhook request.
+  if (env.GUMROAD_PROVISIONING_LOCK) {
+    try {
+      const lockId = env.GUMROAD_PROVISIONING_LOCK.idFromName(sale_id);
+      const lock = env.GUMROAD_PROVISIONING_LOCK.get(lockId);
+      const claimResp = await lock.fetch("https://lock/claim", {
+        method: "POST", body: JSON.stringify({ saleId: sale_id }),
+      });
+      const claimed = await claimResp.json();
+      if (claimed.alreadyClaimed) return jsonResp({ status: "already_provisioned", sale_id });
+    } catch (lockErr) {
+      console.error("[handleWebhookGumroad] GumroadProvisioningLock call failed, falling back to KV-only idempotency:", lockErr?.message || lockErr);
+    }
+  }
 
   // Idempotency guard: one provisioning per sale_id
   const idempKey = `gumroad_sale:${sale_id}`;

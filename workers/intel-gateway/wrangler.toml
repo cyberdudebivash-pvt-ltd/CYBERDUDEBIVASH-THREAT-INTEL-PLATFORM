@@ -125,6 +125,25 @@ bucket_name = "sentinel-apex-data"
 binding     = "REPORTS_R2"
 bucket_name = "sentinel-apex-reports"
 
+# -- Durable Objects --
+# GumroadProvisioningLock (issue #288): closes a real race in
+# handleWebhookGumroad's idempotency check -- Cloudflare KV has no atomic
+# check-and-set, so two concurrent deliveries of the same Gumroad webhook
+# event could both provision an API key for one sale_id. Routing every
+# request for a given sale_id to the same Durable Object instance gives
+# that instance's storage genuine serialization (Cloudflare's "input gate"),
+# so the claim check in gumroad-provisioning-lock.js is atomic in a way KV
+# alone can't be. See that file's header comment for the full rationale.
+# Confirmed (2026-09-01): Durable Objects are enabled for this account.
+
+[[durable_objects.bindings]]
+name       = "GUMROAD_PROVISIONING_LOCK"
+class_name = "GumroadProvisioningLock"
+
+[[migrations]]
+tag         = "v1-gumroad-provisioning-lock"
+new_classes = ["GumroadProvisioningLock"]
+
 # -- Secrets (set via wrangler CLI -- NEVER commit to source control) --
 # npx wrangler secret put ADMIN_SECRET             -> cache bust + admin key management
 # npx wrangler secret put GITHUB_TOKEN             -> emergency GitHub fallback reads
@@ -211,3 +230,7 @@ bucket_name = "sentinel-apex-data"
 [[env.production.r2_buckets]]
 binding     = "REPORTS_R2"
 bucket_name = "sentinel-apex-reports"
+
+[[env.production.durable_objects.bindings]]
+name       = "GUMROAD_PROVISIONING_LOCK"
+class_name = "GumroadProvisioningLock"
