@@ -534,6 +534,7 @@ h1 span { color: var(--accent); }
 .rzp-method-badge { background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 10px; color: var(--text-dim); }
 </style>
 <!-- v184.0: Gumroad overlay embed -- enables one-click checkout with automated API key delivery -->
+<script src="/js/checkout.js"></script>
 <script src="https://gumroad.com/js/gumroad.js" defer></script>
 <!-- Razorpay Checkout SDK -->
 <script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
@@ -789,6 +790,12 @@ h1 span { color: var(--accent); }
               <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">API key delivered to this email instantly after payment</div>
             </div>
 
+            <div class="rzp-email-row">
+              <label class="form-label">GSTIN / VAT Number <span style="color:var(--text-dim);font-weight:400;">(optional, for corporate tax invoicing)</span></label>
+              <input type="text" id="rzp-gstin" class="form-input" placeholder="e.g. 22AAAAA0000A1Z5" autocomplete="off" style="text-transform:uppercase;" oninput="this.value = this.value.toUpperCase();">
+              <div id="rzp-gstin-hint" style="font-size:11px;color:var(--text-dim);margin-top:4px;">Leave blank if you don't need a GST/VAT invoice</div>
+            </div>
+
             <div class="rzp-features">
               <div class="rzp-feature"><span class="rzp-check">&#10003;</span> UPI (GPay, PhonePe, Paytm)</div>
               <div class="rzp-feature"><span class="rzp-check">&#10003;</span> Credit / Debit Cards</div>
@@ -836,6 +843,27 @@ h1 span { color: var(--accent); }
         </div>
         <div id="success-timeline" style="font-size:13px;color:var(--text-dim);margin:10px 0;">
           &#9989; <strong style="color:var(--green);">Payment received via Razorpay</strong> &mdash; API key provisioned automatically.
+        </div>
+
+        <!-- ONBOARDING SNIPPETS -- populated by renderOnboardingSnippets() once the real
+             API key is known (showRazorpaySuccess()). Hidden until then so no page ever
+             shows the <YOUR_API_KEY> placeholder. -->
+        <div id="onboard-snippets" style="display:none;text-align:left;margin:14px 0;">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">TEST YOUR KEY RIGHT NOW</div>
+          <div style="background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span style="font-size:10px;color:var(--text-dim);letter-spacing:1px;">CURL</span>
+              <button class="btn-outline" style="padding:2px 8px;font-size:11px;cursor:pointer;" onclick="copyText(document.getElementById('onboard-curl').textContent,this)">&#128203; Copy</button>
+            </div>
+            <code id="onboard-curl" style="display:block;font-size:11px;color:var(--text);word-break:break-all;white-space:pre-wrap;"></code>
+          </div>
+          <div style="background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px 12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span style="font-size:10px;color:var(--text-dim);letter-spacing:1px;">PYTHON</span>
+              <button class="btn-outline" style="padding:2px 8px;font-size:11px;cursor:pointer;" onclick="copyText(document.getElementById('onboard-python').textContent,this)">&#128203; Copy</button>
+            </div>
+            <code id="onboard-python" style="display:block;font-size:11px;color:var(--text);white-space:pre-wrap;word-break:break-all;"></code>
+          </div>
         </div>
         <strong>Need it urgently?</strong> WhatsApp your Review ID to:<br>
         <a href="https://wa.me/918179881447" target="_blank" style="color:var(--accent);">+91 8179881447</a> &nbsp;&middot;&nbsp;
@@ -1120,7 +1148,7 @@ async function initiateRazorpayOneTimeCheckout(email, tier, billing, btn, orig) 
   try {
     var resp  = await fetch('/api/payment/razorpay/create-order', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tier: tier, email: email, billing: billing }),
+      body: JSON.stringify({ tier: tier, email: email, billing: billing, gstin: gstin || undefined }),
     });
     var order = await resp.json();
 
@@ -1144,7 +1172,7 @@ async function initiateRazorpayOneTimeCheckout(email, tier, billing, btn, orig) 
       description: order.plan + ' - ' + billing + ' subscription',
       order_id:    order.order_id,
       prefill:     { email: email },
-      notes:       order.notes || {},
+      notes:       Object.assign({}, order.notes || {}, gstin ? { gstin: gstin } : {}),
       theme:       { color: '#00d4ff' },
       modal: {
         ondismiss: function() {
@@ -1180,6 +1208,17 @@ async function initiateRazorpayOneTimeCheckout(email, tier, billing, btn, orig) 
     };
 
     var rzp = new Razorpay(rzpOptions);
+    // Explicit decline handling (js/checkout.js) -- distinct from
+    // modal.ondismiss above, which only covers the buyer closing the
+    // modal without attempting payment. This covers an actual decline
+    // (insufficient funds, bank rejection, etc.) with a clear message and
+    // immediately resets the button instead of leaving it stuck disabled.
+    if (window.SentinelCheckout) {
+      window.SentinelCheckout.bindPaymentFailedHandler(rzp, function(msg) {
+        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+        alert(msg);
+      });
+    }
     rzp.open();
   } catch(err) {
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
@@ -1199,7 +1238,23 @@ function showRazorpaySuccess(apiKey, tier, email) {
     if (revEl)  revEl.textContent  = apiKey;
     var tl = document.getElementById('success-timeline');
     if (tl) tl.innerHTML = '&#9989; <strong style="color:var(--green)">API KEY PROVISIONED INSTANTLY</strong><br>Your key is shown above &#8212; copy it and use it with the X-API-Key header.<br><a href="/api-docs.html" style="color:var(--accent)">View API documentation &#8594;</a>';
+    renderOnboardingSnippets(apiKey);
   }
+}
+
+// Automated onboarding modal (js/checkout.js): pre-filled cURL + Python
+// snippets using the real, just-provisioned API key, each with its own
+// 1-click copy button (reuses the existing copyText() helper).
+function renderOnboardingSnippets(apiKey) {
+  if (!apiKey || !window.SentinelCheckout) return;
+  var box = document.getElementById('onboard-snippets');
+  var curlEl = document.getElementById('onboard-curl');
+  var pyEl = document.getElementById('onboard-python');
+  if (!box || !curlEl || !pyEl) return;
+  var snippets = window.SentinelCheckout.buildOnboardingSnippets(apiKey);
+  curlEl.textContent = snippets.curl;
+  pyEl.textContent = snippets.python;
+  box.style.display = 'block';
 }
 
 // Same reconciliation as RAZORPAY_PLANS above (Gumroad panel display only -- Gumroad's
