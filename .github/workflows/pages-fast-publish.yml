@@ -171,6 +171,24 @@ jobs:
       - name: Pre-deploy smoke test (headless-browser render check)
         run: node render-test/verify_pages_fast_publish_smoke.js dist
 
+      # P0 FIX (2026-09-01): the smoke test above only fails on a thrown JS
+      # error or a 404 on an owned path -- it never looks at what actually
+      # painted. #cdb-threat-canvas (homepage threat map, #299) has a long
+      # documented history (index.html's RC1-RC13 / v159-v186 governance CSS
+      # comments) of going silently blank on real Chrome from a GPU
+      # compositor trap that throws no error and 404s nothing -- invisible
+      # to the check above, which is exactly how that one panel reached
+      # production broken 13+ times. This gate samples actual canvas pixel
+      # content and asserts the governed CSS properties RC1-RC13 traced the
+      # trap to, through the new (#299) fullscreen-toggle and tooltip code
+      # specifically, plus the demo-video click-to-play path (#299/#309)
+      # and the #apex-lead-modal Escape/backdrop-click fix landed alongside
+      # this gate. See render-test/verify_threat_map_chrome_render.js for
+      # the full rationale. Additive: a second, narrower gate alongside the
+      # one above, not a replacement.
+      - name: Pre-deploy threat-map / demo-video render check (headless-browser)
+        run: node render-test/verify_threat_map_chrome_render.js dist
+
       # v184.1-style pattern (see sentinel-blogger.yml STAGE 4.9.9): captured
       # immediately before the push so the freshness gate below can verify
       # the live site actually picked up THIS run's deploy.
