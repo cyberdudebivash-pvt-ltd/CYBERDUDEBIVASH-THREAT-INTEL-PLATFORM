@@ -13,10 +13,38 @@
 # (PR #150 regenerated the registry manually once; it went stale again the
 # moment the next protected-asset PR merged, because no automation existed).
 #
-# FIX: whenever any protected asset changes on main, regenerate the registry
-# from the current, just-merged, legitimate file state and commit it back
-# immediately -- so GATE E always compares against what was actually deployed,
-# not a snapshot from whenever someone last ran `generate` by hand.
+# ROOT CAUSE FIX #2 (P0, 2026-09-01): the original push-to-main design below
+# (regenerate after merge, commit, push directly to main) broke the moment a
+# repository ruleset started requiring all changes to main go through a pull
+# request (GH013) -- direct push started failing deterministically on every
+# run (#12 through #19, 8 consecutive failures). A same-day patch added a
+# PR-opening fallback for that case, but it fails too: `gh pr create` errors
+# with "GitHub Actions is not permitted to create or approve pull requests",
+# a separate, org-level restriction on GITHUB_TOKEN that no workflow-level
+# `permissions:` block can grant around. Confirmed live impact from run #19
+# (2026-09-01): config/frontend_checksums.json sat stale on main long enough
+# that `frontend_integrity.py verify` reported a false "TAMPERED: index.html"
+# against #305's legitimately merged change -- exactly the false-positive
+# GATE E exists to avoid, and exactly what this workflow exists to prevent.
+# Manually resynced via #306 to clear that specific false positive; this
+# revision is the structural fix so it can't recur.
+#
+# FIX: stop trying to write to protected main after the fact. Regenerate and
+# commit the registry onto the PR's OWN branch instead, before merge --
+# `contents: write` is enough for that (branch protection on main is never
+# touched, so GH013 never fires; no PR is created, so the disabled
+# Actions-can't-create-PRs restriction never applies either). By the time a
+# PR merges, the registry is already correct as part of that same merge,
+# which is strictly better than racing a post-merge sync: GATE E can never
+# observe a stale registry in the gap between merge and sync.
+#
+# The original push-triggered job is kept, narrowed to a read-only backstop:
+# verify (never write) that whatever landed on main is still in sync. This
+# catches anything that reaches main outside normal PR flow (there
+# shouldn't be one, given the ruleset above, but this is a cheap, minutes-
+# faster early warning for the exact thing GATE E checks downstream in the
+# full deploy pipeline) -- and fails loudly rather than attempting a doomed
+# push-to-main or PR-creation call.
 #
 # Deliberately a separate, minimal-permission workflow rather than an
 # addition to deploy-worker.yml: deploy-worker.yml handles CF_API_TOKEN/
@@ -25,24 +53,20 @@
 # that pipeline to fix an unrelated registry-staleness problem would expand
 # its blast radius for no reason. This workflow's only job is generate+commit;
 # it never touches Worker deployment, secrets, or the protected files' content.
-#
-# GATE E fires via post-deploy-validation.yml, which only runs after
-# deploy-worker.yml completes (workflow_run trigger) -- deploy-worker.yml's
-# own gate suite (encoding validation, dashboard contract check, esbuild
-# preflight, actual Cloudflare deploy, smoke test) takes several minutes,
-# while this workflow (checkout + generate + commit + push) finishes in well
-# under a minute, so in practice the registry is refreshed long before GATE E
-# ever runs. Residual risk: a push that touches both `workers/intel-gateway/
-# src/**` and a protected frontend asset in the same commit could theoretically
-# race deploy-worker.yml if GitHub Actions runner scheduling is unusually
-# slow -- if that ever produces a stale-registry false positive, the next
-# protected-asset change self-heals it, since `generate` always recomputes
-# from current disk state, not incrementally.
 # =============================================================================
 
 name: frontend-integrity-sync
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'js/api_adapter.js'
+      - 'js/card_renderer.js'
+      - 'js/card_renderer_integration.js'
+      - 'js/sla-monitor.js'
+      - 'css/card_renderer_styles.css'
   push:
     branches: [main]
     paths:
@@ -56,20 +80,95 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write  # needed only by the GH013 fallback path below (opening/updating the resync PR)
-
-concurrency:
-  group: frontend-integrity-sync-${{ github.ref }}
-  cancel-in-progress: false  # never cancel a mid-flight registry commit -- let it finish, the next push queues behind it
 
 jobs:
-  sync-registry:
-    name: Regenerate frontend checksum registry
+  # ---------------------------------------------------------------------------
+  # Primary path: regenerate the registry on the PR's own branch, before
+  # merge. Runs on every push to a PR touching a protected asset.
+  # ---------------------------------------------------------------------------
+  sync-on-pr:
+    name: Regenerate frontend checksum registry (pre-merge)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.actor != 'github-actions[bot]'  # defense-in-depth: this job's own commit must never retrigger itself
+    # Same-repo PRs only: a fork's GITHUB_TOKEN can't push back to the fork's
+    # branch (GitHub's own security default), and this repo doesn't take
+    # fork contributions today -- fails clean (skipped) rather than red for
+    # the one case this can't fix. Also: never react to its own push, or a
+    # commit made with GITHUB_TOKEN would retrigger this job forever.
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'github-actions[bot]'
+    concurrency:
+      # Per-PR, not global: a newer push to THIS PR should supersede an
+      # in-flight sync of an older commit on it, but must never block (or be
+      # blocked by) another PR's own sync.
+      group: frontend-integrity-sync-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
-      - name: Checkout repository
+      - name: Checkout PR head branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 1
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Regenerate and verify registry
+        run: |
+          python3 scripts/frontend_integrity.py generate
+          python3 scripts/frontend_integrity.py verify
+
+      - name: Commit and push onto this PR's own branch if the registry changed
+        run: |
+          git config user.name "CYBERDUDEBIVASH"
+          git config user.email "bivash@cyberdudebivash.com"
+
+          git add config/frontend_checksums.json
+          if git diff --cached --quiet config/frontend_checksums.json; then
+            echo "Registry already up to date -- nothing to commit."
+            exit 0
+          fi
+          git commit -m "ci(frontend-integrity): resync checksum registry [skip ci]"
+
+          # The PR branch itself (not main) is the push target, so GH013
+          # never applies here -- the only reason to retry is an ordinary
+          # push race against a human pushing to the same PR branch at the
+          # same time, not a rejected-by-ruleset push.
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${{ github.head_ref }}"; then
+              echo "Pushed onto ${{ github.head_ref }} on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push attempt ${attempt} failed (branch moved) -- rebasing onto the latest and retrying."
+            git fetch origin "${{ github.head_ref }}"
+            git rebase "origin/${{ github.head_ref }}" || {
+              echo "FATAL: rebase conflict resyncing the registry -- resolve manually." >&2
+              exit 1
+            }
+            sleep $((attempt * 2))
+          done
+
+          echo "FATAL: could not push the regenerated registry after 3 attempts." >&2
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Backstop: read-only. Confirms whatever just landed on main is still in
+  # sync. Never attempts to write -- direct push to main is blocked by the
+  # GH013 ruleset and Actions can't open PRs in this repo (see header), so a
+  # write attempt here could only ever fail; a clear, actionable failure from
+  # `verify` is strictly more useful than a doomed remediation attempt.
+  # ---------------------------------------------------------------------------
+  verify-on-push-to-main:
+    name: Verify registry is in sync (post-merge backstop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -79,93 +178,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Regenerate registry from current protected-asset state
-        run: python3 scripts/frontend_integrity.py generate
-
-      - name: Verify the freshly regenerated registry is internally consistent
+      - name: Verify registry matches current main
         run: python3 scripts/frontend_integrity.py verify
 
-      - name: Commit and push if the registry changed
-        id: sync
+      - name: Remediation guidance
+        if: failure()
         run: |
-          git config user.name "CYBERDUDEBIVASH"
-          git config user.email "bivash@cyberdudebivash.com"
-
-          # The concurrency group above serializes this workflow's own runs,
-          # but main can still move from an unrelated push (a different
-          # workflow, or a human) between checkout and this step. Regenerate
-          # and re-commit fresh on every attempt, not just once up front:
-          # if main moved because *another* protected-asset change landed
-          # (not just an unrelated file), rebasing a commit generated from
-          # the old tree would push a registry that's immediately stale
-          # again for that new change -- silently reintroducing the exact
-          # bug this workflow exists to fix. Resetting to origin/main and
-          # regenerating from current disk state on every attempt guarantees
-          # the pushed registry always reflects whatever is on main at push
-          # time, however many times main moved while this job was retrying.
-          #
-          # ROOT CAUSE FIX (P0, 2026-09-01): a repository ruleset now requires
-          # all changes to main go through a pull request (GH013). Direct
-          # `git push origin HEAD:main` therefore fails deterministically --
-          # not a race -- on every attempt, and retrying 5x just wastes ~20s
-          # burning through attempts that can never succeed (confirmed live:
-          # run #18 did exactly this). That rejection is detected below and
-          # breaks out of the retry loop immediately into the PR-based
-          # fallback in the next step, instead of exhausting all 5 attempts.
-          for attempt in 1 2 3 4 5; do
-            git fetch origin main
-            git reset --hard origin/main
-
-            python3 scripts/frontend_integrity.py generate
-            python3 scripts/frontend_integrity.py verify
-
-            git add config/frontend_checksums.json
-            if git diff --cached --quiet config/frontend_checksums.json; then
-              echo "Registry already up to date -- nothing to commit."
-              echo "pushed=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            git commit -m "ci(frontend-integrity): resync checksum registry after protected-asset change [skip ci]"
-
-            push_log=$(git push origin HEAD:main 2>&1) && { echo "Pushed directly to main on attempt ${attempt}."; echo "pushed=true" >> "$GITHUB_OUTPUT"; exit 0; }
-            echo "$push_log"
-
-            if echo "$push_log" | grep -qi "must be made through a pull request"; then
-              echo "main requires all changes via PR (branch ruleset) -- direct push cannot succeed here. Falling back to PR mode."
-              echo "pushed=pr_required" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-
-            echo "Push attempt ${attempt} failed (main moved again) -- retrying against latest main."
-            sleep $((attempt * 2))
-          done
-
-          # No `|| true` anywhere in this step -- a failed sync is always a
-          # visible workflow failure, never a false green.
-          echo "FATAL: could not push the regenerated registry after 5 attempts." >&2
-          exit 1
-
-      - name: Open or update a resync PR when main requires pull requests
-        if: steps.sync.outputs.pushed == 'pr_required'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          branch="ci/frontend-integrity-resync"
-          git checkout -B "$branch"
-          git push origin "$branch" --force
-
-          existing=$(gh pr list --repo "${GITHUB_REPOSITORY}" --head "$branch" --state open --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
-            echo "Updated existing resync PR #${existing} with the latest regenerated registry."
-          else
-            pr_url=$(gh pr create --repo "${GITHUB_REPOSITORY}" \
-              --title "ci(frontend-integrity): resync checksum registry" \
-              --body "Automated resync of \`config/frontend_checksums.json\` after a protected frontend asset changed on \`main\`. Generated and independently re-verified by \`scripts/frontend_integrity.py\` in this workflow -- mechanical, no manual edits. Safe to merge once checks pass." \
-              --base main --head "$branch")
-            echo "Opened resync PR: ${pr_url}"
-            # Best-effort only: enabling auto-merge still respects any required
-            # reviews/checks the branch ruleset demands -- it does not bypass
-            # them. If auto-merge isn't enabled for this repo, this no-ops
-            # rather than failing the job (the PR above already exists either way).
-            gh pr merge --repo "${GITHUB_REPOSITORY}" --auto --squash "$pr_url" || echo "Auto-merge not enabled/available -- PR left open for manual merge."
-          fi
+          echo "::error::Registry drift reached main outside a synced PR -- open any PR touching a protected asset (or an empty commit re-touching one) to let sync-on-pr above resync it, then merge." >&2
