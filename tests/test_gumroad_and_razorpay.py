@@ -334,3 +334,26 @@ def test_welcome_html_inline_js_syntax_valid():
         tmp_path = f.name
     result = subprocess.run(["node", "--check", tmp_path], capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, f"welcome.html inline JS syntax error: {result.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# 6. Gumroad billing-cycle expansion (issue #287)
+# ---------------------------------------------------------------------------
+
+def test_provision_api_key_has_cycle_days_for_every_gumroad_recurrence(gateway_src: str):
+    """provisionApiKey()'s cycleDays used to be a binary
+    `billingCycle === "annual" ? 365 : 30`, silently giving any other value
+    (Gumroad's quarterly/biannual/every_two_years) only 30 days. Regression
+    guard: every bucket inferGumroadBillingCycle() can return must have a
+    real entry here, not fall through to the 30-day default."""
+    match = re.search(r"const CYCLE_DAYS = \{([^}]*)\}", gateway_src)
+    assert match, "expected a CYCLE_DAYS mapping in provisionApiKey()"
+    cycle_days_body = match.group(1)
+    for bucket in ("monthly", "quarterly", "biannual", "annual", "every_two_years"):
+        assert f"{bucket}:" in cycle_days_body, f"CYCLE_DAYS is missing a '{bucket}' entry"
+
+
+def test_gumroad_lifecycle_preserves_all_recurrence_buckets(gumroad_lifecycle_src: str):
+    assert 'r === "quarterly"' in gumroad_lifecycle_src
+    assert 'r === "biannually"' in gumroad_lifecycle_src
+    assert 'r === "every_two_years"' in gumroad_lifecycle_src

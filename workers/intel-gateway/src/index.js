@@ -3216,7 +3216,14 @@ async function provisionApiKey(env, ctx, tier, email, source, metadata, billingC
   const rand   = Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => b.toString(16).padStart(2, "0")).join("");
   const apiKey = `${prefix}_${rand}`;
 
-  const cycleDays      = billingCycle === "annual" ? 365 : 30;
+  // Issue #287: was a binary `billingCycle === "annual" ? 365 : 30`, which
+  // silently gave any other value (e.g. Gumroad's "quarterly"/"biannual"/
+  // "every_two_years", see inferGumroadBillingCycle) a 30-day expiry instead
+  // of the ~90+ days actually paid for. Razorpay's own plans really are
+  // monthly/annual only (RAZORPAY_PLAN_ID_* has no other suffix), so this
+  // widening only changes behavior for Gumroad-sourced billing cycles.
+  const CYCLE_DAYS = { monthly: 30, quarterly: 90, biannual: 180, annual: 365, every_two_years: 730 };
+  const cycleDays      = CYCLE_DAYS[billingCycle] || 30;
   const shadowExpiresAt = new Date(Date.now() + cycleDays * 86400000).toISOString();
   // FREE has no billing cycle to expire against -- it is not a paid
   // subscription, so it never gets a shadow/enforced expiry regardless of

@@ -56,6 +56,26 @@ test("inferGumroadBillingCycle: falls back to text-parsing when recurrence is ab
   assert.equal(inferGumroadBillingCycle("", "Sentinel Pro", ""), "monthly");
 });
 
+// Issue #287: quarterly/biannually/every_two_years must be preserved, not
+// collapsed to "monthly" -- provisionApiKey() gives each its own cycleDays
+// bucket now, so losing the distinction here would silently expire these
+// subscribers after only 30 days once SUBSCRIPTION_EXPIRY_ENABLED is on.
+test("inferGumroadBillingCycle: recurrence 'quarterly' is preserved", () => {
+  assert.equal(inferGumroadBillingCycle("quarterly", "Sentinel Pro", ""), "quarterly");
+});
+
+test("inferGumroadBillingCycle: recurrence 'biannually' maps to biannual", () => {
+  assert.equal(inferGumroadBillingCycle("biannually", "Sentinel Pro", ""), "biannual");
+});
+
+test("inferGumroadBillingCycle: recurrence 'every_two_years' is preserved", () => {
+  assert.equal(inferGumroadBillingCycle("every_two_years", "Sentinel Pro", ""), "every_two_years");
+});
+
+test("inferGumroadBillingCycle: recurrence is case-insensitive", () => {
+  assert.equal(inferGumroadBillingCycle("QUARTERLY", "Sentinel Pro", ""), "quarterly");
+});
+
 test("isGumroadCancellationEvent: cancelled: 'true' is a cancellation", () => {
   assert.equal(isGumroadCancellationEvent({ cancelled: "true" }), true);
 });

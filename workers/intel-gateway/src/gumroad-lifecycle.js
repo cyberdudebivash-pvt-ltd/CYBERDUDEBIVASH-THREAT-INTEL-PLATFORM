@@ -35,24 +35,28 @@ export function inferGumroadTier(productName, variants) {
 
 /**
  * Gumroad sends `recurrence` on subscription products: "monthly",
- * "quarterly", "biannually", "yearly", or "every_two_years". This platform's
- * billing model (provisionApiKey's cycleDays, and every Razorpay/Gumroad
- * price table in pricing-data.json / GUMROAD_URLS) only has two buckets --
- * monthly and annual -- so "quarterly"/"biannually"/"every_two_years"
- * collapse to "monthly" here, the same as they always have. No configured
- * Gumroad product currently uses those recurrences (GUMROAD_URLS in
- * upgrade.html only lists monthly/annual variants); if one ever does,
- * provisionApiKey's cycleDays needs a third bucket before this can be
- * accurate for it -- that's a cross-gateway pricing-model change, out of
- * scope here.
+ * "quarterly", "biannually", "yearly", or "every_two_years" -- all 5
+ * preserved here (issue #287) and given a real cycleDays bucket in
+ * provisionApiKey (index.js), rather than collapsing anything other than
+ * monthly/yearly to "monthly", which silently expired a quarterly/biannual/
+ * every-two-years subscriber's key after only 30 days once
+ * SUBSCRIPTION_EXPIRY_ENABLED is turned on. No currently configured Gumroad
+ * product uses those recurrences (GUMROAD_URLS in upgrade.html only lists
+ * monthly/annual variants) or Razorpay plan (RAZORPAY_PLAN_ID_* is
+ * monthly/annual only) -- this is forward-compatible, not fixing a live
+ * incident -- but it's now correct if one is ever added, rather than merely
+ * documented as a known gap.
  * @param {string} recurrence
  * @param {string} productName
  * @param {string} variants
- * @returns {"monthly"|"annual"}
+ * @returns {"monthly"|"quarterly"|"biannual"|"annual"|"every_two_years"}
  */
 export function inferGumroadBillingCycle(recurrence, productName, variants) {
   const r = String(recurrence || "").toLowerCase();
   if (r === "yearly" || r === "annually" || r === "annual") return "annual";
+  if (r === "quarterly") return "quarterly";
+  if (r === "biannually" || r === "biannual") return "biannual";
+  if (r === "every_two_years" || r === "every-two-years") return "every_two_years";
   const pnl = `${productName || ""}${variants || ""}`.toLowerCase();
   return pnl.includes("annual") ? "annual" : "monthly";
 }
