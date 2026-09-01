@@ -3,6 +3,28 @@
 # Coverage: HSTS · CSP · X-XSS · X-Frame · CORP · COOP · Referrer · Permissions
 # All headers validated against OWASP Secure Headers Project v4.0
 # Audit Status: PASSED — 100/100 convergence | Governance Grade: A+ | v161.x
+#
+# ⚠ 2026-09-01 HARDENING-PASS FINDING — READ BEFORE TRUSTING THIS FILE:
+# `_headers` is a Cloudflare Pages convention. Verified live (curl -sSI against
+# https://intel.cyberdudebivash.com/) that the production static site is
+# actually served from GitHub Pages (x-github-request-id/x-fastly-request-id
+# headers on every response) through Cloudflare's proxy/CDN in front of it —
+# not Cloudflare Pages. GitHub Pages does not read this file at all, so NONE
+# of the rules below reach a real browser for the production domain today;
+# the live response for `/` carries none of X-Frame-Options,
+# X-Content-Type-Options, Permissions-Policy, or an HTTP-header CSP (compare
+# to `/api/*`, which DOES carry all of those — set in code by
+# `workers/intel-gateway/src/index.js`'s SECURITY_HEADERS, applied to every
+# response through `withBaselineHeaders()`, since API routes DO go through
+# the Worker while static pages currently don't). The homepage's only actual
+# CSP is the <meta http-equiv="Content-Security-Policy"> tag in index.html.
+# This file is not necessarily dead everywhere — Cloudflare Pages preview
+# deployments, if this project has any, would honor it — so it's kept
+# accurate rather than deleted. But closing the real gap (no HTTP-header
+# security headers on the production static site) needs an infrastructure
+# change — routing static paths through the Worker, or an equivalent
+# Cloudflare-side response-header rule — not an edit to this file. Flagging
+# for the account owner rather than guessing at routing/DNS changes blind.
 
 /*
   Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
@@ -13,6 +35,7 @@
   Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=(), interest-cohort=(), accelerometer=(), gyroscope=(), magnetometer=()
   Cross-Origin-Resource-Policy: same-origin
   Cross-Origin-Opener-Policy: same-origin
+  X-Permitted-Cross-Domain-Policies: none
   X-Sentinel-Version: 161.x
   X-Sentinel-Platform: CYBERDUDEBIVASH-SENTINEL-APEX
   X-Robots-Tag: index, follow
@@ -70,7 +93,7 @@
   Access-Control-Allow-Origin: *
 
 /data/feed_manifest.json
-  Cache-Control: no-store,
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
 
 # v186.0: Homepage demo-section preview video — same-origin, self-hosted.
 # Immutable long-lived cache since the filename doesn't change on update;
