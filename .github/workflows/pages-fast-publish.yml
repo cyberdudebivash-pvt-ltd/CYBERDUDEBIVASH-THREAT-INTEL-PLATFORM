@@ -144,6 +144,33 @@ jobs:
           fi
           echo "OK: all frontend-critical files present in dist/"
 
+      # PR #304 follow-up: the file-presence check above confirms the right
+      # files exist in dist/; it does not confirm the page actually renders
+      # without error. Before this fix, a broken JS file (syntax error, a
+      # runtime TypeError on load) would reach production in ~90 seconds
+      # with nothing here to catch it -- the post-deploy freshness gate only
+      # confirms the deploy landed, not that it works. Reuses the exact
+      # headless-Chromium/local-static-server pattern this repo already
+      # established in render-test/verify_enterprise_homepage.js, scoped
+      # down to a pass/fail render check (no accessibility/contrast
+      # assertions -- out of scope for a pre-deploy gate).
+      - name: Setup Node.js 22 (smoke-test dependency)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Playwright (Chromium only, smoke-test dependency)
+        # Not a project dependency (this is a Python-first repo -- see
+        # docs/enterprise-homepage-guide.md, Known Limitations, for why no
+        # package.json/node_modules is committed for this); installed fresh
+        # here with --no-save so nothing is written back to the checkout.
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      - name: Pre-deploy smoke test (headless-browser render check)
+        run: node render-test/verify_pages_fast_publish_smoke.js dist
+
       # v184.1-style pattern (see sentinel-blogger.yml STAGE 4.9.9): captured
       # immediately before the push so the freshness gate below can verify
       # the live site actually picked up THIS run's deploy.

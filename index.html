@@ -12649,8 +12649,12 @@ function renderTopThreats(data) {
         // Severity heatmap bar width
         const barW = Math.min(sc * 10, 100);
         // Kill chain phase
+        // String() guard (2026-09-01, found by render-test/verify_pages_fast_publish_smoke.js
+        // in the API-unreachable fallback path): mitre_tactics[0] is not guaranteed to be a
+        // string, matching the Array.isArray guard already used for this same field elsewhere
+        // in this file (e.g. line ~11422) -- .toUpperCase() on a non-string element threw.
         const kcPhase = (item.mitre_tactics && item.mitre_tactics.length)
-            ? (item.mitre_tactics[0] || '').toUpperCase().split('.')[0]
+            ? String(item.mitre_tactics[0] || '').toUpperCase().split('.')[0]
             : '';
 
         return '<div style="position:relative;background:linear-gradient(135deg,var(--bg-card) 0%,rgba('+
