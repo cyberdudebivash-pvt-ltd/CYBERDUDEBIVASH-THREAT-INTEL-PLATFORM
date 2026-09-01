@@ -8449,7 +8449,7 @@
                         Your browser does not support embedded video. <a href="/DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4" style="color:#00d4aa;">Download the preview (MP4) instead →</a>
                     </video>
                     <!-- Click-to-play cover -->
-                    <div id="apex-demo-placeholder" style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,#020a14 0%,#030e1a 50%,#020a14 100%);cursor:pointer;" onclick="apexPlayDemo()">
+                    <div id="apex-demo-placeholder" role="button" tabindex="0" aria-label="Play live dashboard preview video" style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,#020a14 0%,#030e1a 50%,#020a14 100%);cursor:pointer;" onclick="apexPlayDemo()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();apexPlayDemo();}">
                         <div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#00d4aa,#0097a7);display:flex;align-items:center;justify-content:center;margin-bottom:20px;box-shadow:0 0 40px rgba(0,212,170,0.4);transition:transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
                             <svg width="28" height="28" viewBox="0 0 24 24" fill="#020a14"><path d="M8 5v14l11-7z"/></svg>
                         </div>
@@ -15806,10 +15806,10 @@ function renderTopThreats(data) {
                 /* v186.0: threat map legend severity counts — same source data as above */
                 (function(){
                     var _sd2 = intel.severity_distribution || {};
-                    var pairs = [['cdb-legend-n-crit', _sd2.critical || _sd2.CRITICAL],
-                                 ['cdb-legend-n-high', _sd2.high     || _sd2.HIGH],
-                                 ['cdb-legend-n-med',  _sd2.medium   || _sd2.MEDIUM],
-                                 ['cdb-legend-n-info', _sd2.low      || _sd2.LOW]];
+                    var pairs = [['cdb-legend-n-crit', _sd2.critical != null ? _sd2.critical : _sd2.CRITICAL],
+                                 ['cdb-legend-n-high', _sd2.high     != null ? _sd2.high     : _sd2.HIGH],
+                                 ['cdb-legend-n-med',  _sd2.medium   != null ? _sd2.medium   : _sd2.MEDIUM],
+                                 ['cdb-legend-n-info', _sd2.low      != null ? _sd2.low      : _sd2.LOW]];
                     pairs.forEach(function(p){
                         var el = document.getElementById(p[0]);
                         if (el && p[1] != null) el.textContent = '(' + p[1] + ')';
@@ -19797,19 +19797,37 @@ a:focus-visible {
       var t = e.touches && e.touches[0];
       return [(t ? t.clientX : e.clientX) - rect.left, (t ? t.clientY : e.clientY) - rect.top];
     }
+    var hoveringTip = false;
+    var hideTimer = null;
+    function cancelHide() { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } }
+    function scheduleHide() {
+      cancelHide();
+      /* Grace window: the tooltip sits outside the city's own hit-radius by
+         design, so the cursor spends a few frames over "no city" while
+         travelling toward the tooltip's CTA link. Hiding on that
+         intermediate frame would also drop pointer-events (see is-visible
+         in CSS), so the cursor could never reach it to begin with. */
+      hideTimer = setTimeout(function() { if (!hoveringTip) hideTip(); }, 250);
+    }
+    tip.addEventListener('mouseenter', function() { hoveringTip = true; cancelHide(); });
+    tip.addEventListener('mouseleave', function() { hoveringTip = false; hideTip(); });
     canvas.addEventListener('mousemove', function(e) {
       var pt = pointFromEvent(e);
       var city = cityAtPoint(pt[0], pt[1]);
-      if (city) showTip(city, pt[0], pt[1]); else hideTip();
+      if (city) { cancelHide(); showTip(city, pt[0], pt[1]); }
+      else if (!hoveringTip) scheduleHide();
     });
-    canvas.addEventListener('mouseleave', hideTip);
+    canvas.addEventListener('mouseleave', function(e) {
+      if (hoveringTip || tip.contains(e.relatedTarget)) return;
+      scheduleHide();
+    });
     canvas.addEventListener('touchstart', function(e) {
       var pt = pointFromEvent(e);
       var city = cityAtPoint(pt[0], pt[1]);
       if (city) { showTip(city, pt[0], pt[1]); e.preventDefault(); } else hideTip();
     }, { passive: false });
     document.addEventListener('touchstart', function(e) {
-      if (e.target !== canvas) hideTip();
+      if (e.target !== canvas && !tip.contains(e.target)) hideTip();
     }, { passive: true });
 
     /* ── Immersive expand/collapse (viewport-covering overlay, not the
@@ -19818,6 +19836,7 @@ a:focus-visible {
        stability across the RC1-RC13 Chrome/Firefox fixes above). ────── */
     var fsBtn = document.getElementById('cdb-map-fs-btn');
     var immersive = false;
+    var _prevBodyOverflow = '';
     var IMMERSIVE_PROPS = ['position','top','left','right','bottom','width','height',
       'max-height','max-width','z-index','margin','padding','border-radius'];
     function setImmersive(on) {
@@ -19836,16 +19855,21 @@ a:focus-visible {
         panel.style.setProperty('margin', '0', 'important');
         panel.style.setProperty('padding', '20px', 'important');
         panel.style.setProperty('border-radius', '0', 'important');
+        _prevBodyOverflow = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
         if (fsBtn) { fsBtn.textContent = '✕'; fsBtn.title = 'Exit fullscreen (Esc)'; fsBtn.setAttribute('aria-label', 'Exit fullscreen'); }
       } else {
         IMMERSIVE_PROPS.forEach(function(p) { panel.style.removeProperty(p); });
-        document.body.style.overflow = '';
+        document.body.style.overflow = _prevBodyOverflow;
         if (fsBtn) { fsBtn.textContent = '⛶'; fsBtn.title = 'View fullscreen'; fsBtn.setAttribute('aria-label', 'View threat map fullscreen'); }
       }
-      /* Panel's own box just changed size — setupResize()'s ResizeObserver
-         (§F) picks this up and re-applies canvas sizing + arc bounds. */
-      window.dispatchEvent(new Event('resize'));
+      /* No manual resize dispatch needed: ResizeObserver (§F's setupResize)
+         fires on the panel's own box-size change regardless of cause, and
+         re-applies canvas sizing + arc bounds on its own. A synthetic
+         window 'resize' event was tried here before and removed — it also
+         reaches this page's unrelated window-resize handler (mobile-nav
+         auto-close, ~line 5425), which unconditionally clears
+         document.body.style.overflow and clobbered the save/restore above. */
     }
     if (fsBtn) fsBtn.addEventListener('click', function() { setImmersive(!immersive); });
     document.addEventListener('keydown', function(e) {
