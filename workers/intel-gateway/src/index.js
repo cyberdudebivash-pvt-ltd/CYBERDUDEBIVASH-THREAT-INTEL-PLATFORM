@@ -106,11 +106,16 @@ import { handlePremiumReport, handleReportList, handleReportGet } from './premiu
 import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-meter.js';
 import { deductCredits } from './credit-system.js';
 import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
+import { inferGumroadTier, inferGumroadBillingCycle, isGumroadCancellationEvent, isGumroadAccessRevokingEvent } from './gumroad-lifecycle.js';
 // Re-exported unchanged for backward compatibility with any external
 // importer of index.js's own evaluateKeyRecordAccess export (Principle 5:
 // no silent removal of an existing export) -- the canonical implementation
 // now lives in subscription-lifecycle.js; see that file's header comment.
 export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES };
+// Same rationale, for the Gumroad webhook's pure decision logic (see
+// gumroad-lifecycle.js header comment) -- unit-testable under plain
+// `node --test` without pulling in this file's full import chain.
+export { inferGumroadTier, inferGumroadBillingCycle, isGumroadCancellationEvent, isGumroadAccessRevokingEvent };
 const PLATFORM_VERSION    = "200.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -3662,14 +3667,58 @@ async function handleWebhookGumroad(request, env, ctx) {
     return jsonResp({ error: "Invalid request body" }, 400);
   }
 
-  const { sale_id, email, product_name = "", variants = "", price = "0" } = formData;
+  const {
+    sale_id, email, product_id = "", product_name = "", variants = "",
+    price = "0", subscription_id = "", recurrence = "",
+  } = formData;
+
+  // "Subscription updated" ping (same webhook URL as "sale"): cancelled/ended.
+  if (isGumroadCancellationEvent(formData)) {
+    if (!subscription_id) {
+      return jsonResp({ error: "Invalid Gumroad cancellation payload: subscription_id required" }, 400);
+    }
+    const mappedKey = await env.SECURITY_HUB_KV.get(`gumroad_sub_key_map:${subscription_id}`);
+    if (!mappedKey) {
+      auditLog(ctx, env, { action: "gumroad_cancel_key_lookup_failed", subscription_id });
+      ctx.waitUntil(sendTelegramAlert(env,
+        `[WARN] <b>GUMROAD CANCELLATION -- NO KEY MAPPING</b>\n` +
+        `Subscription ID: <code>${subscription_id}</code>\n` +
+        `Manual follow-up required -- could not auto-revoke access.`
+      ));
+      return jsonResp({ status: "noted_no_mapping", subscription_id });
+    }
+
+    // cancelled:"true" alone means auto-renewal was turned off -- the
+    // customer already paid for the current period, so access must not be
+    // revoked yet. Only ended:"true" (the period has actually finished)
+    // revokes. Without this split, cancelling on day 1 of a paid month
+    // would cut off access to the other 29 days already paid for.
+    if (!isGumroadAccessRevokingEvent(formData)) {
+      auditLog(ctx, env, { action: "gumroad_cancellation_intent_recorded", subscription_id, key_prefix: mappedKey.slice(0, 12) + "..." });
+      ctx.waitUntil(sendTelegramAlert(env,
+        `<b>GUMROAD AUTO-RENEW CANCELLED</b>\n` +
+        `Subscription ID: <code>${subscription_id}</code>\n` +
+        `Key: <code>${mappedKey.slice(0, 16)}...</code> -- access continues until the current period ends.`
+      ));
+      return jsonResp({ status: "cancellation_recorded", subscription_id });
+    }
+
+    const result = await applySubscriptionStatusChange(env, ctx, mappedKey, "cancelled", `gumroad_ended:${subscription_id}`);
+    if (result.ok) {
+      ctx.waitUntil(sendTelegramAlert(env,
+        `<b>GUMROAD SUBSCRIPTION ENDED</b>\n` +
+        `Subscription ID: <code>${subscription_id}</code>\n` +
+        `Key: <code>${mappedKey.slice(0, 16)}...</code> marked cancelled -- access revoked.`
+      ));
+    }
+    return jsonResp({ status: result.ok ? "cancelled" : "key_not_found", subscription_id });
+  }
+
   if (!sale_id || !email) return jsonResp({ error: "Invalid Gumroad payload: sale_id and email required" }, 400);
 
   // Map product/variant to tier
-  const pnl = `${product_name}${variants}`.toLowerCase();
-  let tier   = "PRO";
-  if (pnl.includes("enterprise") || pnl.includes("ent")) tier = "ENTERPRISE";
-  else if (pnl.includes("mssp") || pnl.includes("white-label")) tier = "MSSP";
+  const tier = inferGumroadTier(product_name, variants);
+  const billingCycle = inferGumroadBillingCycle(recurrence, product_name, variants);
 
   // Idempotency guard: one provisioning per sale_id
   const idempKey = `gumroad_sale:${sale_id}`;
@@ -3677,14 +3726,43 @@ async function handleWebhookGumroad(request, env, ctx) {
   if (existing) return jsonResp({ status: "already_provisioned", sale_id });
 
   const apiKey = await provisionApiKey(env, ctx, tier, email, "gumroad_webhook", {
-    sale_id, product_name, price, variants,
-  }, pnl.includes("annual") ? "annual" : "monthly");
+    sale_id, product_id, product_name, price, variants, subscription_id,
+  }, billingCycle);
 
   await env.SECURITY_HUB_KV.put(
     idempKey,
     JSON.stringify({ key_prefix: apiKey.slice(0, 12) + "...", email, tier, ts: now() }),
     { expirationTtl: 86400 * 365 }
   );
+
+  // Recurring product: remember which key this subscription provisioned, so
+  // a later "Subscription updated" cancellation/end ping (which carries only
+  // subscription_id, not the API key) can find it. Same pattern and TTL as
+  // Razorpay's payment_key_map: above.
+  if (subscription_id) {
+    await env.SECURITY_HUB_KV.put(`gumroad_sub_key_map:${subscription_id}`, apiKey, { expirationTtl: 86400 * 365 });
+  }
+
+  // Gumroad checkout happens entirely on Gumroad's hosted page -- there is
+  // no client-side callback into this app the way Razorpay's handler:
+  // response has, so email is the only delivery channel for the key. Unlike
+  // the pre-existing Razorpay call sites, this checks the return value:
+  // sendActivationEmail() fails closed (returns false, never throws) rather
+  // than blocking provisioning, so a silently-ignored `false` here would
+  // leave a customer with a valid key and no way to learn it. Provisioning
+  // itself is already done and correct either way; this only adds
+  // visibility into a delivery failure so a human can follow up.
+  let emailSent = false;
+  try { emailSent = await sendActivationEmail(env, email, tier, apiKey); } catch (err) {
+    console.error("[handleWebhookGumroad] sendActivationEmail error:", err?.message || err);
+  }
+  if (!emailSent) {
+    ctx.waitUntil(sendTelegramAlert(env,
+      `[WARN] <b>GUMROAD ACTIVATION EMAIL FAILED</b>\n` +
+      `Email: ${email}\n` +
+      `Key: <code>${apiKey.slice(0, 16)}...</code> is provisioned and active, but delivery failed -- manual follow-up required.`
+    ));
+  }
 
   ctx.waitUntil(sendTelegramAlert(env,
     `? <b>GUMROAD SALE</b>\n` +
