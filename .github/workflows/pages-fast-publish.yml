@@ -61,12 +61,25 @@ on:
   push:
     branches: [main]
     paths:
+      # GAP FIX (found auditing this workflow for global-customer readiness,
+      # 2026-09-01): the original enumerated list only covered the specific
+      # files touched by #299/#300. index.html actually loads 8 more local JS
+      # files this list missed entirely -- js/engines/*.js (6 files),
+      # js/metric-normalize.js, and js/sentinel-live-feeds.js (documented as
+      # "COMPLETE FRONTEND FIX -- All dashboard widgets wired to live API":
+      # stats bar, threat gauge, live feed preview, heatmap, kill-chain
+      # activity). A fix landing in any of those would have silently gone
+      # back to being queued behind the 162-stage pipeline for hours --
+      # recreating this exact P0 for the file most central to it. Directory
+      # globs instead of an enumerated list so this can't drift out of sync
+      # again as new frontend files are added. build_dist_artifact.py's
+      # INCLUDE_DIRS copy of js/ and css/ is already a full recursive
+      # shutil.copytree (verified: EXCLUDE_PATTERNS only blocks __pycache__,
+      # .git, .env, *.log, *.pdf), so no build-side change is needed --
+      # only this trigger list was incomplete.
       - 'index.html'
-      - 'js/api_adapter.js'
-      - 'js/card_renderer.js'
-      - 'js/card_renderer_integration.js'
-      - 'js/sla-monitor.js'
-      - 'css/card_renderer_styles.css'
+      - 'js/**'
+      - 'css/**'
       - '_headers'
   workflow_dispatch: {}
 
@@ -118,7 +131,7 @@ jobs:
       - name: Verify frontend-critical files are present in dist/
         run: |
           missing=0
-          for f in index.html js/api_adapter.js js/card_renderer.js js/card_renderer_integration.js js/sla-monitor.js css/card_renderer_styles.css _headers .nojekyll; do
+          for f in index.html js/api_adapter.js js/card_renderer.js js/card_renderer_integration.js js/sla-monitor.js js/sentinel-live-feeds.js css/card_renderer_styles.css _headers .nojekyll; do
             path="dist/$f"
             if [ ! -s "$path" ]; then
               echo "::error::Missing or empty required file in dist/: $f"
