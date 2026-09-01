@@ -148,6 +148,28 @@ class TestDeliverablesArePresentAndWired:
         assert "routeExports" in index_js
         assert '"/api/v1/export/"' in index_js
 
+    def test_index_js_actually_imports_routeexports_and_ingestion_functions(self):
+        """
+        P0 regression guard (2026-09-01): the original PR #285 commit called
+        getLiveIndicatorsSummary(), runScheduledIngestion(), and routeExports()
+        from index.js WITHOUT ever importing them -- every call site threw an
+        uncaught ReferenceError, which the top-level fetch() catch-all turned
+        into a 500 "Internal gateway error" for /api/preview, /api/feed,
+        /api/feed.json, and every /api/v1/export/* route (confirmed live
+        against production before this fix), and silently no-oped the
+        6-hourly ingestion cron. test_index_js_dispatches_the_export_routes
+        above only checked that the call-site TEXT existed anywhere in the
+        file, which a bare call with no import still satisfies -- that's
+        exactly how this shipped broken. This test checks for the actual
+        import statements instead.
+        """
+        index_js = (GATEWAY_SRC / "index.js").read_text(encoding="utf-8")
+        assert "import { routeExports } from './routes/exports.js';" in index_js
+        assert (
+            "import { getLiveIndicatorsSummary, runScheduledIngestion } from './ingestion/cron_worker.js';"
+            in index_js
+        )
+
     def test_all_five_export_formats_are_implemented(self):
         exports_src = EXPORTS_JS.read_text(encoding="utf-8")
         for fmt_path in EXPORT_FORMATS:
