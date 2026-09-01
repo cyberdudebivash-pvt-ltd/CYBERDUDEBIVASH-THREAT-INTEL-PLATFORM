@@ -1967,18 +1967,37 @@ async function fetchNewsFromRSS(kvNamespace) {
 // IOC LOOKUP
 // =============================================================================
 
-async function iocLookup(query, feedData) {
+async function iocLookup(query, feedData, tier) {
   const q = (query || "").trim().toLowerCase();
   if (!q) return { found: false, query, results: [] };
   const matches = (feedData.items || []).filter(item => {
     const haystack = [item.title, item.source, ...(item.cve_ids || []), ...(item.tags || []), item.id].join(" ").toLowerCase();
     return haystack.includes(q);
   });
+  // Public/anonymous callers reach this route with no API key (resolveAuth()
+  // defaults unauthenticated requests to FREE) -- before this, every result
+  // was served in full with no cap and no upgrade signal, unlike every other
+  // feed-serving route in this file. This projection is already narrow (no
+  // raw iocs/sigma_rule/actor_tag fields to redact via applyTierGateV2), so
+  // the meaningful FREE-tier restriction here is a lower result cap plus
+  // redacting the two fields this shape does expose (risk_score, cve_ids)
+  // that a real "unlock full analysis" upgrade should surface.
+  const isPaid   = tier === TIERS.PRO || tier === TIERS.ENTERPRISE || tier === TIERS.MSSP;
+  const capped   = matches.slice(0, isPaid ? 10 : 3);
   return {
     found: matches.length > 0, query,
-    results: matches.slice(0, 10).map(i => ({
-      id: i.id, title: i.title, severity: i.severity, risk_score: i.risk_score,
-      source: i.source, published: i.published, cve_ids: i.cve_ids || [], ioc_count: i.ioc_count || 0,
+    ...(isPaid ? {} : {
+      _tier: TIERS.FREE, _upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html",
+      _note: matches.length > capped.length
+        ? `Showing ${capped.length} of ${matches.length} matches. Upgrade to PRO for full results, risk scores, and CVE mapping.`
+        : undefined,
+    }),
+    results: capped.map(i => ({
+      id: i.id, title: i.title, severity: i.severity,
+      risk_score: isPaid ? i.risk_score : null,
+      source: i.source, published: i.published,
+      cve_ids: isPaid ? (i.cve_ids || []) : [],
+      ioc_count: i.ioc_count || 0,
     })),
     total_iocs_checked: (feedData.items || []).reduce((s, i) => s + (parseInt(i.ioc_count, 10) || 0), 0),
     generated_at: now(),
@@ -2479,10 +2498,43 @@ function taxiiResp(data, status = 200) {
   });
 }
 
+// STIX pattern per indicator type, keyed by the `type` field
+// scripts/*ioc* actually writes onto item.iocs[] (confirmed against a real
+// feed export: {type:"ipv4", value:"6.0.9.4", ...}). Before this, a STIX
+// bundle for an item with real IP/domain/hash indicators still emitted a
+// generic file:name/threat-actor pattern -- the indicator objects in "Full
+// STIX 2.1 bundles" (a paid PRO+ feature) never actually carried the IOC
+// itself, only a placeholder built from the advisory title.
+const _STIX_HASH_ALGO = { md5: "MD5", sha1: "SHA-1", sha256: "SHA-256" };
+
+function _stixEscape(v) {
+  return String(v == null ? "" : v).replace(/['"\\]/g, "").slice(0, 256);
+}
+
 function buildStixPattern(item) {
-  if (item.cve_ids && item.cve_ids.length > 0) return `[vulnerability:name = '${item.cve_ids[0]}']`;
-  if (item.ioc_count > 0) return `[file:name = '${(item.title || "").replace(/['"\\]/g, "").slice(0, 64)}']`;
-  return `[threat-actor:name = '${(item.source || "unknown").replace(/['"\\]/g, "").slice(0, 32)}']`;
+  const iocs = Array.isArray(item.iocs) ? item.iocs : [];
+  const byType = (t) => iocs.find(i => i && String(i.type || "").toLowerCase() === t);
+
+  const ip = byType("ipv4") || byType("ip");
+  if (ip) return `[ipv4-addr:value = '${_stixEscape(ip.value)}']`;
+
+  const ip6 = byType("ipv6");
+  if (ip6) return `[ipv6-addr:value = '${_stixEscape(ip6.value)}']`;
+
+  const domain = byType("domain") || byType("domain-name");
+  if (domain) return `[domain-name:value = '${_stixEscape(domain.value)}']`;
+
+  const url = byType("url");
+  if (url) return `[url:value = '${_stixEscape(url.value)}']`;
+
+  for (const [type, algo] of Object.entries(_STIX_HASH_ALGO)) {
+    const hash = byType(type);
+    if (hash) return `[file:hashes.'${algo}' = '${_stixEscape(hash.value)}']`;
+  }
+
+  if (item.cve_ids && item.cve_ids.length > 0) return `[vulnerability:name = '${_stixEscape(item.cve_ids[0])}']`;
+  if (item.ioc_count > 0) return `[file:name = '${_stixEscape((item.title || "").slice(0, 64))}']`;
+  return `[threat-actor:name = '${_stixEscape((item.source || "unknown").slice(0, 32))}']`;
 }
 
 async function handleTAXII(request, env, ctx, path, auth) {
@@ -4694,7 +4746,12 @@ async function handleRequest(request, env, ctx) {
       return jsonResp(
         body,
         429,
-        { "Retry-After": "60", "X-RateLimit-Limit": String(rl.limit), "X-RateLimit-Remaining": "0" }
+        {
+          "Retry-After": "60",
+          "X-RateLimit-Limit": String(rl.limit),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(Math.floor(resetAtMs / 1000)),
+        }
       );
     }
 
@@ -5187,12 +5244,12 @@ async function handleRequest(request, env, ctx) {
     try { body = await request.json(); } catch (_) {}
     const query    = body.query || body.ioc || url.searchParams.get("q") || "";
     const feedData = await loadFeedItems(env);
-    return jsonResp(await iocLookup(query, feedData));
+    return jsonResp(await iocLookup(query, feedData, auth.tier));
   }
   if (path === "/api/v1/ioc/lookup" && method === "GET") {
     const query    = url.searchParams.get("q") || url.searchParams.get("query") || "";
     const feedData = await loadFeedItems(env);
-    return jsonResp(await iocLookup(query, feedData));
+    return jsonResp(await iocLookup(query, feedData, auth.tier));
   }
 
   // --- /api/preview -----------------------------------------------------------

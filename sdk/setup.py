@@ -24,8 +24,8 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/cyberdudebivash/sentinel-apex-sdk",
     project_urls={
-        "Documentation": "https://docs.sentinel.cyberdudebivash.com",
-        "API Reference":  "https://api.sentinelapex.cyberdudebivash.com/docs",
+        "Documentation": "https://intel.cyberdudebivash.com/api-docs.html",
+        "API Reference":  "https://intel.cyberdudebivash.com/api-docs.html",
         "Issue Tracker":  "https://github.com/cyberdudebivash/sentinel-apex-sdk/issues",
     },
     packages=find_packages(),
