@@ -104,6 +104,16 @@ import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handle
 // dark-web-monitor.js's handlers are intentionally NOT imported -- see the
 // _darkWebUnavailable disable note at its route registration below.
 import { handlePremiumReport, handleReportList, handleReportGet } from './premium-reports.js';
+// P0 FIX (2026-09-01): PR #285 (v201.0) called getLiveIndicatorsSummary(),
+// runScheduledIngestion(), and routeExports() below without ever importing
+// them from their actual modules -- every call site threw a ReferenceError
+// (uncaught locally, caught only by the top-level fetch() catch-all),
+// producing a 500 "Internal gateway error" for /api/preview, /api/feed,
+// /api/feed.json, and every /api/v1/export/* route, and silently no-oping
+// the 6-hourly threat-indicator cron. Confirmed live against production
+// before this fix (all four returned HTTP 500 / crashed silently).
+import { getLiveIndicatorsSummary, runScheduledIngestion } from './ingestion/cron_worker.js';
+import { routeExports } from './routes/exports.js';
 import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-meter.js';
 import { deductCredits } from './credit-system.js';
 import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
