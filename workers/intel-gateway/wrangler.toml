@@ -135,14 +135,27 @@ bucket_name = "sentinel-apex-reports"
 # so the claim check in gumroad-provisioning-lock.js is atomic in a way KV
 # alone can't be. See that file's header comment for the full rationale.
 # Confirmed (2026-09-01): Durable Objects are enabled for this account.
+#
+# PRODUCTION INCIDENT (2026-09-01, PR #296 deploy): the first deploy attempt
+# used `new_classes` (classic KV-backed Durable Object storage) and failed
+# both retry attempts with Cloudflare API error [code: 10099]: "Creating new
+# key-value backed Durable Object namespaces is no longer supported on this
+# account. Please create a namespace using a `new_sqlite_classes` migration
+# instead." Both attempts failed at the API-validation step before any
+# script upload took effect, so the previously-deployed Worker kept serving
+# unaffected (confirmed via /api/health) -- zero live-payment-gateway
+# downtime. `new_sqlite_classes` below uses the same storage.get/put API
+# GumroadProvisioningLock already calls (SQLite-backed Durable Objects
+# expose an identical transactional key-value interface), so no application
+# code change was needed -- only this migration's class list moved.
 
 [[durable_objects.bindings]]
 name       = "GUMROAD_PROVISIONING_LOCK"
 class_name = "GumroadProvisioningLock"
 
 [[migrations]]
-tag         = "v1-gumroad-provisioning-lock"
-new_classes = ["GumroadProvisioningLock"]
+tag                = "v1-gumroad-provisioning-lock"
+new_sqlite_classes = ["GumroadProvisioningLock"]
 
 # -- Secrets (set via wrangler CLI -- NEVER commit to source control) --
 # npx wrangler secret put ADMIN_SECRET             -> cache bust + admin key management
