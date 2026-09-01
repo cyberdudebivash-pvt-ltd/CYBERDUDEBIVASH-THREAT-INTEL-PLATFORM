@@ -15689,13 +15689,43 @@ function renderTopThreats(data) {
         // v78.0 FIX: Removed aggressive controllerchange → window.location.reload()
         // which caused "BOOTING..." flash on every pipeline deploy (every 6h).
         // The embedded cache now renders instantly on boot \u2014 SW updates are invisible.
+        //
+        // v176.0 FIX (2026-09-01, P0 -- root cause found, not just patched again):
+        // A customer's browser was confirmed stuck for hours on an old SW whose
+        // fetch handler called endpoints that exist nowhere in this codebase
+        // (index.json/stats.json/priority.json/critical.json) -- direct evidence
+        // from that session's DevTools Network panel, Initiator column pointing
+        // at service-worker.js itself. v175's cache-purge/skipWaiting logic in
+        // the SW's own activate handler was correct and simply never ran, because
+        // the browser never re-fetched service-worker.js to find it: confirmed
+        // live, /service-worker.js is served with `Cache-Control: max-age=14400`
+        // (4h) -- a GitHub Pages default this repo has no header file to
+        // override (this static site doesn't read _headers at all -- see that
+        // file's own top-of-file note). Every prior "anti-stale" revision
+        // (v173-v175) hardened what the SW does once a new version is fetched;
+        // none addressed the browser not fetching it to begin with.
+        // `updateViaCache: 'none'` below is the standard, spec-defined fix for
+        // exactly this: it tells the browser to bypass HTTP cache for
+        // service-worker.js on every update() check, for the lifetime of this
+        // registration -- independent of whatever Cache-Control the static host
+        // sends, and needs no Cloudflare/GitHub Pages access this repo doesn't
+        // have. Unsupported-but-harmless on any engine predating this option
+        // (an unrecognized property in a spec-shaped options object is ignored,
+        // not thrown).
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+                navigator.serviceWorker.register('/service-worker.js', { scope: '/', updateViaCache: 'none' })
                     .then(reg => {
                         console.log('[SW] Registered:', reg.scope);
                         // Check for updates on load \u2014 new SW will pre-cache assets silently
                         reg.update();
+                        // v176.0 FIX (2026-09-01, P0): re-check on regained focus too --
+                        // the load-time check above only fires once per navigation, so a
+                        // tab left open for hours never rechecks otherwise. Only the
+                        // check is more frequent; activation timing is unchanged below.
+                        document.addEventListener('visibilitychange', () => {
+                            if (document.visibilityState === 'visible') reg.update();
+                        });
                         // If a new SW is waiting, let it activate on next natural page load
                         // Do NOT force skipWaiting + reload \u2014 this caused the BOOTING... loop
                         reg.addEventListener('updatefound', () => {
