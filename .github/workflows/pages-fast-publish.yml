@@ -89,6 +89,14 @@ concurrency:
 jobs:
   publish:
     name: Fast-publish frontend to GitHub Pages
+    # SECURITY (CWE-863, flagged in PR #303 review): workflow_dispatch lets a
+    # caller pick any branch/tag to check out and deploy with this job's
+    # pages:write/contents:write token. Restrict actual execution to main so
+    # a manual dispatch against a feature branch can't publish unreviewed
+    # content live -- push events already only fire on main, so this is a
+    # no-op for that trigger and doesn't affect the intended manual-dispatch
+    # use (dispatching with ref: main).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -110,7 +118,7 @@ jobs:
       - name: Verify frontend-critical files are present in dist/
         run: |
           missing=0
-          for f in index.html js/api_adapter.js js/card_renderer.js js/card_renderer_integration.js js/sla-monitor.js css/card_renderer_styles.css .nojekyll; do
+          for f in index.html js/api_adapter.js js/card_renderer.js js/card_renderer_integration.js js/sla-monitor.js css/card_renderer_styles.css _headers .nojekyll; do
             path="dist/$f"
             if [ ! -s "$path" ]; then
               echo "::error::Missing or empty required file in dist/: $f"
@@ -140,6 +148,26 @@ jobs:
           branch: gh-pages
           folder: dist
           clean: true
+          # CRITICAL (flagged in PR #303 review): reports/, api/, dashboard/,
+          # customer/, assets/, and .well-known/ are build_dist_artifact.py
+          # INCLUDE_DIRS, but this workflow's fresh checkout never populates
+          # them the way the full pipeline does -- most notably api/feed.json
+          # and /reports/ are deliberately gitignored (served via Cloudflare
+          # R2/Worker, not git; see .gitignore's SECURITY v109 and RC-GITIGNORE-1
+          # notes) and are simply absent from this run's dist/. Without this
+          # exclusion, clean:true's rsync --delete would remove the live
+          # gh-pages copies of those paths on every fast-publish run --
+          # reintroducing the exact "No Threat Intelligence Available" P0
+          # this whole workflow exists to prevent, and doing it more often.
+          # None of these paths are in this workflow's trigger list above, so
+          # it never owned them; scope clean to exactly what it publishes.
+          clean-exclude: |
+            reports/**
+            api/**
+            dashboard/**
+            customer/**
+            assets/**
+            .well-known/**
           single-commit: true
 
       - name: Post-deploy freshness verification (reuses pages_deploy_freshness_gate.py -- STAGE 5.4.9.1)
