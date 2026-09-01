@@ -235,6 +235,15 @@ def test_index_html_ioc_paywall_applies_blur_styling(index_html_text: str):
     assert "blur(" in style_match.group(1), "gated IOC fields must be visually blurred for free tier"
 
 
+def test_index_html_ioc_total_is_numeric_coerced_before_innerhtml(index_html_text: str):
+    """Regression guard (CodeRabbit finding): _iocTotal feeds into
+    grid.innerHTML via the paywall's title/sub text, so a non-numeric
+    ioc_count/ioc_counts value from upstream feed data must be coerced to a
+    finite number, never interpolated raw."""
+    assert "Number(item.ioc_count)" in index_html_text
+    assert "Number.isFinite" in index_html_text
+
+
 def test_index_html_ioc_paywall_has_dual_gateway_ctas(index_html_text: str):
     assert "cdb-ioc-unlock-group" in index_html_text
     assert "gateway=razorpay" in index_html_text, "paywall must offer a Razorpay CTA"

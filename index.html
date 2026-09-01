@@ -10997,7 +10997,15 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                         // GOD MODE v184.0 \u2014 PREMIUM SELLABLE FOOTER \u2014 monetization conversion layer
                         const _userTier = (window._platformTiers && window._platformTiers.current) || 'free';
                         const _isFree   = _userTier === 'free';
-                        const _iocTotal = item.ioc_count || (item.ioc_counts ? Object.values(item.ioc_counts).reduce((a,b)=>a+(b||0),0) : 0);
+                        // Coerced to a finite number before use: this feeds into
+                        // grid.innerHTML below (via _iocLockStrip's title/sub text),
+                        // so a non-numeric ioc_count/ioc_counts value from upstream
+                        // feed data must never reach that template literal unescaped.
+                        const _iocCountNum   = Number(item.ioc_count);
+                        const _iocCountsSum  = item.ioc_counts
+                            ? Object.values(item.ioc_counts).reduce((a,b) => { const n = Number(b); return a + (Number.isFinite(n) ? n : 0); }, 0)
+                            : 0;
+                        const _iocTotal = (Number.isFinite(_iocCountNum) && _iocCountNum) || _iocCountsSum || 0;
                         const _isHigh   = sev === 'CRITICAL' || sev === 'HIGH';
                         const _hasReport = !!(item.report_url || item.internal_report_url);
                         const _hasPdf    = !!item.pdf_url;
