@@ -236,11 +236,13 @@ def test_upgrade_html_handles_gateway_hint(upgrade_html_text: str):
 def test_upgrade_html_inline_js_syntax_valid():
     """Same node --check technique scripts/validate_monetization.py uses."""
     data = UPGRADE_HTML.read_text(encoding="utf-8")
-    # </script\s*> (not bare </script>): CodeQL's py/bad-tag-filter flags an
-    # end-tag regex that requires an exact match immediately before ">",
-    # since it would miss a real closing tag with whitespace before the
-    # bracket (e.g. "</script >").
-    scripts = re.findall(r"<script[^>]*>([\s\S]*?)</script\s*>", data, re.IGNORECASE)
+    # </script[^>]*> (not </script\s*> or bare </script>): a real HTML5
+    # parser closes a <script> element on "</script" followed by ANY
+    # characters up to the next ">" (not just whitespace) -- CodeQL's
+    # py/bad-tag-filter confirmed a whitespace-only allowance still misses
+    # a real closing tag like "</script foo>". Mirrors the same [^>]*
+    # already used for the opening tag above.
+    scripts = re.findall(r"<script[^>]*>([\s\S]*?)</script[^>]*>", data, re.IGNORECASE)
     assert scripts, "expected inline <script> blocks in upgrade.html"
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".js", mode="w", delete=False, encoding="utf-8") as f:
@@ -269,11 +271,13 @@ def test_welcome_html_exists_and_handles_gumroad_redirect():
 @needs_node
 def test_welcome_html_inline_js_syntax_valid():
     data = WELCOME_HTML.read_text(encoding="utf-8")
-    # </script\s*> (not bare </script>): CodeQL's py/bad-tag-filter flags an
-    # end-tag regex that requires an exact match immediately before ">",
-    # since it would miss a real closing tag with whitespace before the
-    # bracket (e.g. "</script >").
-    scripts = re.findall(r"<script[^>]*>([\s\S]*?)</script\s*>", data, re.IGNORECASE)
+    # </script[^>]*> (not </script\s*> or bare </script>): a real HTML5
+    # parser closes a <script> element on "</script" followed by ANY
+    # characters up to the next ">" (not just whitespace) -- CodeQL's
+    # py/bad-tag-filter confirmed a whitespace-only allowance still misses
+    # a real closing tag like "</script foo>". Mirrors the same [^>]*
+    # already used for the opening tag above.
+    scripts = re.findall(r"<script[^>]*>([\s\S]*?)</script[^>]*>", data, re.IGNORECASE)
     assert scripts
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".js", mode="w", delete=False, encoding="utf-8") as f:
