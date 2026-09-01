@@ -69,7 +69,7 @@ This is exactly the kind of finding this phase exists to catch before Phase 7 fi
 
 ## 4. Root-level orphan files — safe to archive
 
-`DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4`, `v55.2-complete.patch`, `SENTINEL_APEX_v78_P0_FIX.tar.gz`,
+`v55.2-complete.patch`, `SENTINEL_APEX_v78_P0_FIX.tar.gz`,
 `0001-SENTINEL-APEX-v28.0-FORTRESS-Security-Hardening-Rele.patch`, `claude-tasks-history-screenshot.jpg`:
 
 - **Generator**: one-time historical additions (single commit, 2026-08-04).
@@ -79,6 +79,19 @@ This is exactly the kind of finding this phase exists to catch before Phase 7 fi
 - **Conclusion**: safe to archive (move out of the active tree into a clearly-labeled archive
   location, preserving git history — not a permanent deletion recommendation, per this effort's
   "reversible" principle).
+
+## 4a. `DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4` — STATUS CHANGE (2026-09-01): now KEEP, not ARCHIVE
+
+- This file was added in the same 2026-08-04 commit as the orphans in §4 above and carried the same
+  "zero references" finding through Phase 1/2/3. **That finding is now stale.**
+- **Consumer, verified**: `index.html`'s homepage `#demo-video` section embeds it directly
+  (`<video><source src="/DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4" type="video/mp4">`) as the live,
+  self-hosted product-preview clip, with a click-to-play cover and a matching long-lived
+  `Cache-Control` rule for this exact path in `_headers`.
+- **Dashboard/customer dependency**: yes — directly customer-facing on the public homepage.
+- **Conclusion**: **disposition changes from ARCHIVE to KEEP.** Do not archive, move, or rename this
+  file without updating both the `<source src=...>` in `index.html`'s `#demo-video` section and the
+  `/DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4` rule in `_headers` in the same change.
 
 ## 5. `data/simulations/*.bat`, `data/products/*.zip` — CONFIRMED KEEP, no further action
 
