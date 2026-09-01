@@ -35,7 +35,15 @@ export const SCOPE_DEFINITIONS = {
   "read:stix":          { tier: "premium",     desc: "STIX 2.1 bundle metadata access"                      },
   "read:stix:full":     { tier: "enterprise",  desc: "Full STIX 2.1 bundle export"                          },
   "read:actors":        { tier: "premium",     desc: "Threat actor profiles + TTPs"                         },
-  "read:cves":          { tier: "premium",     desc: "CVE deep-dive with EPSS + KEV + NVD"                  },
+  // Business decision (2026-08-31, CVE conversion-funnel page): CVE aggregate
+  // data (CVSS/EPSS/severity/KEV/affected products) is now public/free-tier,
+  // matching handleCVEs()'s own already-built free-tier masking (locked:true,
+  // reports truncated to 2, ioc_count nulled, upgrade prompt attached) --
+  // that masking existed and was correctly implemented, it was simply
+  // unreachable with this scope premium-only. Full report correlation (>2
+  // reports, real ioc_count) remains premium -- see TIER_DEFAULT_SCOPES.free
+  // below, now including this scope for exactly that masked-access reason.
+  "read:cves":          { tier: "free",        desc: "CVE aggregate data (masked for free tier -- see handleCVEs)" },
   "export:misp":        { tier: "enterprise",  desc: "MISP JSON event export"                               },
   "export:csv":         { tier: "premium",     desc: "IOC CSV bulk export"                                  },
   "export:stix:full":   { tier: "enterprise",  desc: "Raw STIX bundle download"                             },
@@ -50,7 +58,7 @@ export const SCOPE_DEFINITIONS = {
 };
 
 export const TIER_DEFAULT_SCOPES = {
-  free:       ["read:intel:preview"],
+  free:       ["read:intel:preview", "read:cves"],
   premium:    ["read:intel","read:stix","read:actors","read:cves","export:csv",
                "read:ai:predict","read:ai:campaigns","read:ai:anomalies","read:intel:graph"],
   enterprise: ["read:intel","read:stix","read:stix:full","read:actors","read:cves",

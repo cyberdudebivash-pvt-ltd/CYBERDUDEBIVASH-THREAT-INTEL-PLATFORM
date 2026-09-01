@@ -301,6 +301,16 @@ jobs:
         # dependency-free module, resolving this specific blocker without
         # touching pricing.js.
         #
+        # revenue-enforcement.upgrade-trigger.test.js added -- locks in the
+        # removal of a live fabricated "Start 7-Day Free Trial" claim
+        # (buildUpgradeTrigger()'s trial_url/cta_trial fields, reachable by
+        # real FREE-tier customers via enforceTierGate()'s `upgrade` field on
+        # /api/v1/intel/ai_summary.json) that PR #251/#281's HTML-scoped
+        # funnel-truth fixes missed because it shipped as an API JSON field,
+        # not page copy -- same "what can a customer be told" class of
+        # regression this gate already exists to catch. revenue-enforcement.js
+        # has no pricing-data.json dependency, so no extraction was needed.
+        #
         # Razorpay+Gumroad dual-checkout pass: gumroad-lifecycle.test.js
         # added -- covers isGumroadCancellationEvent(), the decision function
         # that determines whether a Gumroad "Subscription updated" ping
@@ -310,7 +320,7 @@ jobs:
         # identical reason (see gumroad-lifecycle.js header comment).
         run: |
           cd ${WORKER_DIR}
-          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js src/__tests__/detection-registry.test.js src/__tests__/subscription-lifecycle.test.js src/__tests__/gumroad-lifecycle.test.js
+          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js src/__tests__/detection-registry.test.js src/__tests__/subscription-lifecycle.test.js src/__tests__/revenue-enforcement.upgrade-trigger.test.js src/__tests__/daily-quota.test.js src/__tests__/api-extensions.cve-scope.test.js src/__tests__/gumroad-lifecycle.test.js
 
       - name: " esbuild bundle pre-flight (HARD GATE)"
         run: |

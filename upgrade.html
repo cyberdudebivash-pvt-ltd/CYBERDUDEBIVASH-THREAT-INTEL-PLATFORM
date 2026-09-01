@@ -1003,6 +1003,12 @@ function updateRazorpayPanel() {
   el = document.getElementById('rzp-display-plan'); if (el) el.textContent = rp.name;
 }
 
+// Recurring Subscriptions cutover: tries real recurring billing
+// (Razorpay Subscriptions API) first, and falls back to the proven
+// one-time-order flow below on any failure -- a tier/cycle without a
+// live Razorpay Plan ID yet returns 503 by design (see
+// workers/revenue-engine/src/subscription-engine.js), not an error, so
+// checkout must never dead-end here.
 async function initiateRazorpayCheckout() {
   var emailEl = document.getElementById('rzp-email');
   var email   = emailEl ? emailEl.value.trim() : '';
@@ -1015,13 +1021,101 @@ async function initiateRazorpayCheckout() {
     alert('Please select a paid plan (PRO, Enterprise, or MSSP).');
     return;
   }
-  var btn = document.getElementById('rzp-pay-btn');
+  var btn  = document.getElementById('rzp-pay-btn');
   var orig = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '&#9203; Creating order...'; }
-
   var tierMap = { pro:'PRO', enterprise:'ENTERPRISE', mssp:'MSSP' };
   var tier    = tierMap[currentPlan] || 'PRO';
-  var billing = isAnnual ? 'annual' : 'monthly';
+  var cycle   = isAnnual ? 'annual' : 'monthly';
+
+  if (btn) { btn.disabled = true; btn.innerHTML = '&#9203; Setting up subscription...'; }
+
+  try {
+    var subResp = await fetch('/api/v2/billing/subscriptions/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, tier: tier, billing_cycle: cycle }),
+    });
+    var sub = await subResp.json();
+
+    if (!subResp.ok || !sub.subscription_id) {
+      return await initiateRazorpayOneTimeCheckout(email, tier, cycle, btn, orig);
+    }
+    if (typeof Razorpay === 'undefined') {
+      if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+      alert('Razorpay could not load \u2014 please check your connection and try again, or contact us on WhatsApp: +91 8179881447');
+      return;
+    }
+
+    var subOptions = {
+      key:              sub.key_id,
+      subscription_id:  sub.subscription_id,
+      name:             'CYBERDUDEBIVASH SENTINEL APEX',
+      description:      tier + ' - ' + cycle + ' subscription',
+      prefill:          { email: email },
+      theme:            { color: '#00d4ff' },
+      modal: {
+        ondismiss: function() {
+          if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+        }
+      },
+      handler: function(response) {
+        if (btn) btn.innerHTML = '&#9203; Confirming subscription...';
+        pollSubscriptionStatus(sub.subscription_id, response.razorpay_payment_id, response.razorpay_signature, tier, email, btn, orig, 0);
+      },
+    };
+    var subRzp = new Razorpay(subOptions);
+    subRzp.open();
+  } catch (err) {
+    return await initiateRazorpayOneTimeCheckout(email, tier, cycle, btn, orig);
+  }
+}
+
+// Subscription activation happens asynchronously via Razorpay's
+// subscription.activated webhook, not synchronously in the Checkout
+// handler callback above (unlike the one-time-order flow's /verify
+// call below) -- poll briefly rather than assume the key already
+// exists the instant the modal's handler fires. paymentId/signature come
+// straight from Razorpay's own handler callback (response.razorpay_
+// payment_id / .razorpay_signature) and are required by the status
+// endpoint as proof this poller actually completed this checkout --
+// subscription_id alone isn't a secret, so the endpoint would otherwise
+// hand out another customer's live api_key to anyone who obtained it.
+function pollSubscriptionStatus(subscriptionId, paymentId, signature, tier, email, btn, orig, attempt) {
+  var MAX_ATTEMPTS = 15; // ~30s at 2s intervals
+  var qs = 'subscription_id=' + encodeURIComponent(subscriptionId) +
+           '&payment_id=' + encodeURIComponent(paymentId) +
+           '&signature=' + encodeURIComponent(signature);
+  fetch('/api/v2/billing/subscriptions/status?' + qs)
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+    .then(function(res) {
+      if (res.ok && res.d && res.d.status === 'active' && res.d.api_key) {
+        showRazorpaySuccess(res.d.api_key, tier, email);
+        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+        return;
+      }
+      if (attempt >= MAX_ATTEMPTS) {
+        alert('✔ Payment received! Your subscription is confirming \u2014 API key will be emailed to ' + email + ' within a few minutes.\nWhatsApp +91 8179881447 for instant help.');
+        showSuccessState(currentPlan, { review_id: subscriptionId });
+        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+        return;
+      }
+      setTimeout(function() { pollSubscriptionStatus(subscriptionId, paymentId, signature, tier, email, btn, orig, attempt + 1); }, 2000);
+    })
+    .catch(function() {
+      if (attempt >= MAX_ATTEMPTS) {
+        alert('✔ Payment complete! Verifying...\nSubscription ID: ' + subscriptionId + '\nAPI key within 30 min.\nWhatsApp: +91 8179881447');
+        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+        return;
+      }
+      setTimeout(function() { pollSubscriptionStatus(subscriptionId, paymentId, signature, tier, email, btn, orig, attempt + 1); }, 2000);
+    });
+}
+
+// Original one-time-Orders checkout -- the pre-Subscriptions-cutover
+// flow, kept verbatim as the fallback path for any tier/cycle without a
+// live Razorpay Plan ID yet (or if the Subscriptions endpoint above is
+// ever unreachable).
+async function initiateRazorpayOneTimeCheckout(email, tier, billing, btn, orig) {
+  if (btn) { btn.innerHTML = '&#9203; Creating order...'; }
 
   try {
     var resp  = await fetch('/api/payment/razorpay/create-order', {
