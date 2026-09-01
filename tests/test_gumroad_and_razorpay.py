@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -45,6 +46,22 @@ def _node_available() -> bool:
         return subprocess.run(["node", "--version"], capture_output=True, timeout=5).returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
+
+
+def _html_references_host(html_text: str, host: str) -> bool:
+    """True if any src=/href= URL in the page has `host` as its exact
+    hostname (or a subdomain of it). Deliberately does not use a raw
+    `host in html_text` substring check: that form is flagged by CodeQL
+    (py/incomplete-url-substring-sanitization) because it doesn't verify
+    the domain's position -- "evil.com/checkout.razorpay.com" would also
+    match. Parsing each URL and comparing the hostname is the precise
+    check the query recommends instead.
+    """
+    for url in re.findall(r'(?:src|href)=["\']([^"\']+)["\']', html_text):
+        hostname = urlsplit(url).hostname or ""
+        if hostname == host or hostname.endswith("." + host):
+            return True
+    return False
 
 
 needs_node = pytest.mark.skipif(not _node_available(), reason="node not available in this environment")
@@ -204,9 +221,9 @@ def test_index_html_ioc_paywall_has_dual_gateway_ctas(index_html_text: str):
 def test_upgrade_html_still_has_automated_checkout_markers(upgrade_html_text: str):
     """Anti-regression: same markers scripts/validate_monetization.py enforces --
     duplicated here so this test file stands on its own."""
-    assert "checkout.razorpay.com" in upgrade_html_text
+    assert _html_references_host(upgrade_html_text, "checkout.razorpay.com")
     assert "initiateRazorpayCheckout" in upgrade_html_text
-    assert "gumroad.com" in upgrade_html_text
+    assert _html_references_host(upgrade_html_text, "gumroad.com")
 
 
 def test_upgrade_html_handles_gateway_hint(upgrade_html_text: str):
@@ -219,7 +236,11 @@ def test_upgrade_html_handles_gateway_hint(upgrade_html_text: str):
 def test_upgrade_html_inline_js_syntax_valid():
     """Same node --check technique scripts/validate_monetization.py uses."""
     data = UPGRADE_HTML.read_text(encoding="utf-8")
-    scripts = re.findall(r"<script[^>]*>([\s\S]*?)</script>", data, re.IGNORECASE)
+    # </script\s*> (not bare </script>): CodeQL's py/bad-tag-filter flags an
+    # end-tag regex that requires an exact match immediately before ">",
+    # since it would miss a real closing tag with whitespace before the
+    # bracket (e.g. "</script >").
+    scripts = re.findall(r"<script[^>]*>([\s\S]*?)</script\s*>", data, re.IGNORECASE)
     assert scripts, "expected inline <script> blocks in upgrade.html"
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".js", mode="w", delete=False, encoding="utf-8") as f:
@@ -248,7 +269,11 @@ def test_welcome_html_exists_and_handles_gumroad_redirect():
 @needs_node
 def test_welcome_html_inline_js_syntax_valid():
     data = WELCOME_HTML.read_text(encoding="utf-8")
-    scripts = re.findall(r"<script[^>]*>([\s\S]*?)</script>", data, re.IGNORECASE)
+    # </script\s*> (not bare </script>): CodeQL's py/bad-tag-filter flags an
+    # end-tag regex that requires an exact match immediately before ">",
+    # since it would miss a real closing tag with whitespace before the
+    # bracket (e.g. "</script >").
+    scripts = re.findall(r"<script[^>]*>([\s\S]*?)</script\s*>", data, re.IGNORECASE)
     assert scripts
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".js", mode="w", delete=False, encoding="utf-8") as f:
