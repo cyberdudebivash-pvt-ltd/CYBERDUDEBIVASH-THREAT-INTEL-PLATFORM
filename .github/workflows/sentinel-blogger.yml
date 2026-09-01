@@ -1437,6 +1437,16 @@ jobs:
             echo "::notice::AI HEALTH/BRIEF: regenerated from live intel feed"
           else
             echo "::warning::generate_ai_tracker.py exited ${AIT_EXIT} but did not produce both health.json and executive-brief.json (e.g. its no-feed stub path writes only a tracker.json stub) — prior health/brief data retained"
+            # Issue #278: a ::warning:: alone is only visible if someone reads
+            # Actions logs -- nothing pages a human. Reuses the existing
+            # pipeline_alert.py (already wired for pipeline-staleness-monitor.yml
+            # and elsewhere), not a new notification path. Still non-blocking
+            # (own || true; the step above it is already continue-on-error) --
+            # this only adds visibility, per the explicit decision on #278 to
+            # keep warn-and-retain rather than hard-fail.
+            python3 scripts/pipeline_alert.py --status warning \
+              --message "STAGE 3.1.22b: generate_ai_tracker.py exited ${AIT_EXIT} but did not produce both api/ai/health.json and api/ai/executive-brief.json -- prior data retained, health.json/executive-brief.json may be stale." \
+              || true
           fi
 
       # -----------------------------------------------------------------------
