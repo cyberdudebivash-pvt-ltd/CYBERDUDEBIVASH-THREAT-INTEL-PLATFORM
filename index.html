@@ -22,7 +22,17 @@
     <meta name="theme-color" content="#00d4aa">
 
     <!-- ── Content Security Policy ── -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; connect-src 'self' https:; frame-ancestors 'none';">
+    <!-- v186.0 hardening: this <meta> CSP — not _headers' copy, which is Cloudflare-Pages-only
+         syntax the production host (GitHub Pages behind Cloudflare's proxy) never reads — is the
+         only CSP actually enforced on this page. base-uri/form-action/upgrade-insecure-requests
+         added; font-src gains 'self' data: to match img-src's allowance for the same asset types.
+         frame-ancestors kept for intent/documentation even though the browser ignores it from a
+         <meta> tag (console-logged, harmless) — real clickjacking defense on this route needs an
+         X-Frame-Options *HTTP header*, which requires either routing this path through the Worker
+         (whose SECURITY_HEADERS already sets it — confirmed present on /api/* responses, confirmed
+         absent on this one) or equivalent Cloudflare edge configuration; neither is a static-file
+         change, so it isn't done here. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;">
 
     <!-- ── Open Graph / LinkedIn Preview ── -->
     <meta property="og:type" content="website">
