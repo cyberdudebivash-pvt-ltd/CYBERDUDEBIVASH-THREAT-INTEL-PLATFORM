@@ -581,9 +581,9 @@ h1 span { color: var(--accent); }
     </div>
     <div class="stix-banner-actions">
       <button class="stix-upgrade-btn" onclick="document.getElementById('plan-pro').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('plan-pro').click();">
-        ⚡ Unlock PRO &mdash; $49/mo
+        ⚡ Unlock PRO &mdash; $49 due now
       </button>
-      <div class="stix-banner-note">API key delivered within 2 hours &nbsp;&middot;&nbsp; Cancel anytime</div>
+      <div class="stix-banner-note">API key delivered within 2 hours &nbsp;&middot;&nbsp; Gumroad: 30-day grant, no auto-renew</div>
     </div>
   </div>
 </div>
@@ -603,7 +603,7 @@ h1 span { color: var(--accent); }
         <span style="color:rgba(255,255,255,.15);">|</span>
         <span style="color:#94a3b8;font-family:monospace;letter-spacing:1px;">40+ countries</span>
         <span style="color:rgba(255,255,255,.15);">|</span>
-        <span style="color:#94a3b8;font-family:monospace;letter-spacing:1px;">Cancel anytime</span>
+        <span style="color:#94a3b8;font-family:monospace;letter-spacing:1px;">7-day money-back</span>
         <span style="color:rgba(255,255,255,.15);">|</span>
         <a href="/testimonials.html" style="color:#00d4aa;text-decoration:none;font-weight:700;font-family:monospace;font-size:11px;letter-spacing:1px;">Read Testimonials →</a>
       </div>
@@ -616,7 +616,7 @@ h1 span { color: var(--accent); }
       </div>
 
       <div class="plans">
-        <div class="plan-card" id="plan-free" onclick="selectPlan('free')">
+        <div class="plan-card selected" id="plan-free" onclick="selectPlan('free')">
           <div class="plan-radio"><div class="plan-radio-dot"></div></div>
           <div class="plan-info">
             <div class="plan-name-row">
@@ -631,7 +631,7 @@ h1 span { color: var(--accent); }
           </div>
         </div>
 
-        <div class="plan-card selected" id="plan-pro" onclick="selectPlan('pro')">
+        <div class="plan-card" id="plan-pro" onclick="selectPlan('pro')">
           <div class="plan-radio"><div class="plan-radio-dot"></div></div>
           <div class="plan-info">
             <div class="plan-name-row">
@@ -642,7 +642,7 @@ h1 span { color: var(--accent); }
           </div>
           <div class="plan-price-col">
             <div class="plan-price-val" id="price-pro">$49</div>
-            <div class="plan-price-period">/month</div>
+            <div class="plan-price-period" id="period-pro">30-day access</div>
             <div class="plan-price-inr" id="inr-pro">&#x20B9;4,100</div>
           </div>
         </div>
@@ -658,7 +658,7 @@ h1 span { color: var(--accent); }
           </div>
           <div class="plan-price-col">
             <div class="plan-price-val" id="price-enterprise">$499</div>
-            <div class="plan-price-period">/month</div>
+            <div class="plan-price-period" id="period-enterprise">30-day access</div>
             <div class="plan-price-inr" id="inr-enterprise">&#x20B9;41,600</div>
           </div>
         </div>
@@ -684,7 +684,12 @@ h1 span { color: var(--accent); }
            via Gumroad product fulfilment + Cloudflare Worker webhook.
            Products configured at: https://cyberdudebivash.gumroad.com/
            ════════════════════════════════════════════════════════════════ -->
-      <div class="gumroad-panel" id="gumroad-panel">
+      <div id="free-plan-panel" style="margin:0 0 18px;padding:18px 20px;border:1px solid rgba(0,212,170,.28);border-radius:12px;background:rgba(0,212,170,.06);">
+        <div style="font-size:11px;letter-spacing:1.5px;font-weight:800;color:#00d4aa;margin-bottom:8px;">COMMUNITY — FREE FOREVER</div>
+        <div style="font-size:14px;color:#e2e8f0;margin-bottom:10px;">No credit card. Request a Community API key — this is not a paid trial and will not open PRO checkout.</div>
+        <a href="/get-api-key.html?plan=community" id="free-plan-cta" style="display:inline-block;padding:10px 16px;background:#00d4aa;color:#041018;font-weight:800;border-radius:8px;text-decoration:none;font-size:13px;">REQUEST FREE ACCESS →</a>
+      </div>
+      <div class="gumroad-panel" id="gumroad-panel" style="display:none">
         <div class="gumroad-panel-header">
           <span class="gumroad-panel-badge">&#9889; INSTANT CHECKOUT</span>
           <span class="gumroad-panel-title">Buy via Gumroad &mdash; Automated API Key Delivery</span>
@@ -700,13 +705,13 @@ h1 span { color: var(--accent); }
               <span class="gumroad-btn-name">PRO Defense</span>
               <span class="gumroad-btn-desc">120 req/min &middot; Full IOC arrays &middot; STIX 2.1 &middot; Threat alerts &middot; 10 API keys</span>
             </div>
-            <span class="gumroad-btn-price" id="gprice-pro">$49/mo</span>
+            <span class="gumroad-btn-price" id="gprice-pro">$49 · 30-day</span>
             <a class="gumroad-buy-link has-gumroad-prefix"
                href="https://cyberdudebivash.gumroad.com/l/pxyfcb"
                data-gumroad-single-product="true"
                target="_blank" rel="noopener"
                id="gbtn-pro">
-              &#128274; Buy PRO
+              GET 30-DAY PRO ACCESS — $49
             </a>
           </div>
 
@@ -716,7 +721,7 @@ h1 span { color: var(--accent); }
               <span class="gumroad-btn-name">Enterprise SOC</span>
               <span class="gumroad-btn-desc">600 req/min &middot; SIEM push &middot; Splunk/Sentinel &middot; SLA &middot; 50 API keys</span>
             </div>
-            <span class="gumroad-btn-price" id="gprice-enterprise">$499/mo</span>
+            <span class="gumroad-btn-price" id="gprice-enterprise">$499 · 30-day</span>
             <a class="gumroad-buy-link ent has-gumroad-prefix"
                href="https://cyberdudebivash.gumroad.com/l/cdedlo"
                data-gumroad-single-product="true"
@@ -752,7 +757,7 @@ h1 span { color: var(--accent); }
       <!-- PAYMENT METHOD SECTION &mdash; automated checkout only (manual direct-transfer
            gateway removed platform-wide by executive decision; see PAYMENT-GATEWAY.html,
            now a redirect to this page). -->
-      <div class="section-card" id="section-payment-methods">
+      <div class="section-card" id="section-payment-methods" style="display:none">
         <div class="manual-section-label">
           <span class="manual-label-text">&#9889; Pay with Razorpay</span>
           <span class="manual-label-badge" style="background:rgba(0,212,255,0.12);color:var(--accent);border-color:rgba(0,212,255,0.3);">AUTOMATED &middot; INSTANT</span>
@@ -774,7 +779,7 @@ h1 span { color: var(--accent); }
             <div class="rzp-amount-box">
               <div>
                 <div class="rzp-amount-label">Total Amount (INR)</div>
-                <div class="rzp-amount-val" id="rzp-display-inr">&#x20B9;3,999</div>
+                <div class="rzp-amount-val" id="rzp-display-inr">&#x20B9;4,100</div>
                 <div class="rzp-amount-usd" id="rzp-display-usd">&asymp; $49 USD</div>
               </div>
               <div style="text-align:right">
@@ -883,17 +888,17 @@ h1 span { color: var(--accent); }
     <div class="order-card">
       <div class="order-header">
         <div class="order-header-title">Order Summary</div>
-        <div class="order-plan-name" id="summary-plan">PRO Defense</div>
-        <div class="order-billing" id="summary-billing">Monthly billing</div>
+        <div class="order-plan-name" id="summary-plan">Free Tier</div>
+        <div class="order-billing" id="summary-billing">Free forever</div>
       </div>
       <div class="order-body">
         <div class="order-price-row">
           <span class="order-price-label">Plan price</span>
-          <span class="order-price-val" id="summary-price">$49/mo</span>
+          <span class="order-price-val" id="summary-price">Free</span>
         </div>
         <div class="order-price-row">
           <span class="order-price-label">INR equivalent</span>
-          <span class="order-price-val" id="summary-inr" style="color:var(--green)">&#x20B9;4,100</span>
+          <span class="order-price-val" id="summary-inr" style="color:var(--green)">Free</span>
         </div>
         <div class="order-price-row">
           <span class="order-price-label">Setup fee</span>
@@ -906,7 +911,7 @@ h1 span { color: var(--accent); }
         <hr class="order-divider">
         <div class="order-total-row">
           <span class="order-total-label">Total today</span>
-          <span class="order-total-val" id="summary-total">$49</span>
+          <span class="order-total-val" id="summary-total">Free</span>
         </div>
         <div style="margin-top:8px;text-align:right;font-size:11px;color:var(--text-dim)">+ applicable taxes</div>
       </div>
@@ -1055,7 +1060,7 @@ async function initiateRazorpayCheckout() {
   var tier    = tierMap[currentPlan] || 'PRO';
   var cycle   = isAnnual ? 'annual' : 'monthly';
 
-  if (btn) { btn.disabled = true; btn.innerHTML = '&#9203; Setting up subscription...'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '&#9203; Setting up checkout...'; }
 
   try {
     var subResp = await fetch('/api/v2/billing/subscriptions/create', {
@@ -1268,7 +1273,7 @@ var PLANS = {
   mssp:       { name:'MSSP / White-Label',   usd:1999, inr:166600,  usdAnnual:19190,inrAnnual:1599360 }
 };
 
-var currentPlan = 'pro';
+var currentPlan = 'free';
 var isAnnual = false;
 
 /* ── v184.0: Gumroad Quick Checkout URLs ─────────────────────────────
@@ -1294,10 +1299,15 @@ var GUMROAD_URLS = {
 function updateGumroadPanel() {
   var cycle = isAnnual ? 'annual' : 'monthly';
   var paidPlans = ['pro', 'enterprise', 'mssp'];
+  var isFree = (currentPlan === 'free');
 
   // Show/hide the entire panel (hidden for free tier)
   var panel = document.getElementById('gumroad-panel');
-  if (panel) panel.style.display = (currentPlan === 'free') ? 'none' : '';
+  if (panel) panel.style.display = isFree ? 'none' : '';
+  var rzpSection = document.getElementById('section-payment-methods');
+  if (rzpSection) rzpSection.style.display = isFree ? 'none' : '';
+  var freePanel = document.getElementById('free-plan-panel');
+  if (freePanel) freePanel.style.display = isFree ? '' : 'none';
 
   paidPlans.forEach(function(k) {
     var row  = document.getElementById('grow-' + k);
@@ -1313,10 +1323,13 @@ function updateGumroadPanel() {
     // Update URL for billing cycle
     btn.href = urls[cycle] || urls.monthly;
 
-    // Update displayed price
+    // Provider-specific Gumroad label: 30-day grant, not a monthly-subscription label
     if (pEl) {
       var usd = isAnnual ? p.usdAnnual : p.usd;
-      pEl.textContent = '$' + usd.toLocaleString() + (isAnnual ? '/yr' : '/mo');
+      pEl.textContent = '$' + usd.toLocaleString() + (isAnnual ? '/yr' : ' · 30-day');
+    }
+    if (k === 'pro' && !isAnnual) {
+      btn.textContent = 'GET 30-DAY PRO ACCESS — $49';
     }
   });
 }
@@ -1411,7 +1424,7 @@ function updateDGW() {
   if (!p) return;
   var usd  = isAnnual ? p.usdAnnual : p.usd;
   var inr  = isAnnual ? p.inrAnnual : p.inr;
-  var period = isAnnual ? 'per year' : 'per month';
+  var period = currentPlan === 'free' ? 'forever' : (isAnnual ? 'per year' : '30-day grant');
   function se(id, val) { var e = document.getElementById(id); if (e) e.textContent = val; }
   function si(id, val) { var e = document.getElementById(id); if (e) e.innerHTML = val; }
   se('dgw-plan-name',   p.name);
@@ -1464,8 +1477,8 @@ function updateSummary() {
   var p = PLANS[currentPlan];
   var usd = isAnnual ? p.usdAnnual : p.usd;
   var inr = isAnnual ? p.inrAnnual : p.inr;
-  var cycle = isAnnual ? 'Annual billing' : 'Monthly billing';
-  var priceStr = currentPlan === 'free' ? 'Free' : ('$' + usd + (isAnnual ? '/yr' : '/mo'));
+  var cycle = currentPlan === 'free' ? 'Free forever' : (isAnnual ? 'Annual (12-month access)' : '30-day access · due now');
+  var priceStr = currentPlan === 'free' ? 'Free' : ('$' + usd + (isAnnual ? '/yr' : ' · 30-day'));
 
   function se(id, val) { var e = document.getElementById(id); if (e) e.textContent = val; }
   function ss(id, val) { var e = document.getElementById(id); if (e) e.style.display = val; }
@@ -1565,6 +1578,62 @@ function showSuccessState(plan, wData) {
   if (ss) ss.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+/* ── FUNNEL-TRUTH HARD CONTRACT (Phase 2B) ──────────────────────
+   free NEVER becomes pro.
+   Allowlist: free, pro, enterprise, mssp. Alias: community → free.
+   Lowercase. Missing / unknown / malformed → selectPlan('free').
+   Duplicate plan=pro&plan=enterprise must not silently elevate.
+   BEGIN resolveCheckoutPlan */
+function resolveCheckoutPlan(search) {
+  var params;
+  if (typeof search === 'string') {
+    params = new URLSearchParams(search.charAt(0) === '?' ? search.slice(1) : search);
+  } else if (search && typeof search.getAll === 'function') {
+    params = search;
+  } else {
+    params = new URLSearchParams();
+  }
+  var ALLOWED = { free: 1, pro: 1, enterprise: 1, mssp: 1 };
+  var ALIAS = { community: 'free' };
+  var values = [];
+  if (typeof params.getAll === 'function') {
+    values = params.getAll('plan') || [];
+  }
+  if (!values.length && typeof params.get === 'function') {
+    var one = params.get('plan');
+    if (one != null && String(one).length) values = [one];
+  }
+  if (!values.length) return { plan: 'free', annual: false };
+
+  var parsed = [];
+  for (var i = 0; i < values.length; i++) {
+    var raw = String(values[i] == null ? '' : values[i]).trim().toLowerCase();
+    if (!raw) return { plan: 'free', annual: false };
+    var annual = false;
+    if (raw.length > 7 && raw.slice(-7) === '-annual') {
+      annual = true;
+      raw = raw.slice(0, -7);
+    }
+    if (ALIAS[raw]) raw = ALIAS[raw];
+    if (!ALLOWED[raw]) return { plan: 'free', annual: false };
+    parsed.push({ plan: raw, annual: annual });
+  }
+  var first = parsed[0].plan;
+  for (var j = 1; j < parsed.length; j++) {
+    if (parsed[j].plan !== first) {
+      // Conflicting paid (or mixed) plan params: fail closed to unpaid free.
+      return { plan: 'free', annual: false };
+    }
+  }
+  var useAnnual = false;
+  for (var k = 0; k < parsed.length; k++) {
+    if (parsed[k].annual) useAnnual = true;
+  }
+  if (first === 'free') useAnnual = false;
+  return { plan: first, annual: useAnnual };
+}
+/* END resolveCheckoutPlan */
+
 /* ── On-load init v184.0 ──────────────────────────────────────── */
 (function init() {
   var params = new URLSearchParams(window.location.search);
@@ -1619,14 +1688,13 @@ function showSuccessState(plan, wData) {
       if (gwEl) gwEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 300);
   } else {
-    // v185.0: Read plan from URL param (pricing.html annual CTA passes plan=pro-annual)
-    var planParam2 = params.get('plan') || 'pro';
-    var isAnnualParam = planParam2.endsWith('-annual');
-    var basePlan = isAnnualParam ? planParam2.replace('-annual', '') : planParam2;
-    selectPlan(['pro','enterprise','mssp'].includes(basePlan) ? basePlan : 'pro');
+    // FUNNEL-TRUTH HARD CONTRACT: free NEVER becomes pro.
+    // Missing / unknown / malformed / conflicting duplicates → free (unpaid).
+    var resolvedPlan = resolveCheckoutPlan(params);
+    selectPlan(resolvedPlan.plan);
 
     // Activate annual billing if URL param says so or pricing page set sessionStorage
-    if (!isAnnual && (isAnnualParam || (function(){ try{ return sessionStorage.getItem('billingMode') === 'annual'; }catch(e){ return false; } })())) {
+    if (!isAnnual && (resolvedPlan.annual || (function(){ try{ return sessionStorage.getItem('billingMode') === 'annual'; }catch(e){ return false; } })())) {
       toggleBilling();
     }
   }
