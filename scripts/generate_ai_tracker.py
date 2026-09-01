@@ -1098,7 +1098,7 @@ def main():
                 "severity":   r.get("severity", "MEDIUM"),
                 "tlp":        r.get("tlp_label", "TLP:CLEAR"),
                 "actor":      r.get("actor_tag", r.get("actor", "UNKNOWN")),
-                "epss":       float(apex.get("epss_score", r.get("epss", 0)) or 0),
+                "epss":       _parse_float(apex.get("epss_score", r.get("epss", 0))),
                 "cvss":       float(r.get("cvss", 0) or 0),
                 "conf":       float(apex.get("confidence_score", r.get("confidence", 50)) or 50),
                 "risk":       float(apex.get("predictive_score", r.get("risk_score", 5.0)) or 5.0),
