@@ -118,6 +118,20 @@ INCLUDE_FILES_PATTERN = [
     "sitemap.xml",
     "favicon.ico",
     "favicon.png",
+    # P0 FIX (2026-09-01): index.html's homepage demo-video section
+    # (<source src="/DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4">, added by #299)
+    # has been embedding this file since it was introduced, but nothing
+    # in this list ever included it -- confirmed live: the URL 404s on
+    # intel.cyberdudebivash.com right now, and this file is absent from
+    # every dist/ build (checked directly, not assumed). Named explicitly
+    # rather than a blanket "*.mp4" pattern, matching this list's existing
+    # convention of naming specific files rather than wildcarding binary
+    # assets -- this pipeline already treats large media deliberately
+    # (see the PDF exclusion below, added specifically to protect the
+    # GitHub Pages 1 GB hard limit). At 35.5 MB, adding this one file
+    # still leaves dist/ far under both that limit and this script's own
+    # 900 MB size gate.
+    "DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4",
 ]
 
 # ─────────────────────────────────────────────────────────────────
@@ -682,6 +696,17 @@ def main() -> int:
         # sitemap a human would think to check by hand was always fine.
         "sitemap-index.xml", "sitemap-cves.xml", "sitemap-threats.xml",
         "sitemap-reports.xml", "sitemap-iocs.xml", "sitemap-programmatic.xml",
+        # P0 FIX (2026-09-01): same 404 class as the two fixes above, a third
+        # time -- index.html's homepage demo-video section has embedded
+        # <source src="/DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4"> since #299
+        # introduced it, but this file (the list actually consulted by the
+        # loop below -- INCLUDE_FILES_PATTERN above documents the intended
+        # set but is never read by any code in this script) never included
+        # it. Confirmed live: the URL 404s on intel.cyberdudebivash.com right
+        # now, and the file is absent from every dist/ build. At 35.5 MB,
+        # adding it still leaves dist/ far under both this script's own
+        # 900 MB size gate and the GitHub Pages 1 GB hard limit.
+        "DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4",
     ]
     for fname in include_singles:
         src = REPO_ROOT / fname
