@@ -55,11 +55,14 @@ Cloudflare Worker. `workers/intel-gateway/src/` (the real source) is only 2.8MB 
 is fully reproducible via `npm install` from the properly-tracked `package.json`/`package-lock.json`
 — removing it from git has zero functional risk.
 
-**2. `DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4` (33.9MB, repo root)** is not referenced by any `.html`,
-`.js`, or `.md` file in the repository (grep-confirmed). Added 2026-08-04 in the same commit as the
-findings in #4 below. Not confidently classifiable as safe-to-delete from evidence alone — could be
-an intentional marketing asset awaiting a future embed. Recommendation: **ARCHIVE, not DELETE**,
-pending confirmation of intended use (see Phase 2 classification).
+**2. `DASHBOARD-OVERVIEW-LIVE-VIDEO.mp4` (33.9MB, repo root) — RESOLVED 2026-09-01: KEEP.** Added
+2026-08-04 in the same commit as the findings in #4 below, and until now was unreferenced by any
+`.html`, `.js`, or `.md` file in the repository (grep-confirmed) — flagged as an intentional
+marketing asset awaiting a future embed, pending confirmation of intended use. That confirmation has
+happened: it is now embedded in `index.html`'s homepage `#demo-video` section as a self-hosted
+HTML5 `<video>` (click-to-play, real dashboard footage), with a dedicated long-lived `Cache-Control`
+rule for this path in `_headers`. It is a live, customer-facing production asset — do not archive or
+delete it (see `PRODUCTION_SANITATION_DEPENDENCY_ANALYSIS.md` §4a).
 
 **3. `data/.manifest_backups/` (35 files, ~24MB) is tracked despite being explicitly gitignored.**
 Daily manifest snapshots from 2026-03-23 through at least 2026-03-26, ~700–740KB each. This looks
