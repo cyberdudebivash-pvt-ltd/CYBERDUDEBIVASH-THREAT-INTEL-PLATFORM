@@ -81,6 +81,13 @@ on:
       - 'js/**'
       - 'css/**'
       - '_headers'
+      # GAP FIX (2026-09-01, found while adding the stale-service-worker
+      # client-side recovery below): service-worker.js sits at repo root, so
+      # it matched none of the globs above -- a fix landing there alone would
+      # have silently gone back to being queued behind the 162-stage
+      # pipeline for hours, the exact failure mode this file's own header
+      # comment already documents fixing for index.html/js/css/_headers.
+      - 'service-worker.js'
   workflow_dispatch: {}
 
 permissions:
@@ -188,6 +195,26 @@ jobs:
       # one above, not a replacement.
       - name: Pre-deploy threat-map / demo-video render check (headless-browser)
         run: node render-test/verify_threat_map_chrome_render.js dist
+
+      # P0 FIX (2026-09-01): reported live as "Chrome customers blocked --
+      # all threat intel/feeds/reports fail to show and sync, dashboard
+      # empty". Matches a live incident this repo's own commit history
+      # already documents: a customer's browser stuck on a broken/outdated
+      # service worker intercepting /api/* with empty responses while the
+      # real API was healthy. That fix (updateViaCache:'none' + a
+      # visibilitychange re-check, service-worker.js v175/v176) makes the
+      # browser's own update *check* more reliable, but reproduced with a
+      # scripted harness: it does not guarantee an already-stuck browser
+      # recovers promptly (the new SW can sit in `waiting` across several
+      # real reloads without taking control). The actual fix is a
+      # client-side one in loadGOCIntel()'s terminal failure branch:
+      # unregister + clear caches + reload once, session-guarded, if a
+      # service worker is controlling the page when every manifest source
+      # has failed -- doesn't depend on SW update timing at all. See
+      # render-test/verify_stale_service_worker_recovery.js for the full
+      # rationale and the harness that proves it.
+      - name: Pre-deploy stale-service-worker recovery check (headless-browser)
+        run: node render-test/verify_stale_service_worker_recovery.js dist
 
       # v184.1-style pattern (see sentinel-blogger.yml STAGE 4.9.9): captured
       # immediately before the push so the freshness gate below can verify
