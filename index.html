@@ -6489,9 +6489,13 @@
             function buildHeatmap(items){
                 var el = document.getElementById('eicc-heatmap');
                 var ts = document.getElementById('eicc-heatmap-updated');
-                if(!el || !items || !items.length) return;
+                if(!el) return;
+                // v185.1 (CodeRabbit review, PR #314): an empty/missing items array must
+                // still resolve the panel out of its static "Loading region data..."
+                // markup -- falls through to the empty-state branch below instead of
+                // returning early and leaving the loading message stuck forever.
                 var regions = {};
-                items.forEach(function(it){
+                (items || []).forEach(function(it){
                     var src = it.source_country || it.actor_country || (it.tags && it.tags.find(function(t){return t&&t.length===2;})) || '';
                     if(src && src.length===2) regions[src.toUpperCase()] = (regions[src.toUpperCase()]||0)+1;
                 });
@@ -8769,7 +8773,7 @@
                     <div style="background:rgba(4,10,22,0.98);border:1px solid rgba(139,92,246,0.2);border-left:3px solid #8b5cf6;padding:18px 20px;border-radius:4px;">
                         <p style="font-family:var(--font-mono);font-size:8px;color:#8b5cf6;letter-spacing:3px;margin:0 0 12px 0;text-transform:uppercase;">🛡 STIX 2.1 EXPORT (PRO)</p>
                         <code style="font-family:var(--font-mono);font-size:11px;color:rgba(200,220,240,0.85);display:block;line-height:1.9;white-space:pre-wrap;"><span style="color:rgba(139,92,246,0.6);"># List TAXII collections, then export STIX objects (Pro/Enterprise)</span>
-<span style="color:#79b8ff;">curl</span> <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/api/taxii/collections/</span>   -H <span style="color:#9ecbff;">"Authorization: Bearer &lt;JWT&gt;"</span>
+<span style="color:#79b8ff;">curl</span> <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/api/taxii/root/collections/</span>   -H <span style="color:#9ecbff;">"Authorization: Bearer &lt;JWT&gt;"</span>
 
 <span style="color:rgba(139,92,246,0.6);"># Sigma rules export (SOC integration)</span>
 <span style="color:#79b8ff;">curl</span> <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/api/sigma/bulk</span>   -H <span style="color:#9ecbff;">"Authorization: Bearer &lt;JWT&gt;"</span></code>
