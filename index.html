@@ -6489,18 +6489,30 @@
             function buildHeatmap(items){
                 var el = document.getElementById('eicc-heatmap');
                 var ts = document.getElementById('eicc-heatmap-updated');
-                if(!el || !items || !items.length) return;
+                if(!el) return;
+                // v185.1 (CodeRabbit review, PR #314): an empty/missing items array must
+                // still resolve the panel out of its static "Loading region data..."
+                // markup -- falls through to the empty-state branch below instead of
+                // returning early and leaving the loading message stuck forever.
                 var regions = {};
-                items.forEach(function(it){
+                (items || []).forEach(function(it){
                     var src = it.source_country || it.actor_country || (it.tags && it.tags.find(function(t){return t&&t.length===2;})) || '';
                     if(src && src.length===2) regions[src.toUpperCase()] = (regions[src.toUpperCase()]||0)+1;
                 });
                 var known = {RU:'Russia',CN:'China',IR:'Iran',KP:'N.Korea',US:'USA',BR:'Brazil',IN:'India',DE:'Germany',UA:'Ukraine',TR:'Turkey'};
+                // v185.0: no synthetic fallback -- an honest "no data" state beats a
+                // plausible-looking fabricated heatmap. Every bar below is now backed
+                // by a real per-item source_country/actor_country/tag count; when zero
+                // items carry that attribution, show the empty state instead of guessing.
                 var sorted = Object.keys(regions).sort(function(a,b){return regions[b]-regions[a];}).slice(0,6);
-                if(!sorted.length) sorted = ['RU','CN','IR','KP','US','UA'];
-                var maxV = Math.max.apply(null, sorted.map(function(k){return regions[k]||Math.floor(Math.random()*40+10);}));
+                if(!sorted.length){
+                    el.innerHTML = '<div class="watchlist-empty" style="padding:24px 12px;">NO GEOGRAPHIC ATTRIBUTION DATA<br><span style="font-size:9px;">CURRENT ADVISORIES DO NOT INCLUDE SOURCE-COUNTRY TAGS</span></div>';
+                    if(ts) ts.textContent = '—';
+                    return;
+                }
+                var maxV = Math.max.apply(null, sorted.map(function(k){return regions[k];}));
                 el.innerHTML = sorted.map(function(code){
-                    var val  = regions[code] || Math.floor(Math.random()*40+10);
+                    var val  = regions[code];
                     var pct  = Math.round((val/maxV)*100);
                     var name = known[code]||code;
                     var col  = pct>75?'#ef4444':pct>45?'#f97316':'#f59e0b';
@@ -8752,7 +8764,7 @@
                     <div style="background:rgba(4,10,22,0.98);border:1px solid rgba(0,212,170,0.2);border-left:3px solid var(--accent);padding:18px 20px;border-radius:4px;">
                         <p style="font-family:var(--font-mono);font-size:8px;color:var(--accent);letter-spacing:3px;margin:0 0 12px 0;text-transform:uppercase;">⚡ AUTH &amp; FEED</p>
                         <code style="font-family:var(--font-mono);font-size:11px;color:rgba(200,220,240,0.85);display:block;line-height:1.9;white-space:pre-wrap;"><span style="color:rgba(0,212,170,0.6);"># 1. Get API Key → intel.cyberdudebivash.com</span>
-<span style="color:#79b8ff;">curl</span> -X POST <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/auth/login</span>   -H <span style="color:#9ecbff;">"Content-Type: application/json"</span>   -d <span style="color:#9ecbff;">'{"email":"you@org.com","password":"..."}'</span>
+<span style="color:#79b8ff;">curl</span> -X POST <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/api/auth/login</span>   -H <span style="color:#9ecbff;">"Content-Type: application/json"</span>   -d <span style="color:#9ecbff;">'{"api_key":"&lt;your-api-key&gt;"}'</span>
 
 <span style="color:rgba(0,212,170,0.6);"># 2. Fetch latest critical advisories</span>
 <span style="color:#79b8ff;">curl</span> <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/api/feed</span>   -H <span style="color:#9ecbff;">"Authorization: Bearer &lt;JWT&gt;"</span>   -G -d <span style="color:#9ecbff;">"severity=critical&amp;limit=10"</span></code>
@@ -8760,11 +8772,14 @@
                     <!-- STIX + SIEM -->
                     <div style="background:rgba(4,10,22,0.98);border:1px solid rgba(139,92,246,0.2);border-left:3px solid #8b5cf6;padding:18px 20px;border-radius:4px;">
                         <p style="font-family:var(--font-mono);font-size:8px;color:#8b5cf6;letter-spacing:3px;margin:0 0 12px 0;text-transform:uppercase;">🛡 STIX 2.1 EXPORT (PRO)</p>
-                        <code style="font-family:var(--font-mono);font-size:11px;color:rgba(200,220,240,0.85);display:block;line-height:1.9;white-space:pre-wrap;"><span style="color:rgba(139,92,246,0.6);"># Export STIX bundle (Pro/Enterprise)</span>
-<span style="color:#79b8ff;">curl</span> <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/api/stix/bundle</span>   -H <span style="color:#9ecbff;">"Authorization: Bearer &lt;JWT&gt;"</span>   -G -d <span style="color:#9ecbff;">"limit=50"</span>   -o <span style="color:#9ecbff;">stix_bundle.json</span>
+                        <code style="font-family:var(--font-mono);font-size:11px;color:rgba(200,220,240,0.85);display:block;line-height:1.9;white-space:pre-wrap;"><span style="color:rgba(139,92,246,0.6);"># 1. List TAXII collections (Pro/Enterprise)</span>
+<span style="color:#79b8ff;">curl</span> <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/api/taxii/root/collections/</span>   -H <span style="color:#9ecbff;">"Authorization: Bearer &lt;JWT&gt;"</span>
+
+<span style="color:rgba(139,92,246,0.6);"># 2. Export STIX objects from a collection</span>
+<span style="color:#79b8ff;">curl</span> <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/api/taxii/root/collections/sentinel-apex-critical/objects/</span>   -H <span style="color:#9ecbff;">"Authorization: Bearer &lt;JWT&gt;"</span>
 
 <span style="color:rgba(139,92,246,0.6);"># Sigma rules export (SOC integration)</span>
-<span style="color:#79b8ff;">curl</span> <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/api/sigma/rules</span>   -H <span style="color:#9ecbff;">"Authorization: Bearer &lt;JWT&gt;"</span></code>
+<span style="color:#79b8ff;">curl</span> <span style="color:#9ecbff;">https://intel.cyberdudebivash.com</span><span style="color:#f8f8f2;">/api/sigma/bulk</span>   -H <span style="color:#9ecbff;">"Authorization: Bearer &lt;JWT&gt;"</span></code>
                     </div>
                 </div>
                 <!-- Base URL footer -->
