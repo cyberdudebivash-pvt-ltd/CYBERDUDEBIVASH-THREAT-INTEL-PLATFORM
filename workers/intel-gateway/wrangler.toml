@@ -30,8 +30,14 @@ routes = [
 
 # v143.0.0: Cron trigger for scheduled webhook push + cache refresh
 # Fires every 15 minutes -- matches typical CTI pipeline run cadence
-[triggers]
-crons = ["*/15 * * * *"]
+#
+# v201.0: second cron string added for the live threat-indicator ingestion
+# pipeline (src/ingestion/cron_worker.js -- CISA KEV + URLhaus + Tor exit
+# nodes). Cloudflare Workers support multiple cron schedules on one
+# `scheduled()` handler; index.js's scheduled() branches on event.cron so
+# the "*/15 * * * *" entry above keeps calling fetchAndCacheCVEs() exactly
+# as before -- purely additive, zero change to the existing schedule.
+crons = ["*/15 * * * *", "0 */6 * * *"]
 
 [vars]
 GATEWAY_VERSION = "200.0"
@@ -138,14 +144,23 @@ bucket_name = "sentinel-apex-reports"
 # npx wrangler secret put STRIPE_ENT_PRICE_ID      -> Stripe Price ID for ENTERPRISE plan ($199/mo)
 # npx wrangler secret put REVENUE_ADMIN_SECRET     -> MUST be set to the exact same value as
 #                                                     workers/revenue-engine's own REVENUE_ADMIN_SECRET.
-#                                                     Used only to compute the customer-portal HMAC
-#                                                     token (see computePortalToken() in src/index.js)
-#                                                     so the welcome email's portal link validates
-#                                                     against revenue-engine's handleCustomerPortal() --
-#                                                     not used for admin auth in this Worker. Optional:
-#                                                     if unset, portal_url is simply omitted from the
-#                                                     activation email (see computePortalToken()), so
-#                                                     this ships with zero behavior change until set.
+#                                                     Two uses, both still not admin auth for THIS
+#                                                     Worker's own routes: (1) computes the customer-
+#                                                     portal HMAC token (computePortalToken() in
+#                                                     src/index.js) so the welcome email's portal link
+#                                                     validates against revenue-engine's
+#                                                     handleCustomerPortal(); (2) sent as the
+#                                                     X-Admin-Secret header when this Worker calls
+#                                                     revenue-engine's POST /api/automation/trigger
+#                                                     (maybeDispatchQuotaAlert() in src/index.js) to
+#                                                     queue the daily-quota 80% alert email -- that
+#                                                     route used to accept unauthenticated requests
+#                                                     from anyone (real, fixed defect; see
+#                                                     workers/revenue-engine's own automationTrigger()).
+#                                                     Optional for both uses: if unset, portal_url is
+#                                                     simply omitted from the activation email, and the
+#                                                     quota alert dispatch silently no-ops instead of
+#                                                     crashing a customer's actual API request.
 # v142.4.0: GOD-MODE PAYMENT ALERTS + BSC AUTO-VERIFY
 # npx wrangler secret put TG_BOT_TOKEN             -> Telegram bot token (from @BotFather)
 #                                                     Create: t.me/BotFather -> /newbot -> copy token

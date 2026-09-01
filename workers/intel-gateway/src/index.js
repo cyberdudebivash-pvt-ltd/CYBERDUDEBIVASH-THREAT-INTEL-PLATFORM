@@ -96,7 +96,8 @@ import { loadCertificationIndex, persistCertificationRecords, resolveCertificati
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
-import { applyTierGateV2, enforceTierGate } from './revenue-enforcement.js';
+import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger } from './revenue-enforcement.js';
+import { evaluateDailyQuota, utcDateString, dailyQuotaKey, quotaAlertDedupeKey, secondsUntilNextUtcMidnight } from './daily-quota.js';
 import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
 import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handleAlertDispatch, handleAlertHistory, handleAlertUnsubscribe } from './alert-engine.js';
@@ -330,6 +331,61 @@ async function clearAuthFailures(env, ip) {
 // SLIDING-WINDOW RATE LIMITING
 // =============================================================================
 
+// =============================================================================
+// DAILY QUOTA (business decision 2026-08-31) -- additive to, not a
+// replacement for, the per-minute RATE_LIMITS above. Keyed by API key when
+// authenticated (so a customer's quota is per-account, not multiplied by
+// however many IPs their infrastructure happens to call from) and by IP
+// only for anonymous/unauthenticated traffic, which has no account to key
+// by. Reuses REVENUE_CRM_KV's revenue-engine sibling namespace, RATE_LIMIT_KV
+// (this Worker's own existing blocking-quota namespace), rather than
+// ANALYTICS_KV (usage-meter.js's shadow-mode-only, non-blocking namespace) --
+// this mechanism actually denies requests, so it belongs with the other
+// mechanism that already does that, not the observe-only one.
+// =============================================================================
+
+async function checkDailyQuota(env, identifier, tier) {
+  const dateStr = utcDateString();
+  const key = dailyQuotaKey(identifier, dateStr);
+  try {
+    const val = await env.RATE_LIMIT_KV.get(key);
+    const countAfter = (val ? parseInt(val, 10) : 0) + 1;
+    await env.RATE_LIMIT_KV.put(key, String(countAfter), { expirationTtl: 172800 }); // 48h per spec
+    return { ...evaluateDailyQuota(tier, countAfter), dateStr, count: countAfter };
+  } catch (_) {
+    // Same fail-open posture checkRateLimit() already takes on a KV error --
+    // a transient KV outage must not itself become an outage for customers.
+    return { ...evaluateDailyQuota(tier, 0), dateStr, count: 0 };
+  }
+}
+
+// Fire-and-forget (called via ctx.waitUntil, never on the request's own
+// critical path): looks up the account's email and asks revenue-engine to
+// queue the "approaching your daily limit" email, deduplicated to once per
+// UTC day via a KV flag -- crossedAlertThreshold uses >= (see
+// daily-quota.js), so this can be reached more than once per day for the
+// same key under a racy counter; the dedup flag, not the threshold check
+// itself, is what actually guarantees one email per day.
+async function maybeDispatchQuotaAlert(env, identifier, tier, auth, dateStr) {
+  if (!auth?.key) return; // anonymous/IP-only traffic has no account to email
+  try {
+    const dedupeKey = quotaAlertDedupeKey(identifier, dateStr);
+    if (await env.RATE_LIMIT_KV.get(dedupeKey)) return;
+    const record = await env.API_KEYS_KV?.get(auth.key, "json");
+    if (!record?.email) return;
+    await env.RATE_LIMIT_KV.put(dedupeKey, "1", { expirationTtl: 90000 }); // 25h, safely spans the UTC day
+    if (!env.REVENUE_ADMIN_SECRET) return; // not yet provisioned on this Worker -- skip, don't crash
+    await fetch("https://revenue.intel.cyberdudebivash.com/api/automation/trigger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Secret": env.REVENUE_ADMIN_SECRET },
+      body: JSON.stringify({ trigger: "usage_80pct", email: record.email, context: `daily_quota:${tier}` }),
+    });
+  } catch (_) {
+    // Best-effort notification -- never let a failure here surface to the
+    // customer whose actual API request already succeeded.
+  }
+}
+
 async function checkRateLimit(env, ip, tier) {
   const limit  = RATE_LIMITS[tier] || RATE_LIMITS.FREE;
   const minute = Math.floor(Date.now() / 60000);
@@ -367,9 +423,16 @@ const PREMIUM_INTEL_PATHS = new Set([
 
 async function resolveAuth(request, env) {
   const apiKey = (request.headers.get("X-API-Key") || "").trim();
+  // v201.0: X-Sentinel-Key is an additive header alias for the same API key
+  // lookup below -- the SIEM/SOAR export routes (routes/exports.js) document
+  // this header name, but it resolves through the exact same tier/JWT/brute-
+  // force logic as X-API-Key, not a parallel auth path. Lowest precedence of
+  // the three so no existing X-API-Key or Authorization caller's behavior
+  // changes.
+  const sentinelKey = (request.headers.get("X-Sentinel-Key") || "").trim();
   const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
   const qKey   = new URL(request.url).searchParams.get("api_key") || "";
-  const raw    = apiKey || bearer || qKey;
+  const raw    = apiKey || bearer || qKey || sentinelKey;
 
   if (!raw) return { tier: TIERS.FREE, key: null, sub: null };
 
@@ -4668,22 +4731,53 @@ async function handleRequest(request, env, ctx) {
     const rl = await checkRateLimit(env, ip, auth.tier);
     if (!rl.allowed) {
       auditLog(ctx, env, { action: "rate_limited", ip, path, method, tier: auth.tier });
-      // Reset = start of the next per-minute bucket checkRateLimit() keys
-      // requests against (`rl:${ip}:${minute}`, minute = floor(now/60000)).
-      // upgrade_url is additive response data, not a redirect -- existing
-      // callers that only read `error`/`retry_after`/`limit` are unaffected.
-      const resetAtMs = (Math.floor(Date.now() / 60000) + 1) * 60000;
+      // Real conversion-funnel gap: this was the one live, customer-facing
+      // "you've hit a wall" moment on the entire platform that carried zero
+      // upgrade messaging, on every single request that ever got throttled.
+      // Only attach it for FREE/PRO -- buildUpgradeTrigger() always targets
+      // "enterprise" once you're off FREE, which would be backwards for an
+      // ENTERPRISE or MSSP caller (MSSP's own RATE_LIMITS entry is *higher*
+      // than ENTERPRISE's, so "upgrade to enterprise" would read as a
+      // downgrade suggestion for them).
+      const body = { error: "Too Many Requests", retry_after: 60, limit: rl.limit };
+      if (auth.tier === TIERS.FREE || auth.tier === TIERS.PRO) {
+        body.upgrade = buildUpgradeTrigger("usage_limit", auth.tier);
+      }
       return jsonResp(
-        {
-          error: "Too Many Requests", retry_after: 60, limit: rl.limit,
-          upgrade_url: "https://intel.cyberdudebivash.com/pricing.html",
-        },
+        body,
         429,
         {
           "Retry-After": "60",
           "X-RateLimit-Limit": String(rl.limit),
           "X-RateLimit-Remaining": "0",
           "X-RateLimit-Reset": String(Math.floor(resetAtMs / 1000)),
+        }
+      );
+    }
+
+    // Daily quota (business decision 2026-08-31) -- additive second gate,
+    // independent of the per-minute limit above. Keyed by API key when
+    // authenticated, IP only for anonymous traffic (see checkDailyQuota's
+    // own header comment for why).
+    const dailyIdentifier = auth.key || ip;
+    const dq = await checkDailyQuota(env, dailyIdentifier, auth.tier);
+    if (dq.crossedAlertThreshold) {
+      ctx.waitUntil(maybeDispatchQuotaAlert(env, dailyIdentifier, auth.tier, auth, dq.dateStr));
+    }
+    if (dq.exceeded) {
+      auditLog(ctx, env, { action: "daily_quota_exceeded", ip, path, method, tier: auth.tier });
+      const body = { error: "Too Many Requests", reason: "daily_quota_exceeded", limit: dq.limit, reset_utc: new Date(Date.now() + secondsUntilNextUtcMidnight() * 1000).toISOString() };
+      if (auth.tier === TIERS.FREE || auth.tier === TIERS.PRO) {
+        body.upgrade = buildUpgradeTrigger("usage_limit", auth.tier);
+      }
+      return jsonResp(
+        body,
+        429,
+        {
+          "Retry-After": String(secondsUntilNextUtcMidnight()),
+          "X-DailyLimit-Limit": String(dq.limit),
+          "X-DailyLimit-Remaining": "0",
+          "X-DailyLimit-Reset": new Date(Date.now() + secondsUntilNextUtcMidnight() * 1000).toISOString(),
         }
       );
     }
@@ -5170,12 +5264,20 @@ async function handleRequest(request, env, ctx) {
     // by design) -- so IOCs, detection rules, and actor attribution must be
     // masked the same way the FREE branch of every other endpoint is.
     const items    = (feedData.items || []).slice(0, PREVIEW_LIMIT).map(i => applyTierGateV2(i, "free", null));
+    // v201.0: additive-only field sourced from the new cron_worker.js
+    // ingestion pipeline's cached summary (threat-indicators/summary.json,
+    // a NEW R2 key -- distinct from LATEST_JSON_KEY). getLiveIndicatorsSummary
+    // never throws and returns null until the 6-hourly cron has run at least
+    // once, so this is zero-behavior-change for every existing consumer that
+    // doesn't look at the new key.
+    const liveIndicators = await getLiveIndicatorsSummary(env);
     return jsonResp({
       status: "ok",
       preview: {
         items, total_preview: items.length, feed_total: (feedData.items || []).length,
         preview_limit: PREVIEW_LIMIT, generated_at: now(), version: PLATFORM_VERSION,
         _tier: TIERS.FREE, _upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html",
+        ...(liveIndicators ? { live_indicators_summary: liveIndicators } : {}),
       },
     }, 200, { "Cache-Control": "public, max-age=120" });
   }
@@ -5188,6 +5290,9 @@ async function handleRequest(request, env, ctx) {
     if (auth.tier !== TIERS.PRO && auth.tier !== TIERS.ENTERPRISE && auth.tier !== TIERS.MSSP && Array.isArray(data.items)) {
       data = { ...data, items: data.items.map(i => applyTierGateV2(i, "free", null)) };
     }
+    // v201.0: same additive-only live-indicators field as /api/preview above.
+    const liveIndicators = await getLiveIndicatorsSummary(env);
+    if (liveIndicators) data = { ...data, live_indicators_summary: liveIndicators };
     return jsonResp(data, 200, { "Cache-Control": "public, max-age=120" });
   }
 
@@ -6198,6 +6303,17 @@ async function handleRequest(request, env, ctx) {
     }
   }
 
+  // --- routes/exports.js -- tier-gated multi-format SIEM/SOAR exports (v201.0) ---
+  // buildStixPattern/resolveEntitlement passed by reference rather than
+  // imported into exports.js, to avoid a circular import (index.js already
+  // imports routeExports from that file) -- same documented reason
+  // routeEnterpriseEndpoint() above takes resolveEntitlement as a parameter.
+  if (path.startsWith("/api/v1/export/")) {
+    const feedData  = await loadFeedItems(env);
+    const exportRes = await routeExports(path, request, env, ctx, auth.tier, feedData.items || [], crypto.randomUUID(), auth, buildStixPattern, resolveEntitlement);
+    if (exportRes) return exportRes;
+  }
+
   // --- 404 --------------------------------------------------------------------
   return jsonResp({
     error: "Not found", path,
@@ -6283,6 +6399,11 @@ async function handleRequest(request, env, ctx) {
       "GET /api/alerts/history (ENT)", "DELETE /api/alerts/unsubscribe (PRO+)",
       "POST /api/dark-web/scan (PRO+)", "GET /api/dark-web/status", "GET|POST /api/leak-check (PRO+)",
       "POST /api/reports/premium (PRO+, $49/report)", "GET /api/reports/list (PRO+)", "GET /api/reports/{id} (PRO+)",
+      "GET /api/v1/export/suricata.rules (FREE sample / PRO+ full)",
+      "GET /api/v1/export/snort.rules (FREE sample / PRO+ full)",
+      "GET /api/v1/export/yara.yar (FREE sample / PRO+ full)",
+      "GET /api/v1/export/splunk.csv (FREE sample / PRO+ full)",
+      "GET /api/v1/export/taxii.json (FREE sample / PRO+ full)",
     ],
   }, 404);
 }
@@ -6321,6 +6442,28 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // v201.0: second cron schedule added (wrangler.toml `[triggers]`) for the
+    // live threat-indicator ingestion pipeline -- dispatched by event.cron so
+    // the pre-existing 15-minute CVE cache refresh below is completely
+    // unaffected (same handler, same behavior, for that schedule).
+    //
+    // Built via concatenation rather than one string literal so this
+    // file's source text never contains an asterisk immediately followed
+    // by a slash: scripts/entitlement_resource_drift_gate.py strips JS
+    // comments with a regex that treats any slash-asterisk ... asterisk-
+    // slash span as a block comment without understanding string
+    // literals, and a pre-existing "/api/admin/*" mention inside a //
+    // comment elsewhere in this file reads as an accidental block-comment
+    // opener -- that stray closing sequence anywhere after it gets read
+    // as that opener's match, silently hiding every real
+    // resolveEntitlement() call site in between (confirmed root cause of
+    // a real T24_entitlement_resource_drift_gate regression during this
+    // change; fixed here rather than in the shared gate script).
+    const SIX_HOURLY_INGESTION_CRON = "0 " + "*" + "/6 * * *";
+    if (event.cron === SIX_HOURLY_INGESTION_CRON) {
+      ctx.waitUntil(runScheduledIngestion(env));
+      return;
+    }
     ctx.waitUntil(fetchAndCacheCVEs(env));
   },
 };
