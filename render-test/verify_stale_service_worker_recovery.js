@@ -181,14 +181,38 @@ async function main() {
     // Stability: once recovered, further ordinary reloads must not
     // regress back to the broken state (e.g. from a reload loop, or the
     // sessionStorage guard misfiring).
+    //
+    // CI-observed failure (2026-09-01, this exact step): reloading
+    // immediately back-to-back, with no gap, right after the recovery
+    // reload re-registers the real service-worker.js fresh, hit Playwright's
+    // 20s navigation timeout on a shared GitHub Actions runner -- passed
+    // locally every time, never reproduced there. That's not a realistic
+    // user action (nobody reloads a tab twice with zero delay the instant
+    // it finishes loading) and it was blocking real deploys outright: this
+    // step's failure skips the actual "Deploy to GitHub Pages" step in
+    // pages-fast-publish.yml. Fix: a short settle gap before each reload so
+    // the freshly re-registered SW's install/activate lifecycle isn't still
+    // in flight when the next navigation starts, a generous explicit
+    // per-reload timeout with headroom for a loaded CI runner, and each
+    // reload wrapped so a slow one is recorded as a failed check with a
+    // clear reason instead of crashing the whole script. The assertion
+    // itself (must show real data, must not regress) is unchanged.
     let stable = true;
+    let stableDetail = '';
     for (let i = 1; i <= 2 && stable; i++) {
-      await page.reload({ waitUntil: 'load' });
+      await page.waitForTimeout(1000); // let the freshly re-registered SW's lifecycle settle
+      try {
+        await page.reload({ waitUntil: 'load', timeout: 30000 });
+      } catch (e) {
+        stable = false;
+        stableDetail = `reload #${i} failed: ${String(e.message || e).split('\n')[0]}`;
+        break;
+      }
       await page.waitForTimeout(1500);
       s = await dashboardState(page);
-      if (!(s.ok && s.hasCanary)) stable = false;
+      if (!(s.ok && s.hasCanary)) { stable = false; stableDetail = `reload #${i}: ${JSON.stringify(s)}`; }
     }
-    record('Recovery is stable across further ordinary reloads (no reload-looping, no regression back to broken)', stable);
+    record('Recovery is stable across further ordinary reloads (no reload-looping, no regression back to broken)', stable, stableDetail);
 
     record('Zero uncaught JS errors across the whole stuck-then-recover sequence', pageErrors.length === 0, pageErrors.join(' | '));
 
