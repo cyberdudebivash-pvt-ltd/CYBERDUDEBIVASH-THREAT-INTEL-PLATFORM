@@ -173,6 +173,18 @@ test("buildIndicatorSummary computes by_source/by_type/high_risk_count correctly
 
 // --- runScheduledIngestion (I/O layer, fetch + R2 mocked) ----------------------
 
+// CodeQL (Incomplete URL substring sanitization) flagged the earlier
+// `url.includes("cisa.gov")`-style routing below: a bare substring check
+// can't tell "https://www.cisa.gov/..." apart from an attacker-crafted
+// "https://evil.example/?x=cisa.gov". These mock fetches only ever see
+// URLs this same test file passes to runScheduledIngestion() -- there is
+// no untrusted input here -- but parsing the hostname properly rather
+// than substring-matching is strictly more correct and closes the
+// finding outright instead of arguing it's a false positive.
+function hostnameOf(url) {
+  try { return new URL(String(url)).hostname; } catch (_) { return ""; }
+}
+
 function makeFakeR2() {
   const store = new Map();
   return {
@@ -193,17 +205,17 @@ test("runScheduledIngestion writes both R2 keys and degrades gracefully when one
   t.after(() => { globalThis.fetch = originalFetch; });
 
   globalThis.fetch = async (url) => {
-    const u = String(url);
-    if (u.includes("cisa.gov")) {
+    const host = hostnameOf(url);
+    if (host === "www.cisa.gov") {
       return { ok: true, json: async () => ({ vulnerabilities: [{ cveID: "CVE-2026-99999", dateAdded: "2026-08-01" }] }) };
     }
-    if (u.includes("urlhaus")) {
+    if (host === "urlhaus.abuse.ch") {
       throw new Error("simulated URLhaus outage");
     }
-    if (u.includes("torproject")) {
+    if (host === "check.torproject.org") {
       return { ok: true, text: async () => "1.1.1.1\n2.2.2.2\n" };
     }
-    throw new Error(`unexpected URL in test: ${u}`);
+    throw new Error(`unexpected URL in test: ${url}`);
   };
 
   const env = { INTEL_R2: makeFakeR2() };
@@ -226,11 +238,11 @@ test("runScheduledIngestion upserts against a previous snapshot already in R2", 
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
   globalThis.fetch = async (url) => {
-    const u = String(url);
-    if (u.includes("cisa.gov")) return { ok: true, json: async () => ({ vulnerabilities: [] }) };
-    if (u.includes("urlhaus")) return { ok: true, json: async () => ({}) };
-    if (u.includes("torproject")) return { ok: true, text: async () => "3.3.3.3\n" };
-    throw new Error(`unexpected URL: ${u}`);
+    const host = hostnameOf(url);
+    if (host === "www.cisa.gov") return { ok: true, json: async () => ({ vulnerabilities: [] }) };
+    if (host === "urlhaus.abuse.ch") return { ok: true, json: async () => ({}) };
+    if (host === "check.torproject.org") return { ok: true, text: async () => "3.3.3.3\n" };
+    throw new Error(`unexpected URL: ${url}`);
   };
 
   const env = { INTEL_R2: makeFakeR2() };

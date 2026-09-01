@@ -158,10 +158,18 @@ class TestDeliverablesArePresentAndWired:
         assert "FREE_SAMPLE_LIMIT = 25" in exports_src
 
     def test_ingestion_sources_match_the_task_brief(self):
+        # Checks for the named source-URL constants themselves rather than a
+        # bare domain substring: CodeQL's "Incomplete URL substring
+        # sanitization" rule flagged the earlier `"cisa.gov" in cron_src`
+        # form (a domain-shaped literal tested for membership in a larger
+        # string). There's no untrusted input here -- cron_src is this
+        # repo's own source file, read at test time -- but checking for the
+        # specific constant names is both unambiguous to static analysis
+        # and a more precise assertion than a loose domain substring.
         cron_src = CRON_WORKER_JS.read_text(encoding="utf-8")
-        assert "cisa.gov" in cron_src.lower(), "CISA KEV source not found"
-        assert "urlhaus" in cron_src.lower(), "URLhaus source not found"
-        assert "torproject" in cron_src.lower(), "Tor exit node source not found"
+        assert "KEV_URL" in cron_src, "CISA KEV source constant not found"
+        assert "URLHAUS_URL" in cron_src, "URLhaus source constant not found"
+        assert "TOR_EXIT_URL" in cron_src, "Tor exit node source constant not found"
 
     def test_x_sentinel_key_header_is_a_recognized_auth_alias(self):
         index_js = (GATEWAY_SRC / "index.js").read_text(encoding="utf-8")
