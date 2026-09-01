@@ -6384,7 +6384,16 @@
             function buildTicker(items){
                 var ticker = document.getElementById('eicc-ticker-inner');
                 var cnt    = document.getElementById('eicc-ticker-count');
-                if(!ticker || !items || !items.length) return;
+                if(!ticker) return;
+                // STAGE 2 FIX: an empty/missing feed previously left the static
+                // "Syncing live threat feed..." shimmer on screen indefinitely --
+                // same stuck-loading defect class CodeRabbit found in buildHeatmap
+                // (PR #314), applied to the other EICC widgets that share it.
+                if(!items || !items.length){
+                    ticker.innerHTML = '<span>No current threat intelligence available.</span>';
+                    if(cnt) cnt.textContent = '—';
+                    return;
+                }
                 var sevColor = {CRITICAL:'#ef4444',HIGH:'#f97316',MEDIUM:'#f59e0b',LOW:'#6b7280'};
                 var spans = items.slice(0,30).map(function(it){
                     var sev = _hEsc((it.severity||it.risk_level||'INFO').toUpperCase());
@@ -6426,13 +6435,21 @@
                     riskSum += parseFloat(it.risk_score||it.cvss_score||0);
                 });
                 var avgRisk = items.length ? (riskSum/items.length).toFixed(1) : '—';
-                var feeds   = data.feed_count || data.source_count || 74;
+                // STAGE 2 FIX (zero-fabrication): "|| 74" and "|| 'LIVE'" were
+                // fabricated fallback values -- 74 is not a measured feed count,
+                // and 'LIVE' is not a freshness claim backed by any timestamp.
+                // Both fields were very likely showing these constants on every
+                // real page load, since the live /api/feed.json response has no
+                // guarantee of carrying feed_count/source_count/last_updated/
+                // generated_at. Absent data now renders the same honest '—'
+                // placeholder already used before first paint, never a guess.
+                var feeds   = data.feed_count || data.source_count || '—';
                 var sync    = data.last_updated || data.generated_at || '';
                 var syncStr = sync ? (function(){
                     var d = new Date(sync);
                     var diff = Math.round((Date.now()-d)/60000);
                     return diff < 60 ? diff+'m ago' : Math.round(diff/60)+'h ago';
-                })() : 'LIVE';
+                })() : '—';
 
                 function set(id, val){ var el=document.getElementById(id); if(el) el.textContent=val; }
                 set('eicc-m-total',    total);
@@ -6449,7 +6466,14 @@
             // ── Feed preview helpers ────────────────────────────────────────
             function buildFeedPreview(items){
                 var el = document.getElementById('eicc-feed-preview');
-                if(!el || !items || !items.length) return;
+                if(!el) return;
+                // STAGE 2 FIX: same stuck-on-"Loading threat feed..." defect class
+                // as buildTicker/buildHeatmap -- an empty/missing feed must resolve
+                // to an explicit empty state, not leave the loading shimmer forever.
+                if(!items || !items.length){
+                    el.innerHTML = '<div class="watchlist-empty" style="padding:16px 8px;">NO CURRENT THREAT INTELLIGENCE<br><span style="font-size:9px;">CHECK BACK SHORTLY</span></div>';
+                    return;
+                }
                 var sevColor = {CRITICAL:'#ef4444',HIGH:'#f97316',MEDIUM:'#f59e0b',LOW:'#6b7280'};
                 var sevBg    = {CRITICAL:'rgba(239,68,68,0.1)',HIGH:'rgba(249,115,22,0.1)',MEDIUM:'rgba(245,158,11,0.1)',LOW:'rgba(107,114,128,0.08)'};
                 var top = items.filter(function(it){
@@ -6474,7 +6498,12 @@
                     }
                     var c     = sevColor[sev]||'var(--accent)';
                     var bg    = sevBg[sev]||'rgba(0,212,170,0.05)';
-                    var title = (it.title||it.name||it.id||'UNKNOWN').substring(0,72);
+                    // STAGE 2 FIX (Section 14, rendering security): title was
+                    // interpolated into innerHTML unescaped -- buildTicker(),
+                    // rendering the same untrusted feed items a few lines above,
+                    // already correctly wraps its own title with _hEsc(); this
+                    // call site was missed.
+                    var title = _hEsc((it.title||it.name||it.id||'UNKNOWN').substring(0,72));
                     var score = it.risk_score||it.cvss_score||'';
                     var scoreStr = score ? (' <span style="color:'+c+';font-weight:700;">'+parseFloat(score).toFixed(1)+'/10</span>') : '';
                     return '<div style="padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-left:3px solid '+c+';border-radius:3px;display:flex;align-items:center;gap:8px;min-width:0;">'
@@ -6532,25 +6561,32 @@
                 var el = document.getElementById('eicc-ai-predictions');
                 var ai = document.getElementById('eicc-soc-ai-status');
                 if(!el) return;
-                if(ai) ai.innerHTML='<span style="color:#10b981;">● ONLINE</span>';
                 var preds = [];
-                if(d && d.predictions) preds = d.predictions.slice(0,4);
-                else if(d && d.engine_alpha && d.engine_alpha.top_predicted_threats) preds = d.engine_alpha.top_predicted_threats.slice(0,4);
+                if(d && Array.isArray(d.predictions)) preds = d.predictions.slice(0,4);
+                else if(d && d.engine_alpha && Array.isArray(d.engine_alpha.top_predicted_threats)) preds = d.engine_alpha.top_predicted_threats.slice(0,4);
+                // STAGE 2 FIX (zero-fabrication, non-negotiable per mandate Section 8):
+                // previously, ANY failed/empty AI tracker response -- fetch failure,
+                // non-JSON, or a real response with no predictions -- unconditionally
+                // claimed "ONLINE" and rendered 4 hardcoded fake prediction records
+                // (plausible titles, invented probabilities/severities) as if they
+                // were live model output. Never manufacture an AI conclusion: only
+                // real, retrieved predictions are ever rendered; status reflects
+                // whether any were actually retrieved.
                 if(!preds.length){
-                    preds = [
-                        {threat:'Ransomware-as-a-Service escalation', probability:0.87, severity:'CRITICAL'},
-                        {threat:'Zero-day exploit broker activity', probability:0.74, severity:'HIGH'},
-                        {threat:'State-sponsored supply chain attack', probability:0.61, severity:'HIGH'},
-                        {threat:'AI-assisted phishing campaign surge', probability:0.55, severity:'MEDIUM'}
-                    ];
+                    if(ai) ai.innerHTML = '<span style="color:var(--text-muted);">● UNAVAILABLE</span>';
+                    el.innerHTML = '<div class="watchlist-empty" style="padding:16px 8px;">AI PREDICTIONS UNAVAILABLE<br><span style="font-size:9px;">NO CURRENT MODEL OUTPUT RETRIEVED</span></div>';
+                    return;
                 }
+                if(ai) ai.innerHTML='<span style="color:#10b981;">● ONLINE</span>';
                 var sevColor = {CRITICAL:'#ef4444',HIGH:'#f97316',MEDIUM:'#f59e0b'};
                 el.innerHTML = preds.map(function(p){
                     var prob = p.probability||p.confidence||0.5;
                     var pct  = Math.round(prob*100);
                     var sev  = (p.severity||'HIGH').toUpperCase();
                     var col  = sevColor[sev]||'#f59e0b';
-                    var name = (p.threat||p.name||p.title||'Unknown').substring(0,48);
+                    // STAGE 2 FIX (Section 14, rendering security): same unescaped-
+                    // innerHTML pattern as buildFeedPreview's title field, just above.
+                    var name = _hEsc((p.threat||p.name||p.title||'Unknown').substring(0,48));
                     return '<div>'
                          + '<div style="display:flex;justify-content:space-between;margin-bottom:3px;">'
                          +   '<span style="font-family:var(--font-mono);font-size:9px;color:var(--text);">'+name+'</span>'
@@ -6563,29 +6599,88 @@
             }
 
             // ── Main fetch orchestrator (idle priority) ─────────────────────
+            // STAGE 2 (dynamic frontend data plane): routed through
+            // window.ApexDataPlane (js/apex-data-plane.js) for contract-safe
+            // failure classification and a request guard, so a slow response
+            // superseded by a newer fetchAndRender() call can never overwrite
+            // the newer render. On total cascade exhaustion, every widget now
+            // reaches an explicit "unavailable" state instead of silently
+            // leaving its static loading shimmer on screen forever (the same
+            // defect class CodeRabbit found in buildHeatmap on PR #314,
+            // present identically in buildTicker/buildFeedPreview). Falls
+            // back to the original raw-fetch cascade, unchanged, if the new
+            // module did not load -- this must never be a hard dependency.
+            // Lazily created on first real use inside fetchAndRender(), not here:
+            // this whole block is parsed and run synchronously around line 6180,
+            // long before the js/apex-data-plane.js <script> tag (~line 16558)
+            // has loaded -- window.ApexDataPlane would still be undefined at this
+            // point even though it's available by the time fetchAndRender() is
+            // actually invoked (deferred via requestIdleCallback/800ms below).
+            var _eiccGuard = null;
+
+            function _eiccShowUnavailable(){
+                // Reuses each widget's own empty-state rendering (an empty
+                // array) for both "fetch failed" and "valid empty result" --
+                // both are honestly "nothing to show right now" to the
+                // customer. fillMetrics is deliberately NOT called here: it
+                // must keep the pre-paint '—' placeholders rather than
+                // overwrite them with zeroed-out metrics that would
+                // misrepresent "unknown" as "measured zero" (Stage 2 mandate
+                // Section 8 -- a genuine zero is different from unknown).
+                buildTicker([]);
+                buildFeedPreview([]);
+                buildHeatmap([]);
+            }
+
             function fetchAndRender(){
-                // Fetch live feed data
-                var tried = 0;
-                function tryManifest(i){
-                    if(i >= EICC_DATA_URLS.length) return;
-                    fetch(EICC_DATA_URLS[i]+'?_='+Date.now())
-                    .then(function(r){ return r.json(); })
-                    .then(function(data){
-                        var items = data.items || data.advisories || data.data || [];
-                        buildTicker(items);
-                        fillMetrics(data);
-                        buildFeedPreview(items);
-                        buildHeatmap(items);
-                    })
-                    .catch(function(){ tryManifest(i+1); });
+                if (window.ApexDataPlane) {
+                    if (!_eiccGuard) _eiccGuard = window.ApexDataPlane.createRequestGuard();
+                    var guardToken = _eiccGuard.start();
+                    (async function(){
+                        var result = null;
+                        for (var i = 0; i < EICC_DATA_URLS.length; i++) {
+                            result = await window.ApexDataPlane.fetchJSON(EICC_DATA_URLS[i] + '?_=' + Date.now(), { signal: guardToken.signal, timeoutMs: 10000 });
+                            if (result.ok) break;
+                        }
+                        if (!_eiccGuard.isCurrent(guardToken.token)) return; // superseded while awaiting
+                        if (result && result.ok) {
+                            var items = result.data.items || result.data.advisories || result.data.data || [];
+                            buildTicker(items);
+                            fillMetrics(result.data);
+                            buildFeedPreview(items);
+                            buildHeatmap(items);
+                        } else {
+                            _eiccShowUnavailable();
+                        }
+                    })();
+                } else {
+                    var tried = 0;
+                    function tryManifest(i){
+                        if(i >= EICC_DATA_URLS.length){ _eiccShowUnavailable(); return; }
+                        fetch(EICC_DATA_URLS[i]+'?_='+Date.now())
+                        .then(function(r){ return r.json(); })
+                        .then(function(data){
+                            var items = data.items || data.advisories || data.data || [];
+                            buildTicker(items);
+                            fillMetrics(data);
+                            buildFeedPreview(items);
+                            buildHeatmap(items);
+                        })
+                        .catch(function(){ tryManifest(i+1); });
+                    }
+                    tryManifest(0);
                 }
-                tryManifest(0);
 
                 // Fetch AI predictions
-                fetch(AI_TRACKER_URL+'?_='+Date.now())
-                .then(function(r){ return r.json(); })
-                .then(function(d){ fillAIPredictions(d); })
-                .catch(function(){ fillAIPredictions(null); });
+                if (window.ApexDataPlane) {
+                    window.ApexDataPlane.fetchJSON(AI_TRACKER_URL+'?_='+Date.now(), { timeoutMs: 10000 })
+                    .then(function(res){ fillAIPredictions(res.ok ? res.data : null); });
+                } else {
+                    fetch(AI_TRACKER_URL+'?_='+Date.now())
+                    .then(function(r){ return r.json(); })
+                    .then(function(d){ fillAIPredictions(d); })
+                    .catch(function(){ fillAIPredictions(null); });
+                }
             }
 
             // Defer until idle or 800ms whichever comes first
@@ -16554,6 +16649,13 @@ function renderTopThreats(data) {
 <!-- /CDB-PAYMENT-GATEWAY-STRIP v149 -->
 
 <div id="cdb-upgrade-banner" style="display:none" aria-hidden="true"></div>
+
+<!-- STAGE 2 (dynamic frontend data plane): additive, no dependency on the
+     protected load-order block below at module-eval time (window.* refs are
+     resolved lazily, inside function bodies, when a caller actually invokes
+     them) -- placed here rather than inside that block so it is never
+     mistaken for part of the ordering it explicitly protects. -->
+<script src="/js/apex-data-plane.js"></script>
 
 <!-- ═══════════════════════════════════════════════════════════════════════
      SENTINEL APEX CARD RENDERER INTEGRATION &mdash; v184.0

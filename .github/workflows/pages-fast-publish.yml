@@ -216,6 +216,31 @@ jobs:
       - name: Pre-deploy stale-service-worker recovery check (headless-browser)
         run: node render-test/verify_stale_service_worker_recovery.js dist
 
+      # STAGE 2 (SENTINEL APEX Dynamic Frontend Transformation, 2026-09-01):
+      # proves the EICC panel's zero-fabrication fixes (fillAIPredictions'
+      # hardcoded fake predictions + false ONLINE claim, fillMetrics' "74"/
+      # "LIVE" fallbacks, buildTicker/buildFeedPreview's stuck-loading state
+      # on total fetch failure) and the new js/apex-data-plane.js-routed
+      # fetch cascade's rendering-security escaping, against the real page --
+      # see render-test/verify_eicc_zero_fabrication_states.js for the full
+      # rationale.
+      - name: Pre-deploy EICC zero-fabrication + rendering-security check (headless-browser)
+        run: node render-test/verify_eicc_zero_fabrication_states.js dist
+
+      # STAGE 2 (SENTINEL APEX Dynamic Frontend Transformation, 2026-09-01):
+      # js/__tests__/*.test.js (Node's built-in test runner, no extra
+      # dependency) already existed -- api_adapter/dashboard_contract_validator/
+      # dashboard-state/metric-normalize/index_html_* coverage, 118 tests --
+      # but was not wired into any CI workflow (confirmed: no reference to
+      # js/__tests__ anywhere under .github/workflows/ before this change),
+      # so a real regression in any of those already-tested modules could
+      # reach production undetected. Additive: a new gate alongside the
+      # render-test ones above, reusing the exact `node --test` invocation
+      # this repo's own backend workflows already use (deploy-worker.yml,
+      # deploy-revenue-engine.yml), not a new test-running mechanism.
+      - name: Pre-deploy JS unit test suite (js/__tests__/, node --test)
+        run: node --test js/__tests__/*.test.js
+
       # v184.1-style pattern (see sentinel-blogger.yml STAGE 4.9.9): captured
       # immediately before the push so the freshness gate below can verify
       # the live site actually picked up THIS run's deploy.
