@@ -92,7 +92,21 @@ def test_wrangler_toml_has_the_durable_object_binding_and_migration():
     assert "[[env.production.durable_objects.bindings]]" in text
     assert 'class_name = "GumroadProvisioningLock"' in text
     assert "[[migrations]]" in text
-    assert 'new_classes = ["GumroadProvisioningLock"]' in text
+    assert 'new_sqlite_classes = ["GumroadProvisioningLock"]' in text
+
+
+def test_wrangler_toml_migration_uses_sqlite_backed_classes_not_the_deprecated_kv_backed_type():
+    """Production incident (2026-09-01, PR #296): `new_classes` (classic
+    KV-backed Durable Object storage) failed to deploy with Cloudflare API
+    error [code: 10099] -- this account only allows creating new namespaces
+    via `new_sqlite_classes`. Regression guard against reintroducing the
+    deprecated key."""
+    text = WRANGLER_TOML.read_text(encoding="utf-8")
+    # Checks the actual TOML key assignment, not just the word "new_classes"
+    # -- the incident comment above the migration block legitimately mentions
+    # it in prose to document what NOT to use.
+    assert "new_classes =" not in text
+    assert 'new_sqlite_classes = ["GumroadProvisioningLock"]' in text
 
 
 def test_wrangler_toml_migrations_block_is_not_duplicated_per_environment():
@@ -102,4 +116,4 @@ def test_wrangler_toml_migrations_block_is_not_duplicated_per_environment():
     duplicated there (see every other binding in this file)."""
     text = WRANGLER_TOML.read_text(encoding="utf-8")
     assert "[[env.production.migrations]]" not in text
-    assert text.count("new_classes = [\"GumroadProvisioningLock\"]") == 1
+    assert text.count('new_sqlite_classes = ["GumroadProvisioningLock"]') == 1
