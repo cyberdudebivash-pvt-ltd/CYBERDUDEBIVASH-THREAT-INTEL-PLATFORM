@@ -17,48 +17,32 @@
 // get-then-put sequence inside the DO's own fetch handler is genuinely
 // atomic in a way the same sequence against shared KV never can be.
 //
-// DELIBERATE SCOPE LIMIT (owner decision, 2026-09-01): this file provides a
-// fully unit-tested foundation only. It is NOT wired into wrangler.toml (no
-// [[durable_objects.bindings]], no [[migrations]] block) and NOT called from
-// handleWebhookGumroad. Both are real, one-time deploy-time actions that
-// this session has no way to verify: a Durable Object migration applies
-// unconditionally the next time `wrangler deploy` runs (deploy-worker.yml
-// fires on every push to main, not on PRs, so nothing validates this before
-// it would already be live), Durable Objects require Cloudflare account
-// support that hasn't been confirmed here, and there is no prior Durable
-// Object anywhere in this codebase to pattern-match wrangler.toml syntax
-// against. Getting the migration wrong wouldn't just leave a feature
-// inert -- it would fail every future `wrangler deploy` of this live
-// payment gateway until someone fixes or reverts wrangler.toml.
+// ACTIVATED (2026-09-01): a human confirmed Durable Objects are enabled for
+// this Cloudflare account (the risk this file originally deferred on -- a
+// migration applies unconditionally the next time `wrangler deploy` runs,
+// and deploy-worker.yml fires on every push to main with nothing validating
+// it on a PR first). This class is now:
+//   1. Bound in workers/intel-gateway/wrangler.toml, both the top-level
+//      [[durable_objects.bindings]] and [[env.production.durable_objects.bindings]]
+//      sections (matching every other binding's duplication there), plus a
+//      single top-level [[migrations]] block (migrations are tracked once
+//      per Worker script, not duplicated per-environment).
+//   2. Re-exported from index.js: `export { GumroadProvisioningLock } from
+//      './gumroad-provisioning-lock.js';` -- required so the Workers
+//      runtime can instantiate it.
+//   3. Called from handleWebhookGumroad(), before the pre-existing
+//      SECURITY_HUB_KV get/put idempotency pair: a request is routed to
+//      this class via `env.GUMROAD_PROVISIONING_LOCK.idFromName(sale_id)`,
+//      and an `alreadyClaimed: true` response short-circuits with
+//      `{ status: "already_provisioned", sale_id }` before
+//      provisionApiKey() is ever called. The KV pair stays underneath,
+//      unchanged, as defense-in-depth and as the fallback if the DO call
+//      itself throws (see the try/catch around it in handleWebhookGumroad).
 //
-// To activate this once you've confirmed Durable Objects are available for
-// the account:
-//   1. Add to workers/intel-gateway/wrangler.toml (both the top-level
-//      section and the [env.production] section, matching every other
-//      binding's duplication there):
-//        [[durable_objects.bindings]]
-//        name         = "GUMROAD_PROVISIONING_LOCK"
-//        class_name   = "GumroadProvisioningLock"
-//      and, once (not duplicated per-env):
-//        [[migrations]]
-//        tag         = "v1-gumroad-provisioning-lock"
-//        new_classes = ["GumroadProvisioningLock"]
-//   2. Export the class from index.js: add
-//        export { GumroadProvisioningLock } from './gumroad-provisioning-lock.js';
-//      after the existing named re-exports.
-//   3. In handleWebhookGumroad, before calling provisionApiKey(), replace the
-//      SECURITY_HUB_KV.get/put idempotency pair with a call through the DO:
-//        const lockId  = env.GUMROAD_PROVISIONING_LOCK.idFromName(sale_id);
-//        const lock    = env.GUMROAD_PROVISIONING_LOCK.get(lockId);
-//        const claimed = await (await lock.fetch("https://lock/claim", {
-//          method: "POST", body: JSON.stringify({ saleId: sale_id }),
-//        })).json();
-//        if (claimed.alreadyClaimed) return jsonResp({ status: "already_provisioned", sale_id });
-//      Existing SECURITY_HUB_KV idempotency stays as defense-in-depth
-//      underneath, unchanged.
-//   4. Deploy once, confirm the migration applied cleanly (check the
-//      Cloudflare dashboard's Durable Objects tab, or `wrangler deployments
-//      list`), THEN merge the handleWebhookGumroad wiring in step 3.
+// tests/test_gumroad_provisioning_lock_foundation.py now asserts this wired
+// state directly (index.js references this class, wrangler.toml has the
+// binding + migration, the DO claim runs before the KV check) instead of
+// asserting their absence.
 // =============================================================================
 
 /**
@@ -84,12 +68,11 @@ export function decideProvisioningClaim(existingClaim, now = Date.now()) {
 }
 
 /**
- * Durable Object class. Not exported from index.js and not bound in
- * wrangler.toml yet (see header comment) -- inert until both are done, so
- * this class is never instantiated by the Workers runtime today. Kept
- * intentionally thin: all the actual decision logic lives in
- * decideProvisioningClaim() above, so this class has nothing left to get
- * wrong beyond storage plumbing.
+ * Durable Object class. Exported from index.js and bound in wrangler.toml
+ * as GUMROAD_PROVISIONING_LOCK (see header comment) -- instantiated once
+ * per sale_id via idFromName(). Kept intentionally thin: all the actual
+ * decision logic lives in decideProvisioningClaim() above, so this class
+ * has nothing left to get wrong beyond storage plumbing.
  */
 export class GumroadProvisioningLock {
   constructor(state, _env) {
