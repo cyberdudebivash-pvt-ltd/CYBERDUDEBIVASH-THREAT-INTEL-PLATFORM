@@ -4,6 +4,7 @@ import {
   inferGumroadTier,
   inferGumroadBillingCycle,
   isGumroadCancellationEvent,
+  isGumroadAccessRevokingEvent,
 } from "../gumroad-lifecycle.js";
 
 // ---------------------------------------------------------------------------
@@ -74,4 +75,21 @@ test("isGumroadCancellationEvent: cancelled: 'false' is not a cancellation", () 
 test("isGumroadCancellationEvent: handles an empty/undefined payload", () => {
   assert.equal(isGumroadCancellationEvent({}), false);
   assert.equal(isGumroadCancellationEvent(undefined), false);
+});
+
+test("isGumroadAccessRevokingEvent: cancelled: 'true' alone does NOT revoke (auto-renewal off, period still paid for)", () => {
+  assert.equal(isGumroadAccessRevokingEvent({ cancelled: "true" }), false);
+});
+
+test("isGumroadAccessRevokingEvent: ended: 'true' does revoke (period actually over)", () => {
+  assert.equal(isGumroadAccessRevokingEvent({ ended: "true" }), true);
+});
+
+test("isGumroadAccessRevokingEvent: both cancelled and ended true still revokes", () => {
+  assert.equal(isGumroadAccessRevokingEvent({ cancelled: "true", ended: "true" }), true);
+});
+
+test("isGumroadAccessRevokingEvent: handles an empty/undefined payload", () => {
+  assert.equal(isGumroadAccessRevokingEvent({}), false);
+  assert.equal(isGumroadAccessRevokingEvent(undefined), false);
 });

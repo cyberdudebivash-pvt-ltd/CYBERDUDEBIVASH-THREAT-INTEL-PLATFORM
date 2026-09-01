@@ -34,10 +34,17 @@ export function inferGumroadTier(productName, variants) {
 }
 
 /**
- * Gumroad sends `recurrence` ("monthly" | "quarterly" | "yearly") on
- * subscription products -- a more reliable signal than parsing the product
- * name/variant text for "annual". Falls back to the existing text-parse
- * behavior when recurrence is absent (one-time / legacy products).
+ * Gumroad sends `recurrence` on subscription products: "monthly",
+ * "quarterly", "biannually", "yearly", or "every_two_years". This platform's
+ * billing model (provisionApiKey's cycleDays, and every Razorpay/Gumroad
+ * price table in pricing-data.json / GUMROAD_URLS) only has two buckets --
+ * monthly and annual -- so "quarterly"/"biannually"/"every_two_years"
+ * collapse to "monthly" here, the same as they always have. No configured
+ * Gumroad product currently uses those recurrences (GUMROAD_URLS in
+ * upgrade.html only lists monthly/annual variants); if one ever does,
+ * provisionApiKey's cycleDays needs a third bucket before this can be
+ * accurate for it -- that's a cross-gateway pricing-model change, out of
+ * scope here.
  * @param {string} recurrence
  * @param {string} productName
  * @param {string} variants
@@ -60,4 +67,19 @@ export function isGumroadCancellationEvent(formData) {
   const cancelled = String(formData.cancelled || "").toLowerCase();
   const ended = String(formData.ended || "").toLowerCase();
   return cancelled === "true" || ended === "true";
+}
+
+/**
+ * `cancelled: "true"` alone means the buyer turned off auto-renewal -- the
+ * current paid period is not affected, so access must continue until it
+ * actually ends. Only `ended: "true"` (Gumroad's ping once the subscription
+ * has actually terminated) means access should be revoked now. Without this
+ * distinction, a customer who cancels on day 1 of a 30-day period would
+ * lose access to 29 days they already paid for.
+ * @param {Record<string, string>} formData raw Gumroad Ping form fields
+ * @returns {boolean} true only once access should actually be revoked
+ */
+export function isGumroadAccessRevokingEvent(formData) {
+  if (!formData) return false;
+  return String(formData.ended || "").toLowerCase() === "true";
 }

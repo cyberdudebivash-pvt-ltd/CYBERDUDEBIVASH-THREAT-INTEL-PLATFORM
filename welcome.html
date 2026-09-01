@@ -33,11 +33,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:20px}
 .card-title{font-family:var(--mono);font-size:10px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:16px}
 
-.key-box{display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid rgba(0,212,255,.3);border-radius:8px;padding:14px 16px;margin-bottom:12px}
-.key-box code{flex:1;font-family:var(--mono);font-size:13px;color:var(--accent);word-break:break-all}
-.copy-btn{flex-shrink:0;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;color:#fff;background:linear-gradient(135deg,#00d4ff,#0891b2);border:none;padding:9px 16px;border-radius:6px;cursor:pointer;white-space:nowrap;transition:opacity .2s}
-.copy-btn:hover{opacity:.85}
-.copy-btn.copied{background:linear-gradient(135deg,#22c55e,#16a34a)}
 
 .snippet{background:#050a12;border:1px solid var(--border);border-radius:8px;padding:14px 16px;font-family:var(--mono);font-size:12px;color:#94a3b8;overflow-x:auto;white-space:pre;margin-bottom:10px}
 .snippet .tab{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:6px}
@@ -82,25 +77,17 @@ footer{border-top:1px solid var(--border);padding:24px 32px;text-align:center;fo
     </div>
   </div>
 
-  <div id="key-panel" class="card" style="display:none;">
-    <div class="card-title">Your API Key</div>
-    <div class="key-box">
-      <code id="api-key-value">—</code>
-      <button class="copy-btn" id="copy-key-btn" onclick="cdbCopyApiKey()">Copy API Key</button>
-    </div>
-    <p style="font-size:12px;color:var(--muted);">Use this key with the <code>X-API-Key</code> header on every request. Keep it secret — treat it like a password.</p>
-  </div>
-
   <div class="card">
     <div class="card-title">Quickstart</div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">Swap in the key from your activation email wherever you see <code>YOUR_API_KEY</code> below. Keep it secret -- treat it like a password.</p>
     <div class="snippet"><span class="tab">cURL</span>
-curl -H "X-API-Key: <span id="snip-key-curl">YOUR_API_KEY</span>" \
+curl -H "X-API-Key: YOUR_API_KEY" \
   https://intel.cyberdudebivash.com/api/v1/intel/apex.json</div>
     <div class="snippet"><span class="tab">Python</span>
 import requests
 r = requests.get(
     "https://intel.cyberdudebivash.com/api/v1/intel/apex.json",
-    headers={"X-API-Key": "<span id="snip-key-py">YOUR_API_KEY</span>"}
+    headers={"X-API-Key": "YOUR_API_KEY"}
 )
 print(r.json())</div>
     <a href="/api-docs.html">Full API documentation &rarr;</a>
@@ -131,7 +118,6 @@ print(r.json())</div>
   var params  = new URLSearchParams(window.location.search);
   var gateway = (params.get('gateway') || '').toLowerCase();
   var email   = params.get('email') || '';
-  var apiKey  = params.get('api_key') || '';
   var plan    = (params.get('plan') || '').toLowerCase();
 
   var PLAN_NAMES = { pro: 'PRO Defense', enterprise: 'Enterprise SOC', mssp: 'MSSP / White-Label' };
@@ -144,48 +130,21 @@ print(r.json())</div>
   // Gumroad: checkout happened entirely on Gumroad's hosted page -- the key
   // itself never reaches this URL, only (at most) email/plan. It is
   // delivered by email instead (see handleWebhookGumroad -> sendActivationEmail
-  // in workers/intel-gateway/src/index.js).
+  // in workers/intel-gateway/src/index.js). The API key is deliberately never
+  // read from or displayed via a URL parameter here: a live credential
+  // traveling in a query string can leak through browser history, referrer
+  // headers, and access logs. Razorpay's own checkout flow (upgrade.html)
+  // already shows the key inline the moment payment verifies server-side --
+  // this page never needs to carry it at all.
   if (gateway === 'gumroad') {
     document.getElementById('gumroad-panel').style.display = '';
     if (email) document.getElementById('gr-email').textContent = email;
-  }
-
-  // If an API key is present in the URL (e.g. an admin-assisted manual
-  // activation link), display it directly with a copy button and drop it
-  // into the quickstart snippets. Razorpay's own checkout flow (upgrade.html)
-  // already shows the key inline the moment payment verifies -- this page's
-  // Razorpay-adjacent role is only this same-key-display fallback, not a
-  // second checkout or status-polling implementation.
-  if (apiKey) {
-    document.getElementById('key-panel').style.display = '';
-    document.getElementById('api-key-value').textContent = apiKey;
-    document.getElementById('snip-key-curl').textContent = apiKey;
-    document.getElementById('snip-key-py').textContent = apiKey;
-    document.getElementById('hero-badge-text').textContent = 'API Key Ready';
-  } else if (gateway !== 'gumroad') {
+  } else {
     document.getElementById('hero-desc').textContent =
       'If you just completed a Razorpay payment, your API key was already shown on the checkout page. ' +
       'Lost it? Contact support and we\'ll help you recover access.';
   }
 })();
-
-function cdbCopyApiKey() {
-  var key = document.getElementById('api-key-value').textContent;
-  var btn = document.getElementById('copy-key-btn');
-  var done = function() {
-    btn.textContent = 'Copied!';
-    btn.classList.add('copied');
-    setTimeout(function() { btn.textContent = 'Copy API Key'; btn.classList.remove('copied'); }, 1800);
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(key).then(done).catch(function() {});
-  } else {
-    var ta = document.createElement('textarea');
-    ta.value = key; document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); done(); } catch (e) {}
-    document.body.removeChild(ta);
-  }
-}
 </script>
 </body>
 </html>

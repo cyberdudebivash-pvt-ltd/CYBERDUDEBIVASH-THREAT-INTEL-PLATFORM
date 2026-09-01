@@ -148,6 +148,32 @@ def test_gumroad_webhook_handles_cancellation_event(gumroad_webhook_body: str):
     )
 
 
+def test_gumroad_webhook_does_not_revoke_on_cancel_intent_alone(gumroad_webhook_body: str):
+    """cancelled:"true" alone means auto-renewal was turned off -- the buyer
+    already paid for the current period, so access must not be revoked
+    until ended:"true" (the period actually finishing) arrives. Revoking
+    immediately on cancelled:"true" would cut off access a customer already
+    paid for."""
+    assert "isGumroadAccessRevokingEvent" in gumroad_webhook_body, (
+        "must gate the actual revoke on a separate, stricter check than "
+        "isGumroadCancellationEvent (which is also true for cancel-intent-only pings)"
+    )
+    assert "cancellation_recorded" in gumroad_webhook_body, (
+        "a cancel-intent-only ping must return a distinct status, not silently "
+        "no-op or be indistinguishable from an actual revoke"
+    )
+
+
+def test_gumroad_webhook_alerts_on_activation_email_failure(gumroad_webhook_body: str):
+    """sendActivationEmail() fails closed (returns false, never throws) --
+    the webhook must check that return value and raise visibility when it's
+    false, since the customer has a valid key with no way to learn it
+    otherwise. A bare try/catch around the call (ignoring the return value)
+    is not enough."""
+    assert "emailSent" in gumroad_webhook_body
+    assert "GUMROAD ACTIVATION EMAIL FAILED" in gumroad_webhook_body
+
+
 def test_gumroad_webhook_provisioning_writes_subscription_map(gumroad_webhook_body: str):
     assert "gumroad_sub_key_map:${subscription_id}" in gumroad_webhook_body.replace(" ", ""), (
         "a new recurring sale must record subscription_id -> apiKey so a later "
@@ -265,7 +291,21 @@ def test_welcome_html_exists_and_handles_gumroad_redirect():
     assert not data.startswith("﻿"), "welcome.html: BOM detected"
     assert "gateway" in data
     assert "gumroad-panel" in data
-    assert "cdbCopyApiKey" in data, "expected a 1-click copy-API-key affordance"
+
+
+def test_welcome_html_never_reads_api_key_from_url(index_html_text: str, upgrade_html_text: str):
+    """Regression guard: a live API key must never be read from or echoed
+    into this page via a URL query parameter -- it can leak through browser
+    history, referrer headers, and access logs. Gumroad delivers the key by
+    email; Razorpay's checkout page already shows it inline server-side."""
+    data = WELCOME_HTML.read_text(encoding="utf-8")
+    # "YOUR_API_KEY" placeholder text in the quickstart snippets is fine --
+    # what must never come back is code reading a live key out of the URL.
+    assert "params.get('api_key')" not in data
+    assert 'params.get("api_key")' not in data
+    # welcome.html must not be linked to with a live key in the query string either
+    assert "welcome.html?api_key=" not in index_html_text
+    assert "welcome.html?api_key=" not in upgrade_html_text
 
 
 @needs_node
