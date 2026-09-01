@@ -1,9 +1,9 @@
-# CYBERDUDEBIVASH® SENTINEL APEX v184.0
+# CYBERDUDEBIVASH® SENTINEL APEX v200.0
 
 **AI-Powered Global Threat Intelligence Platform** — Real-time IOC feeds, STIX 2.1 exports, MITRE ATT&CK mapping, and enterprise SOC automation.
 
 [![Platform Status](https://img.shields.io/badge/Platform-OPERATIONAL-00d4aa?style=flat-square)](https://intel.cyberdudebivash.com)
-[![Version](https://img.shields.io/badge/Version-v184.0-blueviolet?style=flat-square)](https://intel.cyberdudebivash.com)
+[![Version](https://img.shields.io/badge/Version-v200.0-blueviolet?style=flat-square)](https://intel.cyberdudebivash.com)
 [![Stability](https://img.shields.io/badge/Stability-GOD--MODE-gold?style=flat-square)](https://intel.cyberdudebivash.com)
 [![API](https://img.shields.io/badge/API-STIX%202.1-0078d7?style=flat-square)](https://intel.cyberdudebivash.com/api-docs.html)
 [![GSTIN](https://img.shields.io/badge/GSTIN-21ARKPN8270G1ZP-lightgrey?style=flat-square)](https://intel.cyberdudebivash.com/trust-center.html)

@@ -1061,18 +1061,24 @@ def module_executive_decision(item: Dict, evidence: Dict) -> Dict:
 # MODULE 7: COMPLIANCE & LEGAL SAFETY ENGINE
 # ══════════════════════════════════════════════════════════════════════════════
 
+# TLP reflects how RESTRICTED intelligence is (FIRST.org TLP 2.0), not how
+# severe the underlying threat is. Every source in this pipeline is a public
+# feed/API (RSS, CISA KEV, NVD, vendor blogs) -- there is no non-public
+# ingestion path today -- so classification is capped at CLEAR/GREEN
+# regardless of severity. AMBER/RED require an explicit, source-asserted
+# restriction and must never be inferred from severity alone.
 _TLP_MAP = {
-    "CRITICAL": "TLP:RED",
-    "HIGH":     "TLP:AMBER",
-    "MEDIUM":   "TLP:AMBER",
-    "LOW":      "TLP:GREEN",
+    "CRITICAL": "TLP:GREEN",
+    "HIGH":     "TLP:GREEN",
+    "MEDIUM":   "TLP:CLEAR",
+    "LOW":      "TLP:CLEAR",
 }
 
 
 def module_compliance_legal(item: Dict, exec_decision: Dict) -> Dict:
     """Module 7: Compliance & Legal Safety Engine — TLP, attribution, legal safety."""
     risk_level  = exec_decision.get("risk_level", "MEDIUM")
-    tlp         = _TLP_MAP.get(risk_level, "TLP:AMBER")
+    tlp         = _TLP_MAP.get(risk_level, "TLP:CLEAR")
     cves        = _get_cves(item)
 
     # ── Compliance frameworks potentially triggered ───────────────────────────

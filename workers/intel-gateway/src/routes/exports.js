@@ -213,26 +213,35 @@ function liveIndicatorToStixPattern(ind) {
   return `[url:value = '${String(ind.indicator).replace(/['"\\]/g, '')}']`;
 }
 
+// STIX 2.1 requires every object id to match `{type}--{UUID}` (RFC 4122).
+// item.stix_id/item.id and the live-indicator SID are internal identifiers,
+// not UUIDs -- reusing them directly here previously produced bundles that
+// failed schema validation on every sampled object. Mint a fresh, valid id
+// instead; the internal id is kept as a custom_property for traceability.
+function stixObjectId(type) {
+  return `${type}--${crypto.randomUUID()}`;
+}
+
 function buildTaxiiExport(items, liveIndicators, tier, buildStixPatternFn) {
   const nowIso = new Date().toISOString();
   const itemObjects = (items || []).map(item => ({
     type: 'indicator', spec_version: '2.1',
-    id: item.stix_id || `indicator--${String(item.id || '').replace(/[^a-z0-9-]/gi, '-').toLowerCase()}`,
+    id: stixObjectId('indicator'),
     created: item.published || item.published_at || nowIso, modified: item.published || item.published_at || nowIso,
     name: item.title, indicator_types: ['malicious-activity'],
     pattern: typeof buildStixPatternFn === 'function' ? buildStixPatternFn(item) : `[threat-actor:name = '${(item.source || 'unknown').replace(/['"\\]/g, '')}']`,
     pattern_type: 'stix', valid_from: item.published || item.published_at || nowIso,
     labels: (item.tags || []).slice(0, 10),
-    custom_properties: { x_sentinel_severity: item.severity, x_sentinel_risk_score: item.risk_score, x_sentinel_source: item.source },
+    custom_properties: { x_sentinel_severity: item.severity, x_sentinel_risk_score: item.risk_score, x_sentinel_source: item.source, x_sentinel_item_id: item.stix_id || item.id },
   }));
   const liveObjects = (liveIndicators || []).map(ind => ({
     type: 'indicator', spec_version: '2.1',
-    id: `indicator--live-${ind.type}-${stableSid(`${ind.type}:${ind.indicator}`, 1).toString(16)}`,
+    id: stixObjectId('indicator'),
     created: ind.first_seen || nowIso, modified: ind.last_seen || nowIso,
     name: `${ind.source} ${ind.type}: ${ind.indicator}`, indicator_types: ['malicious-activity'],
     pattern: liveIndicatorToStixPattern(ind), pattern_type: 'stix', valid_from: ind.first_seen || nowIso,
     labels: ind.tags || [],
-    custom_properties: { x_sentinel_risk_score: ind.risk_score, x_sentinel_source: ind.source },
+    custom_properties: { x_sentinel_risk_score: ind.risk_score, x_sentinel_source: ind.source, x_sentinel_indicator: `${ind.type}:${ind.indicator}` },
   }));
 
   const allObjects = [...itemObjects, ...liveObjects];
@@ -240,7 +249,7 @@ function buildTaxiiExport(items, liveIndicators, tier, buildStixPatternFn) {
   const objects = paid ? allObjects : allObjects.slice(0, FREE_SAMPLE_LIMIT);
 
   const bundle = {
-    type: 'bundle', id: `bundle--sentinel-export-${Date.now().toString(36)}`, spec_version: '2.1', objects,
+    type: 'bundle', id: stixObjectId('bundle'), spec_version: '2.1', objects,
   };
   return {
     bundle: paid ? bundle : {

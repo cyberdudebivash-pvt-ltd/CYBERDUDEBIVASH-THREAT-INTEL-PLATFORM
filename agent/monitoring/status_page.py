@@ -106,7 +106,7 @@ class PlatformStatusMonitor:
 
     def check_api_health(self) -> Dict:
         """Check API server health (if deployed)."""
-        api_url = os.environ.get("CDB_API_URL", "https://api.cyberdudebivash.com")
+        api_url = os.environ.get("CDB_API_URL", "https://intel.cyberdudebivash.com")
         result  = {
             "url":      api_url,
             "status":   "UNKNOWN",
@@ -117,7 +117,7 @@ class PlatformStatusMonitor:
         try:
             import requests
             t0 = time.monotonic()
-            r  = requests.get(f"{api_url}/api/v1/health", timeout=10)
+            r  = requests.get(f"{api_url}/api/health", timeout=10)
             latency = round((time.monotonic() - t0) * 1000, 1)
             result["latency_ms"] = latency
             result["status"]     = "OPERATIONAL" if r.status_code == 200 else "DEGRADED"
@@ -178,13 +178,22 @@ class PlatformStatusMonitor:
 
         return result
 
-    def compute_sla_compliance(self, manifest_result: Dict) -> Dict:
-        """Compute SLA compliance metrics."""
+    def compute_sla_compliance(self, manifest_result: Dict, api_result: Optional[Dict] = None) -> Dict:
+        """Compute SLA compliance metrics.
+
+        overall_sla must reflect every monitored component, not feed
+        freshness alone -- it previously could read "MET" while
+        components.api_server read "DOWN" in the same status document.
+        api_sla is folded into overall_sla below so the two can never
+        contradict each other again.
+        """
         age = manifest_result.get("age_hours")
         if age is None:
-            return {"overall_sla": "UNKNOWN", "feed_sla": "UNKNOWN", "uptime_pct": None}
+            return {"overall_sla": "UNKNOWN", "feed_sla": "UNKNOWN", "api_sla": "UNKNOWN", "uptime_pct": None}
 
-        feed_sla = "MET" if age <= self.SLA_FEED_MAX_AGE_HOURS else "BREACHED"
+        feed_sla    = "MET" if age <= self.SLA_FEED_MAX_AGE_HOURS else "BREACHED"
+        api_sla     = "BREACHED" if (api_result and api_result.get("status") == "DOWN") else "MET"
+        overall_sla = "BREACHED" if (feed_sla == "BREACHED" or api_sla == "BREACHED") else "MET"
 
         # Estimated uptime based on freshness
         if age <= 6:
@@ -195,10 +204,13 @@ class PlatformStatusMonitor:
             uptime_pct = 98.0
         else:
             uptime_pct = max(95.0, 100 - (age - 24) * 0.5)
+        if api_sla == "BREACHED":
+            uptime_pct = min(uptime_pct, 95.0)
 
         return {
-            "overall_sla":         feed_sla,
+            "overall_sla":         overall_sla,
             "feed_sla":            feed_sla,
+            "api_sla":             api_sla,
             "feed_max_age_hours":  self.SLA_FEED_MAX_AGE_HOURS,
             "current_age_hours":   age,
             "uptime_pct":          uptime_pct,
@@ -213,13 +225,15 @@ class PlatformStatusMonitor:
         manifest    = self.check_manifest_freshness()
         api         = self.check_api_health()
         pipeline    = self.check_pipeline_runs()
-        sla         = self.compute_sla_compliance(manifest)
+        sla         = self.compute_sla_compliance(manifest, api)
 
-        # Overall platform status
-        component_statuses = [manifest["status"], pipeline["status"]]
+        # Overall platform status. api["status"] previously wasn't included
+        # here, which let this field read OPERATIONAL/MONITORING while
+        # components.api_server read DOWN in the same document.
+        component_statuses = [manifest["status"], pipeline["status"], api["status"]]
         if "DOWN" in component_statuses or "MISSING" in component_statuses:
             overall = "OUTAGE"
-        elif "DEGRADED" in component_statuses or "STALE" in component_statuses:
+        elif "DEGRADED" in component_statuses or "STALE" in component_statuses or "UNKNOWN" in component_statuses:
             overall = "DEGRADED"
         elif all(s == "OPERATIONAL" for s in component_statuses):
             overall = "OPERATIONAL"
@@ -228,7 +242,7 @@ class PlatformStatusMonitor:
 
         status = {
             "platform":       "CYBERDUDEBIVASH(R) SENTINEL APEX",
-            "version":        "v24.0",
+            "version":        "v200.0",
             "page_title":     "CDB Platform Status",
             "status":         overall,
             "status_message": {

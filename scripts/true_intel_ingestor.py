@@ -441,7 +441,7 @@ def ingest_cisa_kev(feed_state: FeedState) -> List[Dict]:
         item["kev_present"]  = True
         item["kev_date"]     = date_str
         item["kev_product"]  = f"{vendor} {product}".strip()
-        item["tlp"]          = "TLP:RED"   # KEV = actively exploited = highest urgency
+        item["tlp"]          = "TLP:CLEAR"  # KEV is a public CISA catalog; urgency is captured by severity/soc_priority, not TLP disclosure-restriction
         items.append(item)
 
         if item_ts and (newest_ts is None or item_ts > newest_ts):
