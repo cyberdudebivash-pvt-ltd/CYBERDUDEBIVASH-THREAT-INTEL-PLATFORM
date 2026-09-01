@@ -8,7 +8,7 @@
 // Phase 2 (foundational pass): Razorpay Subscriptions -- subscription
 // creation, webhook lifecycle, entitlement sync. See subscription-engine.js
 // for scope notes (refunds/upgrades/downgrades/checkout-cutover deferred).
-import { handleBillingSubscriptionCreate, handleBillingWebhook, patchApiKeyEntitlement, patchInternalSub, tryTransition } from "./subscription-engine.js";
+import { handleBillingSubscriptionCreate, handleBillingSubscriptionStatus, handleBillingWebhook, patchApiKeyEntitlement, patchInternalSub, tryTransition, PLAN_ID_ENV_KEYS } from "./subscription-engine.js";
 
 const ENGINE = {
   VERSION:  "183.0",
@@ -65,6 +65,8 @@ export default {
         return await handleBillingSubscriptionCreate(request, env, ctx, rid);
       if (path === "/api/v2/billing/webhooks/razorpay" && method === "POST")
         return await handleBillingWebhook(request, env, ctx, rid);
+      if (path === "/api/v2/billing/subscriptions/status" && method === "GET")
+        return await handleBillingSubscriptionStatus(request, env, ctx, rid);
 
       // ── Public: customer-facing commercial routes ──────────────────────────
       // Moved here from dispatchCommercialRoutes() (further below), which is
@@ -706,7 +708,22 @@ async function enterpriseContractTrigger(request, env, rid) {
 // PHASE 5 — REVENUE AUTOMATION ENGINE
 // =============================================================================
 
+// Real defect found and fixed while wiring intel-gateway's daily-quota alert
+// into this endpoint: /api/automation/trigger had NO authentication -- any
+// external caller could POST an arbitrary `email` and fire any of the seven
+// trigger cases below, using this platform's own SendGrid sending
+// reputation/domain to relay email to any address, for free, with no rate
+// limit. The only file that ever called it, revenue-crm/frontend-injection.js
+// ("Inject this as a <script> block in index.html"), is never actually
+// included in any real page (confirmed: zero matches for it across every
+// .html file in this repo) -- so there was no live legitimate caller whose
+// behavior this breaks. Gated the same way every other admin-only route in
+// this file already is (isAdmin(), X-Admin-Secret / REVENUE_ADMIN_SECRET) --
+// intel-gateway's new caller sends that header; nothing else has ever needed
+// unauthenticated access to this route.
 async function automationTrigger(request, env, rid) {
+  if (!(await isAdmin(request, env))) return json({ error: "unauthorized" }, 401);
+
   let body;
   try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
 
@@ -1319,12 +1336,37 @@ async function computePortalToken(env, email) {
   return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-// GET /api/health -- public observability endpoint. Mirrors the shape/intent
-// of intel-gateway's /api/health (binding pings + config presence), scaled
-// down to what this Worker actually has.
-async function handleRevenueEngineHealth(request, env, rid) {
+/**
+ * GET /api/health -- public observability endpoint. Mirrors the shape/intent
+ * of intel-gateway's /api/health (binding pings + config presence), scaled
+ * down to what this Worker actually has.
+ *
+ * @param {Request} request - unused; accepted for the standard route-handler
+ *   signature used throughout this file.
+ * @param {object} env - Worker bindings/secrets whose presence is reported.
+ * @param {string} rid - request id, echoed back in the response for log
+ *   correlation.
+ * @returns {Promise<Response>} binding health + boolean config-presence
+ *   flags only -- never secret values, including the per-tier/cycle
+ *   `razorpay_plan_ids_configured` booleans.
+ */
+export async function handleRevenueEngineHealth(request, env, rid) {
   const kvOk  = env.REVENUE_CRM_KV ? await env.REVENUE_CRM_KV.get("health:ping").then(() => "ok").catch(() => "error") : "not_bound";
   const d1Ok  = env.CRM_DB ? await env.CRM_DB.prepare("SELECT 1").first().then(() => "ok").catch(() => "error") : "not_bound";
+
+  // Per-tier/cycle Plan ID presence -- booleans only, never the values
+  // themselves. Built off PLAN_ID_ENV_KEYS (the same map
+  // handleBillingSubscriptionCreate's 503 check reads) so this can never
+  // silently drift from what actually gates checkout: a tier/cycle showing
+  // false here is exactly the one that falls back to the one-time-order
+  // flow in upgrade.html today.
+  const planIdsConfigured = {};
+  for (const [tier, cycles] of Object.entries(PLAN_ID_ENV_KEYS)) {
+    for (const [cycle, envKey] of Object.entries(cycles)) {
+      planIdsConfigured[`${tier.toLowerCase()}_${cycle}`] = !!env[envKey];
+    }
+  }
+
   return json({
     status: "ok",
     engine: ENGINE.NAME,
@@ -1336,6 +1378,7 @@ async function handleRevenueEngineHealth(request, env, rid) {
       crm_db: d1Ok,
       razorpay_orders_configured: !!(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET),
       razorpay_subscriptions_configured: !!env.RAZORPAY_WEBHOOK_SECRET,
+      razorpay_plan_ids_configured: planIdsConfigured,
     },
     generated_at: new Date().toISOString(),
     rid,
@@ -1433,11 +1476,18 @@ const DEMO_FALLBACK_THREATS = [
 // reaching customers directly, not just documentation. req_day/req_min
 // corrected to match the real enforced values (revenue-enforcement.js
 // LIMITS.PRO / index.js RATE_LIMITS.PRO in the intel-gateway Worker).
+// req_min must match workers/intel-gateway/src/index.js's RATE_LIMITS (the
+// only actually-enforced values) -- this table only drives portal display
+// and this dormant Subscriptions-API path, so a mismatch here never changed
+// real enforcement, only what a customer's own portal told them it was.
+// price_usd must match pricing.html, the canonical price list. Both ENTERPRISE
+// fields were found drifted (req_min 500 vs real 600; price_usd 999 vs real
+// 499) during a 2026-08-31 monetization audit.
 const TIERS = {
   FREE:       { label:"Free",       req_day:25,     req_min:30,   price_usd:0,    price_inr:0,       trial_days:0,  features:["basic_feed","metadata","stix_ids"] },
   PRO:        { label:"Pro",        req_day:5000,   req_min:120,  price_usd:49,   price_inr:4100,    trial_days:7,  features:["full_ioc","sigma","yara","kql","spl","stix_bundle","actor","kill_chain","playbook","misp_json","csv_export"] },
-  ENTERPRISE: { label:"Enterprise", req_day:50000,  req_min:500,  price_usd:999,  price_inr:83200,   trial_days:14, features:["siem_webhook","soar_export","navigator","hunt_queries","actor_tracking","campaign_intel","prediction_api","sector_feed","executive_brief","fair_model","reg_compliance","10_seats"] },
-  MSSP:       { label:"MSSP",       req_day:200000, req_min:2000, price_usd:1999, price_inr:166500,  trial_days:14, features:["multi_tenant","white_label","partner_api","bulk_stix","tenant_keys","oem_resale","40pct_revshare","unlimited_seats"] },
+  ENTERPRISE: { label:"Enterprise", req_day:50000,  req_min:600,  price_usd:499,  price_inr:41600,   trial_days:14, features:["siem_webhook","soar_export","navigator","hunt_queries","actor_tracking","campaign_intel","prediction_api","sector_feed","executive_brief","fair_model","reg_compliance","10_seats"] },
+  MSSP:       { label:"MSSP",       req_day:200000, req_min:1200, price_usd:1999, price_inr:166500,  trial_days:14, features:["multi_tenant","white_label","partner_api","bulk_stix","tenant_keys","oem_resale","40pct_revshare","unlimited_seats"] },
 };
 
 const PAYMENT_METHODS = ["upi","qr","paypal","neft","crypto_usdt_bep20","crypto_usdt_erc20","amazon_pay","bank_wire"];
@@ -2382,5 +2432,5 @@ function getCommercialEmailTemplate(name, vars) {
 // =============================================================================
 export {
   json, sanitizeEmail, genId, TIERS, SUB_STATUS,
-  provisionCustomer, trackEvent, isAdmin,
+  provisionCustomer, trackEvent, isAdmin, automationTrigger,
 };

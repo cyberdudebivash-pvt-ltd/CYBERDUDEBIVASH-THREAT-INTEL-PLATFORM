@@ -4647,6 +4647,22 @@
             box-shadow: 0 0 28px rgba(220,38,38,0.7), 0 2px 12px rgba(0,0,0,0.5);
             transform: translateY(-1px);
         }
+        /* Dual-gateway CTA group: Razorpay (primary, .cdb-ioc-unlock-btn above)
+           + Gumroad (secondary, global-checkout alternative). Both link into
+           upgrade.html -- the single live Razorpay/Gumroad checkout implementation
+           -- with a ?gateway= hint; no checkout logic is duplicated here. */
+        .cdb-ioc-unlock-group { flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
+        .cdb-ioc-unlock-btn-alt {
+            font-family: var(--font-mono); font-size: 9px; font-weight: 900;
+            color: #93c5fd; text-decoration: none; letter-spacing: 0.5px;
+            background: rgba(59,130,246,0.12);
+            border: 1px solid rgba(96,165,250,0.4); padding: 6px 12px; border-radius: 4px;
+            transition: all 0.2s; white-space: nowrap;
+        }
+        .cdb-ioc-unlock-btn-alt:hover {
+            background: rgba(59,130,246,0.22);
+            border-color: rgba(147,197,253,0.7);
+        }
 
         /* PRO INSIGHT STRIP */
         .cdb-pro-insight-strip {
@@ -10981,7 +10997,15 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                         // GOD MODE v184.0 \u2014 PREMIUM SELLABLE FOOTER \u2014 monetization conversion layer
                         const _userTier = (window._platformTiers && window._platformTiers.current) || 'free';
                         const _isFree   = _userTier === 'free';
-                        const _iocTotal = item.ioc_count || (item.ioc_counts ? Object.values(item.ioc_counts).reduce((a,b)=>a+(b||0),0) : 0);
+                        // Coerced to a finite number before use: this feeds into
+                        // grid.innerHTML below (via _iocLockStrip's title/sub text),
+                        // so a non-numeric ioc_count/ioc_counts value from upstream
+                        // feed data must never reach that template literal unescaped.
+                        const _iocCountNum   = Number(item.ioc_count);
+                        const _iocCountsSum  = item.ioc_counts
+                            ? Object.values(item.ioc_counts).reduce((a,b) => { const n = Number(b); return a + (Number.isFinite(n) ? n : 0); }, 0)
+                            : 0;
+                        const _iocTotal = (Number.isFinite(_iocCountNum) && _iocCountNum) || _iocCountsSum || 0;
                         const _isHigh   = sev === 'CRITICAL' || sev === 'HIGH';
                         const _hasReport = !!(item.report_url || item.internal_report_url);
                         const _hasPdf    = !!item.pdf_url;
@@ -11009,11 +11033,14 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                                     <div class="cdb-ioc-lock-left">
                                         <span style="font-size:18px;">🔒</span>
                                         <div>
-                                            <div class="cdb-ioc-lock-title">${_iocTotal} IOC${_iocTotal>1?'S':''} LOCKED</div>
-                                            <div class="cdb-ioc-lock-sub">Full indicators \u00b7 Hash DB \u00b7 STIX export \u00b7 API access</div>
+                                            <div class="cdb-ioc-lock-title">Advanced Threat Attribution &amp; C2 Telemetry Locked</div>
+                                            <div class="cdb-ioc-lock-sub">${_iocTotal} IOC${_iocTotal>1?'S':''} \u00b7 C2 IPs \u00b7 YARA/Suricata rules \u00b7 5,000 daily API queries on Sentinel Pro</div>
                                         </div>
                                     </div>
-                                    <a href="/upgrade.html?plan=pro&utm_source=ioc-blur&ref=${encodeURIComponent(item.id||item.stix_id||'')}" target="_blank" class="cdb-ioc-unlock-btn">UNLOCK IOC →</a>
+                                    <div class="cdb-ioc-unlock-group">
+                                        <a href="/upgrade.html?plan=pro&utm_source=ioc-blur&gateway=razorpay&ref=${encodeURIComponent(item.id||item.stix_id||'')}" target="_blank" class="cdb-ioc-unlock-btn" title="Cards, UPI, NetBanking">Razorpay →</a>
+                                        <a href="/upgrade.html?plan=pro&utm_source=ioc-blur&gateway=gumroad&ref=${encodeURIComponent(item.id||item.stix_id||'')}" target="_blank" class="cdb-ioc-unlock-btn-alt" title="Global cards / PayPal via Gumroad">Gumroad →</a>
+                                    </div>
                                 </div>
                             </div>` : '';
 

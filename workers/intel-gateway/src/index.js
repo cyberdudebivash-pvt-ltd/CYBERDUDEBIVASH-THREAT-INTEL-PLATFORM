@@ -96,7 +96,8 @@ import { loadCertificationIndex, persistCertificationRecords, resolveCertificati
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
-import { applyTierGateV2, enforceTierGate } from './revenue-enforcement.js';
+import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger } from './revenue-enforcement.js';
+import { evaluateDailyQuota, utcDateString, dailyQuotaKey, quotaAlertDedupeKey, secondsUntilNextUtcMidnight } from './daily-quota.js';
 import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
 import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handleAlertDispatch, handleAlertHistory, handleAlertUnsubscribe } from './alert-engine.js';
@@ -106,13 +107,16 @@ import { handlePremiumReport, handleReportList, handleReportGet } from './premiu
 import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-meter.js';
 import { deductCredits } from './credit-system.js';
 import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
+import { inferGumroadTier, inferGumroadBillingCycle, isGumroadCancellationEvent, isGumroadAccessRevokingEvent } from './gumroad-lifecycle.js';
 // Re-exported unchanged for backward compatibility with any external
 // importer of index.js's own evaluateKeyRecordAccess export (Principle 5:
 // no silent removal of an existing export) -- the canonical implementation
 // now lives in subscription-lifecycle.js; see that file's header comment.
 export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES };
-import { runScheduledIngestion, getLiveIndicatorsSummary, getLiveIndicators } from './ingestion/cron_worker.js';
-import { routeExports } from './routes/exports.js';
+// Same rationale, for the Gumroad webhook's pure decision logic (see
+// gumroad-lifecycle.js header comment) -- unit-testable under plain
+// `node --test` without pulling in this file's full import chain.
+export { inferGumroadTier, inferGumroadBillingCycle, isGumroadCancellationEvent, isGumroadAccessRevokingEvent };
 const PLATFORM_VERSION    = "200.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -326,6 +330,61 @@ async function clearAuthFailures(env, ip) {
 // =============================================================================
 // SLIDING-WINDOW RATE LIMITING
 // =============================================================================
+
+// =============================================================================
+// DAILY QUOTA (business decision 2026-08-31) -- additive to, not a
+// replacement for, the per-minute RATE_LIMITS above. Keyed by API key when
+// authenticated (so a customer's quota is per-account, not multiplied by
+// however many IPs their infrastructure happens to call from) and by IP
+// only for anonymous/unauthenticated traffic, which has no account to key
+// by. Reuses REVENUE_CRM_KV's revenue-engine sibling namespace, RATE_LIMIT_KV
+// (this Worker's own existing blocking-quota namespace), rather than
+// ANALYTICS_KV (usage-meter.js's shadow-mode-only, non-blocking namespace) --
+// this mechanism actually denies requests, so it belongs with the other
+// mechanism that already does that, not the observe-only one.
+// =============================================================================
+
+async function checkDailyQuota(env, identifier, tier) {
+  const dateStr = utcDateString();
+  const key = dailyQuotaKey(identifier, dateStr);
+  try {
+    const val = await env.RATE_LIMIT_KV.get(key);
+    const countAfter = (val ? parseInt(val, 10) : 0) + 1;
+    await env.RATE_LIMIT_KV.put(key, String(countAfter), { expirationTtl: 172800 }); // 48h per spec
+    return { ...evaluateDailyQuota(tier, countAfter), dateStr, count: countAfter };
+  } catch (_) {
+    // Same fail-open posture checkRateLimit() already takes on a KV error --
+    // a transient KV outage must not itself become an outage for customers.
+    return { ...evaluateDailyQuota(tier, 0), dateStr, count: 0 };
+  }
+}
+
+// Fire-and-forget (called via ctx.waitUntil, never on the request's own
+// critical path): looks up the account's email and asks revenue-engine to
+// queue the "approaching your daily limit" email, deduplicated to once per
+// UTC day via a KV flag -- crossedAlertThreshold uses >= (see
+// daily-quota.js), so this can be reached more than once per day for the
+// same key under a racy counter; the dedup flag, not the threshold check
+// itself, is what actually guarantees one email per day.
+async function maybeDispatchQuotaAlert(env, identifier, tier, auth, dateStr) {
+  if (!auth?.key) return; // anonymous/IP-only traffic has no account to email
+  try {
+    const dedupeKey = quotaAlertDedupeKey(identifier, dateStr);
+    if (await env.RATE_LIMIT_KV.get(dedupeKey)) return;
+    const record = await env.API_KEYS_KV?.get(auth.key, "json");
+    if (!record?.email) return;
+    await env.RATE_LIMIT_KV.put(dedupeKey, "1", { expirationTtl: 90000 }); // 25h, safely spans the UTC day
+    if (!env.REVENUE_ADMIN_SECRET) return; // not yet provisioned on this Worker -- skip, don't crash
+    await fetch("https://revenue.intel.cyberdudebivash.com/api/automation/trigger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Secret": env.REVENUE_ADMIN_SECRET },
+      body: JSON.stringify({ trigger: "usage_80pct", email: record.email, context: `daily_quota:${tier}` }),
+    });
+  } catch (_) {
+    // Best-effort notification -- never let a failure here surface to the
+    // customer whose actual API request already succeeded.
+  }
+}
 
 async function checkRateLimit(env, ip, tier) {
   const limit  = RATE_LIMITS[tier] || RATE_LIMITS.FREE;
@@ -3068,6 +3127,34 @@ async function applySubscriptionStatusChange(env, ctx, key, subscription_status,
     action: "subscription_status_changed", key_prefix: key.slice(0, 12),
     from: existing.subscription_status || "active", to: subscription_status, reason: reason || null,
   });
+  // Mirror the new status into REVENUE_CRM_KV and notify the customer. Before
+  // this, a cancelled/refunded/suspended customer's own portal
+  // (handleCustomerPortal(), revenue-engine) kept showing "active" forever --
+  // this function only ever wrote API_KEYS_KV (the entitlement store), never
+  // the customer-facing display copy in REVENUE_CRM_KV, and never sent any
+  // notification. Best-effort/non-blocking, same pattern as
+  // provisionApiKey()'s own mirror write: a KV/email hiccup here can't affect
+  // the real status change above, which has already committed by this point.
+  const custEmail = existing.customer_id;
+  if (custEmail && env.REVENUE_CRM_KV) {
+    ctx.waitUntil((async () => {
+      try {
+        const cust = await env.REVENUE_CRM_KV.get(`customer:${custEmail}`, "json");
+        if (cust) {
+          await env.REVENUE_CRM_KV.put(`customer:${custEmail}`, JSON.stringify({ ...cust, status: subscription_status, updated_at: ts }));
+        }
+        const subEmail = await env.REVENUE_CRM_KV.get(`sub:email:${custEmail}`, "json");
+        if (subEmail) {
+          await env.REVENUE_CRM_KV.put(`sub:email:${custEmail}`, JSON.stringify({ ...subEmail, status: subscription_status, updated_at: ts }));
+        }
+      } catch (err) {
+        console.error("[applySubscriptionStatusChange] REVENUE_CRM_KV mirror write failed (portal display only, access unaffected):", err?.message || err);
+      }
+    })());
+    if (SUBSCRIPTION_STATUS_DENY_STATES.has(subscription_status)) {
+      ctx.waitUntil(sendStatusChangeEmail(env, custEmail, existing.tier, subscription_status, reason));
+    }
+  }
   return { ok: true, existing, updated };
 }
 
@@ -3133,11 +3220,32 @@ async function provisionApiKey(env, ctx, tier, email, source, metadata, billingC
         };
         const prevKeys = (await env.REVENUE_CRM_KV.get(`apikeys:${email}`, "json")) || [];
         await env.REVENUE_CRM_KV.put(`apikeys:${email}`, JSON.stringify([...prevKeys, keyRecord]));
+        // Also write the singular apikey:{key} record -- handleApiKeySelfRotate()
+        // and GET /api/apikeys/validate look this up directly (not the
+        // apikeys:{email} array above). Before this line neither ever found a
+        // real checkout customer's key, so self-rotate 401'd for 100% of them.
+        await env.REVENUE_CRM_KV.put(`apikey:${apiKey}`, JSON.stringify(keyRecord));
         await env.REVENUE_CRM_KV.put(`sub:email:${email}`, JSON.stringify({
           customer_id: email, email, tier: validTier, billing_cycle: billingCycle, status: "active",
           created_at: now(), current_period_start: now(), current_period_end: periodEnd,
           auto_renew: false, // matches the platform-wide "no automated recurring billing" contract
         }));
+        // Also write sub:{id} and append to subscriptions:index, matching
+        // provisionCustomer()'s shape (revenue-engine/src/index.js) exactly --
+        // handleSubExpireCheck(), the only renewal-reminder cron that exists,
+        // reads subscriptions:index then sub:{id} per entry. Without these,
+        // real checkout customers were invisible to it and never got a 7d/3d
+        // renewal reminder before access silently lapsed.
+        const subId = `sub_${crypto.randomUUID()}`;
+        await env.REVENUE_CRM_KV.put(`sub:${subId}`, JSON.stringify({
+          id: subId, customer_id: email, email, tier: validTier, billing_cycle: billingCycle,
+          status: "active", created_at: now(), current_period_start: now(), current_period_end: periodEnd,
+          trial_ends_at: null, payment_id: (metadata && metadata.payment_id) || null,
+          renewal_reminder_sent: false, renewal_count: 0, auto_renew: false,
+        }));
+        const subIdx = (await env.REVENUE_CRM_KV.get("subscriptions:index", "json")) || [];
+        subIdx.unshift({ id: subId, email, tier: validTier, status: "active", current_period_end: periodEnd, created_at: now() });
+        await env.REVENUE_CRM_KV.put("subscriptions:index", JSON.stringify(subIdx.slice(0, 1000)));
       } catch (err) {
         console.error("[provisionApiKey] REVENUE_CRM_KV mirror write failed (portal display only, access unaffected):", err?.message || err);
       }
@@ -3347,6 +3455,56 @@ async function sendActivationEmail(env, email, tier, apiKey) {
     return true;
   } catch (err) {
     console.error("[sendActivationEmail] Failed to send activation email:", err?.message || err);
+    return false;
+  }
+}
+
+async function sendStatusChangeEmail(env, email, tier, status, reason) {
+  if (!env.RESEND_API_KEY) {
+    console.warn("[sendStatusChangeEmail] RESEND_API_KEY not configured  -  skipping notification email");
+    return false;
+  }
+  const copy = {
+    cancelled: { subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX subscription was cancelled", headline: "Subscription Cancelled" },
+    refunded:  { subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX payment was refunded",       headline: "Payment Refunded" },
+    suspended: { subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX access was suspended",        headline: "Access Suspended" },
+    expired:   { subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX access has expired",          headline: "Access Expired" },
+  }[status] || { subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX subscription status changed", headline: "Subscription Status Changed" };
+  try {
+    const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>${copy.subject}</title></head>
+<body style="background:#0a0a0f;color:#e2e8f0;font-family:system-ui,sans-serif;margin:0;padding:32px;">
+  <div style="max-width:600px;margin:0 auto;background:#111827;border:1px solid #1e40af;border-radius:12px;padding:40px;">
+    <h1 style="color:#60a5fa;margin-top:0;">CYBERDUDEBIVASH(R) Sentinel APEX</h1>
+    <h2 style="color:#e2e8f0;">${copy.headline}</h2>
+    <p style="color:#94a3b8;">Your <strong style="color:#60a5fa;">${tier || "PRO"}</strong> plan access has been updated to: <strong style="color:#60a5fa;">${status}</strong>.${reason ? ` Reason: ${reason}.` : ""}</p>
+    <p style="color:#94a3b8;">If this wasn't expected, or you have questions, contact us at <a href="mailto:support@cyberdudebivash.com" style="color:#60a5fa;">support@cyberdudebivash.com</a></p>
+    <p style="color:#475569;font-size:12px;margin-bottom:0;">CYBERDUDEBIVASH(R) SENTINEL APEX  -  Enterprise Threat Intelligence Platform</p>
+  </div>
+</body>
+</html>`;
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({
+        from: "CYBERDUDEBIVASH(R) Sentinel APEX <noreply@cyberdudebivash.com>",
+        to: [email],
+        subject: copy.subject,
+        html: htmlBody,
+      }),
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      console.error(`[sendStatusChangeEmail] Resend API error ${resp.status}: ${errText}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[sendStatusChangeEmail] Failed to send status-change email:", err?.message || err);
     return false;
   }
 }
@@ -3671,14 +3829,58 @@ async function handleWebhookGumroad(request, env, ctx) {
     return jsonResp({ error: "Invalid request body" }, 400);
   }
 
-  const { sale_id, email, product_name = "", variants = "", price = "0" } = formData;
+  const {
+    sale_id, email, product_id = "", product_name = "", variants = "",
+    price = "0", subscription_id = "", recurrence = "",
+  } = formData;
+
+  // "Subscription updated" ping (same webhook URL as "sale"): cancelled/ended.
+  if (isGumroadCancellationEvent(formData)) {
+    if (!subscription_id) {
+      return jsonResp({ error: "Invalid Gumroad cancellation payload: subscription_id required" }, 400);
+    }
+    const mappedKey = await env.SECURITY_HUB_KV.get(`gumroad_sub_key_map:${subscription_id}`);
+    if (!mappedKey) {
+      auditLog(ctx, env, { action: "gumroad_cancel_key_lookup_failed", subscription_id });
+      ctx.waitUntil(sendTelegramAlert(env,
+        `[WARN] <b>GUMROAD CANCELLATION -- NO KEY MAPPING</b>\n` +
+        `Subscription ID: <code>${subscription_id}</code>\n` +
+        `Manual follow-up required -- could not auto-revoke access.`
+      ));
+      return jsonResp({ status: "noted_no_mapping", subscription_id });
+    }
+
+    // cancelled:"true" alone means auto-renewal was turned off -- the
+    // customer already paid for the current period, so access must not be
+    // revoked yet. Only ended:"true" (the period has actually finished)
+    // revokes. Without this split, cancelling on day 1 of a paid month
+    // would cut off access to the other 29 days already paid for.
+    if (!isGumroadAccessRevokingEvent(formData)) {
+      auditLog(ctx, env, { action: "gumroad_cancellation_intent_recorded", subscription_id, key_prefix: mappedKey.slice(0, 12) + "..." });
+      ctx.waitUntil(sendTelegramAlert(env,
+        `<b>GUMROAD AUTO-RENEW CANCELLED</b>\n` +
+        `Subscription ID: <code>${subscription_id}</code>\n` +
+        `Key: <code>${mappedKey.slice(0, 16)}...</code> -- access continues until the current period ends.`
+      ));
+      return jsonResp({ status: "cancellation_recorded", subscription_id });
+    }
+
+    const result = await applySubscriptionStatusChange(env, ctx, mappedKey, "cancelled", `gumroad_ended:${subscription_id}`);
+    if (result.ok) {
+      ctx.waitUntil(sendTelegramAlert(env,
+        `<b>GUMROAD SUBSCRIPTION ENDED</b>\n` +
+        `Subscription ID: <code>${subscription_id}</code>\n` +
+        `Key: <code>${mappedKey.slice(0, 16)}...</code> marked cancelled -- access revoked.`
+      ));
+    }
+    return jsonResp({ status: result.ok ? "cancelled" : "key_not_found", subscription_id });
+  }
+
   if (!sale_id || !email) return jsonResp({ error: "Invalid Gumroad payload: sale_id and email required" }, 400);
 
   // Map product/variant to tier
-  const pnl = `${product_name}${variants}`.toLowerCase();
-  let tier   = "PRO";
-  if (pnl.includes("enterprise") || pnl.includes("ent")) tier = "ENTERPRISE";
-  else if (pnl.includes("mssp") || pnl.includes("white-label")) tier = "MSSP";
+  const tier = inferGumroadTier(product_name, variants);
+  const billingCycle = inferGumroadBillingCycle(recurrence, product_name, variants);
 
   // Idempotency guard: one provisioning per sale_id
   const idempKey = `gumroad_sale:${sale_id}`;
@@ -3686,14 +3888,43 @@ async function handleWebhookGumroad(request, env, ctx) {
   if (existing) return jsonResp({ status: "already_provisioned", sale_id });
 
   const apiKey = await provisionApiKey(env, ctx, tier, email, "gumroad_webhook", {
-    sale_id, product_name, price, variants,
-  }, pnl.includes("annual") ? "annual" : "monthly");
+    sale_id, product_id, product_name, price, variants, subscription_id,
+  }, billingCycle);
 
   await env.SECURITY_HUB_KV.put(
     idempKey,
     JSON.stringify({ key_prefix: apiKey.slice(0, 12) + "...", email, tier, ts: now() }),
     { expirationTtl: 86400 * 365 }
   );
+
+  // Recurring product: remember which key this subscription provisioned, so
+  // a later "Subscription updated" cancellation/end ping (which carries only
+  // subscription_id, not the API key) can find it. Same pattern and TTL as
+  // Razorpay's payment_key_map: above.
+  if (subscription_id) {
+    await env.SECURITY_HUB_KV.put(`gumroad_sub_key_map:${subscription_id}`, apiKey, { expirationTtl: 86400 * 365 });
+  }
+
+  // Gumroad checkout happens entirely on Gumroad's hosted page -- there is
+  // no client-side callback into this app the way Razorpay's handler:
+  // response has, so email is the only delivery channel for the key. Unlike
+  // the pre-existing Razorpay call sites, this checks the return value:
+  // sendActivationEmail() fails closed (returns false, never throws) rather
+  // than blocking provisioning, so a silently-ignored `false` here would
+  // leave a customer with a valid key and no way to learn it. Provisioning
+  // itself is already done and correct either way; this only adds
+  // visibility into a delivery failure so a human can follow up.
+  let emailSent = false;
+  try { emailSent = await sendActivationEmail(env, email, tier, apiKey); } catch (err) {
+    console.error("[handleWebhookGumroad] sendActivationEmail error:", err?.message || err);
+  }
+  if (!emailSent) {
+    ctx.waitUntil(sendTelegramAlert(env,
+      `[WARN] <b>GUMROAD ACTIVATION EMAIL FAILED</b>\n` +
+      `Email: ${email}\n` +
+      `Key: <code>${apiKey.slice(0, 16)}...</code> is provisioned and active, but delivery failed -- manual follow-up required.`
+    ));
+  }
 
   ctx.waitUntil(sendTelegramAlert(env,
     `? <b>GUMROAD SALE</b>\n` +
@@ -4448,10 +4679,49 @@ async function handleRequest(request, env, ctx) {
     const rl = await checkRateLimit(env, ip, auth.tier);
     if (!rl.allowed) {
       auditLog(ctx, env, { action: "rate_limited", ip, path, method, tier: auth.tier });
+      // Real conversion-funnel gap: this was the one live, customer-facing
+      // "you've hit a wall" moment on the entire platform that carried zero
+      // upgrade messaging, on every single request that ever got throttled.
+      // Only attach it for FREE/PRO -- buildUpgradeTrigger() always targets
+      // "enterprise" once you're off FREE, which would be backwards for an
+      // ENTERPRISE or MSSP caller (MSSP's own RATE_LIMITS entry is *higher*
+      // than ENTERPRISE's, so "upgrade to enterprise" would read as a
+      // downgrade suggestion for them).
+      const body = { error: "Too Many Requests", retry_after: 60, limit: rl.limit };
+      if (auth.tier === TIERS.FREE || auth.tier === TIERS.PRO) {
+        body.upgrade = buildUpgradeTrigger("usage_limit", auth.tier);
+      }
       return jsonResp(
-        { error: "Too Many Requests", retry_after: 60, limit: rl.limit },
+        body,
         429,
         { "Retry-After": "60", "X-RateLimit-Limit": String(rl.limit), "X-RateLimit-Remaining": "0" }
+      );
+    }
+
+    // Daily quota (business decision 2026-08-31) -- additive second gate,
+    // independent of the per-minute limit above. Keyed by API key when
+    // authenticated, IP only for anonymous traffic (see checkDailyQuota's
+    // own header comment for why).
+    const dailyIdentifier = auth.key || ip;
+    const dq = await checkDailyQuota(env, dailyIdentifier, auth.tier);
+    if (dq.crossedAlertThreshold) {
+      ctx.waitUntil(maybeDispatchQuotaAlert(env, dailyIdentifier, auth.tier, auth, dq.dateStr));
+    }
+    if (dq.exceeded) {
+      auditLog(ctx, env, { action: "daily_quota_exceeded", ip, path, method, tier: auth.tier });
+      const body = { error: "Too Many Requests", reason: "daily_quota_exceeded", limit: dq.limit, reset_utc: new Date(Date.now() + secondsUntilNextUtcMidnight() * 1000).toISOString() };
+      if (auth.tier === TIERS.FREE || auth.tier === TIERS.PRO) {
+        body.upgrade = buildUpgradeTrigger("usage_limit", auth.tier);
+      }
+      return jsonResp(
+        body,
+        429,
+        {
+          "Retry-After": String(secondsUntilNextUtcMidnight()),
+          "X-DailyLimit-Limit": String(dq.limit),
+          "X-DailyLimit-Remaining": "0",
+          "X-DailyLimit-Reset": new Date(Date.now() + secondsUntilNextUtcMidnight() * 1000).toISOString(),
+        }
       );
     }
   }

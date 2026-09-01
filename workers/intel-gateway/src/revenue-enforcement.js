@@ -570,6 +570,17 @@ export function buildUpgradeTrigger(context, currentTier) {
     enterprise: { inr: "41,600/mo", usd: "$499/mo" },
   };
 
+  // trial_url/cta_trial deliberately removed (real defect, fixed here): this
+  // repo's one true checkout contract (established across pricing.html,
+  // upgrade.html, index.html, get-api-key.html -- see PR #251/#281) is that
+  // there is no trial -- PRO/Enterprise/MSSP are billed the full listed
+  // price immediately at checkout. This function's output reaches real
+  // customers via enforceTierGate()'s `upgrade` field, spread into
+  // masked.campaigns_paywall/anomalies_paywall by maskForFreeTier() (index.js)
+  // for every FREE-tier request to /api/v1/intel/ai_summary.json -- so the
+  // "Start 7-Day Free Trial" claim this function returned was live and
+  // customer-facing, not dead code, despite buildUpgradeTrigger() itself
+  // having no direct call site in index.js.
   return {
     trigger_context:  context,
     current_tier:     t,
@@ -578,9 +589,7 @@ export function buildUpgradeTrigger(context, currentTier) {
     message:          ctx.body,
     price:            prices[targetTier] || prices.pro,
     upgrade_url:      url,
-    trial_url:        REVENUE_CONFIG.UPGRADE_URLS.trial,
     cta_primary:      targetTier === "pro" ? `Upgrade to Pro  ${prices.pro.usd}` : `Upgrade to Enterprise  ${prices.enterprise.usd}`,
-    cta_trial:        "Start 7-Day Free Trial",
     features:         getUpgradeFeatures(targetTier),
     revenue_event:    `upgrade_trigger:${context}:${t}${targetTier}`,
   };
