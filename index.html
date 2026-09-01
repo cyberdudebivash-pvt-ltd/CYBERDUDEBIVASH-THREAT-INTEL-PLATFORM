@@ -13357,6 +13357,50 @@ function renderTopThreats(data) {
             if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge" style="color:var(--medium);">&#x26A1; NO DATA</span>';
             document.querySelectorAll('.metric-card').forEach(function(c){ c.classList.remove('syncing'); });
             if (aiPulse) aiPulse.style.display = 'none';
+
+            // P0 FIX (2026-09-01): every MANIFEST_URLS source failed above. If a
+            // service worker is controlling this page, that is the more likely
+            // cause than a genuine full API outage -- see service-worker.js's own
+            // v175 header and this file's SW registration comments for the
+            // diagnosed incident (a customer's browser stuck on an old SW whose
+            // fetch handler pointed at endpoints that exist nowhere in this
+            // codebase, while every real endpoint returned healthy data when
+            // checked directly). That fix (updateViaCache:'none' + a
+            // visibilitychange re-check) makes the browser's own update *check*
+            // reliable, but does not guarantee an already-stuck browser recovers
+            // promptly: reproduced with a scripted harness (register an old SW,
+            // then make the real one available server-side) that the new worker
+            // can sit in the registration's `waiting` state across several real
+            // reloads without ever taking control, so this exact loop keeps
+            // re-running against the same broken interception every time.
+            // Rather than depend on SW update timing at all, force a one-time,
+            // session-guarded hard reset here: unregister every SW registration
+            // for this origin, clear every SW-managed cache, reload once.
+            // sessionStorage-guarded (cleared when the tab closes, not persisted
+            // like localStorage) so exactly one attempt is made per tab -- a
+            // genuine network/API outage still degrades to the retry message
+            // below instead of reload-looping forever, same anti-loop discipline
+            // as the "do NOT force skipWaiting + reload" rule documented earlier
+            // in this file for the identical reason (a prior forced-reload
+            // attempt caused its own "BOOTING..." loop incident).
+            try {
+                if ('serviceWorker' in navigator && navigator.serviceWorker.controller &&
+                    !sessionStorage.getItem('apex_sw_recovery_done')) {
+                    sessionStorage.setItem('apex_sw_recovery_done', '1');
+                    console.warn('[GOC v77.4] All manifest sources failed under an active service worker -- clearing SW + caches, reloading once');
+                    Promise.all([
+                        navigator.serviceWorker.getRegistrations().then(function(regs) {
+                            return Promise.all(regs.map(function(r) { return r.unregister(); }));
+                        }),
+                        (window.caches ? caches.keys().then(function(keys) {
+                            return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+                        }) : Promise.resolve()),
+                    ]).catch(function(e) { console.debug('[SW-RECOVERY]', e); })
+                      .finally(function() { window.location.reload(); });
+                    return;
+                }
+            } catch (e) { console.debug('[SW-RECOVERY]', e); }
+
             // v184.0 P0 FIX: #threat-grid MUST never stay stuck at initial spinner
             // Root cause: all prior paths returned early; terminal path never touched the grid
             var _dg = document.getElementById('threat-grid');
@@ -20404,6 +20448,30 @@ a:focus-visible {
     if(m) m.classList.remove('open');
     window.location.href = '/upgrade.html?plan=pro&email=' + encodeURIComponent(email) + '&utm_source=lead-modal&utm_medium=timed-popup';
   };
+
+  // P0 FIX (2026-09-01): the modal had no Escape-key or backdrop-click
+  // dismissal -- only the [x] button, the "No thanks" link, or a completed
+  // form submission could close it. #apex-lead-modal is position:fixed;
+  // inset:0 at z-index:99999 (the entire viewport), so with no other way
+  // out it silently intercepted every click anywhere on the page once
+  // shown -- reproduced live in headless Chromium: scrolling to the
+  // homepage's demo-video section crosses this modal's own 60%-scroll-depth
+  // trigger, and the very next click (on the demo video's own play button)
+  // lands on the modal's backdrop instead and does nothing, indistinguishable
+  // from the page being broken. A standard WAI-ARIA dialog (this is
+  // role="dialog" aria-modal="true") is expected to close on Escape and on
+  // an outside click; neither existed. Both call the same apexLeadDismiss()
+  // the existing close paths already use -- no new dismissal behavior, just
+  // two more ways to reach it.
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape'){
+      var m = document.getElementById('apex-lead-modal');
+      if(m && m.classList.contains('open')) apexLeadDismiss();
+    }
+  });
+  document.addEventListener('click', function(e){
+    if(e.target && e.target.id === 'apex-lead-modal') apexLeadDismiss();
+  });
 
   function showModal(){
     if(isSuppressed()) return;
