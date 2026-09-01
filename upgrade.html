@@ -1041,7 +1041,7 @@ async function initiateRazorpayCheckout() {
     }
     if (typeof Razorpay === 'undefined') {
       if (btn) { btn.disabled = false; btn.innerHTML = orig; }
-      alert('Razorpay could not load — please check your connection and try again, or contact us on WhatsApp: +91 8179881447');
+      alert('Razorpay could not load \u2014 please check your connection and try again, or contact us on WhatsApp: +91 8179881447');
       return;
     }
 
@@ -1093,7 +1093,7 @@ function pollSubscriptionStatus(subscriptionId, paymentId, signature, tier, emai
         return;
       }
       if (attempt >= MAX_ATTEMPTS) {
-        alert('✔ Payment received! Your subscription is confirming — API key will be emailed to ' + email + ' within a few minutes.\nWhatsApp +91 8179881447 for instant help.');
+        alert('✔ Payment received! Your subscription is confirming \u2014 API key will be emailed to ' + email + ' within a few minutes.\nWhatsApp +91 8179881447 for instant help.');
         showSuccessState(currentPlan, { review_id: subscriptionId });
         if (btn) { btn.disabled = false; btn.innerHTML = orig; }
         return;
@@ -1629,6 +1629,34 @@ function showSuccessState(plan, wData) {
       var _pe = document.getElementById('plan-pro');
       if (_pe) _pe.scrollIntoView({ behavior:'smooth', block:'center' });
     }, 800);
+  }
+
+  /* ── Gateway hint (?gateway=razorpay|gumroad) ────────────────────────
+     Set by the IOC-lock paywall CTA on index.html (dual "Razorpay" /
+     "Gumroad" buttons). Scrolls to and briefly highlights the matching
+     checkout panel -- does not auto-invoke checkout (browsers block a
+     Razorpay modal opened without a user gesture, and Gumroad checkout
+     happens on Gumroad's own hosted page). Both panels are already fully
+     wired; this is a UX hint only, not a second checkout implementation.
+  ------------------------------------------------------------------------- */
+  var _gatewayHint = params.get('gateway');
+  if (_gatewayHint === 'gumroad' || _gatewayHint === 'razorpay') {
+    var _hintTarget = _gatewayHint === 'gumroad'
+      ? document.getElementById('gumroad-panel')
+      : document.getElementById('section-payment-methods');
+    if (_hintTarget) {
+      setTimeout(function() {
+        _hintTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        var _prevOutline = _hintTarget.style.outline;
+        var _prevShadow  = _hintTarget.style.boxShadow;
+        _hintTarget.style.outline   = '2px solid #00d4ff';
+        _hintTarget.style.boxShadow = '0 0 24px rgba(0,212,255,0.5)';
+        setTimeout(function() {
+          _hintTarget.style.outline   = _prevOutline;
+          _hintTarget.style.boxShadow = _prevShadow;
+        }, 2200);
+      }, 400);
+    }
   }
 
 updateGumroadPanel();

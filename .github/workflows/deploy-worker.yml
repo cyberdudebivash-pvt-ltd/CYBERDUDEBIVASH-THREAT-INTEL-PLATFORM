@@ -310,9 +310,17 @@ jobs:
         # not page copy -- same "what can a customer be told" class of
         # regression this gate already exists to catch. revenue-enforcement.js
         # has no pricing-data.json dependency, so no extraction was needed.
+        #
+        # Razorpay+Gumroad dual-checkout pass: gumroad-lifecycle.test.js
+        # added -- covers isGumroadCancellationEvent(), the decision function
+        # that determines whether a Gumroad "Subscription updated" ping
+        # (cancelled/ended) revokes a customer's access, the same class of
+        # authorization-boundary question as subscription-lifecycle.test.js
+        # above. Extracted into its own dependency-free module for the
+        # identical reason (see gumroad-lifecycle.js header comment).
         run: |
           cd ${WORKER_DIR}
-          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js src/__tests__/detection-registry.test.js src/__tests__/subscription-lifecycle.test.js src/__tests__/revenue-enforcement.upgrade-trigger.test.js src/__tests__/daily-quota.test.js src/__tests__/api-extensions.cve-scope.test.js
+          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js src/__tests__/detection-registry.test.js src/__tests__/subscription-lifecycle.test.js src/__tests__/revenue-enforcement.upgrade-trigger.test.js src/__tests__/daily-quota.test.js src/__tests__/api-extensions.cve-scope.test.js src/__tests__/gumroad-lifecycle.test.js
 
       - name: " esbuild bundle pre-flight (HARD GATE)"
         run: |

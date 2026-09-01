@@ -1476,11 +1476,18 @@ const DEMO_FALLBACK_THREATS = [
 // reaching customers directly, not just documentation. req_day/req_min
 // corrected to match the real enforced values (revenue-enforcement.js
 // LIMITS.PRO / index.js RATE_LIMITS.PRO in the intel-gateway Worker).
+// req_min must match workers/intel-gateway/src/index.js's RATE_LIMITS (the
+// only actually-enforced values) -- this table only drives portal display
+// and this dormant Subscriptions-API path, so a mismatch here never changed
+// real enforcement, only what a customer's own portal told them it was.
+// price_usd must match pricing.html, the canonical price list. Both ENTERPRISE
+// fields were found drifted (req_min 500 vs real 600; price_usd 999 vs real
+// 499) during a 2026-08-31 monetization audit.
 const TIERS = {
   FREE:       { label:"Free",       req_day:25,     req_min:30,   price_usd:0,    price_inr:0,       trial_days:0,  features:["basic_feed","metadata","stix_ids"] },
   PRO:        { label:"Pro",        req_day:5000,   req_min:120,  price_usd:49,   price_inr:4100,    trial_days:7,  features:["full_ioc","sigma","yara","kql","spl","stix_bundle","actor","kill_chain","playbook","misp_json","csv_export"] },
-  ENTERPRISE: { label:"Enterprise", req_day:50000,  req_min:500,  price_usd:999,  price_inr:83200,   trial_days:14, features:["siem_webhook","soar_export","navigator","hunt_queries","actor_tracking","campaign_intel","prediction_api","sector_feed","executive_brief","fair_model","reg_compliance","10_seats"] },
-  MSSP:       { label:"MSSP",       req_day:200000, req_min:2000, price_usd:1999, price_inr:166500,  trial_days:14, features:["multi_tenant","white_label","partner_api","bulk_stix","tenant_keys","oem_resale","40pct_revshare","unlimited_seats"] },
+  ENTERPRISE: { label:"Enterprise", req_day:50000,  req_min:600,  price_usd:499,  price_inr:41600,   trial_days:14, features:["siem_webhook","soar_export","navigator","hunt_queries","actor_tracking","campaign_intel","prediction_api","sector_feed","executive_brief","fair_model","reg_compliance","10_seats"] },
+  MSSP:       { label:"MSSP",       req_day:200000, req_min:1200, price_usd:1999, price_inr:166500,  trial_days:14, features:["multi_tenant","white_label","partner_api","bulk_stix","tenant_keys","oem_resale","40pct_revshare","unlimited_seats"] },
 };
 
 const PAYMENT_METHODS = ["upi","qr","paypal","neft","crypto_usdt_bep20","crypto_usdt_erc20","amazon_pay","bank_wire"];
