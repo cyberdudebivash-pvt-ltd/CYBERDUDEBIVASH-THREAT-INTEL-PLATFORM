@@ -1095,11 +1095,15 @@ jobs:
           git merge  --abort 2>/dev/null || true
           rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
 
-          # Stage AI outputs ONLY (never feed_manifest.json — manifest destruction risk)
-          git add api/ai/tracker.json 2>/dev/null || true
-          git add api/ai/health.json 2>/dev/null || true
-          git add api/ai/executive-brief.json 2>/dev/null || true
-          git add api/ai/monetization.json 2>/dev/null || true
+          # Issue #274: api/ai/{tracker,health,executive-brief,monetization}.json
+          # are no longer git-tracked (see .gitignore) -- STAGE 9.5 below already
+          # uploads them straight to R2 every run regardless of whether this
+          # commit/push succeeds, and the Worker now reads them from R2 first
+          # (workers/intel-gateway/src/index.js's /api/ai/{filename} handler).
+          # Committing them to main was pure overhead: this push has been
+          # failing outright since main started requiring PRs (root-caused in
+          # #274), so they were frozen in git anyway while the real serving
+          # path (R2) already updates independently.
           git add data/ai-telemetry/ 2>/dev/null || true
 
           # Stage governance engine outputs (feed enrichment + quality reports)
@@ -1229,7 +1233,6 @@ jobs:
           CF_ACCOUNT_ID:          ${{ secrets.CF_ACCOUNT_ID }}
           AWS_ACCESS_KEY_ID:      ${{ secrets.CF_R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY:  ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
-          WORKER_ADMIN_SECRET:    ${{ secrets.WORKER_ADMIN_SECRET }}
         run: |
           set -euo pipefail
           ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
@@ -1260,12 +1263,17 @@ jobs:
           done
           echo "[R2] Upload complete — ${UPLOADED} file(s) synced to R2"
 
-          # Bust KV cache so Worker serves fresh AI data immediately
-          echo "[R2] Busting Worker KV cache for AI endpoints..."
-          for KV_KEY in "ai:tracker" "ai:health" "ai:exec-brief" "ai:monetize"; do
-            HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-              -X POST "https://intel.cyberdudebivash.com/api/admin/cache/bust?key=${KV_KEY}" \
-              -H "X-Admin-Secret: ${WORKER_ADMIN_SECRET}" || echo "000")
-            echo "[KV] Busted ${KV_KEY} → HTTP ${HTTP}"
-          done
-          echo "[R2] Stage 9.5 complete — AI Tracker live on Worker"
+          # Issue #274 cleanup: this used to also POST to the Worker's admin
+          # cache-bust endpoint (key=ai:tracker, ai:health, ai:exec-brief, or
+          # ai:monetize) to invalidate a per-key KV cache in front of these
+          # files. That KV
+          # cache scheme doesn't exist anymore -- the Worker's
+          # /api/ai/{filename} handler (workers/intel-gateway/src/index.js)
+          # reads api/ai/health.json etc. straight from this same R2 bucket
+          # (env.INTEL_R2.get(`ai/${filename}`)) with no caching layer to
+          # invalidate, and none of "ai:tracker"/"ai:health"/"ai:exec-brief"/
+          # "ai:monetize" are in that endpoint's ALLOWED_EXACT_KEYS allowlist --
+          # every one of these calls was silently getting HTTP 400 (curl's
+          # exit code was never checked, so this never surfaced). Removed
+          # rather than fixed forward: there's nothing left to bust.
+          echo "[R2] Stage 9.5 complete — AI Tracker live on Worker (R2, read directly, no cache to invalidate)"

@@ -6271,12 +6271,27 @@ async function handleRequest(request, env, ctx) {
   // last few hours). health.json / executive-brief.json are also reachable
   // through this same fix but were independently found ~4 days stale on
   // gh-pages (regenerate_engine_data.py, called every sentinel-blogger run,
-  // only writes tracker.json; health/executive-brief are meant to come from
-  // generate_ai_endpoints.py via generate-and-sync.yml's 6h schedule, which
-  // does not appear to be updating them -- a separate issue from this proxy
-  // fix, not yet root-caused). Proxy the already-deployed static file
-  // through rather than reimplementing its generation here. Filenames are
-  // whitelisted; this is not an open path-passthrough proxy.
+  // only writes tracker.json; health/executive-brief were meant to come from
+  // generate_ai_endpoints.py via generate-and-sync.yml's 6h schedule).
+  //
+  // Root-caused in issue #274: generate-and-sync.yml's `git push origin main`
+  // has been failing every run (GH013 -- main now requires PRs), silently
+  // (continue-on-error), so main's copy of these files froze the moment
+  // branch protection took effect. sentinel-blogger.yml's STAGE 3.1.22b
+  // (added for this exact reason) regenerates both files fresh every run and
+  // its own r2_upload.py step (Upload 3b) already uploads them to
+  // INTEL_R2 (bucket sentinel-apex-data) as `ai/{filename}` -- that upload
+  // was landing in R2 unused, because this proxy still only checked
+  // gh-pages, which generate-and-sync.yml's broken push also left stale.
+  // Per issue #274 (owner decision: move this data off git entirely), R2 is
+  // now checked FIRST -- it no longer depends on either the gh-pages deploy
+  // timing or a git push succeeding. The gh-pages fetch is kept as a
+  // fallback only (zero regression if the R2 object is ever missing, e.g.
+  // before the first pipeline run that writes it).
+  //
+  // Proxy the already-deployed static file through rather than reimplementing
+  // its generation here. Filenames are whitelisted; this is not an open
+  // path-passthrough proxy.
   // -----------------------------------------------------------------------
   const AI_STATIC_PROXY_FILES = new Set(["tracker.json", "health.json", "executive-brief.json"]);
   if (path.startsWith("/api/ai/") && AI_STATIC_PROXY_FILES.has(path.slice("/api/ai/".length))) {
@@ -6284,6 +6299,21 @@ async function handleRequest(request, env, ctx) {
       return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
     }
     const filename = path.slice("/api/ai/".length);
+
+    if (env.INTEL_R2) {
+      try {
+        const r2Obj = await env.INTEL_R2.get(`ai/${filename}`);
+        if (r2Obj) {
+          return new Response(r2Obj.body, {
+            status: 200,
+            headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" },
+          });
+        }
+      } catch (r2Err) {
+        console.error(`[api/ai proxy] R2 read failed for ${filename}, falling back to gh-pages: ${r2Err && r2Err.message ? r2Err.message : r2Err}`);
+      }
+    }
+
     const upstreamUrl = `https://raw.githubusercontent.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/gh-pages/api/ai/${filename}`;
     try {
       const resp = await fetch(upstreamUrl, {

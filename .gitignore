@@ -74,6 +74,22 @@ data/feed_manifest.json
 api/feed.json
 api/apex_v2/
 
+# Issue #274: these flow to Cloudflare R2 via sentinel-blogger.yml's
+# r2_upload.py and generate-and-sync.yml's STAGE 9.5 (both already upload
+# them every run, independent of any git commit) -- the Worker now reads
+# them from R2 first (workers/intel-gateway/src/index.js's /api/ai/{filename}
+# handler). Different reason from the block above (not a security/auth
+# concern, just no longer serving any purpose): main's branch protection
+# now requires PRs, so generate-and-sync.yml's direct `git push origin main`
+# for these files was failing on every scheduled run, freezing whatever
+# copy happened to be committed before that -- while the real (R2) serving
+# path kept updating independently. Un-tracking removes a stale, misleading
+# snapshot rather than fixing a push that had no reason to exist anymore.
+api/ai/tracker.json
+api/ai/health.json
+api/ai/executive-brief.json
+api/ai/monetization.json
+
 # --- PIPELINE-CRITICAL STATE FILES — EXPLICITLY UN-IGNORED ---
 # These MUST be committed so all downstream workflows find them on checkout.
 !data/cache/
