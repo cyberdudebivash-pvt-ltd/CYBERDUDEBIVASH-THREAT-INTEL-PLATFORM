@@ -1,0 +1,150 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX -- Fast, Independent Frontend Publisher
+# =============================================================================
+# ROOT CAUSE FIX (P0, 2026-09-01): sentinel-blogger.yml's own "STAGE 5 - Deploy
+# to GitHub Pages" is step 133 of ~162 sequential stages in ONE monolithic job
+# (concurrency group `sentinel-data-writer`, cancel-in-progress: false). A full
+# run legitimately takes 2-3+ hours -- confirmed live: run #2202 (triggered by
+# commit a9ccb05's push) needed 65 stages / ~32 minutes just to reach STAGE 3.5
+# of ~162 total. Because that concurrency group never cancels an in-progress
+# run, every commit during a busy period (15+ commits landed in a few hours on
+# 2026-09-01) queues up strictly behind it, one at a time -- so a plain
+# index.html change (a CSS tweak, a UI fix, a security-header hardening pass)
+# can sit fully merged and correct in git, yet invisible on the live site for
+# hours, waiting behind unrelated, much slower data-enrichment/certification
+# stages it has nothing to do with. That is exactly what happened to the
+# threat-map/demo-video feature (#299) and the CSP hardening (#300): both were
+# git-perfect immediately, but stuck live for hours because they were queued
+# behind that single 162-stage run.
+#
+# FIX: publish the CURRENT git-committed state of the static frontend
+# (index.html + its protected JS/CSS + _headers) to GitHub Pages via its own
+# small, independent workflow -- own concurrency group, own policy
+# (cancel-in-progress: true, since every run just republishes current git
+# state; a newer commit's run should always supersede a stale in-flight one,
+# unlike sentinel-data-writer's sequential enrichment work where state
+# actually accumulates run over run) -- with nothing to wait behind.
+#
+# This does NOT replace sentinel-blogger.yml's own deploy step, which remains
+# the authoritative path for reports/, api/, dashboard/, customer/, assets/,
+# and everything else build_dist_artifact.py packages on its normal cadence.
+# It is a narrow, additive safety net specifically for the handful of files
+# that make up the live dashboard's own code, so a UI or security fix is never
+# again hostage to an unrelated multi-hour data-pipeline queue.
+#
+# REUSE (Principle 4 -- searched before building): calls the exact same
+# scripts/build_dist_artifact.py and the same pinned
+# JamesIves/github-pages-deploy-action config that sentinel-blogger.yml's
+# STAGE 5.4.6/STAGE 5 already use -- not a reimplementation. Also reuses
+# scripts/pages_deploy_freshness_gate.py (STAGE 5.4.9.1) unchanged -- it
+# polls the live site's Last-Modified header against a pre-deploy timestamp
+# and has no dependency on reports/ or any other pipeline-specific state, so
+# it's equally valid here as the guard against the *other* known failure mode
+# (GitHub's own Pages backend silently stuck in `deployment_queued` -- see
+# TITAN_PAGES_DEPLOYMENT_INCIDENT_2026-08-06.md).
+#
+# Deliberately NOT reusing STAGE 5.4.7's dist_artifact_verifier.py: its
+# report-count/report-url checks assume reports/ was just freshly generated
+# by the ~130 preceding enrichment stages this workflow deliberately skips
+# (reports/ is gitignored and does not exist in a plain checkout --
+# build_dist_artifact.py's own copy_reports_selective() already handles a
+# missing reports/ gracefully, returning 0 files copied rather than failing).
+# Running the full verifier here would hard-fail every single run on a
+# guarantee this workflow was never meant to make. The step below checks
+# only what this workflow *does* guarantee: the frontend files it was
+# triggered to publish are actually present and non-empty in dist/.
+# =============================================================================
+
+name: pages-fast-publish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'js/api_adapter.js'
+      - 'js/card_renderer.js'
+      - 'js/card_renderer_integration.js'
+      - 'js/sla-monitor.js'
+      - 'css/card_renderer_styles.css'
+      - '_headers'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-fast-publish
+  # Opposite of sentinel-data-writer's cancel-in-progress: false -- that
+  # pipeline accumulates enrichment state run over run, so it must never
+  # cancel a run mid-flight. This workflow only ever republishes whatever is
+  # currently on main; a newer commit's run fully supersedes an older one, so
+  # letting a stale in-flight run keep the lock and delay the newer commit's
+  # publish would recreate the exact queueing problem this workflow exists to
+  # avoid.
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Fast-publish frontend to GitHub Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build dist/ artifact (reuses build_dist_artifact.py -- same script as sentinel-blogger.yml STAGE 5.4.6)
+        env:
+          REPORT_RETENTION_DAYS: "3"
+        run: python3 scripts/build_dist_artifact.py
+
+      - name: Verify frontend-critical files are present in dist/
+        run: |
+          missing=0
+          for f in index.html js/api_adapter.js js/card_renderer.js js/card_renderer_integration.js js/sla-monitor.js css/card_renderer_styles.css .nojekyll; do
+            path="dist/$f"
+            if [ ! -s "$path" ]; then
+              echo "::error::Missing or empty required file in dist/: $f"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "FATAL: dist/ is missing frontend-critical files -- refusing to deploy a broken artifact." >&2
+            exit 1
+          fi
+          echo "OK: all frontend-critical files present in dist/"
+
+      # v184.1-style pattern (see sentinel-blogger.yml STAGE 4.9.9): captured
+      # immediately before the push so the freshness gate below can verify
+      # the live site actually picked up THIS run's deploy.
+      - name: Capture pre-deploy timestamp
+        id: pre-deploy-ts
+        run: echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to GitHub Pages (same action + config as sentinel-blogger.yml STAGE 5)
+        # Pinned to the same commit SHA as sentinel-blogger.yml's STAGE 5 --
+        # this job holds pages:write and pushes to gh-pages, so a re-pointed
+        # floating tag would deploy arbitrary content to the live Pages site
+        # with this token.
+        uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f # v4.8.0
+        with:
+          branch: gh-pages
+          folder: dist
+          clean: true
+          single-commit: true
+
+      - name: Post-deploy freshness verification (reuses pages_deploy_freshness_gate.py -- STAGE 5.4.9.1)
+        timeout-minutes: 14
+        env:
+          PLATFORM_URL: https://intel.cyberdudebivash.com
+          PRE_DEPLOY_TIMESTAMP: ${{ steps.pre-deploy-ts.outputs.ts }}
+        run: python3 scripts/pages_deploy_freshness_gate.py
