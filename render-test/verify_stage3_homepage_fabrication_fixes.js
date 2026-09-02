@@ -52,6 +52,7 @@ const MIME = {
   '.json': 'application/json', '.txt': 'text/plain', '.ico': 'image/x-icon',
 };
 
+/** Serves the repo root over plain HTTP so the real index.html and its JS/CSS load unmodified. @returns {Promise<import('http').Server>} */
 function startStaticServer() {
   const server = http.createServer((req, res) => {
     let urlPath = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
@@ -70,6 +71,7 @@ function startStaticServer() {
 }
 
 const results = [];
+/** Records one check's outcome to the module-level `results` list and logs it. @param {string} name @param {boolean} pass @param {string} [detail] */
 function record(name, pass, detail) {
   results.push({ name, pass, detail });
   const tag = pass ? 'PASS' : 'FAIL';
@@ -87,6 +89,12 @@ const PREVIEW_ITEMS = [
   { id: 'intel--r3', title: 'Regression-Test Medium Advisory',   severity: 'MEDIUM',   risk_score: 3.0, actor_tag: '', mitre_tactics: [] },
 ];
 
+/**
+ * Routes the page's network requests to fixtures: the static AI JSON
+ * endpoints 404 (forcing the live-synthesis fallback path), /api/preview
+ * returns PREVIEW_ITEMS, and everything else off-origin is aborted.
+ * @param {import('playwright').BrowserContext} context
+ */
 async function routeAPIs(context) {
   await context.route('**/*', (route) => {
     const url = route.request().url();
@@ -109,6 +117,13 @@ async function routeAPIs(context) {
   });
 }
 
+/**
+ * Clicks the GENESIS Analyze Live button and asserts avg_risk_score
+ * reflects the real average of PREVIEW_ITEMS (6.0), not the always-0
+ * EMBEDDED_INTEL bug -- with CRITICAL/HIGH counts as an unaffected-sibling
+ * sanity cross-check.
+ * @param {import('playwright').Browser} browser
+ */
 async function runAvgRiskScoreScenario(browser) {
   const context = await browser.newContext({ serviceWorkers: 'block' });
   await routeAPIs(context);
@@ -156,6 +171,11 @@ async function runAvgRiskScoreScenario(browser) {
   await context.close();
 }
 
+/**
+ * Asserts the fabricated live subscriber counter element is gone and the
+ * one real, non-live "1,200+" claim in the intro copy is preserved.
+ * @param {import('playwright').Browser} browser
+ */
 async function runSubscriberCounterScenario(browser) {
   const context = await browser.newContext({ serviceWorkers: 'block' });
   await routeAPIs(context);
@@ -185,6 +205,7 @@ async function runSubscriberCounterScenario(browser) {
   await context.close();
 }
 
+/** Runs both scenarios against a fresh browser/static-server pair and exits non-zero if any check failed. */
 async function main() {
   const server = await startStaticServer();
   let browser;

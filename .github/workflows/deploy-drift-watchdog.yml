@@ -88,6 +88,16 @@ concurrency:
 jobs:
   reconcile:
     name: Detect main/deploy drift and self-heal
+    # SECURITY (same CWE-863 concern pages-fast-publish.yml's own job
+    # already documents and guards against): workflow_dispatch lets a
+    # caller pick any branch/tag to run this job's actions:write token
+    # against. This job never deploys anything itself and only ever
+    # dispatches pages-fast-publish.yml against a hardcoded `--ref main`
+    # (never an attacker-chosen ref), so the exploitable surface was
+    # already narrow -- this restriction closes it entirely rather than
+    # relying on that hardcoding alone. schedule always evaluates against
+    # the default branch already, so this is a no-op for that trigger.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -121,8 +131,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ steps.latest.outputs.sha }}
         run: |
+          # --limit 200: pages-fast-publish.yml only fires on frontend-path
+          # pushes (a narrow, low-frequency subset of this repo's overall
+          # commit volume, unlike the hundreds-per-day push-triggered
+          # workflows with no paths: filter), so its own run history is
+          # shallow between ~15-minute watchdog checks. 200 is deliberately
+          # generous headroom over that, not a tight fit.
           matches=$(gh run list --repo "${{ github.repository }}" --workflow pages-fast-publish.yml \
-            --limit 100 --json headSha,status,conclusion,createdAt \
+            --limit 200 --json headSha,status,conclusion,createdAt \
             --jq --arg sha "$TARGET_SHA" '[.[] | select(.headSha == $sha)] | length')
           echo "matching_runs=$matches" >> "$GITHUB_OUTPUT"
           echo "Existing pages-fast-publish.yml runs for $TARGET_SHA: $matches"

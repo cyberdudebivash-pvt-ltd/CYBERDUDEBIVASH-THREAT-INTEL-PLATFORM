@@ -12263,12 +12263,26 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
         // get right and no injection surface, regardless of what a
         // malicious source/report URL field might contain.
         let _tickerClickTargets = [];
+        /**
+         * Allow-lists a URL for the ticker's click-to-open action.
+         * Same allow-only-http(s)-or-relative convention already used by
+         * initLiveCyberNews()'s href construction elsewhere in this file --
+         * rejects javascript:/data:/malformed values, returning '' instead.
+         * @param {string} raw
+         * @returns {string} the URL if safe to open, otherwise ''
+         */
         function _tickerSafeUrl(raw) {
-            // Same allow-only-http(s)-or-relative convention already used by
-            // initLiveCyberNews()'s href construction elsewhere in this file.
             const s = String(raw || '');
             return /^(https?:\/\/|\/)/.test(s) ? s : '';
         }
+        /**
+         * Renders the homepage threat ticker from the top 20 highest-risk
+         * live feed items. Titles are HTML-escaped via _cdbEsc(); each
+         * item's report/source URL is resolved at click time through
+         * _tickerClickTargets by plain integer index rather than being
+         * interpolated into markup (see the delegated listener below).
+         * @param {object[]} data live feed items
+         */
         function renderTicker(data) {
             const outer = document.getElementById('threat-ticker-outer');
             const inner = document.getElementById('threat-ticker-inner');
@@ -12343,6 +12357,13 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
         }
 
         // v184.0: Render dynamic attack ticker on the threat map using real CVE/threat data
+        /**
+         * Renders the scrolling attack-ticker overlay on the threat map
+         * canvas from the same top-20 live feed items as renderTicker(),
+         * pairing each with an illustrative geo-pair label. Titles are
+         * HTML-escaped via _cdbEsc() the same way.
+         * @param {object[]} data live feed items
+         */
         function renderMapTicker(data) {
             var tickerEl = document.getElementById('cdb-ticker-text');
             if (!tickerEl || !data || !data.length) return;
@@ -15497,6 +15518,16 @@ function renderTopThreats(data) {
             // Decoded: https://intel.cyberdudebivash.com/api/ai/
 
             // ── Live synthesis: build analyze/respond/correlate from real Worker feed ──
+            /**
+             * Builds a GENESIS Analyze Live result (analyze/respond/correlate)
+             * from the live Worker feed when the pre-generated static AI JSON
+             * endpoints are unavailable. avg_risk_score is computed from the
+             * real fetched `items`, not window.EMBEDDED_INTEL (permanently
+             * empty since v184.0 -- see the comment above). Returns all-null
+             * fields on total fetch failure; never synthesizes a replacement
+             * result for a genuinely failed fetch.
+             * @returns {Promise<{analyze: object|null, respond: object|null, correlate: object|null}>}
+             */
             async function _synthAnalysisFromLiveFeed() {
                 const WORKER = 'https://intel.cyberdudebivash.com';
                 let items = [];

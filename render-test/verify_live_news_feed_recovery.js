@@ -204,6 +204,11 @@ async function runGlobalIntelBootRaceScenario(browser) {
   await context.close();
 }
 
+/**
+ * Asserts STATIC_FALLBACK's cached headlines show the honest "Cached
+ * headline" label instead of a fabricated "Xm/Xh/Xd ago" relative age.
+ * @param {import('playwright').Browser} browser
+ */
 async function runCachedFallbackHonestTimestampScenario(browser) {
   // STAGE 3 FIX: STATIC_FALLBACK's pubDate previously read
   // `new Date(Date.now()-N).toISOString()`, computed from the page-render
