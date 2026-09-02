@@ -1438,31 +1438,25 @@ function extJson(body, status = 200) {
 // 
 // =============================================================================
 
-// 
-// INTERNAL: fetch the feed manifest from R2 (cached in KV)
-// 
+//
+// INTERNAL: fetch the feed manifest from R2, shaped as { reports: [...] }
+// for /api/predict, /api/campaigns, /api/anomalies, /api/intelligence/*.
+//
+// PRODUCTION-VERIFICATION FIX (2026-09-02): this used to be its own,
+// separate loader reading env.INTEL_KV and env.INTEL_BUCKET -- neither is
+// a binding that has ever existed in wrangler.toml (only INTEL_R2 and
+// REPORTS_R2 are bound), and even with a correct binding it read the wrong
+// R2 key ("data/stix/feed_manifest.json", never written under that literal
+// path -- see fetchReportsIndexExt's own fix note) and returned the bare
+// array unwrapped, not the { reports: [...] } shape every caller below
+// already expects. fetchReportsIndexExt() (below) is the canonical,
+// already-fixed loader for this exact same data (api/v1/intel/latest.json
+// via INTEL_R2, wrapped as { reports }) used by /api/search, /api/actors,
+// /api/cves, /api/intel/correlate, and the CSV/MISP exporters -- reusing
+// it here instead of maintaining a second, silently-broken copy.
+//
 async function fetchManifestForAI(env) {
-  // Try KV cache first
-  if (env.INTEL_KV) {
-    try {
-      const cached = await env.INTEL_KV.get("ai:manifest_cache", "json");
-      if (cached) return cached;
-    } catch (_) {}
-  }
-  // Fall back to R2
-  if (env.INTEL_BUCKET) {
-    try {
-      const obj  = await env.INTEL_BUCKET.get("data/stix/feed_manifest.json");
-      if (obj) {
-        const data = await obj.json();
-        if (env.INTEL_KV) {
-          await env.INTEL_KV.put("ai:manifest_cache", JSON.stringify(data), { expirationTtl: 120 });
-        }
-        return data;
-      }
-    } catch (_) {}
-  }
-  return null;
+  return fetchReportsIndexExt(env);
 }
 
 // 
