@@ -1651,7 +1651,11 @@ export function classifyFreshness(lastSyncIso) {
   if (Number.isNaN(lastSyncMs)) {
     return { state: "UNAVAILABLE", age_seconds: null };
   }
-  const ageSeconds = Math.max(0, Math.round((Date.now() - lastSyncMs) / 1000));
+  // CodeRabbit review finding (verified: e.g. an actual age of 5h59m59.6s =
+  // 21599.6s rounds UP to 21600 and wrongly fails the "< 6h" FRESH check --
+  // floor keeps the integer age on the same side of each boundary as the
+  // real elapsed time, for all three thresholds).
+  const ageSeconds = Math.max(0, Math.floor((Date.now() - lastSyncMs) / 1000));
   let state;
   if (ageSeconds < 6 * 3600) state = "FRESH";
   else if (ageSeconds < 24 * 3600) state = "RECENT";
@@ -5029,7 +5033,24 @@ async function handleRequest(request, env, ctx) {
     // one (see classifyFreshness()'s comment for the incident this fixes).
     // data_freshness is additive: existing consumers reading top-level
     // `status`/`last_sync` are unaffected.
-    const dataFreshness = classifyFreshness(stats.last_sync);
+    //
+    // CodeRabbit review finding on this migration (verified, not taken on
+    // faith): stats.last_sync (computeStats()) is the MAX of each item's
+    // own published/published_at date -- i.e. "how recent is the newest
+    // article," not "when did this platform last successfully sync/ingest
+    // data." Those are genuinely different signals: a freshly-synced batch
+    // of month-old backfill items would wrongly report STALE, and -- far
+    // more dangerous given what this field exists to detect -- a pipeline
+    // that has been silently broken for weeks but whose last successful
+    // ingest happened to include recently-published source articles would
+    // wrongly report FRESH, masking exactly the class of incident this
+    // whole fix exists to catch. feedData.generated_at (set by
+    // generate_api_manifests.py every time it actually writes this file,
+    // always present -- loadFeedItems()'s empty-fallback path sets it too)
+    // is the correct signal: it is the same "when was this file last
+    // regenerated" timestamp this incident's own root-cause investigation
+    // used as its evidence throughout (frozen at 2026-08-26T09:55:27Z).
+    const dataFreshness = classifyFreshness(feedData.generated_at);
     return jsonResp({
       status: "ok", version: PLATFORM_VERSION,
       advisory_count: stats.total, critical_count: stats.critical,

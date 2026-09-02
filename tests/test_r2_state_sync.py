@@ -80,6 +80,19 @@ class TestS3GetOutcomeClassification(unittest.TestCase):
                            return_value=_proc(1, stderr="Connection timed out")):
             self.assertEqual(r2_upload.s3_get("/tmp/x.json", "b", "k", "https://e"), "ERROR")
 
+    def test_nosuchbucket_returns_error_not_not_found(self):
+        """CodeRabbit review finding (verified, not taken on faith): AWS's
+        actual NoSuchBucket message is "An error occurred (NoSuchBucket)
+        when calling the HeadObject operation: The specified bucket does
+        not exist" -- which contains "does not exist", one of the generic
+        NOT_FOUND substrings this function already matched on. A wrong or
+        misconfigured bucket name would have been silently misclassified as
+        "this object simply hasn't been created yet" and treated as a safe
+        bootstrap case instead of the configuration error it actually is."""
+        with patch.object(r2_upload.subprocess, "run",
+                           return_value=_proc(1, stderr="An error occurred (NoSuchBucket) when calling the HeadObject operation: The specified bucket does not exist")):
+            self.assertEqual(r2_upload.s3_get("/tmp/x.json", "b", "k", "https://e"), "ERROR")
+
 
 class TestStateFilesManifest(unittest.TestCase):
     """STATE_FILES is the single source of truth other tests (download/

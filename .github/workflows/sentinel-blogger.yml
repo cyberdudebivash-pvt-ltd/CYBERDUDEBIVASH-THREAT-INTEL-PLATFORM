@@ -2992,10 +2992,29 @@ jobs:
       # completed (reports, STIX bundles, the Pages deploy) over an R2
       # publish hiccup affecting only these three files -- a strictly worse
       # outcome than a loud but non-blocking annotation.
+      #
+      # CodeRabbit review findings on this migration (both verified, not
+      # taken on faith, both fixed here):
+      #   1. timeout-minutes without continue-on-error: a GitHub Actions
+      #      timeout kill bypasses the `if ! ...; then ... fi` wrapper
+      #      entirely (the shell running it is killed, not just the python
+      #      process it wraps) -- the step itself is marked `failure`, and
+      #      every later default-if:success() step (deploy gates included)
+      #      would cascade-skip, exactly the STAGE 0.0 encoding_guard.py
+      #      class of bug this whole incident is about. continue-on-error
+      #      makes that survivable regardless of which way this step fails.
+      #   2. bare if: always() ran this even when STAGE 0.00's
+      #      PIPELINE_LOCKED guard is active (human "god mode" manual editing
+      #      in progress -- see that stage's own comment) or when STAGE 1-3
+      #      itself failed, in both cases publishing whatever local state
+      #      happens to exist -- possibly mid-manual-edit or incomplete -- as
+      #      the new R2-authoritative copy every other run reads from. Now
+      #      gated the same way STAGE 4's safe_git_commit.py step already is.
       # -----------------------------------------------------------------------
       - name: "Upload Intel State to R2 (final, post-enrichment)"
         timeout-minutes: 5
-        if: always()
+        if: ${{ always() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' }}
+        continue-on-error: true
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
@@ -4103,6 +4122,35 @@ jobs:
       - name: "Stage 5.9.1 - Manifest URL Repair (P1-004)"
         continue-on-error: true
         run: python3 scripts/manifest_url_repair.py
+
+      # -----------------------------------------------------------------------
+      # CodeRabbit review finding on this migration (verified and fixed):
+      # manifest_url_repair.py patches data/stix/feed_manifest.json (syncing
+      # report_url from api/feed.json) at TWO points in this pipeline --
+      # STAGE 5.4.9 above and this step's "Stage 5.9.1" right above -- and
+      # BOTH run after "Upload Intel State to R2 (final, post-enrichment)"
+      # (~line 2996). That upload's own STATE_FILES-timing test asserted 6
+      # writer scripts run before it but never checked this one -- a real
+      # gap, not just a missed comment: every run's report_url fix was being
+      # silently discarded, not merely delayed, since nothing re-uploaded
+      # this file again afterward. Same idempotent-late-resync pattern this
+      # file already uses for STAGE 4.1 (API manifests) -- r2_state_sync.py
+      # --upload is safe to call again; it just republishes current disk
+      # state under the same keys. if:always() + continue-on-error so this
+      # runs regardless of STAGE 5.9.2's hard-fail-capable gate right below.
+      # -----------------------------------------------------------------------
+      - name: "Upload Intel State to R2 (post-manifest-repair, final)"
+        timeout-minutes: 5
+        if: ${{ always() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: |
+          if ! python3 scripts/r2_state_sync.py --upload; then
+            echo "::warning::Upload Intel State to R2 (post-manifest-repair): publish failed -- manifest_url_repair.py's report_url fixes from this run may not have persisted. See error annotation above for file-level detail."
+          fi
 
       # =====================================================================
       # STAGE 5.9.2 - PRODUCTION RELEASE GATES (v184.0 - HARD FAIL)

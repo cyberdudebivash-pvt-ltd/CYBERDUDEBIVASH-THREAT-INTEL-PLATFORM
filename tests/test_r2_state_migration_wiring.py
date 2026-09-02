@@ -224,9 +224,46 @@ class TestSentinelBloggerWiring(unittest.TestCase):
         used to. Must follow the same if:always() + captured-exit-code
         pattern as the existing STAGE 4.1 step right before it."""
         step = next(s for s in self.steps if s.get("name") == "Upload Intel State to R2 (final, post-enrichment)")
-        self.assertEqual(step.get("if"), "always()")
+        self.assertIn("always()", step.get("if", ""))
         self.assertIn("if ! python3 scripts/r2_state_sync.py --upload", step["run"])
         self.assertNotIn("exit 1", step["run"])
+
+    def test_upload_step_does_not_run_when_locked_or_stage_1_3_failed(self):
+        """CodeRabbit review finding on this migration (verified and fixed):
+        a bare if:always() published whatever local state existed even when
+        STAGE 0.00's PIPELINE_LOCKED guard is active (human 'god mode' manual
+        editing in progress) or when STAGE 1-3 itself failed -- in both cases
+        publishing possibly mid-edit or incomplete state as the new
+        R2-authoritative copy every other run reads from."""
+        for name in (
+            "Upload Intel State to R2 (final, post-enrichment)",
+            "Upload Intel State to R2 (post-manifest-repair, final)",
+        ):
+            step = next(s for s in self.steps if s.get("name") == name)
+            condition = step.get("if", "")
+            self.assertIn("PIPELINE_LOCKED", condition, f"{name} missing PIPELINE_LOCKED guard")
+            self.assertIn("pipeline_stage_1_3", condition, f"{name} missing pipeline_stage_1_3 guard")
+            self.assertEqual(
+                step.get("continue-on-error"), True,
+                f"{name}: a timeout-minutes kill bypasses this step's own "
+                f"internal `if ! ...; then ... fi` failure handling entirely "
+                f"(the shell running it is killed, not just the wrapped "
+                f"process) -- without continue-on-error the step itself is "
+                f"marked failure and every later default-if:success() step "
+                f"cascade-skips.",
+            )
+
+    def test_late_upload_step_runs_after_final_manifest_url_repair(self):
+        """CodeRabbit review finding on this migration (verified and fixed):
+        manifest_url_repair.py patches data/stix/feed_manifest.json at two
+        points (STAGE 5.4.9 and Stage 5.9.1), both of which used to run
+        after the only upload step -- so its report_url fixes were silently
+        discarded every run, not merely delayed a cycle."""
+        stage_549 = self.names.index("STAGE 5.4.9 - STIX Manifest URL Sanitizer (V11 Pre-Gate Fix)")
+        stage_591 = self.names.index("Stage 5.9.1 - Manifest URL Repair (P1-004)")
+        late_upload = self.names.index("Upload Intel State to R2 (post-manifest-repair, final)")
+        self.assertLess(stage_549, late_upload)
+        self.assertLess(stage_591, late_upload)
 
     def test_download_step_r2_credentials_present(self):
         step = next(s for s in self.steps if s.get("name") == "Download Intel State from R2")

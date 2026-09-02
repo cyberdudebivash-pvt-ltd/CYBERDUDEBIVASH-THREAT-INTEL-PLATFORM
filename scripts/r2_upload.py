@@ -184,9 +184,17 @@ def s3_get(
                      new key, e.g. before this migration's first successful
                      upload). Safe to fall back to a bootstrap source.
       "ERROR"     -- anything else (network, auth, R2 outage, malformed
-                     response). NOT safe to treat as "start fresh": doing so
-                     for a dedup/incremental-state object could silently
-                     discard real history and reintroduce duplicates.
+                     response, or -- CodeRabbit review finding on this
+                     migration, verified: AWS's actual NoSuchBucket message
+                     is "The specified bucket does not exist", which the
+                     naive "does not exist" substring check below used to
+                     also match, misclassifying a wrong/misconfigured bucket
+                     name as "object not created yet" -- checked first and
+                     explicitly excluded). NOT safe to treat any of these as
+                     "start fresh": doing so for a dedup/incremental-state
+                     object could silently discard real history and
+                     reintroduce duplicates, or mask a bucket misconfig
+                     behind what looks like a normal first-run bootstrap.
     """
     cmd = [
         "aws", "s3", "cp", f"s3://{src_bucket}/{src_key}", dst_local,
@@ -199,6 +207,15 @@ def s3_get(
         return "OK"
 
     combined = f"{result.stdout}\n{result.stderr}".lower()
+    if "nosuchbucket" in combined:
+        log.error(
+            "ERROR: Download failed for s3://%s/%s (%d): bucket does not "
+            "exist or is misconfigured -- NOT the same as the object simply "
+            "not being created yet. %s %s",
+            src_bucket, src_key, result.returncode,
+            result.stdout.strip(), result.stderr.strip(),
+        )
+        return "ERROR"
     if "404" in combined or "not found" in combined or "nosuchkey" in combined or "does not exist" in combined:
         log.info(
             "NOT_FOUND: s3://%s/%s does not exist yet (expected on first run "

@@ -9,10 +9,21 @@ import { classifyFreshness } from "../index.js";
 // one week old (production /api/health showed
 // last_sync:"2026-08-26T08:50:13Z" while generated_at, the response's own
 // timestamp, was 2026-09-02). classifyFreshness() gives /api/health an
-// independent freshness signal computed from the same stats.last_sync
-// already available to the handler (no extra R2 fetch), so
-// PLATFORM_REACHABLE and DATA_FRESHNESS can never be silently conflated
-// into one status field again.
+// independent freshness signal, so PLATFORM_REACHABLE and DATA_FRESHNESS
+// can never be silently conflated into one status field again.
+//
+// CodeRabbit review finding on this migration (verified and fixed, not
+// this test file's concern but noted for context): the handler originally
+// passed stats.last_sync (the MAX published/published_at across feed items
+// -- source article recency, not sync recency) into classifyFreshness().
+// That's a different signal from "when did this platform last successfully
+// ingest" -- a broken pipeline whose last successful ingest happened to
+// include recently-published source articles would have reported FRESH,
+// masking exactly the class of incident this field exists to catch. Fixed
+// by passing feedData.generated_at (the pipeline's own "when I last wrote
+// this file" timestamp) instead. classifyFreshness() itself is a pure
+// function of whatever ISO timestamp it's given, so this test file's own
+// coverage is unaffected by which field the caller passes in.
 //
 // Thresholds match this platform's own known ingestion cadence
 // (multi-source-intel.yml + sentinel-blogger.yml both run roughly every 4h):
@@ -50,6 +61,19 @@ test("classifyFreshness: just now / 2h ago is FRESH", () => {
 test("classifyFreshness: boundary just under 6h is FRESH, just over is RECENT", () => {
   assert.equal(classifyFreshness(hoursAgoIso(5.9)).state, "FRESH");
   assert.equal(classifyFreshness(hoursAgoIso(6.1)).state, "RECENT");
+});
+
+test("classifyFreshness: CodeRabbit review finding -- sub-second age just under a threshold must not round up across it", () => {
+  // An actual elapsed age of 21599.6s (5h59m59.6s) is genuinely < 21600s
+  // (6h) and must classify FRESH. Math.round(21599.6) = 21600, which used
+  // to fail the "< 6h" check and wrongly return RECENT; Math.floor keeps it
+  // on the correct side of the boundary. Same class of off-by-a-rounding
+  // bug would apply at the 24h/72h boundaries too, but they share the same
+  // fix (one Math.floor call for all three thresholds), so this one case
+  // is sufficient to pin the fix rather than repeating it three times.
+  const ts = new Date(Date.now() - 21599600).toISOString();
+  const r = classifyFreshness(ts);
+  assert.equal(r.state, "FRESH");
 });
 
 test("classifyFreshness: 12h ago is RECENT", () => {
