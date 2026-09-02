@@ -230,6 +230,76 @@ class TestDownload(unittest.TestCase):
             rc = rs.download(self.tmp, "https://e")
         self.assertEqual(rc, 1)
 
+    def test_malformed_json_after_download_preserves_existing_local_copy(self):
+        """PRODUCTION-VERIFICATION HARDENING (2026-09-02): s3_get() used to
+        write straight to local_path, so a malformed download had already
+        overwritten a good local copy by the time this function's own
+        validation ran -- correctly reported as fatal (rc=1), but the file
+        on disk was left corrupt, not restored. download() now stages into
+        a .tmp sibling first and only promotes it on successful validation,
+        so a real pre-existing local copy must survive a malformed download
+        completely unchanged, not just get an accurate error code."""
+        local_rel, r2_key = rs.STATE_FILES[0]
+        local_path = self.tmp / local_rel
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text('{"real_history": "must_not_be_discarded"}', encoding="utf-8")
+
+        def _fake_run(cmd, **kwargs):
+            _is_download, dst, key = _parse_cp_cmd(cmd)
+            if key == r2_key:
+                pathlib.Path(dst).write_text("{not valid json", encoding="utf-8")
+            else:
+                pathlib.Path(dst).write_text(json.dumps({"ok": True}), encoding="utf-8")
+            return _proc(0)
+
+        with patch.object(r2_upload.subprocess, "run", side_effect=_fake_run):
+            rc = rs.download(self.tmp, "https://e")
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(json.loads(local_path.read_text()), {"real_history": "must_not_be_discarded"})
+        # No leftover .tmp sibling, success or rejection.
+        self.assertFalse((self.tmp / (local_rel + ".r2sync.tmp")).exists())
+
+    def test_wrong_shape_json_is_rejected_and_preserves_existing_local_copy(self):
+        """Section 19 Case C of the P0 R2 hardening mandate: valid JSON that
+        is not the expected shape (here, a bare string instead of a list/
+        object) must be rejected the same as malformed JSON, not silently
+        accepted just because json.loads() succeeds."""
+        local_rel, r2_key = rs.STATE_FILES[0]
+        local_path = self.tmp / local_rel
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text('{"real_history": "must_not_be_discarded"}', encoding="utf-8")
+
+        def _fake_run(cmd, **kwargs):
+            _is_download, dst, key = _parse_cp_cmd(cmd)
+            if key == r2_key:
+                pathlib.Path(dst).write_text(json.dumps("just a string, not a list or object"), encoding="utf-8")
+            else:
+                pathlib.Path(dst).write_text(json.dumps({"ok": True}), encoding="utf-8")
+            return _proc(0)
+
+        with patch.object(r2_upload.subprocess, "run", side_effect=_fake_run):
+            rc = rs.download(self.tmp, "https://e")
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(json.loads(local_path.read_text()), {"real_history": "must_not_be_discarded"})
+
+    def test_valid_correctly_shaped_download_replaces_existing_local_copy(self):
+        """Sanity counterpart to the two rejection tests above: a valid,
+        correctly-shaped download must still replace an existing local file
+        (the hardening must reject bad content, not everything)."""
+        local_rel, r2_key = rs.STATE_FILES[0]
+        local_path = self.tmp / local_rel
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text('{"stale": true}', encoding="utf-8")
+
+        outcomes = {k: "OK" for _, k in rs.STATE_FILES}
+        with patch.object(r2_upload.subprocess, "run", side_effect=self._mock_run_for(outcomes)):
+            rc = rs.download(self.tmp, "https://e")
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(local_path.read_text()), {"ok": True})
+
 
 class TestUpload(unittest.TestCase):
     def setUp(self):
