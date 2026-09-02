@@ -53,7 +53,33 @@ jobs:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
         run: python3 scripts/bootstrap_critical_files.py
 
-      # 
+      # -----------------------------------------------------------------------
+      # P0 FIX: Download Intel State from R2 (runtime-authoritative)
+      # feed_state.json / processed_intel.json / feed_manifest.json used to be
+      # committed to main by this workflow's own push below -- but that push
+      # has been rejected on every run since main started requiring PRs
+      # (confirmed live via job logs: "GH013 ... Changes must be made through
+      # a pull request", 4/4 attempts, every ~4h run for a week straight),
+      # silently discarding every run's freshly-ingested state. Extends the
+      # #274/#293 pattern (api/ai/*.json moved off git onto R2) to these three
+      # files: R2 is now the cross-run-persistent authority, downloaded here
+      # BEFORE ingestion runs and re-uploaded (STAGE below) after. This step
+      # hard-fails on a genuine R2 read error (network/auth/outage) rather
+      # than silently starting from empty state, which would risk discarding
+      # real dedup history and reintroducing duplicates -- see
+      # scripts/r2_state_sync.py's own docstring for the full bootstrap
+      # contract (an object simply not existing yet in R2, e.g. this
+      # workflow's very first run after this fix, is NOT an error: the
+      # current git-checkout copy is used as a one-time bootstrap source).
+      # -----------------------------------------------------------------------
+      - name: "Download Intel State from R2"
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --download
+
+      #
       # TRUE INCREMENTAL INGESTION (P0 FIX v184.0)
       # Replaces the broken ManifestMerger + SourceIntelligenceOrchestrator.
       # true_intel_ingestor.py:
@@ -80,12 +106,33 @@ jobs:
         run: |
           python3 scripts/validate_manifest_integrity.py
 
-      # 
-      # COMMIT STATE FILES - CRITICAL for cross-run incremental ingestion
-      # feed_state.json    = per-source last_seen timestamps (MUST persist)
-      # processed_intel.json = dedup fingerprint store (MUST persist)
-      # feed_manifest.json  = intel manifest (additive, safe to commit)
-      # 
+      # -----------------------------------------------------------------------
+      # P0 FIX: Upload Intel State to R2 (runtime-authoritative)
+      # Publishes this run's updated feed_state.json / processed_intel.json /
+      # feed_manifest.json to R2 -- independent of whether the git commit
+      # below succeeds. This is now the ONLY durable persistence path for
+      # these three files; see the "Download Intel State from R2" step above
+      # for the full rationale. Retries 4x (scripts/r2_state_sync.py) and
+      # hard-fails the job on total exhaustion, matching the "Commit Intel
+      # State & Manifest" step's own push-exhaustion behavior below.
+      # -----------------------------------------------------------------------
+      - name: "Upload Intel State to R2"
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --upload
+
+      #
+      # COMMIT REMAINING STATE - append-only intelligence repository files.
+      # feed_state.json / processed_intel.json / feed_manifest.json are no
+      # longer staged here (P0 FIX): they are R2-authoritative now (see the
+      # upload step above) and main's branch ruleset rejects this workflow's
+      # direct push for them anyway (git history shows no successful commit
+      # of these paths by this workflow since main started requiring PRs).
+      # Leaving a failed git push running in parallel with a working R2
+      # publish served no purpose.
+      #
       - name: "Commit Intel State & Manifest"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -98,11 +145,6 @@ jobs:
           git rebase --abort 2>/dev/null || true
           git merge --abort  2>/dev/null || true
           rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
-
-          # Stage state files that MUST persist between runs
-          git add -f data/cache/feed_state.json    2>/dev/null || true  # per-source last_seen
-          git add -f data/processed_intel.json     2>/dev/null || true  # dedup fingerprint store
-          git add -f data/stix/feed_manifest.json  2>/dev/null || true  # intel manifest (additive)
 
           # v184.0 P0: Run Intelligence Persistence Engine after every ingest
           python3 scripts/intel_persistence_engine.py 2>/dev/null || true
@@ -151,6 +193,6 @@ jobs:
           # feed_manifest.json never advanced past their last successful
           # commit. Hard-fail so this is visible instead of invisible.
           if [ "$PUSHED" -ne 1 ]; then
-            echo "::error::Commit Intel State & Manifest: push to main was rejected on all 4 attempts. This run's freshly-ingested intel state (feed_state.json, processed_intel.json, feed_manifest.json) was NOT persisted -- the next scheduled run will start from stale state again. Check https://github.com/${{ github.repository }}/rules?ref=refs%2Fheads%2Fmain for the branch rule rejecting this push."
+            echo "::error::Commit Intel State & Manifest: push to main was rejected on all 4 attempts. This run's data/intelligence_repository/* append-only registry updates were NOT persisted (feed_state.json/processed_intel.json/feed_manifest.json are unaffected -- they are R2-authoritative now, published by the earlier 'Upload Intel State to R2' step regardless of this push's outcome). Check https://github.com/${{ github.repository }}/rules?ref=refs%2Fheads%2Fmain for the branch rule rejecting this push."
             exit 1
           fi

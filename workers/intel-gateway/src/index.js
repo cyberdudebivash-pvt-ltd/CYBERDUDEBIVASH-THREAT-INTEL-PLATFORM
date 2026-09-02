@@ -1632,6 +1632,34 @@ function computeStats(items) {
   };
 }
 
+// P0 FIX: /api/health's `status: "ok"` only ever reflected platform/gateway
+// reachability, never whether the underlying intelligence corpus was
+// actually current -- confirmed live during the 2026-08-26 core-feed
+// staleness incident: status:"ok" coexisted with a stats.last_sync ~1 week
+// old. This computes an independent freshness classification from the same
+// stats.last_sync already available to every /api/health caller (no
+// additional R2 fetch, no added latency) so PLATFORM_REACHABLE and
+// DATA_FRESHNESS are never conflated into one boolean-shaped signal again.
+// Thresholds are informed by this platform's own known ingestion cadence
+// (multi-source-intel.yml every ~4h, sentinel-blogger.yml every ~4h) --
+// FRESH allows one missed cycle before escalating.
+export function classifyFreshness(lastSyncIso) {
+  if (!lastSyncIso || lastSyncIso === "N/A") {
+    return { state: "UNAVAILABLE", age_seconds: null };
+  }
+  const lastSyncMs = Date.parse(lastSyncIso);
+  if (Number.isNaN(lastSyncMs)) {
+    return { state: "UNAVAILABLE", age_seconds: null };
+  }
+  const ageSeconds = Math.max(0, Math.round((Date.now() - lastSyncMs) / 1000));
+  let state;
+  if (ageSeconds < 6 * 3600) state = "FRESH";
+  else if (ageSeconds < 24 * 3600) state = "RECENT";
+  else if (ageSeconds < 72 * 3600) state = "AGING";
+  else state = "STALE";
+  return { state, age_seconds: ageSeconds };
+}
+
 function computeDefcon(stats) {
   const ratio = stats.total > 0 ? stats.critical / stats.total : 0;
   if (ratio >= 0.4 || stats.kev_confirmed >= 5) return { level: 1, label: "DEFCON 1", status: "WAR",          color: "#ff0000" };
@@ -4996,11 +5024,20 @@ async function handleRequest(request, env, ctx) {
     // it would silently read as "configured" here while still being useless to
     // every caller that needs the actual value. Require non-whitespace content.
     const isSet = (v) => typeof v === "string" && v.trim().length > 0;
+    // P0 FIX: `status: "ok"` above has only ever meant "the gateway
+    // answered" -- it is NOT a data-health signal and must never be read as
+    // one (see classifyFreshness()'s comment for the incident this fixes).
+    // data_freshness is additive: existing consumers reading top-level
+    // `status`/`last_sync` are unaffected.
+    const dataFreshness = classifyFreshness(stats.last_sync);
     return jsonResp({
       status: "ok", version: PLATFORM_VERSION,
       advisory_count: stats.total, critical_count: stats.critical,
       kev_confirmed: stats.kev_confirmed, last_sync: stats.last_sync,
       feed_index: `live:${stats.total}_items`,
+      platform_reachable: true,
+      data_freshness: dataFreshness,
+      intelligence_available: stats.total > 0,
       checks: {
         gateway: "ok", kv_rate_limit: kvOk, kv_api_keys: kvOk,
         r2_intel: feedData.items.length > 0 ? "ok" : "empty",
