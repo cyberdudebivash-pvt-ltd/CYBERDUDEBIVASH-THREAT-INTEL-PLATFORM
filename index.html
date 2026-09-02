@@ -6265,18 +6265,27 @@
                 <div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,#3b82f6,#60a5fa,#3b82f6);"></div>
                 <p style="font-family:var(--font-mono);font-size:8px;letter-spacing:3px;color:#60a5fa;text-transform:uppercase;margin:0 0 4px 0;">🔐 SOC STATUS PANEL</p>
                 <p style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin:0 0 12px 0;">Integration Health &amp; Sensor Status</p>
+                <!-- P0 FIX: the 5 rows below (all but AI ENGINE) had no JS
+                     writer anywhere in this codebase -- "● ONLINE"/"● ACTIVE"
+                     was static markup claiming real-time runtime health no
+                     backend signal ever backed, unconditionally, regardless
+                     of any actual integration or feed state. Relabeled as
+                     what they truthfully are: supported platform
+                     capabilities, not measured live status. AI ENGINE is
+                     untouched -- it is the one row a real function
+                     (fillAIPredictions()) actually writes. -->
                 <div style="display:flex;flex-direction:column;gap:7px;" id="eicc-soc-status">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-family:var(--font-mono);font-size:9px;color:var(--text);">STIX 2.1 FEED</span>
-                        <span style="font-family:var(--font-mono);font-size:8px;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 8px;border-radius:2px;">● ONLINE</span>
+                        <span style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:2px;">SUPPORTED</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-family:var(--font-mono);font-size:9px;color:var(--text);">SIEM WEBHOOK</span>
-                        <span style="font-family:var(--font-mono);font-size:8px;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 8px;border-radius:2px;">● ONLINE</span>
+                        <span style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:2px;">SUPPORTED</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-family:var(--font-mono);font-size:9px;color:var(--text);">MISP EXPORT</span>
-                        <span style="font-family:var(--font-mono);font-size:8px;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 8px;border-radius:2px;">● ONLINE</span>
+                        <span style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:2px;">SUPPORTED</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-family:var(--font-mono);font-size:9px;color:var(--text);">AI ENGINE</span>
@@ -6284,11 +6293,11 @@
                     </div>
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-family:var(--font-mono);font-size:9px;color:var(--text);">IOC SCANNER</span>
-                        <span style="font-family:var(--font-mono);font-size:8px;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 8px;border-radius:2px;">● ACTIVE</span>
+                        <span style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:2px;">SUPPORTED</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-family:var(--font-mono);font-size:9px;color:var(--text);">THREAT SCORING</span>
-                        <span style="font-family:var(--font-mono);font-size:8px;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 8px;border-radius:2px;">● ONLINE</span>
+                        <span style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:2px;">SUPPORTED</span>
                     </div>
                 </div>
                 <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(59,130,246,0.12);">
@@ -13676,7 +13685,17 @@ function renderTopThreats(data) {
                 if (panel) panel.classList.add('active');
 
                 if (tab === 'live') return; // LIVE uses existing renderCards pipeline
-                if (!manifestData || !manifestData.length) { cdbFallbackLive(); return; }
+                // P0 FIX: this used to silently call cdbFallbackLive() here --
+                // a customer clicking SOC VIEW (or Timeline/Campaigns/Actors)
+                // during a total feed outage saw the LIVE tab's content with
+                // no error, no indication their click did anything different.
+                // Stays on the requested tab and shows an explicit
+                // unavailable state with a retry action instead.
+                if (!manifestData || !manifestData.length) {
+                    var _tabLabels = { timeline: 'TIMELINE', campaigns: 'CAMPAIGNS', actors: 'ACTORS', soc: 'SOC VIEW' };
+                    if (panel) panel.innerHTML = '<div class="loading-state">' + (_tabLabels[tab] || tab.toUpperCase()) + ' DATA UNAVAILABLE<br><span style="font-size:9px;">No current threat intelligence loaded — <a href="javascript:void(0)" onclick="loadGOCIntel()" style="color:var(--accent);">retry</a></span></div>';
+                    return;
+                }
 
                 if (tab === 'timeline') cdbRenderTimeline(manifestData);
                 else if (tab === 'campaigns') cdbRenderCampaigns(manifestData);
@@ -13764,12 +13783,21 @@ function renderTopThreats(data) {
             var panel = document.getElementById('cdb-panel-campaigns');
             if (!panel) return;
             var campaigns = {};
+            // Group by MITRE tactic phase as campaign proxy
+            var phases = {'T1595':'Reconnaissance','T1592':'Reconnaissance','T1190':'Initial Access','T1133':'Initial Access','T1566':'Phishing','T1059':'Execution','T1053':'Execution','T1547':'Persistence','T1543':'Persistence','T1548':'Privilege Escalation','T1003':'Credential Access','T1110':'Credential Access','T1021':'Lateral Movement','T1071':'Command & Control','T1041':'Exfiltration','T1486':'Impact','T1490':'Impact'};
             data.forEach(function(item) {
                 var tags = item.mitre_tactics || [];
-                var key = tags.length > 0 ? tags[0] : 'General Intelligence';
-                // Group by MITRE tactic phase as campaign proxy
-                var phases = {'T1595':'Reconnaissance','T1592':'Reconnaissance','T1190':'Initial Access','T1133':'Initial Access','T1566':'Phishing','T1059':'Execution','T1053':'Execution','T1547':'Persistence','T1543':'Persistence','T1548':'Privilege Escalation','T1003':'Credential Access','T1110':'Credential Access','T1021':'Lateral Movement','T1071':'Command & Control','T1041':'Exfiltration','T1486':'Impact','T1490':'Impact'};
-                var phaseName = phases[key] || 'Threat Intelligence';
+                var t0 = tags.length > 0 ? tags[0] : null;
+                // P0 FIX: mitre_tactics entries are objects ({id,name,tactic,
+                // justification}), not bare technique-id strings -- t0 used
+                // directly as the phases[] lookup key always missed (an
+                // object key never matches a string key), so every item fell
+                // into the untagged bucket regardless of its real technique.
+                // t0.id recovers the phases[] table's intended lookup; t0.tactic
+                // is already a correctly-named phase for any id the table
+                // doesn't carry, so it's tried next before the untagged bucket.
+                var techId = t0 ? (typeof t0 === 'string' ? t0 : t0.id) : null;
+                var phaseName = (techId && phases[techId]) || (t0 && t0.tactic) || 'Threat Intelligence';
                 if (!campaigns[phaseName]) campaigns[phaseName] = [];
                 campaigns[phaseName].push(item);
             });
@@ -13777,7 +13805,13 @@ function renderTopThreats(data) {
             var html = '';
             sorted.forEach(function(entry) {
                 var name = entry[0], items = entry[1];
-                                var avgRisk = window._v149AvgRisk(window.EMBEDDED_INTEL || []);
+                // P0 FIX: was window._v149AvgRisk(window.EMBEDDED_INTEL || []) --
+                // EMBEDDED_INTEL is permanently [] in production (the R2-backed
+                // API is authoritative), so every card always showed "Avg Risk:
+                // 0/10" regardless of its real content. Uses this group's own
+                // items, matching how the sibling Actors tab already computes
+                // its own (correct) average.
+                var avgRisk = window._v149AvgRisk(items);
                 html += '<div class="cdb-group-card">';
                 html += '<div class="cdb-group-header"><div class="cdb-group-name">' + _cdbEsc(name) + '</div><div class="cdb-group-count">' + items.length + ' advisories \u00b7 Avg Risk: ' + avgRisk + '/10</div></div>';
                 html += '<div class="cdb-group-items">';
@@ -13847,8 +13881,17 @@ function renderTopThreats(data) {
             var topActors = Object.entries(actorMap).sort(function(a,b){return b[1]-a[1];}).slice(0,5);
 
             // Top MITRE techniques
+            // P0 FIX: mitre_tactics entries are objects ({id,name,tactic,
+            // justification}), not bare technique-id strings -- techMap[t]
+            // used the object itself as the key, which JS coerces to the
+            // literal string "[object Object]", so every technique collapsed
+            // into one fabricated-looking bucket labeled "[object Object]".
             var techMap = {};
-            data.forEach(function(i){(i.mitre_tactics||[]).forEach(function(t){techMap[t]=(techMap[t]||0)+1;});});
+            data.forEach(function(i){(i.mitre_tactics||[]).forEach(function(t){
+                var techId = t ? (typeof t === 'string' ? t : (t.id || t.tactic || t.name)) : null;
+                if (!techId) return;
+                techMap[techId]=(techMap[techId]||0)+1;
+            });});
             var topTech = Object.entries(techMap).sort(function(a,b){return b[1]-a[1];}).slice(0,8);
 
             var html = '<div class="cdb-soc-grid">';
