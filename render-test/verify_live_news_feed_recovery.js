@@ -35,6 +35,12 @@
  *     Cloudflare Pages' _headers mechanism isn't interpreted by this test's
  *     plain Node static server).
  *
+ * STAGE 3 ADDITION: also verifies that STATIC_FALLBACK's cached headlines
+ * no longer claim a fabricated relative age (was: pubDate computed as
+ * `Date.now() - fixed_offset` at page-render time, so "15m ago"-style text
+ * was always fresh on every load regardless of true content age) -- see
+ * runCachedFallbackHonestTimestampScenario() below.
+ *
  * Usage:
  *   NODE_PATH="$(npm root -g)" node render-test/verify_live_news_feed_recovery.js
  *
@@ -198,9 +204,49 @@ async function runGlobalIntelBootRaceScenario(browser) {
   await context.close();
 }
 
+async function runCachedFallbackHonestTimestampScenario(browser) {
+  // STAGE 3 FIX: STATIC_FALLBACK's pubDate previously read
+  // `new Date(Date.now()-N).toISOString()`, computed from the page-render
+  // clock at evaluation time rather than any real publication/capture
+  // timestamp -- so every fresh page load showed these 11 cached headlines
+  // as "15m ago", "1h ago", etc. regardless of their true (unknown) age. No
+  // real timestamp exists for this illustrative cached content, so pubDate
+  // is now explicitly null and cached cards render honest "Cached headline"
+  // text instead of a fabricated relative age.
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await routeAPIs(context, { proxiesSucceed: false });
+  const page = await context.newPage();
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1000);
+
+  const dateTexts = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('#lcn-grid .lcn-date')).map((el) => el.textContent.trim()));
+
+  record('Cached fallback headlines never claim a fabricated relative age (no "Xm/Xh/Xd ago" derived from the page-render clock)',
+    dateTexts.length > 0 && dateTexts.every((t) => !/\d+\s*[mhd]\s*ago/i.test(t)),
+    JSON.stringify(dateTexts));
+
+  record('Cached fallback headlines instead show the honest, non-time-claiming "Cached headline" label',
+    dateTexts.length > 0 && dateTexts.every((t) => t.includes('Cached headline')),
+    JSON.stringify(dateTexts));
+
+  await context.close();
+}
+
 function runCSPAllowlistScenario() {
+  // STAGE 3 FIX: this previously matched the FIRST line containing the
+  // substring "Content-Security-Policy" -- but _headers' own explanatory
+  // comment ("# CSP is the <meta http-equiv="Content-Security-Policy">
+  // tag in index.html.") also contains that substring and sorts earlier in
+  // the file than the real `Content-Security-Policy:` response header
+  // line, so .find() always returned the comment, never the real directive
+  // -- every hasAllorigins/hasCorsproxy/hasRss2json check below was
+  // silently false regardless of the real header's content. The real
+  // _headers directive was (and is) correctly configured with all three
+  // domains the whole time; only this check's own line-selection was
+  // broken. Excluding comment lines fixes the false negative.
   const headersContent = fs.readFileSync(path.join(REPO_ROOT, '_headers'), 'utf-8');
-  const cspLine = headersContent.split('\n').find(l => l.includes('Content-Security-Policy'));
+  const cspLine = headersContent.split('\n').find(l => !l.trim().startsWith('#') && l.includes('Content-Security-Policy'));
   const hasAllorigins = /connect-src[^;]*api\.allorigins\.win/.test(cspLine || '');
   const hasCorsproxy = /connect-src[^;]*corsproxy\.io/.test(cspLine || '');
   const hasRss2json = /connect-src[^;]*api\.rss2json\.com/.test(cspLine || '');
@@ -216,6 +262,8 @@ async function main() {
     await runNoCrashScenario(browser);
     console.log('\n--- Scenario: CSP allowlist (static config check) ---');
     runCSPAllowlistScenario();
+    console.log('\n--- Scenario: cached fallback headlines show an honest label, not a fabricated relative age ---');
+    await runCachedFallbackHonestTimestampScenario(browser);
     console.log('\n--- Scenario: live proxy fetch succeeds -> real content replaces fallback ---');
     await runLiveSuccessScenario(browser);
     console.log('\n--- Scenario: Global Cyber Intel LIVE populates once real data arrives ---');
