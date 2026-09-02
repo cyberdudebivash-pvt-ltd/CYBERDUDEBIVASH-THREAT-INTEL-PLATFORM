@@ -171,10 +171,29 @@ def download(endpoint: str) -> int:
                 rel, src, exc, rel,
             )
             continue
-        tmp_path.replace(local_path)
+        # PRODUCTION-VERIFICATION HARDENING (2026-09-02, round 2): JSON validity
+        # alone is not shape validity -- `{}`, `42`, or `"oops"` all parse as
+        # valid JSON but are none of the two shapes these 3 files actually use
+        # (see _count_entries' own docstring). Before this check, any such
+        # object would replace a good local file and would then only be
+        # caught, if at all, by run_pipeline.py's "never raise" loaders
+        # reading it back as a silently empty feed. _count_entries() already
+        # encodes exactly which shapes are valid for these files; reusing its
+        # None-for-unrecognized-shape return as the reject signal here (not
+        # just for the log line, as before) closes that gap without a new,
+        # duplicate shape-validation implementation.
         count = _count_entries(data)
-        count_str = str(count) if count is not None else "unknown shape"
-        log.info("OK: SOURCE=R2 pulled %s <- %s (entries=%s)", rel, src, count_str)
+        if count is None:
+            tmp_path.unlink(missing_ok=True)
+            log.warning(
+                "REJECTED: %s downloaded from %s parsed as valid JSON but not as a "
+                "recognized shape (type=%s) -- keeping this checkout's existing copy "
+                "of %s rather than replacing it with unverified content.",
+                rel, src, type(data).__name__, rel,
+            )
+            continue
+        tmp_path.replace(local_path)
+        log.info("OK: SOURCE=R2 pulled %s <- %s (entries=%s)", rel, src, count)
         pulled += 1
     log.info("Download complete: %d/%d pulled from R2.", pulled, len(STATE_FILES))
     return pulled

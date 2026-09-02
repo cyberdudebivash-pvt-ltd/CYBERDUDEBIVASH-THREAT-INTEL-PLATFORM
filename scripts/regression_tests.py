@@ -1068,6 +1068,179 @@ def t24():
 
 
 # ---------------------------------------------------------------------------
+# T25: workflow_dispatch checkout-ref hardcoding regression guard
+# ---------------------------------------------------------------------------
+
+@test("T25_workflow_dispatch_checkout_ref_not_hardcoded")
+def t25():
+    """Regression guard for the ref:main checkout defect class.
+
+    Found live (this session) in multi-source-intel.yml and sentinel-blogger.yml:
+    an actions/checkout step with a literal `ref: main` hardcodes the checked-out
+    file content to main regardless of which branch actually dispatched the
+    workflow, silently defeating workflow_dispatch's whole purpose of testing a
+    feature branch's changes before merge -- confirmed live via a real
+    workflow_dispatch run whose dispatched branch added a new script that then
+    failed with "No such file or directory" because the checkout pulled main's
+    tree instead. github.ref already resolves to the dispatching branch on
+    workflow_dispatch and to the correct branch on schedule/push, so replacing
+    the literal with `ref: "${{ github.ref }}"` is a no-op for every trigger
+    except workflow_dispatch, where it is the actual fix.
+
+    Scans every .github/workflows/*.yml that declares a workflow_dispatch
+    trigger for a checkout step whose `ref:` is a bare literal `main` (quoted
+    or not) rather than a github-context expression. A workflow with a
+    pull_request or workflow_call trigger is intentionally excluded from this
+    blanket rule -- those can have legitimate reasons to pin a specific ref --
+    but none currently in this repository has either, so today's assertion is
+    unconditional (see this test's own scan below, not a hardcoded exemption
+    list, so a future workflow_call/pull_request addition is picked up
+    automatically rather than silently grandfathered in).
+    """
+    import re
+    import yaml
+
+    workflows_dir = REPO_ROOT / ".github" / "workflows"
+    offenders = []
+    dispatchable_count = 0
+    for path in sorted(workflows_dir.glob("*.yml")):
+        content = path.read_text(encoding="utf-8")
+        try:
+            doc = yaml.safe_load(content)
+        except Exception:
+            continue  # T12/other tests own YAML-parseability; not this test's concern
+        if not isinstance(doc, dict):
+            continue
+        triggers = doc.get("on") or doc.get(True)  # PyYAML parses bare `on:` as True in some versions
+        if not isinstance(triggers, dict) or "workflow_dispatch" not in triggers:
+            continue
+        if "pull_request" in triggers or "workflow_call" in triggers:
+            continue  # explicitly out of scope -- see docstring
+        dispatchable_count += 1
+
+        # Literal `ref: main` (bare or quoted), in either block or flow-mapping
+        # style, but NOT a `${{ ... }}` expression.
+        for m in re.finditer(r"""ref:\s*(['"]?)main\1\s*[,}\n]""", content):
+            line_no = content.count("\n", 0, m.start()) + 1
+            offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_no}")
+
+    assert not offenders, (
+        "T25 REGRESSION: workflow(s) with a workflow_dispatch trigger hardcode "
+        f"actions/checkout's ref to the literal 'main': {offenders}. This silently "
+        "defeats workflow_dispatch testing of any feature branch for these "
+        "workflows -- use ref: \"${{ github.ref }}\" instead (no-op for "
+        "schedule/push, correct for workflow_dispatch)."
+    )
+    log.info("[T25] %d workflow_dispatch-capable workflow(s) scanned, 0 hardcoded to ref:main",
+             dispatchable_count)
+
+
+# ---------------------------------------------------------------------------
+# T26: intel_state_r2_sync.py download() safe-read semantics
+# ---------------------------------------------------------------------------
+
+@test("T26_intel_state_r2_sync_download_safe_read_semantics")
+def t26():
+    """Regression guard for scripts/intel_state_r2_sync.py's download().
+
+    Covers the 4 failure-mode cases relevant to a read path (Section 19,
+    Cases A-C of the P0 R2 hardening mandate): R2 object absent, malformed
+    JSON, and valid-JSON-wrong-shape must each preserve the pre-existing
+    local file untouched; a valid, correctly-shaped object must replace it
+    and report an accurate entry count. Exercised via a mocked
+    subprocess.run (this script's only I/O boundary with the real `aws s3
+    cp` call) against a temporary STATE_FILES-shaped fixture, so this test
+    touches no real R2 bucket and leaves no trace in the real repository
+    tree either way.
+    """
+    import importlib
+    import shutil
+    import tempfile
+    from unittest import mock
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    if "intel_state_r2_sync" in sys.modules:
+        importlib.reload(sys.modules["intel_state_r2_sync"])
+    import intel_state_r2_sync as r2sync
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="t26_r2sync_"))
+    try:
+        manifest_path = tmpdir / "feed_manifest.json"
+        state_path = tmpdir / "feed_state.json"
+        manifest_path.write_text(json.dumps([{"id": "pre-existing-1"}, {"id": "pre-existing-2"}]), encoding="utf-8")
+        state_path.write_text(json.dumps({"sources": {"cisa_kev": "2026-01-01T00:00:00Z"}}), encoding="utf-8")
+        original_manifest = manifest_path.read_text(encoding="utf-8")
+        original_state = state_path.read_text(encoding="utf-8")
+
+        fake_state_files = [
+            (manifest_path, "intel/ingestion/feed_manifest.json"),
+            (state_path, "intel/ingestion/feed_state.json"),
+        ]
+
+        def run_case(remote_content_by_key: dict[str, "bytes | None"]):
+            """remote_content_by_key: r2_key -> bytes to 'download' (None = object absent, i.e. non-zero aws exit)."""
+            def fake_run(cmd, capture_output=True, text=True):
+                # cmd shape: ["aws", "s3", "cp", src, dst, "--endpoint-url", ..., "--only-show-errors"]
+                src, dst = cmd[3], cmd[4]
+                key = src.split(f"{r2sync.BUCKET_DATA}/", 1)[1]
+                content = remote_content_by_key.get(key)
+                if content is None:
+                    return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="NoSuchKey")
+                Path(dst).write_bytes(content)
+                return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+            with mock.patch.object(r2sync, "STATE_FILES", fake_state_files), \
+                 mock.patch.object(r2sync, "REPO_ROOT", tmpdir), \
+                 mock.patch.object(r2sync.subprocess, "run", side_effect=fake_run):
+                return r2sync.download("https://fake.endpoint.test")
+
+        # Case A: R2 object absent for both -- local files must be untouched.
+        run_case({})
+        assert manifest_path.read_text(encoding="utf-8") == original_manifest, (
+            "T26 Case A: R2-absent manifest object must preserve the existing local file"
+        )
+        assert state_path.read_text(encoding="utf-8") == original_state, (
+            "T26 Case A: R2-absent state object must preserve the existing local file"
+        )
+
+        # Case B: malformed JSON -- must be rejected, local file preserved.
+        run_case({"intel/ingestion/feed_manifest.json": b"{not valid json!!"})
+        assert manifest_path.read_text(encoding="utf-8") == original_manifest, (
+            "T26 Case B REGRESSION: malformed JSON from R2 was NOT rejected -- local "
+            "manifest was replaced with unparseable content"
+        )
+
+        # Case C: valid JSON, wrong/unrecognized shape (e.g. a bare object with
+        # none of the recognized collection keys) -- must be rejected same as
+        # malformed JSON, not silently accepted just because json.loads succeeds.
+        run_case({"intel/ingestion/feed_manifest.json": json.dumps({"unexpected": "shape"}).encode()})
+        assert manifest_path.read_text(encoding="utf-8") == original_manifest, (
+            "T26 Case C REGRESSION: valid-JSON-but-wrong-shape content from R2 was NOT "
+            "rejected -- local manifest was replaced with an unrecognized-shape object "
+            "(the exact 'catastrophic empty/invalid state' class this hardening exists "
+            "to prevent)"
+        )
+
+        # Case D: valid, correctly-shaped object -- must replace local file and
+        # report the correct count.
+        new_manifest = [{"id": "r2-sourced-1"}, {"id": "r2-sourced-2"}, {"id": "r2-sourced-3"}]
+        pulled = run_case({"intel/ingestion/feed_manifest.json": json.dumps(new_manifest).encode()})
+        assert json.loads(manifest_path.read_text(encoding="utf-8")) == new_manifest, (
+            "T26 Case D: valid, correctly-shaped R2 content must replace the local file"
+        )
+        assert pulled == 1, f"T26 Case D: expected exactly 1 file pulled, got {pulled}"
+
+        # No .tmp sibling should ever survive a run, success or rejection.
+        leftover_tmp = list(tmpdir.glob("*.r2sync.tmp"))
+        assert not leftover_tmp, f"T26: .r2sync.tmp file(s) left behind: {leftover_tmp}"
+
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    log.info("[T26] intel_state_r2_sync.download(): absent/malformed/wrong-shape all "
+             "preserve existing state; valid+correctly-shaped replaces with accurate count")
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -1079,7 +1252,7 @@ def main() -> int:
     except Exception:
         _suite_ver = "UNKNOWN"
     log.info("=" * 60)
-    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T24)", _suite_ver)
+    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T26)", _suite_ver)
     log.info("=" * 60)
 
     pass_count = sum(1 for r in RESULTS if r["status"] == "PASS")
