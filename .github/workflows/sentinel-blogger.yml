@@ -281,9 +281,31 @@ jobs:
       - name: "Checkout repository"
         timeout-minutes: 20   # v184.0: raised 8->20min; 71k-file shallow clone safely fits well under this ceiling
         uses: actions/checkout@v6.0.2   # v6.0.2 — native Node 24 (v6 series; upgraded from v4.3.1 May-23-2026)
+        # PRODUCTION-VERIFICATION FIX (2026-09-02): this was hardcoded to
+        # `ref: main` -- a no-op for this workflow's push (branches:[main])
+        # and schedule triggers (github.ref already resolves to main for
+        # both) but silently defeats workflow_dispatch's whole purpose of
+        # testing a feature branch's changes before merge. Confirmed live
+        # (run 33654629252, disposable branch
+        # claude/sentinel-blogger-r2-readside-validation): dispatching this
+        # workflow from a feature branch runs THAT branch's workflow YAML
+        # (STAGE 0.00a's step appeared), but this hardcoding checked out
+        # main's file content regardless, so STAGE 0.00a's
+        # `python3 scripts/intel_state_r2_sync.py` failed with "No such
+        # file or directory" (the script only exists on this branch, not
+        # yet merged to main) and every downstream stage processed main's
+        # existing 190-item feed_manifest.json instead of this branch's R2
+        # read-side output -- silently, because that step's own
+        # `continue-on-error: true` + `|| true` (correctly designed for the
+        # legitimate "R2 object missing" case) also swallowed this
+        # unrelated "script missing" failure. Same defect class already
+        # fixed in multi-source-intel.yml's checkout (082c070b2) via the
+        # identical change. github.ref already resolves to the dispatching
+        # branch on workflow_dispatch and to main on push/schedule, so this
+        # is a strict improvement with no change in production behavior.
         with:
           fetch-depth: 1
-          ref: main
+          ref: "${{ github.ref }}"
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # -----------------------------------------------------------------------
