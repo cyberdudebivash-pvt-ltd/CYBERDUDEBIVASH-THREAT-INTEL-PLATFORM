@@ -167,6 +167,53 @@ def s3_cp(
     return False
 
 
+def s3_get(
+    dst_local: str,
+    src_bucket: str,
+    src_key: str,
+    endpoint: str,
+) -> str:
+    """
+    Download a single object from R2 to a local path.
+
+    Returns one of three distinct outcomes -- callers that need bootstrap
+    semantics (missing object is fine, transient errors are not) MUST branch
+    on this three-way result rather than treating any failure alike:
+      "OK"        -- downloaded successfully, dst_local now holds the object.
+      "NOT_FOUND" -- the object genuinely does not exist yet in R2 (a brand
+                     new key, e.g. before this migration's first successful
+                     upload). Safe to fall back to a bootstrap source.
+      "ERROR"     -- anything else (network, auth, R2 outage, malformed
+                     response). NOT safe to treat as "start fresh": doing so
+                     for a dedup/incremental-state object could silently
+                     discard real history and reintroduce duplicates.
+    """
+    cmd = [
+        "aws", "s3", "cp", f"s3://{src_bucket}/{src_key}", dst_local,
+        "--endpoint-url", endpoint,
+        "--only-show-errors",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        log.info("OK: Downloaded s3://%s/%s -> %s", src_bucket, src_key, dst_local)
+        return "OK"
+
+    combined = f"{result.stdout}\n{result.stderr}".lower()
+    if "404" in combined or "not found" in combined or "nosuchkey" in combined or "does not exist" in combined:
+        log.info(
+            "NOT_FOUND: s3://%s/%s does not exist yet (expected on first run "
+            "after a state-object migration).", src_bucket, src_key,
+        )
+        return "NOT_FOUND"
+
+    log.error(
+        "ERROR: Download failed for s3://%s/%s (%d): %s %s",
+        src_bucket, src_key, result.returncode,
+        result.stdout.strip(), result.stderr.strip(),
+    )
+    return "ERROR"
+
+
 def s3_sync(
     src_dir: str,
     dst_bucket: str,

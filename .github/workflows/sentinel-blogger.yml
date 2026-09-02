@@ -355,6 +355,35 @@ jobs:
           mkdir -p data/intelligence/detection_rules secrets api data/ai_intelligence
 
       # -----------------------------------------------------------------------
+      # P0 FIX: Download Intel State from R2 (runtime-authoritative)
+      # data/stix/feed_manifest.json / data/cache/feed_state.json /
+      # data/processed_intel.json are cross-workflow state also written by
+      # multi-source-intel.yml's "True Incremental Intel Ingestion" (every
+      # ~4h). Both workflows' direct `git push origin main` for these files
+      # has been rejected by main's branch ruleset since ~2026-08-26
+      # ("Changes must be made through a pull request", confirmed live via
+      # job logs) -- this pipeline's OWN git checkout has therefore been
+      # seeing the same frozen 2026-08-26 copy on every run regardless of
+      # what multi-source-intel.yml ingested in between. R2 is now the
+      # cross-run/cross-workflow authority for these three files (see
+      # scripts/r2_state_sync.py); this step downloads the latest copy
+      # BEFORE STAGE 1-3 (run_pipeline.py) reads data/stix/feed_manifest.json
+      # as its Single Source of Truth. Hard-fails on a genuine R2 read error
+      # (not on the object simply not existing yet) -- see r2_state_sync.py's
+      # own docstring for the full bootstrap contract. Deliberately placed
+      # this early: essentially no pipeline work has happened yet, so
+      # hard-failing here (unlike a hard-fail mid-pipeline) does not discard
+      # any already-completed work.
+      # -----------------------------------------------------------------------
+      - name: "Download Intel State from R2"
+        timeout-minutes: 5
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --download
+
+      # -----------------------------------------------------------------------
       # -----------------------------------------------------------------------
       # STAGE 0.00: PIPELINE LOCK CHECK (v184.0)
       # If .PIPELINE_LOCK exists, operator is doing manual god mode work.
@@ -2941,6 +2970,39 @@ jobs:
           # Now: captures exit code, emits ::warning:: on failure, always exits 0.
           if ! python3 scripts/r2_resync_manifests.py; then
             echo "::warning::STAGE 4.1: Final R2 full sync failed — feed data in R2 may be stale. Check CF_ACCOUNT_ID, CF_R2_ACCESS_KEY_ID, CF_R2_SECRET_ACCESS_KEY secrets and bucket 'sentinel-apex-data' policy. See error annotation above for file-level detail."
+          fi
+
+      # -----------------------------------------------------------------------
+      # P0 FIX: Upload Intel State to R2 (runtime-authoritative, final)
+      # data/stix/feed_manifest.json is enriched (MITRE tags, IOC hardening,
+      # quality scoring, dedup) by dozens of stages throughout STAGE 3.x --
+      # STAGE 3.5's r2_upload.py (step ~66) already uploads it to R2 key
+      # intel/feed_manifest.json, but that upload runs BEFORE many of those
+      # later stages (mirroring the exact same "early upload misses
+      # late-pipeline changes" problem STAGE 4.1 above already exists to fix
+      # for the API manifests). This step re-publishes the FINAL,
+      # fully-enriched versions of all three cross-workflow state files
+      # (feed_manifest.json plus feed_state.json/processed_intel.json, which
+      # source_fabric_health.py and intel_dedup_engine.py may also have
+      # touched during this run) so multi-source-intel.yml's next scheduled
+      # run builds on top of this pipeline's enrichment instead of
+      # overwriting it. Same reasoning as STAGE 4.1 for why this is
+      # deliberately non-fatal: this step runs this late in a 162-stage
+      # pipeline, and hard-failing here would discard everything already
+      # completed (reports, STIX bundles, the Pages deploy) over an R2
+      # publish hiccup affecting only these three files -- a strictly worse
+      # outcome than a loud but non-blocking annotation.
+      # -----------------------------------------------------------------------
+      - name: "Upload Intel State to R2 (final, post-enrichment)"
+        timeout-minutes: 5
+        if: always()
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: |
+          if ! python3 scripts/r2_state_sync.py --upload; then
+            echo "::warning::Upload Intel State to R2: publish failed for one or more of feed_manifest.json/feed_state.json/processed_intel.json — the next multi-source-intel.yml run may build on this run's pre-enrichment state instead of its final output. See error annotation above for file-level detail."
           fi
 
       # -----------------------------------------------------------------------
