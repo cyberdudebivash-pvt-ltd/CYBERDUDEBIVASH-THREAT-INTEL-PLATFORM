@@ -75,6 +75,47 @@ class TestIsDynamic(unittest.TestCase):
         is_dynamic, _ = gate._is_dynamic(html)
         self.assertTrue(is_dynamic)
 
+    def test_fetch_via_helper_function_far_from_api_literal_is_detected(self):
+        # Second real false negative caught while building this script:
+        # threats.html's fetchJSON(path) helper calls fetch(API_BASE + path, ...)
+        # with no /api/ text anywhere near that call -- the actual
+        # "/api/v1/intel/stats" literal is 40 lines away, at the call site.
+        # A windowed "fetch( followed within N chars by /api/" regex misses
+        # this; whole-file co-occurrence does not.
+        html = (
+            "<script>\n"
+            "  function fetchJSON(path) { return fetch(API_BASE + path, {cache:'no-cache'}); }\n"
+            "  // ... 40 lines of unrelated code here in the real file ...\n"
+            "  fetchJSON(\"/api/v1/intel/stats\");\n"
+            "</script>"
+        )
+        is_dynamic, reason = gate._is_dynamic(html)
+        self.assertTrue(is_dynamic)
+        self.assertIn("fetch", reason)
+
+    def test_fetch_with_api_literal_containing_query_string_is_detected(self):
+        # Third real regression caught while building this script: an
+        # over-restrictive first attempt at the path-literal regex allowed
+        # only [a-zA-Z0-9/_.-] after "/api/", which excludes "?" and "=" --
+        # so it silently stopped matching cves.html's own
+        # '/api/v1/cve/detail?id=' and vulnerabilities.html's
+        # '/api/v1/cve/live?limit=8' literals (both real, both this
+        # session's own verified-live fixes) the moment this change was
+        # made, without any test catching it until a full re-run against
+        # the real repo. Any non-quote character is valid inside a query
+        # string, so the tail must accept anything up to the closing quote.
+        html = "<script>fetch(API_BASE + '/api/v1/cve/detail?id=' + encodeURIComponent(cveId), {cache:'no-store'})</script>"
+        is_dynamic, _ = gate._is_dynamic(html)
+        self.assertTrue(is_dynamic)
+
+    def test_fetch_with_no_api_literal_anywhere_is_static(self):
+        # The whole-file co-occurrence check still requires BOTH signals --
+        # a fetch() call alone, with no /api/ literal anywhere in the file,
+        # must not be misclassified as dynamic.
+        html = "<script>fetch('/js/some-lib.js'); fetch('https://fonts.googleapis.com/css');</script>"
+        is_dynamic, _ = gate._is_dynamic(html)
+        self.assertFalse(is_dynamic)
+
 
 class TestLoadAllowlist(unittest.TestCase):
     def setUp(self):

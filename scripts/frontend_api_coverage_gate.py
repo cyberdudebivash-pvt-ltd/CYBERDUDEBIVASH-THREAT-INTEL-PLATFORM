@@ -89,14 +89,30 @@ KNOWN_LIVE_DATA_SCRIPTS = (
 # over-reporting them, which is the safer failure direction for a
 # find-real-gaps tool. [^)] already spans newlines (unlike `.` without
 # re.DOTALL), so a multi-line fetch(...) call is still matched correctly.
-_FETCH_API_RE = re.compile(r"fetch\s*\([^)]{0,200}?/api/", re.IGNORECASE)
+_FETCH_RE = re.compile(r"fetch\s*\(", re.IGNORECASE)
+_API_PATH_LITERAL_RE = re.compile(r"""["'`][^"'`]*?/api/[^"'`]*["'`]""")
 _SCRIPT_SRC_RE = re.compile(r'<script[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
 
 
 def _is_dynamic(content: str) -> tuple[bool, str]:
-    """Returns (is_dynamic, reason). reason is empty for a static page."""
-    if _FETCH_API_RE.search(content):
-        return True, "inline fetch() of /api/*"
+    """Returns (is_dynamic, reason). reason is empty for a static page.
+
+    Deliberately whole-file co-occurrence, not "fetch( followed closely by
+    /api/" -- a stricter windowed version of this check missed THREE real
+    variants while this script was being built and verified against its
+    own fixes: fetch(API_BASE + "/api/...") string concatenation
+    (ransomware.html, cves.html), and fetch(API_BASE + path, ...) where the
+    actual "/api/..." literal is a call-site argument to a small helper
+    function defined elsewhere in the same file, sometimes 40+ lines away
+    (threats.html's fetchJSON() helper). Requiring both signals to appear
+    ANYWHERE in the same file, rather than adjacent to each other, catches
+    all of these without needing a real JS parser. The trade-off is a rare,
+    harmless false positive (both signals present but genuinely unrelated) --
+    which under-reports gaps rather than over-reporting them, the safer
+    failure direction for a find-real-gaps tool.
+    """
+    if _FETCH_RE.search(content) and _API_PATH_LITERAL_RE.search(content):
+        return True, "fetch() call plus an /api/* path literal in the same file"
     for m in _SCRIPT_SRC_RE.finditer(content):
         src = m.group(1)
         for known in KNOWN_LIVE_DATA_SCRIPTS:
