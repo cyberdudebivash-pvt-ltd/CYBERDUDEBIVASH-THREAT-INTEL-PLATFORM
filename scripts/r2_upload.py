@@ -401,6 +401,27 @@ def main() -> None:
             log.warning("SKIP (AI tracker): %s not found -- run generate-and-sync workflow first", src)
     log.info("OK: AI Tracker files uploaded to R2 (%d/%d)", uploaded_ai_tracker, len(ai_tracker_files))
 
+    # --- Upload 3c: AI Index + Detection Rule Manifest (Stage 4 P0) ---
+    # Same fix as Upload 3b above, extended to the two files backing
+    # index.html's per-card "AI Record" / "Detection Rules" annotations
+    # (_cdbGetAIRecord() / _cdbGetDetectionRules()), which previously had
+    # no R2 copy at all -- the Worker's new intel-gateway proxy route
+    # (INTEL_STATIC_PROXY) checks R2 first, so these need to land here for
+    # that proxy to serve fresh content instead of always falling through
+    # to its gh-pages fallback.
+    ai_index_files = [
+        ("data/ai_intelligence/ai_index.json",                     "intelligence/ai_index.json"),
+        ("data/intelligence/detection_rules/rule_manifest.json",   "intelligence/detection_rules_manifest.json"),
+    ]
+    uploaded_ai_index = 0
+    for src, dst_key in ai_index_files:
+        src_path = REPO_ROOT / src
+        if src_path.exists():
+            s3_cp(str(src_path), BUCKET_DATA, dst_key, endpoint)
+            uploaded_ai_index += 1
+        else:
+            log.warning("SKIP (AI index): %s not found", src)
+    log.info("OK: AI index/detection-rules files uploaded to R2 (%d/%d)", uploaded_ai_index, len(ai_index_files))
 
     # --- Upload 4a: Generated HTML reports (Tactical Dossiers) ---
     # v143.5.1 FIX: Two-part fix for 36-minute stall / job-timeout cancellation:

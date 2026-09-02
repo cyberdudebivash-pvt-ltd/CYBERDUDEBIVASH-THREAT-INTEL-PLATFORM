@@ -118,6 +118,7 @@ import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-me
 import { deductCredits } from './credit-system.js';
 import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
 import { inferGumroadTier, inferGumroadBillingCycle, isGumroadCancellationEvent, isGumroadAccessRevokingEvent } from './gumroad-lifecycle.js';
+import { handleIntelStaticProxy, INTEL_STATIC_PROXY } from './intel-static-proxy.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -132,6 +133,10 @@ export { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_
 // gumroad-lifecycle.js header comment) -- unit-testable under plain
 // `node --test` without pulling in this file's full import chain.
 export { inferGumroadTier, inferGumroadBillingCycle, isGumroadCancellationEvent, isGumroadAccessRevokingEvent };
+// Same rationale, for the Stage 4 intel-static-proxy (see that file's
+// header comment) -- unit-testable under plain `node --test` without
+// pulling in this file's full import chain.
+export { handleIntelStaticProxy, INTEL_STATIC_PROXY };
 const PLATFORM_VERSION    = "200.0";
 const JWT_EXPIRY_SEC      = 86400;        // 24h JWT lifetime
 const BRUTE_FORCE_MAX     = 5;            // lockout after N failed auth attempts
@@ -6386,6 +6391,40 @@ async function handleRequest(request, env, ctx) {
     }
   }
 
+  // -----------------------------------------------------------------------
+  // STAGE 4 FIX (issue tracked in Stage 4 report's Runtime Data Inventory):
+  // index.html's _cdbGetAIRecord()/_cdbGetDetectionRules() (the "AI Record"
+  // and "Detection Rules" annotations shown on every advisory/threat card)
+  // fetch data/ai_intelligence/ai_index.json and
+  // data/intelligence/detection_rules/rule_manifest.json via bare relative
+  // paths -- neither matches this Worker's route table (/api/*, /reports/*,
+  // /taxii/*, /auth/* only; "data/*" is outside the Worker Route pattern
+  // entirely), so both requests fall through to the Pages static origin
+  // unconditionally. Both files are pipeline-generated and git-committed
+  // (generate_ai_endpoints.py / detection-engine.yml), so updating either
+  // one has required a full sentinel-blogger.yml run + Pages publish --
+  // exactly the same CLASS D coupling issue #274 already root-caused and
+  // fixed for /api/ai/tracker.json et al. (the AI_STATIC_PROXY_FILES block
+  // immediately above), just not yet extended to these two files.
+  //
+  // Same fix, same pattern, reused verbatim rather than reimplemented: R2
+  // checked first (no dependency on git push or Pages deploy timing), raw
+  // gh-pages content kept as the fallback (zero regression if the R2
+  // object is ever missing, e.g. before the first pipeline run that writes
+  // it via scripts/r2_upload.py's new Upload 3c block).
+  //
+  // New endpoints only -- the original data/ai_intelligence/ai_index.json
+  // and data/intelligence/detection_rules/rule_manifest.json static paths
+  // are untouched and keep serving their git-committed content unchanged,
+  // so any existing consumer of those exact URLs sees no behavior change.
+  // index.html's two fetch() call sites are repointed to these new
+  // endpoints as part of this same change.
+  // -----------------------------------------------------------------------
+  if (Object.prototype.hasOwnProperty.call(INTEL_STATIC_PROXY, path)) {
+    const proxyResp = await handleIntelStaticProxy(env, path, method);
+    if (proxyResp) return proxyResp;
+  }
+
   // --- routes/exports.js -- tier-gated multi-format SIEM/SOAR exports (v201.0) ---
   // buildStixPattern/resolveEntitlement passed by reference rather than
   // imported into exports.js, to avoid a circular import (index.js already
@@ -6406,6 +6445,7 @@ async function handleRequest(request, env, ctx) {
       "/api/v1/intel/campaigns", "/api/v1/intel/ransomware", "/api/v1/intel/apt",
       "/api/v1/intel/epss", "/api/v1/intel/defcon", "/api/v1/intel/pulse",
       "/api/v1/intel/darkweb", "/api/v1/intel/cybermap", "/api/feed.json",
+      "/api/v1/intel/ai_index.json", "/api/v1/intel/detection_rules_manifest.json",
       "/api/v1/news/feed", "/api/reports/index.json", "/api/reports/stats.json",
       "/api/v1/ioc/lookup",
       "/api/v1/cve/live", "/api/v1/cve/stats", "/api/v1/cve/detail?id=CVE-XXXX-XXXXX",

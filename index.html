@@ -14084,13 +14084,18 @@ function renderTopThreats(data) {
             }
 
             // Fetch AI index
-            fetch('data/ai_intelligence/ai_index.json?_=' + Date.now(), {cache:'no-store'})
+            // Stage 4: routed through intel-gateway's runtime proxy (R2-backed,
+            // falls back to gh-pages) instead of a bare relative static path,
+            // so a fresh pipeline write reaches this widget without waiting on
+            // a Pages deploy. See workers/intel-gateway/src/index.js's
+            // INTEL_STATIC_PROXY block for the serving side of this change.
+            fetch('/api/v1/intel/ai_index.json?_=' + Date.now(), {cache:'no-store'})
                 .then(function(r) { return r.ok ? r.json() : null; })
                 .then(function(data) { aiData = data; indexDone = true; tryFinish(); })
                 .catch(function() { indexDone = true; tryFinish(); });
 
-            // Fetch detection rule manifest (non-blocking)
-            fetch('data/intelligence/detection_rules/rule_manifest.json?_=' + Date.now(), {cache:'no-store'})
+            // Fetch detection rule manifest (non-blocking) -- same Stage 4 change.
+            fetch('/api/v1/intel/detection_rules_manifest.json?_=' + Date.now(), {cache:'no-store'})
                 .then(function(r) { return r.ok ? r.json() : null; })
                 .then(function(data) { rulesData = data; rulesDone = true; tryFinish(); })
                 .catch(function() { rulesDone = true; tryFinish(); });
