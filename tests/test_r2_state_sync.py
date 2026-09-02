@@ -300,6 +300,33 @@ class TestDownload(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(local_path.read_text()), {"ok": True})
 
+    def test_replace_failure_after_valid_download_preserves_existing_local_copy(self):
+        """The atomic-replace promotion itself can fail (disk full, a
+        cross-device tmp dir, a permission error) even after the downloaded
+        content has already passed validation. That failure must be reported
+        (not swallowed) and must not destroy whatever was already at
+        local_path -- the same guarantee the malformed/wrong-shape cases
+        above provide, now covering the promotion step itself."""
+        local_rel, r2_key = rs.STATE_FILES[0]
+        local_path = self.tmp / local_rel
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text('{"real_history": "must_not_be_discarded"}', encoding="utf-8")
+
+        outcomes = {k: "OK" for _, k in rs.STATE_FILES}
+        real_replace = pathlib.Path.replace
+
+        def _fake_replace(self_path, target):
+            if self_path.name == local_path.name + ".r2sync.tmp" and self_path.parent == local_path.parent:
+                raise OSError("simulated: cross-device link")
+            return real_replace(self_path, target)
+
+        with patch.object(r2_upload.subprocess, "run", side_effect=self._mock_run_for(outcomes)), \
+             patch.object(pathlib.Path, "replace", _fake_replace):
+            rc = rs.download(self.tmp, "https://e")
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(json.loads(local_path.read_text()), {"real_history": "must_not_be_discarded"})
+
 
 class TestUpload(unittest.TestCase):
     def setUp(self):

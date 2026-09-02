@@ -1116,9 +1116,22 @@ def t25():
         if not isinstance(doc, dict):
             continue
         triggers = doc.get("on") or doc.get(True)  # PyYAML parses bare `on:` as True in some versions
-        if not isinstance(triggers, dict) or "workflow_dispatch" not in triggers:
+        # `on:` is valid YAML as a dict ({workflow_dispatch: {...}, push: {...}}),
+        # a list ([push, workflow_dispatch]), or a single bare string
+        # (workflow_dispatch) -- normalize all three to a name set so none of
+        # them silently bypass this scan the way a raw `isinstance(..., dict)`
+        # gate would for the list/string forms.
+        if isinstance(triggers, dict):
+            trigger_names = set(triggers.keys())
+        elif isinstance(triggers, list):
+            trigger_names = set(triggers)
+        elif isinstance(triggers, str):
+            trigger_names = {triggers}
+        else:
             continue
-        if "pull_request" in triggers or "workflow_call" in triggers:
+        if "workflow_dispatch" not in trigger_names:
+            continue
+        if "pull_request" in trigger_names or "workflow_call" in trigger_names:
             continue  # explicitly out of scope -- see docstring
         dispatchable_count += 1
 

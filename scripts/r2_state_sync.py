@@ -278,7 +278,22 @@ def download(root: pathlib.Path, endpoint: str) -> int:
                 had_error = True
                 tmp_path.unlink(missing_ok=True)
                 continue
-            tmp_path.replace(local_path)
+            try:
+                tmp_path.replace(local_path)
+            except OSError as exc:
+                # Promotion itself failing (disk full, permission error, a
+                # cross-device tmp dir) is the one failure mode the write-tmp/
+                # verify/replace pattern doesn't self-heal -- without this
+                # handler it would propagate out of download() uncaught,
+                # skipping every remaining STATE_FILES entry instead of
+                # degrading one file at a time like every other outcome here.
+                log.error(
+                    "FATAL: validated download for %s but could not promote it onto %s (%s) -- "
+                    "existing local copy (if any) is untouched.",
+                    r2_key, local_path, exc,
+                )
+                had_error = True
+                tmp_path.unlink(missing_ok=True)
             continue
         tmp_path.unlink(missing_ok=True)
         if outcome == "NOT_FOUND":
