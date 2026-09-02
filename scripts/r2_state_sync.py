@@ -17,8 +17,8 @@ staying frozen despite dozens of "green" pipeline runs in between.
 
 Extends the pattern already reviewed and approved for issue #274 / PR #293
 (api/ai/{tracker,health,executive-brief,monetization}.json moved off git onto
-R2) to the three files true_intel_ingestor.py's incremental-ingestion state
-actually depends on:
+R2) to the four files true_intel_ingestor.py's and sentinel-blogger.yml's
+own pipeline's cross-run state actually depends on:
 
   data/cache/feed_state.json    -- per-source last_seen timestamps + reason
                                     codes. Read+written every run by
@@ -30,19 +30,30 @@ actually depends on:
                                     written every run by
                                     true_intel_ingestor.py; prevents
                                     reprocessing already-seen items.
-  data/stix/feed_manifest.json  -- the actual accumulated intel items.
-                                    Written (additive merge) by
-                                    true_intel_ingestor.py; read AND further
-                                    enriched (MITRE tags, IOC hardening,
-                                    quality scoring, dedup) by dozens of call
-                                    sites throughout scripts/run_pipeline.py,
-                                    which is the Single Source of Truth this
-                                    file's own docstring at line 2168
-                                    describes it as.
+  data/stix/feed_manifest.json  -- the raw accumulated intel items. Written
+                                    (additive merge) by true_intel_ingestor.py;
+                                    read AND further enriched (MITRE tags, IOC
+                                    hardening, quality scoring, dedup) by
+                                    dozens of call sites throughout
+                                    scripts/run_pipeline.py, which is the
+                                    Single Source of Truth this file's own
+                                    docstring at line 2168 describes it as.
+  data/feed_manifest.json       -- the EII-enriched manifest (distinct file,
+                                    NOT the same as data/stix/feed_manifest.json
+                                    above). Read-then-patched in place by
+                                    run_pipeline.py, apex_quality_field_backfill.py,
+                                    cve_id_backfill.py, actor_attribution_enricher.py,
+                                    generate_advisory_pdfs.py and
+                                    threat_graph_engine.py, all within
+                                    sentinel-blogger.yml -- and, like the
+                                    three files above, one of
+                                    safe_git_commit.py's CRITICAL files whose
+                                    git push was being silently rejected by
+                                    the same root cause.
 
 Unlike issue #274's AI-tracker files (pure output, regenerated fresh every
-run, no need to read prior state back in), these three are genuinely
-bidirectional cross-run state that both multi-source-intel.yml AND
+run, no need to read prior state back in), these four are genuinely
+bidirectional cross-run state that multi-source-intel.yml and/or
 sentinel-blogger.yml read at the START of their run and write back at the
 END -- so this is a download-before/upload-after wrapper around each
 workflow's existing processing, not a one-way "stop committing, start
@@ -119,10 +130,30 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # so their keys mirror their local relative path, matching this codebase's
 # existing convention for genuinely-new R2 objects (e.g. r2_upload.py's
 # "api/feed.json" -> R2 key "api/feed.json").
+#
+# data/feed_manifest.json (top-level -- the EII-enriched manifest, distinct
+# from data/stix/feed_manifest.json's raw ingestion bundle) belongs in this
+# list for the same reason as the three above: it is bidirectional cross-run
+# state, not a fresh-every-run output. Confirmed by reading every writer:
+# run_pipeline.py, apex_quality_field_backfill.py, cve_id_backfill.py,
+# actor_attribution_enricher.py, generate_advisory_pdfs.py and
+# threat_graph_engine.py all read-then-patch this same file in place, and
+# every one of those steps in sentinel-blogger.yml runs between this
+# workflow's "Download Intel State from R2" step and its "Upload Intel State
+# to R2 (final, post-enrichment)" step -- so no wiring change is needed
+# there, only this entry. It has no pre-existing R2 key of its own (r2_upload.py
+# and r2-data-sync.yml only ever touch data/stix/feed_manifest.json), so its
+# key mirrors its local path, same convention as feed_state.json /
+# processed_intel.json above. This file is also independently subject to the
+# exact same P0 push-rejection root cause this script fixes for the other
+# three (it is in safe_git_commit.py's CRITICAL file list) -- its
+# generated_at was frozen at the same 2026-08-26 incident date before this
+# fix, for the same reason.
 STATE_FILES: list[tuple[str, str]] = [
     ("data/cache/feed_state.json", "data/cache/feed_state.json"),
     ("data/processed_intel.json", "data/processed_intel.json"),
     ("data/stix/feed_manifest.json", "intel/feed_manifest.json"),
+    ("data/feed_manifest.json", "data/feed_manifest.json"),
 ]
 
 UPLOAD_RETRY_ATTEMPTS = 4

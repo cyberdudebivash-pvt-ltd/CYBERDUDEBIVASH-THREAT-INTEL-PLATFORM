@@ -81,6 +81,34 @@ class TestS3GetOutcomeClassification(unittest.TestCase):
             self.assertEqual(r2_upload.s3_get("/tmp/x.json", "b", "k", "https://e"), "ERROR")
 
 
+class TestStateFilesManifest(unittest.TestCase):
+    """STATE_FILES is the single source of truth other tests (download/
+    upload/wiring) drive off of via len()/iteration -- these tests pin its
+    actual expected contents directly, so a future accidental removal of an
+    entry doesn't silently pass just because the generic tests adapted to
+    the shorter list."""
+
+    def test_exactly_four_files_migrated(self):
+        self.assertEqual(len(rs.STATE_FILES), 4)
+
+    def test_top_level_feed_manifest_is_present_with_path_mirrored_key(self):
+        self.assertIn(
+            ("data/feed_manifest.json", "data/feed_manifest.json"),
+            rs.STATE_FILES,
+        )
+
+    def test_top_level_and_stix_feed_manifest_are_distinct_entries(self):
+        """These are two different files (the EII-enriched manifest vs. the
+        raw STIX ingestion bundle) -- must never collapse onto the same
+        local path or the same R2 key."""
+        local_paths = [local for local, _ in rs.STATE_FILES]
+        r2_keys = [key for _, key in rs.STATE_FILES]
+        self.assertIn("data/feed_manifest.json", local_paths)
+        self.assertIn("data/stix/feed_manifest.json", local_paths)
+        self.assertEqual(len(local_paths), len(set(local_paths)))
+        self.assertEqual(len(r2_keys), len(set(r2_keys)))
+
+
 class TestDownload(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_dl_"))
@@ -253,6 +281,53 @@ class TestRoundTripFidelity(unittest.TestCase):
         try:
             local_rel, r2_key = rs.STATE_FILES[2]  # feed_manifest.json
             payload = {"items": [{"id": "intel--abc123", "title": "Real advisory"}]}
+            src_path = src_dir / local_rel
+            src_path.parent.mkdir(parents=True, exist_ok=True)
+            src_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            def _fake_run(cmd, **kwargs):
+                is_download, local_path, key = _parse_cp_cmd(cmd)
+                if not is_download:
+                    fake_bucket[key] = pathlib.Path(local_path).read_bytes()
+                    return _proc(0)
+                if key not in fake_bucket:
+                    return _proc(1, stderr="An error occurred (404) Not Found")
+                pathlib.Path(local_path).write_bytes(fake_bucket[key])
+                return _proc(0)
+
+            (dst_dir / local_rel).parent.mkdir(parents=True, exist_ok=True)
+            with patch.object(r2_upload.subprocess, "run", side_effect=_fake_run):
+                self.assertEqual(r2_upload.s3_cp(str(src_path), r2_upload.BUCKET_DATA, r2_key, "https://e"), True)
+                outcome = r2_upload.s3_get(str(dst_dir / local_rel), r2_upload.BUCKET_DATA, r2_key, "https://e")
+
+            self.assertEqual(outcome, "OK")
+            self.assertEqual(json.loads((dst_dir / local_rel).read_text()), payload)
+        finally:
+            import shutil
+            shutil.rmtree(src_dir, ignore_errors=True)
+            shutil.rmtree(dst_dir, ignore_errors=True)
+
+
+class TestTopLevelFeedManifestRoundTrip(unittest.TestCase):
+    """Same round-trip guarantee as TestRoundTripFidelity above, specifically
+    for data/feed_manifest.json (STATE_FILES[3]) -- the EII-enriched
+    manifest, not the STIX one already covered by that test. Written by
+    apex_quality_field_backfill.py / cve_id_backfill.py / etc. in place, so
+    an upload that silently truncated or reordered its content would corrupt
+    accumulated enrichment history, not just fail to add new items."""
+
+    def test_upload_then_download_round_trips_exact_content(self):
+        src_dir = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_rt2_src_"))
+        dst_dir = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_rt2_dst_"))
+        fake_bucket: dict[str, bytes] = {}
+        try:
+            local_rel, r2_key = next(
+                (local, key) for local, key in rs.STATE_FILES if local == "data/feed_manifest.json"
+            )
+            payload = {
+                "version": "70.0",
+                "advisories": [{"id": "intel--abc123", "cve_id": "CVE-2026-4075", "apex_risk": 91.2}],
+            }
             src_path = src_dir / local_rel
             src_path.parent.mkdir(parents=True, exist_ok=True)
             src_path.write_text(json.dumps(payload), encoding="utf-8")

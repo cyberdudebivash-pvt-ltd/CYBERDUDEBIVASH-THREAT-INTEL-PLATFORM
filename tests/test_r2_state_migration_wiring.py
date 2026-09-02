@@ -187,6 +187,43 @@ class TestSentinelBloggerWiring(unittest.TestCase):
     def test_workflow_is_valid_yaml(self):
         self.assertTrue(len(self.steps) > 100)
 
+    def test_every_feed_manifest_writer_runs_between_download_and_upload(self):
+        """data/feed_manifest.json (the EII-enriched manifest) has no
+        dedicated download-before/upload-after step of its own -- it rides
+        the same two steps as the other three STATE_FILES entries. That is
+        only correct if every script that patches this file in place runs
+        strictly between those two steps; otherwise the upload would ship a
+        stale pre-enrichment copy, or a script would read a copy older than
+        what this run's download just fetched. Confirmed by reading each
+        script's own read/patch logic, not assumed from naming."""
+        download = self.names.index("Download Intel State from R2")
+        upload = self.names.index("Upload Intel State to R2 (final, post-enrichment)")
+        writer_step_name_fragments = [
+            "STAGE 1-3 - Master Pipeline Orchestrator",  # run_pipeline.py
+            "apex_quality_field_backfill.py",
+            "cve_id_backfill.py",
+            "actor_attribution_enricher.py",
+            "generate_advisory_pdfs.py",
+            "threat_graph_engine.py",
+        ]
+        for fragment in writer_step_name_fragments:
+            matches = [
+                i for i, s in enumerate(self.steps)
+                if fragment in (s.get("name") or "") or fragment in (s.get("run") or "")
+            ]
+            self.assertTrue(matches, f"no step found invoking/matching {fragment!r}")
+            for i in matches:
+                self.assertGreater(
+                    i, download,
+                    f"step {i} ({self.names[i]!r}, matched {fragment!r}) runs "
+                    f"before the R2 download -- it would read stale/missing state.",
+                )
+                self.assertLess(
+                    i, upload,
+                    f"step {i} ({self.names[i]!r}, matched {fragment!r}) runs "
+                    f"after the R2 upload -- its writes would never be persisted.",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
