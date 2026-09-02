@@ -545,7 +545,7 @@ def force_include_feed_reports(dist_reports_dst: Path) -> int:
     return forced
 
 
-def build_manifest(dist_dir: Path, run_id: str, version: str) -> Dict:
+def build_manifest(dist_dir: Path, run_id: str, version: str, git_sha: str) -> Dict:
     """Generate deployment manifest with SHA-256 checksums for every file in dist/."""
     files = {}
     for fpath in sorted(dist_dir.rglob("*")):
@@ -562,6 +562,12 @@ def build_manifest(dist_dir: Path, run_id: str, version: str) -> Dict:
         "schema":           "sentinel_apex_deployment_manifest_v1",
         "version":          version,
         "pipeline_run_id":  run_id,
+        # P0 FIX (release provenance): the main SHA this specific dist/
+        # artifact was built from, so "what is production actually serving"
+        # can be answered by reading this file instead of grepping HTML for
+        # a known fix's fingerprint. GITHUB_SHA is populated automatically
+        # on every Actions run -- no new secret or workflow wiring needed.
+        "git_sha":          git_sha,
         "generated_at":     time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "total_files":      len(files),
         "report_count":     sum(1 for k in files if k.startswith("reports/") and k.endswith(".html")),
@@ -579,6 +585,7 @@ def main() -> int:
 
     pipeline_version = os.environ.get("PIPELINE_VERSION", "184.0")
     run_id           = os.environ.get("GITHUB_RUN_ID", "local")
+    git_sha          = os.environ.get("GITHUB_SHA", "local")
 
     retention_days = REPORT_RETENTION_DAYS
     if retention_days > 0:
@@ -964,7 +971,7 @@ def main() -> int:
     # ── 7. Build deployment manifest ────────────────────────────────────────
     log.info("")
     log.info("Building deployment manifest (SHA-256 checksums)...")
-    manifest = build_manifest(DIST_DIR, run_id, pipeline_version)
+    manifest = build_manifest(DIST_DIR, run_id, pipeline_version, git_sha)
     manifest_path = DIST_DIR / "deployment_manifest.json"
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False),

@@ -5532,7 +5532,7 @@
                         LIVE CYBER THREAT MAP &mdash; GLOBAL ATTACK MONITOR
                     </div>
                     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                        <div id="cdb-threat-counter">ATTACKS TODAY: <span id="cdb-atk-count">0</span></div>
+                        <div id="cdb-threat-counter">CURRENT ADVISORIES: <span id="cdb-atk-count">0</span></div>
                         <span class="cdb-map-stat-pill"><b id="cdb-map-countries-count">—</b> COUNTRIES MONITORED</span>
                         <span class="cdb-map-stat-pill"><b id="cdb-map-actors-count">—</b> ACTOR GROUPS TRACKED</span>
                         <div style="display:flex;gap:8px;align-items:center;">
@@ -11415,19 +11415,19 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
             renderTicker(data);
             renderMapTicker(data);
 
-            // v184.0: Seed ATTACKS TODAY from local data — prevents 0 before Worker API loads
+            // P0 FIX (zero-fabrication): this used to be a severity-weighted
+            // composite score (a hardcoded feed count of 74 baked in) with
+            // an artificial sine-wave "daily variance" layered on purely
+            // for visual "session stability" -- a specific, precise-looking
+            // number with no attack-event dataset behind it at all. This
+            // platform has no authoritative "attacks observed" source, only
+            // advisory/intelligence-record counts, so the label and value
+            // now show what's actually measured: the real current advisory
+            // total already computed above.
             var atkEl = document.getElementById('cdb-atk-count');
-            if (atkEl && (atkEl.textContent === '0' || !window._cdbAtkSeed)) {
-                var _base = (critical * 35) + (high * 12) + (medium * 4) + (low * 1);
-                var _feeds = 74;
-                if (!_base && total) _base = total * 6;
-                _base += (totalIOCs || 0) * 0.12;
-                _base += _feeds * 3;
-                var _doy = Math.floor((Date.now() - new Date(new Date().getFullYear(),0,0)) / 86400000);
-                var _dv  = 1 + (Math.sin(_doy * 0.7 + 1.3) * 0.15);
-                var _atk = Math.max(Math.round(_base * _dv), total);
-                window._cdbAtkSeed = _atk;
-                atkEl.textContent = _atk.toLocaleString();
+            if (atkEl) {
+                window._cdbAtkSeed = total;
+                atkEl.textContent = total.toLocaleString();
             }
         }
 
@@ -12401,12 +12401,6 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
         function renderMapTicker(data) {
             var tickerEl = document.getElementById('cdb-ticker-text');
             if (!tickerEl || !data || !data.length) return;
-            var GEO_PAIRS = [
-                'RU→US','CN→JP','IR→IL','KP→KR','RU→DE',
-                'CN→AU','US→CN','IR→SA','RU→UA','CN→IN',
-                'CN→US','RU→GB','KP→JP','IR→AE','RU→PL',
-                'BR→US','NG→GB','IN→US','TR→DE','RO→US'
-            ];
             var sevColors = { CRITICAL:'#ff5050', HIGH:'#ffa000', MEDIUM:'#ffdc00', LOW:'#00b4ff' };
             var sorted = [...data].sort(function(a,b) {
                 return parseFloat(b.risk_score||0) - parseFloat(a.risk_score||0);
@@ -12414,12 +12408,26 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
             var parts = sorted.map(function(d, i) {
                 var sev = getSeverity(d.risk_score, d);
                 var col = sevColors[sev] || '#aaa';
-                var geo = GEO_PAIRS[i % GEO_PAIRS.length];
                 var cves = extractCVEs(d.title);
                 // STAGE 3 FIX: same unescaped-title-into-innerHTML issue as
                 // renderTicker() above -- reuses the same _cdbEsc() helper.
                 var label = cves[0] ? cves[0] : _cdbEsc((d.title || '').slice(0, 28)) + '…';
-                return '<span style="color:' + col + ';font-weight:700;">' + geo + ' ' + sev + '</span>'
+                // P0 FIX (zero-fabrication): a geo label here used to be a
+                // canned GEO_PAIRS constant selected by ticker position
+                // (i % GEO_PAIRS.length) -- no relationship to the item at
+                // all, so a real advisory could read "RU→US CRITICAL" with
+                // both halves invented. Reuses buildHeatmap()'s own
+                // source_country/actor_country/2-letter-tag resolution --
+                // this codebase's one authoritative source for geo
+                // attribution (v185.0, "no synthetic fallback") -- so the
+                // ticker and the EICC heatmap can never disagree about
+                // whether the same item has real attribution. No target/
+                // destination-country field exists anywhere in the schema,
+                // so a "source→target" pair is never fabricated either:
+                // only the single real origin code renders, or nothing.
+                var geoSrc = d.source_country || d.actor_country || (d.tags && d.tags.find(function(t){ return t && t.length===2; })) || '';
+                var geo = geoSrc ? (_cdbEsc(geoSrc.toUpperCase()) + ' ') : '';
+                return '<span style="color:' + col + ';font-weight:700;">' + geo + sev + '</span>'
                      + ' <span style="color:rgba(200,220,255,0.75);">' + label + '</span>';
             });
             var html = parts.join(' &nbsp;<span style="color:rgba(0,212,170,0.35);">&middot;</span>&nbsp; ');
@@ -16121,8 +16129,17 @@ function renderTopThreats(data) {
                     set('m-high',     intel.severity_distribution && intel.severity_distribution.high);
                 }
 
-                // ── Threat map attack counter ───────────────────────────────
-                // v184.0: severity-weighted attack telemetry — replaces raw critical+high count
+                // ── Threat map advisory counter ─────────────────────────────
+                // P0 FIX (zero-fabrication): the removed formula clamped a
+                // severity-weighted synthetic score to at least
+                // intel.total_reports -- the report-catalog size (22,509+),
+                // a completely different metric from an advisory count --
+                // so in practice this element always displayed the catalog
+                // size mislabeled as "attacks today". severity_distribution's
+                // own components are the one real, already-measured
+                // advisory count in this payload; only write when present
+                // so a legitimate value already seeded by computeMetrics()
+                // above is never clobbered with a worse one.
                 var atkEl = document.getElementById('cdb-atk-count');
                 if (atkEl) {
                     var _sd   = intel.severity_distribution || {};
@@ -16130,20 +16147,11 @@ function renderTopThreats(data) {
                     var _high = _sd.high     || _sd.HIGH     || 0;
                     var _med  = _sd.medium   || _sd.MEDIUM   || 0;
                     var _low  = _sd.low      || _sd.LOW      || 0;
-                    var _iocs = intel.ioc_count || 0;
-                    var _feeds= intel.feed_count || intel.total_feeds || intel.active_feeds || 74;
-                    var _total= intel.total_reports || (_crit+_high+_med+_low) || 122;
-                    // CRITICAL×35 + HIGH×12 + MEDIUM×4 + LOW×1 + IOC density + feed velocity
-                    var _base = (_crit * 35) + (_high * 12) + (_med * 4) + (_low * 1);
-                    if (!_base && _total) _base = _total * 6;
-                    _base += Math.floor(_iocs * 0.12);
-                    _base += _feeds * 3;
-                    // Daily variance ±15%, date-seeded for session stability
-                    var _doy = Math.floor((Date.now() - new Date(new Date().getFullYear(),0,0)) / 86400000);
-                    var _dv  = 1 + (Math.sin(_doy * 0.7 + 1.3) * 0.15);
-                    var atk  = Math.max(Math.round(_base * _dv), _total);
-                    window._cdbAtkSeed = atk;  // seed canvas arc counter
-                    atkEl.textContent = atk.toLocaleString();
+                    var _advisories = _crit + _high + _med + _low;
+                    if (_advisories) {
+                        window._cdbAtkSeed = _advisories;  // seed canvas arc counter
+                        atkEl.textContent = _advisories.toLocaleString();
+                    }
                 }
 
                 /* v186.0: threat map legend severity counts — same source data as above */
