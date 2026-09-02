@@ -23,6 +23,7 @@ import datetime
 import urllib.request
 import urllib.error
 import urllib.parse
+import concurrent.futures
 
 try:
     import boto3
@@ -123,16 +124,30 @@ def backup_namespace(ns_name, ns_id, skip_transient):
 
     entries = {}
     errors = 0
-    for i, key in enumerate(keys):
-        try:
-            val = get_kv_value(ns_id, key)
-            entries[key] = val
-        except Exception as e:
-            print(f"    WARN: Could not fetch key {key!r}: {e}")
-            errors += 1
-        if i > 0 and i % 100 == 0:
-            print(f"    Progress: {i}/{len(keys)} keys fetched...")
-            time.sleep(0.05)
+    completed = 0
+    # P0 FIX: fetching each key with its own sequential HTTP round-trip (the
+    # previous shape of this loop) was the direct cause of this job hitting
+    # its 30-minute timeout every day for 13+ days once a namespace grew
+    # past a few thousand keys -- confirmed live via the job's own
+    # timeout-boundary cancellation with zero progress logged. Each
+    # get_kv_value() call is an independent, read-only GET on a distinct
+    # key, so a modestly-bounded thread pool is safe: identical data
+    # fetched, identical per-key error handling, just concurrently. Kept
+    # deliberately conservative (10 workers) rather than maximizing
+    # throughput, since Cloudflare's API applies its own rate limits and a
+    # burst of 429s would just move the failure mode rather than fix it.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        future_to_key = {pool.submit(get_kv_value, ns_id, key): key for key in keys}
+        for future in concurrent.futures.as_completed(future_to_key):
+            key = future_to_key[future]
+            completed += 1
+            try:
+                entries[key] = future.result()
+            except Exception as e:
+                print(f"    WARN: Could not fetch key {key!r}: {e}")
+                errors += 1
+            if completed % 100 == 0:
+                print(f"    Progress: {completed}/{len(keys)} keys fetched...")
 
     checksum = hashlib.sha256(json.dumps(entries, sort_keys=True).encode()).hexdigest()
     return {

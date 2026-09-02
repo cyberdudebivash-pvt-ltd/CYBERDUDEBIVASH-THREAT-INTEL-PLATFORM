@@ -144,6 +144,18 @@ jobs:
           CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
           CF_R2_ENDPOINT:          ${{ secrets.CF_R2_ENDPOINT }}
           CF_R2_BUCKET:            sentinel-apex-data
+          # P0 FIX: this job has been silently timing out at 30min every day
+          # for 13+ days (confirmed live: job log shows zero output between
+          # env setup and "The operation was canceled" at the exact
+          # timeout-minutes boundary) -- backup_kv_to_r2.py's own print()
+          # calls were real but invisible: piped/non-interactive stdout is
+          # fully-buffered by default in Python, so nothing reached the CI
+          # log until the buffer flushed or the process exited, neither of
+          # which happened before the timeout killed it. This alone doesn't
+          # fix the slowness (see backup_kv_to_r2.py's parallelized fetch),
+          # but without it this job would still be undiagnosable if it ever
+          # times out again.
+          PYTHONUNBUFFERED: "1"
         run: |
           if [[ -z "$CF_API_TOKEN" || -z "$CF_ACCOUNT_ID" ]]; then
             echo "SKIP: CF_API_TOKEN or CF_ACCOUNT_ID not configured"
