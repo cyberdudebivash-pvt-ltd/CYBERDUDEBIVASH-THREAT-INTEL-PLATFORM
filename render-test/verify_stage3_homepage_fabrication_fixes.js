@@ -38,6 +38,7 @@
 'use strict';
 
 const path = require('path');
+const { startStaticServer } = require('./lib/static-server');
 const http = require('http');
 const fs = require('fs');
 const { chromium } = require('playwright');
@@ -53,22 +54,6 @@ const MIME = {
 };
 
 /** Serves the repo root over plain HTTP so the real index.html and its JS/CSS load unmodified. @returns {Promise<import('http').Server>} */
-function startStaticServer() {
-  const server = http.createServer((req, res) => {
-    let urlPath = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
-    if (urlPath.endsWith('/')) urlPath += 'index.html';
-    const filePath = path.join(REPO_ROOT, urlPath);
-    const rel = path.relative(REPO_ROOT, filePath);
-    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) { res.writeHead(403); res.end(); return; }
-    fs.readFile(filePath, (err, data) => {
-      if (err) { res.writeHead(404); res.end('Not found'); return; }
-      const ext = path.extname(filePath);
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-      res.end(data);
-    });
-  });
-  return new Promise((resolve) => server.listen(PORT, '127.0.0.1', () => resolve(server)));
-}
 
 const results = [];
 /** Records one check's outcome to the module-level `results` list and logs it. @param {string} name @param {boolean} pass @param {string} [detail] */
@@ -207,7 +192,7 @@ async function runSubscriberCounterScenario(browser) {
 
 /** Runs both scenarios against a fresh browser/static-server pair and exits non-zero if any check failed. */
 async function main() {
-  const server = await startStaticServer();
+  const server = await startStaticServer(REPO_ROOT, PORT, MIME);
   let browser;
   try {
     browser = await chromium.launch();
