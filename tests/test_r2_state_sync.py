@@ -88,8 +88,22 @@ class TestStateFilesManifest(unittest.TestCase):
     entry doesn't silently pass just because the generic tests adapted to
     the shorter list."""
 
-    def test_exactly_four_files_migrated(self):
-        self.assertEqual(len(rs.STATE_FILES), 4)
+    def test_exactly_nine_files_migrated(self):
+        self.assertEqual(len(rs.STATE_FILES), 9)
+
+    def test_all_five_intelligence_repository_registry_files_present(self):
+        """CodeRabbit review finding on this migration (verified, not taken
+        on faith): these 5 files were still on multi-source-intel.yml's
+        doomed-to-fail git push after the 4 files above were pulled off it."""
+        local_paths = [local for local, _ in rs.STATE_FILES]
+        for f in (
+            "data/intelligence_repository/intelligence_index.json",
+            "data/intelligence_repository/advisory_registry.json",
+            "data/intelligence_repository/intel_retention_registry.json",
+            "data/intelligence_repository/intel_lifecycle_registry.json",
+            "data/intelligence_repository/historical_feed_registry.json",
+        ):
+            self.assertIn(f, local_paths)
 
     def test_top_level_feed_manifest_is_present_with_path_mirrored_key(self):
         self.assertIn(
@@ -112,6 +126,14 @@ class TestStateFilesManifest(unittest.TestCase):
 class TestDownload(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_dl_"))
+        # STATE_DIRS uses a different (sync, not cp) subprocess command shape
+        # than the STATE_FILES tests below fake -- these tests are about
+        # STATE_FILES semantics specifically, so STATE_DIRS is neutralized
+        # to a trivial success here. TestStateDirs below covers its own
+        # behavior directly.
+        patcher = patch.object(rs, "s3_sync_download", return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         import shutil
@@ -267,6 +289,94 @@ class TestUpload(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn(keys[1], uploaded_keys)
         self.assertIn(keys[2], uploaded_keys)
+
+
+class TestStateDirs(unittest.TestCase):
+    """STATE_DIRS (data/intelligence_repository/advisories/) uses sync, not
+    cp, semantics -- these tests exercise that path directly rather than
+    relying on TestDownload/TestUpload's STATE_FILES-shaped mocking."""
+
+    def test_exactly_one_dir_migrated(self):
+        self.assertEqual(len(rs.STATE_DIRS), 1)
+        self.assertIn(
+            ("data/intelligence_repository/advisories", "data/intelligence_repository/advisories"),
+            rs.STATE_DIRS,
+        )
+
+    def test_download_calls_sync_for_each_configured_dir(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_dirs_dl_"))
+        try:
+            with patch.object(rs, "s3_sync_download", return_value=True) as m:
+                with patch.object(rs, "s3_get", return_value="NOT_FOUND"):
+                    rc = rs.download(tmp, "https://e")
+            self.assertEqual(rc, 0)
+            self.assertEqual(m.call_count, len(rs.STATE_DIRS))
+            for local_rel, r2_prefix in rs.STATE_DIRS:
+                m.assert_any_call(str(tmp / local_rel), rs.BUCKET_DATA, r2_prefix, "https://e")
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_download_sync_failure_is_an_error_not_silently_ignored(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_dirs_dl_"))
+        try:
+            with patch.object(rs, "s3_sync_download", return_value=False):
+                with patch.object(rs, "s3_get", return_value="NOT_FOUND"):
+                    rc = rs.download(tmp, "https://e")
+            self.assertEqual(rc, 1)
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_upload_skips_missing_or_empty_dir_not_an_error(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_dirs_ul_empty_"))
+        try:
+            with patch.object(r2_upload.subprocess, "run") as m:
+                rc = rs.upload(tmp, "https://e")
+            self.assertEqual(rc, 0)
+            m.assert_not_called()
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_upload_syncs_dir_with_content(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_dirs_ul_"))
+        try:
+            local_rel, _ = rs.STATE_DIRS[0]
+            adv_dir = tmp / local_rel
+            adv_dir.mkdir(parents=True, exist_ok=True)
+            (adv_dir / "registry_202609.json").write_text('{"items": []}', encoding="utf-8")
+
+            with patch.object(rs, "s3_sync", return_value=True) as m:
+                rc = rs.upload(tmp, "https://e")
+            self.assertEqual(rc, 0)
+            m.assert_called_once()
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_upload_sync_exhaustion_is_fatal_and_reported_as_mixed_state_when_partial(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_dirs_ul_"))
+        try:
+            local_rel, _ = rs.STATE_DIRS[0]
+            adv_dir = tmp / local_rel
+            adv_dir.mkdir(parents=True, exist_ok=True)
+            (adv_dir / "registry_202609.json").write_text('{"items": []}', encoding="utf-8")
+            for f, _ in rs.STATE_FILES:
+                p = tmp / f
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text("{}", encoding="utf-8")
+
+            with patch.object(rs, "s3_sync", return_value=False):
+                with patch.object(rs, "s3_cp", return_value=True):
+                    with patch.object(rs.time, "sleep"):
+                        with self.assertLogs("r2-state-sync", level="ERROR") as cm:
+                            rc = rs.upload(tmp, "https://e")
+            self.assertEqual(rc, 1)
+            self.assertTrue([line for line in cm.output if "MIXED STATE" in line])
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class TestMixedStateVisibility(unittest.TestCase):

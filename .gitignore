@@ -82,6 +82,22 @@ api/apex_v2/
 # started requiring PRs (~2026-08-26), silently discarding it every time.
 data/processed_intel.json
 
+# CodeRabbit review finding on the migration above (verified, not taken on
+# faith): multi-source-intel.yml kept `git add -f`-ing these 5 registry
+# files + the advisories/ chunk directory after the block above was pulled
+# off that same push -- but main's branch ruleset rejects ANY direct push
+# to main, not just pushes of specific files, so that push was always going
+# to keep failing regardless of which files remained on it, and PR #330
+# made that failure hard-fail the job. Same root cause, same fix, same file
+# family as the block above -- see scripts/r2_state_sync.py's STATE_FILES /
+# STATE_DIRS for the R2 side of this migration.
+data/intelligence_repository/intelligence_index.json
+data/intelligence_repository/advisory_registry.json
+data/intelligence_repository/intel_retention_registry.json
+data/intelligence_repository/intel_lifecycle_registry.json
+data/intelligence_repository/historical_feed_registry.json
+data/intelligence_repository/advisories/
+
 # Issue #274: these flow to Cloudflare R2 via sentinel-blogger.yml's
 # r2_upload.py and generate-and-sync.yml's STAGE 9.5 (both already upload
 # them every run, independent of any git commit) -- the Worker now reads

@@ -102,6 +102,8 @@ from r2_upload import (  # noqa: E402
     install_awscli,
     s3_cp,
     s3_get,
+    s3_sync,
+    s3_sync_download,
 )
 
 logging.basicConfig(
@@ -154,6 +156,39 @@ STATE_FILES: list[tuple[str, str]] = [
     ("data/processed_intel.json", "data/processed_intel.json"),
     ("data/stix/feed_manifest.json", "intel/feed_manifest.json"),
     ("data/feed_manifest.json", "data/feed_manifest.json"),
+    # CodeRabbit review finding on this migration (verified, not taken on
+    # faith): multi-source-intel.yml's "Commit Intel State & Manifest" step
+    # still `git add -f`'d these 5 append-only registry files after the
+    # STATE_FILES above were pulled off that same push -- but main's branch
+    # ruleset rejects ANY direct push, not just pushes of specific files, so
+    # that push was always going to keep failing regardless of which files
+    # remained on it. Since PR #330 made push exhaustion hard-fail the job
+    # (deliberately, to stop it silently discarding real state), leaving
+    # these 5 on the git path meant this job would now hard-fail on every
+    # run that touched any of them -- confirmed by reading
+    # intel_persistence_engine.py's own docstring, which describes all 5 as
+    # written every run. Same root cause, same fix, same file family as the
+    # entries above: no pre-existing R2 key for any of them (confirmed: no
+    # reference anywhere in r2_upload.py or the Worker), so keys mirror
+    # local paths per this module's established convention.
+    ("data/intelligence_repository/intelligence_index.json", "data/intelligence_repository/intelligence_index.json"),
+    ("data/intelligence_repository/advisory_registry.json", "data/intelligence_repository/advisory_registry.json"),
+    ("data/intelligence_repository/intel_retention_registry.json", "data/intelligence_repository/intel_retention_registry.json"),
+    ("data/intelligence_repository/intel_lifecycle_registry.json", "data/intelligence_repository/intel_lifecycle_registry.json"),
+    ("data/intelligence_repository/historical_feed_registry.json", "data/intelligence_repository/historical_feed_registry.json"),
+]
+
+# data/intelligence_repository/advisories/ is a directory of monthly chunk
+# files (registry_<YYYYMM>.json, "never overwritten" per
+# intel_persistence_engine.py's own docstring) -- not a single JSON object,
+# so it needs sync (prefix-level) rather than cp (key-level) semantics.
+# Same root cause and fix as STATE_FILES above; kept as a separate list
+# because s3_sync()/s3_sync_download()'s directory contract genuinely
+# differs from s3_cp()/s3_get()'s single-object OK/NOT_FOUND/ERROR one (see
+# s3_sync_download()'s docstring: without --delete, sync is inherently
+# additive/bootstrap-safe, so it doesn't need the same three-way branching).
+STATE_DIRS: list[tuple[str, str]] = [
+    ("data/intelligence_repository/advisories", "data/intelligence_repository/advisories"),
 ]
 
 UPLOAD_RETRY_ATTEMPTS = 4
@@ -225,6 +260,18 @@ def download(root: pathlib.Path, endpoint: str) -> int:
         )
         had_error = True
 
+    for local_rel, r2_prefix in STATE_DIRS:
+        local_dir = root / local_rel
+        local_dir.mkdir(parents=True, exist_ok=True)
+        if not s3_sync_download(str(local_dir), BUCKET_DATA, r2_prefix, endpoint):
+            log.error(
+                "FATAL: could not sync %s from R2 -- see the WARN log line "
+                "above for the underlying cause. Existing local copy (if "
+                "any) is left untouched.",
+                r2_prefix,
+            )
+            had_error = True
+
     return 1 if had_error else 0
 
 
@@ -272,6 +319,30 @@ def upload(root: pathlib.Path, endpoint: str) -> int:
                 "file's state was NOT persisted; the next scheduled run will "
                 "read it stale again.",
                 r2_key, UPLOAD_RETRY_ATTEMPTS,
+            )
+            had_error = True
+
+    for local_rel, r2_prefix in STATE_DIRS:
+        local_dir = root / local_rel
+        if not local_dir.exists() or not any(local_dir.iterdir()):
+            log.info("SKIP: %s has no local content to publish.", local_rel)
+            continue
+
+        for attempt in range(1, UPLOAD_RETRY_ATTEMPTS + 1):
+            if s3_sync(str(local_dir), BUCKET_DATA, r2_prefix, endpoint, content_type="application/json"):
+                succeeded.append(r2_prefix)
+                break
+            if attempt < UPLOAD_RETRY_ATTEMPTS:
+                sleep_secs = attempt * 15
+                log.warning("Retrying %s sync in %ds...", r2_prefix, sleep_secs)
+                time.sleep(sleep_secs)
+        else:
+            failed.append(r2_prefix)
+            log.error(
+                "FATAL: %s failed to sync to R2 after %d attempts -- this "
+                "run's additions were NOT persisted; the next scheduled run "
+                "will read it stale again.",
+                r2_prefix, UPLOAD_RETRY_ATTEMPTS,
             )
             had_error = True
 

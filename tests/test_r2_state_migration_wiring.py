@@ -26,6 +26,20 @@ MIGRATED_FILES = [
     "data/feed_manifest.json",
 ]
 
+# CodeRabbit review finding on this migration (verified, not taken on
+# faith): these 5 registry files + the advisories/ chunk directory were
+# still on multi-source-intel.yml's doomed-to-fail git push after the 4
+# files above were pulled off it -- same root cause, same fix, tracked
+# separately here since they were a later, second round of the migration.
+MIGRATED_REGISTRY_FILES = [
+    "data/intelligence_repository/intelligence_index.json",
+    "data/intelligence_repository/advisory_registry.json",
+    "data/intelligence_repository/intel_retention_registry.json",
+    "data/intelligence_repository/intel_lifecycle_registry.json",
+    "data/intelligence_repository/historical_feed_registry.json",
+]
+MIGRATED_REGISTRY_DIR = "data/intelligence_repository/advisories/"
+
 
 def _step_names(doc: dict, job_key: str | None = None) -> list[str]:
     jobs = doc["jobs"]
@@ -59,6 +73,29 @@ class TestGitignoreCompletesTheMigration(unittest.TestCase):
         self.assertEqual(
             result.stdout.strip(), "",
             f"these files are still git-tracked despite being gitignored "
+            f"(git rm --cached was needed, not just a .gitignore entry): "
+            f"{result.stdout.strip()}",
+        )
+
+    def test_registry_files_and_advisories_dir_are_gitignored(self):
+        for f in MIGRATED_REGISTRY_FILES + [MIGRATED_REGISTRY_DIR]:
+            result = subprocess.run(
+                ["git", "check-ignore", f], cwd=REPO_ROOT, capture_output=True,
+            )
+            self.assertEqual(
+                result.returncode, 0,
+                f"{f} is not gitignored -- the R2 migration is incomplete "
+                f"(a fresh `git add .` would re-track it).",
+            )
+
+    def test_registry_files_and_advisories_dir_are_not_git_tracked(self):
+        result = subprocess.run(
+            ["git", "ls-files"] + MIGRATED_REGISTRY_FILES + [MIGRATED_REGISTRY_DIR],
+            cwd=REPO_ROOT, capture_output=True, text=True,
+        )
+        self.assertEqual(
+            result.stdout.strip(), "",
+            f"these are still git-tracked despite being gitignored "
             f"(git rm --cached was needed, not just a .gitignore entry): "
             f"{result.stdout.strip()}",
         )
@@ -108,18 +145,31 @@ class TestMultiSourceIntelWiring(unittest.TestCase):
                 self.assertIn(key, env, f"{name} is missing {key}")
 
     def test_migrated_files_no_longer_staged_in_commit_step(self):
+        """CodeRabbit review finding on this migration (verified and fixed):
+        this step's git push was guaranteed to fail on every run regardless
+        of which files it carried -- main's branch ruleset rejects ANY
+        direct push, not just pushes of specific paths -- so the fix is a
+        complete no-op, not just removing the 3 originally-migrated files
+        while leaving the 5 registry files + advisories/ still staged."""
         commit_step = next(
             s for s in self.doc["jobs"]["multi-source-enrichment"]["steps"]
             if s.get("name") == "Commit Intel State & Manifest"
         )
         run_block = commit_step["run"]
-        for f in ("data/cache/feed_state.json", "data/processed_intel.json", "data/stix/feed_manifest.json"):
-            self.assertNotIn(
-                f"git add -f {f}", run_block,
-                f"{f} is still being staged for git commit -- R2 write + failed "
-                f"git push would run in parallel indefinitely, exactly what this "
-                f"migration was meant to eliminate.",
-            )
+        self.assertNotIn("git add -f", run_block)
+        self.assertNotIn("git push", run_block)
+
+    def test_persistence_engine_runs_before_upload_not_after(self):
+        """CodeRabbit review finding on this migration (verified and fixed):
+        intel_persistence_engine.py -- which writes the 5 registry files +
+        advisories/ -- used to run inside the old "Commit Intel State &
+        Manifest" step, which was AFTER "Upload Intel State to R2". That
+        meant the upload always published the PREVIOUS run's registry
+        content, never the current run's. Now a dedicated step runs it
+        before the upload."""
+        persistence = self.names.index("Run Intelligence Persistence Engine")
+        upload = self.names.index("Upload Intel State to R2")
+        self.assertLess(persistence, upload)
 
     def test_existing_concurrency_safeguard_is_untouched(self):
         """multi-source-intel.yml and sentinel-blogger.yml's staggered cron

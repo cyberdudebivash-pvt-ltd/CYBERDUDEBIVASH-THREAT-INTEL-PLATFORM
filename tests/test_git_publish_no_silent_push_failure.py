@@ -35,6 +35,21 @@ Fix:
     now emits a loud `::error::` GitHub Actions annotation (still exits 0),
     matching the same pattern already used one stage later by STAGE 4.1's
     r2_resync_manifests.py failure handling.
+
+Superseded update (see scripts/r2_state_sync.py / tests/test_r2_state_sync.py
+/ tests/test_r2_state_migration_wiring.py): multi-source-intel.yml's
+"Commit Intel State & Manifest" step no longer attempts a git push at all.
+The hard-fail-on-exhaustion behavior above was a genuine improvement over
+silent failure, but it was still failing on every single run: main's branch
+ruleset rejects ANY direct push to main, not just pushes of specific files,
+so once ALL of this step's files were migrated to R2 (feed_state.json /
+processed_intel.json / feed_manifest.json / data/feed_manifest.json plus,
+found by a later CodeRabbit review, the 5 data/intelligence_repository/*.json
+registry files + advisories/), there was nothing left this step could ever
+successfully commit -- a push attempt here was structurally guaranteed to
+fail, forever, not just historically. TestMultiSourceIntelCommitStepFailsLoudly
+below is updated to assert the step no longer attempts a push at all, rather
+than asserting how it fails when it does.
 """
 import pathlib
 import unittest
@@ -65,22 +80,18 @@ class TestMultiSourceIntelCommitStepFailsLoudly(unittest.TestCase):
     def test_commit_step_exists_exactly_once(self):
         self._commit_step_source()
 
-    def test_exhausted_push_retries_now_exit_nonzero(self):
+    def test_step_no_longer_attempts_a_git_push(self):
+        """Superseded by the R2 migration (see module docstring): every file
+        this step used to commit is R2-authoritative now, and main's branch
+        ruleset rejects ANY direct push to main -- not just pushes of
+        specific files -- so a push here was structurally guaranteed to
+        fail on every run, forever. The correct fix escalated from "hard-fail
+        loudly when the push is rejected" to "don't attempt a push that
+        cannot succeed"."""
         run_block = self._commit_step_source()
-        # Must track whether any attempt actually succeeded...
-        self.assertIn("PUSHED=1", run_block)
-        # ...and must hard-fail the step when none did.
-        self.assertRegex(
-            run_block,
-            r'if\s*\[\s*"\$PUSHED"\s*-ne\s*1\s*\]\s*;\s*then',
-            "push-exhaustion branch must check whether any attempt actually succeeded",
-        )
-        exhaustion_branch = run_block.split('if [ "$PUSHED" -ne 1 ]; then', 1)[-1]
-        self.assertIn("exit 1", exhaustion_branch)
-
-    def test_exhausted_push_retries_emit_error_annotation(self):
-        run_block = self._commit_step_source()
-        self.assertIn("::error::", run_block)
+        self.assertNotIn("git push", run_block)
+        self.assertNotIn("git add -f", run_block)
+        self.assertNotIn("PUSHED=", run_block)
 
     def test_no_more_bare_warn_only_deferral(self):
         """The old behaviour -- print a [WARN] and just fall through -- must be gone."""

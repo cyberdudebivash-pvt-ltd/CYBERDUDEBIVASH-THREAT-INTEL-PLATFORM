@@ -268,6 +268,50 @@ def s3_sync(
     return False
 
 
+def s3_sync_download(
+    dst_dir: str,
+    src_bucket: str,
+    src_prefix: str,
+    endpoint: str,
+    timeout_seconds: int | None = None,
+) -> bool:
+    """
+    Download counterpart to s3_sync(): pulls src_bucket/src_prefix down to
+    dst_dir. Returns True on success (including the trivial case where the
+    prefix has no objects yet -- `aws s3 sync` from an empty/nonexistent
+    prefix is a legitimate no-op, not an error, unlike s3_get()'s single-
+    object OK/NOT_FOUND/ERROR contract which a directory sync doesn't need:
+    without --delete, sync only adds/updates -- it never removes files
+    already present in dst_dir, so a git-checkout copy of dst_dir is safe to
+    sync onto (bootstrap-safe by construction, no special-casing required).
+    """
+    cmd = [
+        "aws", "s3", "sync", f"s3://{src_bucket}/{src_prefix}", dst_dir,
+        "--endpoint-url", endpoint,
+        "--only-show-errors",
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        log.warning(
+            "WARN: s3 sync download timed out after %ds (non-fatal) -- "
+            "existing local copy of %s is left untouched.",
+            timeout_seconds, dst_dir,
+        )
+        return False
+
+    if result.returncode == 0:
+        log.info("OK: Synced s3://%s/%s -> %s", src_bucket, src_prefix, dst_dir)
+        return True
+    log.warning(
+        "WARN: Sync download had errors (%d): %s",
+        result.returncode, result.stderr.strip()[:400],
+    )
+    return False
+
+
 def upload_p40_artifacts(endpoint: str) -> int:
     """
     Upload the 3 P40 Global Intelligence Source Fabric artifacts to R2.
