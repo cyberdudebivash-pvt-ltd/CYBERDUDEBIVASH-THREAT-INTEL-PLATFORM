@@ -55,6 +55,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone, timedelta
@@ -545,6 +546,27 @@ def force_include_feed_reports(dist_reports_dst: Path) -> int:
     return forced
 
 
+def _resolve_git_sha() -> str:
+    """Resolve the actual commit checked out in REPO_ROOT.
+
+    Deliberately not GITHUB_SHA: that env var is event-derived, not
+    checkout-derived -- for a pull_request event it is GitHub's ephemeral
+    test-merge SHA (refs/pull/N/merge), not the real commit this workflow's
+    own checkout step resolves via `ref: main` for that exact event type
+    (see pages-fast-publish.yml). Querying git directly reflects whatever
+    was actually checked out, correctly, for every trigger type without
+    needing per-event-type branches here.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT,
+            capture_output=True, text=True, timeout=10, check=True,
+        )
+        return out.stdout.strip() or os.environ.get("GITHUB_SHA", "local")
+    except Exception:
+        return os.environ.get("GITHUB_SHA", "local")
+
+
 def build_manifest(dist_dir: Path, run_id: str, version: str, git_sha: str) -> Dict:
     """Generate deployment manifest with SHA-256 checksums for every file in dist/."""
     files = {}
@@ -576,6 +598,7 @@ def build_manifest(dist_dir: Path, run_id: str, version: str, git_sha: str) -> D
 
 
 def main() -> int:
+    """Build dist/ from the working tree and write its checksummed deployment manifest."""
     t0 = time.time()
     log.info("=" * 70)
     log.info("SENTINEL APEX -- Deterministic Dist Artifact Builder v184.0")
@@ -585,7 +608,7 @@ def main() -> int:
 
     pipeline_version = os.environ.get("PIPELINE_VERSION", "184.0")
     run_id           = os.environ.get("GITHUB_RUN_ID", "local")
-    git_sha          = os.environ.get("GITHUB_SHA", "local")
+    git_sha          = _resolve_git_sha()
 
     retention_days = REPORT_RETENTION_DAYS
     if retention_days > 0:
