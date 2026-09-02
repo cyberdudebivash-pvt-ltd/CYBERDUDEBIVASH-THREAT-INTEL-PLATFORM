@@ -269,6 +269,89 @@ class TestUpload(unittest.TestCase):
         self.assertIn(keys[2], uploaded_keys)
 
 
+class TestMixedStateVisibility(unittest.TestCase):
+    """CodeRabbit review finding on PR #332: R2 has no cross-object
+    transactions, so a run where some of the 4 STATE_FILES upload
+    successfully and others exhaust their retries leaves R2 in a genuinely
+    inconsistent mix -- and the original per-file-only error message
+    ('this run's state was NOT persisted') was misleading in exactly that
+    case, since some of it *had* been. These tests assert the partial
+    failure is loudly, distinctly diagnosable rather than indistinguishable
+    from a total failure."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_mixed_"))
+        for local_rel, _ in rs.STATE_FILES:
+            p = self.tmp / local_rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps({"file": local_rel}), encoding="utf-8")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_partial_failure_logs_mixed_state_warning(self):
+        keys = [k for _, k in rs.STATE_FILES]
+
+        def _fake_run(cmd, **kwargs):
+            _is_download, _local_path, r2_key = _parse_cp_cmd(cmd)
+            if r2_key == keys[0]:
+                return _proc(1, stderr="500 Internal Error")
+            return _proc(0)
+
+        with patch.object(r2_upload.subprocess, "run", side_effect=_fake_run):
+            with patch.object(rs.time, "sleep"):
+                with self.assertLogs("r2-state-sync", level="ERROR") as cm:
+                    rc = rs.upload(self.tmp, "https://e")
+
+        self.assertEqual(rc, 1)
+        mixed_state_lines = [line for line in cm.output if "MIXED STATE" in line]
+        self.assertTrue(mixed_state_lines, "expected a MIXED STATE warning when some files "
+                                            "succeeded and others failed")
+        # Names both the stale (failed) and fresh (succeeded) files, not just a count.
+        self.assertIn(keys[0], mixed_state_lines[0])
+        for k in keys[1:]:
+            self.assertIn(k, mixed_state_lines[0])
+
+    def test_total_failure_does_not_log_mixed_state_warning(self):
+        """All 4 files failing is not 'mixed' -- it's uniformly stale, same
+        as before this fix. The MIXED STATE signal must be reserved for the
+        genuinely partial case so it isn't cried wolf on every outage."""
+        with patch.object(r2_upload.subprocess, "run", return_value=_proc(1, stderr="500 Internal Error")):
+            with patch.object(rs.time, "sleep"):
+                with self.assertLogs("r2-state-sync", level="ERROR") as cm:
+                    rc = rs.upload(self.tmp, "https://e")
+
+        self.assertEqual(rc, 1)
+        self.assertFalse([line for line in cm.output if "MIXED STATE" in line])
+
+    def test_total_success_does_not_log_mixed_state_warning(self):
+        with patch.object(r2_upload.subprocess, "run", return_value=_proc(0)):
+            rc = rs.upload(self.tmp, "https://e")
+        self.assertEqual(rc, 0)
+
+    def test_single_file_failure_message_does_not_overclaim_whole_run_lost(self):
+        """The original wording implied the entire run's state was lost even
+        when only one of several files failed -- must now scope the claim to
+        the file it actually describes."""
+        keys = [k for _, k in rs.STATE_FILES]
+
+        def _fake_run(cmd, **kwargs):
+            _is_download, _local_path, r2_key = _parse_cp_cmd(cmd)
+            if r2_key == keys[0]:
+                return _proc(1, stderr="500 Internal Error")
+            return _proc(0)
+
+        with patch.object(r2_upload.subprocess, "run", side_effect=_fake_run):
+            with patch.object(rs.time, "sleep"):
+                with self.assertLogs("r2-state-sync", level="ERROR") as cm:
+                    rs.upload(self.tmp, "https://e")
+
+        per_file_failure = [line for line in cm.output if keys[0] in line and "MIXED STATE" not in line]
+        self.assertTrue(per_file_failure)
+        self.assertNotIn("this run's state was NOT persisted", per_file_failure[0])
+
+
 class TestRoundTripFidelity(unittest.TestCase):
     """The script must be a byte-transparent pass-through: whatever gets
     uploaded is exactly what a later download returns -- no silent mutation

@@ -235,8 +235,22 @@ def upload(root: pathlib.Path, endpoint: str) -> int:
     multi-source-intel.yml's "Commit Intel State & Manifest" step) for
     consistency. A file that was never present locally (nothing to publish,
     e.g. an ingestion run that legitimately produced no output) is skipped,
-    not an error."""
+    not an error.
+
+    R2 has no cross-object transactions (see this module's docstring's
+    Concurrency note), so a run where some of STATE_FILES' 4 uploads succeed
+    and others exhaust their retries leaves R2 in a genuinely MIXED state --
+    e.g. a freshly-uploaded data/stix/feed_manifest.json paired with a
+    stale, previous-run data/feed_manifest.json that failed to publish.
+    Building real cross-file atomicity (stage-then-promote) is out of scope
+    for a last-write-wins object store this fix doesn't otherwise depend on;
+    instead this function tracks succeeded vs. failed files explicitly so a
+    genuinely partial run is loudly distinguishable from a total failure --
+    the previous per-file-only message wrongly implied 'NOT persisted' even
+    when other files in the same run *had* persisted."""
     had_error = False
+    succeeded: list[str] = []
+    failed: list[str] = []
     for local_rel, r2_key in STATE_FILES:
         local_path = root / local_rel
         if not local_path.exists():
@@ -245,19 +259,31 @@ def upload(root: pathlib.Path, endpoint: str) -> int:
 
         for attempt in range(1, UPLOAD_RETRY_ATTEMPTS + 1):
             if s3_cp(str(local_path), BUCKET_DATA, r2_key, endpoint):
+                succeeded.append(r2_key)
                 break
             if attempt < UPLOAD_RETRY_ATTEMPTS:
                 sleep_secs = attempt * 15
                 log.warning("Retrying %s upload in %ds...", r2_key, sleep_secs)
                 time.sleep(sleep_secs)
         else:
+            failed.append(r2_key)
             log.error(
                 "FATAL: %s failed to upload to R2 after %d attempts -- this "
-                "run's state was NOT persisted; the next scheduled run will "
-                "start from stale state again.",
+                "file's state was NOT persisted; the next scheduled run will "
+                "read it stale again.",
                 r2_key, UPLOAD_RETRY_ATTEMPTS,
             )
             had_error = True
+
+    if failed and succeeded:
+        log.error(
+            "MIXED STATE WARNING: this run partially published its R2 state -- "
+            "%d file(s) now fresh (%s), %d file(s) still stale from a previous "
+            "run (%s). These files are no longer guaranteed mutually "
+            "consistent; if downstream behavior looks wrong, check whether it "
+            "correlates with this run.",
+            len(succeeded), ", ".join(succeeded), len(failed), ", ".join(failed),
+        )
 
     return 1 if had_error else 0
 
