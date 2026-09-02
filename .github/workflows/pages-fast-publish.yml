@@ -32,6 +32,30 @@
 # that make up the live dashboard's own code, so a UI or security fix is never
 # again hostage to an unrelated multi-hour data-pipeline queue.
 #
+# ADDITIVE FIX (P0, issue #320, 2026-09-02): this workflow's own on.push
+# trigger has now failed to fire on 3 consecutive PR-merge commits (#314,
+# #315, #317) -- see deploy-drift-watchdog.yml's header for the full
+# evidence chain (two other filterless on.push workflows showed the same
+# gap; GitHub's own CodeQL scan fired fine on the same pushes; converging
+# evidence points at API/App-mediated PR-merge pushes not reliably
+# triggering user-defined on.push workflows in this repo/org). The
+# watchdog closes that gap within ~15 minutes; this trigger tries to close
+# it immediately, and by a different mechanism than the one suspected
+# unreliable: `pull_request` events are fired by GitHub's PR state
+# machine as part of the merge operation itself, not by a subsequent git
+# push-webhook delivery -- an architecturally different path than `push`,
+# not a retry of the same one. If this repo/org's suppression turns out
+# to also affect `pull_request` delivery, the watchdog remains as a
+# bounded-time safety net; if it doesn't, this closes the gap with zero
+# delay instead of ~15 minutes. Either way this is a pure addition: the
+# existing `push` and `workflow_dispatch` triggers, and everything below
+# them, are unchanged. A near-simultaneous double-fire (e.g. push
+# delivery works sometimes) is already handled safely by this workflow's
+# existing `concurrency: cancel-in-progress: true` below -- both runs
+# would build+deploy the identical current-main content, so the second
+# to start simply supersedes the first, exactly the "a newer run
+# supersedes a stale one" behavior this workflow already relies on.
+#
 # REUSE (Principle 4 -- searched before building): calls the exact same
 # scripts/build_dist_artifact.py and the same pinned
 # JamesIves/github-pages-deploy-action config that sentinel-blogger.yml's
@@ -88,6 +112,20 @@ on:
       # pipeline for hours, the exact failure mode this file's own header
       # comment already documents fixing for index.html/js/css/_headers.
       - 'service-worker.js'
+  # ADDITIVE FIX (issue #320, see header comment above): identical paths
+  # list to the push trigger above -- only fires when a merged PR actually
+  # touched one of these files, matching that trigger's own scoping intent
+  # exactly (GitHub evaluates pull_request paths: filters against the PR's
+  # actual changed files, including for the `closed` event).
+  pull_request:
+    types: [closed]
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'js/**'
+      - 'css/**'
+      - '_headers'
+      - 'service-worker.js'
   workflow_dispatch: {}
 
 permissions:
@@ -116,13 +154,32 @@ jobs:
     # content live -- push events already only fire on main, so this is a
     # no-op for that trigger and doesn't affect the intended manual-dispatch
     # use (dispatching with ref: main).
-    if: github.ref == 'refs/heads/main'
+    #
+    # EXTENDED (issue #320): github.ref for a pull_request event is a PR
+    # merge/head ref (e.g. refs/pull/316/merge), never refs/heads/main, so
+    # the check above needs a second clause for the new trigger rather than
+    # matching it by accident. Guards on both the PR actually having been
+    # merged (types:[closed] alone also fires on close-without-merge) and
+    # its base branch being main (branches:[main] above already restricts
+    # this, checked again here defense-in-depth since this line is what
+    # actually authorizes the deploy).
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # EXTENDED (issue #320): a pull_request event has no meaningful
+          # github.ref to check out (see the job-level `if` comment above) --
+          # this workflow's entire design is "republish whatever is
+          # currently on main" (see header comment), so explicitly check out
+          # main's current HEAD (the just-landed squash-merge commit) for
+          # that one event type; push and workflow_dispatch keep their
+          # existing, unchanged behavior via github.ref.
+          ref: ${{ github.event_name == 'pull_request' && 'main' || github.ref }}
           fetch-depth: 1
 
       - name: Setup Python 3.12
