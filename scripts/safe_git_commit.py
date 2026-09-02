@@ -908,7 +908,35 @@ def main() -> None:
             log.info("Retrying in %ds...", sleep_secs)
             time.sleep(sleep_secs)
         else:
-            log.warning("All push attempts exhausted -- state will sync on next run.")
+            # P0 FIX: this used to be a bare log.warning() with no GitHub
+            # Actions annotation, so a fully-exhausted push (all 4 attempts
+            # rejected) was indistinguishable in the Actions UI from a normal
+            # successful run -- confirmed live: every run for ~7 days had all
+            # 4 attempts rejected with GH013 "Changes must be made through a
+            # pull request" (main's branch ruleset), yet STAGE 4 showed green
+            # throughout, silently discarding every run's committed STIX
+            # bundles, reports, index.html and feed_state.json. Deliberately
+            # still exit 0 below (see __main__ docstring: "Git sync must
+            # never kill pipeline") -- STAGE 4 sits mid-pipeline and many
+            # downstream steps (STAGE 5.6.1 Regression Immunity, STAGE 5.6.2
+            # Stale-Feed Recurrence Guard, STAGE 5 Deploy to GitHub Pages,
+            # etc.) have no `if: always()` guard and would be silently
+            # skipped by GitHub Actions' default if:success() if this step
+            # flipped to "failure" -- that blast radius is worse than the
+            # bug this fixes. Loud annotation instead, matching the same
+            # ::warning:: pattern STAGE 4.1's r2_resync_manifests.py failure
+            # handling already uses one stage later in this same pipeline.
+            _msg = (
+                "safe_git_commit.py: push to main was rejected on all 4 attempts "
+                f"(last error: {push_result.stderr.strip()[:200]!r}). This run's "
+                "git-committed state (STIX bundles, reports, index.html, "
+                "data/cache/feed_state.json, etc.) was NOT persisted to main -- "
+                "the next run starts from stale state again. Check "
+                f"https://github.com/{os.environ.get('GITHUB_REPOSITORY', '')}"
+                "/rules?ref=refs%2Fheads%2Fmain for the branch rule rejecting this push."
+            )
+            log.error(_msg)
+            print(f"::error::{_msg}")
 
     log.info("safe_git_commit.py complete.")
     sys.exit(0)
