@@ -461,7 +461,18 @@ def _check_worker_js_eof(path: pathlib.Path, root: pathlib.Path) -> bool:
         if not non_empty:
             return False  # empty file is always broken
         last_line = non_empty[-1].strip()
-        return last_line in WORKER_JS_VALID_EOF_TOKENS
+        # Suffix match, not exact match: a legitimate statement line like
+        # `export { handleFoo, BAR };` or `export default { ...` ends with a
+        # valid closing token ("};") without *being* that token verbatim.
+        # An exact-match `in` check here false-positived on
+        # workers/intel-gateway/src/intel-static-proxy.js's last line
+        # (`export { handleIntelStaticProxy, INTEL_STATIC_PROXY };`, itself
+        # ending in the tool's own documented-valid "};"), hard-failing
+        # STAGE 0.0 on every run. A randomly truncated file (cut off
+        # mid-identifier/mid-string) essentially never coincidentally ends
+        # in one of these closing-bracket tokens, so this keeps catching
+        # real truncation while accepting any valid closing statement.
+        return any(last_line.endswith(tok) for tok in WORKER_JS_VALID_EOF_TOKENS)
     except OSError:
         return False  # unreadable = broken
 

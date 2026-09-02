@@ -37,15 +37,26 @@ DIM    = "\033[2m"
 BOLD   = "\033[1m"
 
 # ── Smart / curly quote codepoints (common corruption artefacts) ──────────────
+# P0 FIX: keys MUST be \uXXXX escapes, never literal Unicode characters.
+# A prior edit of this exact dict (before this fix) had its literal U+2018/
+# U+2019/U+201C/U+201D key characters silently collapsed to plain ASCII
+# apostrophe/quote by some earlier normalization pass, which (a) turned the
+# U+2018/U+2019 entries into a no-op U+0027->U+0027 self-map that flagged
+# every ordinary ASCII apostrophe in the codebase as a "smart/curly quote"
+# (confirmed live: scripts/report_generator.py and others WARNed on every
+# single-quoted string literal), and (b) silently deleted the U+201C/U+201D
+# detection entries entirely, so real curly double quotes went undetected.
+# \u escapes render as plain ASCII in the source file itself, so no future
+# BOM/CRLF/quote-normalization tool can mangle them the same way again.
 SMART_QUOTES = {
-    "'": "'",  # LEFT SINGLE QUOTATION MARK
-    "'": "'",  # RIGHT SINGLE QUOTATION MARK
-    """: '"',  # LEFT DOUBLE QUOTATION MARK
-    """: '"',  # RIGHT DOUBLE QUOTATION MARK
-    "′": "'",  # PRIME
-    "″": '"',  # DOUBLE PRIME
-    "«": '"',  # LEFT-POINTING DOUBLE ANGLE QUOTATION MARK
-    "»": '"',  # RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK
+    "\u2018": "'",  # LEFT SINGLE QUOTATION MARK
+    "\u2019": "'",  # RIGHT SINGLE QUOTATION MARK
+    "\u201c": '"',  # LEFT DOUBLE QUOTATION MARK
+    "\u201d": '"',  # RIGHT DOUBLE QUOTATION MARK
+    "\u2032": "'",  # PRIME
+    "\u2033": '"',  # DOUBLE PRIME
+    "\u00ab": '"',  # LEFT-POINTING DOUBLE ANGLE QUOTATION MARK
+    "\u00bb": '"',  # RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK
 }
 
 # ── Invisible / zero-width characters ────────────────────────────────────────

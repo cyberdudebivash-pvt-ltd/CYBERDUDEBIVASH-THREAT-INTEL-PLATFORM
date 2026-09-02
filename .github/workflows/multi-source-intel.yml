@@ -131,12 +131,26 @@ jobs:
           git commit -m "Intel v184.0 incremental ingest | ${NEW_COUNT} sources tracked | $(date -u +'%Y-%m-%dT%H:%M:%SZ') [skip ci]"
 
           # Push with retry + rebase strategy
+          PUSHED=0
           for i in 1 2 3 4; do
             git fetch origin main --quiet 2>/dev/null || true
             git rebase origin/main --quiet 2>/dev/null \
               || { git rebase --abort 2>/dev/null || true; \
                    git merge origin/main -X ours --no-edit --quiet || true; }
-            if git push origin main; then echo "Push OK on attempt $i"; break; fi
+            if git push origin main; then echo "Push OK on attempt $i"; PUSHED=1; break; fi
             sleep $((i * 15))
-            [ "$i" -eq 4 ] && echo "[WARN] Push deferred after 4 attempts - will retry next run"
           done
+
+          # P0 FIX: a push that fails all 4 attempts used to fall through to a
+          # bare [WARN] echo with no exit 1, so the step (and job) reported
+          # SUCCESS while silently discarding this run's entire ingestion
+          # output -- confirmed live: every run since main started requiring
+          # PRs rejected all 4 attempts with "GH013: ... Changes must be made
+          # through a pull request", yet the job stayed green for ~7 days
+          # straight while feed_state.json/processed_intel.json/
+          # feed_manifest.json never advanced past their last successful
+          # commit. Hard-fail so this is visible instead of invisible.
+          if [ "$PUSHED" -ne 1 ]; then
+            echo "::error::Commit Intel State & Manifest: push to main was rejected on all 4 attempts. This run's freshly-ingested intel state (feed_state.json, processed_intel.json, feed_manifest.json) was NOT persisted -- the next scheduled run will start from stale state again. Check https://github.com/${{ github.repository }}/rules?ref=refs%2Fheads%2Fmain for the branch rule rejecting this push."
+            exit 1
+          fi
