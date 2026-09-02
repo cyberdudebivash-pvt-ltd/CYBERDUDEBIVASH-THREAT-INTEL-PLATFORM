@@ -1952,6 +1952,32 @@ jobs:
         run: python3 scripts/dashboard_frontend_guard.py
 
       # -----------------------------------------------------------------------
+      # STAGE 3.92b: FRONTEND API COVERAGE GATE (NEW -- observability bake-in)
+      # A manual page-by-page audit found top-level product pages
+      # (cves.html, ransomware.html) shipping zero client-side calls into
+      # this platform's own live API despite the data existing and being
+      # already served elsewhere (fixed both this session). STAGE 3.92
+      # above validates index.html's OWN fetch-chain invariants; it has
+      # never checked whether the platform's other ~140 top-level pages
+      # call the API at all. This closes that visibility gap: classifies
+      # every top-level *.html page as dynamic (calls the API) or static,
+      # and writes data/quality/frontend_api_coverage_report.json.
+      # Bake-in period: no allowlist of legitimately-static pages (privacy,
+      # terms, marketing, etc.) exists yet, so every static page currently
+      # reports as observability-only "unclassified" -- never a hard
+      # failure. Once data/quality/frontend_static_page_allowlist.json is
+      # curated, a future change can make an unclassified static page a
+      # real gate.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.92b - Frontend API Coverage Gate (observability bake-in)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          python3 scripts/frontend_api_coverage_gate.py || true
+          read -r TOTAL DYNAMIC ALLOWED UNCLASSIFIED <<< "$(python3 scripts/ci_stats_extract.py frontend_api_coverage 2>/dev/null || echo '0 0 0 0')"
+          echo "::notice::Frontend API coverage: ${DYNAMIC}/${TOTAL} top-level pages call the platform API; ${ALLOWED} static pages allowlisted, ${UNCLASSIFIED} static pages unclassified (observability-only -- see data/quality/frontend_api_coverage_report.json)."
+
+      # -----------------------------------------------------------------------
       # STAGE 3.93: IMMUTABLE API MANIFEST GENERATOR (v184.0 -- REPLACES INJECT)
       # ARCHITECTURE CHANGE (v184.0 -- PERMANENT):
       #   OLD: inject_embedded_intel.py mutated index.html at deploy time.
