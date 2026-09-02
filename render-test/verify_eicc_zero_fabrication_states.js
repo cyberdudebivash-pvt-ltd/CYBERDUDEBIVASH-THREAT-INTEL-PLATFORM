@@ -70,7 +70,7 @@ const NAV_TIMEOUT_MS = 20_000;
 // Server behavior is switched per-scenario via these module-level flags,
 // each test navigates fresh so there is no cross-scenario state leakage.
 let feedMode = 'fail';   // 'fail' | 'incomplete' | 'ok'
-let aiMode = 'fail';     // 'fail' | 'ok'
+let aiMode = 'fail';     // 'fail' | 'ok' | 'xss' | 'escalation'
 
 const REAL_ITEM = { id: 'intel--real-1', title: 'REGRESSION-TEST-CANARY-ITEM', severity: 'CRITICAL', risk_score: 9.1, source_country: 'US' };
 const XSS_PAYLOAD = '<img src=x onerror="window.__xssFired=true">';
@@ -106,6 +106,20 @@ function startServer(root) {
       if (aiMode === 'xss') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ predictions: [{ threat: XSS_PAYLOAD, probability: 0.5, severity: 'HIGH' }] }));
+        return;
+      }
+      if (aiMode === 'escalation') {
+        // STAGE 5 FIX regression guard: the real production api/ai/tracker.json
+        // shape (confirmed against a live capture) has no top-level `predictions`
+        // and no `engine_alpha.top_predicted_threats` -- only `escalation_tracker`,
+        // a flat list of {title, risk_score, priority, ...}. fillAIPredictions()
+        // silently rendered the honest-but-permanently-empty "AI PREDICTIONS
+        // UNAVAILABLE" state against this exact shape for as long as the AI
+        // pipeline has produced it, because this file's other two aiMode
+        // fixtures ('ok'/'xss') mock the OLD `predictions` shape, which the
+        // real generator no longer emits -- masking the drift entirely.
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ escalation_tracker: [{ id: 'ESC-001', title: 'REGRESSION-TEST-ESCALATION-PREDICTION', risk_score: 9.4, priority: 'P1' }] }));
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -313,6 +327,36 @@ async function main() {
         !!mainGridTickerHtml.mapTicker && mainGridTickerHtml.mapTicker.includes('&lt;img') && !/<img[^&]/i.test(mainGridTickerHtml.mapTicker),
         JSON.stringify(mainGridTickerHtml.mapTicker));
       record('No uncaught JS errors anywhere on the page from the malicious title (main-grid parse-break class is now fixed, not just tolerated)',
+        pageErrors.length === 0, pageErrors.join(' | '));
+
+      await context.close();
+    }
+
+    // ── Scenario 5: real production AI-tracker schema (escalation_tracker
+    // only, no predictions/top_predicted_threats) -- proves the Stage 5 fix
+    // renders real current model output instead of silently reaching the
+    // honest-but-wrong "unavailable" state on a contract this widget was
+    // never updated to match. ──────────────────────────────────────────
+    feedMode = 'ok'; aiMode = 'escalation';
+    {
+      const { context, page, pageErrors } = await freshPage(browser);
+      await page.goto(PAGE_URL, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
+      await page.waitForTimeout(2500);
+      const s = await eiccState(page);
+
+      record('Real escalation_tracker-shaped AI response renders ONLINE, not the permanent UNAVAILABLE state',
+        !!s.aiStatusHtml && /ONLINE/.test(s.aiStatusHtml) && !/UNAVAILABLE/.test(s.aiStatusHtml),
+        JSON.stringify(s.aiStatusHtml));
+      record('Real escalation_tracker prediction title renders in the AI predictions panel',
+        !!s.aiPredictionsHtml && s.aiPredictionsHtml.includes('REGRESSION-TEST-ESCALATION-PREDICTION'),
+        JSON.stringify(s.aiPredictionsHtml));
+      record('escalation_tracker risk_score 9.4/10 maps to the expected 94% probability',
+        !!s.aiPredictionsHtml && s.aiPredictionsHtml.includes('94%'),
+        JSON.stringify(s.aiPredictionsHtml));
+      record('escalation_tracker priority P1 maps to CRITICAL severity color',
+        !!s.aiPredictionsHtml && s.aiPredictionsHtml.includes('#ef4444'),
+        JSON.stringify(s.aiPredictionsHtml));
+      record('Zero uncaught JS errors on the real-schema AI response',
         pageErrors.length === 0, pageErrors.join(' | '));
 
       await context.close();

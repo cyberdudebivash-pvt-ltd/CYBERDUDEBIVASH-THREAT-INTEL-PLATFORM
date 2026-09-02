@@ -6564,6 +6564,25 @@
                 var preds = [];
                 if(d && Array.isArray(d.predictions)) preds = d.predictions.slice(0,4);
                 else if(d && d.engine_alpha && Array.isArray(d.engine_alpha.top_predicted_threats)) preds = d.engine_alpha.top_predicted_threats.slice(0,4);
+                // STAGE 5 FIX (contract drift, confirmed against real production
+                // api/ai/tracker.json): neither branch above has matched the real
+                // generator's output since the v103 AI-engine redesign -- engine_alpha
+                // is now aggregate metrics only (zero_day_candidates is a count, not a
+                // list; no top_predicted_threats field exists at all), so this widget
+                // has been silently stuck on its honest-but-permanent "AI PREDICTIONS
+                // UNAVAILABLE" state despite the AI pipeline producing real, current
+                // output every run. escalation_tracker is the real per-item analog --
+                // each entry already carries a title, a 0-10 risk_score, and a P1-P3
+                // priority from the same Engine Alpha scoring the old top_predicted_
+                // threats field was meant to expose. Mapped into the exact {threat,
+                // probability, severity} shape the render loop below already expects,
+                // so nothing past this block changes. Additive only: the two branches
+                // above are untouched, so a future generator version that reintroduces
+                // either original field still works exactly as before.
+                else if(d && Array.isArray(d.escalation_tracker)) preds = d.escalation_tracker.slice(0,4).map(function(e){
+                    var sev = e.priority === 'P1' ? 'CRITICAL' : e.priority === 'P2' ? 'HIGH' : 'MEDIUM';
+                    return { threat: e.title, probability: (e.risk_score || 0) / 10, severity: sev };
+                });
                 // STAGE 2 FIX (zero-fabrication, non-negotiable per mandate Section 8):
                 // previously, ANY failed/empty AI tracker response -- fetch failure,
                 // non-JSON, or a real response with no predictions -- unconditionally
