@@ -131,15 +131,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ steps.latest.outputs.sha }}
         run: |
-          # --limit 200: pages-fast-publish.yml only fires on frontend-path
-          # pushes (a narrow, low-frequency subset of this repo's overall
-          # commit volume, unlike the hundreds-per-day push-triggered
-          # workflows with no paths: filter), so its own run history is
-          # shallow between ~15-minute watchdog checks. 200 is deliberately
-          # generous headroom over that, not a tight fit.
+          # CORRECTNESS FIX: `gh`'s --jq takes exactly one filter-expression
+          # string, not a full jq CLI invocation -- it does not understand a
+          # trailing --arg the way the standalone jq binary does. The
+          # previous form (--jq --arg sha "$TARGET_SHA" '...') actually
+          # passed "--arg" as the filter expression itself and left
+          # "sha"/"$TARGET_SHA"/the real expression as stray positional
+          # arguments, which `gh run list` rejects at runtime -- this
+          # watchdog would have failed on every single scheduled run.
+          # Fixed by using `gh run list`'s own native --commit filter
+          # (server-side exact-SHA match, not a client-side scan) together
+          # with --branch main, so there is no jq templating to get wrong
+          # and no run-history depth to size a --limit against at all.
           matches=$(gh run list --repo "${{ github.repository }}" --workflow pages-fast-publish.yml \
-            --limit 200 --json headSha,status,conclusion,createdAt \
-            --jq --arg sha "$TARGET_SHA" '[.[] | select(.headSha == $sha)] | length')
+            --branch main --commit "$TARGET_SHA" --limit 1 \
+            --json headSha --jq 'length')
           echo "matching_runs=$matches" >> "$GITHUB_OUTPUT"
           echo "Existing pages-fast-publish.yml runs for $TARGET_SHA: $matches"
 

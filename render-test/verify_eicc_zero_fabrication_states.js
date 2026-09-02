@@ -304,8 +304,13 @@ async function main() {
       record('Main-grid threat ticker (#threat-ticker-inner) renders the malicious title as escaped text, not a raw <img> tag',
         !!mainGridTickerHtml.ticker && mainGridTickerHtml.ticker.includes('&lt;img') && !/<img[^&]/i.test(mainGridTickerHtml.ticker),
         JSON.stringify(mainGridTickerHtml.ticker));
+      // STAGE 3 FIX (review finding): the original `!mapTicker || (...)`
+      // form let a missing #cdb-ticker-text element (e.g. a future
+      // regression that stops renderMapTicker() from running at all)
+      // vacuously pass this check instead of failing it. Require the
+      // element to actually be present before checking its content.
       record('Main-grid map ticker (#cdb-ticker-text) renders the malicious title as escaped text, not a raw <img> tag',
-        !mainGridTickerHtml.mapTicker || (mainGridTickerHtml.mapTicker.includes('&lt;img') && !/<img[^&]/i.test(mainGridTickerHtml.mapTicker)),
+        !!mainGridTickerHtml.mapTicker && mainGridTickerHtml.mapTicker.includes('&lt;img') && !/<img[^&]/i.test(mainGridTickerHtml.mapTicker),
         JSON.stringify(mainGridTickerHtml.mapTicker));
       record('No uncaught JS errors anywhere on the page from the malicious title (main-grid parse-break class is now fixed, not just tolerated)',
         pageErrors.length === 0, pageErrors.join(' | '));

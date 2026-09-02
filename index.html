@@ -7210,13 +7210,19 @@
             // headlines would show "15m ago"-style relative ages that were
             // always fresh on every single page load regardless of true
             // content age (a static-timestamp-as-current fabrication). No
-            // real timestamp exists for this illustrative cached content, so
+            // real timestamp exists for this illustrative content, so
             // pubDate is explicitly null ("Unknown \u2260 zero") and _render()
-            // below no longer computes a relative age for cached items --
-            // it shows honest, non-time-claiming "Cached headline" text
-            // instead. See the CACHED-badge / "LIVE FEEDS SYNCING\u2014DISPLAYING
-            // CACHED INTEL" banner immediately below for the existing,
-            // already-honest staleness disclosure this pairs with.
+            // below no longer computes a relative age for it -- it shows
+            // honest, non-time-claiming "Sample headline" text instead.
+            // STAGE 3 FOLLOW-UP FIX (review finding): the "cached"/"CACHED"
+            // vocabulary previously used here asserts a specific, unverified
+            // provenance claim -- "this was really fetched live before, and
+            // we're showing you a saved copy" -- which is not something this
+            // code can actually guarantee about hand-authored illustrative
+            // placeholder content. Relabeled to "SAMPLE" throughout, which
+            // is accurate regardless of the content's real history. The
+            // `cached` property name below is kept as the internal flag
+            // name (never shown to a customer) to avoid a wider rename.
             var STATIC_FALLBACK = [
                 { title: 'CISA Adds Critical Ivanti & Fortinet CVEs to KEV Catalog \u2014 Emergency Patch Required', pubDate: null, label: 'CISA ADVISORY',    labelColor: '#00d4aa', link: 'https://www.cisa.gov/known-exploited-vulnerabilities-catalog', cached: true },
                 { title: 'China APT41 Targets APAC Financial Institutions in Multi-Country Espionage Campaign',  pubDate: null, label: 'THE HACKER NEWS',  labelColor: '#f97316', link: 'https://thehackernews.com', cached: true },
@@ -7289,11 +7295,11 @@
                         // failed) but the banner still claimed "Auto-retrying"
                         // indefinitely -- a customer had no way to tell "still
                         // trying" from "gave up until the next 5-minute cycle".
-                        err.innerHTML='&#9651; LIVE FEEDS UNAVAILABLE &mdash; DISPLAYING CACHED INTEL &nbsp;&middot;&nbsp; <span style="color:#5a6578;">Retrying in 5 min</span>';
+                        err.innerHTML='&#9651; LIVE FEEDS UNAVAILABLE &mdash; DISPLAYING SAMPLE INTEL &nbsp;&middot;&nbsp; <span style="color:#5a6578;">Retrying in 5 min</span>';
                         err.style.cssText='display:block;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);color:#d97706;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:8px 14px;border-radius:3px;margin-bottom:14px;';
                     } else if (isFallback) {
                         var minsAgo = _retryCount > 0 ? 'Retry '+ _retryCount +'/'+MAX_RETRIES+' \u2014 ' : '';
-                        err.innerHTML='&#9651; '+minsAgo+'LIVE FEEDS SYNCING &mdash; DISPLAYING CACHED INTEL &nbsp;&middot;&nbsp; <span style="color:#5a6578;">Auto-retrying</span>';
+                        err.innerHTML='&#9651; '+minsAgo+'LIVE FEEDS SYNCING &mdash; DISPLAYING SAMPLE INTEL &nbsp;&middot;&nbsp; <span style="color:#5a6578;">Auto-retrying</span>';
                         err.style.cssText='display:block;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);color:#d97706;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:8px 14px;border-radius:3px;margin-bottom:14px;';
                     } else { err.style.display='none'; }
                 }
@@ -7307,12 +7313,12 @@
                     // Only allow http/https/relative links — block javascript: and data: URIs
                     var href = /^(https?:\/\/|\/)/.test(safeLink) ? safeLink : '#';
                     var badge=safeLabel?'<span class="lcn-badge" style="background:'+lc+'22;color:'+lc+';border:1px solid '+lc+'44;">'+safeLabel+'</span>':'';
-                    var cacheMark=it.cached?'<span style="font-family:var(--font-mono);font-size:7px;color:#5a6578;padding:1px 5px;border:1px solid #2a3340;border-radius:2px;margin-left:4px;vertical-align:middle;">CACHED</span>':'';
+                    var cacheMark=it.cached?'<span style="font-family:var(--font-mono);font-size:7px;color:#5a6578;padding:1px 5px;border:1px solid #2a3340;border-radius:2px;margin-left:4px;vertical-align:middle;">SAMPLE</span>':'';
                     return '<a class="lcn-card" href="'+href+'" target="_blank" rel="noopener noreferrer">'+
                         '<div>'+badge+cacheMark+'</div>'+
                         '<div class="lcn-source">'+safeLabel+'</div>'+
                         '<div class="lcn-title">'+safeTitle+'</div>'+
-                        '<div class="lcn-date">&#128197; '+(it.cached?'Cached headline':_relTime(it.pubDate))+'</div>'+
+                        '<div class="lcn-date">&#128197; '+(it.cached?'Sample headline':_relTime(it.pubDate))+'</div>'+
                         '</a>';
                 }).join('');
                 var upd=document.getElementById('lcn-last-update');

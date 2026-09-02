@@ -1050,7 +1050,10 @@ def main() -> int:
         "size_limit_mb":        limit_mb,
         "size_gate":            "PASS",
         "timestamp":            datetime.now(timezone.utc).isoformat(),
-        "manifest_path":        str(manifest_path),
+        # Relative to REPO_ROOT, not str(manifest_path) -- that would bake
+        # the local checkout's absolute filesystem path (machine-specific,
+        # meaningless on any other runner/checkout) into a committed file.
+        "manifest_path":        str(manifest_path.relative_to(REPO_ROOT)),
     }, indent=2))
     log.info("Build summary written: %s", summary_path)
     return 0

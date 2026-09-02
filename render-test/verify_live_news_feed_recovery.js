@@ -205,7 +205,7 @@ async function runGlobalIntelBootRaceScenario(browser) {
 }
 
 /**
- * Asserts STATIC_FALLBACK's cached headlines show the honest "Cached
+ * Asserts STATIC_FALLBACK's sample headlines show the honest "Sample
  * headline" label instead of a fabricated "Xm/Xh/Xd ago" relative age.
  * @param {import('playwright').Browser} browser
  */
@@ -213,11 +213,16 @@ async function runCachedFallbackHonestTimestampScenario(browser) {
   // STAGE 3 FIX: STATIC_FALLBACK's pubDate previously read
   // `new Date(Date.now()-N).toISOString()`, computed from the page-render
   // clock at evaluation time rather than any real publication/capture
-  // timestamp -- so every fresh page load showed these 11 cached headlines
+  // timestamp -- so every fresh page load showed these 11 sample headlines
   // as "15m ago", "1h ago", etc. regardless of their true (unknown) age. No
-  // real timestamp exists for this illustrative cached content, so pubDate
-  // is now explicitly null and cached cards render honest "Cached headline"
-  // text instead of a fabricated relative age.
+  // real timestamp exists for this illustrative content, so pubDate is now
+  // explicitly null and these cards render honest "Sample headline" text
+  // instead of a fabricated relative age. STAGE 3 FOLLOW-UP FIX (review
+  // finding): also relabeled from "Cached"/"CACHED" to "Sample"/"SAMPLE"
+  // throughout index.html -- "cached" asserts an unverifiable provenance
+  // claim (this was really fetched live before), which this hand-authored
+  // illustrative content can't actually back up; "sample" is accurate
+  // regardless of the content's real history.
   const context = await browser.newContext({ serviceWorkers: 'block' });
   await routeAPIs(context, { proxiesSucceed: false });
   const page = await context.newPage();
@@ -231,8 +236,8 @@ async function runCachedFallbackHonestTimestampScenario(browser) {
     dateTexts.length > 0 && dateTexts.every((t) => !/\d+\s*[mhd]\s*ago/i.test(t)),
     JSON.stringify(dateTexts));
 
-  record('Cached fallback headlines instead show the honest, non-time-claiming "Cached headline" label',
-    dateTexts.length > 0 && dateTexts.every((t) => t.includes('Cached headline')),
+  record('Sample fallback headlines instead show the honest, non-time-claiming "Sample headline" label',
+    dateTexts.length > 0 && dateTexts.every((t) => t.includes('Sample headline')),
     JSON.stringify(dateTexts));
 
   await context.close();
