@@ -36,8 +36,21 @@ jobs:
     timeout-minutes: 25
 
     steps:
+      # PRODUCTION-VERIFICATION FIX (2026-09-02): this was hardcoded to
+      # `ref: main`, which is a no-op for the schedule trigger (scheduled
+      # runs always resolve github.ref to the default branch anyway) but
+      # silently defeats workflow_dispatch's whole purpose of testing a
+      # feature branch's changes before merge -- confirmed live: dispatching
+      # this workflow from a feature branch runs THAT branch's workflow
+      # YAML (new steps appear), but checks out main's file content
+      # regardless, so a script only committed on the feature branch
+      # ("python3: can't open file '.../scripts/intel_state_r2_sync.py'")
+      # fails as if it were simply missing. github.ref already resolves to
+      # the dispatching branch on workflow_dispatch and to the default
+      # branch on schedule, so this is a strict improvement with no change
+      # in scheduled behavior.
       - uses: actions/checkout@v6.0.2
-        with: {fetch-depth: 1, ref: main}
+        with: {fetch-depth: 1, ref: "${{ github.ref }}"}
 
       - uses: actions/setup-python@v5.5.0
         with: {python-version: '3.12', cache: 'pip'}
