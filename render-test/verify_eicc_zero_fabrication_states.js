@@ -178,6 +178,7 @@ async function eiccState(page) {
       metricsTotal: text('eicc-m-total'),
       aiStatusHtml: html('eicc-soc-ai-status'),
       aiPredictionsHtml: html('eicc-ai-predictions'),
+      socStatusHtml: html('eicc-soc-status'),
       mapTickerHtml: html('cdb-ticker-text'),
       atkCountText: text('cdb-atk-count'),
     };
@@ -286,6 +287,14 @@ async function main() {
         !/ransomware-as-a-service escalation/i.test(s.aiPredictionsHtml),
         JSON.stringify({ status: s.aiStatusHtml, preds: s.aiPredictionsHtml }));
       record('Zero uncaught JS errors on full-success scenario', pageErrors.length === 0, pageErrors.join(' | '));
+      // STAGE 6 FIX regression guard: the SOC status panel's 5 static rows
+      // (all but AI ENGINE) used to hardcode "● ONLINE"/"● ACTIVE" with no
+      // backing JS writer anywhere -- claiming real-time integration health
+      // no runtime signal ever produced. Now labeled as supported platform
+      // capabilities instead.
+      record('SOC status panel labels its 5 static capability rows as SUPPORTED, not a fabricated live status',
+        !!s.socStatusHtml && (s.socStatusHtml.match(/SUPPORTED/g) || []).length === 5,
+        JSON.stringify(s.socStatusHtml));
 
       await context.close();
     }
