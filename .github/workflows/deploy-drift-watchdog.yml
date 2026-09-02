@@ -1,0 +1,172 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX -- Deploy Trigger Drift Watchdog
+# =============================================================================
+# STAGE 3 (End-to-End Dashboard Synchronization, Runtime Integrity & Release
+# Reliability) Section 26/27 -- P0 release-engineering defect.
+#
+# ROOT CAUSE (evidence-based -- see the Stage 3 final report's release-pipeline
+# section for the full chain, summarized here): pages-fast-publish.yml has,
+# across its run history, required manual `workflow_dispatch` recovery on
+# multiple occasions when its own `on.push` trigger should have fired
+# automatically -- most recently on the PR #314 (0fc0f5eaae9) and PR #315
+# (6759e395ed1) merge commits. Forensic investigation this stage found that
+# TWO OTHER workflows with `on.push.branches:[main]` and NO `paths:` filter
+# at all (access-governance-gate.yml, report-generator-regression-gate.yml)
+# *also* recorded zero runs of any kind across the exact window spanning both
+# merges -- while the same two workflows fired reliably many times earlier
+# the same day from ordinary direct pushes, and GitHub's own native default
+# CodeQL code-scanning (a platform-managed feature, not a repo-defined
+# workflow) fired successfully on both merge pushes. That rules out (a)
+# generic webhook loss (CodeQL saw the push) and (b) anything specific to
+# pages-fast-publish.yml's own `paths:` filter (two unrelated, filterless
+# workflows show the identical gap). The converging evidence points to
+# API/App-mediated PR-merge pushes not reliably triggering user-defined
+# `.github/workflows/*.yml` `on.push` workflows in this repository/org. The
+# exact GitHub-side suppression mechanism (App-installation-token push-event
+# policy vs. an organization/repo Actions setting) could not be isolated
+# further using only read-only REST API access -- that would require
+# webhook-delivery-log or organization Actions-policy visibility this
+# tooling does not have. Per this repo's "do NOT guess" standard, this
+# comment states exactly that boundary rather than asserting a specific
+# GitHub-internal cause without evidence.
+#
+# FIX -- root-cause-agnostic self-healing, not a guess-and-patch: `schedule`
+# triggers are evaluated by GitHub's own scheduler against main's current
+# workflow file, entirely independent of the push-event delivery path that
+# is the suspected point of failure above -- so this workflow does not
+# depend on the very mechanism suspected unreliable. Every ~15 minutes, this
+# job finds the latest commit on main touching any path
+# pages-fast-publish.yml's own trigger list covers, checks whether that
+# workflow already has a recorded run for that exact commit, and -- only if
+# not -- dispatches it via `workflow_dispatch`. `workflow_dispatch` is
+# explicitly exempt from the GITHUB_TOKEN anti-recursion suppression that
+# affects other auto-generated events (GitHub's own documented behavior),
+# so this specific chaining pattern (workflow A's GITHUB_TOKEN dispatching
+# workflow B via workflow_dispatch) is the officially-supported way to
+# trigger a sibling workflow programmatically -- not a workaround.
+#
+# This intentionally does NOT retry a failed deploy. A run existing for the
+# target commit (any status/conclusion: queued, in_progress, success, or
+# failure) counts as "already handled" and is left alone -- a real build or
+# pre-deploy-gate failure is a defect for a human to look at (the existing
+# smoke/threat-map/SW-recovery/EICC/JS-unit gates already exist to catch
+# those), not something this watchdog should silently retry forever. Its
+# only job is closing the specific gap this stage found: "triggered but no
+# run was ever created."
+#
+# `workflow_dispatch` on pages-fast-publish.yml remains available for
+# immediate manual recovery (unchanged) -- this workflow makes automatic
+# self-healing the normal path within ~15 minutes instead of requiring a
+# human to notice and run it by hand, satisfying Stage 3 Section 27 even
+# without 100%-certain attribution of the underlying GitHub-side cause.
+#
+# REUSE (Principle 4 -- searched before building): does not reimplement any
+# build/deploy logic -- it only ever calls the existing pages-fast-publish.yml
+# via `gh workflow run`, using the GitHub CLI already preinstalled on
+# GitHub-hosted runners. PURELY ADDITIVE: a new file; touches no existing
+# workflow, script, or production code path. pages-fast-publish.yml itself
+# is unmodified by this change.
+# =============================================================================
+
+name: deploy-drift-watchdog
+
+on:
+  schedule:
+    # Offset from the top of the hour (not :00/:15/:30/:45) per GitHub's own
+    # guidance, to land in a less congested part of the scheduler's queue.
+    - cron: '4,19,34,49 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: deploy-drift-watchdog
+  cancel-in-progress: true
+
+jobs:
+  reconcile:
+    name: Detect main/deploy drift and self-heal
+    # SECURITY (same CWE-863 concern pages-fast-publish.yml's own job
+    # already documents and guards against): workflow_dispatch lets a
+    # caller pick any branch/tag to run this job's actions:write token
+    # against. This job never deploys anything itself and only ever
+    # dispatches pages-fast-publish.yml against a hardcoded `--ref main`
+    # (never an attacker-chosen ref), so the exploitable surface was
+    # already narrow -- this restriction closes it entirely rather than
+    # relying on that hardcoding alone. schedule always evaluates against
+    # the default branch already, so this is a no-op for that trigger.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find latest main commit touching a pages-fast-publish.yml trigger path
+        id: latest
+        run: |
+          # Mirrors pages-fast-publish.yml's own `on.push.paths` list exactly
+          # (index.html, js/**, css/**, _headers, service-worker.js). Kept as
+          # an explicit, commented literal rather than parsed out of that
+          # file at runtime -- five entries that change rarely, and a
+          # hand-maintained mirror is more auditable here than a YAML-scraping
+          # step whose own breakage would silently disable this safety net.
+          # If pages-fast-publish.yml's paths: list is ever edited, update
+          # this list in the same commit.
+          sha=$(git log -1 --format=%H -- index.html 'js/**' 'css/**' _headers service-worker.js)
+          if [ -z "$sha" ]; then
+            echo "::error::No commit found touching any pages-fast-publish.yml trigger path in the full fetched history -- investigate before trusting this gate."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Latest trigger-path commit on main: $sha"
+
+      - name: Check whether pages-fast-publish.yml already has a run for that commit
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.latest.outputs.sha }}
+        run: |
+          # CORRECTNESS FIX: `gh`'s --jq takes exactly one filter-expression
+          # string, not a full jq CLI invocation -- it does not understand a
+          # trailing --arg the way the standalone jq binary does. The
+          # previous form (--jq --arg sha "$TARGET_SHA" '...') actually
+          # passed "--arg" as the filter expression itself and left
+          # "sha"/"$TARGET_SHA"/the real expression as stray positional
+          # arguments, which `gh run list` rejects at runtime -- this
+          # watchdog would have failed on every single scheduled run.
+          # Fixed by using `gh run list`'s own native --commit filter
+          # (server-side exact-SHA match, not a client-side scan) together
+          # with --branch main, so there is no jq templating to get wrong
+          # and no run-history depth to size a --limit against at all.
+          matches=$(gh run list --repo "${{ github.repository }}" --workflow pages-fast-publish.yml \
+            --branch main --commit "$TARGET_SHA" --limit 1 \
+            --json headSha --jq 'length')
+          echo "matching_runs=$matches" >> "$GITHUB_OUTPUT"
+          echo "Existing pages-fast-publish.yml runs for $TARGET_SHA: $matches"
+
+      - name: Dispatch pages-fast-publish.yml (drift detected -- no run exists for the latest relevant commit)
+        if: steps.check.outputs.matching_runs == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::warning::Deploy-trigger drift detected -- ${{ steps.latest.outputs.sha }} has no pages-fast-publish.yml run. Auto-dispatching recovery via workflow_dispatch."
+          gh workflow run pages-fast-publish.yml --repo "${{ github.repository }}" --ref main
+          {
+            echo "### Deploy-trigger drift detected"
+            echo "Commit \`${{ steps.latest.outputs.sha }}\` had no recorded pages-fast-publish.yml run."
+            echo "Auto-dispatched \`workflow_dispatch\` as recovery."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: No drift
+        if: steps.check.outputs.matching_runs != '0'
+        run: |
+          echo "OK: pages-fast-publish.yml is up to date with ${{ steps.latest.outputs.sha }} (${{ steps.check.outputs.matching_runs }} run(s) already recorded)."
+          {
+            echo "### No drift"
+            echo "pages-fast-publish.yml already has ${{ steps.check.outputs.matching_runs }} run(s) for \`${{ steps.latest.outputs.sha }}\`. Nothing to do."
+          } >> "$GITHUB_STEP_SUMMARY"
