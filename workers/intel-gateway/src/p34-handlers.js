@@ -35,8 +35,11 @@ function _ts() {
  */
 async function _loadP33Cert(env) {
   try {
-    const raw = await env.THREAT_INTEL_KV.get('quality:p33_certification_report');
-    if (raw) return JSON.parse(raw);
+    // PRODUCTION-VERIFICATION FIX (2026-09-02): same phantom THREAT_INTEL_KV
+    // binding as this file's _loadFeed fix note -- cert reports are uploaded
+    // to R2 by scripts/r2_resync_manifests.py (STAGE 4.1), not KV.
+    const r2obj = await env.INTEL_R2.get('intel/p33_certification_report.json');
+    if (r2obj) return await r2obj.json();
   } catch (_) {}
   return null;
 }
@@ -59,12 +62,15 @@ async function _loadFeed(env) {
 }
 
 /**
- * Load a quality report JSON from KV (key = quality:<filename_without_ext>).
+ * Load a quality report JSON from R2 (key = intel/<filename_without_ext>.json).
  */
 async function _loadQualityReport(env, key) {
   try {
-    const raw = await env.THREAT_INTEL_KV.get(`quality:${key}`);
-    return raw ? JSON.parse(raw) : null;
+    // PRODUCTION-VERIFICATION FIX (2026-09-02): same phantom THREAT_INTEL_KV
+    // binding as this file's _loadFeed fix note -- cert reports are uploaded
+    // to R2 by scripts/r2_resync_manifests.py (STAGE 4.1), not KV.
+    const r2obj = await env.INTEL_R2.get(`intel/${key}.json`);
+    return r2obj ? await r2obj.json() : null;
   } catch (_) {
     return null;
   }

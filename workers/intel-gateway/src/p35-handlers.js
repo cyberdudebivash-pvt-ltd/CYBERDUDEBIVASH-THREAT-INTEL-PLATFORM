@@ -61,8 +61,12 @@ async function _loadFeed(env) {
 
 async function _loadQuality(env, key) {
   try {
-    const raw = await env.THREAT_INTEL_KV.get(`quality:${key}`);
-    return raw ? JSON.parse(raw) : null;
+    // PRODUCTION-VERIFICATION FIX (2026-09-02): THREAT_INTEL_KV is not a
+    // bound namespace anywhere in wrangler.toml -- see this file's _loadFeed
+    // fix note. Cert reports are uploaded to R2 by
+    // scripts/r2_resync_manifests.py (STAGE 4.1), not KV.
+    const r2obj = await env.INTEL_R2.get(`intel/${key}.json`);
+    return r2obj ? await r2obj.json() : null;
   } catch (_) { return null; }
 }
 
