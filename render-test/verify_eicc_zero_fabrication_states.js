@@ -96,6 +96,25 @@ function startServer(root) {
         res.end(JSON.stringify({ items: [{ id: 'x1', title: XSS_PAYLOAD, severity: 'CRITICAL', risk_score: 9.9 }], feed_count: 1, last_updated: new Date().toISOString() }));
         return;
       }
+      if (feedMode === 'geo-mixed') {
+        // STAGE 6 FIX regression guard: renderMapTicker() used to pair every
+        // item with a canned GEO_PAIRS entry selected by ticker position, so
+        // a real advisory with zero attribution (the real current feed's
+        // actual state -- 0/109 items carry source_country/actor_country)
+        // still rendered a specific, invented country pair. One item here
+        // has no geo field at all; the other has a real, distinct
+        // source_country, proving the fix renders real attribution and
+        // nothing else -- never a fabricated placeholder either way.
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          items: [
+            { id: 'geo-none', title: 'REGRESSION-TEST-NO-ATTRIBUTION-ITEM', severity: 'CRITICAL', risk_score: 9.5 },
+            { id: 'geo-real', title: 'REGRESSION-TEST-REAL-ATTRIBUTION-ITEM', severity: 'HIGH', risk_score: 7.2, source_country: 'DE' },
+          ],
+          feed_count: 2, last_updated: new Date().toISOString(),
+        }));
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ items: [REAL_ITEM], feed_count: 42, last_updated: new Date().toISOString() }));
       return;
@@ -159,6 +178,8 @@ async function eiccState(page) {
       metricsTotal: text('eicc-m-total'),
       aiStatusHtml: html('eicc-soc-ai-status'),
       aiPredictionsHtml: html('eicc-ai-predictions'),
+      mapTickerHtml: html('cdb-ticker-text'),
+      atkCountText: text('cdb-atk-count'),
     };
   });
 }
@@ -358,6 +379,35 @@ async function main() {
         JSON.stringify(s.aiPredictionsHtml));
       record('Zero uncaught JS errors on the real-schema AI response',
         pageErrors.length === 0, pageErrors.join(' | '));
+
+      await context.close();
+    }
+
+    // ── Scenario 6: map ticker geo attribution + advisory counter --
+    // proves the Stage 6 fix renders only real, per-item geo attribution
+    // (never a canned/rotated placeholder) and a real advisory count
+    // (never a report-catalog-size number dressed up as "attacks today").
+    // ──────────────────────────────────────────────────────────────────
+    feedMode = 'geo-mixed'; aiMode = 'fail';
+    {
+      const { context, page, pageErrors } = await freshPage(browser);
+      await page.goto(PAGE_URL, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
+      await page.waitForTimeout(2500);
+      const s = await eiccState(page);
+
+      record('Item with no source_country/actor_country/geo-tag renders its severity with no invented country prefix',
+        !!s.mapTickerHtml && s.mapTickerHtml.includes('>CRITICAL</span>'),
+        JSON.stringify(s.mapTickerHtml));
+      record('Item with a real source_country renders exactly that code, not a canned pair',
+        !!s.mapTickerHtml && s.mapTickerHtml.includes('>DE HIGH</span>'),
+        JSON.stringify(s.mapTickerHtml));
+      record('None of the old canned GEO_PAIRS codes appear anywhere in the ticker',
+        !!s.mapTickerHtml && !/RU→US|CN→JP|IR→IL|KP→KR|RU→DE|CN→AU|US→CN|IR→SA|RU→UA|CN→IN/.test(s.mapTickerHtml),
+        JSON.stringify(s.mapTickerHtml));
+      record('Advisory counter reflects the real item count (2), not a report-catalog-size or synthetic value',
+        s.atkCountText === '2',
+        JSON.stringify(s.atkCountText));
+      record('Zero uncaught JS errors on the geo-mixed scenario', pageErrors.length === 0, pageErrors.join(' | '));
 
       await context.close();
     }
