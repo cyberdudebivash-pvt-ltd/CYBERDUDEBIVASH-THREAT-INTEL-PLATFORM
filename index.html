@@ -7204,19 +7204,38 @@
             var MAX_RETRIES = 3;
             var _retryCount = 0;
             var _liveLoaded = false;
+            // STAGE 3 FIX: pubDate previously read `new Date(Date.now()-N)`,
+            // i.e. computed from the *page-render* clock at evaluation time,
+            // not any real publication/capture timestamp -- these fallback
+            // headlines would show "15m ago"-style relative ages that were
+            // always fresh on every single page load regardless of true
+            // content age (a static-timestamp-as-current fabrication). No
+            // real timestamp exists for this illustrative content, so
+            // pubDate is explicitly null ("Unknown \u2260 zero") and _render()
+            // below no longer computes a relative age for it -- it shows
+            // honest, non-time-claiming "Sample headline" text instead.
+            // STAGE 3 FOLLOW-UP FIX (review finding): the "cached"/"CACHED"
+            // vocabulary previously used here asserts a specific, unverified
+            // provenance claim -- "this was really fetched live before, and
+            // we're showing you a saved copy" -- which is not something this
+            // code can actually guarantee about hand-authored illustrative
+            // placeholder content. Relabeled to "SAMPLE" throughout, which
+            // is accurate regardless of the content's real history. The
+            // `cached` property name below is kept as the internal flag
+            // name (never shown to a customer) to avoid a wider rename.
             var STATIC_FALLBACK = [
-                { title: 'CISA Adds Critical Ivanti & Fortinet CVEs to KEV Catalog \u2014 Emergency Patch Required', pubDate: new Date(Date.now()-900000).toISOString(),   label: 'CISA ADVISORY',    labelColor: '#00d4aa', link: 'https://www.cisa.gov/known-exploited-vulnerabilities-catalog', cached: true },
-                { title: 'China APT41 Targets APAC Financial Institutions in Multi-Country Espionage Campaign',  pubDate: new Date(Date.now()-3600000).toISOString(),  label: 'THE HACKER NEWS',  labelColor: '#f97316', link: 'https://thehackernews.com', cached: true },
-                { title: 'Critical RCE in Ivanti Connect Secure (CVSS 9.8) \u2014 Active In-the-Wild Exploitation',  pubDate: new Date(Date.now()-5400000).toISOString(),  label: 'SECURITY WEEK',    labelColor: '#f43f5e', link: 'https://www.securityweek.com', cached: true },
-                { title: 'LockBit 4.0 RaaS Infrastructure Resurfaces \u2014 New Encryptors Targeting Healthcare',    pubDate: new Date(Date.now()-7200000).toISOString(),  label: 'BLEEPINGCOMPUTER', labelColor: '#3b82f6', link: 'https://www.bleepingcomputer.com', cached: true },
-                { title: 'Zero-Day in Microsoft Exchange Server \u2014 Active Mass Exploitation Detected in Wild',    pubDate: new Date(Date.now()-9000000).toISOString(),  label: 'KREBS SECURITY',   labelColor: '#8b5cf6', link: 'https://krebsonsecurity.com', cached: true },
-                { title: 'US DOJ Indicts North Korea Lazarus Group Members for $1.3B Crypto Exchange Theft',    pubDate: new Date(Date.now()-10800000).toISOString(), label: 'CISA ADVISORY',    labelColor: '#00d4aa', link: 'https://www.cisa.gov', cached: true },
-                { title: 'Novel AI-Powered Malware Uses LLM-Generated Code to Evade Next-Gen EDR Solutions',    pubDate: new Date(Date.now()-12600000).toISOString(), label: 'THE HACKER NEWS',  labelColor: '#f97316', link: 'https://thehackernews.com', cached: true },
-                { title: 'Scattered Spider Group Linked to MGM-Style Attack on UK Financial Sector',             pubDate: new Date(Date.now()-14400000).toISOString(), label: 'BLEEPINGCOMPUTER', labelColor: '#3b82f6', link: 'https://www.bleepingcomputer.com', cached: true },
-                { title: 'Supply Chain Attack via Malicious npm Packages Hits 47 Fortune 500 Build Pipelines',  pubDate: new Date(Date.now()-16200000).toISOString(), label: 'SECURITY WEEK',    labelColor: '#f43f5e', link: 'https://www.securityweek.com', cached: true },
-                { title: 'ClickFix Campaign Deploys AsyncRAT via Fake CAPTCHA Pages Across 60+ Countries',      pubDate: new Date(Date.now()-18000000).toISOString(), label: 'KREBS SECURITY',   labelColor: '#8b5cf6', link: 'https://krebsonsecurity.com', cached: true },
-                { title: 'BlackCat/ALPHV Successor Deploys Ransomware-as-a-Service 2.0 \u2014 300+ Victims in Q1',  pubDate: new Date(Date.now()-19800000).toISOString(), label: 'SECURITY WEEK',    labelColor: '#f43f5e', link: 'https://www.securityweek.com', cached: true },
-                { title: 'Nation-State APT Abuses Microsoft OAuth Flow to Gain Persistent Cloud Access',        pubDate: new Date(Date.now()-21600000).toISOString(), label: 'THE HACKER NEWS',  labelColor: '#f97316', link: 'https://thehackernews.com', cached: true },
+                { title: 'CISA Adds Critical Ivanti & Fortinet CVEs to KEV Catalog \u2014 Emergency Patch Required', pubDate: null, label: 'CISA ADVISORY',    labelColor: '#00d4aa', link: 'https://www.cisa.gov/known-exploited-vulnerabilities-catalog', cached: true },
+                { title: 'China APT41 Targets APAC Financial Institutions in Multi-Country Espionage Campaign',  pubDate: null, label: 'THE HACKER NEWS',  labelColor: '#f97316', link: 'https://thehackernews.com', cached: true },
+                { title: 'Critical RCE in Ivanti Connect Secure (CVSS 9.8) \u2014 Active In-the-Wild Exploitation',  pubDate: null, label: 'SECURITY WEEK',    labelColor: '#f43f5e', link: 'https://www.securityweek.com', cached: true },
+                { title: 'LockBit 4.0 RaaS Infrastructure Resurfaces \u2014 New Encryptors Targeting Healthcare',    pubDate: null, label: 'BLEEPINGCOMPUTER', labelColor: '#3b82f6', link: 'https://www.bleepingcomputer.com', cached: true },
+                { title: 'Zero-Day in Microsoft Exchange Server \u2014 Active Mass Exploitation Detected in Wild',    pubDate: null, label: 'KREBS SECURITY',   labelColor: '#8b5cf6', link: 'https://krebsonsecurity.com', cached: true },
+                { title: 'US DOJ Indicts North Korea Lazarus Group Members for $1.3B Crypto Exchange Theft',    pubDate: null, label: 'CISA ADVISORY',    labelColor: '#00d4aa', link: 'https://www.cisa.gov', cached: true },
+                { title: 'Novel AI-Powered Malware Uses LLM-Generated Code to Evade Next-Gen EDR Solutions',    pubDate: null, label: 'THE HACKER NEWS',  labelColor: '#f97316', link: 'https://thehackernews.com', cached: true },
+                { title: 'Scattered Spider Group Linked to MGM-Style Attack on UK Financial Sector',             pubDate: null, label: 'BLEEPINGCOMPUTER', labelColor: '#3b82f6', link: 'https://www.bleepingcomputer.com', cached: true },
+                { title: 'Supply Chain Attack via Malicious npm Packages Hits 47 Fortune 500 Build Pipelines',  pubDate: null, label: 'SECURITY WEEK',    labelColor: '#f43f5e', link: 'https://www.securityweek.com', cached: true },
+                { title: 'ClickFix Campaign Deploys AsyncRAT via Fake CAPTCHA Pages Across 60+ Countries',      pubDate: null, label: 'KREBS SECURITY',   labelColor: '#8b5cf6', link: 'https://krebsonsecurity.com', cached: true },
+                { title: 'BlackCat/ALPHV Successor Deploys Ransomware-as-a-Service 2.0 \u2014 300+ Victims in Q1',  pubDate: null, label: 'SECURITY WEEK',    labelColor: '#f43f5e', link: 'https://www.securityweek.com', cached: true },
+                { title: 'Nation-State APT Abuses Microsoft OAuth Flow to Gain Persistent Cloud Access',        pubDate: null, label: 'THE HACKER NEWS',  labelColor: '#f97316', link: 'https://thehackernews.com', cached: true },
             ];
             function _normT(t) { return (t||'').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,40); }
             function _relTime(d) {
@@ -7276,11 +7295,11 @@
                         // failed) but the banner still claimed "Auto-retrying"
                         // indefinitely -- a customer had no way to tell "still
                         // trying" from "gave up until the next 5-minute cycle".
-                        err.innerHTML='&#9651; LIVE FEEDS UNAVAILABLE &mdash; DISPLAYING CACHED INTEL &nbsp;&middot;&nbsp; <span style="color:#5a6578;">Retrying in 5 min</span>';
+                        err.innerHTML='&#9651; LIVE FEEDS UNAVAILABLE &mdash; DISPLAYING SAMPLE INTEL &nbsp;&middot;&nbsp; <span style="color:#5a6578;">Retrying in 5 min</span>';
                         err.style.cssText='display:block;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);color:#d97706;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:8px 14px;border-radius:3px;margin-bottom:14px;';
                     } else if (isFallback) {
                         var minsAgo = _retryCount > 0 ? 'Retry '+ _retryCount +'/'+MAX_RETRIES+' \u2014 ' : '';
-                        err.innerHTML='&#9651; '+minsAgo+'LIVE FEEDS SYNCING &mdash; DISPLAYING CACHED INTEL &nbsp;&middot;&nbsp; <span style="color:#5a6578;">Auto-retrying</span>';
+                        err.innerHTML='&#9651; '+minsAgo+'LIVE FEEDS SYNCING &mdash; DISPLAYING SAMPLE INTEL &nbsp;&middot;&nbsp; <span style="color:#5a6578;">Auto-retrying</span>';
                         err.style.cssText='display:block;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);color:#d97706;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:8px 14px;border-radius:3px;margin-bottom:14px;';
                     } else { err.style.display='none'; }
                 }
@@ -7294,16 +7313,16 @@
                     // Only allow http/https/relative links — block javascript: and data: URIs
                     var href = /^(https?:\/\/|\/)/.test(safeLink) ? safeLink : '#';
                     var badge=safeLabel?'<span class="lcn-badge" style="background:'+lc+'22;color:'+lc+';border:1px solid '+lc+'44;">'+safeLabel+'</span>':'';
-                    var cacheMark=it.cached?'<span style="font-family:var(--font-mono);font-size:7px;color:#5a6578;padding:1px 5px;border:1px solid #2a3340;border-radius:2px;margin-left:4px;vertical-align:middle;">CACHED</span>':'';
+                    var cacheMark=it.cached?'<span style="font-family:var(--font-mono);font-size:7px;color:#5a6578;padding:1px 5px;border:1px solid #2a3340;border-radius:2px;margin-left:4px;vertical-align:middle;">SAMPLE</span>':'';
                     return '<a class="lcn-card" href="'+href+'" target="_blank" rel="noopener noreferrer">'+
                         '<div>'+badge+cacheMark+'</div>'+
                         '<div class="lcn-source">'+safeLabel+'</div>'+
                         '<div class="lcn-title">'+safeTitle+'</div>'+
-                        '<div class="lcn-date">&#128197; '+(it.cached?'Last updated '+_relTime(it.pubDate):_relTime(it.pubDate))+'</div>'+
+                        '<div class="lcn-date">&#128197; '+(it.cached?'Sample headline':_relTime(it.pubDate))+'</div>'+
                         '</a>';
                 }).join('');
                 var upd=document.getElementById('lcn-last-update');
-                if (upd) upd.textContent='&middot; '+(isFallback?'Cached intel \u2014 ':'Updated ')+ new Date().toLocaleTimeString();
+                if (upd) upd.textContent='&middot; '+(isFallback?'Sample intel \u2014 ':'Updated ')+ new Date().toLocaleTimeString();
             }
             function _loadAll(attempt) {
                 attempt = attempt || 1;
@@ -8629,11 +8648,6 @@
                         <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#ef4444,#dc2626);border:2px solid #030e1a;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;margin-right:-8px;">K</div>
                         <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#10b981,#059669);border:2px solid #030e1a;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#020a14;"></div>
                     </div>
-                    <!-- C-04: Live subscriber ticker -->
-                    <span style="display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:10px;color:rgba(255,255,255,0.5);">
-                      <span style="width:6px;height:6px;border-radius:50%;background:#00d4aa;box-shadow:0 0 6px #00d4aa;display:inline-block;animation:pulse 2s infinite;" aria-hidden="true"></span>
-                      <span id="live-sub-count">1,247</span>&nbsp;security professionals
-                    </span>
                 </div>
 
                 <!-- What you get chips -->
@@ -8688,21 +8702,13 @@
             el.classList.add('active');
             document.getElementById('sub-role-value').value = role;
         }
-        /* C-04: Live subscriber ticker — increments realistically to signal growth */
-        (function(){
-            var el = document.getElementById('live-sub-count');
-            if(!el) return;
-            var count = 1247;
-            function tick(){
-                count++;
-                el.textContent = count.toLocaleString();
-                el.style.color = '#00d4aa';
-                setTimeout(function(){ el.style.color = ''; }, 500);
-                /* 18–42 second jitter → ~1.6 new subs/hour cadence */
-                setTimeout(tick, 18000 + Math.random() * 24000);
-            }
-            setTimeout(tick, 12000 + Math.random() * 16000);
-        })();
+        /* STAGE 3 FIX: removed a client-side timer that fabricated a live,
+           incrementing "N security professionals" counter (Math.random()
+           jitter, no backend behind it -- a simulated live-activity signal
+           forbidden by the zero-fabrication mandate). The one real,
+           non-live claim ("Join 1,200+ SOC analysts...") already exists in
+           this section's intro copy above and is left as-is; this removes
+           only the fabricated real-time growth animation and its markup. */
 
         function handleSubscribeEnhanced(e){
             e.preventDefault();
@@ -12255,10 +12261,50 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
         }
 
         // ── Threat Ticker ──
+        // STAGE 3 FIX: _tickerClickTargets holds the CURRENT render's real
+        // report_url/source_url values, referenced from the DOM only by a
+        // plain integer index (data-ticker-url-idx) -- see the delegated
+        // click handler below. The raw URL string is never interpolated
+        // into any HTML/JS-string text at all, so there is no escaping to
+        // get right and no injection surface, regardless of what a
+        // malicious source/report URL field might contain.
+        let _tickerClickTargets = [];
+        /**
+         * Allow-lists a URL for the ticker's click-to-open action.
+         * Same allow-only-http(s)-or-relative convention already used by
+         * initLiveCyberNews()'s href construction elsewhere in this file --
+         * rejects javascript:/data:/malformed values, returning '' instead.
+         * @param {string} raw
+         * @returns {string} the URL if safe to open, otherwise ''
+         */
+        function _tickerSafeUrl(raw) {
+            const s = String(raw || '');
+            return /^(https?:\/\/|\/)/.test(s) ? s : '';
+        }
+        /**
+         * Renders the homepage threat ticker from the top 20 highest-risk
+         * live feed items. Titles are HTML-escaped via _cdbEsc(); each
+         * item's report/source URL is resolved at click time through
+         * _tickerClickTargets by plain integer index rather than being
+         * interpolated into markup (see the delegated listener below).
+         * @param {object[]} data live feed items
+         */
         function renderTicker(data) {
             const outer = document.getElementById('threat-ticker-outer');
             const inner = document.getElementById('threat-ticker-inner');
             if (!inner || !data.length) return;
+
+            if (!inner.dataset.clickBound) {
+                inner.dataset.clickBound = '1';
+                inner.addEventListener('click', function(ev) {
+                    const el = ev.target.closest('[data-ticker-url-idx]');
+                    if (!el) return;
+                    const item = _tickerClickTargets[parseInt(el.dataset.tickerUrlIdx, 10)];
+                    if (!item) return;
+                    const url = _tickerSafeUrl(item.report_url || item.source_url || '');
+                    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+                });
+            }
 
             const sevColors = { CRITICAL:'#dc2626', HIGH:'#ea580c', MEDIUM:'#d97706', LOW:'#16a34a' };
             // v184.0 FIX: Use all available items (up to 50) sorted by recency.
@@ -12276,12 +12322,20 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                 return parseFloat(b.risk_score||0) - parseFloat(a.risk_score||0);
             }).slice(0, 20);
 
-            const itemsHtml = recent.map(d => {
+            _tickerClickTargets = recent;
+            const itemsHtml = recent.map((d, idx) => {
                 const sev = getSeverity(d.risk_score, d);
                 const col = sevColors[sev] || '#5a6578';
                 const cves = extractCVEs(d.title);
-                const id = cves[0] || cleanText(d.title).slice(0, 30) + '\u2026';
-                return `<span class="ticker-item" onclick="window.open('${d.report_url||d.source_url||''}','_blank')">
+                // STAGE 3 FIX: was raw-interpolated (cleanText() only fixes
+                // mojibake/control chars, it does not HTML-escape) into an
+                // innerHTML target -- a title containing e.g.
+                // `<img src=x onerror=...>` became a real, live element.
+                // _cdbEsc() is the same escaping helper already used
+                // correctly for card titles elsewhere in this file (see its
+                // definition below, reused here rather than re-implemented).
+                const id = cves[0] || _cdbEsc(cleanText(d.title).slice(0, 30)) + '\u2026';
+                return `<span class="ticker-item" data-ticker-url-idx="${idx}" style="cursor:pointer;">
                     <span class="ticker-sev" style="background:${col}22;color:${col};">${sev}</span>
                     ${id} \u2014 RISK ${d.risk_score}/10
                 </span><span class="ticker-sep">◆</span>`;
@@ -12309,6 +12363,13 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
         }
 
         // v184.0: Render dynamic attack ticker on the threat map using real CVE/threat data
+        /**
+         * Renders the scrolling attack-ticker overlay on the threat map
+         * canvas from the same top-20 live feed items as renderTicker(),
+         * pairing each with an illustrative geo-pair label. Titles are
+         * HTML-escaped via _cdbEsc() the same way.
+         * @param {object[]} data live feed items
+         */
         function renderMapTicker(data) {
             var tickerEl = document.getElementById('cdb-ticker-text');
             if (!tickerEl || !data || !data.length) return;
@@ -12327,7 +12388,9 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                 var col = sevColors[sev] || '#aaa';
                 var geo = GEO_PAIRS[i % GEO_PAIRS.length];
                 var cves = extractCVEs(d.title);
-                var label = cves[0] ? cves[0] : (d.title || '').slice(0, 28) + '…';
+                // STAGE 3 FIX: same unescaped-title-into-innerHTML issue as
+                // renderTicker() above -- reuses the same _cdbEsc() helper.
+                var label = cves[0] ? cves[0] : _cdbEsc((d.title || '').slice(0, 28)) + '…';
                 return '<span style="color:' + col + ';font-weight:700;">' + geo + ' ' + sev + '</span>'
                      + ' <span style="color:rgba(200,220,255,0.75);">' + label + '</span>';
             });
@@ -15461,6 +15524,16 @@ function renderTopThreats(data) {
             // Decoded: https://intel.cyberdudebivash.com/api/ai/
 
             // ── Live synthesis: build analyze/respond/correlate from real Worker feed ──
+            /**
+             * Builds a GENESIS Analyze Live result (analyze/respond/correlate)
+             * from the live Worker feed when the pre-generated static AI JSON
+             * endpoints are unavailable. avg_risk_score is computed from the
+             * real fetched `items`, not window.EMBEDDED_INTEL (permanently
+             * empty since v184.0 -- see the comment above). Returns all-null
+             * fields on total fetch failure; never synthesizes a replacement
+             * result for a genuinely failed fetch.
+             * @returns {Promise<{analyze: object|null, respond: object|null, correlate: object|null}>}
+             */
             async function _synthAnalysisFromLiveFeed() {
                 const WORKER = 'https://intel.cyberdudebivash.com';
                 let items = [];
@@ -15478,7 +15551,12 @@ function renderTopThreats(data) {
                 const high      = items.filter(i => (i.severity||'').toUpperCase() === 'HIGH').length;
                 const kevActive = items.filter(i => i.kev_present || i.kev).length;
                 const actors    = [...new Set(items.map(i => i.actor_tag||i.actor||'').filter(Boolean))];
-                const avgRisk   = window._v149AvgRisk(window.EMBEDDED_INTEL || []);
+                // STAGE 3 FIX: this read window.EMBEDDED_INTEL, which v184.0
+                // permanently empties (see the comment two lines above) --
+                // avg_risk_score was always 0 while critical_count/high_count
+                // two lines up were already correctly computed from the real,
+                // just-fetched `items`. Same existing calculator, real data.
+                const avgRisk   = window._v149AvgRisk(items);
                 const sorted    = [...items].sort((a,b) => (parseFloat(b.risk_score)||0) - (parseFloat(a.risk_score)||0));
 
                 // ── analyze.json equivalent ──

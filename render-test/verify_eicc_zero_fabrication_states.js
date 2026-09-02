@@ -38,6 +38,12 @@
  * js/__tests__/apex-data-plane.test.js for the shared module's own unit
  * tests).
  *
+ * STAGE 3 ADDITION: Scenario 4 (rendering security) now also asserts the
+ * main threat-grid ticker (#threat-ticker-inner / #cdb-ticker-text) escapes
+ * the same malicious title, and that zero uncaught errors occur anywhere on
+ * the page -- tightened from Stage 2's KNOWN_PREEXISTING_MAIN_GRID_ERROR
+ * carve-out now that renderTicker()/renderMapTicker() are fixed too.
+ *
  * Same pattern as this directory's other verify_*.js scripts -- local
  * static server + Playwright, hermetic (non-local requests aborted),
  * record()/exitCode convention.
@@ -271,28 +277,43 @@ async function main() {
       record('Malicious AI-prediction threat name renders as escaped text, not a raw <img> tag',
         !!s.aiPredictionsHtml && s.aiPredictionsHtml.includes('&lt;img') && !/<img[^&]/i.test(s.aiPredictionsHtml),
         JSON.stringify(s.aiPredictionsHtml));
-      // KNOWN PRE-EXISTING ISSUE (found by this test, not introduced by it):
-      // the same malicious title, via the same shared api/feed.json response,
-      // also reaches the separate, unmodified main threat-grid pipeline
-      // (loadGOCIntel()/card_renderer.js -- out of this Stage 2 PR's scope,
-      // which deliberately targets only the EICC panel). Reproduced in
-      // isolation with none of this file's own test logic involved: a
-      // malicious title triggers ~20 "Invalid or unexpected token" parse
-      // errors there too. The static JSON-LD block at index.html:70 was
-      // checked and ruled out (fixed content, no item interpolation); the
-      // exact call site is not yet root-caused -- flagged as a dedicated P1
-      // follow-up rather than guessed at or blind-fixed in an unaudited
-      // pipeline under this PR's time budget. This assertion documents that
-      // those errors are exactly the known pattern (so a real NEW error
-      // class would still fail the check) while not misrepresenting a
-      // pre-existing, separately-scoped defect as a regression in this PR's
-      // own fix -- which is proven correct by the three assertions above
-      // (no execution, both fields escaped).
-      const KNOWN_PREEXISTING_MAIN_GRID_ERROR = /^Invalid or unexpected token$/;
-      const unexpectedErrors = pageErrors.filter((e) => !KNOWN_PREEXISTING_MAIN_GRID_ERROR.test(e));
-      record('No NEW uncaught JS errors beyond the known, pre-existing, separately-scoped main-grid parse issue',
-        unexpectedErrors.length === 0,
-        unexpectedErrors.length ? unexpectedErrors.join(' | ') : `(${pageErrors.length} known pre-existing errors from the unrelated main-grid pipeline, see comment above -- not this PR's fix)`);
+
+      // STAGE 3 FIX (was a documented, tolerated KNOWN_PREEXISTING_MAIN_GRID_ERROR
+      // carve-out here through Stage 2): the same malicious title, via the
+      // same shared api/feed.json response, also reaches the separate main
+      // threat-grid pipeline (loadGOCIntel() -> renderTicker()/
+      // renderMapTicker()) -- out of Stage 2's scope, root-caused and fixed
+      // in Stage 3. renderTicker()'s `id` and renderMapTicker()'s `label`
+      // interpolated the raw title (only run through cleanText(), which
+      // fixes mojibake/control chars but does not HTML-escape) directly
+      // into an innerHTML target, producing ~20 "Invalid or unexpected
+      // token" errors (a raw <img onerror=...> element whose broken
+      // attribute boundary the browser fails to compile at fire-time) --
+      // reproduced and confirmed via a standalone harness before the fix.
+      // Both sites now reuse the same _cdbEsc() helper already used
+      // correctly elsewhere in this file. This carve-out is intentionally
+      // removed rather than kept permissive: leaving it in place after the
+      // fix would silently mask a future regression of the exact same
+      // class, which the zero-fabrication mandate's "never weaken tests"
+      // rule specifically warns against.
+      const mainGridTickerHtml = await page.evaluate(() => {
+        const t = document.getElementById('threat-ticker-inner');
+        const m = document.getElementById('cdb-ticker-text');
+        return { ticker: t ? t.innerHTML : null, mapTicker: m ? m.innerHTML : null };
+      });
+      record('Main-grid threat ticker (#threat-ticker-inner) renders the malicious title as escaped text, not a raw <img> tag',
+        !!mainGridTickerHtml.ticker && mainGridTickerHtml.ticker.includes('&lt;img') && !/<img[^&]/i.test(mainGridTickerHtml.ticker),
+        JSON.stringify(mainGridTickerHtml.ticker));
+      // STAGE 3 FIX (review finding): the original `!mapTicker || (...)`
+      // form let a missing #cdb-ticker-text element (e.g. a future
+      // regression that stops renderMapTicker() from running at all)
+      // vacuously pass this check instead of failing it. Require the
+      // element to actually be present before checking its content.
+      record('Main-grid map ticker (#cdb-ticker-text) renders the malicious title as escaped text, not a raw <img> tag',
+        !!mainGridTickerHtml.mapTicker && mainGridTickerHtml.mapTicker.includes('&lt;img') && !/<img[^&]/i.test(mainGridTickerHtml.mapTicker),
+        JSON.stringify(mainGridTickerHtml.mapTicker));
+      record('No uncaught JS errors anywhere on the page from the malicious title (main-grid parse-break class is now fixed, not just tolerated)',
+        pageErrors.length === 0, pageErrors.join(' | '));
 
       await context.close();
     }
