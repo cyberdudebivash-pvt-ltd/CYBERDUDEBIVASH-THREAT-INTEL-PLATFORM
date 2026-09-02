@@ -50,6 +50,7 @@
 'use strict';
 
 const path = require('path');
+const { startStaticServer } = require('./lib/static-server');
 const http = require('http');
 const fs = require('fs');
 const { chromium } = require('playwright');
@@ -66,22 +67,6 @@ const MIME = {
   '.json': 'application/json', '.txt': 'text/plain', '.ico': 'image/x-icon',
   '.mp4': 'video/mp4',
 };
-
-function startStaticServer(root) {
-  const server = http.createServer((req, res) => {
-    let urlPath = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
-    if (urlPath.endsWith('/')) urlPath += 'index.html';
-    const filePath = path.join(root, urlPath);
-    if (!filePath.startsWith(root)) { res.writeHead(403); res.end(); return; }
-    fs.readFile(filePath, (err, data) => {
-      if (err) { res.writeHead(404); res.end('Not found'); return; }
-      const ext = path.extname(filePath);
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-      res.end(data);
-    });
-  });
-  return new Promise((resolve) => server.listen(PORT, '127.0.0.1', () => resolve(server)));
-}
 
 const results = [];
 function record(name, pass, detail) {
@@ -134,7 +119,7 @@ async function main() {
     return;
   }
 
-  const server = await startStaticServer(ROOT_DIR);
+  const server = await startStaticServer(ROOT_DIR, PORT, MIME);
   let browser;
   try {
     browser = await chromium.launch();

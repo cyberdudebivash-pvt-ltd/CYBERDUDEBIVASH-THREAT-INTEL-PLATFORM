@@ -24,6 +24,7 @@ const http = require('http');
 const fs = require('fs');
 const { chromium } = require('playwright');
 
+const { startStaticServer } = require('./lib/static-server');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const PORT = 8946;
 const PAGE_URL = `http://127.0.0.1:${PORT}/enterprise-pricing.html`;
@@ -33,22 +34,6 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.json': 'application/json', '.txt': 'text/plain', '.ico': 'image/x-icon',
 };
-
-function startStaticServer() {
-  const server = http.createServer((req, res) => {
-    let urlPath = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
-    if (urlPath.endsWith('/')) urlPath += 'index.html';
-    const filePath = path.join(REPO_ROOT, urlPath);
-    if (!filePath.startsWith(REPO_ROOT)) { res.writeHead(403); res.end(); return; }
-    fs.readFile(filePath, (err, data) => {
-      if (err) { res.writeHead(404); res.end('Not found'); return; }
-      const ext = path.extname(filePath);
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-      res.end(data);
-    });
-  });
-  return new Promise((resolve) => server.listen(PORT, '127.0.0.1', () => resolve(server)));
-}
 
 const results = [];
 function record(name, pass, detail) {
@@ -77,7 +62,7 @@ function contrastRatio(fg, bg) {
 }
 
 async function main() {
-  const server = await startStaticServer();
+  const server = await startStaticServer(REPO_ROOT, PORT, MIME);
   let browser;
   try {
     browser = await chromium.launch();
