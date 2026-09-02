@@ -167,6 +167,70 @@ def s3_cp(
     return False
 
 
+def s3_get(
+    dst_local: str,
+    src_bucket: str,
+    src_key: str,
+    endpoint: str,
+) -> str:
+    """
+    Download a single object from R2 to a local path.
+
+    Returns one of three distinct outcomes -- callers that need bootstrap
+    semantics (missing object is fine, transient errors are not) MUST branch
+    on this three-way result rather than treating any failure alike:
+      "OK"        -- downloaded successfully, dst_local now holds the object.
+      "NOT_FOUND" -- the object genuinely does not exist yet in R2 (a brand
+                     new key, e.g. before this migration's first successful
+                     upload). Safe to fall back to a bootstrap source.
+      "ERROR"     -- anything else (network, auth, R2 outage, malformed
+                     response, or -- CodeRabbit review finding on this
+                     migration, verified: AWS's actual NoSuchBucket message
+                     is "The specified bucket does not exist", which the
+                     naive "does not exist" substring check below used to
+                     also match, misclassifying a wrong/misconfigured bucket
+                     name as "object not created yet" -- checked first and
+                     explicitly excluded). NOT safe to treat any of these as
+                     "start fresh": doing so for a dedup/incremental-state
+                     object could silently discard real history and
+                     reintroduce duplicates, or mask a bucket misconfig
+                     behind what looks like a normal first-run bootstrap.
+    """
+    cmd = [
+        "aws", "s3", "cp", f"s3://{src_bucket}/{src_key}", dst_local,
+        "--endpoint-url", endpoint,
+        "--only-show-errors",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        log.info("OK: Downloaded s3://%s/%s -> %s", src_bucket, src_key, dst_local)
+        return "OK"
+
+    combined = f"{result.stdout}\n{result.stderr}".lower()
+    if "nosuchbucket" in combined:
+        log.error(
+            "ERROR: Download failed for s3://%s/%s (%d): bucket does not "
+            "exist or is misconfigured -- NOT the same as the object simply "
+            "not being created yet. %s %s",
+            src_bucket, src_key, result.returncode,
+            result.stdout.strip(), result.stderr.strip(),
+        )
+        return "ERROR"
+    if "404" in combined or "not found" in combined or "nosuchkey" in combined or "does not exist" in combined:
+        log.info(
+            "NOT_FOUND: s3://%s/%s does not exist yet (expected on first run "
+            "after a state-object migration).", src_bucket, src_key,
+        )
+        return "NOT_FOUND"
+
+    log.error(
+        "ERROR: Download failed for s3://%s/%s (%d): %s %s",
+        src_bucket, src_key, result.returncode,
+        result.stdout.strip(), result.stderr.strip(),
+    )
+    return "ERROR"
+
+
 def s3_sync(
     src_dir: str,
     dst_bucket: str,
@@ -216,6 +280,50 @@ def s3_sync(
         return True
     log.warning(
         "WARN: Sync had errors (%d): %s",
+        result.returncode, result.stderr.strip()[:400],
+    )
+    return False
+
+
+def s3_sync_download(
+    dst_dir: str,
+    src_bucket: str,
+    src_prefix: str,
+    endpoint: str,
+    timeout_seconds: int | None = None,
+) -> bool:
+    """
+    Download counterpart to s3_sync(): pulls src_bucket/src_prefix down to
+    dst_dir. Returns True on success (including the trivial case where the
+    prefix has no objects yet -- `aws s3 sync` from an empty/nonexistent
+    prefix is a legitimate no-op, not an error, unlike s3_get()'s single-
+    object OK/NOT_FOUND/ERROR contract which a directory sync doesn't need:
+    without --delete, sync only adds/updates -- it never removes files
+    already present in dst_dir, so a git-checkout copy of dst_dir is safe to
+    sync onto (bootstrap-safe by construction, no special-casing required).
+    """
+    cmd = [
+        "aws", "s3", "sync", f"s3://{src_bucket}/{src_prefix}", dst_dir,
+        "--endpoint-url", endpoint,
+        "--only-show-errors",
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        log.warning(
+            "WARN: s3 sync download timed out after %ds (non-fatal) -- "
+            "existing local copy of %s is left untouched.",
+            timeout_seconds, dst_dir,
+        )
+        return False
+
+    if result.returncode == 0:
+        log.info("OK: Synced s3://%s/%s -> %s", src_bucket, src_prefix, dst_dir)
+        return True
+    log.warning(
+        "WARN: Sync download had errors (%d): %s",
         result.returncode, result.stderr.strip()[:400],
     )
     return False
