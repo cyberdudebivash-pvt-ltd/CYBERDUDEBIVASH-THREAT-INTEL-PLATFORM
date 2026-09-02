@@ -355,6 +355,38 @@ jobs:
           mkdir -p data/intelligence/detection_rules secrets api data/ai_intelligence
 
       # -----------------------------------------------------------------------
+      # STAGE 0.00a: PULL INTEL INGESTION STATE FROM R2 (runtime-authority
+      # bridge -- see scripts/intel_state_r2_sync.py's own header)
+      #
+      # run_pipeline.py's Master Pipeline Orchestrator (STAGE 1-3, below)
+      # treats data/stix/feed_manifest.json as its Single Source of Truth
+      # input. multi-source-intel.yml (CISA KEV/NVD/GitHub Advisories/
+      # ransomware.live/URLhaus/RSS ingestion) used to be this file's only
+      # writer, via a direct git commit + push to main -- confirmed live
+      # (2026-09-02) that push is rejected by branch protection on every run
+      # that finds new items, so this checkout's copy can be arbitrarily far
+      # behind whatever that workflow actually ingested. That workflow now
+      # persists feed_state.json/processed_intel.json/feed_manifest.json to
+      # R2 as their authoritative copy (its own "Persist Intel Ingestion
+      # State to R2" step) instead of relying on the git push. Pulling that
+      # copy here, before run_pipeline.py reads it, is what actually closes
+      # the loop -- without this step the R2 copy would be written but never
+      # read, and this pipeline's Single Source of Truth would still be
+      # frozen at whatever git last successfully committed. Non-fatal by
+      # design: a missing R2 object falls through to this checkout's own
+      # copy, identical to this step not existing.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.00a - Pull Intel Ingestion State from R2"
+        timeout-minutes: 2
+        if: always()
+        continue-on-error: true
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/intel_state_r2_sync.py --download || true
+
+      # -----------------------------------------------------------------------
       # -----------------------------------------------------------------------
       # STAGE 0.00: PIPELINE LOCK CHECK (v184.0)
       # If .PIPELINE_LOCK exists, operator is doing manual god mode work.

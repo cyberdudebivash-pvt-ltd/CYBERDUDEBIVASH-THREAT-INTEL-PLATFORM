@@ -48,6 +48,28 @@ jobs:
       - name: "Prepare Directories"
         run: mkdir -p data/enrichment data/stix data/cache api
 
+      # -----------------------------------------------------------------------
+      # PULL INTEL INGESTION STATE FROM R2 (runtime-authority bridge)
+      # See scripts/intel_state_r2_sync.py's own header for the full
+      # architecture note. Confirmed live (2026-09-02): every run of this
+      # workflow that finds new items has its "Commit Intel State &
+      # Manifest" push below rejected by branch protection (GH013), so
+      # feed_state.json/processed_intel.json/feed_manifest.json in this
+      # checkout can be arbitrarily far behind whatever the last run
+      # actually produced. R2 is now the authoritative copy going forward
+      # (see the "Persist" step below) -- pull it before ingestion runs so
+      # this run's incremental dedup/freshness tracking starts from the
+      # real last-seen state, not from a stale git checkout. Non-fatal by
+      # design: a missing R2 object (first run) falls through to this
+      # checkout's own copy.
+      # -----------------------------------------------------------------------
+      - name: "Pull Intel Ingestion State from R2"
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/intel_state_r2_sync.py --download || true
+
       - name: "Bootstrap Critical Files"
         env:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
@@ -80,13 +102,35 @@ jobs:
         run: |
           python3 scripts/validate_manifest_integrity.py
 
-      # 
-      # COMMIT STATE FILES - CRITICAL for cross-run incremental ingestion
-      # feed_state.json    = per-source last_seen timestamps (MUST persist)
-      # processed_intel.json = dedup fingerprint store (MUST persist)
-      # feed_manifest.json  = intel manifest (additive, safe to commit)
-      # 
-      - name: "Commit Intel State & Manifest"
+      # -----------------------------------------------------------------------
+      # PERSIST INTEL INGESTION STATE TO R2 (runtime-authority bridge)
+      # This is now the AUTHORITATIVE persistence path for feed_state.json /
+      # processed_intel.json / feed_manifest.json -- see
+      # scripts/intel_state_r2_sync.py's header. Runs before the git commit
+      # attempt below (kept for the append-only data/intelligence_repository/
+      # registries and as a best-effort legacy path for the same 3 files) so
+      # this run's ingested intelligence reaches R2 -- and therefore
+      # sentinel-blogger.yml's own R2 bootstrap step and any Worker handler
+      # that reads these keys directly -- regardless of whether the git push
+      # below succeeds.
+      # -----------------------------------------------------------------------
+      - name: "Persist Intel Ingestion State to R2"
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/intel_state_r2_sync.py --upload
+
+      #
+      # COMMIT STATE FILES - best-effort legacy path + append-only registries
+      # feed_state.json / processed_intel.json / feed_manifest.json are now
+      # authoritatively persisted to R2 above; this git commit is kept as a
+      # best-effort secondary copy (useful for local dev checkouts) for
+      # those 3, and remains the only persistence path for the
+      # data/intelligence_repository/ registries below, which have no R2
+      # consumer yet and are out of scope for this migration.
+      #
+      - name: "Commit Intel State & Manifest (best-effort)"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -141,16 +185,31 @@ jobs:
             sleep $((i * 15))
           done
 
-          # P0 FIX: a push that fails all 4 attempts used to fall through to a
-          # bare [WARN] echo with no exit 1, so the step (and job) reported
-          # SUCCESS while silently discarding this run's entire ingestion
-          # output -- confirmed live: every run since main started requiring
-          # PRs rejected all 4 attempts with "GH013: ... Changes must be made
-          # through a pull request", yet the job stayed green for ~7 days
-          # straight while feed_state.json/processed_intel.json/
-          # feed_manifest.json never advanced past their last successful
-          # commit. Hard-fail so this is visible instead of invisible.
+          # P0 FIX (2026-08-xx): a push that fails all 4 attempts used to fall
+          # through to a bare [WARN] echo with no exit 1, so the step (and
+          # job) reported SUCCESS while silently discarding this run's
+          # entire ingestion output -- confirmed live: every run since main
+          # started requiring PRs rejected all 4 attempts with "GH013:
+          # ... Changes must be made through a pull request", yet the job
+          # stayed green for ~7 days straight while feed_state.json/
+          # processed_intel.json/feed_manifest.json never advanced past
+          # their last successful commit. Made loud (hard-fail) so this was
+          # visible instead of invisible.
+          #
+          # PRODUCTION-VERIFICATION FIX (2026-09-02): this push is EXPECTED
+          # to keep failing under this repository's branch-protection
+          # ruleset (git-push-to-protected-main is structurally incompatible
+          # with it -- that is the whole reason for the R2 persistence step
+          # above) for feed_state.json/processed_intel.json/
+          # feed_manifest.json, which now have a working, authoritative R2
+          # path regardless of this step's outcome. Failing the JOB here
+          # would misreport a run that successfully ingested and persisted
+          # real intelligence as broken. Downgraded to a warning so the
+          # attempt (and the still-real gap for the
+          # data/intelligence_repository/ registries, which this git commit
+          # remains the only persistence path for) stays visible without
+          # blocking the pipeline on an operation this architecture no
+          # longer depends on.
           if [ "$PUSHED" -ne 1 ]; then
-            echo "::error::Commit Intel State & Manifest: push to main was rejected on all 4 attempts. This run's freshly-ingested intel state (feed_state.json, processed_intel.json, feed_manifest.json) was NOT persisted -- the next scheduled run will start from stale state again. Check https://github.com/${{ github.repository }}/rules?ref=refs%2Fheads%2Fmain for the branch rule rejecting this push."
-            exit 1
+            echo "::warning::Commit Intel State & Manifest: push to main was rejected on all 4 attempts (expected under branch protection -- see https://github.com/${{ github.repository }}/rules?ref=refs%2Fheads%2Fmain). feed_state.json/processed_intel.json/feed_manifest.json are unaffected (persisted to R2 above); data/intelligence_repository/ registry updates from this run, if any, were NOT persisted anywhere."
           fi
