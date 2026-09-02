@@ -61,6 +61,7 @@ it calls the same `aws s3 cp` shape r2_resync_manifests.py already uses.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import subprocess
@@ -107,25 +108,74 @@ def s3_cp(src: str, dst: str, endpoint: str) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
+def _count_entries(data) -> int | None:
+    """Best-effort entry count for the two shapes STATE_FILES actually use:
+    feed_manifest.json (a bare list) and feed_state.json/processed_intel.json
+    (a dict with a countable top-level collection). Returns None rather than
+    0 when the shape isn't recognized, so a genuinely empty file is never
+    confused with one this function simply doesn't know how to measure."""
+    if isinstance(data, list):
+        return len(data)
+    if isinstance(data, dict):
+        for key in ("sources", "fingerprints", "items", "advisories", "reports"):
+            if isinstance(data.get(key), (list, dict)):
+                return len(data[key])
+    return None
+
+
 def download(endpoint: str) -> int:
     """Pull current R2 copies into their local paths. A missing R2 object
     is the expected bootstrap/first-run case, not a failure -- falls
     through to this checkout's own copy, same as before this script
-    existed."""
+    existed.
+
+    PRODUCTION-VERIFICATION HARDENING (2026-09-02): downloads to a .tmp
+    sibling and validates it parses as JSON before replacing the real
+    path, mirroring the write-tmp/verify/replace pattern
+    true_intel_ingestor.py's own _save_manifest() already uses for the
+    same files on the write side. Without this, a transient failure that
+    left a partial or corrupt object at the destination path (rather than
+    a clean non-zero exit from `aws s3 cp`) would silently replace a good
+    local copy with a broken one, and run_pipeline.py's manifest loader
+    (safe_json_load / load_manifest, both "never raise") would read that
+    back as an empty list indistinguishable from a genuinely empty feed --
+    not a crash, but a silent, unlogged intelligence-loss failure mode.
+    Also gives explicit "SOURCE=R2" + entry-count evidence per file
+    (previously the only signal was "OK: pulled" with no count), so a
+    successful pull vs. the checkout-copy fallback vs. a corrupt object
+    are each distinguishable in the run log rather than only two of the
+    three being visible.
+    """
     pulled = 0
     for local_path, r2_key in STATE_FILES:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         src = f"s3://{BUCKET_DATA}/{r2_key}"
+        rel = local_path.relative_to(REPO_ROOT)
+        tmp_path = local_path.with_suffix(local_path.suffix + ".r2sync.tmp")
         result = subprocess.run(
-            ["aws", "s3", "cp", src, str(local_path), "--endpoint-url", endpoint, "--only-show-errors"],
+            ["aws", "s3", "cp", src, str(tmp_path), "--endpoint-url", endpoint, "--only-show-errors"],
             capture_output=True, text=True,
         )
-        rel = local_path.relative_to(REPO_ROOT)
-        if result.returncode == 0:
-            log.info("OK: pulled %s <- %s", rel, src)
-            pulled += 1
-        else:
+        if result.returncode != 0:
+            tmp_path.unlink(missing_ok=True)
             log.info("SKIP: no R2 object at %s yet -- using this checkout's copy of %s", src, rel)
+            continue
+        try:
+            data = json.loads(tmp_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            tmp_path.unlink(missing_ok=True)
+            log.warning(
+                "REJECTED: %s downloaded from %s but did not parse as valid JSON (%s) -- "
+                "keeping this checkout's existing copy of %s rather than replacing it with "
+                "unverified content.",
+                rel, src, exc, rel,
+            )
+            continue
+        tmp_path.replace(local_path)
+        count = _count_entries(data)
+        count_str = str(count) if count is not None else "unknown shape"
+        log.info("OK: SOURCE=R2 pulled %s <- %s (entries=%s)", rel, src, count_str)
+        pulled += 1
     log.info("Download complete: %d/%d pulled from R2.", pulled, len(STATE_FILES))
     return pulled
 
