@@ -1068,6 +1068,91 @@ def t24():
 
 
 # ---------------------------------------------------------------------------
+# T25: workflow_dispatch checkout-ref hardcoding regression guard
+# ---------------------------------------------------------------------------
+
+@test("T25_workflow_dispatch_checkout_ref_not_hardcoded")
+def t25():
+    """Regression guard for the ref:main checkout defect class.
+
+    Found live (this session) in multi-source-intel.yml and sentinel-blogger.yml:
+    an actions/checkout step with a literal `ref: main` hardcodes the checked-out
+    file content to main regardless of which branch actually dispatched the
+    workflow, silently defeating workflow_dispatch's whole purpose of testing a
+    feature branch's changes before merge -- confirmed live via a real
+    workflow_dispatch run whose dispatched branch added a new script that then
+    failed with "No such file or directory" because the checkout pulled main's
+    tree instead. github.ref already resolves to the dispatching branch on
+    workflow_dispatch and to the correct branch on schedule/push, so replacing
+    the literal with `ref: "${{ github.ref }}"` is a no-op for every trigger
+    except workflow_dispatch, where it is the actual fix.
+
+    Scans every .github/workflows/*.yml that declares a workflow_dispatch
+    trigger for a checkout step whose `ref:` is a bare literal `main` (quoted
+    or not) rather than a github-context expression. A workflow with a
+    pull_request or workflow_call trigger is intentionally excluded from this
+    blanket rule -- those can have legitimate reasons to pin a specific ref
+    (e.g. pages-fast-publish.yml's `pull_request: types:[closed]` handler,
+    which deliberately checks out main's just-landed HEAD because a
+    pull_request event's own github.ref has no meaningful checkout target
+    once the PR that triggered it has closed) -- but this test discovers
+    that exemption from each workflow's own declared triggers, not from a
+    hardcoded exemption list, so a future workflow_call/pull_request
+    addition to some other workflow is picked up automatically rather than
+    silently grandfathered in.
+    """
+    import re
+    import yaml
+
+    workflows_dir = REPO_ROOT / ".github" / "workflows"
+    offenders = []
+    dispatchable_count = 0
+    for path in sorted(workflows_dir.glob("*.yml")):
+        content = path.read_text(encoding="utf-8")
+        try:
+            doc = yaml.safe_load(content)
+        except Exception:
+            continue  # T12/other tests own YAML-parseability; not this test's concern
+        if not isinstance(doc, dict):
+            continue
+        triggers = doc.get("on") or doc.get(True)  # PyYAML parses bare `on:` as True in some versions
+        # `on:` is valid YAML as a dict ({workflow_dispatch: {...}, push: {...}}),
+        # a list ([push, workflow_dispatch]), or a single bare string
+        # (workflow_dispatch) -- normalize all three to a name set so none of
+        # them silently bypass this scan the way a raw `isinstance(..., dict)`
+        # gate would for the list/string forms.
+        if isinstance(triggers, dict):
+            trigger_names = set(triggers.keys())
+        elif isinstance(triggers, list):
+            trigger_names = set(triggers)
+        elif isinstance(triggers, str):
+            trigger_names = {triggers}
+        else:
+            continue
+        if "workflow_dispatch" not in trigger_names:
+            continue
+        if "pull_request" in trigger_names or "workflow_call" in trigger_names:
+            continue  # explicitly out of scope -- see docstring
+        dispatchable_count += 1
+
+        # Literal `ref: main` (bare or quoted), in either block or flow-mapping
+        # style, but NOT a `${{ ... }}` expression.
+        for m in re.finditer(r"""ref:\s*(['"]?)main\1\s*[,}\n]""", content):
+            line_no = content.count("\n", 0, m.start()) + 1
+            offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_no}")
+
+    assert not offenders, (
+        "T25 REGRESSION: workflow(s) with a workflow_dispatch trigger hardcode "
+        f"actions/checkout's ref to the literal 'main': {offenders}. This silently "
+        "defeats workflow_dispatch testing of any feature branch for these "
+        "workflows -- use ref: \"${{ github.ref }}\" instead (no-op for "
+        "schedule/push, correct for workflow_dispatch)."
+    )
+    log.info("[T25] %d workflow_dispatch-capable workflow(s) scanned, 0 hardcoded to ref:main",
+             dispatchable_count)
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -1079,7 +1164,7 @@ def main() -> int:
     except Exception:
         _suite_ver = "UNKNOWN"
     log.info("=" * 60)
-    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T24)", _suite_ver)
+    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T25)", _suite_ver)
     log.info("=" * 60)
 
     pass_count = sum(1 for r in RESULTS if r["status"] == "PASS")
