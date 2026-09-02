@@ -689,6 +689,29 @@ class TestPublicFetchThrottling(unittest.TestCase):
         self.assertIsNone(rrv._retry_after_seconds({"retry-after": "inf"}))
         self.assertIsNone(rrv._retry_after_seconds({"retry-after": "nan"}))
 
+    def test_retry_after_seconds_caps_large_value(self):
+        # STAGE 3.6a timeout postmortem (sentinel-blogger.yml run
+        # 33630720481, 2026-09-02): main() finished and logged its full run
+        # summary at exactly RUN_DEADLINE_SECONDS (600.00s), then the step
+        # went silent for 309s until the external 15-minute timeout-minutes
+        # kill -- consistent with a non-daemon worker thread sleeping on an
+        # uncapped Retry-After value (e.g. 300s) from a 429 response, which
+        # blocks OS-level process exit regardless of what main() already
+        # returned. An origin can name any delay it wants; this verifier
+        # must never honor one large enough to outlive its own deadline
+        # budget.
+        self.assertEqual(
+            rrv._retry_after_seconds({"retry-after": "300"}),
+            rrv.RETRY_AFTER_CAP_SECONDS,
+        )
+        self.assertLess(rrv.RETRY_AFTER_CAP_SECONDS, 300)
+
+    def test_retry_after_seconds_leaves_small_value_uncapped(self):
+        # A cooperative, reasonably-sized Retry-After must still be honored
+        # verbatim -- the cap protects against pathological values, it must
+        # not silently override normal backoff hints.
+        self.assertEqual(rrv._retry_after_seconds({"retry-after": "5"}), 5.0)
+
     def test_429_response_waits_for_retry_after_instead_of_fixed_delay(self):
         import email.message
 
@@ -710,6 +733,31 @@ class TestPublicFetchThrottling(unittest.TestCase):
         self.assertEqual(
             sleep_calls, [7.0, 7.0],
             "a 429 with a Retry-After header must back off for that long, not the fixed PUBLIC_RETRY_DELAY"
+        )
+
+    def test_429_response_with_large_retry_after_sleeps_capped_not_verbatim(self):
+        import email.message
+
+        def _fake_urlopen(*args, **kwargs):
+            headers = email.message.Message()
+            headers["Retry-After"] = "300"
+            raise urllib.error.HTTPError(
+                url="https://intel.cyberdudebivash.com/reports/x.html",
+                code=429, msg="Too Many Requests", hdrs=headers, fp=None,
+            )
+
+        sleep_calls = []
+        with patch.object(rrv, "PUBLIC_RETRY_DELAY", 3), \
+             patch.object(rrv._PUBLIC_OPENER, "open", side_effect=_fake_urlopen), \
+             patch.object(rrv.time, "sleep", side_effect=sleep_calls.append):
+            result = rrv._fetch_public("https://intel.cyberdudebivash.com/reports/x.html")
+
+        self.assertEqual(result["status"], 429)
+        self.assertTrue(
+            all(delay == rrv.RETRY_AFTER_CAP_SECONDS for delay in sleep_calls),
+            f"a large Retry-After must be capped to RETRY_AFTER_CAP_SECONDS "
+            f"({rrv.RETRY_AFTER_CAP_SECONDS}), not honored verbatim (300s) -- "
+            f"got sleep_calls={sleep_calls}",
         )
 
     def test_429_response_without_retry_after_falls_back_to_fixed_delay(self):
@@ -855,6 +903,38 @@ class TestWorkflowStepHasReportsBucketCredentials(unittest.TestCase):
             "as missing from R2"
         )
         self.assertIn("CF_R2_REPORTS_SECRET_KEY", env)
+
+    def test_stage_3_6a_step_has_continue_on_error(self):
+        # STAGE 3.6a timeout postmortem (sentinel-blogger.yml run
+        # 33630720481, 2026-09-02): this step is documented as
+        # observability-only/bake-in (--enforce deliberately not passed,
+        # its own `run:` already guards the script call with `|| true`),
+        # but lacked continue-on-error -- so a step-level timeout-minutes
+        # kill (which bypasses that internal guard entirely) was recorded
+        # as a step failure and, via this workflow's default if:
+        # success(), cascaded to skip STAGE 5 - Deploy to GitHub Pages.
+        # Every other observability-only stage in this file already sets
+        # continue-on-error: true (STAGE 3.1.0b, 3.1.1, 3.1.2, 3.93.15d
+        # through 3.93.15k, etc.) -- this asserts STAGE 3.6a matches that
+        # same established, repo-wide convention.
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github" / "workflows" / "sentinel-blogger.yml"
+        with open(workflow_path, encoding="utf-8") as f:
+            workflow = yaml.safe_load(f)
+
+        job = next(iter(workflow["jobs"].values()))
+        steps = job["steps"]
+        matches = [s for s in steps if "STAGE 3.6a" in s.get("name", "")]
+        self.assertEqual(len(matches), 1)
+        step = matches[0]
+        self.assertIs(
+            step.get("continue-on-error"), True,
+            "STAGE 3.6a must set continue-on-error: true so an external "
+            "timeout-minutes kill (which bypasses this step's own internal "
+            "`|| true` guard) can never cascade into skipping STAGE 5 -- "
+            "Deploy to GitHub Pages"
+        )
 
 
 class TestManifestR2Sync(unittest.TestCase):

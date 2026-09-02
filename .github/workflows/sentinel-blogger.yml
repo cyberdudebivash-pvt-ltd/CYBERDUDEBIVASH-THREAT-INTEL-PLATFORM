@@ -1785,9 +1785,31 @@ jobs:
       # requires this to become a real HARD FAIL gate eventually).
       # timeout-minutes raised 10->15: each report now does one additional
       # public HTTPS GET on top of the existing R2 HEAD+GET pair.
+      # continue-on-error: true -- same non-blocking pattern every other
+      # observability-only stage in this file already uses (STAGE 3.1.0b,
+      # 3.1.1, 3.1.2, 3.93.15d-3.93.15k, etc.). This stage's own script is
+      # bake-in/observability-only by design (--enforce deliberately not
+      # passed, its `run:` already guards the script call with `|| true`),
+      # so it must never be able to fail the step -- but a step-level
+      # timeout-minutes kill bypasses that internal guard entirely (GitHub
+      # Actions marks a timed-out step failed regardless of the shell's own
+      # exit code), which is exactly what happened on run 33630720481
+      # (2026-09-02): the script finished and wrote its manifest at 600s
+      # per its own RUN_DEADLINE_SECONDS budget, but a straggler
+      # ThreadPoolExecutor worker thread -- non-daemon, and at the time
+      # capable of sleeping on an unbounded origin-supplied Retry-After
+      # value (see RETRY_AFTER_CAP_SECONDS in r2_reports_verifier.py) --
+      # kept the process alive until the external 15-minute timeout force-
+      # killed it, which was then recorded as a step failure and cascaded
+      # (via this workflow's default if: success()) to skip STAGE 5 --
+      # Deploy to GitHub Pages. That specific hang is now bounded, but
+      # continue-on-error is added here too so no future timeout on this
+      # observability-only stage, for any reason, can ever again skip the
+      # actual production deploy.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.6a - RX-PUB-A0 Reports Artifact Identity Verifier (observability bake-in)"
         timeout-minutes: 15
+        continue-on-error: true
         if: always()
         env:
           CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
