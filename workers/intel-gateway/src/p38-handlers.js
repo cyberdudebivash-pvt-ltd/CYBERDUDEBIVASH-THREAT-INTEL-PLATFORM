@@ -404,11 +404,22 @@ function _json(data, status = 200) {
 }
 
 async function _loadKvFeed(env) {
+  // PRODUCTION-VERIFICATION FIX (2026-09-02): env.INTEL_KV is not a bound
+  // namespace anywhere in wrangler.toml (see p18/p34/p36/p37-handlers.js's
+  // matching _loadFeed fix notes for the identical THREAT_INTEL_KV defect).
+  // env.INTEL_KV?.get(...) never throws (optional chaining short-circuits
+  // to undefined on the missing binding), so every P38 handler silently
+  // returned NO_FEED / all-zero metrics in production with no visible
+  // error. Redirected to the live R2 key every sibling P-layer already
+  // reads, normalized the same way (bare array or {items:[...]}).
   try {
-    const raw = await env.INTEL_KV?.get('feed:live', 'json');
-    if (Array.isArray(raw) && raw.length > 0) return raw;
-  } catch {}
-  return [];
+    const r2obj = await env.INTEL_R2.get('api/v1/intel/latest.json');
+    if (!r2obj) return [];
+    const data = await r2obj.json();
+    return Array.isArray(data) ? data : (data?.items || []);
+  } catch (_) {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
