@@ -132,7 +132,21 @@ jobs:
             echo "Registry already up to date -- nothing to commit."
             exit 0
           fi
-          git commit -m "ci(frontend-integrity): resync checksum registry [skip ci]"
+          # P0 FIX (release convergence): deliberately no [skip ci] here.
+          # GitHub's skip-ci commit-message scan applies to push AND
+          # pull_request events, and on a squash-merge every constituent
+          # commit's message -- including this one -- is concatenated into
+          # the single merge commit landing on main. A tag meant only to
+          # silence a second CI pass on THIS open PR was therefore also
+          # silencing pages-fast-publish.yml's push/pull_request(closed)
+          # deploy triggers on every merge whose PR happened to touch a
+          # protected frontend asset (confirmed: PR #325 and #323 both
+          # carry this exact sub-commit and both silently failed to deploy).
+          # config/frontend_checksums.json alone doesn't match any other
+          # workflow's path filter except two intentionally-unfiltered
+          # governance gates that are *supposed* to run on every push to
+          # main, so there is no expensive pipeline left to protect here.
+          git commit -m "ci(frontend-integrity): resync checksum registry"
 
           # The PR branch itself (not main) is the push target, so GH013
           # never applies here -- the only reason to retry is an ordinary
