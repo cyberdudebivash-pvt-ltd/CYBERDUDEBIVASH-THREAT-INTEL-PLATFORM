@@ -1785,10 +1785,27 @@ jobs:
       # requires this to become a real HARD FAIL gate eventually).
       # timeout-minutes raised 10->15: each report now does one additional
       # public HTTPS GET on top of the existing R2 HEAD+GET pair.
+      #
+      # PRODUCTION-VERIFICATION FIX (2026-09-02): this step was missing
+      # continue-on-error, unlike every other "observability bake-in"/
+      # advisory gate in this pipeline (STAGE 3.6.5, STAGE 5.9.4, STAGE
+      # 5.9.5). Confirmed live across 3 consecutive runs the same day
+      # (07:09, 10:57, 13:23 UTC) that r2_reports_verifier.py was hitting
+      # this step's external 15-minute timeout on every run (root cause
+      # fixed separately in that script's __main__ block -- an
+      # unbounded concurrent.futures atexit thread-join past its own
+      # 600s internal deadline). Without continue-on-error, that timeout
+      # -- despite this step's own script being explicitly
+      # observability-only and never intended to block anything -- was
+      # skipping ~50 downstream steps every single run, including
+      # "Generate Immutable API Manifests" and the entire P31-P38
+      # certification chain. Matches the exact non-blocking pattern this
+      # step's own design already documents.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.6a - RX-PUB-A0 Reports Artifact Identity Verifier (observability bake-in)"
         timeout-minutes: 15
         if: always()
+        continue-on-error: true
         env:
           CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
           CF_R2_REPORTS_SECRET_KEY: ${{ secrets.CF_R2_REPORTS_SECRET_KEY }}
@@ -4252,4 +4269,29 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         run: python3 scripts/r2_upload.py --p40-only || true
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.7 - Capability Coverage Audit (observability only)
+      # Static grep-based check (scripts/capability_coverage_audit.py) for
+      # backend /api/v1/pXX/* routes with no frontend file referencing them
+      # anywhere in the repo -- the generalized version of the manual audit
+      # that found P34/P36/P37/P38 fully unwired. Writes
+      # data/quality/capability_coverage_report.json every run so drift is
+      # visible without waiting for another manual sweep. Pure text
+      # analysis, no network calls, no dependency on this run's ingested
+      # data -- cannot itself go stale or time out on a slow external call.
+      # Explicitly non-blocking (continue-on-error + its own script always
+      # exits 0 + || true here as a third layer): this is a candidate list
+      # for human triage, not an automatic verdict (many backend-only
+      # routes are correctly API-only/internal/admin-only by design -- see
+      # the script's own header), and per this same pipeline's STAGE 3.6a
+      # incident earlier the same day, a new check that can fail the job
+      # over something it was never meant to gate is worse than the drift
+      # it would catch.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.7 - Capability Coverage Audit (observability only)"
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        run: python3 scripts/capability_coverage_audit.py || true
 

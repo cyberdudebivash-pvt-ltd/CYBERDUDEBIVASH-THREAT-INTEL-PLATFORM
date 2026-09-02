@@ -53,13 +53,16 @@ async function _loadQuality(env, key) {
   // binding as _loadFeed above (see that function's fix note) -- this read
   // was also unguarded and was the actual remaining cause of
   // GET /api/v1/p37/observability's confirmed live 500 even after
-  // _loadFeed was fixed (callers use both). No live equivalent exists for
-  // certification-report data (see this same commit's note on P34-P37's
-  // certification readers), so this is wrapped to fail closed to null
-  // rather than redirected to fabricated data.
+  // _loadFeed was fixed (callers use both).
+  //
+  // PRODUCTION-VERIFICATION FIX (2026-09-02): at the time of the fix above,
+  // no live equivalent existed for certification-report data, so this was
+  // wrapped to fail closed to null. scripts/r2_resync_manifests.py now
+  // uploads data/quality/p3x_certification_report.json to R2 (STAGE 4.1),
+  // so this reads the real report instead of failing closed.
   try {
-    const raw = await env.THREAT_INTEL_KV.get(`quality:${key}`);
-    return raw ? JSON.parse(raw) : null;
+    const r2obj = await env.INTEL_R2.get(`intel/${key}.json`);
+    return r2obj ? await r2obj.json() : null;
   } catch (_) { return null; }
 }
 

@@ -62,6 +62,22 @@ RESYNC_FILES = [
     ("api/v1/intel/apex.json",       "api/v1/intel/apex.json",     "no-cache, no-store, must-revalidate"),
     ("api/v1/intel/manifest.json",   "api/v1/intel/manifest.json", "public, max-age=300"),
     ("api/v1/intel/ai_summary.json", "api/v1/intel/ai_summary.json", "public, max-age=300"),
+    # PRODUCTION-VERIFICATION FIX (2026-09-02): P33-P37's own certification
+    # reports were generated on disk every run (STAGE 3.98-4.02) but never
+    # uploaded anywhere the Worker could read -- p34/p35/p36/p37-handlers.js's
+    # _loadQuality()/_loadQualityReport()/_loadP33Cert() all read
+    # env.THREAT_INTEL_KV, a namespace that has never been bound in
+    # wrangler.toml (same root-cause class as this same file's api/feed.json
+    # fix and p38-handlers.js's _loadKvFeed fix), so those cross-layer
+    # "p35_tier"/"p34_blockers"-style fields on the P34/P36/P37 dashboards
+    # always read UNKNOWN/null. Uploading here (P40's own r2_upload.py
+    # precedent: data/quality/*.json -> R2 intel/*.json) and redirecting
+    # those handlers' loaders to read the same key this script writes.
+    ("data/quality/p33_certification_report.json", "intel/p33_certification_report.json", "public, max-age=300"),
+    ("data/quality/p34_certification_report.json", "intel/p34_certification_report.json", "public, max-age=300"),
+    ("data/quality/p35_certification_report.json", "intel/p35_certification_report.json", "public, max-age=300"),
+    ("data/quality/p36_certification_report.json", "intel/p36_certification_report.json", "public, max-age=300"),
+    ("data/quality/p37_certification_report.json", "intel/p37_certification_report.json", "public, max-age=300"),
 ]
 
 
