@@ -41,6 +41,16 @@ import sys
 import re
 import pathlib
 
+# Reuse the proven double-encoded mojibake corruption signatures (single
+# source of truth -- see fix_all_html_encoding.py header comment for the
+# Latin-1 / Windows-1252 re-encoding math). Do NOT hand-roll a second list
+# here: a prior copy conflated these corruption signatures with the plain,
+# correctly-encoded UTF-8 bytes of common punctuation (em dash, curly
+# quotes, NBSP, rupee sign), which hard-failed this gate on legitimate
+# content (see generate-and-sync.yml run #544-#550).
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from fix_all_html_encoding import MOJIBAKE_TRIPLES
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 ERRORS   = []
@@ -73,21 +83,18 @@ def check_no_bom(data: bytes, fname: str) -> None:
         ok(f"{fname}: No BOM")
 
 def check_no_junk_chars(data: bytes, fname: str) -> None:
-    """Check for common mojibake sequences that indicate encoding corruption."""
-    junk_patterns = [
-        b"\xe2\x80\x94",   # â€" (em dash mojibake)
-        b"\xe2\x82\xb9",   # â‚¹ (rupee mojibake)
-        b"\xc3\xa2",       # Ã¢ (common mojibake prefix)
-        b"\xc2\xa0",       # Â\xa0 (non-breaking space mojibake)
-        b"\xe2\x80\x9c",   # mojibake left double quote (UTF-8 bytes)
-        b"\xe2\x80\x9d",   # mojibake right double quote (UTF-8 bytes)
-        b"\xe2\x80\x98",   # mojibake left single quote (UTF-8 bytes)
-        b"\xf0\x9f\x85\xbf",  # emoji mojibake: P (PayPal icon)
-    ]
-    found = []
-    for pattern in junk_patterns:
-        if pattern in data:
-            found.append(pattern)
+    """Check for genuine mojibake: byte sequences that only occur when a
+    UTF-8 multi-byte character has been misdecoded (Latin-1 / Windows-1252)
+    and re-encoded -- see MOJIBAKE_TRIPLES for the encoding math.
+
+    IMPORTANT: correctly-encoded UTF-8 punctuation (em dash, curly quotes,
+    NBSP, rupee sign, ...) is legitimate content, not corruption, and must
+    NOT be flagged here. A prior version of this check matched the plain
+    single-encoded bytes of those characters -- e.g. b"\\xe2\\x80\\x94" is
+    simply the correct UTF-8 encoding of U+2014 EM DASH, not a mojibake
+    signature -- which hard-failed this gate on legitimate copy.
+    """
+    found = [pattern for pattern, _ in MOJIBAKE_TRIPLES if pattern in data]
     if found:
         fail(f"{fname}: Mojibake/junk char sequences detected ({len(found)} patterns)")
     else:
