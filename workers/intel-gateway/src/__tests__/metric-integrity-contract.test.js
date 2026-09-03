@@ -106,3 +106,44 @@ test("_liveFeedSourceCount exists, is reused by both legacy stats routes and /ap
     "null when the source registry is unavailable, per the contract's own no-invented-integers rule."
   );
 });
+
+// CodeRabbit review findings on this PR (verified against the real failure mode before being
+// accepted, not taken on faith -- see the fix commit's own comments at each call site below).
+test("/api/metrics rejects non-GET methods with 405 (same gap already fixed at /api/reports/list)", () => {
+  const routeStart = source.indexOf('path === "/api/metrics"');
+  assert.ok(routeStart > -1, "route not found (see first test)");
+  const routeBody = source.slice(routeStart, routeStart + 600);
+  assert.match(
+    routeBody, /if\s*\(\s*method\s*!==\s*"GET"\s*\)/,
+    "/api/metrics must reject non-GET requests before doing any work, matching the method !== \"GET\" " +
+    "-> 405 guard already established at /api/reports/list and /api/reports/{id}."
+  );
+  assert.match(
+    routeBody, /405,\s*\{\s*"Allow":\s*"GET"\s*\}/,
+    "/api/metrics's 405 response must include an Allow: GET header, matching this file's existing " +
+    "method_not_allowed convention."
+  );
+});
+
+test("/api/metrics computes freshness from feedData.generated_at, not stats.last_sync", () => {
+  const routeStart = source.indexOf('path === "/api/metrics"');
+  const routeBody = source.slice(routeStart, routeStart + 3000);
+  assert.match(
+    routeBody, /classifyFreshness\(\s*lastFeedSyncUtc\s*\)/,
+    "/api/metrics must classify freshness from feedData.generated_at (aliased here as " +
+    "lastFeedSyncUtc), not stats.last_sync -- stats.last_sync is the newest item's own published " +
+    "date, not \"when this platform last synced,\" the exact distinction /api/health's own " +
+    "data_freshness fix already established elsewhere in this file. Using the wrong signal can mask " +
+    "a silently-broken ingest pipeline as FRESH, or wrongly report a fresh backfill batch as STALE."
+  );
+  assert.doesNotMatch(
+    routeBody, /classifyFreshness\(\s*stats\.last_sync\s*\)/,
+    "/api/metrics regressed to classifying freshness from stats.last_sync -- see the previous " +
+    "assertion's message for why this is wrong for this specific field."
+  );
+  assert.match(
+    routeBody, /last_feed_sync_utc:\s*lastFeedSyncUtc/,
+    "last_feed_sync_utc must report the same feedData.generated_at-derived value used for the " +
+    "freshness classification above, not a second, differently-sourced timestamp."
+  );
+});

@@ -5257,10 +5257,25 @@ async function handleRequest(request, env, ctx) {
   // fabricated number, matching the sample file's own explicit rule:
   // "Shipping this file with invented integers is a contract violation."
   if (path === "/api/metrics") {
+    // CodeRabbit review finding on this PR (verified, not taken on faith):
+    // same GET-only gap already fixed at /api/reports/list and
+    // /api/reports/{id} above (PR #242) -- nothing rejected a non-GET call
+    // before this, so e.g. POST would still dispatch a normal 200 read.
+    if (method !== "GET") {
+      return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
+    }
     const feedData = await loadFeedItems(env);
     const items = feedData.items || [];
     const stats = computeStats(items);
-    const freshness = classifyFreshness(stats.last_sync);
+    // CodeRabbit review finding on this PR (verified, not taken on faith):
+    // same stats.last_sync-vs-feedData.generated_at distinction already
+    // fixed at /api/health above (see that route's own comment for the
+    // full incident this matters for) -- stats.last_sync is the newest
+    // item's own published date, not "when this platform last
+    // synced/ingested," and using it here can mask the same silently-
+    // broken-pipeline class /api/health's fix exists to catch.
+    const lastFeedSyncUtc = feedData.generated_at || null;
+    const freshness = classifyFreshness(lastFeedSyncUtc);
     const feedSourceCount = await _liveFeedSourceCount(env);
 
     // Unique (type, value) IOCs across items published in the last 30 days --
@@ -5291,7 +5306,7 @@ async function handleRequest(request, env, ctx) {
       feed_source_count: feedSourceCount,
       ioc_count_unique_30d: uniqueIocs30d.size,
       stix_bundles_available: stixBundlesAvailable,
-      last_feed_sync_utc: stats.last_sync !== "N/A" ? stats.last_sync : null,
+      last_feed_sync_utc: lastFeedSyncUtc,
       freshness: freshness.state,
       freshness_age_seconds: freshness.age_seconds,
       api_uptime_30d_pct: null,

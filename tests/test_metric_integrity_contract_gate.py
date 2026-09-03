@@ -86,6 +86,17 @@ class TestNavLeakageScan(unittest.TestCase):
         findings = gate._scan_nav_leakage(["a.html"], ["MSSP Console"])
         self.assertEqual(findings, [])
 
+    def test_filename_outside_script_src_does_not_exempt(self):
+        # CodeRabbit review finding (verified, not taken on faith): the
+        # runtime-detection check used to be a bare substring test over the
+        # whole page, so a filename mentioned in a comment -- with no actual
+        # <script src> loading it -- wrongly exempted a page that ships a
+        # genuinely unguarded restricted nav link.
+        self._write("a.html", '<a href="/x">MSSP Console</a><!-- metric-normalize.js -->')
+        findings = gate._scan_nav_leakage(["a.html"], ["MSSP Console"])
+        self.assertEqual(len(findings), 1)
+        self.assertIn("MSSP Console", findings[0]["unguarded_nav_labels"])
+
     def test_label_not_present_produces_no_finding(self):
         self._write("a.html", '<nav><a href="/pricing.html">Pricing</a></nav>')
         findings = gate._scan_nav_leakage(["a.html"], ["MSSP Console"])

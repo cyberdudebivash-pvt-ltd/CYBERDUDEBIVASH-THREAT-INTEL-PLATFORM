@@ -116,6 +116,21 @@ def _scan_forbidden_hardcodes(pages: list[str], forbidden: list[str]) -> list[di
     return findings
 
 
+# Same <script src="..."> pattern already established in
+# scripts/frontend_api_coverage_gate.py's _SCRIPT_SRC_RE for the identical
+# purpose (detecting a real client-side script inclusion, not a filename
+# appearing anywhere in the page) -- reused as an idiom, not re-derived.
+_SCRIPT_SRC_RE = re.compile(r'<script[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
+
+
+def _has_hiding_runtime(text: str) -> bool:
+    for m in _SCRIPT_SRC_RE.finditer(text):
+        src = m.group(1)
+        if "metric-normalize.js" in src or "p0-public-contract.js" in src:
+            return True
+    return False
+
+
 def _scan_nav_leakage(pages: list[str], hide_labels: list[str]) -> list[dict]:
     # Loose, intentionally conservative: a real anchor/button text exactly
     # matching a hide_until_auth label, present in the raw page source with
@@ -124,6 +139,12 @@ def _scan_nav_leakage(pages: list[str], hide_labels: list[str]) -> list[dict]:
     # is exempt here even if hidden nav-hiding logic runs after this script's
     # static read -- this check cannot execute JS, only flag pages with no
     # hiding mechanism wired in at all.
+    #
+    # CodeRabbit review finding on this PR (verified, not taken on faith):
+    # the previous check was a bare substring test over the whole page --
+    # `<a>MSSP Console</a><!-- metric-normalize.js -->` would wrongly exempt
+    # a page with no real script load at all. _has_hiding_runtime requires
+    # the filename to actually appear as a <script src="..."> value.
     label_res = [re.compile(r">\s*" + re.escape(label) + r"\s*<", re.IGNORECASE) for label in hide_labels]
     findings = []
     for page in pages:
@@ -132,8 +153,7 @@ def _scan_nav_leakage(pages: list[str], hide_labels: list[str]) -> list[dict]:
             text = path.read_text(encoding="utf-8", errors="replace")
         except Exception:
             continue
-        has_hiding_runtime = "metric-normalize.js" in text or "p0-public-contract.js" in text
-        if has_hiding_runtime:
+        if _has_hiding_runtime(text):
             continue
         hit_labels = [hide_labels[i] for i, r in enumerate(label_res) if r.search(text)]
         if hit_labels:
