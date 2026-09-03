@@ -123,7 +123,19 @@ STATUS_NOTE = {
 
 
 def main():
-    report = json.loads(COVERAGE_REPORT.read_text())
+    if not COVERAGE_REPORT.exists():
+        raise SystemExit(
+            f"[FATAL] {COVERAGE_REPORT.relative_to(REPO_ROOT)} does not exist. "
+            f"Run scripts/frontend_api_coverage_gate.py first (STAGE 3.92b runs "
+            f"before this step in sentinel-blogger.yml)."
+        )
+    try:
+        report = json.loads(COVERAGE_REPORT.read_text())
+    except json.JSONDecodeError as e:
+        raise SystemExit(
+            f"[FATAL] {COVERAGE_REPORT.relative_to(REPO_ROOT)} is not valid JSON ({e}). "
+            f"Re-run scripts/frontend_api_coverage_gate.py to regenerate it."
+        )
     entries = []
 
     for p in report["dynamic_pages"]:

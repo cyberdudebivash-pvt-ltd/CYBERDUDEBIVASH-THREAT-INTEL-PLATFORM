@@ -2008,7 +2008,10 @@ jobs:
       - name: "STAGE 3.92c - Capability Registry Rebuild"
         if: ${{ !cancelled() }}
         timeout-minutes: 2
-        run: python3 scripts/build_capability_registry.py
+        run: |
+          python3 scripts/build_capability_registry.py
+          read -r TOTAL UNCLASSIFIED ORPHANS CUSTOMER_UI ADMIN INTERNAL <<< "$(python3 scripts/ci_stats_extract.py capability_registry 2>/dev/null || echo '? ? ? ? ? ?')"
+          echo "::notice::Capability registry: ${TOTAL} pages classified (${CUSTOMER_UI} CUSTOMER_UI / ${ADMIN} ADMIN / ${INTERNAL} INTERNAL), unclassified=${UNCLASSIFIED} (target 0), known orphans pending live-API wiring=${ORPHANS} (tracked, non-blocking -- see data/quality/frontend_capability_registry.json)."
 
       # -----------------------------------------------------------------------
       # STAGE 3.92d: CAPABILITY REGISTRY GATE (HARD FAIL GATE)
