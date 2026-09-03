@@ -223,7 +223,7 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
       return;
     }
     el.innerHTML = cves.slice(0, 8).map(function (c) {
-      var meta = [c.severity, "CVSS " + (c.cvss_score != null ? c.cvss_score : "N/A")].filter(Boolean).join(" &middot; ");
+      var meta = [c.severity ? esc(c.severity) : null, "CVSS " + (c.cvss_score != null ? c.cvss_score : "N/A")].filter(Boolean).join(" &middot; ");
       var kevBadge = c.kev ? '<span class="pill" style="margin-left:8px">KEV</span>' : "";
       return '<div class="cdb-live-adv">' +
         '<div class="t">' + esc(c.id) + kevBadge + '</div>' +
@@ -248,7 +248,6 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     var timer = setTimeout(function () { ctrl.abort(); }, 12000);
     fetch(API_BASE + "/api/v1/cve/live?limit=8", { signal: ctrl.signal, headers: { Accept: "application/json" }, cache: "no-cache" })
       .then(function (resp) {
-        clearTimeout(timer);
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         return resp.json();
       })
@@ -268,9 +267,9 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
         if (updated) updated.textContent = data.generated_at ? ("Updated " + esc(data.generated_at)) : "Live";
       })
       .catch(function () {
-        clearTimeout(timer);
         setUnavailable();
-      });
+      })
+      .finally(function () { clearTimeout(timer); });
   }
 
   if (document.readyState === "loading") {

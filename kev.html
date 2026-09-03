@@ -267,7 +267,7 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     }
     el.innerHTML = items.slice(0, 10).map(function (it) {
       var due = it.kev_due ? ("Due " + esc(it.kev_due)) : null;
-      var meta = [it.kev_product || null, due, it.source || it.feed_source || null].filter(Boolean).join(" &middot; ");
+      var meta = [it.kev_product ? esc(it.kev_product) : null, due, (it.source || it.feed_source) ? esc(it.source || it.feed_source) : null].filter(Boolean).join(" &middot; ");
       return '<div class="cdb-live-adv">' +
         '<div class="t">' + esc(it.title || it.kev_name || "Untitled Advisory") + '<span class="pill" style="margin-left:8px">KEV</span></div>' +
         '<div class="m">' + meta + '</div>' +
@@ -291,7 +291,6 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     var timer = setTimeout(function () { ctrl.abort(); }, 12000);
     fetch(API_BASE + "/api/v1/intel/latest.json", { signal: ctrl.signal, headers: { Accept: "application/json" }, cache: "no-cache" })
       .then(function (resp) {
-        clearTimeout(timer);
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         return resp.json();
       })
@@ -307,9 +306,9 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
         if (updated) updated.textContent = data.generated_at ? ("Updated " + esc(data.generated_at)) : "Live";
       })
       .catch(function () {
-        clearTimeout(timer);
         setUnavailable();
-      });
+      })
+      .finally(function () { clearTimeout(timer); });
   }
 
   if (document.readyState === "loading") {

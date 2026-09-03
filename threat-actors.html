@@ -309,7 +309,7 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
       return;
     }
     el.innerHTML = items.slice(0, 6).map(function (it) {
-      var meta = [it.source, it.severity, it.published ? timeAgo(it.published) : null].filter(Boolean).join(" &middot; ");
+      var meta = [it.source ? esc(it.source) : null, it.severity ? esc(it.severity) : null, it.published ? timeAgo(it.published) : null].filter(Boolean).join(" &middot; ");
       return '<div class="cdb-live-adv">' +
         '<div class="t">' + esc(it.title) + '</div>' +
         '<div class="m">' + meta + '</div>' +
@@ -335,7 +335,6 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     var timer = setTimeout(function () { ctrl.abort(); }, 12000);
     fetch(API_BASE + "/api/v1/intel/apt", { signal: ctrl.signal, headers: { Accept: "application/json" }, cache: "no-cache" })
       .then(function (resp) {
-        clearTimeout(timer);
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         return resp.json();
       })
@@ -352,9 +351,9 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
         if (updated) updated.textContent = data.generated_at ? ("Updated " + timeAgo(data.generated_at)) : "Live";
       })
       .catch(function () {
-        clearTimeout(timer);
         setUnavailable();
-      });
+      })
+      .finally(function () { clearTimeout(timer); });
   }
 
   if (document.readyState === "loading") {
