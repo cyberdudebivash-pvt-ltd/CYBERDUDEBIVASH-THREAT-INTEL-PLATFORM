@@ -2033,6 +2033,25 @@ jobs:
         run: python3 scripts/capability_registry_gate.py
 
       # -----------------------------------------------------------------------
+      # STAGE 3.92e: METRIC INTEGRITY + PUBLIC NAV CONTRACT GATE (bake-in)
+      # Validates two contracts a concurrent session landed on main the same
+      # day as the capability registry above (p0-revenue-os/config/
+      # metric_integrity_contract.json, p0-revenue-os/config/public_nav.json)
+      # -- neither had an enforcement mechanism before this. Same bake-in
+      # rollout pattern as STAGE 3.92b: first real run against the live
+      # site, findings are a candidate list for human triage, not yet a
+      # hard gate. See scripts/metric_integrity_contract_gate.py's own
+      # header for the full rationale and both checks it runs.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.92e - Metric Integrity + Public Nav Contract Gate (bake-in)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 2
+        run: |
+          python3 scripts/metric_integrity_contract_gate.py
+          read -r SCANNED HARDCODE_PAGES NAV_PAGES <<< "$(python3 scripts/ci_stats_extract.py metric_integrity_contract 2>/dev/null || echo '? ? ?')"
+          echo "::notice::Metric/nav contract scan: ${SCANNED} CUSTOMER_UI pages scanned, ${HARDCODE_PAGES} page(s) with a forbidden hardcoded number, ${NAV_PAGES} page(s) with an unguarded restricted-nav label (bake-in, non-blocking -- see data/quality/metric_integrity_contract_report.json)."
+
+      # -----------------------------------------------------------------------
       # STAGE 3.93: IMMUTABLE API MANIFEST GENERATOR (v184.0 -- REPLACES INJECT)
       # ARCHITECTURE CHANGE (v184.0 -- PERMANENT):
       #   OLD: inject_embedded_intel.py mutated index.html at deploy time.

@@ -59,7 +59,18 @@ def check_file(f: pathlib.Path) -> list[str]:
         text = data.decode("ascii", errors="replace")
         non_empty = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
         last_line  = non_empty[-1].strip() if non_empty else ""
-        if last_line not in VALID_EOF:
+        # Verified defect (2026-09-03, deploy-worker.yml run 33669781679): an
+        # exact-equality check against VALID_EOF's bare tokens fails any file
+        # whose last line is a real statement ending in one of those tokens
+        # rather than nothing but the token alone -- e.g. intel-static-proxy.js's
+        # legitimate `export { handleIntelStaticProxy, INTEL_STATIC_PROXY };`.
+        # That file was flagged TRUNCATED_EOF and blocked deploy-worker.yml
+        # though it is not truncated (confirmed: valid export statement,
+        # 5513 bytes, ends with a newline). Suffix match preserves this
+        # gate's actual intent -- reject a file that does NOT end in a
+        # closing token -- without penalizing a closing statement that has
+        # trailing content before the token.
+        if not any(last_line.endswith(tok) for tok in VALID_EOF):
             errors.append(f"TRUNCATED_EOF: last non-empty line is {repr(last_line[:60])} (not a valid JS closing token)")
     except Exception as e:
         errors.append(f"EOF_CHECK_ERROR: {e}")
