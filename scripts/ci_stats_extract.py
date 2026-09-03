@@ -252,6 +252,19 @@ _REPORTS: dict = {
             d.get("capability_registry", {}).get("customer_ui_count", 0),
         ],
     ),
+    "capability_runtime": (
+        _ROOT / "data" / "quality" / "capability_runtime_certification.json",
+        lambda d: [
+            d.get("total_customer_ui", 0),
+            d.get("verdict_counts", {}).get("DYNAMIC_VERIFIED", 0),
+            d.get("verdict_counts", {}).get("STATIC_VALID", 0),
+            d.get("verdict_counts", {}).get("AUTH_GATED", 0),
+            d.get("verdict_counts", {}).get("DEGRADED", 0),
+            d.get("verdict_counts", {}).get("BROKEN", 0),
+            d.get("verdict_counts", {}).get("ORPHANED", 0),
+            d.get("verdict_counts", {}).get("MISCLASSIFIED", 0),
+        ],
+    ),
 }
 
 _FALLBACKS = {
@@ -280,6 +293,7 @@ _FALLBACKS = {
     "capability_registry": "? ? ? ? ? ?",
     "metric_integrity_contract": "? ? ?",
     "p41": "UNKNOWN 0 0 0 0 0",
+    "capability_runtime": "0 0 0 0 0 0 0 0",
 }
 
 

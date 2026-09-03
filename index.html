@@ -10704,9 +10704,6 @@
                     : _prioNum === 3 ? 'Schedule remediation during routine maintenance window.'
                     : 'Routine monitoring sufficient; no immediate action required.';
 
-                // Actor context (only for attributed threats)
-                const _actorCtx = (item.actor_tag && item.actor_tag !== 'UNC-CDB-99') ? ` Attributed to <b>${item.actor_tag}</b>.` : '';
-
                 // v184.0 FIX: Prefer real CVE description from feed over boilerplate template.
                 // Strip leading "CVE-YYYY-NNNNN " prefix; use remainder if >30 chars.
                 const _rawFeedDesc = String(item.description || item.summary || '').trim();
@@ -10719,6 +10716,15 @@
                 const _escFeedDesc = (s) => String(s)
                     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
                     .replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+                // P0 Runtime Convergence XSS fix: actor_tag is the same class of
+                // feed-sourced field as the description above (attribution data
+                // can originate from external/AI-derived sources) and was being
+                // concatenated into _sumText -- which IS rendered via innerHTML
+                // a few lines below -- with zero escaping, missed when the
+                // v184.0 fix above covered description/summary but not this
+                // sibling field. Reuses the identical _escFeedDesc() helper
+                // already defined for that fix rather than adding a second one.
+                const _actorCtx = (item.actor_tag && item.actor_tag !== 'UNC-CDB-99') ? ` Attributed to <b>${_escFeedDesc(item.actor_tag)}</b>.` : '';
                 const _feedDescSentence = _hasRealDesc
                     ? _escFeedDesc(_strippedDesc.charAt(0).toUpperCase() + _strippedDesc.slice(1))
                     : '';
@@ -21678,9 +21684,23 @@ a:focus-visible {
   /* Expose for manual refresh buttons */
   window.CDB_NEWS={refresh:refreshNews};
 
-  /* FIX v148.0 — LIVE DATA BRIDGE: fetch /api/apex_v2/priority.json → window.__GOC_LIVE_INTEL */
+  /* FIX v148.0 — LIVE DATA BRIDGE: fetch /api/feed.json → window.__GOC_LIVE_INTEL
+     P0 Runtime Convergence session: verified live (2026-09-03) that
+     /api/apex_v2/priority.json and /api/apex_v2/critical.json both return
+     404 in production -- /api/* is entirely Worker-routed per
+     wrangler.toml, and workers/intel-gateway/src/index.js has no handler
+     for /api/apex_v2/* (the files under the repo's own api/apex_v2/
+     directory are not served at that URL; likely a stale reference to a
+     prior architecture). The forEach+done-guard fallback already made this
+     harmless functionally (api/feed.json, the 3rd URL, always won), but
+     the first two entries cost two guaranteed-failing requests on every
+     homepage load for zero benefit. Removed rather than fixed forward:
+     building /api/apex_v2/* routes is a backend change outside this
+     session's frontend-runtime scope, and the working fallback already
+     covers this page's actual need -- see this session's PR description
+     for the full finding. */
   function _fetchLiveIntel(cb){
-    var urls=['/api/apex_v2/priority.json','/api/apex_v2/critical.json','/api/feed.json'];
+    var urls=['/api/feed.json'];
     var done=false;
     urls.forEach(function(url){
       if(done)return;
