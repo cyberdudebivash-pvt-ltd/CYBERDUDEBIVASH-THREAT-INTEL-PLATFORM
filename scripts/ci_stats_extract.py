@@ -240,7 +240,13 @@ _FALLBACKS = {
     "p38": "UNKNOWN 0 0 0 0",
     "p40": "UNKNOWN 0 0 0 0 0",
     "rx_pub_a0": "0 0 0 0 0 0 0 0 0 0 0",
-    "frontend_api_coverage": "0 0 0 0",
+    # CodeRabbit finding on PR #336 (verified, not taken on faith): all-zero
+    # fallback values here are indistinguishable from a genuine "0 dynamic
+    # pages" reading, so a script crash that leaves no report behind (never
+    # reaches its own atomic write) would print a normal-looking coverage
+    # notice instead of visibly failing. "?" placeholders match this file's
+    # own p21 convention for the same reason (an all-numeric fallback tuple).
+    "frontend_api_coverage": "? ? ? ?",
 }
 
 

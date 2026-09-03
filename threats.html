@@ -354,7 +354,6 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     var timer = setTimeout(function () { ctrl.abort(); }, 12000);
     return fetch(API_BASE + path, { signal: ctrl.signal, headers: { Accept: "application/json" }, cache: "no-cache" })
       .then(function (resp) {
-        clearTimeout(timer);
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         return resp.json();
       })
@@ -380,7 +379,7 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
       return;
     }
     el.innerHTML = items.slice(0, 8).map(function (it) {
-      var meta = [it.severity, it.feed_source || it.source, it.published_at ? timeAgo(it.published_at) : null].filter(Boolean).join(" &middot; ");
+      var meta = [it.severity ? esc(it.severity) : null, esc(it.feed_source || it.source || "") || null, it.published_at ? timeAgo(it.published_at) : null].filter(Boolean).join(" &middot; ");
       return '<div class="cdb-live-adv">' +
         '<div class="t">' + esc(it.title || "Untitled Advisory") + '</div>' +
         '<div class="m">' + meta + '</div>' +

@@ -417,6 +417,22 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
+  // CodeRabbit finding on PR #336 (verified, not taken on faith): esc()
+  // above does not escape a single quote, and every renderDetail(...) call
+  // site below embeds a CVE id inside a single-quoted JS string literal
+  // nested in an HTML onclick attribute -- the browser HTML-decodes the
+  // attribute value BEFORE parsing it as JS, so encoding a quote as
+  // &#39; would still decode back to a raw ' inside that JS string and
+  // break out of it just the same; esc() alone can never close this for a
+  // value used in that position. Real CVE ids from NVD are always
+  // CVE-YYYY-NNNN..., so validating the shape before it ever reaches the
+  // onclick string (rather than restructuring to a delegated event
+  // listener, a larger change) closes the gap with no behavior change for
+  // any well-formed id.
+  function safeIdForOnclick(id) {
+    return /^CVE-\d{4}-\d{4,}$/.test(String(id || '')) ? id : '';
+  }
+
   // Tracker state
   var state = {
     cves:      [],
@@ -437,12 +453,17 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     state.loading = true;
     setRefreshSpinner(true);
 
-    var url = API_BASE + '/api/v1/cve/live?limit=200&days=' + state.days;
+    var url = API_BASE + '/api/v1/cve/live?limit=200';
     if (state.severity !== 'ALL') url += '&severity=' + state.severity;
     if (state.query)              url += '&q=' + encodeURIComponent(state.query);
 
-    fetch(url, { cache: 'no-store' })
-      .then(function(r) { return r.json(); })
+    var loadCtrl  = new AbortController();
+    var loadTimer = setTimeout(function() { loadCtrl.abort(); }, 12000);
+    fetch(url, { cache: 'no-store', signal: loadCtrl.signal })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function(data) {
         state.cves      = data.cves  || [];
         state.stats     = data.stats || {};
@@ -457,16 +478,28 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
         setRefreshSpinner(false);
         var tbody = document.getElementById('cve-tbody');
         if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="padding:30px;text-align:center;color:#ff1a1a;font-family:var(--font-mono);font-size:11px;">ERROR LOADING CVE DATA. CHECK NETWORK. ' + esc(err.message) + '</td></tr>';
-      });
+      })
+      .finally(function() { clearTimeout(loadTimer); });
   }
 
   // ── Filter ──────────────────────────────────────────────────────────────────
   function filter() {
     var q   = state.query.toLowerCase().trim();
     var sev = state.severity;
+    // CodeRabbit finding on PR #336 (verified, not taken on faith):
+    // /api/v1/cve/live only reads severity/q/limit/offset -- confirmed
+    // against workers/intel-gateway/src/index.js, which never parses a
+    // "days" query param -- so sending &days=... on the request did
+    // nothing, and the "Last 7/30/90 Days" select was non-functional.
+    // Filtering client-side against the already-fetched window is a
+    // self-contained fix that makes the existing control real without
+    // adding new surface to the shared backend Worker for one field.
+    var cutoff = Date.now() - (state.days * 24 * 60 * 60 * 1000);
     state.filtered = state.cves.filter(function(c) {
       if (sev !== 'ALL' && c.severity !== sev) return false;
       if (q && !(c.id || '').toLowerCase().includes(q) && !(c.description || '').toLowerCase().includes(q)) return false;
+      var ts = Date.parse(c.published || c.last_modified || '');
+      if (isFinite(ts) && ts < cutoff) return false;
       return true;
     });
     state.page = 0;
@@ -515,18 +548,25 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     var rows = page.map(function(c) {
       var sColor  = severityColor(c.severity);
       var cColor  = cvssColor(c.cvss_score);
+      // CodeRabbit finding on PR #336 (verified, not taken on faith):
+      // c.cvss_score.toFixed(1) below throws if the API ever returns this
+      // as a numeric string rather than a JSON number -- cvssColor() above
+      // already guards the same value with parseFloat(...) || 0 for
+      // exactly this reason; reuse that same coercion here instead of a
+      // second, inconsistent guard.
+      var cvssNum = parseFloat(c.cvss_score) || 0;
       var desc    = (c.description || 'No description available.').slice(0, 120);
       if ((c.description || '').length > 120) desc += '…';
       var kevBadge = c.kev ? '<span style="display:inline-block;margin-left:4px;padding:1px 5px;background:rgba(255,26,26,0.2);border:1px solid #ff1a1a;border-radius:2px;font-size:8px;color:#ff1a1a;font-weight:700;">KEV</span>' : '';
       return '<tr style="border-bottom:1px solid rgba(22,32,48,0.8);transition:background 0.15s;" onmouseover="this.style.background=\'rgba(0,212,170,0.04)\'" onmouseout="this.style.background=\'\'">'+
-        '<td style="padding:10px 12px;white-space:nowrap;"><a href="#" onclick="event.preventDefault();window.cdbCVETracker.renderDetail(\''+esc(c.id)+'\')" style="color:#00d4aa;text-decoration:none;font-weight:700;font-family:var(--font-mono);font-size:11px;">'+esc(c.id)+'</a>'+kevBadge+'</td>'+
+        '<td style="padding:10px 12px;white-space:nowrap;"><a href="#" onclick="event.preventDefault();window.cdbCVETracker.renderDetail(\''+safeIdForOnclick(c.id)+'\')" style="color:#00d4aa;text-decoration:none;font-weight:700;font-family:var(--font-mono);font-size:11px;">'+esc(c.id)+'</a>'+kevBadge+'</td>'+
         '<td style="padding:10px 12px;"><span style="display:inline-block;padding:3px 8px;border-radius:2px;border:1px solid '+sColor+';color:'+sColor+';font-size:9px;font-weight:700;letter-spacing:1px;background:'+sColor+'18;">'+esc(c.severity||'NONE')+'</span></td>'+
-        '<td style="padding:10px 12px;"><span style="color:'+cColor+';font-weight:700;font-size:13px;">'+( c.cvss_score > 0 ? c.cvss_score.toFixed(1) : 'N/A' )+'</span></td>'+
+        '<td style="padding:10px 12px;"><span style="color:'+cColor+';font-weight:700;font-size:13px;">'+( cvssNum > 0 ? cvssNum.toFixed(1) : 'N/A' )+'</span></td>'+
         '<td style="padding:10px 12px;color:var(--text);max-width:320px;line-height:1.4;">'+esc(desc)+'</td>'+
         '<td style="padding:10px 12px;color:var(--muted);white-space:nowrap;">'+esc(formatDate(c.published))+'</td>'+
         '<td style="padding:10px 12px;color:var(--muted);white-space:nowrap;">'+esc(formatDate(c.last_modified))+'</td>'+
         '<td style="padding:10px 12px;"><span style="font-size:9px;color:var(--muted);">'+esc((c.vuln_status||'').replace(/_/g,' '))+'</span></td>'+
-        '<td style="padding:10px 12px;text-align:center;"><button onclick="window.cdbCVETracker.renderDetail(\''+esc(c.id)+'\')" style="padding:4px 10px;font-family:var(--font-mono);font-size:9px;border:1px solid rgba(0,212,170,0.4);border-radius:2px;background:rgba(0,212,170,0.08);color:#00d4aa;cursor:pointer;letter-spacing:1px;">DETAIL</button></td>'+
+        '<td style="padding:10px 12px;text-align:center;"><button onclick="window.cdbCVETracker.renderDetail(\''+safeIdForOnclick(c.id)+'\')" style="padding:4px 10px;font-family:var(--font-mono);font-size:9px;border:1px solid rgba(0,212,170,0.4);border-radius:2px;background:rgba(0,212,170,0.08);color:#00d4aa;cursor:pointer;letter-spacing:1px;">DETAIL</button></td>'+
         '</tr>';
     });
 
@@ -583,11 +623,17 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     if (title) title.textContent = cveId;
     body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);font-family:var(--font-mono);"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid #00d4aa;border-top-color:transparent;animation:spin 0.8s linear infinite;margin-right:8px;vertical-align:middle;"></span>FETCHING CVE DETAIL...</div>';
 
-    fetch(API_BASE + '/api/v1/cve/detail?id=' + encodeURIComponent(cveId), { cache: 'no-store' })
-      .then(function(r) { return r.json(); })
+    var detailCtrl  = new AbortController();
+    var detailTimer = setTimeout(function() { detailCtrl.abort(); }, 12000);
+    fetch(API_BASE + '/api/v1/cve/detail?id=' + encodeURIComponent(cveId), { cache: 'no-store', signal: detailCtrl.signal })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function(c) {
         var sColor = severityColor(c.severity);
         var cColor = cvssColor(c.cvss_score);
+        var cvssNum = parseFloat(c.cvss_score) || 0;
         var affected = (c.affected_products || []).map(function(a){ return '<li style="font-size:10px;margin:3px 0;color:var(--muted);">'+esc(a)+'</li>'; }).join('');
         var refs     = (c.references || []).map(function(r){ return '<li style="margin:4px 0;"><a href="'+esc(r)+'" target="_blank" rel="noopener" style="color:#00d4aa;font-size:10px;word-break:break-all;">'+esc(r)+'</a></li>'; }).join('');
         var cwes     = (c.cwe_ids || []).map(function(w){ return '<span style="display:inline-block;padding:2px 8px;border:1px solid rgba(139,92,246,0.4);border-radius:2px;color:#a78bfa;font-size:10px;margin:2px;">'+esc(w)+'</span>'; }).join('');
@@ -601,7 +647,7 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
             '</div>'+
             '<div style="background:rgba(0,0,0,0.3);border-radius:4px;padding:16px;text-align:center;border:1px solid '+cColor+'33;">'+
               '<p style="font-family:var(--font-mono);font-size:8px;color:var(--muted);letter-spacing:2px;margin:0 0 8px;">CVSS SCORE</p>'+
-              '<div style="font-size:28px;font-weight:900;color:'+cColor+';font-family:var(--font-mono);">'+(c.cvss_score>0?c.cvss_score.toFixed(1):'N/A')+'</div>'+
+              '<div style="font-size:28px;font-weight:900;color:'+cColor+';font-family:var(--font-mono);">'+(cvssNum>0?cvssNum.toFixed(1):'N/A')+'</div>'+
             '</div>'+
             '<div style="background:rgba(0,0,0,0.3);border-radius:4px;padding:16px;text-align:center;border:1px solid rgba(100,116,139,0.3);">'+
               '<p style="font-family:var(--font-mono);font-size:8px;color:var(--muted);letter-spacing:2px;margin:0 0 8px;">STATUS</p>'+
@@ -623,7 +669,8 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
       })
       .catch(function(err) {
         body.innerHTML = '<p style="color:#ff1a1a;font-family:var(--font-mono);text-align:center;padding:40px;">ERROR LOADING CVE DETAIL: '+esc(err.message)+'</p>';
-      });
+      })
+      .finally(function() { clearTimeout(detailTimer); });
   }
 
   // ── Public API ───────────────────────────────────────────────────────────────
@@ -656,8 +703,10 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
 
     setDays: function(d) {
       state.days = parseInt(d, 10) || 7;
-      state.page = 0;
-      load();
+      // Client-side filter over the already-fetched window (see filter())
+      // -- no network round-trip needed for a day-range change now that
+      // the backend never read this param anyway.
+      filter();
     },
 
     prevPage: function() {

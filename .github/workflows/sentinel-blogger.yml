@@ -1976,9 +1976,21 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         run: |
-          python3 scripts/frontend_api_coverage_gate.py || true
-          read -r TOTAL DYNAMIC ALLOWED UNCLASSIFIED <<< "$(python3 scripts/ci_stats_extract.py frontend_api_coverage 2>/dev/null || echo '0 0 0 0')"
-          echo "::notice::Frontend API coverage: ${DYNAMIC}/${TOTAL} top-level pages call the platform API; ${ALLOWED} static pages allowlisted, ${UNCLASSIFIED} static pages unclassified (observability-only -- see data/quality/frontend_api_coverage_report.json)."
+          # CodeRabbit finding on PR #336 (verified, not taken on faith): the
+          # step must never silently present a stale or missing report as a
+          # normal reading. Remove any report left from a previous run first
+          # -- this repo never commits it (gitignored, R2/CI-generated), but
+          # removing it defensively costs nothing and rules out a checked-out
+          # stale copy on principle. If the script crashes before its own
+          # atomic write, no report exists afterward either way.
+          rm -f data/quality/frontend_api_coverage_report.json
+          if python3 scripts/frontend_api_coverage_gate.py; then
+            read -r TOTAL DYNAMIC ALLOWED UNCLASSIFIED <<< "$(python3 scripts/ci_stats_extract.py frontend_api_coverage 2>/dev/null || echo '? ? ? ?')"
+            echo "::notice::Frontend API coverage: ${DYNAMIC}/${TOTAL} top-level pages call the platform API; ${ALLOWED} static pages allowlisted, ${UNCLASSIFIED} static pages unclassified (observability-only -- see data/quality/frontend_api_coverage_report.json)."
+          else
+            echo "::warning::STAGE 3.92b: frontend_api_coverage_gate.py exited non-zero -- no fresh coverage report was produced this run (observability-only, does not fail the pipeline, but the last known reading below may be stale or absent)."
+            python3 scripts/ci_stats_extract.py frontend_api_coverage 2>/dev/null || echo "? ? ? ?"
+          fi
 
       # -----------------------------------------------------------------------
       # STAGE 3.93: IMMUTABLE API MANIFEST GENERATOR (v184.0 -- REPLACES INJECT)

@@ -268,7 +268,7 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
       return;
     }
     el.innerHTML = items.slice(0, 6).map(function (a) {
-      var meta = [a.source, a.severity, a.published ? timeAgo(a.published) : null].filter(Boolean).join(" &middot; ");
+      var meta = [a.source ? esc(a.source) : null, a.severity ? esc(a.severity) : null, a.published ? timeAgo(a.published) : null].filter(Boolean).join(" &middot; ");
       return '<div class="cdb-live-adv">' +
         '<div class="t">' + esc(a.title) + '</div>' +
         '<div class="m">' + meta + '</div>' +
@@ -294,7 +294,6 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     var timer = setTimeout(function () { ctrl.abort(); }, 12000);
     fetch(API_BASE + "/api/v1/intel/ransomware", { signal: ctrl.signal, headers: { Accept: "application/json" }, cache: "no-cache" })
       .then(function (resp) {
-        clearTimeout(timer);
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         return resp.json();
       })
@@ -311,9 +310,9 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
         if (updated) updated.textContent = data.generated_at ? ("Updated " + timeAgo(data.generated_at)) : "";
       })
       .catch(function () {
-        clearTimeout(timer);
         setUnavailable();
-      });
+      })
+      .finally(function () { clearTimeout(timer); });
   }
 
   if (document.readyState === "loading") {

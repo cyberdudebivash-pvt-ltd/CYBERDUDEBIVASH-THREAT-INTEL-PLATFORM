@@ -76,43 +76,55 @@ KNOWN_LIVE_DATA_SCRIPTS = (
 )
 
 
-# Deliberately loose: a strict "fetch( immediately followed by a quote then
-# /api/" pattern missed both real pages this script exists to catch --
-# cves.html and ransomware.html's own live-wiring fixes this session both
-# build the URL via variable concatenation (`fetch(API_BASE + "/api/...")`),
-# not a literal string starting with /api/. Matching "/api/ appears
-# somewhere within the fetch(...) call's argument list" instead catches
-# concatenation, template literals, and a URL variable assigned from an
-# /api/ literal a few lines earlier -- at the cost of a rare, harmless
-# false positive (a fetch() call with an unrelated /api/-containing string
-# nearby). A false positive here under-reports gaps rather than
-# over-reporting them, which is the safer failure direction for a
-# find-real-gaps tool. [^)] already spans newlines (unlike `.` without
-# re.DOTALL), so a multi-line fetch(...) call is still matched correctly.
+# Deliberately loose within a <script> block's own text, not "fetch(
+# followed closely by /api/" -- a stricter windowed version of this check
+# missed THREE real variants while this script was being built and verified
+# against its own fixes: fetch(API_BASE + "/api/...") string concatenation
+# (ransomware.html, cves.html), and fetch(API_BASE + path, ...) where the
+# actual "/api/..." literal is a call-site argument to a small helper
+# function defined elsewhere in the same script, sometimes 40+ lines away
+# (threats.html's fetchJSON() helper). Requiring both signals to appear
+# ANYWHERE in the same <script> block, rather than adjacent to each other,
+# catches all of these without needing a real JS parser.
+#
+# CodeRabbit review finding on PR #336 (verified, not taken on faith):
+# an earlier version of this checked the whole raw file, not just script
+# content -- SENTINEL_APEX_ENTERPRISE_AUDIT_v145.html (a prose audit
+# report that discusses this platform's own /api/ endpoints in plain
+# English) was misclassified dynamic purely because the sentence "daily
+# public JSON fetch (no API key needed)" happens to contain the substring
+# "fetch (" outside any <script> tag, nowhere near real code. Scoping the
+# co-occurrence check to concatenated <script>...</script> body content
+# (JSON-LD structured-data blocks excluded -- they hold JSON text, not
+# executable JS, and could coincidentally contain the same two substrings
+# as unrelated data) closes that false positive while still catching all
+# three real cases above, since every one of them is genuine inline JS.
 _FETCH_RE = re.compile(r"fetch\s*\(", re.IGNORECASE)
 _API_PATH_LITERAL_RE = re.compile(r"""["'`][^"'`]*?/api/[^"'`]*["'`]""")
 _SCRIPT_SRC_RE = re.compile(r'<script[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
+_SCRIPT_BLOCK_RE = re.compile(r"<script\b([^>]*)>(.*?)</script\s*>", re.IGNORECASE | re.DOTALL)
+
+
+def _inline_script_text(content: str) -> str:
+    """Concatenated text of every <script>...</script> block's own body,
+    skipping external (src=) scripts (no inline body to scan -- handled
+    separately below) and JSON-LD structured-data blocks (JSON text, not
+    JS -- see _is_dynamic's docstring)."""
+    parts = []
+    for attrs, body in _SCRIPT_BLOCK_RE.findall(content):
+        if "src=" in attrs.lower():
+            continue
+        if "application/ld+json" in attrs.lower():
+            continue
+        parts.append(body)
+    return "\n".join(parts)
 
 
 def _is_dynamic(content: str) -> tuple[bool, str]:
-    """Returns (is_dynamic, reason). reason is empty for a static page.
-
-    Deliberately whole-file co-occurrence, not "fetch( followed closely by
-    /api/" -- a stricter windowed version of this check missed THREE real
-    variants while this script was being built and verified against its
-    own fixes: fetch(API_BASE + "/api/...") string concatenation
-    (ransomware.html, cves.html), and fetch(API_BASE + path, ...) where the
-    actual "/api/..." literal is a call-site argument to a small helper
-    function defined elsewhere in the same file, sometimes 40+ lines away
-    (threats.html's fetchJSON() helper). Requiring both signals to appear
-    ANYWHERE in the same file, rather than adjacent to each other, catches
-    all of these without needing a real JS parser. The trade-off is a rare,
-    harmless false positive (both signals present but genuinely unrelated) --
-    which under-reports gaps rather than over-reporting them, the safer
-    failure direction for a find-real-gaps tool.
-    """
-    if _FETCH_RE.search(content) and _API_PATH_LITERAL_RE.search(content):
-        return True, "fetch() call plus an /api/* path literal in the same file"
+    """Returns (is_dynamic, reason). reason is empty for a static page."""
+    script_text = _inline_script_text(content)
+    if _FETCH_RE.search(script_text) and _API_PATH_LITERAL_RE.search(script_text):
+        return True, "fetch() call plus an /api/* path literal in the same <script> block"
     for m in _SCRIPT_SRC_RE.finditer(content):
         src = m.group(1)
         for known in KNOWN_LIVE_DATA_SCRIPTS:

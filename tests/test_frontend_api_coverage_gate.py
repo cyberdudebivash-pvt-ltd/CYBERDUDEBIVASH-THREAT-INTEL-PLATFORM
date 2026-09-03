@@ -108,6 +108,44 @@ class TestIsDynamic(unittest.TestCase):
         is_dynamic, _ = gate._is_dynamic(html)
         self.assertTrue(is_dynamic)
 
+    def test_prose_mentioning_fetch_and_api_outside_script_is_static(self):
+        # Real false positive CodeRabbit caught on PR #336 (verified against
+        # the actual file, not taken on faith): SENTINEL_APEX_ENTERPRISE_
+        # AUDIT_v145.html is a prose audit report discussing this platform's
+        # /api/ endpoints in plain English -- the sentence "daily public
+        # JSON fetch (no API key needed)" alone satisfied a whole-raw-file
+        # version of this check (fetch\s*\( matched "fetch (", an /api/
+        # path literal appeared elsewhere in the document), misclassifying
+        # a static document as dynamic. Neither signal is inside a
+        # <script> tag here, so this must classify static.
+        html = (
+            "<html><body>"
+            "<div class='finding-body'>Integrate with the Worker to fetch "
+            "/api/health in real-time and display actual service status.</div>"
+            "<li>CISA KEV cross-reference &mdash; daily public JSON fetch "
+            "(no API key needed)</li>"
+            "</body></html>"
+        )
+        is_dynamic, reason = gate._is_dynamic(html)
+        self.assertFalse(is_dynamic, f"expected static, got dynamic with reason: {reason!r}")
+
+    def test_json_ld_block_is_excluded_from_the_script_pool(self):
+        # JSON-LD structured-data blocks hold JSON text, not executable JS,
+        # and every real product page in this repo carries one (SEO
+        # metadata) -- a JSON-LD "description" field mentioning /api/ must
+        # not combine with an unrelated real <script>'s fetch() call to
+        # produce a false dynamic classification. Note: this checks the
+        # JSON-LD exclusion specifically, not per-block isolation -- two
+        # genuine inline <script> tags on the same page are still pooled
+        # together (a page's own inline scripts are all "this page's code",
+        # just not raw HTML prose or structured data).
+        html = (
+            "<script>fetch('https://analytics.example.com/beacon')</script>"
+            '<script type="application/ld+json">{"description": "See /api/docs for details"}</script>'
+        )
+        is_dynamic, _ = gate._is_dynamic(html)
+        self.assertFalse(is_dynamic)
+
     def test_fetch_with_no_api_literal_anywhere_is_static(self):
         # The whole-file co-occurrence check still requires BOTH signals --
         # a fetch() call alone, with no /api/ literal anywhere in the file,
@@ -228,6 +266,39 @@ class TestWorkflowStepConfiguration(unittest.TestCase):
             "never be able to fail the pipeline"
         )
         self.assertIn("frontend_api_coverage_gate.py", step.get("run", ""))
+
+    def test_stage_3_92b_never_presents_a_stale_or_missing_report_as_fresh(self):
+        # CodeRabbit finding on PR #336 (verified, not taken on faith): the
+        # original step swallowed the script's exit code unconditionally
+        # (`|| true`) and read whatever report happened to already be on
+        # disk, so a script crash before its own atomic write would print a
+        # normal-looking coverage notice instead of visibly failing.
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github" / "workflows" / "sentinel-blogger.yml"
+        with open(workflow_path, encoding="utf-8") as f:
+            workflow = yaml.safe_load(f)
+
+        job = next(iter(workflow["jobs"].values()))
+        steps = job["steps"]
+        step = next(s for s in steps if "STAGE 3.92b" in s.get("name", ""))
+        run = step.get("run", "")
+
+        self.assertIn(
+            "rm -f data/quality/frontend_api_coverage_report.json", run,
+            "must remove any pre-existing report before running so a stale "
+            "copy can never be read as this run's own output"
+        )
+        self.assertNotIn(
+            "frontend_api_coverage_gate.py || true", run,
+            "must not unconditionally swallow the script's exit code -- a "
+            "crash needs to produce a visibly different log line than success"
+        )
+        self.assertIn(
+            "::warning::", run,
+            "a failed run must emit a warning, not the same ::notice:: a "
+            "successful run does"
+        )
 
 
 if __name__ == "__main__":

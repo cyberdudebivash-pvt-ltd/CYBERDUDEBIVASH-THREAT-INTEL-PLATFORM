@@ -113,3 +113,14 @@ python-jose[cryptography]==3.5.0  # RS256 JWT for OIDC federation; v184.7 FIX: 3
 # .github/workflows/sast-security-scan.yml's pip-audit invocation with
 # this same justification, not silently ignored.
 
+# CodeRabbit finding on PR #336 (plausible, added defensively): several
+# tests (tests/test_r2_reports_verifier.py, tests/test_frontend_api_coverage_gate.py,
+# and pre-existing tests/test_r2_state_migration_wiring.py among others)
+# `import yaml` to assert on this repo's own workflow YAML files, but no
+# requirements file ever declared it explicitly -- it happened to already
+# be available in this sandbox via the system Python's dist-packages
+# (python3-yaml), which is not guaranteed to be visible to an isolated
+# CI Python environment (actions/setup-python, uv). Declaring it here
+# costs nothing if already present and closes a plausible real gap if not.
+PyYAML==6.0.1
+

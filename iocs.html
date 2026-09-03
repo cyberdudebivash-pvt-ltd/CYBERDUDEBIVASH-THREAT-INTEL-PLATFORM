@@ -266,7 +266,6 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
       signal: ctrl.signal, headers: { Accept: "application/json" }, cache: "no-cache"
     })
       .then(function (resp) {
-        clearTimeout(timer);
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         return resp.json();
       })
@@ -287,9 +286,9 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
         }).join("");
       })
       .catch(function () {
-        clearTimeout(timer);
         result.textContent = "Lookup failed — live IOC lookup temporarily unavailable.";
-      });
+      })
+      .finally(function () { clearTimeout(timer); });
   }
 
   function init() {
