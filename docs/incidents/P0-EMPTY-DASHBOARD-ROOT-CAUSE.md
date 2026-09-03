@@ -1,5 +1,192 @@
 # P0 — Empty Dashboard / Data-Plane Forensics — Root Cause Report
 
+**Companion:** `docs/incidents/P0-PRODUCTION-REQUEST-MATRIX.md` (real-Chromium request capture), `docs/incidents/P0-WORKFLOW-FORENSIC-MATRIX.md` (all 61 workflows), `docs/incidents/P0-v200-empty-dashboard-root-cause.md` (first pass).
+
+---
+
+# UPDATE (2026-09-03, 13:05 UTC) — PRIMARY ROOT CAUSE PROVEN. SUPERSEDES EVERY VERDICT BELOW.
+
+Everything below this section was written before this pass. Two prior diagnoses in this
+document are **corrected** at the end of this section — neither was the primary cause.
+
+## PRIMARY ROOT CAUSE
+
+**The first-party customer dashboard was metered against the commercial API product's
+FREE tier, and exhausted that tier's quota rendering itself.**
+
+Stated with the specificity the mandate requires, no hedging:
+
+| | |
+|---|---|
+| **Exact file** | `workers/intel-gateway/src/index.js` |
+| **Exact function** | `handleRequest()` — the rate-limit / quota block, pre-fix line 4848 |
+| **Exact pre-fix code** | `if (path !== "/api/health" && path !== "/api/health/") { const rl = await checkRateLimit(env, ip, auth.tier); … const dailyIdentifier = auth.key \|\| ip; const dq = await checkDailyQuota(env, dailyIdentifier, auth.tier); … }` |
+| **Exact limits applied** | `RATE_LIMITS.FREE = 30`/minute (`index.js:184`); `DAILY_QUOTAS.FREE = { limit: 50 }`/UTC day (`daily-quota.js`) |
+| **Exact identity** | `auth.key \|\| ip` — for an anonymous browser this is the raw `CF-Connecting-IP`. Every anonymous visitor behind one NAT/corporate egress shares, and collectively exhausts, one 50/day budget. |
+| **Exact endpoints** | the 20 `/api/*` routes in the request matrix — every endpoint the dashboard needs, none of which is `/api/health` |
+| **Exact response** | `HTTP 429 {"error":"Too Many Requests","reason":"daily_quota_exceeded","limit":50,…}` (`index.js:4887`) |
+| **Exact reason 500 becomes 0** | see the count-collapse table below |
+
+### The arithmetic
+
+A real Chromium against production measured **27 requests to `/api/*` per page render**
+(`P0-PRODUCTION-REQUEST-MATRIX.md`). Against the plane that was metering them:
+
+- **27 of 30 requests/minute.** A refresh, the page's own auto-refresh, or a second tab
+  inside the same minute exceeds the per-minute limit.
+- **27 of 50 requests/day.** **The second page view of a UTC day (54 > 50) exhausts the
+  daily quota**, and every subsequent request from that IP is denied until UTC midnight.
+
+Empirically confirmed against production: a burst of sequential `GET`s to
+`/api/v1/intel/stats` from one IP returned `200` twenty-two times and **`429` at request
+23**.
+
+The dashboard never calls `/api/health` — and `/api/health` was the *only* path the gate
+exempted. That is precisely why `/api/health` truthfully reported
+`advisory_count: 500, feed_index: "live:500_items"` at the same moment the dashboard
+reported zero. **The two numbers were never in conflict; they were on opposite sides of
+an entitlement gate.**
+
+## THE FIRST COUNT/STATE COLLAPSE — 500 → 0
+
+| Stage | Count | Evidence |
+|---|---|---|
+| R2 / publication authority | 500 | `/api/feed.json` → `count: 500`, 6,639,808 bytes |
+| `API_HEALTH_COUNT` | 500 | `/api/health` → `advisory_count: 500` |
+| **`DASHBOARD_ENDPOINT_COUNT`** | **0** | **← FIRST COLLAPSE.** `handleRequest()` returns `429` before any handler runs. The intelligence is never read. |
+| `BROWSER_RESPONSE_COUNT` | 0 | five sources tried, all fail (`[GOC v77.4] Fetch failed: … HTTP 429`) |
+| `NORMALIZED_COUNT` | 0 | `if (!resp.ok) throw` — the loop never reaches normalization |
+| `RENDERED_COUNT` | 0 | `EMBEDDED_INTEL` is `[]` (`index.html:13102`, deliberately cleared in v112) so the "all sources failed" fallback is dead and control reaches the terminal branch |
+
+**The primary fault boundary is the entitlement gate in `handleRequest()`, not the
+frontend.** The frontend defects below are real and were fixed, but they only decide
+*how* the collapse is displayed, not that it happens.
+
+## CONTRIBUTING CAUSE 1 — a terminal failure state labelled `LOADING`
+
+`index.html`, `loadGOCIntel()`, terminal branch (pre-fix ~line 13570):
+
+```js
+// Truly no data at all — show degraded
+if (syncVal)     syncVal.innerHTML     = 'SYNC: <span …>⚡ LOADING</span>';
+if (integrityEl) integrityEl.innerHTML = '<span …>⚡ NO DATA</span>';
+```
+
+Nothing runs after this branch. It is a **terminal** state wearing a **transient** label —
+which is the literal, character-for-character source of the customer-reported
+`SYNC: ⚡ LOADING` + `⚡ NO DATA`. The dashboard was not "still loading"; it had finished,
+failed, and mislabelled the result. It also made an infrastructure denial visually
+identical to "there is no intelligence", i.e. a **quota error masquerading as an empty
+feed** — the exact prohibition the mandate names.
+
+**Reproduced, then verified fixed**, in a real Chromium (all four same-origin sources
+`429`, mirror unreachable):
+
+| | Before | After |
+|---|---|---|
+| SYNC | `SYNC: ⚡ LOADING` | `SYNC: ⚡ RATE LIMITED` |
+| Badge | `⚡ NO DATA` | `REQUEST LIMIT REACHED` |
+| Grid | `⚠ Feed temporarily unavailable` | `⚠ Too many requests from this network. Intelligence is available — this view is temporarily throttled.` |
+| `window.__FEED_TERMINAL_STATE__` | *(did not exist)* | `RATE_LIMITED` |
+
+## CONTRIBUTING CAUSE 2 — a stale mirror presented as verified live data
+
+With the API quota-denied but the third-party `raw.githubusercontent.com` mirror
+reachable, `loadGOCIntel()` rendered the mirror's **stale 109-item snapshot** — against
+the authority's 500 — while still displaying **`SYNC: ⚡ LIVE`** and
+**`MANIFEST VERIFIED`**. Reproduced in a real Chromium: `manifestDataLen: 109`,
+`syncLine: "SYNC: ⚡ LIVE"`, `manifestVerified: true`.
+
+This is a silent-truth defect independent of the outage: on any day the quota ran out but
+the mirror answered, the dashboard asserted freshness and cryptographic verification over
+data that was neither. Now labelled `SYNC: ⚡ STALE` / `FALLBACK SOURCE`, with the items
+still rendered — degrading to a mirror beats showing nothing, but it must say so.
+
+## CORRECTIONS TO THIS DOCUMENT'S OWN EARLIER DIAGNOSES
+
+**Correction 1 — the service worker (PR #350/#351) was a real defect but was NOT the
+root cause.** The section immediately below claims "Root cause: the pre-fix service
+worker (v175) cached the dashboard's data-loading/rendering JavaScript". That fix is
+sound and is retained (Phase 14: no evidence it is harmful). But it cannot be the primary
+cause: the outage reproduces **deterministically with no service worker involved at all**
+— a first-visit browser with an empty cache, given `429`s, lands on exactly the reported
+symptom. The service worker could prolong or complicate recovery; it did not cause the
+collapse. Its earlier promotion to "root cause" was based on mechanism plausibility
+without an end-to-end reproduction, which this pass now supplies.
+
+**Correction 2 — "the reported symptom does not reproduce" was wrong.** The original
+pass concluded no root cause could be proven because the symptom would not reproduce. It
+would not reproduce because the harness (jsdom, then eight fresh-process traces) always
+started with an unspent quota and made a *single* pass. The symptom needs a **spent
+quota**, which requires either a second page view in the same UTC day or a shared egress
+IP. The finding was a harness artefact, not evidence of a healthy dashboard.
+
+**Standing:** the four architectural findings from the 61-workflow audit (below) remain
+open and are unaffected by this diagnosis. None of them is the primary cause either.
+
+## THE FIX — separation, not exemption
+
+`workers/intel-gateway/src/first-party-plane.js` (new) splits the two trust domains that
+were conflated:
+
+- **Commercial API plane** — any request carrying a credential. **Bit-for-bit
+  unchanged**: `RATE_LIMITS` and `DAILY_QUOTAS` still apply per tier, FREE is still
+  30/min and 50/day. A test asserts these exact numbers so the prohibited "fix" of
+  raising or disabling them fails CI.
+- **First-party web read plane** — an *uncredentialed* `GET`/`HEAD` for an *exact* path
+  in the dashboard's own read set, given its **own dedicated anonymous-web budget** in
+  its **own KV keyspace** (`rl:web:` / `quota:web:`): 240/minute, 2,000/day per IP ≈ 8
+  renders/minute, ~74/day.
+
+Presenting any credential routes a request to the commercial plane **on every path**, so
+no API customer can reach the web plane's budget by calling a dashboard endpoint. The
+plane is an exact-match allowlist, deliberately not a prefix — a prefix would silently
+enrol future routes, which is the drift that caused this incident. Membership is
+queryable at `/api/v1/observability/first-party-plane`.
+
+Against each explicit prohibition in the mandate: rate limiting is not disabled; the FREE
+quota is not raised; no count is hard-coded; `/api/health`'s `advisory_count` is not used
+to fake cards; no synthetic intelligence is embedded; entitlement controls are not
+removed; `429`s are not silenced; `429` no longer becomes `[]`; `LOADING` is no longer
+reachable as a terminal state; no R2/KV/D1 data was touched; no auth path was weakened.
+
+## VERDICT — B
+
+**B — ROOT CAUSE PROVEN + PERMANENT FIX IMPLEMENTED + PRODUCTION CERTIFICATION PENDING.**
+
+Not A, for one honest reason: **the fix is not deployed yet.** The Worker change reaches
+production through `deploy-worker.yml` and the frontend through the Pages publish, both
+of which run on merge to `main`. Phases 21–22 (real-browser production canary against the
+deployed fix, and multi-refresh / post-quota-exhaustion certification) can only be
+executed *after* that deployment, and the mandate is explicit that the live customer
+dashboard is the final authority. Everything provable pre-deployment is proven:
+
+- root cause proven end-to-end, with the symptom reproduced and the fix verified in a
+  real Chromium across three scenarios (healthy → LIVE/500 cards; quota-denied +
+  mirror → STALE/109; quota-denied + no mirror → RATE_LIMITED, never LOADING);
+- first count-collapse boundary identified;
+- commercial quotas verified unchanged by test;
+- Worker suite 138/138, frontend suite 165/165 (29 of them new), `regression_tests.py`
+  25/25, `p33_production_certification.py` → `WORLDWIDE_RELEASE`, 0 blockers.
+
+## KNOWN-OPEN FOLLOW-UPS (not fixed here, deliberately)
+
+- **F-1 — request amplification.** `/api/feed.json` is fetched **5× per page load** and
+  `/api/v1/intel/latest.json` (byte-identical) once more: **≈39.8 MB of the 40.6 MB per
+  load is six copies of the same 6.6 MB document**, from four uncoordinated loaders.
+  This is Phase 17's convergence work. Converging four loaders inside a 1.4 MB
+  `index.html` mid-P0 is an architectural event under `CLAUDE.md`'s Architecture
+  Preservation Rule and needs its own blast-radius assessment. Fixing it alone would not
+  have fixed the outage (27 → ~10 calls still exhausts 50/day by the fifth view).
+- **F-2 — `/api/reports/stats.json` returns a zero-byte body** with
+  `Content-Type: application/json`; `.json()` on it throws.
+- **F-3 — `/api/*` responses carry `Cache-Control: public, max-age=60–300` but show no
+  `CF-Cache-Status`.** Every one of the 27 calls reaches the Worker. Edge-caching the
+  public read plane would cut both quota pressure and the 40.6 MB.
+- **F-4** — the four architectural findings from the 61-workflow audit, below, remain open.
+
+---
+
 **Companion:** `docs/incidents/P0-WORKFLOW-FORENSIC-MATRIX.md` (all 61 workflows), `docs/incidents/P0-v200-empty-dashboard-root-cause.md` (this investigation's first pass — frontend execution-trace methodology).
 
 ---
