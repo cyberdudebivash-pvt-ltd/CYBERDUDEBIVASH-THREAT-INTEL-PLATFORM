@@ -21794,7 +21794,15 @@ a:focus-visible {
         return r.json();
       }).then(function(data){
         if(done)return;
-        var items=Array.isArray(data)?data:(data.advisories||data.data||data.feed||[]);
+        // ROOT CAUSE FIX: /api/feed.json's real response is
+        // {schema_version, generated_at, count, items:[...], ...} -- the
+        // items array lives under `.items`, which this fallback chain never
+        // checked. `.advisories`/`.data`/`.feed` never matched, so `items`
+        // was always [], window.__GOC_LIVE_INTEL was never set, and every
+        // consumer (runAIBrain, injectEnterpriseSignals, refreshNews) stayed
+        // on its permanent empty-state placeholder. `.items` checked first
+        // since that's the real shape; the others kept as harmless fallbacks.
+        var items=Array.isArray(data)?data:(data.items||data.advisories||data.data||data.feed||[]);
         if(items.length){done=true;window.__GOC_LIVE_INTEL=items;if(typeof cb==='function')cb(items);}
       }).catch(function(){});
     });

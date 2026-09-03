@@ -76,12 +76,26 @@ const EMPTY_FEED = JSON.stringify({
   count: 0, items: [],
 });
 
-const REAL_ISH_INTEL = JSON.stringify([
+const REAL_ISH_INTEL_ITEMS = [
   { id: "intel--test1", title: "CVE-2026-99999 Critical RCE in Example Widget", severity: "CRITICAL", date: "2026-08-12T00:00:00Z" },
   { id: "intel--test2", title: "Ransomware group targets healthcare sector", severity: "HIGH", date: "2026-08-12T01:00:00Z" },
-]);
+];
+const REAL_ISH_INTEL = JSON.stringify(REAL_ISH_INTEL_ITEMS);
+// ROOT CAUSE FIX (2026-09-03): _fetchLiveIntel() in index.html now only ever
+// fetches /api/feed.json (the /api/apex_v2/* URLs this mock used to route
+// REAL_ISH_INTEL through were removed as dead code -- confirmed 404 in
+// production). And /api/feed.json's real shape, confirmed via
+// `curl https://intel.cyberdudebivash.com/api/feed.json`, is
+// {schema_version, generated_at, count, items:[...], sha256} -- the array
+// lives under `.items`, not a bare top-level array. Wrapping it here so
+// runGlobalIntelBootRaceScenario actually exercises "real data arrives via
+// the one URL the app really fetches" instead of a dead endpoint.
+const REAL_ISH_FEED = JSON.stringify({
+  schema_version: "1.0", generated_at: "2026-09-03T13:47:47Z", generator: "generate_api_manifests.py",
+  version: "v200.0", count: REAL_ISH_INTEL_ITEMS.length, items: REAL_ISH_INTEL_ITEMS, sha256: "test",
+});
 
-async function routeAPIs(context, { proxiesSucceed }) {
+async function routeAPIs(context, { proxiesSucceed, feedHasRealData }) {
   await context.route('**/*', (route) => {
     const url = route.request().url();
     const json = (body) => route.fulfill({ status: 200, contentType: 'application/json', body });
@@ -95,8 +109,8 @@ async function routeAPIs(context, { proxiesSucceed }) {
       }
       return route.abort();
     }
-    if (/\/api\/apex_v2\/(priority|critical)\.json/.test(url)) return json(REAL_ISH_INTEL);
-    if (/\/api\/(feed\.json|preview\/?|v1\/intel\/(latest|apex|top10|stats)\.json)/.test(url)) return json(EMPTY_FEED);
+    if (/\/api\/feed\.json/.test(url)) return json(feedHasRealData ? REAL_ISH_FEED : EMPTY_FEED);
+    if (/\/api\/(preview\/?|v1\/intel\/(latest|apex|top10|stats)\.json)/.test(url)) return json(EMPTY_FEED);
     if (/^\/api\//.test(new URL(url).pathname)) return route.abort();
 
     if (url.startsWith(`http://127.0.0.1:${PORT}/`)) return route.continue();
@@ -171,12 +185,12 @@ async function runLiveSuccessScenario(browser) {
 
 async function runGlobalIntelBootRaceScenario(browser) {
   const context = await browser.newContext({ serviceWorkers: 'block' });
-  await routeAPIs(context, { proxiesSucceed: false });
+  await routeAPIs(context, { proxiesSucceed: false, feedHasRealData: true });
   const page = await context.newPage();
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
   // _startAIBrainPoller() fires _fetchLiveIntel() on load; give it time to
-  // resolve against the mocked /api/apex_v2/priority.json and re-invoke
-  // refreshNews().
+  // resolve against the mocked /api/feed.json (the one URL the app really
+  // fetches -- see REAL_ISH_FEED above) and re-invoke refreshNews().
   await page.waitForTimeout(3000);
 
   const gridText = await page.evaluate(() => {
