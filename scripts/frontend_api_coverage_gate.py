@@ -102,7 +102,25 @@ KNOWN_LIVE_DATA_SCRIPTS = (
 _FETCH_RE = re.compile(r"fetch\s*\(", re.IGNORECASE)
 _API_PATH_LITERAL_RE = re.compile(r"""["'`][^"'`]*?/api/[^"'`]*["'`]""")
 _SCRIPT_SRC_RE = re.compile(r'<script[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
-_SCRIPT_BLOCK_RE = re.compile(r"<script\b([^>]*)>(.*?)</script\s*>", re.IGNORECASE | re.DOTALL)
+
+# GitHub Advanced Security / CodeQL finding on PR #336 ("Bad HTML filtering
+# regexp", verified against the CodeQL rule's own stated rationale, not
+# taken on faith): the previous pattern's closing half, `</script\s*>`,
+# only tolerated whitespace between "</script" and the final ">". A real
+# browser's HTML tokenizer closes a <script> element on "</script" followed
+# by ANY run of characters up to the next ">" -- e.g. `</script data-x="1">`
+# or CodeQL's own example `</script\t\n bar>` -- not just whitespace. Since
+# the capturing group here is non-greedy (`.*?`), a closing tag the old
+# pattern couldn't recognize would make the match skip past it and either
+# swallow unrelated trailing HTML into a script "body" or fail to find a
+# close at all, silently dropping that block's text from
+# _inline_script_text()'s classification input (a false-negative risk, not
+# an XSS one -- this script only ever parses this repo's own first-party
+# *.html files to build a coverage report, it never sanitizes untrusted
+# HTML for serving). `[^>]*` mirrors real tokenizer behavior and is a
+# strict superset of the old `\s*` -- every previously-matching well-formed
+# `</script>` still matches identically (both accept zero extra chars).
+_SCRIPT_BLOCK_RE = re.compile(r"<script\b([^>]*)>(.*?)</script[^>]*>", re.IGNORECASE | re.DOTALL)
 
 
 def _inline_script_text(content: str) -> str:

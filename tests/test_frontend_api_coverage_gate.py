@@ -154,6 +154,51 @@ class TestIsDynamic(unittest.TestCase):
         is_dynamic, _ = gate._is_dynamic(html)
         self.assertFalse(is_dynamic)
 
+    def test_malformed_script_close_tag_still_terminates_the_block(self):
+        # GitHub Advanced Security / CodeQL finding on PR #336 ("Bad HTML
+        # filtering regexp"): a real browser closes <script> on "</script"
+        # followed by ANY characters up to the next ">", not just
+        # whitespace -- CodeQL's own flagged example is a close tag with a
+        # stray attribute-like tail, "</script\t\n bar>". Before the fix,
+        # _SCRIPT_BLOCK_RE's `</script\s*>` half did not match that, so the
+        # non-greedy body capture skipped straight past it looking for a
+        # plain `</script>`, pulling the next unrelated <script> block's
+        # code into this one's "body" text. Two independent script blocks
+        # here -- only the second one has both signals -- must classify as
+        # two separate blocks, not get merged into one by the malformed
+        # close tag on the first.
+        html = (
+            "<script>fetch('/js/some-lib.js')</script bar>"
+            "<script>var x = 1;</script>"
+        )
+        is_dynamic, _ = gate._is_dynamic(html)
+        self.assertFalse(is_dynamic)
+
+        parts = gate._inline_script_text(html).split("\n")
+        self.assertEqual(parts, ["fetch('/js/some-lib.js')", "var x = 1;"])
+
+    def test_malformed_close_tag_on_json_ld_block_does_not_hide_a_real_api_call(self):
+        # Proves the bug was a genuine false negative, not just a cosmetic
+        # mis-split: verified directly (old vs. new regex, side by side)
+        # that with a malformed close tag on a JSON-LD block, the OLD
+        # pattern's non-greedy body capture skips straight past it and
+        # merges the JSON-LD block with the *next* real <script> block into
+        # ONE match -- whose attrs still say type="application/ld+json", so
+        # _inline_script_text's JSON-LD exclusion (see its docstring) then
+        # discards the WHOLE merged body, including the second block's
+        # genuine fetch()+/api/ call, via `continue`. A real dynamic page
+        # would silently classify as static. The fix's `[^>]*` closes the
+        # JSON-LD block exactly at its own (malformed) end tag, leaving the
+        # following real <script> block intact and separately captured.
+        html = (
+            '<script type="application/ld+json">{"a":1}</script\t\n bar>'
+            "<script>fetch(API_BASE + '/api/v1/cve/live')</script>"
+        )
+        is_dynamic, reason = gate._is_dynamic(html)
+        self.assertTrue(is_dynamic)
+        self.assertIn("fetch", reason)
+        self.assertEqual(gate._inline_script_text(html), "fetch(API_BASE + '/api/v1/cve/live')")
+
 
 class TestLoadAllowlist(unittest.TestCase):
     def setUp(self):
