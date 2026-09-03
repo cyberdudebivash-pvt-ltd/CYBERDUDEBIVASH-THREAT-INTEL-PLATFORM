@@ -222,6 +222,17 @@ _REPORTS: dict = {
             d.get("static_unclassified_count", 0),
         ],
     ),
+    "capability_registry": (
+        _ROOT / "data" / "quality" / "frontend_capability_registry.json",
+        lambda d: [
+            d.get("total_pages", 0),
+            d.get("unclassified_count", 0),
+            d.get("customer_ui_orphan_count", 0),
+            d.get("by_category", {}).get("CUSTOMER_UI", 0),
+            d.get("by_category", {}).get("ADMIN", 0),
+            d.get("by_category", {}).get("INTERNAL", 0),
+        ],
+    ),
 }
 
 _FALLBACKS = {
@@ -247,6 +258,7 @@ _FALLBACKS = {
     # notice instead of visibly failing. "?" placeholders match this file's
     # own p21 convention for the same reason (an all-numeric fallback tuple).
     "frontend_api_coverage": "? ? ? ?",
+    "capability_registry": "? ? ? ? ? ?",
 }
 
 

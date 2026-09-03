@@ -101,6 +101,7 @@ header .badge{background:#0ea5e920;color:var(--accent);border:1px solid var(--ac
     <div class="tab" onclick="switchTab('scorecard')">Scorecard</div>
     <div class="tab" onclick="switchTab('improvements')">Improvements</div>
     <div class="tab" onclick="switchTab('cert')">Certification</div>
+    <div class="tab" onclick="switchTab('freshness')">Freshness &amp; Drift</div>
   </div>
 
   <div class="panel active" id="panel-dashboard"></div>
@@ -111,6 +112,7 @@ header .badge{background:#0ea5e920;color:var(--accent);border:1px solid var(--ac
   <div class="panel" id="panel-scorecard"></div>
   <div class="panel" id="panel-improvements"></div>
   <div class="panel" id="panel-cert"></div>
+  <div class="panel" id="panel-freshness"></div>
 </div>
 
 <script>
@@ -156,7 +158,7 @@ async function loadStatBar() {
 }
 
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach((t,i)=>{t.classList.toggle('active',['dashboard','quality','evidence','confidence','diversity','scorecard','improvements','cert'][i]===name)});
+  document.querySelectorAll('.tab').forEach((t,i)=>{t.classList.toggle('active',['dashboard','quality','evidence','confidence','diversity','scorecard','improvements','cert','freshness'][i]===name)});
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('panel-' + name).classList.add('active');
   if (!loaded[name]) loadPanel(name);
@@ -188,6 +190,7 @@ async function loadPanel(name) {
     else if (name === 'scorecard') await renderScorecard(el);
     else if (name === 'improvements') await renderImprovements(el);
     else if (name === 'cert') await renderCert(el);
+    else if (name === 'freshness') await renderFreshness(el);
   } catch(e) { el.innerHTML = `<div class="err">Load error: ${e.message}</div>`; }
 }
 
@@ -399,6 +402,28 @@ async function renderCert(el) {
   <div class="kpi-item"><div class="kv">P34 Tier</div><div class="kval" style="font-size:13px">${obs.metrics?.p34_tier||'—'}</div></div>
   <div class="kpi-item"><div class="kv">Layer</div><div class="kval">P35.0</div></div>
 </div>`;
+}
+
+async function renderFreshness(el) {
+  const [fresh, drift] = await Promise.all([fetchJSON('/api/v1/p35/freshness'), fetchJSON('/api/v1/p35/drift')]);
+  const dd = drift.detection_drift, cd = drift.contract_drift;
+  el.innerHTML = `
+<div class="grid-2" style="margin-bottom:16px">
+  <div class="card">
+    <h3>Intelligence Freshness</h3>
+    <div style="font-size:32px;font-weight:700;color:var(--accent)">${fresh.avg_age_hours ?? '—'}<span style="font-size:14px;color:var(--muted)"> hrs avg age</span></div>
+    <div style="margin-top:4px"><span class="tier ${tierClass(fresh.freshness_tier)}">${fresh.freshness_tier||'—'}</span></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">${fresh.items_with_timestamps ?? '—'} of ${fresh.feed_item_count ?? '—'} items carry a timestamp</div>
+  </div>
+  <div class="card">
+    <h3>Drift Status</h3>
+    <div style="margin-top:4px"><span class="tier ${tierClass(drift.drift_status)}">${drift.drift_status||'—'}</span></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">Detection drift: <span class="tier ${tierClass(dd?.overall_status)}">${dd?.overall_status ?? 'REPORT_PENDING'}</span></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">Contract drift: <span class="tier ${tierClass(cd?.exit_level === 'BREAKING' ? 'RED' : cd?.exit_level)}">${cd?.exit_level ?? 'REPORT_PENDING'}</span></div>
+  </div>
+</div>
+<div class="section-title">Engine Reads</div>
+<div style="font-size:11px;color:var(--muted)">${(drift.engine_reads||[]).join(' · ')}</div>`;
 }
 </script>
 </body>

@@ -80,6 +80,7 @@ header .badge{background:#a855f720;color:var(--accent);border:1px solid var(--ac
     <div class="tab" onclick="switchTab('competitive')">Competitive</div>
     <div class="tab" onclick="switchTab('detection')">Detection</div>
     <div class="tab" onclick="switchTab('roadmap')">Roadmap</div>
+    <div class="tab" onclick="switchTab('gaps')">Gaps &amp; Reliability</div>
   </div>
 
   <div class="panel active" id="panel-dashboard"></div>
@@ -89,12 +90,13 @@ header .badge{background:#a855f720;color:var(--accent);border:1px solid var(--ac
   <div class="panel" id="panel-competitive"></div>
   <div class="panel" id="panel-detection"></div>
   <div class="panel" id="panel-roadmap"></div>
+  <div class="panel" id="panel-gaps"></div>
 </div>
 
 <script>
 const API = location.origin;
 const loaded = {};
-const TABS = ['dashboard','targets','maturity','customer','competitive','detection','roadmap'];
+const TABS = ['dashboard','targets','maturity','customer','competitive','detection','roadmap','gaps'];
 
 async function fetchJSON(path) {
   const r = await fetch(API + path);
@@ -149,6 +151,7 @@ async function loadPanel(name) {
     else if (name === 'competitive') await renderCompetitive(el);
     else if (name === 'detection') await renderDetection(el);
     else if (name === 'roadmap') await renderRoadmap(el);
+    else if (name === 'gaps') await renderGaps(el);
   } catch(e) { el.innerHTML = `<div class="err">Load error: ${e.message}</div>`; }
 }
 
@@ -292,6 +295,28 @@ async function renderRoadmap(el) {
     <div class="rtext">${r.current_pct}% → ${r.target_pct}% (gap ${r.gap_pct}%) · effort ${r.effort} · value ${r.value}</div>
     <div class="rtext" style="margin-top:4px">${r.action}</div>
   </div>`).join('')||'<div class="loading">No open roadmap items</div>'}
+</div>`;
+}
+
+async function renderGaps(el) {
+  const [gaps, rel] = await Promise.all([fetchJSON('/api/v1/p36/gaps'), fetchJSON('/api/v1/p36/reliability')]);
+  el.innerHTML = `
+<div class="card" style="margin-bottom:16px">
+  <h3>Unmet Quality Targets</h3>
+  <div style="font-size:12px;color:var(--muted)">${gaps.summary||''}</div>
+</div>
+<div class="section-title">Open Gaps (${gaps.gap_count ?? 0})</div>
+<div class="rec-list" style="margin-bottom:16px">
+  ${(gaps.gaps||[]).map(g=>`<div class="rec ${g.priority}"><div class="rtag">${g.priority} · ${g.label}</div><div class="rtext">${g.actual}% actual (target ${g.target}%) · gap ${g.gap}%</div></div>`).join('')||'<div class="loading">No gaps — all targets met</div>'}
+</div>
+<div class="section-title">Platform Reliability</div>
+<div class="kpi-grid">
+  ${kpiBlock('Reliability Tier', rel.reliability_tier ?? '—')}
+  ${kpiBlock('Feed Items', rel.feed_item_count ?? '—', `${rel.unique_item_count ?? '—'} unique`)}
+  ${kpiBlock('Duplicates', rel.duplicate_count ?? '—')}
+  ${kpiBlock('Fresh (48h)', rel.freshness_48h ?? '—', (rel.freshness_pct ?? '—') + '%')}
+  ${kpiBlock('P35 Blockers', rel.p35_blockers ?? '—', `${rel.p35_passed ?? '—'}/${rel.p35_total ?? '—'} gates`)}
+  ${kpiBlock('P34 Blockers', rel.p34_blockers ?? '—')}
 </div>`;
 }
 

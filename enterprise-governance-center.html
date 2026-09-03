@@ -76,6 +76,7 @@ header .badge{background:#22c55e20;color:var(--accent);border:1px solid var(--ac
     <div class="tab" onclick="switchTab('enrichment')">Enrichment</div>
     <div class="tab" onclick="switchTab('iq')">IQ Index</div>
     <div class="tab" onclick="switchTab('diversity')">Source Diversity</div>
+    <div class="tab" onclick="switchTab('certification')">Certification &amp; Reliability</div>
   </div>
 
   <div class="panel active" id="panel-executive"></div>
@@ -85,12 +86,13 @@ header .badge{background:#22c55e20;color:var(--accent);border:1px solid var(--ac
   <div class="panel" id="panel-enrichment"></div>
   <div class="panel" id="panel-iq"></div>
   <div class="panel" id="panel-diversity"></div>
+  <div class="panel" id="panel-certification"></div>
 </div>
 
 <script>
 const API = location.origin;
 const loaded = {};
-const TABS = ['executive','schema','feeds','drift','enrichment','iq','diversity'];
+const TABS = ['executive','schema','feeds','drift','enrichment','iq','diversity','certification'];
 
 async function fetchJSON(path) {
   const r = await fetch(API + path);
@@ -151,6 +153,7 @@ async function loadPanel(name) {
     else if (name === 'enrichment') await renderEnrichment(el);
     else if (name === 'iq') await renderIQ(el);
     else if (name === 'diversity') await renderDiversity(el);
+    else if (name === 'certification') await renderCertification(el);
   } catch(e) { el.innerHTML = `<div class="err">Load error: ${e.message}</div>`; }
 }
 
@@ -328,6 +331,46 @@ async function renderDiversity(el) {
   ${kpiBlock('Min Distinct Sources', d.thresholds?.min_distinct_sources ?? '—')}
 </div>
 <div style="font-size:11px;color:var(--muted);margin-top:12px">${d.governance_note||''}</div>`;
+}
+
+async function renderCertification(el) {
+  const [cert, conf, rel, metrics] = await Promise.all([
+    fetchJSON('/api/v1/p38/certification'),
+    fetchJSON('/api/v1/p38/confidence-audit'),
+    fetchJSON('/api/v1/p38/reliability'),
+    fetchJSON('/api/v1/p38/metrics'),
+  ]);
+  const gs = metrics.governance_surface || {};
+  el.innerHTML = `
+<div class="grid-2" style="margin-bottom:16px">
+  <div class="card">
+    <h3>P38 Certification Chain</h3>
+    <div style="font-size:12px;color:var(--muted)">${(cert.chain||[]).join(' · ')}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">Source: ${cert.certification_source||'—'}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">${cert.governance_note||''}</div>
+  </div>
+  <div class="card">
+    <h3>Confidence Calibration Audit</h3>
+    <div style="font-size:28px;font-weight:700;color:var(--accent)">${conf.p25_avg_trust_score ?? '—'}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px">Sample: ${conf.sample_size ?? '—'} items · ${conf.confidence_declared_pct ?? '—'}% declare confidence</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">${conf.governance_note||''}</div>
+  </div>
+</div>
+<div class="section-title">Reliability</div>
+<div class="kpi-grid" style="margin-bottom:16px">
+  ${kpiBlock('Total Items', rel.total_items ?? '—')}
+  ${kpiBlock('Dedup OK', String(rel.dedup_ok ?? '—'))}
+  ${kpiBlock('Freshness', (rel.freshness_pct ?? '—') + '%')}
+  ${kpiBlock('Risk Ceiling Violations', rel.ceiling_violations ?? '—')}
+</div>
+<div class="section-title">Governance Surface (Platform Inventory)</div>
+<div class="kpi-grid">
+  ${kpiBlock('Schema Fields', gs.schema_fields ?? '—')}
+  ${kpiBlock('Deprecated Fields', gs.deprecated_fields ?? '—')}
+  ${kpiBlock('Feed Variants', gs.feed_variants ?? '—')}
+  ${kpiBlock('P-Layers', gs.p_layers ?? '—')}
+  ${kpiBlock('API Routes', gs.api_routes ?? '—')}
+</div>`;
 }
 
 loadStatBar();

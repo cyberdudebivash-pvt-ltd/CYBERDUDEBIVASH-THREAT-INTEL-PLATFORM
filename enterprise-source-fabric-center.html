@@ -84,6 +84,7 @@ tr:last-child td{border-bottom:none}
     <div class="tab" onclick="switchTab('licensing')">Licensing</div>
     <div class="tab" onclick="switchTab('waves')">Rollout Waves</div>
     <div class="tab" onclick="switchTab('certification')">Certification</div>
+    <div class="tab" onclick="switchTab('metrics')">Fabric Metrics</div>
   </div>
 
   <div class="panel active" id="panel-dashboard"></div>
@@ -93,12 +94,13 @@ tr:last-child td{border-bottom:none}
   <div class="panel" id="panel-licensing"></div>
   <div class="panel" id="panel-waves"></div>
   <div class="panel" id="panel-certification"></div>
+  <div class="panel" id="panel-metrics"></div>
 </div>
 
 <script>
 const API = location.origin;
 const loaded = {};
-const TABS = ['dashboard','registry','health','coverage','licensing','waves','certification'];
+const TABS = ['dashboard','registry','health','coverage','licensing','waves','certification','metrics'];
 
 async function fetchJSON(path) {
   const r = await fetch(API + path);
@@ -161,6 +163,7 @@ async function loadPanel(name) {
     else if (name === 'licensing') await renderLicensing(el);
     else if (name === 'waves') await renderWaves(el);
     else if (name === 'certification') await renderCertification(el);
+    else if (name === 'metrics') await renderMetrics(el);
   } catch(e) { el.innerHTML = `<div class="err">Load error: ${e.message}</div>`; }
 }
 
@@ -401,6 +404,30 @@ ${(d.gates||[]).map(g=>`<tr>
 </tr>`).join('')}
 </tbody>
 </table>
+</div>`;
+}
+
+async function renderMetrics(el) {
+  const [metrics, obs] = await Promise.all([fetchJSON('/api/v1/p40/metrics'), fetchJSON('/api/v1/p40/observability')]);
+  el.innerHTML = `
+<div class="section-title">Domain Coverage Breakdown</div>
+<div class="kpi-grid" style="margin-bottom:16px">
+  ${Object.entries(metrics.domain_breakdown||{}).map(([k,v])=>kpiBlock(k.replace(/_/g,' '), v)).join('') || '<div class="loading">No domain data</div>'}
+</div>
+<div class="grid-2">
+  <div class="card">
+    <h3>Fabric Status</h3>
+    <div style="margin-top:4px"><span class="tier ${tierClass(obs.status)}">${obs.status||'—'}</span></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">${obs.engines_reused_note||''}</div>
+  </div>
+  <div class="card">
+    <h3>Data Provenance</h3>
+    ${Object.entries(obs.data_sources||{}).map(([k,v])=>`<div style="font-size:11px;margin-bottom:6px"><span style="color:var(--muted)">${k}:</span> ${v}</div>`).join('')}
+  </div>
+</div>
+<div class="section-title" style="margin-top:16px">P40 API Surface (${(obs.endpoints||[]).length} routes)</div>
+<div style="display:flex;flex-wrap:wrap;gap:6px">
+  ${(obs.endpoints||[]).map(e=>`<span class="tier blue" style="font-family:monospace">${e}</span>`).join('')}
 </div>`;
 }
 

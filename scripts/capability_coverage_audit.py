@@ -93,6 +93,50 @@ CLASSIFICATION_OVERRIDES: dict[str, str] = {
     # P39 is explicitly documented (p39-handlers.js header) as internal-only,
     # never routed to HTTP at all -- it will never appear in ROUTE_RE's
     # extraction in the first place, listed here only for self-documentation.
+
+    # -- sentinel-apex-transformation-8x3y26 session (2026-09-03) --
+    # Every route below was evaluated against its actual handler source
+    # (workers/intel-gateway/src/pXX-handlers.js) before classifying, not
+    # name-guessed. See data/quality/frontend_capability_registry.json for
+    # the companion frontend-page classification and the session's final
+    # report for the full evidence trail.
+
+    # API_ONLY: single-item / id-required drill-down endpoints. Each needs a
+    # specific item, entity, or source id the caller must already have (from
+    # an already-wired list/search/graph endpoint) -- not aggregate data a
+    # passive dashboard tile can show, so not wired into a new UI card this
+    # session. Legitimate self-serve API capabilities, not orphans.
+    "/api/v1/p22/validate": "API_ONLY",       # handleP22Validate: requires ?id= (or defaults to items[0])
+    "/api/v1/p28/certify": "API_ONLY",        # handleP28Certify: GET ?id= or POST a single item body
+    "/api/v1/p29/certify": "API_ONLY",        # handleP29Certify: requires ?id=
+    "/api/v1/p31/entity": "API_ONLY",         # handleP31Entity: requires ?id=, tier-gated (paid only)
+    "/api/v1/p31/relationships": "API_ONLY",  # handleP31Relationships: requires ?entity=, tier-gated
+    "/api/v1/p40/source-detail": "API_ONLY",  # handleP40SourceDetail: requires ?id=, 400s without one
+
+    # API_ONLY: navigation alias, not a data endpoint.
+    "/api/v1/p21/dashboard": "API_ONLY",  # handleP21Dashboard is a bare 302 redirect to /threat-intel-certification-dashboard.html
+
+    # CUSTOMER_UI (server-composed): reaches customers via HTML composed
+    # server-side into another page (index.js:buildP28FeedbackBlock), not a
+    # client-side fetch() from a dedicated page -- exactly the blind spot
+    # this script's own docstring warns CONSUMER_REF_RE can't see. Verified
+    # by reading buildP28FeedbackBlock's own output: it embeds a real
+    # fetch(apiBase + "/api/v1/p28/feedback", {method:"POST",...}) call.
+    "/api/v1/p28/feedback": "CUSTOMER_UI",
+
+    # CUSTOMER_UI (served transitively): the route's own data is a strict
+    # subset of, or is already computed by, an aggregate endpoint already
+    # wired and rendered on this route's own dashboard -- adding a second
+    # UI card would just redisplay the same numbers under a new tab, not
+    # surface anything new to a customer. Verified by diffing each pair of
+    # handler return shapes, not assumed from route naming.
+    "/api/v1/p23/observability": "CUSTOMER_UI",  # subset of /p23/actionability's per-item data, already aggregated client-side on enterprise-action-dashboard.html
+    "/api/v1/p34/status": "CUSTOMER_UI",         # subset of /p34/dashboard (platform_status/release_tier) + /p34/assurance (gate counts), both wired on enterprise-assurance-center.html
+    "/api/v1/p35/metrics": "CUSTOMER_UI",        # identical kpis object to /p35/dashboard's own `kpis` field (same _computeKPIs() call, same args) -- wired there
+    "/api/v1/p36/metrics": "CUSTOMER_UI",        # overlaps /p36/dashboard's scorecard/quality_targets/reliability; its two non-overlapping fields (avg_p20_quality/avg_p25_trust) are below the bar for a dedicated card
+    "/api/v1/p36/quality": "CUSTOMER_UI",        # field_coverage + quality_targets is the same _evaluateTargets(coverage) output already rendered on the wired /p36/targets tab
+    "/api/v1/p37/hardening": "CUSTOMER_UI",      # summary rollup of /p37/dashboard + /p37/debt + /p37/enrichment, all three already wired
+    "/api/v1/p37/metrics": "CUSTOMER_UI",        # overlaps /p37/dashboard's iq_score/enrichment/confidence/reliability/cert_chain fields
 }
 
 

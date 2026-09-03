@@ -207,6 +207,34 @@ tr:hover td{background:rgba(255,255,255,.02);}
       </div>
     </div>
 
+    <!-- P26/P27/P29/P30/P33 Platform-Wide Excellence & Trust -->
+    <div class="row3" id="excellencePanels" style="margin-top:16px;">
+      <div class="card">
+        <div class="card-title">P26 EXCELLENCE GRADE DISTRIBUTION</div>
+        <div id="p26GradePanel"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">P29 TRUST CENTER</div>
+        <div id="p29TrustPanel"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">P22.3 CONTRADICTION DETAIL</div>
+        <div id="p22ContradictionsPanel"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">P30 VERIFICATION TIMELINE</div>
+        <div id="p30TimelinePanel"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">P27 TOP ADVISORY EXPOSURE</div>
+        <div id="p27CertifyPanel"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">P33 TOP ADVISORY RECOMMENDATIONS</div>
+        <div id="p33RecPanel"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
     <!-- Item Table -->
     <div class="card">
       <div class="card-title">
@@ -276,6 +304,11 @@ function toast(msg, isErr = false) {
   setTimeout(() => { t.className = ""; }, 3000);
 }
 
+/* ── Escaping (hostile threat-intel titles/severity are untrusted input) ── */
+function esc(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 /* ── Fetch helpers ── */
 async function apiFetch(path) {
   const res = await fetch(API_BASE + path, {
@@ -304,6 +337,7 @@ async function loadAll() {
     renderComponentBars(_allItems);
     if (p22obs) renderP22Panels(p22obs);
     renderTable();
+    loadExcellencePanels();
     document.getElementById("lastUpd").textContent = "Updated " + new Date().toLocaleTimeString();
     toast("Certification data refreshed");
   } catch (e) {
@@ -510,8 +544,8 @@ function renderTable() {
     return `<tr>
       <td><span class="score-chip" style="color:${scoreColor(it.score)};">${it.score}</span></td>
       <td><span class="cert-badge ${certBadgeClass(it.certification)}">${certLabel(it.certification)}</span>${it.kev?'<span class="kev-tag">KEV</span>':''}</td>
-      <td class="title-cell" title="${(it.title||'').replace(/"/g,'&quot;')}">${it.title||'—'}</td>
-      <td class="${sevClass(it.severity)}">${it.severity||'—'}</td>
+      <td class="title-cell" title="${esc(it.title)}">${esc(it.title)||'—'}</td>
+      <td class="${sevClass(it.severity)}">${esc(it.severity)||'—'}</td>
       <td style="white-space:nowrap;display:flex;align-items:center;gap:1px;padding:12px 12px;">${gDots}<span style="font-size:10px;color:var(--muted);margin-left:4px;">${it.gates_passed}/${it.gates_total}</span></td>
       <td style="font-family:monospace;font-size:11px;color:${scoreColor((bd.evidence||0)/25*100)};">${bd.evidence||0}/25</td>
       <td style="font-family:monospace;font-size:11px;color:${scoreColor((bd.ioc_quality||0)/20*100)};">${bd.ioc_quality||0}/20</td>
@@ -523,6 +557,97 @@ function renderTable() {
   }).join("");
 
   document.getElementById("tblBody").innerHTML = rows;
+}
+
+/* ── P26/P27/P29/P30/P33 Platform-Wide Excellence & Trust ──
+   Each panel loads and fails independently so one slow/broken secondary
+   endpoint never blocks or blanks the primary certification dashboard. */
+function loadExcellencePanels() {
+  loadP26Grade();
+  loadP29Trust();
+  loadP22Contradictions();
+  loadP30Timeline();
+  loadP27Certify();
+  loadP33Recommendations();
+}
+
+async function loadP26Grade() {
+  const el = document.getElementById("p26GradePanel");
+  try {
+    const d = await apiFetch("/api/v1/p26/grade/feed");
+    const g = d.grade_distribution || {};
+    const total = d.total_items || 1;
+    const rows = ["A","B","C","D","F"].map(k => {
+      const count = g[k] || 0, pct = Math.round(count / total * 100);
+      const color = k === "A" ? "#00ffc6" : k === "B" ? "#3b82f6" : k === "C" ? "#d97706" : "#ef4444";
+      return `<div class="dist-row"><span class="dist-label" style="color:${color};font-size:11.5px;">Grade ${k}</span>
+        <div class="bar-outer"><div class="bar-inner" style="width:${pct}%;background:${color};"></div></div>
+        <span class="bar-val" style="color:${color};">${count}</span></div>`;
+    }).join("");
+    el.innerHTML = `<div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">${d.enterprise_excellent_pct ?? 0}% enterprise-excellent · ${d.total_blockers ?? 0} blocker(s) across ${total} items</div>${rows}`;
+  } catch (e) { el.innerHTML = `<div class="error-msg" style="color:var(--red);font-size:11px;">${esc(e.message)}</div>`; }
+}
+
+async function loadP29Trust() {
+  const el = document.getElementById("p29TrustPanel");
+  try {
+    const d = await apiFetch("/api/v1/p29/trust-center");
+    const fm = d.feed_metrics || {}, cc = d.certification_chain || {};
+    const healthColor = d.platform_health === "OPTIMAL" ? "#10b981" : d.platform_health === "DEGRADED" ? "#ef4444" : "#d97706";
+    el.innerHTML = `
+      <div style="font-size:16px;font-weight:800;color:${healthColor};margin-bottom:8px;">${d.platform_health || "—"}</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">${fm.total_items ?? "—"} items · ${fm.avg_confidence ?? "—"}% avg confidence · ${fm.kev_items ?? 0} KEV</div>
+      ${["p28","p27","p26","p25"].map(k => `<div class="dist-row"><span class="dist-label" style="font-size:11px;">${k.toUpperCase()}</span><span class="bar-val">${cc[k] ? esc(cc[k].tier) : "—"}</span></div>`).join("")}`;
+  } catch (e) { el.innerHTML = `<div class="error-msg" style="color:var(--red);font-size:11px;">${esc(e.message)}</div>`; }
+}
+
+async function loadP22Contradictions() {
+  const el = document.getElementById("p22ContradictionsPanel");
+  try {
+    const d = await apiFetch("/api/v1/p22/contradictions?limit=200");
+    const list = (d.contradictions || []).slice(0, 8);
+    el.innerHTML = `
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">${d.total_contradictions ?? 0} found across ${d.items_checked ?? 0} items sampled (${d.error_count ?? 0} error / ${d.warn_count ?? 0} warn)</div>
+      ${list.length ? list.map(c => `<div style="font-size:10.5px;margin-bottom:6px;color:${c.level === "error" ? "#ef4444" : "#d97706"};">${esc(c.code)} · ${esc(c.item_title) || "—"}<br><span style="color:var(--muted);">${esc(c.desc)}</span></div>`).join("") : '<div style="color:#10b981;font-size:12px;">✓ No contradictions in sampled items</div>'}`;
+  } catch (e) { el.innerHTML = `<div class="error-msg" style="color:var(--red);font-size:11px;">${esc(e.message)}</div>`; }
+}
+
+async function loadP30Timeline() {
+  const el = document.getElementById("p30TimelinePanel");
+  try {
+    const d = await apiFetch("/api/v1/p30/timeline");
+    const items = (d.recent_timelines || []).slice(0, 5);
+    el.innerHTML = `
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">${d.timeline_coverage_pct ?? 0}% of items carry lifecycle timestamps (${d.items_with_timestamps ?? 0}/${d.total_items ?? 0})</div>
+      ${items.map(t => `<div style="font-size:10.5px;margin-bottom:8px;"><span class="title-cell" style="max-width:none;color:#c4d0e3;">${esc(t.title) || "—"}</span><br><span style="color:var(--muted);">${(t.events||[]).map(e => esc(e.label)).join(" → ") || "no events"}</span></div>`).join("") || '<div style="color:var(--muted);font-size:12px;">No timeline data</div>'}`;
+  } catch (e) { el.innerHTML = `<div class="error-msg" style="color:var(--red);font-size:11px;">${esc(e.message)}</div>`; }
+}
+
+async function loadP27Certify() {
+  const el = document.getElementById("p27CertifyPanel");
+  try {
+    const d = await apiFetch("/api/v1/p27/certify");
+    el.innerHTML = `
+      <div class="title-cell" style="max-width:none;color:#c4d0e3;font-size:11.5px;margin-bottom:8px;">${esc(d.title) || "—"}</div>
+      <div class="dist-row"><span class="dist-label" style="font-size:11px;">P26 Grade</span><span class="bar-val">${esc(d.p26_grade)} (${d.p26_composite ?? "—"})</span></div>
+      <div class="dist-row"><span class="dist-label" style="font-size:11px;">Exposed Dimensions</span><span class="bar-val">${d.p27_exposed_dimensions ?? "—"}</span></div>
+      <div class="dist-row"><span class="dist-label" style="font-size:11px;">Critical Exposure</span><span class="bar-val" style="color:${(d.p27_critical_exposure||0) > 0 ? '#ef4444' : '#10b981'};">${d.p27_critical_exposure ?? "—"}</span></div>
+      <div class="dist-row"><span class="dist-label" style="font-size:11px;">Audience Packages</span><span class="bar-val">${d.p27_audiences_generated ?? "—"}</span></div>
+      <div class="dist-row"><span class="dist-label" style="font-size:11px;">P27 Certification</span><span class="bar-val">${esc(d.p27_certification)}</span></div>`;
+  } catch (e) { el.innerHTML = `<div class="error-msg" style="color:var(--red);font-size:11px;">${esc(e.message)}</div>`; }
+}
+
+async function loadP33Recommendations() {
+  const el = document.getElementById("p33RecPanel");
+  try {
+    const d = await apiFetch("/api/v1/p33/recommendations");
+    const a = d.advisory || {}, r = d.recommendations || {};
+    const immediate = [...(r.immediate||[]), ...(r.h24||[])].slice(0, 4);
+    el.innerHTML = `
+      <div class="title-cell" style="max-width:none;color:#c4d0e3;font-size:11.5px;margin-bottom:4px;">${esc(a.title) || "—"}</div>
+      <div style="font-size:10.5px;color:var(--muted);margin-bottom:8px;">${esc(a.severity)||"—"} · CVSS ${a.cvss ?? "—"} ${a.kev ? '<span class="kev-tag">KEV</span>' : ""}</div>
+      ${immediate.length ? immediate.map(x => `<div style="font-size:10.5px;color:var(--muted);margin-bottom:4px;">▸ ${esc(x)}</div>`).join("") : '<div style="color:var(--muted);font-size:11px;">No immediate/24h actions</div>'}`;
+  } catch (e) { el.innerHTML = `<div class="error-msg" style="color:var(--red);font-size:11px;">${esc(e.message)}</div>`; }
 }
 </script>
 </body>
