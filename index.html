@@ -13301,6 +13301,14 @@ function renderTopThreats(data) {
                 : 0;
 
             var lastError = null;
+            // P0 2026-09-03: record the OUTCOME of every source attempt, not
+            // just the last Error object. The terminal branch below previously
+            // had no way to tell an entitlement denial (HTTP 429 from the API
+            // quota gate) apart from a network failure apart from a genuinely
+            // empty feed -- so it collapsed all three into "LOADING / NO DATA".
+            // js/feed-state.js turns these records into an explicit terminal
+            // state. Purely additive: nothing in the success paths reads it.
+            var _feedAttempts = [];
             for (var mIdx = 0; mIdx < MANIFEST_URLS.length; mIdx++) {
                 var manifestUrl = MANIFEST_URLS[mIdx];
                 // isApiSource: authoritative sources bypass staleness gates
@@ -13318,7 +13326,14 @@ function renderTopThreats(data) {
                         }
                     });
                     clearTimeout(tid);
-                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    if (!resp.ok) {
+                        // P0 2026-09-03: capture the status BEFORE throwing.
+                        // A 429 here is the API entitlement gate denying the
+                        // request, not evidence that no intelligence exists --
+                        // that distinction is what the terminal branch needs.
+                        _feedAttempts.push({ url: manifestUrl, status: resp.status, ok: false, authoritative: isApiSource, itemCount: 0 });
+                        throw new Error('HTTP ' + resp.status);
+                    }
                     var data    = await resp.json();
                     // v184.0: MULTI-SCHEMA SAFE PARSER
                     // Priority: data.preview.items (Worker) > data.items > data.data.items > plain Array
@@ -13332,6 +13347,10 @@ function renderTopThreats(data) {
                                 : (Array.isArray(data) ? data : []);
                     var entries = items;
                     console.log('[SENTINEL-APEX] ITEM COUNT:', entries.length);
+                    // P0 2026-09-03: a 200 that parses to 0 items is a real,
+                    // distinct outcome (feed reachable, genuinely empty) and
+                    // must not be recorded as the same thing as a 429.
+                    _feedAttempts.push({ url: manifestUrl, status: resp.status, ok: true, authoritative: isApiSource, itemCount: entries.length });
                     if (!entries.length) {
                         console.error('[SENTINEL-APEX] NO DATA FROM API \u2014 all parse paths returned 0 items');
                         throw new Error('API returned 0 items');
@@ -13485,8 +13504,23 @@ function renderTopThreats(data) {
                             }
                         }
                     } catch(_lse) {}
-                    if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--accent);animation:new-glow 1.5s ease-in-out infinite alternate;">&#x26A1; LIVE</span>';
-                    if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge integrity-ok"><i class="fas fa-shield-check"></i> MANIFEST VERIFIED</span>';
+                    // P0 2026-09-03: only an AUTHORITATIVE source may be
+                    // labelled LIVE / MANIFEST VERIFIED. When the API sources
+                    // were quota-denied, the third-party raw.githubusercontent
+                    // mirror answered with a stale 109-item snapshot against
+                    // the authority's 500 -- and this line still asserted
+                    // "LIVE" and "MANIFEST VERIFIED" over it. Reproduced in a
+                    // real Chromium; see the root-cause report. The data is
+                    // still shown (degrading to a mirror beats showing
+                    // nothing) -- it is simply labelled honestly as STALE.
+                    if (isApiSource) {
+                        if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--accent);animation:new-glow 1.5s ease-in-out infinite alternate;">&#x26A1; LIVE</span>';
+                        if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge integrity-ok"><i class="fas fa-shield-check"></i> MANIFEST VERIFIED</span>';
+                    } else {
+                        if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--warning,#ffa502);">&#x26A1; STALE</span>';
+                        if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge" style="color:var(--warning,#ffa502);">&#x26A1; FALLBACK SOURCE</span>';
+                        console.warn('[GOC v200.0] Rendering from NON-AUTHORITATIVE fallback mirror:', manifestUrl.substring(0, 70), '| items:', entries.length);
+                    }
                     var _displayCount = (data.preview && data.preview.total_in_feed)
                                       || data.total_in_feed || data.total_count || data.count || entries.length;
                     var _srcLabel = isApiSource ? 'API LIVE' : 'MANIFEST';
@@ -13520,6 +13554,13 @@ function renderTopThreats(data) {
 
                 } catch (err) {
                     lastError = err;
+                    // P0 2026-09-03: a throw that produced no HTTP status at
+                    // all (network error / timeout / abort) still needs an
+                    // attempt record, with status null, so the terminal state
+                    // resolver sees every source that was tried.
+                    if (!_feedAttempts.some(function (a) { return a.url === manifestUrl; })) {
+                        _feedAttempts.push({ url: manifestUrl, status: null, ok: false, authoritative: isApiSource, itemCount: 0 });
+                    }
                     console.warn('[GOC v77.4] Fetch failed:', manifestUrl.substring(0, 60), err.message);
                 }
             }
@@ -13567,9 +13608,38 @@ function renderTopThreats(data) {
                 return;
             }
 
-            // Truly no data at all \u2014 show degraded
-            if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--medium);">&#x26A1; LOADING</span>';
-            if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge" style="color:var(--medium);">&#x26A1; NO DATA</span>';
+            // \u2500\u2500\u2500 TERMINAL FAILURE \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+            // P0 2026-09-03. This branch previously painted
+            //     SYNC: \u26a1 LOADING   +   \u26a1 NO DATA
+            // and then stopped. Nothing runs after it, so "LOADING" was a
+            // TERMINAL state wearing a transient label -- the customer
+            // dashboard sat on it indefinitely while /api/health reported 500
+            // healthy advisories. It also made an entitlement denial (HTTP 429
+            // from the API quota gate) visually identical to "there is no
+            // intelligence", which is the false-EMPTY this incident is about.
+            //
+            // js/feed-state.js resolves the real terminal state from the
+            // per-source outcomes recorded above. RATE_LIMITED, ERROR and
+            // OFFLINE are all distinct, all terminal, and none of them is
+            // LOADING or claims the feed is empty.
+            var _termState = (window.SentinelFeedState && typeof window.SentinelFeedState.resolveFeedTerminalState === 'function')
+                ? window.SentinelFeedState.resolveFeedTerminalState({
+                    attempts: _feedAttempts,
+                    online: (typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean') ? navigator.onLine : true,
+                  })
+                // Inline fallback if js/feed-state.js failed to load: still
+                // never LOADING, still never "no intelligence".
+                : { state: 'ERROR', sync: 'ERROR', badge: 'FEED UNAVAILABLE',
+                    detail: 'Could not reach the intelligence feed. This is a delivery fault, not an absence of intelligence.',
+                    rateLimited: false, isTerminalFailure: true };
+
+            window.__FEED_TERMINAL_STATE__ = _termState;
+            console.error('[GOC v200.0] Primary feed terminal state:', _termState.state,
+                          '| sources tried:', _feedAttempts.length,
+                          '| statuses:', _feedAttempts.map(function(a){ return a.url.slice(0, 40) + '=' + (a.status === null ? 'net-error' : a.status); }).join(', '));
+
+            if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--danger,#ff4757);">&#x26A1; ' + _termState.sync + '</span>';
+            if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge" style="color:var(--danger,#ff4757);">&#x26A1; ' + _termState.badge + '</span>';
             document.querySelectorAll('.metric-card').forEach(function(c){ c.classList.remove('syncing'); });
             if (aiPulse) aiPulse.style.display = 'none';
 
@@ -13618,8 +13688,17 @@ function renderTopThreats(data) {
 
             // v184.0 P0 FIX: #threat-grid MUST never stay stuck at initial spinner
             // Root cause: all prior paths returned early; terminal path never touched the grid
+            // P0 2026-09-03: state-specific copy. "Feed temporarily
+            // unavailable" is true of a network fault but actively misleading
+            // for a quota denial, where the intelligence exists and is
+            // healthy and only this view is throttled -- and the customer
+            // needs to know the difference before concluding the platform has
+            // no data. _termState.detail carries the correct sentence per
+            // state; the retry affordance is preserved unchanged.
             var _dg = document.getElementById('threat-grid');
-            if (_dg) _dg.innerHTML = '<div class="loading-state" style="color:#888;">&#9888; Feed temporarily unavailable &mdash; <a href="javascript:void(0)" onclick="window.__DATA_LOADED__=false;window.__INTEL_RENDERED__=false;loadGOCIntel();" style="color:var(--accent,#00d4aa);text-decoration:none;font-weight:700;">retry</a></div>';
+            if (_dg) _dg.innerHTML = '<div class="loading-state" style="color:#888;">&#9888; ' +
+                String(_termState.detail || 'Feed unavailable.').replace(/[<>&]/g, '') +
+                ' &mdash; <a href="javascript:void(0)" onclick="window.__DATA_LOADED__=false;window.__INTEL_RENDERED__=false;loadGOCIntel();" style="color:var(--accent,#00d4aa);text-decoration:none;font-weight:700;">retry</a></div>';
         }
         // v64.2 FIX: Freshest-wins sync time
         async function fetchPipelineSyncTime() {
@@ -16815,6 +16894,12 @@ function renderTopThreats(data) {
      them) -- placed here rather than inside that block so it is never
      mistaken for part of the ordering it explicitly protects. -->
 <script src="/js/apex-data-plane.js"></script>
+<!-- P0 2026-09-03 (additive, same rationale as apex-data-plane.js above):
+     pure terminal-state resolver for the primary feed. Referenced lazily from
+     inside loadGOCIntel()'s terminal branch, which cannot run before the
+     document has finished parsing, so this placement is safe; loadGOCIntel
+     also carries an inline fallback if this file fails to load at all. -->
+<script src="/js/feed-state.js"></script>
 
 <!-- ═══════════════════════════════════════════════════════════════════════
      SENTINEL APEX CARD RENDERER INTEGRATION &mdash; v184.0

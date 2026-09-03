@@ -120,6 +120,14 @@ import { deductCredits } from './credit-system.js';
 import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
 import { inferGumroadTier, inferGumroadBillingCycle, isGumroadCancellationEvent, isGumroadAccessRevokingEvent } from './gumroad-lifecycle.js';
 import { handleIntelStaticProxy, INTEL_STATIC_PROXY } from './intel-static-proxy.js';
+// P0 2026-09-03: separates the first-party dashboard's own read traffic from
+// the commercial API entitlement plane. See first-party-plane.js's header for
+// the incident this closes -- the public dashboard was metered against the
+// FREE API tier's 30/min + 50/day budget and exhausted it rendering itself.
+import {
+  isFirstPartyRead, WEB_PLANE_LIMITS, webPlaneRateKey, webPlaneDailyKey,
+  evaluateWebPlaneDaily, firstPartyPlaneObservability,
+} from './first-party-plane.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -404,6 +412,44 @@ async function maybeDispatchQuotaAlert(env, identifier, tier, auth, dateStr) {
   } catch (_) {
     // Best-effort notification -- never let a failure here surface to the
     // customer whose actual API request already succeeded.
+  }
+}
+
+// P0 2026-09-03 -- first-party web read plane's own budget. Deliberately a
+// separate pair of functions rather than extra parameters on checkRateLimit()/
+// checkDailyQuota(): those two are the commercial plane's enforcement and are
+// consumed by the existing tier logic, alert dispatch and upgrade-trigger
+// paths. Keeping the planes as distinct code paths with distinct KV
+// keyspaces (see webPlaneRateKey/webPlaneDailyKey) is what guarantees
+// anonymous page rendering can neither consume nor be consumed by a
+// commercial caller's budget. Both fail OPEN on a KV error, matching the
+// identical posture checkRateLimit() and checkDailyQuota() already take --
+// a transient KV outage must not itself become a customer-facing outage.
+async function checkWebPlaneRateLimit(env, ip) {
+  const minute = Math.floor(Date.now() / 60000);
+  const key = webPlaneRateKey(ip, minute);
+  const limit = WEB_PLANE_LIMITS.perMinute;
+  try {
+    const val = await env.RATE_LIMIT_KV.get(key);
+    const count = val ? parseInt(val, 10) : 0;
+    if (count >= limit) return { allowed: false, count, limit, remaining: 0 };
+    await env.RATE_LIMIT_KV.put(key, String(count + 1), { expirationTtl: 61 });
+    return { allowed: true, count: count + 1, limit, remaining: limit - count - 1 };
+  } catch (_) {
+    return { allowed: true, count: 0, limit, remaining: limit };
+  }
+}
+
+async function checkWebPlaneDailyQuota(env, ip) {
+  const dateStr = utcDateString();
+  const key = webPlaneDailyKey(ip, dateStr);
+  try {
+    const val = await env.RATE_LIMIT_KV.get(key);
+    const countAfter = (val ? parseInt(val, 10) : 0) + 1;
+    await env.RATE_LIMIT_KV.put(key, String(countAfter), { expirationTtl: 172800 });
+    return { ...evaluateWebPlaneDaily(countAfter), dateStr, count: countAfter };
+  } catch (_) {
+    return { ...evaluateWebPlaneDaily(0), dateStr, count: 0 };
   }
 }
 
@@ -4844,8 +4890,63 @@ async function handleRequest(request, env, ctx) {
     );
   }
 
-  // Rate limiting (skip health check so monitors never get throttled)
-  if (path !== "/api/health" && path !== "/api/health/") {
+  // P0 2026-09-03 -- ENTITLEMENT PLANE SELECTION.
+  //
+  // Every request that is not /api/health used to be metered against ONE
+  // plane: the commercial per-tier RATE_LIMITS + DAILY_QUOTAS, keyed by
+  // `auth.key || ip`. The first-party dashboard is itself an anonymous
+  // consumer of that plane and spends 27 of the FREE tier's 30/min and
+  // 50/day budget on a single render, so the second page view of a UTC day
+  // from any IP was denied with daily_quota_exceeded -- and every anonymous
+  // visitor behind one NAT shared that single 50/day budget. See
+  // first-party-plane.js's header and
+  // docs/incidents/P0-EMPTY-DASHBOARD-ROOT-CAUSE.md.
+  //
+  // isFirstPartyRead() admits ONLY an uncredentialed GET/HEAD for an exact
+  // path in the dashboard's own read set. Presenting any credential routes
+  // the request to the commercial plane on every path, so quota enforcement
+  // for FREE/PRO/ENTERPRISE/MSSP API customers is bit-for-bit unchanged.
+  // Commercial quotas are not disabled or raised anywhere in this change.
+  const firstPartyRead = isFirstPartyRead({ path, method, hasCredential: !!auth.key });
+
+  // First-party web read plane: its own dedicated anonymous-web budget, in
+  // its own KV keyspace. Abuse and DDoS protection are preserved -- just at a
+  // ceiling sized for rendering a web page (~8 renders/min, ~74/day per IP)
+  // rather than for consuming an API product.
+  if (firstPartyRead) {
+    const wrl = await checkWebPlaneRateLimit(env, ip);
+    if (!wrl.allowed) {
+      auditLog(ctx, env, { action: "web_plane_rate_limited", ip, path, method, tier: auth.tier });
+      // No `upgrade` block: this is the first-party dashboard's own delivery
+      // plane, not a commercial funnel surface. Upselling an anonymous
+      // visitor an API plan because the page they are looking at refreshed
+      // too fast would be the same category confusion this change removes.
+      return jsonResp(
+        { error: "Too Many Requests", reason: "web_plane_rate_limited", plane: "first_party_web_read", retry_after: 60, limit: wrl.limit },
+        429,
+        { "Retry-After": "60", "X-WebPlane-Limit": String(wrl.limit), "X-WebPlane-Remaining": "0" }
+      );
+    }
+    const wdq = await checkWebPlaneDailyQuota(env, ip);
+    if (wdq.exceeded) {
+      auditLog(ctx, env, { action: "web_plane_daily_exceeded", ip, path, method, tier: auth.tier });
+      return jsonResp(
+        { error: "Too Many Requests", reason: "web_plane_daily_exceeded", plane: "first_party_web_read", limit: wdq.limit, reset_utc: new Date(Date.now() + secondsUntilNextUtcMidnight() * 1000).toISOString() },
+        429,
+        {
+          "Retry-After": String(secondsUntilNextUtcMidnight()),
+          "X-WebPlane-Daily-Limit": String(wdq.limit),
+          "X-WebPlane-Daily-Remaining": "0",
+        }
+      );
+    }
+  }
+
+  // Rate limiting (skip health check so monitors never get throttled).
+  // `!firstPartyRead` keeps the commercial plane's two gates exactly as they
+  // were for every request that is not an anonymous first-party dashboard
+  // read -- the condition below is unchanged apart from that one conjunct.
+  if (!firstPartyRead && path !== "/api/health" && path !== "/api/health/") {
     const rl = await checkRateLimit(env, ip, auth.tier);
     if (!rl.allowed) {
       auditLog(ctx, env, { action: "rate_limited", ip, path, method, tier: auth.tier });
@@ -6056,6 +6157,15 @@ async function handleRequest(request, env, ctx) {
   // --- P19: Enterprise Report Excellence + Dead-code Activation (additive, v19.0) -----------
   if (path === "/api/v1/reports/certify")           return await handleP19Certify(request, env);
   if (path === "/api/v1/reports/scorecard")         return await handleP19Scorecard(request, env);
+  // --- First-party web read plane observability (additive, P0 2026-09-03) ------------------
+  // Principle 7: the plane's membership and budgets must be queryable, so
+  // that a dashboard endpoint drifting out of the plane (and back onto the
+  // commercial FREE quota that caused this incident) is observable rather
+  // than silent. Read-only, no arguments, no state.
+  if (path === "/api/v1/observability/first-party-plane") {
+    return jsonResp(firstPartyPlaneObservability(), 200, { "Cache-Control": "public, max-age=300" });
+  }
+
   // --- P20: Enterprise Threat Intelligence Trust & Quality Platform (additive, v20.0) ------
   if (path === "/api/v1/reports/p20/quality")       return await handleP20QualityReport(request, env);
   if (path === "/api/v1/reports/p20/audit")         return await handleP20FeedAudit(request, env);
