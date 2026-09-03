@@ -29,10 +29,6 @@ env:
   PYTHONIOENCODING: "utf-8"
   PYTHONUTF8: "1"
 
-# P0 invariant: this workflow READS the same authoritative R2 state that
-# sentinel-blogger and multi-source-intel WRITE. Serialize the snapshot+publish
-# transaction with those writers; an offset cron alone is not a lock when a
-# production run overruns its nominal window.
 concurrency:
   group: sentinel-data-writer
   cancel-in-progress: false
@@ -69,13 +65,6 @@ jobs:
       - name: "Ensure output directories"
         run: mkdir -p api/v1/intel api/reports data/stix data/cache data/intelligence_repository
 
-      # CRITICAL P0 FIX: Git is no longer the runtime state authority. The old
-      # workflow generated dashboard feeds from whatever stale manifest happened
-      # to exist in its checkout, while ingestion/blogger persisted current state
-      # to R2. Restore the authoritative snapshot before deriving any dashboard
-      # feed. r2_state_sync.py validates JSON/shape and atomically replaces local
-      # state; transport/auth/corruption failures hard-fail instead of publishing
-      # stale/empty customer feeds.
       - name: "Restore authoritative intelligence state from R2"
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -87,18 +76,20 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, pathlib, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
           candidates = [pathlib.Path('data/feed_manifest.json'), pathlib.Path('data/stix/feed_manifest.json')]
           for p in candidates:
               if not p.exists():
                   continue
               try:
-                  d=json.loads(p.read_text(encoding='utf-8'))
+                  d=json.loads(p.read_text(encoding='utf-8'), parse_constant=reject_constant)
               except Exception as e:
-                  print(f'::error::{p}: invalid JSON: {e}')
+                  print(f'::error::{p}: invalid strict JSON: {e}')
                   sys.exit(1)
               items=d if isinstance(d,list) else (d.get('items') or d.get('data') or d.get('advisories') or d.get('results') or []) if isinstance(d,dict) else []
               if items:
-                  print(f'AUTHORITY=R2 PATH={p} RECORDS={len(items)}')
+                  print(f'AUTHORITY=R2 PATH={p} RECORDS={len(items)} STRICT_JSON=PASS')
                   break
           else:
               print('::error::Authoritative R2 snapshot contains no usable intelligence; refusing to publish empty dashboard generation')
@@ -116,27 +107,33 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import json, pathlib, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
+          def strict_load(path):
+              return json.loads(path.read_text(encoding='utf-8'), parse_constant=reject_constant)
           files = [
             'api/v1/intel/apex.json','api/v1/intel/ai_summary.json','api/v1/intel/stats.json',
             'api/v1/intel/campaigns.json','api/v1/intel/ransomware.json','api/v1/intel/apt.json',
             'api/v1/intel/epss.json','api/v1/intel/defcon.json','api/v1/intel/pulse.json',
             'api/v1/intel/darkweb.json','api/v1/intel/cybermap.json'
           ]
+          parsed={}
           for name in files:
               p=pathlib.Path(name)
               if not p.exists() or p.stat().st_size < 10:
                   print(f'::error::{name}: missing/empty'); sys.exit(1)
-              try: d=json.loads(p.read_text(encoding='utf-8'))
+              try: d=strict_load(p)
               except Exception as e:
-                  print(f'::error::{name}: invalid JSON: {e}'); sys.exit(1)
+                  print(f'::error::{name}: invalid strict JSON: {e}'); sys.exit(1)
               if not isinstance(d,(dict,list)):
                   print(f'::error::{name}: invalid top-level shape'); sys.exit(1)
-          apex=json.loads(pathlib.Path('api/v1/intel/apex.json').read_text(encoding='utf-8'))
+              parsed[name]=d
+          apex=parsed['api/v1/intel/apex.json']
           count=apex.get('total_advisories', apex.get('total', 0)) if isinstance(apex,dict) else 0
-          if not isinstance(count,(int,float)) or count <= 0:
+          if not isinstance(count,(int,float)) or isinstance(count,bool) or count <= 0:
               print(f'::error::apex.json advertises non-positive advisory count ({count}); refusing destructive empty publication')
               sys.exit(1)
-          print(f'VALIDATION=PASS DASHBOARD_ADVISORIES={count} FILES={len(files)}')
+          print(f'VALIDATION=PASS DASHBOARD_ADVISORIES={count} FILES={len(files)} STRICT_JSON=PASS')
           PY
 
       - name: "Upload dashboard generation to Cloudflare R2"
@@ -176,15 +173,14 @@ jobs:
             -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
             --data '{"files":["https://intel.cyberdudebivash.com/api/v1/intel/apex.json","https://intel.cyberdudebivash.com/api/v1/intel/ai_summary.json","https://intel.cyberdudebivash.com/api/v1/intel/stats","https://intel.cyberdudebivash.com/api/v1/intel/campaigns","https://intel.cyberdudebivash.com/api/v1/intel/ransomware","https://intel.cyberdudebivash.com/api/v1/intel/apt","https://intel.cyberdudebivash.com/api/v1/intel/epss","https://intel.cyberdudebivash.com/api/v1/intel/defcon","https://intel.cyberdudebivash.com/api/v1/intel/pulse","https://intel.cyberdudebivash.com/api/v1/intel/darkweb","https://intel.cyberdudebivash.com/api/v1/intel/cybermap"]}'
 
-      # Customer-critical validation is deliberately NOT continue-on-error.
-      # HTTP 200/byte-count is insufficient: parse JSON and require the primary
-      # apex contract to expose non-zero authoritative intelligence.
       - name: "Production semantic canary"
         if: github.event.inputs.dry_run != 'true'
         run: |
           sleep 8
           python3 - <<'PY'
           import json, time, urllib.request, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
           base='https://intel.cyberdudebivash.com'
           endpoints=['/api/v1/intel/apex.json','/api/v1/intel/ai_summary.json','/api/v1/intel/stats']
           last=None
@@ -195,11 +191,11 @@ jobs:
                       req=urllib.request.Request(base+ep, headers={'Cache-Control':'no-cache','User-Agent':'SentinelAPEX-v200-canary'})
                       with urllib.request.urlopen(req, timeout=15) as r:
                           if r.status != 200: raise RuntimeError(f'{ep}: HTTP {r.status}')
-                          payloads[ep]=json.loads(r.read().decode('utf-8'))
+                          payloads[ep]=json.loads(r.read().decode('utf-8'), parse_constant=reject_constant)
                   apex=payloads['/api/v1/intel/apex.json']
                   count=apex.get('total_advisories', apex.get('total',0)) if isinstance(apex,dict) else 0
-                  if count and count > 0:
-                      print(f'PRODUCTION_CANARY=PASS API_ADVISORIES={count}')
+                  if isinstance(count,(int,float)) and not isinstance(count,bool) and count > 0:
+                      print(f'PRODUCTION_CANARY=PASS API_ADVISORIES={count} STRICT_JSON=PASS')
                       sys.exit(0)
                   last=f'apex advisory count={count}'
               except Exception as e:
