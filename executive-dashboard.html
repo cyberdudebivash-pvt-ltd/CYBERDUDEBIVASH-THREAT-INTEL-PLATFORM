@@ -191,7 +191,16 @@
 
 <script>
 const API = 'https://intel.cyberdudebivash.com/api/v1/intel/latest.json';
-const ACTORS_API = 'https://intel.cyberdudebivash.com/api/apex_v2/actors.json';
+// ROOT CAUSE FIX: /api/apex_v2/actors.json 404s in production (confirmed
+// against the live Worker) -- no route by that name has ever existed in
+// workers/intel-gateway/src/index.js. The real, live actor-intelligence
+// endpoint is /api/v1/intel/apt, returning { top_actors: [...] } built
+// from APT_PROFILES (id/alias/nation/sector/ttps) -- a narrower field set
+// than this page's original render code assumed (no aliases[]/origin/
+// motivation/attribution_confidence/campaigns[] exist on any real
+// endpoint). Render code below updated to match the real fields instead
+// of silently keeping a permanently-empty panel.
+const ACTORS_API = 'https://intel.cyberdudebivash.com/api/v1/intel/apt';
 
 function switchView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -223,7 +232,7 @@ async function loadDashboard() {
   try {
     const r2 = await fetch(ACTORS_API);
     const d2 = await r2.json();
-    actors = d2.actors || [];
+    actors = d2.top_actors || [];
   } catch(e) {}
 
   // Count by severity
@@ -348,16 +357,17 @@ async function loadDashboard() {
 
   // ── CTI VIEW ────────────────────────────────────────────────────────────
   let ctiHtml='<div class="grid-3">';
+  // ROOT CAUSE FIX: real actors (from /api/v1/intel/apt's top_actors, backed
+  // by APT_PROFILES in the Worker) carry id/alias/nation/sector/ttps -- not
+  // the aliases[]/origin/motivation/attribution_confidence/campaigns[] shape
+  // this card assumed, which no endpoint has ever served.
   actors.slice(0,9).forEach(act=>{
-    const confColor = act.attribution_confidence==='HIGH'?'var(--green)':act.attribution_confidence.includes('MEDIUM')?'var(--yellow)':'var(--muted)';
     ctiHtml+=`<div class="card">
       <div style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-bottom:4px;">${act.id}</div>
-      <div style="font-size:14px;font-weight:700;margin-bottom:8px;">${(act.aliases||[])[0]||act.id}</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">${(act.aliases||[]).slice(1).join(' · ')}</div>
-      <div class="metric-row"><span class="metric-label">Origin</span><span class="metric-val">${act.origin||'Unknown'}</span></div>
-      <div class="metric-row"><span class="metric-label">Motivation</span><span class="metric-val" style="font-size:12px;">${act.motivation||'—'}</span></div>
-      <div class="metric-row"><span class="metric-label">Attribution</span><span class="metric-val" style="color:${confColor};">${act.attribution_confidence||'—'}</span></div>
-      <div style="margin-top:12px;font-size:11px;color:var(--muted);">Recent campaigns: ${(act.campaigns||['—']).slice(-1)[0]}</div>
+      <div style="font-size:14px;font-weight:700;margin-bottom:8px;">${act.alias||act.id}</div>
+      <div class="metric-row"><span class="metric-label">Origin</span><span class="metric-val">${act.nation||'Unknown'}</span></div>
+      <div class="metric-row"><span class="metric-label">Sector Focus</span><span class="metric-val" style="font-size:12px;">${act.sector||'—'}</span></div>
+      <div class="metric-row"><span class="metric-label">TTPs Tracked</span><span class="metric-val">${act.ttps!=null?act.ttps:'—'}</span></div>
     </div>`;
   });
   ctiHtml+='</div>';

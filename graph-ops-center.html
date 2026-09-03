@@ -442,7 +442,7 @@ function draw() {
   // Grid
   ctx.strokeStyle = 'rgba(30,45,66,0.3)';
   ctx.lineWidth = 0.5;
-  for (let x = -W; x < W*2; x += 60) { ctx.beginPath(); ctx.moveTo(x,−H); ctx.lineTo(x,H*2); ctx.stroke(); }
+  for (let x = -W; x < W*2; x += 60) { ctx.beginPath(); ctx.moveTo(x,-H); ctx.lineTo(x,H*2); ctx.stroke(); }
   for (let y = -H; y < H*2; y += 60) { ctx.beginPath(); ctx.moveTo(-W,y); ctx.lineTo(W*2,y); ctx.stroke(); }
 
   // Edges
@@ -720,22 +720,36 @@ function highlightPath(pid) {
 }
 
 // ── LIVE DATA LOADER ─────────────────────────────────────────────────────────
+// ROOT CAUSE FIX: this fetched /api/graph/stats.json, which 404s -- no such
+// route has ever existed in workers/intel-gateway/src/index.js. The real
+// graph endpoint (/api/v1/intel/graph, handleIntelGraph in api-extensions.js)
+// exists but rejects the FREE tier outright (aiTierReject) and returns a
+// completely different shape (node_count/edge_count, no node_types
+// actor/ioc breakdown) -- pointing at it would still leave this page
+// permanently empty for every anonymous visitor. Synthesizing the same
+// four stat tiles from /api/feed.json instead: free, public, already
+// proven reliable, and this page's own IOC/actor pivot view already reads
+// this same shape of item elsewhere on the page.
 function loadLiveGraphStats() {
-  fetch('/api/graph/stats.json?_t=' + Date.now())
+  fetch('/api/feed.json?_t=' + Date.now())
     .then(function(r) { return r.ok ? r.json() : null; })
     .then(function(d) {
-      if (!d) return;
+      var items = d && (d.items || (Array.isArray(d) ? d : [])) || [];
+      if (!items.length) return;
       var el = function(id) { return document.getElementById(id); };
-      if (el('stat-nodes')) el('stat-nodes').textContent = (d.nodes || 0).toLocaleString();
-      if (el('stat-edges')) el('stat-edges').textContent = (d.edges || 0).toLocaleString();
-      if (el('stat-campaigns')) {
-        var actors = (d.node_types && d.node_types.actor) ? d.node_types.actor : 0;
-        el('stat-campaigns').textContent = actors;
-      }
-      if (el('stat-pivots')) {
-        var iocs = (d.node_types && d.node_types.ioc) ? d.node_types.ioc : 0;
-        el('stat-pivots').textContent = iocs;
-      }
+      var totalIocs = 0, actorSet = {};
+      items.forEach(function(it) {
+        totalIocs += parseInt(it.ioc_count || 0, 10) || 0;
+        var actor = it.actor_tag || it.actor_id || '';
+        if (actor && actor !== 'UNATTRIBUTED' && actor !== 'UNC-CDB-99' && actor !== 'UNC-UNKNOWN') actorSet[actor] = true;
+      });
+      var actorCount = Object.keys(actorSet).length;
+      var nodeCount = items.length + totalIocs;          // advisories + IOC nodes
+      var edgeCount = totalIocs + actorCount;             // advisory<->IOC + advisory<->actor links
+      if (el('stat-nodes')) el('stat-nodes').textContent = nodeCount.toLocaleString();
+      if (el('stat-edges')) el('stat-edges').textContent = edgeCount.toLocaleString();
+      if (el('stat-campaigns')) el('stat-campaigns').textContent = actorCount;
+      if (el('stat-pivots')) el('stat-pivots').textContent = totalIocs.toLocaleString();
     }).catch(function() {});
 }
 
