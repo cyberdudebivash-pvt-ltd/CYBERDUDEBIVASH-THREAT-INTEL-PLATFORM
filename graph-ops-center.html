@@ -720,23 +720,20 @@ function highlightPath(pid) {
 }
 
 // ── LIVE DATA LOADER ─────────────────────────────────────────────────────────
-// ROOT CAUSE FIX: this fetched /api/graph/stats.json, which 404s -- no such
-// route has ever existed in workers/intel-gateway/src/index.js. The real
-// graph endpoint (/api/v1/intel/graph, handleIntelGraph in api-extensions.js)
-// exists but rejects the FREE tier outright (aiTierReject) and returns a
-// completely different shape (node_count/edge_count, no node_types
-// actor/ioc breakdown) -- pointing at it would still leave this page
-// permanently empty for every anonymous visitor. Synthesizing the same
-// four stat tiles from /api/feed.json instead: free, public, already
-// proven reliable, and this page's own IOC/actor pivot view already reads
-// this same shape of item elsewhere on the page.
+// Graph stats are computed from the public feed rather than a dedicated
+// endpoint, so every visitor sees real numbers on the same reliable path
+// the rest of this page's IOC/actor pivot view already uses.
 function loadLiveGraphStats() {
+  var statIds = ['stat-nodes', 'stat-edges', 'stat-campaigns', 'stat-pivots'];
+  var el = function(id) { return document.getElementById(id); };
+  var markUnavailable = function() {
+    statIds.forEach(function(id) { if (el(id)) el(id).textContent = '—'; });
+  };
   fetch('/api/feed.json?_t=' + Date.now())
     .then(function(r) { return r.ok ? r.json() : null; })
     .then(function(d) {
       var items = d && (d.items || (Array.isArray(d) ? d : [])) || [];
-      if (!items.length) return;
-      var el = function(id) { return document.getElementById(id); };
+      if (!items.length) { markUnavailable(); return; }
       var totalIocs = 0, actorSet = {};
       items.forEach(function(it) {
         totalIocs += parseInt(it.ioc_count || 0, 10) || 0;
@@ -750,7 +747,7 @@ function loadLiveGraphStats() {
       if (el('stat-edges')) el('stat-edges').textContent = edgeCount.toLocaleString();
       if (el('stat-campaigns')) el('stat-campaigns').textContent = actorCount;
       if (el('stat-pivots')) el('stat-pivots').textContent = totalIocs.toLocaleString();
-    }).catch(function() {});
+    }).catch(markUnavailable);
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────

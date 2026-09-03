@@ -191,15 +191,7 @@
 
 <script>
 const API = 'https://intel.cyberdudebivash.com/api/v1/intel/latest.json';
-// ROOT CAUSE FIX: /api/apex_v2/actors.json 404s in production (confirmed
-// against the live Worker) -- no route by that name has ever existed in
-// workers/intel-gateway/src/index.js. The real, live actor-intelligence
-// endpoint is /api/v1/intel/apt, returning { top_actors: [...] } built
-// from APT_PROFILES (id/alias/nation/sector/ttps) -- a narrower field set
-// than this page's original render code assumed (no aliases[]/origin/
-// motivation/attribution_confidence/campaigns[] exist on any real
-// endpoint). Render code below updated to match the real fields instead
-// of silently keeping a permanently-empty panel.
+// Live actor intelligence, sourced from the platform's public feed API.
 const ACTORS_API = 'https://intel.cyberdudebivash.com/api/v1/intel/apt';
 
 function switchView(name) {
@@ -357,10 +349,7 @@ async function loadDashboard() {
 
   // ── CTI VIEW ────────────────────────────────────────────────────────────
   let ctiHtml='<div class="grid-3">';
-  // ROOT CAUSE FIX: real actors (from /api/v1/intel/apt's top_actors, backed
-  // by APT_PROFILES in the Worker) carry id/alias/nation/sector/ttps -- not
-  // the aliases[]/origin/motivation/attribution_confidence/campaigns[] shape
-  // this card assumed, which no endpoint has ever served.
+  // Actor cards render the fields the live endpoint actually provides.
   actors.slice(0,9).forEach(act=>{
     ctiHtml+=`<div class="card">
       <div style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-bottom:4px;">${act.id}</div>
