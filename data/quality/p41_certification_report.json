@@ -1,0 +1,128 @@
+{
+  "schema_version": "p41.0",
+  "generated_at": "2026-09-03T06:11:13.398877+00:00",
+  "source_commit": "local",
+  "layer": "P41",
+  "scope": "live_capability_discovery_api",
+  "release_tier": "WORLDWIDE_RELEASE",
+  "passed_count": 10,
+  "blocker_count": 0,
+  "warning_count": 1,
+  "total_gates": 11,
+  "p40_tier": "BLOCKED",
+  "shared_validators_import_ok": true,
+  "capability_registry": {
+    "total_pages": 150,
+    "unclassified_count": 0,
+    "customer_ui_count": 138
+  },
+  "governance_deliverables": {
+    "canonical_registry_source": "data/quality/frontend_capability_registry.json",
+    "registry_generator": "scripts/build_capability_registry.py",
+    "r2_upload_bridge": "scripts/r2_resync_manifests.py",
+    "handler_js": "workers/intel-gateway/src/p41-handlers.js",
+    "frontend_consumer": "js/capability-discovery.js + capability-directory.html"
+  },
+  "adr": [
+    {
+      "id": "ADR-P41-001",
+      "decision": "Expose the #340 capability registry live via R2 rather than building a second, richer, hand-maintained capability metadata store.",
+      "rationale": "The mission's 'Canonical Capability Registry' item explicitly requires not creating a second manually maintained source of truth when equivalent authoritative metadata already exists (Single Source of Truth, CLAUDE.md Principle 3). #340 already built and CI-enforces the classification; the gap was only that nothing served it live.",
+      "approach": "Additive read-only layer. Zero classification logic re-implemented.",
+      "risk": "LOW"
+    },
+    {
+      "id": "ADR-P41-002",
+      "decision": "This endpoint is public/unauthenticated, unlike every P21-P40 route.",
+      "rationale": "It serves page-inventory metadata (a live sitemap), not computed intelligence. Gating it behind a paid API key would defeat the point of capability discovery: a prospective customer must be able to see what the platform offers before they have a key.",
+      "approach": "Left outside the existing `_p17to40Gated` regex rather than modifying auth logic (CLAUDE.md: auth changes frozen unless the task is explicitly auth). Documented explicitly at the route registration site so a future P42+ author does not assume the same exemption applies to them.",
+      "risk": "LOW"
+    },
+    {
+      "id": "ADR-P41-003",
+      "decision": "The registry's `notes` field is never included in the public response.",
+      "rationale": "notes contains internal audit/engineering commentary (e.g. gaps, missing routes) that has no reason to reach an anonymous caller — information disclosure the mission's security section explicitly warns against ('internal infrastructure details').",
+      "approach": "Hard field allowlist in _toPublicCapability(), not a denylist.",
+      "risk": "LOW"
+    }
+  ],
+  "gates": [
+    {
+      "gate_id": "G01",
+      "label": "P40 certification report present",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "tier=BLOCKED blockers=3"
+    },
+    {
+      "gate_id": "G02",
+      "label": "P40 release tier = WORLDWIDE_RELEASE (informational -- see comment)",
+      "severity": "WARNING",
+      "status": "FAIL_WARNING",
+      "detail": "BLOCKED"
+    },
+    {
+      "gate_id": "G03",
+      "label": "Capability registry present and fully classified (unclassified_count=0)",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "total_pages=150 unclassified=0"
+    },
+    {
+      "gate_id": "G04",
+      "label": "PUBLIC_CATEGORIES allowlist contains only CUSTOMER_UI (never ADMIN/INTERNAL)",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "'CUSTOMER_UI'"
+    },
+    {
+      "gate_id": "G05",
+      "label": "Public capability shape never includes the registry's internal `notes` field",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "clean"
+    },
+    {
+      "gate_id": "G06",
+      "label": "p41-handlers.js exists and exports all 3 expected handlers",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "handleP41Capabilities, handleP41CapabilityDetail, handleP41Observability"
+    },
+    {
+      "gate_id": "G07",
+      "label": "index.js imports p41-handlers.js and dispatches all 3 routes",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "import=True routes=True"
+    },
+    {
+      "gate_id": "G08",
+      "label": "P41 routes remain outside the P17-P40 auth-required gate (public by design)",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "gate_found=True boundary_intact=True p41_not_gated=True"
+    },
+    {
+      "gate_id": "G09",
+      "label": "Capability registry has a Python -> R2 upload bridge",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "intel/frontend_capability_registry.json"
+    },
+    {
+      "gate_id": "G10",
+      "label": "p41-handlers.js has meaningful unit test coverage (>=8 tests)",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "13 test() blocks found"
+    },
+    {
+      "gate_id": "G11",
+      "label": "Frontend consumer exists, is wired, and avoids innerHTML DOM construction",
+      "severity": "BLOCKER",
+      "status": "PASS",
+      "detail": "files_exist=True referenced=True no_innerHTML=True"
+    }
+  ]
+}

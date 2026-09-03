@@ -78,6 +78,16 @@ RESYNC_FILES = [
     ("data/quality/p35_certification_report.json", "intel/p35_certification_report.json", "public, max-age=300"),
     ("data/quality/p36_certification_report.json", "intel/p36_certification_report.json", "public, max-age=300"),
     ("data/quality/p37_certification_report.json", "intel/p37_certification_report.json", "public, max-age=300"),
+    # P41.0 Live Capability Discovery API: syncs the #340 capability registry
+    # (checked-in, hand-curated -- see build_capability_registry.py's own
+    # "one-time build; hand-maintained CLASSIFICATIONS dict thereafter" --
+    # not regenerated every pipeline run the way p33-p37's reports are) so
+    # p41-handlers.js's env.INTEL_R2.get() has something to read. Unlike
+    # P40 (STAGE 5.9.6 "late R2 sync" -- needed because P40's OWN data is
+    # regenerated mid-pipeline, after r2_upload.py's early sync already
+    # ran), this file does not change mid-pipeline, so this single STAGE
+    # 4.1 sync is sufficient -- no late-resync stage needed.
+    ("data/quality/frontend_capability_registry.json", "intel/frontend_capability_registry.json", "public, max-age=300"),
 ]
 
 

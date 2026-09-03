@@ -91,6 +91,7 @@ import { handleP37Hardening, handleP37FeedAudit, handleP37Enrichment, handleP37I
 import { handleP38SchemaRegistry, handleP38FeedGovernance, handleP38SchemaDrift, handleP38EnrichmentAudit, handleP38ConfidenceAudit, handleP38IQIndex, handleP38SourceDiversity, handleP38Certification, handleP38Executive, handleP38Reliability, handleP38Metrics, handleP38Observability } from './p38-handlers.js';
 import { handleP40SourceRegistry, handleP40SourceDetail, handleP40SourceHealth, handleP40Licensing, handleP40Coverage, handleP40Waves, handleP40Certification, handleP40Metrics, handleP40Dashboard, handleP40Observability, _loadRegistry as loadP40SourceRegistry } from './p40-handlers.js';
 import { handleRxPubA0ReportsIdentity, handleRxPubA0Observability } from './rx-pub-a0-handlers.js';
+import { handleP41Capabilities, handleP41CapabilityDetail, handleP41Observability } from './p41-handlers.js';
 import { evaluatePublicationGate, isCustomerReady, buildGateRejectedResponseBody, buildUnresolvableReportResponseBody } from './publication-gate.js';
 import { loadCertificationIndex, persistCertificationRecords, resolveCertification, CERTIFICATION_POLICY_VERSION } from './certification-registry.js';
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
@@ -6220,6 +6221,22 @@ async function handleRequest(request, env, ctx) {
 
   if (path === "/api/v1/rx-pub-a0/reports-identity") return await handleRxPubA0ReportsIdentity(request, env);
   if (path === "/api/v1/rx-pub-a0/observability")    return await handleRxPubA0Observability(request, env);
+
+  // --- P41: Live Capability Discovery API (additive) -------------------------
+  // Deliberately PUBLIC, no auth check -- see workers/intel-gateway/src/
+  // p41-handlers.js file header for the full rationale. It serves
+  // page-inventory metadata only (id/title/route/status derived from
+  // data/quality/frontend_capability_registry.json), never computed
+  // intelligence, so it does not belong behind the same key/JWT bar as
+  // P21-P40. It is intentionally NOT added to the `_p17to40Gated` regex
+  // above (`/^\/api\/v1\/p(2[1-9]|3\d|40)\//`) -- that regex already stops
+  // at p40 and does not need editing for this route to fall outside it. If
+  // a FUTURE P42+ layer needs the same auth bar P21-P40 have, extend that
+  // regex explicitly for it; do not assume a new pNN route is covered just
+  // because it comes after p40 -- it is not, by construction.
+  if (path === "/api/v1/p41/capabilities")       return await handleP41Capabilities(request, env);
+  if (path === "/api/v1/p41/capability")         return await handleP41CapabilityDetail(request, env);
+  if (path === "/api/v1/p41/observability")      return await handleP41Observability(request, env);
 
   // --- P0 publication authorization gate (incident: intel--ba996dad34540150b8ea1b5f) ---
   // Supports both /api/v1/reports/{id}/publication-status (path form) and

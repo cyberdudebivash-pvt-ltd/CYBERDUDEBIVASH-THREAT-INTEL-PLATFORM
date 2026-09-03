@@ -4400,3 +4400,32 @@ jobs:
         continue-on-error: true
         run: python3 scripts/capability_coverage_audit.py || true
 
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.8 - P41.0 Live Capability Discovery Certification
+      # Chains from P40 (matching the "chain from the latest fully-live
+      # numbered layer" precedent P40 itself set chaining from P38). Verifies
+      # the #340 capability registry is still fully classified, the P41
+      # worker handler + index.js wiring are intact, the security boundary
+      # (ADMIN/INTERNAL exclusion, no `notes` leakage) has not regressed, and
+      # the frontend consumer (js/capability-discovery.js +
+      # capability-directory.html) still exists and avoids innerHTML DOM
+      # construction. Non-blocking (continue-on-error: true) -- CI helper
+      # only, matching every other P-layer cert stage (STAGE 5.9.5/5.9.7).
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.8 - P41.0 Live Capability Discovery Certification"
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          python3 scripts/p41_production_certification.py
+          if [ -f "data/quality/p41_certification_report.json" ]; then
+            read -r TIER BLOCKERS WARNINGS PASSED TOTAL CUSTOMER_UI_COUNT <<< "$(python3 scripts/ci_stats_extract.py p41 2>/dev/null || echo 'UNKNOWN 0 0 0 0 0')"
+            echo "P41 Capability Discovery: tier=${TIER} passed=${PASSED}/${TOTAL} blockers=${BLOCKERS} warnings=${WARNINGS} public_capabilities=${CUSTOMER_UI_COUNT}"
+            if [ "${BLOCKERS}" = "0" ]; then
+              echo "::notice::P41.0 WORLDWIDE_RELEASE — ${PASSED}/${TOTAL} gates passed. ${CUSTOMER_UI_COUNT} public capabilities discoverable via /api/v1/p41/capabilities."
+            else
+              echo "::warning::P41.0 BLOCKED — ${BLOCKERS} blocker(s). Gates: ${PASSED}/${TOTAL}. See data/quality/p41_certification_report.json."
+            fi
+          fi
+          exit 0
+

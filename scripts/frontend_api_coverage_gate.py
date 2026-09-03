@@ -68,6 +68,22 @@ ALLOWLIST_PATH = REPO_ROOT / "data" / "quality" / "frontend_static_page_allowlis
 # (js/sentinel-live-feeds.js -- ransomware.html's fix; js/api_adapter.js,
 # js/card_renderer.js -- referenced in scripts/frontend_integrity.py's own
 # TIER 3 protected-file list).
+#
+# P41.0 addition: js/apex-data-plane.js (PR #315, "STAGE 2 of the SENTINEL
+# APEX Dynamic Frontend Transformation mandate") is the same kind of shared
+# fetch orchestrator as api_adapter.js above -- its own file header
+# documents it as purely additive infrastructure with zero consumers at
+# build time ("not called by any existing code path until a consumer is
+# wired to it explicitly"), which is exactly why it was missing from this
+# list: no page existed yet that needed it counted. capability-directory.html
+# (js/capability-discovery.js, composing ApexDataPlane per that module's own
+# Reuse Before Build design) is that first consumer. Omitting it here would
+# have forced a dishonest manual "live" override in build_capability_registry.py's
+# CLASSIFICATIONS dict instead -- see intelligence-archive.html's own
+# CLASSIFICATIONS comment for why that specific shortcut is deliberately
+# never taken: a manually-forced status="live" that this report's own
+# dynamic_pages list disagrees with is exactly what capability_registry_gate.py's
+# Gate 2 (placeholder-regression check) is built to catch and fail on.
 KNOWN_LIVE_DATA_SCRIPTS = (
     "sentinel-live-feeds.js",
     "api_adapter.js",
@@ -84,6 +100,7 @@ KNOWN_LIVE_DATA_SCRIPTS = (
     # live data, unconditionally, regardless of why it originally included the
     # script.
     "metric-normalize.js",
+    "apex-data-plane.js",
 )
 
 

@@ -241,6 +241,17 @@ _REPORTS: dict = {
             len(d.get("nav_leakage_findings", [])),
         ],
     ),
+    "p41": (
+        _ROOT / "data" / "quality" / "p41_certification_report.json",
+        lambda d: [
+            d.get("release_tier", "UNKNOWN"),
+            d.get("blocker_count", 0),
+            d.get("warning_count", 0),
+            d.get("passed_count", 0),
+            d.get("total_gates", 0),
+            d.get("capability_registry", {}).get("customer_ui_count", 0),
+        ],
+    ),
 }
 
 _FALLBACKS = {
@@ -268,6 +279,7 @@ _FALLBACKS = {
     "frontend_api_coverage": "? ? ? ?",
     "capability_registry": "? ? ? ? ? ?",
     "metric_integrity_contract": "? ? ?",
+    "p41": "UNKNOWN 0 0 0 0 0",
 }
 
 
