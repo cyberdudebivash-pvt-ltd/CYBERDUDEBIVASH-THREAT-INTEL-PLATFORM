@@ -107,6 +107,28 @@ CLASSIFICATIONS = {
     "partner.html": ("CUSTOMER_UI", "form_only", "Partner/reseller program marketing page."),
     # -- INTERNAL: one-off report artifact, not a live product surface --
     "GODMODE-REVENUE-AUDIT-REPORT.html": ("INTERNAL", None, "One-off internal audit report artifact (added to the static allowlist -- zero real form/fetch; its 'fetch(' matches are prose describing suggested code, not executable JS)."),
+    # -- INTERNAL: same class as GODMODE-REVENUE-AUDIT-REPORT.html above --
+    # found by scripts/capability_runtime_auditor.py (P0 Dynamic Capability
+    # Runtime Convergence session): all 4 were misclassified CUSTOMER_UI/
+    # static_content with the generic "marketing/legal/informational"
+    # note, but are actually internal engineering/business audit reports
+    # (zero <script> tags; content includes commit-referencing defect
+    # tables, P0 gate IDs, and -- SENTINEL_APEX_ENTERPRISE_AUDIT_v145.html
+    # specifically -- live sales-pipeline figures like "3 incoming
+    # enterprise inquiry emails" and unresolved revenue-blocking gaps).
+    # frontend_api_coverage_gate.py's own docstring already independently
+    # described v145 as "a prose audit report" when documenting an
+    # unrelated false-positive fix -- this classification fix is the first
+    # place that finding is actually acted on. Reclassifying only changes
+    # P41 capability-discovery visibility (never advertised as a customer
+    # capability, never appears in /api/v1/p41/capabilities); it does not
+    # change or add any HTTP access control to the file itself, which is
+    # unchanged and out of scope for this fix (see this session's own
+    # report for that distinction).
+    "SENTINEL-APEX-CEO-CTO-CISO-EXECUTIVE-AUDIT-REPORT-v161.html": ("INTERNAL", None, "Internal engineering audit report (ISSUE ID/ROOT CAUSE/FIX/COMMIT defect table), not customer-facing content. Zero <script> tags."),
+    "SENTINEL-APEX-SOVEREIGN-MASTER-REPORT-2026.html": ("INTERNAL", None, "Internal engineering/revenue audit report (\"REVENUE BLOCKED -- 5 FIXES REQUIRED\", per-tier enforcement-gap notes), not customer-facing content. Zero <script> tags."),
+    "SENTINEL_APEX_ENTERPRISE_AUDIT_v145.html": ("INTERNAL", None, "Internal production audit report discussing live sales-pipeline figures and unresolved P0 revenue-blocking gaps, not customer-facing content. Zero <script> tags. Already independently described as 'a prose audit report' in frontend_api_coverage_gate.py's own docstring (an unrelated false-positive fix) prior to this classification correction."),
+    "SENTINEL_APEX_P0_AUDIT_REPORT.html": ("INTERNAL", None, "Internal full-system audit report, not customer-facing content. Zero <script> tags."),
     # -- CUSTOMER_UI, correctly excluded from the strict static allowlist --
     "api-docs.html": ("CUSTOMER_UI", "interactive_docs", "Has real interactive 'try it' fetch() calls (an embedded API console), not a placeholder-data page -- intentionally not in the zero-fetch static allowlist."),
     "intelligence-archive.html": ("CUSTOMER_UI", "live_non_gateway", "Genuinely fetches live JSON from /data/intelligence_repository/*.json -- a real data source outside the /api/ gateway, so the coverage gate's /api/-only regex permanently misses it (by design, not a bug in that gate -- see its own docstring's scope note). Deliberately NOT status='live': that status feeds capability_registry_gate.py's placeholder-regression check against frontend_api_coverage_report.json's dynamic_pages list, which this page can never appear in. Not a defect; not added to the static allowlist because it IS dynamic."),

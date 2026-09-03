@@ -4429,3 +4429,27 @@ jobs:
           fi
           exit 0
 
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.9 - Capability Runtime Disposition Gate (P0 Dynamic Capability
+      # Runtime Convergence). Blocking on GATE 1 only (every CUSTOMER_UI
+      # capability must have an explicit runtime disposition); BROKEN/ORPHANED
+      # counts are observability-only on this first run -- see scripts/
+      # capability_runtime_gate.py's own docstring for the full rationale
+      # (same "bake-in first" rollout pattern already established twice in
+      # this workflow by frontend_api_coverage_gate.py and metric_integrity_
+      # contract_gate.py). Runs the offline static auditor unconditionally;
+      # the live-HTTP probe (network-dependent, ~1-2 min against production)
+      # runs best-effort so a transient network blip here can never fail this
+      # stage -- non-blocking either way, matching the gate's own design.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.9 - Capability Runtime Disposition Gate"
+        if: always()
+        timeout-minutes: 8
+        continue-on-error: true
+        run: |
+          python3 scripts/capability_runtime_auditor.py
+          python3 scripts/capability_live_probe.py || echo "::warning::capability_live_probe.py failed or timed out (network-dependent, non-blocking) -- reconcile will run on static evidence only where live data is missing."
+          python3 scripts/capability_runtime_reconcile.py || true
+          python3 scripts/capability_runtime_gate.py
+          exit 0
+
