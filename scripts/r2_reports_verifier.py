@@ -1106,11 +1106,42 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # PRODUCTION-VERIFICATION FIX (2026-09-02): sys.exit() raises SystemExit,
+    # which unwinds normally into CPython's interpreter shutdown -- and
+    # concurrent.futures registers an atexit hook (_python_exit) that joins
+    # *every* thread any ThreadPoolExecutor in this process ever started,
+    # with no timeout. RUN_DEADLINE_SECONDS (600s, above) only bounds how
+    # long main()'s own concurrent.futures.wait() blocks; futures still
+    # running when that wait times out are recorded as
+    # NOT_PROCESSED_DEADLINE and abandoned by main(), but their underlying
+    # threads keep running in the background. On process exit, that atexit
+    # hook then blocks -- with no bound -- until every one of those
+    # abandoned threads finishes on its own (each can retry for
+    # PUBLIC_MAX_RETRIES * (PUBLIC_TIMEOUT + PUBLIC_RETRY_DELAY) or longer
+    # per report). Confirmed live: sentinel-blogger.yml's STAGE 3.6a step
+    # (workflow timeout-minutes: 15) was hitting that external 15-minute
+    # kill at the same ~15:13 wall-clock duration on every single run
+    # (2026-09-02 07:09-07:24, 10:57-11:12, 13:23-13:39 UTC), never its own
+    # 600s deadline -- the external SIGKILL was arriving before the
+    # interpreter's own atexit thread-join ever returned. Because that step
+    # has no continue-on-error, the kill cascaded into skipping ~50
+    # downstream steps every run, including "Generate Immutable API
+    # Manifests" -- the actual cause of api/v1/intel/latest.json being
+    # frozen at generated_at=2026-08-26 for a week. By the time we reach
+    # this line, main() has already written the full output manifest and
+    # logged every summary; any thread still running belongs to a report
+    # already classified NOT_PROCESSED_DEADLINE and intentionally
+    # disregarded, so terminating immediately loses no information this
+    # script reports on. os._exit() skips the atexit machinery entirely,
+    # so the process can no longer stall past its own intended budget.
     try:
-        sys.exit(main())
+        _rc = main()
     except SystemExit:
         raise
     except Exception as e:
         import traceback
         log.critical("Unhandled exception: %s\n%s", e, traceback.format_exc())
-        sys.exit(1)
+        _rc = 1
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_rc)

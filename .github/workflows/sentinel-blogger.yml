@@ -283,7 +283,7 @@ jobs:
         uses: actions/checkout@v6.0.2   # v6.0.2 — native Node 24 (v6 series; upgraded from v4.3.1 May-23-2026)
         with:
           fetch-depth: 1
-          ref: main
+          ref: "${{ github.ref }}"
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # -----------------------------------------------------------------------
@@ -1802,7 +1802,10 @@ jobs:
       # kept the process alive until the external 15-minute timeout force-
       # killed it, which was then recorded as a step failure and cascaded
       # (via this workflow's default if: success()) to skip STAGE 5 --
-      # Deploy to GitHub Pages. That specific hang is now bounded, but
+      # Deploy to GitHub Pages, confirmed live across multiple runs the
+      # same day (07:09, 10:57, 13:23, 18:56 UTC on 2026-09-02) skipping
+      # ~50 downstream steps including the entire P31-P38 certification
+      # chain. That specific hang is now bounded at its source, but
       # continue-on-error is added here too so no future timeout on this
       # observability-only stage, for any reason, can ever again skip the
       # actual production deploy.
@@ -4300,4 +4303,29 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         run: python3 scripts/r2_upload.py --p40-only || true
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.7 - Capability Coverage Audit (observability only)
+      # Static grep-based check (scripts/capability_coverage_audit.py) for
+      # backend /api/v1/pXX/* routes with no frontend file referencing them
+      # anywhere in the repo -- the generalized version of the manual audit
+      # that found P34/P36/P37/P38 fully unwired. Writes
+      # data/quality/capability_coverage_report.json every run so drift is
+      # visible without waiting for another manual sweep. Pure text
+      # analysis, no network calls, no dependency on this run's ingested
+      # data -- cannot itself go stale or time out on a slow external call.
+      # Explicitly non-blocking (continue-on-error + its own script always
+      # exits 0 + || true here as a third layer): this is a candidate list
+      # for human triage, not an automatic verdict (many backend-only
+      # routes are correctly API-only/internal/admin-only by design -- see
+      # the script's own header), and per this same pipeline's STAGE 3.6a
+      # incident earlier the same day, a new check that can fail the job
+      # over something it was never meant to gate is worse than the drift
+      # it would catch.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.7 - Capability Coverage Audit (observability only)"
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        run: python3 scripts/capability_coverage_audit.py || true
 

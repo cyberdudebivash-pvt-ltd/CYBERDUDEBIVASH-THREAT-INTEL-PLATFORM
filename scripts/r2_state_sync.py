@@ -194,6 +194,25 @@ STATE_DIRS: list[tuple[str, str]] = [
 UPLOAD_RETRY_ATTEMPTS = 4
 
 
+def _is_recognized_state_shape(data) -> bool:
+    """True unless `data` is a bare JSON scalar (string/number/bool/null).
+
+    Every file in STATE_FILES is documented as a list or an object (a dict
+    keyed by source/fingerprint/registry entries) -- never a lone scalar.
+    This is deliberately a coarse, file-shape-agnostic check rather than a
+    per-file schema validator: the 9 files in STATE_FILES have 9 different
+    internal shapes, and hand-encoding each one's exact schema here would be
+    both a maintenance burden and a second, competing source of truth for
+    a contract each file's own real consumer (true_intel_ingestor.py,
+    run_pipeline.py, intel_persistence_engine.py, ...) already enforces by
+    construction. What every one of them agrees on, unconditionally, is that
+    a bare scalar is never a valid top-level value -- so that's the one
+    invariant checked here, closing the "valid JSON, wrong shape" gap
+    without inventing a second schema authority.
+    """
+    return isinstance(data, (list, dict))
+
+
 def download(root: pathlib.Path, endpoint: str) -> int:
     """
     Populate each local state path from its R2-authoritative copy.
@@ -212,31 +231,71 @@ def download(root: pathlib.Path, endpoint: str) -> int:
                    transient R2 outage as "nothing has ever been seen before",
                    discarding real dedup history and reintroducing duplicates
                    into the customer-facing feed.
+
+    PRODUCTION-VERIFICATION HARDENING (2026-09-02): s3_get() writes directly
+    to its destination path, so validating local_path in place (as this
+    function used to) meant a malformed or wrong-shape download had already
+    overwritten a good local copy by the time validation ran -- the ERROR
+    log line and had_error=True were accurate, but the damage to the file
+    on disk was already done, and nothing here restored it. Downloads now
+    go to a `.tmp` sibling first, validated, and only promoted onto
+    local_path via an atomic replace on success -- mirroring the write-tmp/
+    verify/replace pattern true_intel_ingestor.py's own _save_manifest()
+    already uses for several of these same files on the write side. A
+    failed validation now leaves whatever was already at local_path
+    (git-checkout copy or a prior successful download) untouched, and is
+    reported the same way a NOT_FOUND-with-no-local-copy case already was.
     """
     had_error = False
     for local_rel, r2_key in STATE_FILES:
         local_path = root / local_rel
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        outcome = s3_get(str(local_path), BUCKET_DATA, r2_key, endpoint)
+        tmp_path = local_path.with_name(local_path.name + ".r2sync.tmp")
+        outcome = s3_get(str(tmp_path), BUCKET_DATA, r2_key, endpoint)
 
         if outcome == "OK":
             try:
-                with open(local_path, "r", encoding="utf-8") as fh:
-                    json.load(fh)
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                # A malformed download is at least as dangerous as an outright
-                # read error: a downstream consumer that trusts this file
-                # (true_intel_ingestor.py's dedup state, run_pipeline.py's
-                # Single Source of Truth manifest) could crash mid-run or,
-                # worse, silently misbehave on partially-parseable content.
-                # Fail loudly rather than handing corrupt state downstream.
+                with open(tmp_path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if not _is_recognized_state_shape(data):
+                    raise ValueError(f"top-level JSON value is a bare {type(data).__name__}, not a list/object")
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                # A malformed or wrong-shape download is at least as dangerous
+                # as an outright read error: a downstream consumer that trusts
+                # this file (true_intel_ingestor.py's dedup state,
+                # run_pipeline.py's Single Source of Truth manifest) could
+                # crash mid-run or, worse, silently misbehave on partially-
+                # parseable content. Fail loudly rather than handing corrupt
+                # state downstream -- and, unlike before this hardening,
+                # leave the existing local_path (if any) untouched rather
+                # than having already overwritten it.
                 log.error(
-                    "FATAL: downloaded %s but it is not valid JSON (%s) -- "
-                    "refusing to hand corrupt state to downstream consumers.",
-                    r2_key, exc,
+                    "FATAL: downloaded %s but it is not valid, recognized-shape JSON (%s) -- "
+                    "refusing to hand corrupt state to downstream consumers. Existing local "
+                    "copy of %s (if any) is untouched.",
+                    r2_key, exc, local_rel,
                 )
                 had_error = True
+                tmp_path.unlink(missing_ok=True)
+                continue
+            try:
+                tmp_path.replace(local_path)
+            except OSError as exc:
+                # Promotion itself failing (disk full, permission error, a
+                # cross-device tmp dir) is the one failure mode the write-tmp/
+                # verify/replace pattern doesn't self-heal -- without this
+                # handler it would propagate out of download() uncaught,
+                # skipping every remaining STATE_FILES entry instead of
+                # degrading one file at a time like every other outcome here.
+                log.error(
+                    "FATAL: validated download for %s but could not promote it onto %s (%s) -- "
+                    "existing local copy (if any) is untouched.",
+                    r2_key, local_path, exc,
+                )
+                had_error = True
+                tmp_path.unlink(missing_ok=True)
             continue
+        tmp_path.unlink(missing_ok=True)
         if outcome == "NOT_FOUND":
             if local_path.exists():
                 log.info(
