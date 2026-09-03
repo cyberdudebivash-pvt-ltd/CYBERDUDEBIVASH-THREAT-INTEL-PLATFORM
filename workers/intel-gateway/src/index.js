@@ -1690,6 +1690,7 @@ ${buildP33APIGatewayBlock(item)}
 function computeStats(items) {
   const sev = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
   let totalRisk = 0, totalIOCs = 0, kevCount = 0, latestSync = "";
+  const nowIso = now();
   for (const item of items) {
     const s = (item.severity || "INFO").toUpperCase();
     sev[s] = (sev[s] || 0) + 1;
@@ -1697,7 +1698,22 @@ function computeStats(items) {
     totalIOCs += parseInt(item.ioc_count || 0, 10);
     if (item.kev_present) kevCount++;
     const ts = item.published || item.published_at || "";
-    if (ts && (!latestSync || ts > latestSync)) latestSync = ts;
+    // PRODUCTION FIX (live-data audit, confirmed against /api/feed.json):
+    // a small number of upstream feed items carry a future-dated
+    // `published` (RSS "virtual event" listings whose pubDate is the
+    // event's own calendar date, plus at least one vulnerability-DB
+    // source item with an unexplained future date). latestSync is a
+    // plain string MAX, so one such record permanently overrides every
+    // real sync timestamp -- confirmed live: /api/platform/stats was
+    // reporting last_sync:"2026-12-29T00:00:00Z" (~4 months ahead of
+    // actual sync time), traced to item intel--8acba011534efe29
+    // ("GNUnet P2P Framework 0.26.2", rss_vulners_com_rss_xml). Worse,
+    // classifyFreshness() (below) then computes a negative age that
+    // clamps to 0s -- permanently "FRESH", silently defeating the exact
+    // staleness detection the 2026-08-26 incident (see comment above
+    // classifyFreshness) added this field to support. A sync cannot
+    // happen in the future, so candidates newer than "now" are excluded.
+    if (ts && ts <= nowIso && (!latestSync || ts > latestSync)) latestSync = ts;
   }
   const avgRisk = items.length > 0 ? (totalRisk / items.length).toFixed(2) : "0.00";
   return {
@@ -2866,7 +2882,19 @@ async function fetchAndCacheCVEs(env) {
     const endDate   = new Date();
     const startDate = new Date(endDate.getTime() - 7 * 86400 * 1000);
     const fmt       = d => d.toISOString().replace("Z", "").slice(0, 23);
-    const nvdUrl    = `${NVD_API}?pubStartDate=${fmt(startDate)}&pubEndDate=${fmt(endDate)}&resultsPerPage=100&startIndex=0`;
+    // PRODUCTION FIX (live-data audit): resultsPerPage=100 requested only
+    // the first, arbitrarily-ordered page of NVD's 7-day publish window --
+    // confirmed live that window currently holds 2,459 records, and NVD's
+    // API applies no severity/date sort, so a single page can be entirely
+    // consumed by one homogeneous cluster. Reproduced exactly: this
+    // endpoint was returning stats {total:100, critical:0, high:0,
+    // medium:0, low:0, none:100} because its one 100-item page was 100%
+    // vulnStatus:"Rejected" placeholder records (NVD periodically bulk-
+    // processes/rejects old reserved-but-unpublished CVE IDs). 2000 is
+    // NVD API 2.0's own documented per-request maximum (confirmed working
+    // live) -- covers the large majority of the window in one call without
+    // adding a multi-page fetch loop.
+    const nvdUrl    = `${NVD_API}?pubStartDate=${fmt(startDate)}&pubEndDate=${fmt(endDate)}&resultsPerPage=2000&startIndex=0`;
 
     const resp = await fetch(nvdUrl, {
       headers: { "Accept": "application/json", "User-Agent": "CyberDudeBivash-Sentinel-Apex/"+PLATFORM_VERSION },
@@ -2879,7 +2907,23 @@ async function fetchAndCacheCVEs(env) {
     }
 
     const raw  = await resp.json();
-    const cves = (raw.vulnerabilities || []).map(mapNvdItem);
+    // Rejected is NVD's own "this ID does not represent a real
+    // vulnerability" status (empty CVSS, no real description) -- excluded
+    // before mapping so it can never crowd out genuine tracked CVEs on the
+    // tracker (see resultsPerPage comment above for the live-confirmed
+    // failure mode this caused). Records still Awaiting/Undergoing
+    // Analysis are kept: those are real, currently-tracked CVEs that
+    // simply have no CVSS score yet (severity "NONE" is a legitimate,
+    // pre-existing state for them, not a defect).
+    const cves = (raw.vulnerabilities || [])
+      .filter(v => ((v.cve || {}).vulnStatus || "") !== "Rejected")
+      .map(mapNvdItem)
+      // Most-recent-published first: with up to ~1,800+ tracked CVEs now
+      // in the window (vs. the ~100 before this fix) and the API layer
+      // capping /api/v1/cve/live's response to `limit` (<=200), display
+      // order now materially decides which CVEs are actually visible --
+      // NVD's own unordered response is no longer a reasonable default.
+      .sort((a, b) => (b.published || "").localeCompare(a.published || ""));
 
     // Compute stats
     const stats = { total: cves.length, critical: 0, high: 0, medium: 0, low: 0, none: 0, avg_cvss: 0 };
@@ -5277,22 +5321,18 @@ async function handleRequest(request, env, ctx) {
     const stats      = computeStats(items);
     const threat     = computeThreatLevel(stats);
     const defcon     = computeDefcon(stats);
-    // CVE-derived IOC count: each unique CVE = 3 indicators (CVE-ID + EPSS + CVSS vector)
-    const cveRe = /CVE-\d{4}-\d{4,7}/gi;
-    const cveSet = new Set();
-    let stixCount = 0;
-    items.forEach(i => {
-      [i.id, i.cve_id, i.title, i.description].filter(Boolean).forEach(s => {
-        (String(s).match(cveRe) || []).forEach(c => cveSet.add(c.toUpperCase()));
-      });
-      (i.cve_ids || []).forEach(c => cveSet.add(String(c).toUpperCase()));
-      if (i.stix_bundle && Array.isArray(i.stix_bundle.objects)) {
-        stixCount += i.stix_bundle.objects.filter(o =>
-          ['indicator','malware','attack-pattern','tool','threat-actor'].includes(o.type)
-        ).length;
-      }
-    });
-    const iocCount = (cveSet.size * 3) + stixCount + stats.kev_confirmed;
+    // PRODUCTION FIX (live-data audit, Single Source of Truth): this endpoint
+    // previously computed its own "CVE mentions x 3" proxy here instead of
+    // using stats.total_iocs -- the real per-item ioc_count sum computeStats()
+    // above already produces, and that every other IOC-count consumer in
+    // this file (buildApexInline's total_iocs, /api/v1/intel/stats's spread
+    // of `stats`) and the frontend (fillMetrics/_iocContribution summing
+    // /api/feed.json's own per-item ioc_count) already treats as canonical.
+    // Confirmed live: this endpoint was returning ioc_count:706 from the
+    // proxy formula while the real sum (stats.total_iocs, same feed window)
+    // was 1377 -- two code paths, two disagreeing answers for the same
+    // metric on the same homepage. Reusing the existing canonical value.
+    const iocCount = stats.total_iocs;
     // Try to get total_reports from R2 reports index
     let totalReports = stats.total;
     try {
