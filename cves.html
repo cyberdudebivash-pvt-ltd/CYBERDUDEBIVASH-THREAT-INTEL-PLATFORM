@@ -417,22 +417,6 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  // CodeRabbit finding on PR #336 (verified, not taken on faith): esc()
-  // above does not escape a single quote, and every renderDetail(...) call
-  // site below embeds a CVE id inside a single-quoted JS string literal
-  // nested in an HTML onclick attribute -- the browser HTML-decodes the
-  // attribute value BEFORE parsing it as JS, so encoding a quote as
-  // &#39; would still decode back to a raw ' inside that JS string and
-  // break out of it just the same; esc() alone can never close this for a
-  // value used in that position. Real CVE ids from NVD are always
-  // CVE-YYYY-NNNN..., so validating the shape before it ever reaches the
-  // onclick string (rather than restructuring to a delegated event
-  // listener, a larger change) closes the gap with no behavior change for
-  // any well-formed id.
-  function safeIdForOnclick(id) {
-    return /^CVE-\d{4}-\d{4,}$/.test(String(id || '')) ? id : '';
-  }
-
   // Tracker state
   var state = {
     cves:      [],
@@ -559,14 +543,14 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
       if ((c.description || '').length > 120) desc += '…';
       var kevBadge = c.kev ? '<span style="display:inline-block;margin-left:4px;padding:1px 5px;background:rgba(255,26,26,0.2);border:1px solid #ff1a1a;border-radius:2px;font-size:8px;color:#ff1a1a;font-weight:700;">KEV</span>' : '';
       return '<tr style="border-bottom:1px solid rgba(22,32,48,0.8);transition:background 0.15s;" onmouseover="this.style.background=\'rgba(0,212,170,0.04)\'" onmouseout="this.style.background=\'\'">'+
-        '<td style="padding:10px 12px;white-space:nowrap;"><a href="#" onclick="event.preventDefault();window.cdbCVETracker.renderDetail(\''+safeIdForOnclick(c.id)+'\')" style="color:#00d4aa;text-decoration:none;font-weight:700;font-family:var(--font-mono);font-size:11px;">'+esc(c.id)+'</a>'+kevBadge+'</td>'+
+        '<td style="padding:10px 12px;white-space:nowrap;"><a href="#" data-cve-id="'+esc(c.id)+'" class="cve-detail-link" style="color:#00d4aa;text-decoration:none;font-weight:700;font-family:var(--font-mono);font-size:11px;">'+esc(c.id)+'</a>'+kevBadge+'</td>'+
         '<td style="padding:10px 12px;"><span style="display:inline-block;padding:3px 8px;border-radius:2px;border:1px solid '+sColor+';color:'+sColor+';font-size:9px;font-weight:700;letter-spacing:1px;background:'+sColor+'18;">'+esc(c.severity||'NONE')+'</span></td>'+
         '<td style="padding:10px 12px;"><span style="color:'+cColor+';font-weight:700;font-size:13px;">'+( cvssNum > 0 ? cvssNum.toFixed(1) : 'N/A' )+'</span></td>'+
         '<td style="padding:10px 12px;color:var(--text);max-width:320px;line-height:1.4;">'+esc(desc)+'</td>'+
         '<td style="padding:10px 12px;color:var(--muted);white-space:nowrap;">'+esc(formatDate(c.published))+'</td>'+
         '<td style="padding:10px 12px;color:var(--muted);white-space:nowrap;">'+esc(formatDate(c.last_modified))+'</td>'+
         '<td style="padding:10px 12px;"><span style="font-size:9px;color:var(--muted);">'+esc((c.vuln_status||'').replace(/_/g,' '))+'</span></td>'+
-        '<td style="padding:10px 12px;text-align:center;"><button onclick="window.cdbCVETracker.renderDetail(\''+safeIdForOnclick(c.id)+'\')" style="padding:4px 10px;font-family:var(--font-mono);font-size:9px;border:1px solid rgba(0,212,170,0.4);border-radius:2px;background:rgba(0,212,170,0.08);color:#00d4aa;cursor:pointer;letter-spacing:1px;">DETAIL</button></td>'+
+        '<td style="padding:10px 12px;text-align:center;"><button data-cve-id="'+esc(c.id)+'" class="cve-detail-link" style="padding:4px 10px;font-family:var(--font-mono);font-size:9px;border:1px solid rgba(0,212,170,0.4);border-radius:2px;background:rgba(0,212,170,0.08);color:#00d4aa;cursor:pointer;letter-spacing:1px;">DETAIL</button></td>'+
         '</tr>';
     });
 
@@ -680,6 +664,22 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
     init: function() {
       load();
       setInterval(load, 5 * 60 * 1000); // auto-refresh every 5 min
+
+      // Delegated on the static tbody (present at load; renderTable() only
+      // replaces its children) rather than an inline onclick with an
+      // interpolated CVE id -- an id string containing a quote would
+      // otherwise be able to break out of the onclick attribute's own JS
+      // string context (HTML entity-decoding happens before that inline
+      // script text is parsed, so attribute-escaping alone doesn't stop it).
+      var tbody = document.getElementById('cve-tbody');
+      if (tbody) {
+        tbody.addEventListener('click', function(e) {
+          var el = e.target.closest('[data-cve-id]');
+          if (!el) return;
+          e.preventDefault();
+          renderDetail(el.getAttribute('data-cve-id'));
+        });
+      }
     },
 
     load:   load,

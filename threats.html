@@ -379,7 +379,7 @@ h1{font-size:36px;font-weight:700;margin-bottom:12px}
       return;
     }
     el.innerHTML = items.slice(0, 8).map(function (it) {
-      var meta = [it.severity ? esc(it.severity) : null, esc(it.feed_source || it.source || "") || null, it.published_at ? timeAgo(it.published_at) : null].filter(Boolean).join(" &middot; ");
+      var meta = [it.severity ? esc(it.severity) : null, (it.feed_source || it.source) ? esc(it.feed_source || it.source) : null, it.published_at ? timeAgo(it.published_at) : null].filter(Boolean).join(" &middot; ");
       return '<div class="cdb-live-adv">' +
         '<div class="t">' + esc(it.title || "Untitled Advisory") + '</div>' +
         '<div class="m">' + meta + '</div>' +
