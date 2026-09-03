@@ -1785,27 +1785,35 @@ jobs:
       # requires this to become a real HARD FAIL gate eventually).
       # timeout-minutes raised 10->15: each report now does one additional
       # public HTTPS GET on top of the existing R2 HEAD+GET pair.
-      #
-      # PRODUCTION-VERIFICATION FIX (2026-09-02): this step was missing
-      # continue-on-error, unlike every other "observability bake-in"/
-      # advisory gate in this pipeline (STAGE 3.6.5, STAGE 5.9.4, STAGE
-      # 5.9.5). Confirmed live across 3 consecutive runs the same day
-      # (07:09, 10:57, 13:23 UTC) that r2_reports_verifier.py was hitting
-      # this step's external 15-minute timeout on every run (root cause
-      # fixed separately in that script's __main__ block -- an
-      # unbounded concurrent.futures atexit thread-join past its own
-      # 600s internal deadline). Without continue-on-error, that timeout
-      # -- despite this step's own script being explicitly
-      # observability-only and never intended to block anything -- was
-      # skipping ~50 downstream steps every single run, including
-      # "Generate Immutable API Manifests" and the entire P31-P38
-      # certification chain. Matches the exact non-blocking pattern this
-      # step's own design already documents.
+      # continue-on-error: true -- same non-blocking pattern every other
+      # observability-only stage in this file already uses (STAGE 3.1.0b,
+      # 3.1.1, 3.1.2, 3.93.15d-3.93.15k, etc.). This stage's own script is
+      # bake-in/observability-only by design (--enforce deliberately not
+      # passed, its `run:` already guards the script call with `|| true`),
+      # so it must never be able to fail the step -- but a step-level
+      # timeout-minutes kill bypasses that internal guard entirely (GitHub
+      # Actions marks a timed-out step failed regardless of the shell's own
+      # exit code), which is exactly what happened on run 33630720481
+      # (2026-09-02): the script finished and wrote its manifest at 600s
+      # per its own RUN_DEADLINE_SECONDS budget, but a straggler
+      # ThreadPoolExecutor worker thread -- non-daemon, and at the time
+      # capable of sleeping on an unbounded origin-supplied Retry-After
+      # value (see RETRY_AFTER_CAP_SECONDS in r2_reports_verifier.py) --
+      # kept the process alive until the external 15-minute timeout force-
+      # killed it, which was then recorded as a step failure and cascaded
+      # (via this workflow's default if: success()) to skip STAGE 5 --
+      # Deploy to GitHub Pages, confirmed live across multiple runs the
+      # same day (07:09, 10:57, 13:23, 18:56 UTC on 2026-09-02) skipping
+      # ~50 downstream steps including the entire P31-P38 certification
+      # chain. That specific hang is now bounded at its source, but
+      # continue-on-error is added here too so no future timeout on this
+      # observability-only stage, for any reason, can ever again skip the
+      # actual production deploy.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.6a - RX-PUB-A0 Reports Artifact Identity Verifier (observability bake-in)"
         timeout-minutes: 15
-        if: always()
         continue-on-error: true
+        if: always()
         env:
           CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
           CF_R2_REPORTS_SECRET_KEY: ${{ secrets.CF_R2_REPORTS_SECRET_KEY }}
@@ -1945,6 +1953,44 @@ jobs:
       - name: "STAGE 3.92 - Dashboard Frontend Architecture Guard (HARD FAIL)"
         timeout-minutes: 5
         run: python3 scripts/dashboard_frontend_guard.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 3.92b: FRONTEND API COVERAGE GATE (NEW -- observability bake-in)
+      # A manual page-by-page audit found top-level product pages
+      # (cves.html, ransomware.html) shipping zero client-side calls into
+      # this platform's own live API despite the data existing and being
+      # already served elsewhere (fixed both this session). STAGE 3.92
+      # above validates index.html's OWN fetch-chain invariants; it has
+      # never checked whether the platform's other ~140 top-level pages
+      # call the API at all. This closes that visibility gap: classifies
+      # every top-level *.html page as dynamic (calls the API) or static,
+      # and writes data/quality/frontend_api_coverage_report.json.
+      # Bake-in period: no allowlist of legitimately-static pages (privacy,
+      # terms, marketing, etc.) exists yet, so every static page currently
+      # reports as observability-only "unclassified" -- never a hard
+      # failure. Once data/quality/frontend_static_page_allowlist.json is
+      # curated, a future change can make an unclassified static page a
+      # real gate.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.92b - Frontend API Coverage Gate (observability bake-in)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          # CodeRabbit finding on PR #336 (verified, not taken on faith): the
+          # step must never silently present a stale or missing report as a
+          # normal reading. Remove any report left from a previous run first
+          # -- this repo never commits it (gitignored, R2/CI-generated), but
+          # removing it defensively costs nothing and rules out a checked-out
+          # stale copy on principle. If the script crashes before its own
+          # atomic write, no report exists afterward either way.
+          rm -f data/quality/frontend_api_coverage_report.json
+          if python3 scripts/frontend_api_coverage_gate.py; then
+            read -r TOTAL DYNAMIC ALLOWED UNCLASSIFIED <<< "$(python3 scripts/ci_stats_extract.py frontend_api_coverage 2>/dev/null || echo '? ? ? ?')"
+            echo "::notice::Frontend API coverage: ${DYNAMIC}/${TOTAL} top-level pages call the platform API; ${ALLOWED} static pages allowlisted, ${UNCLASSIFIED} static pages unclassified (observability-only -- see data/quality/frontend_api_coverage_report.json)."
+          else
+            echo "::warning::STAGE 3.92b: frontend_api_coverage_gate.py exited non-zero -- no fresh coverage report was produced this run (observability-only, does not fail the pipeline, but the last known reading below may be stale or absent)."
+            python3 scripts/ci_stats_extract.py frontend_api_coverage 2>/dev/null || echo "? ? ? ?"
+          fi
 
       # -----------------------------------------------------------------------
       # STAGE 3.93: IMMUTABLE API MANIFEST GENERATOR (v184.0 -- REPLACES INJECT)

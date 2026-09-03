@@ -213,6 +213,15 @@ _REPORTS: dict = {
             d.get("summary", {}).get("publication_gate_bypass", 0),
         ],
     ),
+    "frontend_api_coverage": (
+        _ROOT / "data" / "quality" / "frontend_api_coverage_report.json",
+        lambda d: [
+            d.get("total_pages", 0),
+            d.get("dynamic_count", 0),
+            d.get("static_allowlisted_count", 0),
+            d.get("static_unclassified_count", 0),
+        ],
+    ),
 }
 
 _FALLBACKS = {
@@ -231,6 +240,13 @@ _FALLBACKS = {
     "p38": "UNKNOWN 0 0 0 0",
     "p40": "UNKNOWN 0 0 0 0 0",
     "rx_pub_a0": "0 0 0 0 0 0 0 0 0 0 0",
+    # CodeRabbit finding on PR #336 (verified, not taken on faith): all-zero
+    # fallback values here are indistinguishable from a genuine "0 dynamic
+    # pages" reading, so a script crash that leaves no report behind (never
+    # reaches its own atomic write) would print a normal-looking coverage
+    # notice instead of visibly failing. "?" placeholders match this file's
+    # own p21 convention for the same reason (an all-numeric fallback tuple).
+    "frontend_api_coverage": "? ? ? ?",
 }
 
 

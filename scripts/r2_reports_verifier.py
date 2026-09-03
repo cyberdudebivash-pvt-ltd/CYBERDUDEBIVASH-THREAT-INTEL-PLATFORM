@@ -262,6 +262,28 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _PUBLIC_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
+
+# RX-PUB-A0 STAGE 3.6a timeout postmortem (sentinel-blogger.yml run
+# 33630720481, 2026-09-02): the step was force-killed by its 15-minute
+# timeout-minutes budget at 13:39:09Z, but main()'s own RUN_DEADLINE_SECONDS
+# (600s) budgeting had already completed and logged the full run summary at
+# 13:34:00Z -- 309s earlier. Root cause: pool.shutdown(wait=False,
+# cancel_futures=True) below only cancels not-yet-started futures; an
+# in-flight verify_one() call keeps running on its ThreadPoolExecutor worker
+# thread, and those threads are non-daemon, so the OS process (and thus this
+# step) cannot actually exit until every one of them returns, however long
+# that takes -- sys.exit(0) in the main thread does not preempt them. An
+# origin-supplied Retry-After value was previously accepted unbounded, so a
+# single 429 response naming a large delay (e.g. 300s) could hold one worker
+# thread -- and therefore the whole process -- alive well past
+# RUN_DEADLINE_SECONDS, long enough to collide with the external
+# timeout-minutes kill. Capping the honored delay below closes that specific
+# gap: no single retry sleep can ever run long enough to matter, so every
+# worker thread is guaranteed to finish within a small, bounded time after
+# the main thread's own deadline logic already gave up on it.
+RETRY_AFTER_CAP_SECONDS = PUBLIC_TIMEOUT
+
+
 def _retry_after_seconds(headers: dict) -> float | None:
     """Parses a Retry-After header value (seconds form only -- the HTTP-date
     form exists but every 429 observed from this origin has used the seconds
@@ -271,7 +293,12 @@ def _retry_after_seconds(headers: dict) -> float | None:
     the prior max(0.0, ...) clamp turned a negative value into an immediate
     retry (worse than the fixed delay it was meant to replace) while an
     infinite value would reach time.sleep() and hang that worker thread
-    indefinitely."""
+    indefinitely. Also capped at RETRY_AFTER_CAP_SECONDS: an origin is free
+    to name any delay it likes, but honoring an arbitrarily large one verbatim
+    can keep a non-daemon worker thread (and therefore this whole process)
+    alive well past main()'s own RUN_DEADLINE_SECONDS budget -- see the
+    STAGE 3.6a timeout postmortem above. Still always at least as cooperative
+    as the fixed PUBLIC_RETRY_DELAY this replaces."""
     raw = headers.get("retry-after")
     if not raw:
         return None
@@ -281,7 +308,7 @@ def _retry_after_seconds(headers: dict) -> float | None:
         return None
     if not math.isfinite(delay) or delay < 0:
         return None
-    return delay
+    return min(delay, RETRY_AFTER_CAP_SECONDS)
 
 
 def _fetch_public(url: str) -> dict:
