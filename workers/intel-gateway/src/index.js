@@ -89,7 +89,7 @@ import { handleP35Quality, handleP35Freshness, handleP35Evidence, handleP35Confi
 import { handleP36Quality, handleP36Maturity, handleP36Targets, handleP36Gaps, handleP36CustomerValue, handleP36Competitive, handleP36Detection, handleP36Reliability, handleP36Metrics, handleP36Roadmap, handleP36Dashboard, handleP36Observability } from './p36-handlers.js';
 import { handleP37Hardening, handleP37FeedAudit, handleP37Enrichment, handleP37IQScore, handleP37Detection, handleP37SourceDiversity, handleP37Reliability, handleP37Debt, handleP37Metrics, handleP37Certification, handleP37Dashboard, handleP37Observability } from './p37-handlers.js';
 import { handleP38SchemaRegistry, handleP38FeedGovernance, handleP38SchemaDrift, handleP38EnrichmentAudit, handleP38ConfidenceAudit, handleP38IQIndex, handleP38SourceDiversity, handleP38Certification, handleP38Executive, handleP38Reliability, handleP38Metrics, handleP38Observability } from './p38-handlers.js';
-import { handleP40SourceRegistry, handleP40SourceDetail, handleP40SourceHealth, handleP40Licensing, handleP40Coverage, handleP40Waves, handleP40Certification, handleP40Metrics, handleP40Dashboard, handleP40Observability } from './p40-handlers.js';
+import { handleP40SourceRegistry, handleP40SourceDetail, handleP40SourceHealth, handleP40Licensing, handleP40Coverage, handleP40Waves, handleP40Certification, handleP40Metrics, handleP40Dashboard, handleP40Observability, _loadRegistry as loadP40SourceRegistry } from './p40-handlers.js';
 import { handleRxPubA0ReportsIdentity, handleRxPubA0Observability } from './rx-pub-a0-handlers.js';
 import { evaluatePublicationGate, isCustomerReady, buildGateRejectedResponseBody, buildUnresolvableReportResponseBody } from './publication-gate.js';
 import { loadCertificationIndex, persistCertificationRecords, resolveCertification, CERTIFICATION_POLICY_VERSION } from './certification-registry.js';
@@ -676,6 +676,34 @@ async function loadFeedItems(env) {
   if (data && data.items && data.items.length > 0) return data;
   return { schema_version: "1.0", count: 0, items: [], generated_at: now(), version: PLATFORM_VERSION };
 }
+
+// P0 FIX (metric-integrity contract closure, see /api/metrics below): both
+// /api/platform/stats and /api/v1/intel/stats hardcoded feed_count/
+// active_feeds/feeds_active to the literal 74 -- exactly the "hardcoded
+// marketing number" p0-revenue-os/config/metric_integrity_contract.json
+// exists to forbid, just living in a JSON API response instead of HTML
+// copy. P40's source registry (already live, already the authoritative
+// count of enabled collectors -- see enterprise-source-fabric-center.html)
+// gives the real number.
+//
+// Returns the raw count, or null if the registry genuinely can't be read
+// (R2 miss/error) -- deliberately does NOT itself decide a fallback value,
+// so /api/metrics (a metric-integrity-contract endpoint whose own sample
+// file says "shipping this with invented integers is a contract violation")
+// can surface that null honestly, while the two pre-existing legacy routes
+// below apply their own explicit `?? 74` to preserve their prior behavior
+// on a transient outage instead of a worse one. One read, two policies --
+// not two reads or a fabricated shared default.
+async function _liveFeedSourceCount(env) {
+  try {
+    const registry = await loadP40SourceRegistry(env);
+    const count = registry ? (registry.status_breakdown?.ACTIVE ?? registry.total_sources) : null;
+    return (typeof count === "number" && count > 0) ? count : null;
+  } catch (_) {
+    return null;
+  }
+}
+const _LEGACY_FEED_COUNT_FALLBACK = 74;
 
 // =============================================================================
 // DETECTION REGISTRY QUERY HANDLERS (Phase 4.1 mandate Section 9-19)
@@ -5141,6 +5169,7 @@ async function handleRequest(request, env, ctx) {
   // --- /api/platform/stats ----------------------------------------------------
   // Dashboard-facing unified stats endpoint  -  returns {intel:{...}, api:{...}}
   if (path === "/api/platform/stats") {
+    const liveFeedCount = (await _liveFeedSourceCount(env)) ?? _LEGACY_FEED_COUNT_FALLBACK;
     const feedData   = await loadFeedItems(env);
     const items      = feedData.items || [];
     const stats      = computeStats(items);
@@ -5174,8 +5203,8 @@ async function handleRequest(request, env, ctx) {
         total_reports: totalReports,
         ioc_count: iocCount,
         kev_count: stats.kev_confirmed,
-        feed_count: 74,
-        active_feeds: 74,
+        feed_count: liveFeedCount,
+        active_feeds: liveFeedCount,
         unique_actors: uniqueActors,
         severity_distribution: {
           critical: stats.critical, high: stats.high,
@@ -5199,10 +5228,74 @@ async function handleRequest(request, env, ctx) {
     const stats    = computeStats(feedData.items || []);
     const threat   = computeThreatLevel(stats);
     const defcon   = computeDefcon(stats);
+    const liveFeedCount = (await _liveFeedSourceCount(env)) ?? _LEGACY_FEED_COUNT_FALLBACK;
     return jsonResp({
       ...stats, global_threat_level: threat.level, global_threat_label: threat.label,
       defcon: defcon.level, defcon_label: defcon.label, defcon_status: defcon.status,
-      feeds_active: 74, version: PLATFORM_VERSION,
+      feeds_active: liveFeedCount, version: PLATFORM_VERSION,
+    }, 200, { "Cache-Control": "public, max-age=60" });
+  }
+
+  // --- /api/metrics -------------------------------------------------------
+  // Backs p0-revenue-os/config/metric_integrity_contract.json (contract_id
+  // APEX-METRIC-INTEGRITY-v1, landed on main alongside js/p0-public-contract.js
+  // -- see that commit's own header: "Does not invent advisory/IOC counts").
+  // That contract and its runtime already existed with NO backend route
+  // behind them: js/p0-public-contract.js's loadMetrics() has always tried
+  // this exact path first, silently falling through to its static-file
+  // fallback (also absent -- only a null-filled p0-revenue-os/metrics/
+  // canonical.sample.json template exists, never at the real
+  // /metrics/canonical.json path) -- a contract-without-a-backend gap, the
+  // mirror image of the more usual backend-without-a-frontend orphan this
+  // platform has been closing PR by PR. Reuses this file's own
+  // computeStats()/loadFeedItems()/classifyFreshness() (already used by the
+  // sibling /api/platform/stats and /api/v1/intel/stats routes immediately
+  // above) and P40's already-live source registry for feed_source_count --
+  // no new scoring or R2-read logic. Every field the contract lists but
+  // this platform has no real source for (api_uptime_30d_pct: no uptime-
+  // history store exists anywhere in this codebase) is null, never a
+  // fabricated number, matching the sample file's own explicit rule:
+  // "Shipping this file with invented integers is a contract violation."
+  if (path === "/api/metrics") {
+    const feedData = await loadFeedItems(env);
+    const items = feedData.items || [];
+    const stats = computeStats(items);
+    const freshness = classifyFreshness(stats.last_sync);
+    const feedSourceCount = await _liveFeedSourceCount(env);
+
+    // Unique (type, value) IOCs across items published in the last 30 days --
+    // a real dedup over each item's own iocs[] array (same field p22-handlers.js
+    // reads for IOC validation), not the raw summed ioc_count /api/platform/stats
+    // uses (that sum double-counts a repeated indicator across reports).
+    const THIRTY_DAYS_MS = 30 * 24 * 3600 * 1000;
+    const cutoff = Date.now() - THIRTY_DAYS_MS;
+    const uniqueIocs30d = new Set();
+    let stixBundlesAvailable = false;
+    for (const item of items) {
+      const publishedMs = Date.parse(item.published || item.published_at || "");
+      if (!Number.isNaN(publishedMs) && publishedMs >= cutoff) {
+        for (const ioc of (item.iocs || [])) {
+          if (ioc && ioc.type && ioc.value) uniqueIocs30d.add(ioc.type + ":" + ioc.value);
+        }
+      }
+      if (item.stix_bundle && Array.isArray(item.stix_bundle.objects) && item.stix_bundle.objects.length > 0) {
+        stixBundlesAvailable = true;
+      }
+    }
+
+    return jsonResp({
+      contract_id: "APEX-METRIC-INTEGRITY-v1",
+      version: PLATFORM_VERSION,
+      generated_at: now(),
+      advisory_count_live: stats.total,
+      feed_source_count: feedSourceCount,
+      ioc_count_unique_30d: uniqueIocs30d.size,
+      stix_bundles_available: stixBundlesAvailable,
+      last_feed_sync_utc: stats.last_sync !== "N/A" ? stats.last_sync : null,
+      freshness: freshness.state,
+      freshness_age_seconds: freshness.age_seconds,
+      api_uptime_30d_pct: null,
+      preview_item_limit: 10,
     }, 200, { "Cache-Control": "public, max-age=60" });
   }
 

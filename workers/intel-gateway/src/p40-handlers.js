@@ -165,7 +165,10 @@ async function _loadR2Json(env, key) {
   }
 }
 
-async function _loadRegistry(env) {
+// Exported (unlike this file's other _-prefixed helpers) so index.js's new
+// /api/metrics route can reuse the same registry read for feed_source_count
+// instead of re-implementing the R2 read -- see that route's own comment.
+export async function _loadRegistry(env) {
   return await _loadR2Json(env, REGISTRY_KEY);
 }
 

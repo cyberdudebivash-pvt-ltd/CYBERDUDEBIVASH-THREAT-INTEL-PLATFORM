@@ -73,6 +73,17 @@ KNOWN_LIVE_DATA_SCRIPTS = (
     "api_adapter.js",
     "card_renderer.js",
     "card_renderer_integration.js",
+    # Added 2026-09-03 (sentinel-apex-transformation session): js/metric-normalize.js
+    # is primarily a formatting-utility module (epss()/kevState()/priority()), but
+    # a concurrent same-day commit made it unconditionally inject
+    # js/p0-public-contract.js on load (see that file's own "P0 2026-09-03" header
+    # comment), which fetches /api/metrics and hides restricted nav for every page
+    # that includes it -- not just index.html, the one page that had it before.
+    # Verified against advisories.html, wired to it the same session /api/metrics
+    # was implemented: any page loading metric-normalize.js now genuinely fetches
+    # live data, unconditionally, regardless of why it originally included the
+    # script.
+    "metric-normalize.js",
 )
 
 

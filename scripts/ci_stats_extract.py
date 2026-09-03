@@ -233,6 +233,14 @@ _REPORTS: dict = {
             d.get("by_category", {}).get("INTERNAL", 0),
         ],
     ),
+    "metric_integrity_contract": (
+        _ROOT / "data" / "quality" / "metric_integrity_contract_report.json",
+        lambda d: [
+            d.get("pages_scanned", 0),
+            len(d.get("forbidden_hardcode_findings", [])),
+            len(d.get("nav_leakage_findings", [])),
+        ],
+    ),
 }
 
 _FALLBACKS = {
@@ -259,6 +267,7 @@ _FALLBACKS = {
     # own p21 convention for the same reason (an all-numeric fallback tuple).
     "frontend_api_coverage": "? ? ? ?",
     "capability_registry": "? ? ? ? ? ?",
+    "metric_integrity_contract": "? ? ?",
 }
 
 
