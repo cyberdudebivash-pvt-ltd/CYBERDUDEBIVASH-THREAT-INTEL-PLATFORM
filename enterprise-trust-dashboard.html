@@ -565,7 +565,13 @@ async function loadFeed(headers) {
       document.getElementById('stat-p21').textContent = (p21d.average_score || 0).toFixed(1);
     } catch(_) {}
     try {
-      const p24r = await fetch(base + '/api/v1/reports/stats.json', { headers });
+      // ROOT CAUSE FIX: this fetched /api/v1/reports/stats.json, which 404s --
+      // the real route (confirmed in workers/intel-gateway/src/index.js) is
+      // /api/reports/stats.json, no /v1/ segment. commercial_score is not a
+      // field that endpoint (or any endpoint) returns, so the pre-existing
+      // '--' fallback below is the honest result once the fetch itself
+      // succeeds -- not a further bug to fix.
+      const p24r = await fetch(base + '/api/reports/stats.json', { headers });
       const p24d = await p24r.json();
       document.getElementById('stat-p24').textContent = (p24d.commercial_score || '—') + (p24d.commercial_score ? '%' : '');
     } catch(_) {}
