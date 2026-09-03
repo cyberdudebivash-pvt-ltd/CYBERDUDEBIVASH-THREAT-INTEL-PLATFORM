@@ -66,6 +66,8 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, pathlib, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
           required=[
             'data/stix/feed_manifest.json',
             'data/intelligence_repository/intelligence_index.json',
@@ -78,12 +80,12 @@ jobs:
               p=pathlib.Path(name)
               if not p.exists() or p.stat().st_size < 2:
                   print(f'::error::Missing/empty required persistence output: {name}'); sys.exit(1)
-              try: d=json.loads(p.read_text(encoding='utf-8'))
+              try: d=json.loads(p.read_text(encoding='utf-8'), parse_constant=reject_constant)
               except Exception as e:
-                  print(f'::error::Invalid JSON {name}: {e}'); sys.exit(1)
+                  print(f'::error::Invalid strict JSON {name}: {e}'); sys.exit(1)
               if not isinstance(d,(dict,list)):
                   print(f'::error::Invalid state shape {name}'); sys.exit(1)
-          print('PERSISTENCE_VALIDATION=PASS')
+          print('PERSISTENCE_VALIDATION=PASS STRICT_JSON=PASS')
           PY
 
       - name: "Upload Intel State to R2"
