@@ -5,22 +5,8 @@
 // consumer) so window.CDB_NORMALIZE is always defined by the time a
 // data-driven renderer actually runs.
 //
-// Contract:
-//   epss(raw)     -> { probability: 0..1|null, percent: 0..100|null, state: 'OK'|'UNKNOWN'|'INVALID' }
-//                    0..1 values are treated as already-probability; values in
-//                    (1,100] are treated as a percentage and divided by 100.
-//                    Negative or >100 values are INVALID, never silently clamped.
-//   kevState(item) -> true | false | 'UNKNOWN'
-//                    Trusts item.kev_present when it is an actual boolean
-//                    (the clean canonical field); otherwise parses the legacy
-//                    item.kev field (which carries string values like "NO"
-//                    that are truthy in JS -- never use raw !!item.kev).
-//   priority(item) -> 'P0'..'P4' | 'UNKNOWN'
-//                    Presentation-boundary resolver only -- does not
-//                    recompute priority from risk signals (that remains
-//                    window.computePriority's job). Prefers the backend's
-//                    own authoritative field, in order, and never invents P4
-//                    for a genuinely-unknown item.
+// P0 2026-09-03: also boots js/p0-public-contract.js when present so public
+// nav hide + live metric fill run on every page that already loads this file.
 (function (root, factory) {
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = factory(null);
@@ -42,9 +28,6 @@
       if (trimmed === '') {
         return { probability: null, percent: null, state: 'UNKNOWN' };
       }
-      // Strict numeric conversion -- parseFloat("42invalid") would silently
-      // return 42 and mark a malformed value OK. Number() rejects any
-      // trailing non-numeric characters.
       n = Number(trimmed);
     } else {
       n = NaN;
@@ -95,11 +78,6 @@
     if (fromSoc) return fromSoc;
     var fromField = validPriority(item.priority);
     if (fromField) return fromField;
-    // Only defer to computePriority() (a real derivation engine) when the
-    // item actually carries at least one raw signal it derives from --
-    // otherwise computePriority() just returns its own internal default
-    // (P4), which would leak through here as if it were a genuine
-    // computation on a genuinely-unknown item.
     var hasSignal = item.kev_present !== undefined || item.cvss_score != null
       || item.risk_score != null || item.epss_score != null;
     if (hasSignal && root && typeof root.computePriority === 'function') {
@@ -115,3 +93,12 @@
     priority: priority,
   };
 });
+
+(function loadP0PublicContract() {
+  if (typeof document === 'undefined') return;
+  var s = document.createElement('script');
+  s.src = '/js/p0-public-contract.js';
+  s.async = true;
+  s.defer = true;
+  document.head ? document.head.appendChild(s) : document.documentElement.appendChild(s);
+})();
