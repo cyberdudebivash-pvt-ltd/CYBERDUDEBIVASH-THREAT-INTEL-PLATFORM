@@ -102,7 +102,7 @@ KNOWN_LIVE_DATA_SCRIPTS = (
 _FETCH_RE = re.compile(r"fetch\s*\(", re.IGNORECASE)
 _API_PATH_LITERAL_RE = re.compile(r"""["'`][^"'`]*?/api/[^"'`]*["'`]""")
 _SCRIPT_SRC_RE = re.compile(r'<script[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
-_SCRIPT_BLOCK_RE = re.compile(r"<script\b([^>]*)>(.*?)</script\s*>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_BLOCK_RE = re.compile(r"<script\b([^>]*)>(.*?)</script[^>]*>", re.IGNORECASE | re.DOTALL)
 
 
 def _inline_script_text(content: str) -> str:
