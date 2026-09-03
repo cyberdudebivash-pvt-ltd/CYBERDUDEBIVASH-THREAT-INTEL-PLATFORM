@@ -164,6 +164,10 @@ tr:hover td{background:rgba(255,255,255,.02);}
       <div class="card-title">Publication Readiness</div>
       <div id="pubReadPanel"><div class="loading">Loading…</div></div>
     </div>
+    <div class="card">
+      <div class="card-title">P28 Risk Intelligence Platform</div>
+      <div id="p28Panel"><div class="loading">Loading…</div></div>
+    </div>
   </div>
 
   <!-- Items Table -->
@@ -223,13 +227,14 @@ async function apiFetch(path) {
 async function loadAll() {
   document.getElementById('lastRefresh').textContent = 'Refreshing…';
   try {
-    const [action, readiness, p22, p21] = await Promise.all([
+    const [action, readiness, p22, p21, p28] = await Promise.all([
       apiFetch('/api/v1/p23/actionability').catch(() => null),
       apiFetch('/api/v1/p23/operational-readiness').catch(() => null),
       apiFetch('/api/v1/p22/observability').catch(() => null),
       apiFetch('/api/v1/p21/observability').catch(() => null),
+      apiFetch('/api/v1/p28/observability').catch(() => null),
     ]);
-    G_DATA = { action, readiness, p22, p21 };
+    G_DATA = { action, readiness, p22, p21, p28 };
     if (action) G_ITEMS = action.items || [];
     renderAll();
     document.getElementById('lastRefresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -244,6 +249,7 @@ function renderAll() {
   const r = G_DATA.readiness;
   const p22 = G_DATA.p22;
   const p21 = G_DATA.p21;
+  const p28 = G_DATA.p28;
 
   // KPIs
   if (a) {
@@ -326,6 +332,21 @@ function renderAll() {
       <div class="stat-row"><span class="stat-label">Blocked</span><span class="stat-val" style="color:var(--red);">${blk}</span></div>
       <div class="stat-row"><span class="stat-label">Eligibility Rate</span><span class="stat-val">${Math.round((pub/tot)*100)}%</span></div>
       <div class="stat-row"><span class="stat-label">Avg Gates Passed</span><span class="stat-val">${r.avg_gates_passed||0}/10</span></div>`;
+  }
+
+  // P28 Risk Intelligence Platform
+  if (p28) {
+    const pm = p28.platform_metrics || {};
+    const qg = p28.quality_gates || {};
+    document.getElementById('p28Panel').innerHTML = `
+      <div class="stat-row"><span class="stat-label">Feed Items</span><span class="stat-val">${pm.feed_items ?? '—'}</span></div>
+      <div class="stat-row"><span class="stat-label">Critical Advisories</span><span class="stat-val" style="color:${(pm.critical_advisories||0)>0?'#ef4444':'var(--muted)'};">${pm.critical_advisories ?? '—'}</span></div>
+      <div class="stat-row"><span class="stat-label">Avg Confidence</span><span class="stat-val">${pm.avg_confidence_pct ?? '—'}%</span></div>
+      <div class="stat-row"><span class="stat-label">TTP Coverage</span><span class="stat-val">${pm.ttp_coverage_pct ?? '—'}%</span></div>
+      <div class="stat-row"><span class="stat-label">Total IOCs</span><span class="stat-val">${pm.total_iocs ?? '—'}</span></div>
+      <div class="stat-row"><span class="stat-label">P27/P26/P25 Tiers</span><span class="stat-val" style="font-size:10px;">${qg.p27_tier||'—'} / ${qg.p26_tier||'—'} / ${qg.p25_tier||'—'}</span></div>`;
+  } else {
+    document.getElementById('p28Panel').innerHTML = '<div class="empty">Unavailable</div>';
   }
 
   renderTable(G_ITEMS);

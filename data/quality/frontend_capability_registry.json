@@ -1,0 +1,1056 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-09-03T04:26:52.551685+00:00",
+  "generator": "scripts/build_capability_registry.py (one-time build; hand-maintained CLASSIFICATIONS dict thereafter)",
+  "scope": "top-level *.html (repo root) -- see CLAUDE.md's P-layer table and scripts/capability_coverage_audit.py for the /api/v1/pXX/* backend route -> handler registry (a distinct, complementary artifact; this file classifies FRONTEND pages, not backend routes)",
+  "taxonomy": [
+    "CUSTOMER_UI",
+    "API_ONLY",
+    "ADMIN",
+    "INTERNAL",
+    "DEPRECATED"
+  ],
+  "total_pages": 149,
+  "by_category": {
+    "CUSTOMER_UI": 137,
+    "INTERNAL": 1,
+    "ADMIN": 11
+  },
+  "customer_ui_orphan_count": 27,
+  "unclassified_count": 0,
+  "note": "unclassified_count is the mission-tracked metric (target: 0). A page's presence in this file's `entries` array with a category from `taxonomy` IS its classification -- there is no separate UNCLASSIFIED bucket by construction (see scripts/capability_registry_gate.py, which fails CI if a top-level *.html page exists with no entry here). customer_ui_orphan_count tracks a SEPARATE, non-blocking metric: CUSTOMER_UI pages that are correctly classified but still show static/placeholder data pending a live-API wiring fix -- see each entry's `notes`.",
+  "access_navigation_audit_status": "NOT YET DONE for most entries. The mission's requested `access` (public/api_key_required/admin) and `navigation` (which nav menus link to this page) fields were audited and are accurate ONLY for the 9 pages this session touched directly (see the P21-P40 dashboard family and the git log for claude/sentinel-apex-transformation-8x3y26). Populating them accurately for the other 140 pages requires reading each page's own auth-wall markup and cross-referencing every nav/header partial across the site -- exactly the 'Unified Application Shell' audit (mission item 4) this session did not have room for. Recommended as the next P0: a dedicated navigation-shell audit pass, not a guess encoded into this file.",
+  "entries": [
+    {
+      "id": "404.html",
+      "frontend_route": "/404.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "ENTERPRISE-CUSTOMER-RESPONSE-SYSTEM.html",
+      "frontend_route": "/ENTERPRISE-CUSTOMER-RESPONSE-SYSTEM.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "GODMODE-REVENUE-AUDIT-REPORT.html",
+      "frontend_route": "/GODMODE-REVENUE-AUDIT-REPORT.html",
+      "category": "INTERNAL",
+      "notes": "One-off internal audit report artifact (added to the static allowlist -- zero real form/fetch; its 'fetch(' matches are prose describing suggested code, not executable JS)."
+    },
+    {
+      "id": "PAYMENT-GATEWAY.html",
+      "frontend_route": "/PAYMENT-GATEWAY.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "SENTINEL-APEX-CEO-CTO-CISO-EXECUTIVE-AUDIT-REPORT-v161.html",
+      "frontend_route": "/SENTINEL-APEX-CEO-CTO-CISO-EXECUTIVE-AUDIT-REPORT-v161.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "SENTINEL-APEX-PRODUCTION-BACKLOG.html",
+      "frontend_route": "/SENTINEL-APEX-PRODUCTION-BACKLOG.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "SENTINEL-APEX-SOVEREIGN-MASTER-REPORT-2026.html",
+      "frontend_route": "/SENTINEL-APEX-SOVEREIGN-MASTER-REPORT-2026.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "SENTINEL_APEX_ENTERPRISE_AUDIT_v145.html",
+      "frontend_route": "/SENTINEL_APEX_ENTERPRISE_AUDIT_v145.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "SENTINEL_APEX_P0_AUDIT_REPORT.html",
+      "frontend_route": "/SENTINEL_APEX_P0_AUDIT_REPORT.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "about.html",
+      "frontend_route": "/about.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "admin.html",
+      "frontend_route": "/admin.html",
+      "category": "ADMIN",
+      "notes": "Password-gated internal admin control panel."
+    },
+    {
+      "id": "advisories.html",
+      "frontend_route": "/advisories.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "ai-runtime-defense.html",
+      "frontend_route": "/ai-runtime-defense.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded/animated stat counters, zero fetch. No dedicated backend route found; partial fit /api/v1/ai-ops/analytics.",
+      "status": "orphan"
+    },
+    {
+      "id": "ai-security-ops-hub.html",
+      "frontend_route": "/ai-security-ops-hub.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded inference/prompt-firewall counters, zero fetch. Partial fit /api/v1/ai-ops/analytics.",
+      "status": "orphan"
+    },
+    {
+      "id": "ai-threat-tracker.html",
+      "frontend_route": "/ai-threat-tracker.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "alternative-to-mandiant.html",
+      "frontend_route": "/alternative-to-mandiant.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "alternative-to-recorded-future.html",
+      "frontend_route": "/alternative-to-recorded-future.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "api-docs.html",
+      "frontend_route": "/api-docs.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Has real interactive 'try it' fetch() calls (an embedded API console), not a placeholder-data page -- intentionally not in the zero-fetch static allowlist.",
+      "status": "interactive_docs"
+    },
+    {
+      "id": "api-key-manager.html",
+      "frontend_route": "/api-key-manager.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "api-management-center.html",
+      "frontend_route": "/api-management-center.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded API usage/success-rate stats, zero fetch. No key/webhook CRUD route exists (see api-key-manager.html for the one page with a real fetch() pattern).",
+      "status": "orphan"
+    },
+    {
+      "id": "api-reference-card.html",
+      "frontend_route": "/api-reference-card.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded 'live' advisory badge with pulsing indicator, no fetch. Best fit: /api/health.",
+      "status": "orphan"
+    },
+    {
+      "id": "billing-center.html",
+      "frontend_route": "/billing-center.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded usage-meter numbers, zero fetch. Partial fit /api/payment/status.",
+      "status": "orphan"
+    },
+    {
+      "id": "case-studies.html",
+      "frontend_route": "/case-studies.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "compare.html",
+      "frontend_route": "/compare.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "compliance.html",
+      "frontend_route": "/compliance.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "contact-enterprise.html",
+      "frontend_route": "/contact-enterprise.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Enterprise sales contact form.",
+      "status": "form_only"
+    },
+    {
+      "id": "conversion-analytics.html",
+      "frontend_route": "/conversion-analytics.html",
+      "category": "ADMIN",
+      "notes": "CDB-internal sales-funnel analytics."
+    },
+    {
+      "id": "customer-dashboard.html",
+      "frontend_route": "/customer-dashboard.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Single-tenant demo dashboard, fully hardcoded. Fits /api/v1/intel/apt, /api/v1/intel/feed, /api/health.",
+      "status": "orphan"
+    },
+    {
+      "id": "customer-health-platform.html",
+      "frontend_route": "/customer-health-platform.html",
+      "category": "ADMIN",
+      "notes": "CDB-internal customer health/churn scoring tool."
+    },
+    {
+      "id": "customer-intake.html",
+      "frontend_route": "/customer-intake.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "customer-intelligence.html",
+      "frontend_route": "/customer-intelligence.html",
+      "category": "ADMIN",
+      "notes": "CDB-internal customer health-scoring engine."
+    },
+    {
+      "id": "customer-ops-center.html",
+      "frontend_route": "/customer-ops-center.html",
+      "category": "ADMIN",
+      "notes": "CDB-internal 'Global Ops' command center."
+    },
+    {
+      "id": "customer-portal.html",
+      "frontend_route": "/customer-portal.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded threat/IOC counts and a fake masked API key. Fits /api/v1/intel/feed, /api/v1/detections, /api/health.",
+      "status": "orphan"
+    },
+    {
+      "id": "customer-success-center.html",
+      "frontend_route": "/customer-success-center.html",
+      "category": "ADMIN",
+      "notes": "CDB-internal CS team tool."
+    },
+    {
+      "id": "customer-success-stories.html",
+      "frontend_route": "/customer-success-stories.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "customer-success.html",
+      "frontend_route": "/customer-success.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "customer-value-dashboard.html",
+      "frontend_route": "/customer-value-dashboard.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "cve.html",
+      "frontend_route": "/cve.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "cves.html",
+      "frontend_route": "/cves.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "cyber-kits.html",
+      "frontend_route": "/cyber-kits.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "daily-operations-center.html",
+      "frontend_route": "/daily-operations-center.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Multi-tab ops tool, hardcoded across every tab. Fits /api/v1/intel/latest.json, /api/v1/incidents, /api/v1/detections, /api/sla/incidents.",
+      "status": "orphan"
+    },
+    {
+      "id": "dashboard.html",
+      "frontend_route": "/dashboard.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Investigated this session, deliberately NOT fixed: its fetch() calls target /auth/login and /auth/keys (missing /api/ prefix AND /api/auth/keys does not exist as a route at all -- only /api/admin/keys [admin-scoped] and /api/keys/free [free-tier signup] exist). This is an auth-model mismatch, not a URL typo -- see login.html note. Also references stale element IDs ('login-screen'/'dashboard-screen') that don't match its own DOM ('auth-gate'/'dashboard'). Needs an auth-model decision before any fix, not a frontend-only patch.",
+      "status": "orphan"
+    },
+    {
+      "id": "demo-conversion-center.html",
+      "frontend_route": "/demo-conversion-center.html",
+      "category": "ADMIN",
+      "notes": "CDB-internal demo-to-customer sales pipeline tracker."
+    },
+    {
+      "id": "demo-intelligence-center.html",
+      "frontend_route": "/demo-intelligence-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "demo.html",
+      "frontend_route": "/demo.html",
+      "category": "CUSTOMER_UI",
+      "notes": "'Book a Demo' page; explicitly self-labeled sandbox/demo mode.",
+      "status": "form_only"
+    },
+    {
+      "id": "dependency-platform.html",
+      "frontend_route": "/dependency-platform.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded 'sticky score' and API-call stats. No obvious existing backend route.",
+      "status": "orphan"
+    },
+    {
+      "id": "developer-portal.html",
+      "frontend_route": "/developer-portal.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "editorial-policy.html",
+      "frontend_route": "/editorial-policy.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "enterprise-action-dashboard.html",
+      "frontend_route": "/enterprise-action-dashboard.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-assurance-center.html",
+      "frontend_route": "/enterprise-assurance-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-compliance.html",
+      "frontend_route": "/enterprise-compliance.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "enterprise-cyber-intelligence-os.html",
+      "frontend_route": "/enterprise-cyber-intelligence-os.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-demo.html",
+      "frontend_route": "/enterprise-demo.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Enterprise-tier 'Book a Demo' page.",
+      "status": "form_only"
+    },
+    {
+      "id": "enterprise-excellence-center.html",
+      "frontend_route": "/enterprise-excellence-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-governance-center.html",
+      "frontend_route": "/enterprise-governance-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-hardening-center.html",
+      "frontend_route": "/enterprise-hardening-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-homepage.html",
+      "frontend_route": "/enterprise-homepage.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "enterprise-intelligence-health-dashboard.html",
+      "frontend_route": "/enterprise-intelligence-health-dashboard.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-knowledge-center.html",
+      "frontend_route": "/enterprise-knowledge-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "enterprise-knowledge-graph.html",
+      "frontend_route": "/enterprise-knowledge-graph.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-onboarding.html",
+      "frontend_route": "/enterprise-onboarding.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-operations.html",
+      "frontend_route": "/enterprise-operations.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-pricing.html",
+      "frontend_route": "/enterprise-pricing.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "enterprise-procurement-pack.html",
+      "frontend_route": "/enterprise-procurement-pack.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "enterprise-quality-center.html",
+      "frontend_route": "/enterprise-quality-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-security-pack.html",
+      "frontend_route": "/enterprise-security-pack.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "enterprise-source-fabric-center.html",
+      "frontend_route": "/enterprise-source-fabric-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-trust-center.html",
+      "frontend_route": "/enterprise-trust-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-trust-dashboard.html",
+      "frontend_route": "/enterprise-trust-dashboard.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "enterprise-use-cases.html",
+      "frontend_route": "/enterprise-use-cases.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "enterprise.html",
+      "frontend_route": "/enterprise.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "eula.html",
+      "frontend_route": "/eula.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "evidence-threat-map.html",
+      "frontend_route": "/evidence-threat-map.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded map stats with fake Math.random()-driven 'live counters'. Fits /api/v1/intel/graph, /api/v1/geo/cybermap, /api/v1/intel/relations.",
+      "status": "orphan"
+    },
+    {
+      "id": "executive-briefing.html",
+      "frontend_route": "/executive-briefing.html",
+      "category": "CUSTOMER_UI",
+      "notes": "CISO/board briefing-pack marketing page; ROI cites a real external IBM breach-cost report.",
+      "status": "form_only"
+    },
+    {
+      "id": "executive-dashboard.html",
+      "frontend_route": "/executive-dashboard.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "executive-reporting-center.html",
+      "frontend_route": "/executive-reporting-center.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded board-report figures ('$9.7M Annualized ROI'). Fits /api/v1/executive/command-center, /api/v1/reports/.",
+      "status": "orphan"
+    },
+    {
+      "id": "get-api-key.html",
+      "frontend_route": "/get-api-key.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "global-deployment.html",
+      "frontend_route": "/global-deployment.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "graph-ops-center.html",
+      "frontend_route": "/graph-ops-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "index.html",
+      "frontend_route": "/index.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "integration-catalog.html",
+      "frontend_route": "/integration-catalog.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "intelligence-archive.html",
+      "frontend_route": "/intelligence-archive.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Genuinely fetches live JSON from /data/intelligence_repository/*.json -- a real data source outside the /api/ gateway, so the coverage gate's /api/-only regex permanently misses it (by design, not a bug in that gate -- see its own docstring's scope note). Deliberately NOT status='live': that status feeds capability_registry_gate.py's placeholder-regression check against frontend_api_coverage_report.json's dynamic_pages list, which this page can never appear in. Not a defect; not added to the static allowlist because it IS dynamic.",
+      "status": "live_non_gateway"
+    },
+    {
+      "id": "iocs.html",
+      "frontend_route": "/iocs.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "kev.html",
+      "frontend_route": "/kev.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "lead-capture.html",
+      "frontend_route": "/lead-capture.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Paywall-unlock lead-gen form.",
+      "status": "form_only"
+    },
+    {
+      "id": "lead-intelligence.html",
+      "frontend_route": "/lead-intelligence.html",
+      "category": "ADMIN",
+      "notes": "CDB-internal lead-scoring engine."
+    },
+    {
+      "id": "lead-pipeline.html",
+      "frontend_route": "/lead-pipeline.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "login.html",
+      "frontend_route": "/login.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Investigated this session, deliberately NOT fixed: fetch() calls are missing the /api/ prefix (/auth/login, /auth/signup), but the deeper issue is an auth-MODEL mismatch, not a URL typo -- POST /api/auth/login expects {api_key}, not {email,password} (this platform has no password-based account system), and POST /api/auth/register unconditionally returns 422 'Email registration is not available.' A shallow /api/ prefix fix would still be broken and would look fixed when it isn't; CLAUDE.md freezes auth-logic changes outright. Needs a product decision (build real email/password auth, or redesign this page around API-key issuance via the already-working /api/keys/free flow that get-api-key.html correctly uses) before any code changes here.",
+      "status": "orphan"
+    },
+    {
+      "id": "lookup.html",
+      "frontend_route": "/lookup.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "malware-intel-hub.html",
+      "frontend_route": "/malware-intel-hub.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded sample counters, fake sandbox hash stream via Math.random(). Partial fit /api/yara, /api/sigma.",
+      "status": "orphan"
+    },
+    {
+      "id": "methodology.html",
+      "frontend_route": "/methodology.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "monetization-ops.html",
+      "frontend_route": "/monetization-ops.html",
+      "category": "ADMIN",
+      "notes": "CDB-internal revenue/monetization ops dashboard."
+    },
+    {
+      "id": "mssp-console.html",
+      "frontend_route": "/mssp-console.html",
+      "category": "CUSTOMER_UI",
+      "notes": "1785-line MSSP console, fully hardcoded, zero fetch. Fits /api/mssp, /api/mssp/feed, /api/mssp/tenants/{id}/feed.",
+      "status": "orphan"
+    },
+    {
+      "id": "mssp-customer-center.html",
+      "frontend_route": "/mssp-customer-center.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded partner/customer arrays. Fits /api/mssp, /api/mssp/feed.",
+      "status": "orphan"
+    },
+    {
+      "id": "mssp-lead-tracker.html",
+      "frontend_route": "/mssp-lead-tracker.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "mssp-onboarding-kit.html",
+      "frontend_route": "/mssp-onboarding-kit.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "mssp-partner-onboarding.html",
+      "frontend_route": "/mssp-partner-onboarding.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "mssp-partner-portal.html",
+      "frontend_route": "/mssp-partner-portal.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded tenant list. Fits /api/mssp/tenants/{id}/feed, /api/mssp/feed.",
+      "status": "orphan"
+    },
+    {
+      "id": "mssp-tenant-dashboard.html",
+      "frontend_route": "/mssp-tenant-dashboard.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "mssp-training-center.html",
+      "frontend_route": "/mssp-training-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "mssp.html",
+      "frontend_route": "/mssp.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "my-exposure-center.html",
+      "frontend_route": "/my-exposure-center.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded CVEs/campaigns/recommendations presented as personalized. Fits /api/v1/cve/live, /api/v1/intel/campaigns, /api/v1/assets/intelligence.",
+      "status": "orphan"
+    },
+    {
+      "id": "observability.html",
+      "frontend_route": "/observability.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "onboarding.html",
+      "frontend_route": "/onboarding.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "partner.html",
+      "frontend_route": "/partner.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Partner/reseller program marketing page.",
+      "status": "form_only"
+    },
+    {
+      "id": "payment-confirmation.html",
+      "frontend_route": "/payment-confirmation.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Activation timeline derived only from URL query params, never calls the real payment-status API. Fits /api/payment/status.",
+      "status": "orphan"
+    },
+    {
+      "id": "payment-status-dashboard.html",
+      "frontend_route": "/payment-status-dashboard.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "payment-submission.html",
+      "frontend_route": "/payment-submission.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "platform-capabilities.html",
+      "frontend_route": "/platform-capabilities.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "pricing.html",
+      "frontend_route": "/pricing.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "privacy.html",
+      "frontend_route": "/privacy.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "ransomware.html",
+      "frontend_route": "/ransomware.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "reference-architecture.html",
+      "frontend_route": "/reference-architecture.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "referral.html",
+      "frontend_route": "/referral.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "revenue-dashboard.html",
+      "frontend_route": "/revenue-dashboard.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "revenue-intelligence.html",
+      "frontend_route": "/revenue-intelligence.html",
+      "category": "ADMIN",
+      "notes": "CDB-internal revenue-ops engine; own code comment says data is 'seeded...in production fetched from revenue registry API'."
+    },
+    {
+      "id": "roi-calculator.html",
+      "frontend_route": "/roi-calculator.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "security-compliance.html",
+      "frontend_route": "/security-compliance.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "security-questionnaire-pack.html",
+      "frontend_route": "/security-questionnaire-pack.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "sentinel-master-ops-center.html",
+      "frontend_route": "/sentinel-master-ops-center.html",
+      "category": "ADMIN",
+      "notes": "CDB-internal master operations command center."
+    },
+    {
+      "id": "sentinel-onboarding.html",
+      "frontend_route": "/sentinel-onboarding.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Fixed this session: removed fabricated org/tenant/API-key credentials and the false 'account activated' / 'credentials emailed' claims from step 5. Now honestly states activation is manual. No route wires a real self-serve paid-tier provisioning flow yet (payment step is decorative -- simulatePaypal() just opens paypal.com); building one is explicitly out of scope here (CLAUDE.md: payment/billing logic is frozen).",
+      "status": "form_only"
+    },
+    {
+      "id": "services.html",
+      "frontend_route": "/services.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "sla-overview.html",
+      "frontend_route": "/sla-overview.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "sla.html",
+      "frontend_route": "/sla.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "soc-integrations.html",
+      "frontend_route": "/soc-integrations.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "soc-operations-center.html",
+      "frontend_route": "/soc-operations-center.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded INTEL_ITEMS array despite an in-code comment claiming 'No fake data -- Real manifest-driven'. Fits /api/v1/incidents, /api/v1/intel/graph, /api/v1/geo/cybermap.",
+      "status": "orphan"
+    },
+    {
+      "id": "soc-workspace.html",
+      "frontend_route": "/soc-workspace.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded incidents/hunts/timeline; updateStats() fakes live numbers via Math.random(). Fits /api/v1/incidents, /api/v1/detections.",
+      "status": "orphan"
+    },
+    {
+      "id": "status.html",
+      "frontend_route": "/status.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "store.html",
+      "frontend_route": "/store.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "subscription-billing-center.html",
+      "frontend_route": "/subscription-billing-center.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded MRR/usage figures; every action button alert()s a nonexistent route. Partial fit /api/payment/status.",
+      "status": "orphan"
+    },
+    {
+      "id": "subscription-management.html",
+      "frontend_route": "/subscription-management.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "support-center.html",
+      "frontend_route": "/support-center.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Fixed this session: a real JS syntax error (unescaped raw HTML in a return statement, not wrapped in a template literal) was breaking the entire inline <script>, so nothing on the page worked. Syntax now valid. Still shows a hardcoded ticket list -- no live route for a per-tenant support-ticket API exists yet; tracked as a residual orphan.",
+      "status": "orphan"
+    },
+    {
+      "id": "telemetry-embedding.html",
+      "frontend_route": "/telemetry-embedding.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded/rotated telemetry counters via setInterval + Math.random(). No obvious existing route.",
+      "status": "orphan"
+    },
+    {
+      "id": "telemetry-visibility-ops.html",
+      "frontend_route": "/telemetry-visibility-ops.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded event-rate counters and tickets. Fits /api/v1/detections, /api/v1/incidents, /api/v1/intel/graph.",
+      "status": "orphan"
+    },
+    {
+      "id": "terms.html",
+      "frontend_route": "/terms.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "testimonials.html",
+      "frontend_route": "/testimonials.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "threat-actors.html",
+      "frontend_route": "/threat-actors.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "threat-intel-certification-dashboard.html",
+      "frontend_route": "/threat-intel-certification-dashboard.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "threats.html",
+      "frontend_route": "/threats.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "trial-center.html",
+      "frontend_route": "/trial-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "trust-center.html",
+      "frontend_route": "/trust-center.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "unified-ops-hub.html",
+      "frontend_route": "/unified-ops-hub.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded alert/IOC/score tiles across all tabs. Fits /api/v1/incidents, /api/v1/intel/graph, /api/v1/detections.",
+      "status": "orphan"
+    },
+    {
+      "id": "upgrade.html",
+      "frontend_route": "/upgrade.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "user-test-kit.html",
+      "frontend_route": "/user-test-kit.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "value-center.html",
+      "frontend_route": "/value-center.html",
+      "category": "CUSTOMER_UI",
+      "notes": "Hardcoded ROI/threat figures with a fake 'LIVE' badge; period selector re-displays the same static numbers. Fits /api/v1/incidents, /api/v1/detections, /api/v1/stats.",
+      "status": "orphan"
+    },
+    {
+      "id": "vendor-assessment-pack.html",
+      "frontend_route": "/vendor-assessment-pack.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "vulnerabilities.html",
+      "frontend_route": "/vulnerabilities.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
+      "id": "weekly-brief.html",
+      "frontend_route": "/weekly-brief.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    },
+    {
+      "id": "welcome.html",
+      "frontend_route": "/welcome.html",
+      "category": "CUSTOMER_UI",
+      "status": "static_content",
+      "notes": "Legitimately static marketing/legal/informational content."
+    }
+  ]
+}

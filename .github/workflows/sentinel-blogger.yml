@@ -1993,6 +1993,43 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
+      # STAGE 3.92c: CAPABILITY REGISTRY REBUILD (data step, non-blocking)
+      # Regenerates data/quality/frontend_capability_registry.json from the
+      # fresh coverage report STAGE 3.92b just wrote, plus this script's own
+      # hand-maintained CLASSIFICATIONS dict for the pages the mechanical
+      # dynamic/static heuristic can't resolve on its own (ADMIN/INTERNAL/
+      # form-only pages, and known CUSTOMER_UI orphans still pending a live-
+      # API wiring fix). A data-generation step, not a check -- if a brand
+      # new page has no CLASSIFICATIONS entry yet, build_capability_registry.py
+      # exits non-zero here (not a silent skip) and STAGE 3.92d below fails
+      # the build on the resulting missing/stale registry, which is the
+      # actual "classify it or don't ship it" gate.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.92c - Capability Registry Rebuild"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 2
+        run: python3 scripts/build_capability_registry.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 3.92d: CAPABILITY REGISTRY GATE (HARD FAIL GATE)
+      # The enforcement half of STAGE 3.92b/3.92c's observability: fails the
+      # build if (1) a top-level *.html page exists with no capability-
+      # registry classification, or (2) a page the registry certified "live"
+      # (genuinely calling the platform API) is no longer dynamic per the
+      # coverage report just regenerated this run -- a transformed customer
+      # page silently reverting to a static placeholder. Both checks are
+      # pure offline text/JSON analysis (no network calls, no timing
+      # dependency) -- not the STAGE 3.6a external-call timeout class of
+      # flakiness risk this repo has previously hardened against. See
+      # scripts/capability_registry_gate.py's own docstring for full gate
+      # rationale and tests/test_capability_registry_gate.py for coverage.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.92d - Capability Registry Gate (classification + placeholder regression)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 2
+        run: python3 scripts/capability_registry_gate.py
+
+      # -----------------------------------------------------------------------
       # STAGE 3.93: IMMUTABLE API MANIFEST GENERATOR (v184.0 -- REPLACES INJECT)
       # ARCHITECTURE CHANGE (v184.0 -- PERMANENT):
       #   OLD: inject_embedded_intel.py mutated index.html at deploy time.

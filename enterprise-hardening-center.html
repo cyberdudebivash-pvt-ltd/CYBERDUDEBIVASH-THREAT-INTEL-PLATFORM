@@ -78,6 +78,7 @@ header .badge{background:#f9731620;color:var(--accent);border:1px solid var(--ac
     <div class="tab" onclick="switchTab('reliability')">Reliability</div>
     <div class="tab" onclick="switchTab('debt')">Technical Debt</div>
     <div class="tab" onclick="switchTab('iq')">IQ Score</div>
+    <div class="tab" onclick="switchTab('certification')">Certification</div>
   </div>
 
   <div class="panel active" id="panel-dashboard"></div>
@@ -87,12 +88,13 @@ header .badge{background:#f9731620;color:var(--accent);border:1px solid var(--ac
   <div class="panel" id="panel-reliability"></div>
   <div class="panel" id="panel-debt"></div>
   <div class="panel" id="panel-iq"></div>
+  <div class="panel" id="panel-certification"></div>
 </div>
 
 <script>
 const API = location.origin;
 const loaded = {};
-const TABS = ['dashboard','enrichment','diversity','detection','reliability','debt','iq'];
+const TABS = ['dashboard','enrichment','diversity','detection','reliability','debt','iq','certification'];
 
 async function fetchJSON(path) {
   const r = await fetch(API + path);
@@ -149,6 +151,7 @@ async function loadPanel(name) {
     else if (name === 'reliability') await renderReliability(el);
     else if (name === 'debt') await renderDebt(el);
     else if (name === 'iq') await renderIQ(el);
+    else if (name === 'certification') await renderCertification(el);
   } catch(e) { el.innerHTML = `<div class="err">Load error: ${e.message}</div>`; }
 }
 
@@ -315,6 +318,30 @@ async function renderIQ(el) {
   ${Object.entries(dims).map(([k,v])=>kpiBlock(k.replace(/_/g,' '), v.score, `weight ${Math.round(v.weight*100)}%`)).join('')}
 </div>
 <div style="font-size:11px;color:var(--muted);margin-top:12px">Engines reused: ${(d.engines_reused||[]).join(', ')}</div>`;
+}
+
+async function renderCertification(el) {
+  const [cert, audit] = await Promise.all([fetchJSON('/api/v1/p37/certification'), fetchJSON('/api/v1/p37/feed-audit')]);
+  const pc = cert.p37_cert || {};
+  el.innerHTML = `
+<div class="grid-2" style="margin-bottom:16px">
+  <div class="card">
+    <h3>P37 Certification</h3>
+    <div style="margin-top:4px"><span class="tier ${tierClass(pc.status || pc.release_tier)}">${pc.status || pc.release_tier || 'REPORT_PENDING'}</span></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">${pc.note || ''}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">P36 tier: <span class="tier ${tierClass(cert.p36_tier)}">${cert.p36_tier||'—'}</span></div>
+  </div>
+  <div class="card">
+    <h3>Certification Chain</h3>
+    <div style="font-size:12px;color:var(--muted)">${cert.cert_chain||'—'}</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Feed Classification</h3>
+  <div style="font-size:20px;font-weight:700;color:var(--accent)">${audit.feed_classification||'—'}</div>
+  <div style="font-size:12px;color:var(--muted);margin-top:8px">${audit.feed_item_count ?? '—'} feed items in the live production feed gated by P37</div>
+  <div style="font-size:11px;color:var(--muted);margin-top:10px">${audit.p37_note||''}</div>
+</div>`;
 }
 
 loadStatBar();

@@ -163,6 +163,9 @@
 
   .copilot-panel { display: none; }
   .copilot-panel.visible { display: block; }
+
+  .health-panel { display: none; }
+  .health-panel.visible { display: block; }
   .copilot-item { margin-bottom: 0.6rem; }
   .copilot-q { font-size: 0.78rem; font-weight: 600; color: var(--accent); margin-bottom: 0.2rem; }
   .copilot-a { font-size: 0.76rem; color: var(--muted); line-height: 1.5; }
@@ -208,6 +211,7 @@
       <span id="graph-status" style="font-size:0.8rem;color:var(--muted)">Loading…</span>
       <button class="btn-sm" id="btn-refresh">↻ Refresh</button>
       <button class="btn-sm" id="btn-campaign">Campaigns</button>
+      <button class="btn-sm" id="btn-health">Platform Health</button>
       <button class="btn-sm" id="btn-logout">Logout</button>
     </div>
   </div>
@@ -285,6 +289,15 @@
           <button class="btn-sm" id="btn-close-copilot">✕</button>
         </div>
         <div id="copilot-content"></div>
+      </div>
+
+      <!-- PLATFORM HEALTH PANEL -->
+      <div class="sidebar-section health-panel" id="health-panel">
+        <div class="tab-row">
+          <h3 style="flex:1">Platform Health (P31)</h3>
+          <button class="btn-sm" id="btn-close-health">✕</button>
+        </div>
+        <div id="health-content"></div>
       </div>
 
       <!-- SEARCH RESULTS -->
@@ -629,6 +642,51 @@
           ${c.timeline ? `<p style="margin-top:0.3rem;font-size:0.72rem">Latest: ${c.timeline.latest || 'unknown'}</p>` : ''}
         </div>
       `).join('');
+    } catch (err) {
+      content.innerHTML = `<div class="error-msg">${err.message}</div>`;
+    }
+  }
+
+  // ── Platform Health (P31 certification + observability) ────────────────────
+
+  document.getElementById('btn-health').addEventListener('click', loadHealth);
+  document.getElementById('btn-close-health').addEventListener('click', () => {
+    document.getElementById('health-panel').classList.remove('visible');
+  });
+
+  async function loadHealth() {
+    const panel = document.getElementById('health-panel');
+    const content = document.getElementById('health-content');
+    panel.classList.add('visible');
+    content.innerHTML = '<div style="color:var(--muted);font-size:0.8rem">Loading platform health…</div>';
+    try {
+      const [certRes, obsRes] = await Promise.all([
+        fetch(`${API}/api/v1/p31/certify`, { headers: { 'X-API-Key': _apiKey } }),
+        fetch(`${API}/api/v1/p31/observability`, { headers: { 'X-API-Key': _apiKey } }),
+      ]);
+      if (!certRes.ok || !obsRes.ok) throw new Error(`HTTP ${certRes.status}/${obsRes.status}`);
+      const cert = await certRes.json();
+      const obs = await obsRes.json();
+      const ec = obs.entity_coverage || {};
+      const kh = obs.knowledge_health || {};
+      content.innerHTML = `
+        <div class="campaign-card">
+          <h5>Release Tier: ${cert.release_tier || '—'}</h5>
+          <p>${cert.passed_count ?? '—'}/${cert.total_gates ?? '—'} gates passed · ${cert.blocker_count ?? 0} blocker(s)</p>
+        </div>
+        <div class="campaign-card">
+          <h5>Certification Gates</h5>
+          ${(cert.gates || []).map(g => `<p>${g.pass ? '✓' : '✗'} ${g.label}</p>`).join('') || '<p>No gate data</p>'}
+        </div>
+        <div class="campaign-card">
+          <h5>Entity Coverage</h5>
+          <p>Actor attribution: ${ec.actor_coverage_pct ?? '—'}% · TTPs: ${ec.ttp_coverage_pct ?? '—'}% · CVEs: ${ec.cve_coverage_pct ?? '—'}%</p>
+        </div>
+        <div class="campaign-card">
+          <h5>Knowledge Graph Health</h5>
+          <p>Richness: ${kh.graph_richness_pct ?? '—'}% · Avg entity degree: ${kh.avg_entity_degree ?? '—'} · Verified edges: ${kh.verified_edge_pct ?? '—'}%</p>
+        </div>
+      `;
     } catch (err) {
       content.innerHTML = `<div class="error-msg">${err.message}</div>`;
     }

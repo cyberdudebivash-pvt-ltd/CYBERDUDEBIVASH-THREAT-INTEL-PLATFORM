@@ -480,18 +480,14 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;mi
   <div class="panel" id="p5">
     <div class="success-wrap">
       <div class="success-icon">🎉</div>
-      <div class="success-title">Welcome to Sentinel APEX!</div>
-      <div class="success-sub">Your enterprise account is activated. Here are your credentials and API keys.</div>
+      <div class="success-title">Activation Request Received</div>
+      <div class="success-sub">Our team provisions enterprise accounts by hand to verify billing and tenant setup — your credentials are not issued on this page.</div>
       <div class="creds-box">
-        <div class="creds-row"><span class="creds-label">Organization ID</span><span class="creds-val" id="cred-orgid">ORG-APEX-8821</span></div>
-        <div class="creds-row"><span class="creds-label">Tenant ID</span><span class="creds-val" id="cred-tenant">TNT-29F4-A71B</span></div>
         <div class="creds-row"><span class="creds-label">Admin Email</span><span class="creds-val" id="cred-email">—</span></div>
-        <div class="creds-row"><span class="creds-label">API Key (Primary)</span><span class="creds-val" id="cred-apikey">sk-apex-XXXXXXXXXXXX</span></div>
-        <div class="creds-row"><span class="creds-label">TAXII Feed URL</span><span class="creds-val">https://api.cyberdudebivash.in/taxii/</span></div>
-        <div class="creds-row"><span class="creds-label">Subscription</span><span class="creds-val" id="cred-plan">—</span></div>
-        <div class="creds-row"><span class="creds-label">Renews</span><span class="creds-val" id="cred-renew">—</span></div>
+        <div class="creds-row"><span class="creds-label">Requested Plan</span><span class="creds-val" id="cred-plan">—</span></div>
+        <div class="creds-row"><span class="creds-label">Submitted</span><span class="creds-val" id="cred-renew">—</span></div>
       </div>
-      <div class="alert alert-success" style="max-width:480px;margin:0 auto 24px;text-align:left">📧 Credentials and onboarding guide sent to your email. Check your inbox.</div>
+      <div class="alert alert-success" style="max-width:480px;margin:0 auto 24px;text-align:left">📩 Our team will email your Organization ID, Tenant ID and API key to the address above once your account is provisioned — typically within one business day. Need it sooner? Use Contact Support below.</div>
       <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
         <button class="launch-btn" onclick="window.location='customer-portal.html'">🚀 Launch Customer Portal</button>
         <button onclick="window.location='api-management-center.html'" style="padding:14px 28px;background:rgba(0,212,255,0.15);color:var(--accent);border:1px solid var(--accent);border-radius:12px;font-size:15px;font-weight:700;cursor:pointer">🔑 View API Keys</button>
@@ -594,16 +590,10 @@ function step3Next() {
 function step4Next() {
   const email = document.getElementById('admin-email').value;
   const plan = selectedPlan || 'professional';
-  const orgId = 'ORG-APEX-'+Math.floor(1000+Math.random()*9000);
-  const tenant = 'TNT-'+Math.random().toString(36).substring(2,6).toUpperCase()+'-'+Math.random().toString(36).substring(2,6).toUpperCase();
-  const apiKey = 'sk-apex-'+Math.random().toString(36).substring(2,18).toUpperCase();
-  const renewDate = new Date(); renewDate.setMonth(renewDate.getMonth()+1);
-  document.getElementById('cred-orgid').textContent = orgId;
-  document.getElementById('cred-tenant').textContent = tenant;
+  const submittedDate = new Date();
   document.getElementById('cred-email').textContent = email;
-  document.getElementById('cred-apikey').textContent = apiKey;
   document.getElementById('cred-plan').textContent = plan.charAt(0).toUpperCase()+plan.slice(1);
-  document.getElementById('cred-renew').textContent = renewDate.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  document.getElementById('cred-renew').textContent = submittedDate.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
   goTo(5);
 }
 
