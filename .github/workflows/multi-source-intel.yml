@@ -1,29 +1,20 @@
 # =============================================================================
-# CYBERDUDEBIVASH(R) SENTINEL APEX v184.0 - MULTI-SOURCE INTELLIGENCE ENRICHMENT
-# Version: v184.0 - P0 TIMESTAMP INTEGRITY FIX
-# Race condition FIX: Cron unchanged - '45 1,5,9,13,17,21 * * *'
-#                     (sentinel-blogger runs at 0,4,8,12,16,20 - no overlap)
-#
-# v184.0 CHANGES (P0 Intel Ingestion Fix):
-#   - REPLACED broken ManifestMerger (class never existed) with true_intel_ingestor.py
-#   - REPLACED broken SourceIntelligenceOrchestrator import (import path wrong)
-#   - NOW commits feed_state.json + processed_intel.json for cross-run state persistence
-#   - NOW commits feed_manifest.json (additive merge - safe with dedup engine)
-#   - true_intel_ingestor.py enforces: published_at = SOURCE date, never NOW_UTC
-#   - Per-source last_seen_timestamp prevents full re-scan on every run
+# CYBERDUDEBIVASH(R) SENTINEL APEX v200.0 - MULTI-SOURCE INTELLIGENCE ENRICHMENT
+# Runtime state authority: Cloudflare R2
 # =============================================================================
-name: CDB Multi-Source Intelligence Enrichment v142
+name: CDB Multi-Source Intelligence Enrichment v200
 
 on:
   schedule:
-    - cron: '45 1,5,9,13,17,21 * * *'   # FIXED: no overlap with sentinel-blogger
+    - cron: '45 1,5,9,13,17,21 * * *'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PIPELINE_VERSION: "200.0"
 
 concurrency:
   group: sentinel-data-writer
@@ -31,47 +22,23 @@ concurrency:
 
 jobs:
   multi-source-enrichment:
-    name: Multi-Source Intelligence v142
+    name: Multi-Source Intelligence v200
     runs-on: ubuntu-latest
     timeout-minutes: 25
-
     steps:
       - uses: actions/checkout@v6.0.2
         with: {fetch-depth: 1, ref: "${{ github.ref }}"}
-
       - uses: actions/setup-python@v5.5.0
         with: {python-version: '3.12', cache: 'pip'}
-
       - name: "Install Dependencies"
         run: pip install requests feedparser --quiet
-
       - name: "Prepare Directories"
         run: mkdir -p data/enrichment data/stix data/cache api
-
       - name: "Bootstrap Critical Files"
         env:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
         run: python3 scripts/bootstrap_critical_files.py
 
-      # -----------------------------------------------------------------------
-      # P0 FIX: Download Intel State from R2 (runtime-authoritative)
-      # feed_state.json / processed_intel.json / feed_manifest.json used to be
-      # committed to main by this workflow's own push below -- but that push
-      # has been rejected on every run since main started requiring PRs
-      # (confirmed live via job logs: "GH013 ... Changes must be made through
-      # a pull request", 4/4 attempts, every ~4h run for a week straight),
-      # silently discarding every run's freshly-ingested state. Extends the
-      # #274/#293 pattern (api/ai/*.json moved off git onto R2) to these three
-      # files: R2 is now the cross-run-persistent authority, downloaded here
-      # BEFORE ingestion runs and re-uploaded (STAGE below) after. This step
-      # hard-fails on a genuine R2 read error (network/auth/outage) rather
-      # than silently starting from empty state, which would risk discarding
-      # real dedup history and reintroducing duplicates -- see
-      # scripts/r2_state_sync.py's own docstring for the full bootstrap
-      # contract (an object simply not existing yet in R2, e.g. this
-      # workflow's very first run after this fix, is NOT an error: the
-      # current git-checkout copy is used as a one-time bootstrap source).
-      # -----------------------------------------------------------------------
       - name: "Download Intel State from R2"
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -79,56 +46,48 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
         run: python3 scripts/r2_state_sync.py --download
 
-      #
-      # TRUE INCREMENTAL INGESTION (P0 FIX v184.0)
-      # Replaces the broken ManifestMerger + SourceIntelligenceOrchestrator.
-      # true_intel_ingestor.py:
-      #   - Fetches CISA KEV, NVD CVE, GitHub Advisories, ransomware.live, URLhaus, RSS
-      #   - Tracks per-source last_seen_timestamp in data/cache/feed_state.json
-      #   - Only processes items WHERE source_published_at > last_seen_timestamp[source]
-      #   - Deduplicates via SHA256(source_url + title + published_at) fingerprint
-      #   - Writes ONLY new items to data/stix/feed_manifest.json (additive merge)
-      #   - NEVER sets published_at = NOW_UTC - always preserves source date
-      # 
       - name: "True Incremental Intel Ingestion"
         env:
           GITHUB_TOKEN_INTEL: ${{ secrets.GH_INTEL_TOKEN }}
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
           PYTHONPATH: ${{ github.workspace }}
-        run: |
-          python3 scripts/true_intel_ingestor.py
-          echo "Ingestion exit code: $?"
+        run: python3 scripts/true_intel_ingestor.py
 
-      # 
-      # VALIDATE OUTPUT - fail fast if something broke the manifest
-      # 
       - name: "Validate Manifest Integrity"
-        run: |
-          python3 scripts/validate_manifest_integrity.py
+        run: python3 scripts/validate_manifest_integrity.py
 
-      # -----------------------------------------------------------------------
-      # Run Intelligence Persistence Engine (writes the 5 registry files +
-      # advisories/ chunk directory this run's "Upload Intel State to R2"
-      # step publishes next). MUST run before that upload step -- it used to
-      # run inside the old "Commit Intel State & Manifest" step, which was
-      # AFTER the upload, so the upload was always publishing the PREVIOUS
-      # run's registry content, never this run's. Moved here to fix that.
-      # -----------------------------------------------------------------------
+      # P0: this engine writes registry/chunk state that the immediately
+      # following R2 publication persists. Suppressing its exit status allowed
+      # a green workflow to publish incomplete/previous-generation state.
       - name: "Run Intelligence Persistence Engine"
-        run: python3 scripts/intel_persistence_engine.py 2>/dev/null || true
+        run: python3 scripts/intel_persistence_engine.py
 
-      # -----------------------------------------------------------------------
-      # P0 FIX: Upload Intel State to R2 (runtime-authoritative)
-      # Publishes this run's updated feed_state.json / processed_intel.json /
-      # feed_manifest.json / data/feed_manifest.json, plus (CodeRabbit review
-      # finding on this migration, verified and fixed) the 5
-      # data/intelligence_repository/*.json registry files and the
-      # advisories/ chunk directory -- all of it R2-authoritative now,
-      # independent of whether any git commit succeeds. See the "Download
-      # Intel State from R2" step above for the full rationale. Retries 4x
-      # (scripts/r2_state_sync.py) and hard-fails the job on total
-      # exhaustion.
-      # -----------------------------------------------------------------------
+      - name: "Validate persistence outputs before publication"
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
+          required=[
+            'data/stix/feed_manifest.json',
+            'data/intelligence_repository/intelligence_index.json',
+            'data/intelligence_repository/advisory_registry.json',
+            'data/intelligence_repository/intel_retention_registry.json',
+            'data/intelligence_repository/intel_lifecycle_registry.json',
+            'data/intelligence_repository/historical_feed_registry.json',
+          ]
+          for name in required:
+              p=pathlib.Path(name)
+              if not p.exists() or p.stat().st_size < 2:
+                  print(f'::error::Missing/empty required persistence output: {name}'); sys.exit(1)
+              try: d=json.loads(p.read_text(encoding='utf-8'), parse_constant=reject_constant)
+              except Exception as e:
+                  print(f'::error::Invalid strict JSON {name}: {e}'); sys.exit(1)
+              if not isinstance(d,(dict,list)):
+                  print(f'::error::Invalid state shape {name}'); sys.exit(1)
+          print('PERSISTENCE_VALIDATION=PASS STRICT_JSON=PASS')
+          PY
+
       - name: "Upload Intel State to R2"
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -136,22 +95,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
         run: python3 scripts/r2_state_sync.py --upload
 
-      # -----------------------------------------------------------------------
-      # Intentional no-op, kept rather than deleted (this repo's
-      # deprecation-over-deletion convention): every file this step used to
-      # `git add -f` -- feed_state.json / processed_intel.json /
-      # feed_manifest.json / data/feed_manifest.json and (CodeRabbit review
-      # finding on this migration, verified and fixed) the 5
-      # data/intelligence_repository/*.json registry files + advisories/ --
-      # is R2-authoritative now (see "Upload Intel State to R2" above). Its
-      # git push was also *guaranteed* to fail every run regardless of which
-      # of those files it carried: main's branch ruleset rejects ANY direct
-      # push to main, not just pushes touching specific paths, and PR #330
-      # made that rejection hard-fail the job -- so leaving even one
-      # still-git-tracked file here would have made this job red on every
-      # run that touched it. If a genuinely new file is ever added to this
-      # workflow's output that must live in git (not R2), it belongs here.
-      # -----------------------------------------------------------------------
-      - name: "Commit Intel State & Manifest"
+      - name: "Runtime state publication summary"
         run: |
-          echo "No-op -- all state this workflow produces is R2-authoritative. See step comment above for why this step is kept rather than removed."
+          echo "STATE_AUTHORITY=R2"
+          echo "PIPELINE_VERSION=${PIPELINE_VERSION}"
+          echo "PUBLICATION=PASS"

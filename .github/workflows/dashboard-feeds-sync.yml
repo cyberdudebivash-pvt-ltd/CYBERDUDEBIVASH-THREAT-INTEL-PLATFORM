@@ -1,63 +1,17 @@
 # =============================================================================
-# CYBERDUDEBIVASH(R) SENTINEL APEX v184.0
-# DASHBOARD-FEEDS-SYNC — Generate all dashboard JSON feeds + upload to R2
+# CYBERDUDEBIVASH(R) SENTINEL APEX v200.0
+# DASHBOARD-FEEDS-SYNC — Generate customer dashboard feeds from authoritative R2
 # =============================================================================
-#
-# PURPOSE:
-#   Generates the 13 static JSON feeds required by the live dashboard,
-#   uploads them to Cloudflare R2, and purges CF cache.
-#   Runs AFTER the main intel pipeline has produced api/feed.json.
-#
-# FEEDS GENERATED:
-#   api/v1/intel/apex.json          (was broken / empty)
-#   api/v1/intel/ai_summary.json    (was broken / empty)
-#   api/v1/intel/stats.json         (new)
-#   api/v1/intel/campaigns.json     (new — kill chain)
-#   api/v1/intel/ransomware.json    (new — ransomware tracker)
-#   api/v1/intel/apt.json           (new — APT radar)
-#   api/v1/intel/epss.json          (new — EPSS CVE tracker)
-#   api/v1/intel/defcon.json        (new — DEFCON status)
-#   api/v1/intel/pulse.json         (new — live threat pulse)
-#   api/v1/intel/darkweb.json       (new — dark web monitor)
-#   api/v1/intel/cybermap.json      (new — geo heatmap)
-#
-#   NOTE (F-02 fix): api/reports/index.json and api/reports/stats.json were
-#   removed from this workflow's scope. scripts/build_reports_index.py
-#   (sentinel-blogger.yml STAGE 3.3.7) is the sole authoritative writer for
-#   the report registry; this workflow racing it on the same R2 keys with a
-#   different schema and fabricated report URLs was the root cause of F-02
-#   (flapping/inconsistent api/reports/index.json and latest.json).
-#
-# GOVERNANCE:
-#   - Never publishes synthetic data as real intel
-#   - All outputs include provenance: generated_at, derivation_method
-#   - Hard-fails if any output is missing or empty
-#   - Post-deploy validation against live endpoints
-#
-# CONCURRENCY:
-#   group: sentinel-dashboard-feeds (isolated from intel write group)
-#   cancel-in-progress: false
-#
-# SCHEDULE:
-#   Every 6h offset from main intel pipeline to ensure fresh data is available
-#
-# AUTHOR: CYBERDUDEBIVASH Pvt. Ltd. | Principal AI Systems Architect
-# =============================================================================
-
-name: "SENTINEL APEX — Dashboard Feeds Sync v184.0"
+name: "SENTINEL APEX — Dashboard Feeds Sync v200.0"
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - 'scripts/generate_dashboard_feeds.py'
-      - 'api/feed.json'
-      - 'api/v1/intel/latest.json'
-      - 'data/feed_manifest.json'
+      - 'scripts/r2_state_sync.py'
       - '.github/workflows/dashboard-feeds-sync.yml'
   schedule:
-    # Every 6h at :30 — offset +30min from generate-and-sync to ensure feed is ready
     - cron: '30 3,9,15,21 * * *'
   workflow_dispatch:
     inputs:
@@ -71,32 +25,32 @@ permissions:
   contents: read
 
 env:
-  PIPELINE_VERSION: "182.0"
+  PIPELINE_VERSION: "200.0"
   PYTHONIOENCODING: "utf-8"
   PYTHONUTF8: "1"
 
 concurrency:
-  group: sentinel-dashboard-feeds
+  group: sentinel-data-writer
   cancel-in-progress: false
 
 jobs:
   generate-dashboard-feeds:
-    name: "Generate Dashboard Feeds + R2 Upload"
+    name: "Generate Dashboard Feeds from R2 + Publish"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    timeout-minutes: 20
     if: |
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.actor != 'github-actions[bot]')
 
     steps:
-      - name: "Checkout repository (shallow)"
+      - name: "Checkout repository"
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
           ref: "${{ github.ref }}"
+
       - name: "Python 3.12 setup"
         uses: actions/setup-python@v5
         with:
@@ -106,109 +60,103 @@ jobs:
       - name: "Install dependencies"
         run: |
           python -m pip install --upgrade pip --quiet
-          echo "[OK] Dependencies ready"
-
-      - name: "Syntax check generate_dashboard_feeds.py"
-        run: |
-          python3 -m py_compile scripts/generate_dashboard_feeds.py
-          echo "[OK] Syntax check passed"
+          pip install awscli --quiet
 
       - name: "Ensure output directories"
+        run: mkdir -p api/v1/intel api/reports data/stix data/cache data/intelligence_repository
+
+      - name: "Restore authoritative intelligence state from R2"
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --download
+
+      - name: "Pre-generation authority gate"
         run: |
-          mkdir -p api/v1/intel
-          mkdir -p api/reports
-          echo "[OK] Directories ready"
+          python3 - <<'PY'
+          import json, pathlib, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
+          candidates = [pathlib.Path('data/feed_manifest.json'), pathlib.Path('data/stix/feed_manifest.json')]
+          for p in candidates:
+              if not p.exists():
+                  continue
+              try:
+                  d=json.loads(p.read_text(encoding='utf-8'), parse_constant=reject_constant)
+              except Exception as e:
+                  print(f'::error::{p}: invalid strict JSON: {e}')
+                  sys.exit(1)
+              items=d if isinstance(d,list) else (d.get('items') or d.get('data') or d.get('advisories') or d.get('results') or []) if isinstance(d,dict) else []
+              if items:
+                  print(f'AUTHORITY=R2 PATH={p} RECORDS={len(items)} STRICT_JSON=PASS')
+                  break
+          else:
+              print('::error::Authoritative R2 snapshot contains no usable intelligence; refusing to publish empty dashboard generation')
+              sys.exit(1)
+          PY
 
       - name: "Generate all dashboard feeds"
-        run: |
-          python3 scripts/generate_dashboard_feeds.py
+        run: python3 scripts/generate_dashboard_feeds.py
         env:
           PIPELINE_VERSION: ${{ env.PIPELINE_VERSION }}
           API_OUT_DIR: "api/v1/intel"
 
-      - name: "Validate all feed outputs (hard-fail gate)"
+      - name: "Validate customer feed outputs"
         run: |
-          set -e
-          ERRORS=0
-          for f in \
-            api/v1/intel/apex.json \
-            api/v1/intel/ai_summary.json \
-            api/v1/intel/stats.json \
-            api/v1/intel/campaigns.json \
-            api/v1/intel/ransomware.json \
-            api/v1/intel/apt.json \
-            api/v1/intel/epss.json \
-            api/v1/intel/defcon.json \
-            api/v1/intel/pulse.json \
-            api/v1/intel/darkweb.json \
-            api/v1/intel/cybermap.json; do
-            if [ ! -f "$f" ]; then
-              echo "::error::MISSING: $f"
-              ERRORS=$((ERRORS+1))
-              continue
-            fi
-            SIZE=$(stat -c%s "$f")
-            if [ "$SIZE" -lt 10 ]; then
-              echo "::error::EMPTY: $f (${SIZE} bytes)"
-              ERRORS=$((ERRORS+1))
-              continue
-            fi
-            python3 -c "import json,sys; json.load(open('$f'))" || {
-              echo "::error::INVALID JSON: $f"
-              ERRORS=$((ERRORS+1))
-              continue
-            }
-            echo "  OK  $f  (${SIZE} bytes)"
-          done
-          if [ "$ERRORS" -gt 0 ]; then
-            echo "::error::$ERRORS feed(s) failed validation — aborting R2 upload"
-            exit 1
-          fi
-          echo "All 11 feed outputs validated."
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
+          def strict_load(path):
+              return json.loads(path.read_text(encoding='utf-8'), parse_constant=reject_constant)
+          files = [
+            'api/v1/intel/apex.json','api/v1/intel/ai_summary.json','api/v1/intel/stats.json',
+            'api/v1/intel/campaigns.json','api/v1/intel/ransomware.json','api/v1/intel/apt.json',
+            'api/v1/intel/epss.json','api/v1/intel/defcon.json','api/v1/intel/pulse.json',
+            'api/v1/intel/darkweb.json','api/v1/intel/cybermap.json'
+          ]
+          parsed={}
+          for name in files:
+              p=pathlib.Path(name)
+              if not p.exists() or p.stat().st_size < 10:
+                  print(f'::error::{name}: missing/empty'); sys.exit(1)
+              try: d=strict_load(p)
+              except Exception as e:
+                  print(f'::error::{name}: invalid strict JSON: {e}'); sys.exit(1)
+              if not isinstance(d,(dict,list)):
+                  print(f'::error::{name}: invalid top-level shape'); sys.exit(1)
+              parsed[name]=d
+          apex=parsed['api/v1/intel/apex.json']
+          count=apex.get('total_advisories', apex.get('total', 0)) if isinstance(apex,dict) else 0
+          if not isinstance(count,(int,float)) or isinstance(count,bool) or count <= 0:
+              print(f'::error::apex.json advertises non-positive advisory count ({count}); refusing destructive empty publication')
+              sys.exit(1)
+          print(f'VALIDATION=PASS DASHBOARD_ADVISORIES={count} FILES={len(files)} STRICT_JSON=PASS')
+          PY
 
-      - name: "Upload feeds to Cloudflare R2"
+      - name: "Upload dashboard generation to Cloudflare R2"
         if: github.event.inputs.dry_run != 'true'
         env:
-          CF_ACCOUNT_ID:         ${{ secrets.CF_ACCOUNT_ID }}
-          AWS_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
         run: |
-          set -e
+          set -euo pipefail
           ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
           BUCKET="sentinel-apex-data"
-
-          pip install awscli --quiet --break-system-packages 2>/dev/null || pip install awscli --quiet
-
-          UPLOADED=0
-          FAILED=0
           for FILE in \
-            api/v1/intel/apex.json \
-            api/v1/intel/ai_summary.json \
-            api/v1/intel/stats.json \
-            api/v1/intel/campaigns.json \
-            api/v1/intel/ransomware.json \
-            api/v1/intel/apt.json \
-            api/v1/intel/epss.json \
-            api/v1/intel/defcon.json \
-            api/v1/intel/pulse.json \
-            api/v1/intel/darkweb.json \
-            api/v1/intel/cybermap.json; do
-            if [ -f "$FILE" ]; then
-              aws s3 cp "$FILE" "s3://${BUCKET}/${FILE}" \
-                --endpoint-url "$ENDPOINT" \
-                --content-type "application/json" \
-                --cache-control "max-age=120, s-maxage=120" \
-                --quiet && {
-                echo "  UPLOADED  $FILE"
-                UPLOADED=$((UPLOADED+1))
-              } || {
-                echo "::warning::  FAILED    $FILE"
-                FAILED=$((FAILED+1))
-              }
-            fi
+            api/v1/intel/apex.json api/v1/intel/ai_summary.json api/v1/intel/stats.json \
+            api/v1/intel/campaigns.json api/v1/intel/ransomware.json api/v1/intel/apt.json \
+            api/v1/intel/epss.json api/v1/intel/defcon.json api/v1/intel/pulse.json \
+            api/v1/intel/darkweb.json api/v1/intel/cybermap.json; do
+            echo "Publishing $FILE"
+            aws s3 cp "$FILE" "s3://${BUCKET}/${FILE}" \
+              --endpoint-url "$ENDPOINT" --content-type "application/json" \
+              --cache-control "max-age=120, s-maxage=120" --quiet
           done
-          echo "R2 upload complete: ${UPLOADED} uploaded, ${FAILED} failed"
-          [ "$FAILED" -gt 3 ] && { echo "::error::Too many R2 upload failures"; exit 1; } || true
+          echo "R2_PUBLICATION=PASS FILES=11"
 
       - name: "Purge Cloudflare cache"
         if: github.event.inputs.dry_run != 'true'
@@ -217,61 +165,42 @@ jobs:
           ZONE_ID="${{ secrets.CF_ZONE_ID }}"
           TOKEN="${{ secrets.CF_CACHE_PURGE_TOKEN }}"
           if [ -z "$ZONE_ID" ] || [ -z "$TOKEN" ]; then
-            echo "[SKIP] CF_ZONE_ID or CF_CACHE_PURGE_TOKEN not configured"
+            echo "[WARN] cache purge credentials unavailable; endpoint canary below remains authoritative"
             exit 0
           fi
-          curl -s -X POST \
+          curl --fail-with-body -sS -X POST \
             "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/purge_cache" \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -H "Content-Type: application/json" \
-            --data '{
-              "files": [
-                "https://intel.cyberdudebivash.com/api/v1/intel/apex.json",
-                "https://intel.cyberdudebivash.com/api/v1/intel/ai_summary.json",
-                "https://intel.cyberdudebivash.com/api/v1/intel/stats",
-                "https://intel.cyberdudebivash.com/api/v1/intel/campaigns",
-                "https://intel.cyberdudebivash.com/api/v1/intel/ransomware",
-                "https://intel.cyberdudebivash.com/api/v1/intel/apt",
-                "https://intel.cyberdudebivash.com/api/v1/intel/epss",
-                "https://intel.cyberdudebivash.com/api/v1/intel/defcon",
-                "https://intel.cyberdudebivash.com/api/v1/intel/pulse",
-                "https://intel.cyberdudebivash.com/api/v1/intel/darkweb",
-                "https://intel.cyberdudebivash.com/api/v1/intel/cybermap",
-                "https://intel.cyberdudebivash.com/api/v1/news/feed"
-              ]
-            }' | python3 -c "import sys,json; d=json.load(sys.stdin); print('Cache purge:', 'OK' if d.get('success') else 'FAILED', d.get('errors',[]))"
+            -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+            --data '{"files":["https://intel.cyberdudebivash.com/api/v1/intel/apex.json","https://intel.cyberdudebivash.com/api/v1/intel/ai_summary.json","https://intel.cyberdudebivash.com/api/v1/intel/stats","https://intel.cyberdudebivash.com/api/v1/intel/campaigns","https://intel.cyberdudebivash.com/api/v1/intel/ransomware","https://intel.cyberdudebivash.com/api/v1/intel/apt","https://intel.cyberdudebivash.com/api/v1/intel/epss","https://intel.cyberdudebivash.com/api/v1/intel/defcon","https://intel.cyberdudebivash.com/api/v1/intel/pulse","https://intel.cyberdudebivash.com/api/v1/intel/darkweb","https://intel.cyberdudebivash.com/api/v1/intel/cybermap"]}'
 
-      - name: "Post-deploy endpoint validation"
+      - name: "Production semantic canary"
         if: github.event.inputs.dry_run != 'true'
-        continue-on-error: true
         run: |
           sleep 8
-          BASE="https://intel.cyberdudebivash.com"
-          PASS=0
-          FAIL=0
-          for endpoint in \
-            /api/health \
-            /api/v1/intel/apex.json \
-            /api/v1/intel/ai_summary.json \
-            /api/v1/intel/stats \
-            /api/v1/intel/campaigns \
-            /api/v1/intel/ransomware \
-            /api/v1/intel/apt \
-            /api/v1/intel/epss \
-            /api/v1/intel/defcon \
-            /api/v1/intel/pulse \
-            /api/v1/intel/darkweb \
-            /api/v1/intel/cybermap \
-            /api/v1/news/feed; do
-            HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}${endpoint}" --max-time 10)
-            SIZE=$(curl -s "${BASE}${endpoint}" --max-time 10 | wc -c)
-            if [ "$HTTP" = "200" ] && [ "$SIZE" -gt 10 ]; then
-              echo "  PASS  ${endpoint}  (HTTP ${HTTP}, ${SIZE}b)"
-              PASS=$((PASS+1))
-            else
-              echo "::warning::  FAIL  ${endpoint}  (HTTP ${HTTP}, ${SIZE}b)"
-              FAIL=$((FAIL+1))
-            fi
-          done
-          echo ""
-          echo "=== POST-DEPLOY: ${PASS} PASS / ${FAIL} FAIL ==="
+          python3 - <<'PY'
+          import json, time, urllib.request, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
+          base='https://intel.cyberdudebivash.com'
+          endpoints=['/api/v1/intel/apex.json','/api/v1/intel/ai_summary.json','/api/v1/intel/stats']
+          last=None
+          for attempt in range(4):
+              try:
+                  payloads={}
+                  for ep in endpoints:
+                      req=urllib.request.Request(base+ep, headers={'Cache-Control':'no-cache','User-Agent':'SentinelAPEX-v200-canary'})
+                      with urllib.request.urlopen(req, timeout=15) as r:
+                          if r.status != 200: raise RuntimeError(f'{ep}: HTTP {r.status}')
+                          payloads[ep]=json.loads(r.read().decode('utf-8'), parse_constant=reject_constant)
+                  apex=payloads['/api/v1/intel/apex.json']
+                  count=apex.get('total_advisories', apex.get('total',0)) if isinstance(apex,dict) else 0
+                  if isinstance(count,(int,float)) and not isinstance(count,bool) and count > 0:
+                      print(f'PRODUCTION_CANARY=PASS API_ADVISORIES={count} STRICT_JSON=PASS')
+                      sys.exit(0)
+                  last=f'apex advisory count={count}'
+              except Exception as e:
+                  last=str(e)
+              time.sleep(5*(attempt+1))
+          print(f'::error::PRODUCTION_CANARY=FAIL {last}')
+          sys.exit(1)
+          PY
