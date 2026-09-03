@@ -4,7 +4,25 @@
 
 ---
 
-## EXECUTIVE VERDICT
+## UPDATE (2026-09-03, ~11:52 UTC) — ROOT CAUSE NOW PROVEN, SUPERSEDES THE VERDICT BELOW
+
+Everything below this section was written before commit `ab94d3ada` ("fix(p0): force v200 frontend/data network convergence in service worker", #350) landed on `main` ~29 minutes prior to this update, merged and deployed independently of this document's own investigation. That commit, confirmed live in production (`curl https://intel.cyberdudebivash.com/service-worker.js` returns it verbatim), proves the mechanism this investigation could not reach:
+
+**Root cause: the pre-fix service worker (v175) cached the dashboard's data-loading/rendering JavaScript, not just static assets.** Its network-first allowlist covered HTML, `api/` paths, and `/js/engines/*` explicitly — but **not** `api_adapter.js`, `card_renderer.js`, or `card_renderer_integration.js`, the files that actually consume the fetched feed and render the threat grid. Those fell through to the generic cache-first branch. A returning browser that had cached those files before a frontend release could receive current v200 HTML and current API data while *executing an old cached renderer* — producing exactly the reported split: `SYNC: LOADING` / `LIVE 0` on the primary grid while other, differently-coded sections of the same page (e.g. NEXUS) rendered correctly. `CACHE_VERSION` had also stayed pinned at `v175` across every v184–v200 release, so the browser never had cause to purge the stale cache on its own.
+
+**This is exactly why this investigation's own methodology (documented below) could never have reproduced it.** jsdom does not implement the Service Worker API at all — every execution trace this investigation ran (eight of them) was structurally equivalent to a browser with no installed service worker and no cache, i.e. always a "first visit." The bug requires a *specific prior browser state* (an installed old-generation SW with stale cached JS) that a fresh jsdom process can never carry. This is a genuine, previously-unrecognized blind spot in this investigation's tooling, not a flaw in the logic applied.
+
+**Correction to this document's own earlier Phase 14 finding** (service-worker audit, in the prior pass): that check verified the right high-level property — HTML and `api/` paths were network-first — but did not check whether the *renderer JavaScript* that consumes that data was equally fresh. It was not. The conclusion "no defect found" for the service worker was incomplete.
+
+**Fix verified sound:** the new v200.1 worker makes every GET other than an explicit, small, offline-safe static-asset allowlist network-only (`cache: 'no-store'`), covering HTML/JS/CSS/JSON/API/service-worker.js itself, and bumps `CACHE_VERSION` so every existing client purges its old cache on next activation. Existing recovery logic already in `index.html` (predating this fix, not modified by it) complements it without needing a forced reload — which the code deliberately avoids per a comment documenting a prior "BOOTING..." loop incident caused by exactly that: a `[GOC v77.4]` fallback detects "all manifest sources failed under an active service worker" and does a one-time unregister + cache-clear + reload, and a separate version-stamp check runs on every load. Affected returning visitors should self-heal within one or two page loads.
+
+**This fix was not authored by this investigation** — it was merged directly to `main` by the repository owner while this session's own audit was in progress (Phase 0's "parallel work" concern, realized). Per that phase's own instruction ("AUDIT → RETARGET → HARDEN → CONVERGE, do not create a third competing implementation"), this update audits and confirms the existing fix rather than implementing a competing one.
+
+**Revised verdict: B — ROOT CAUSE PROVEN + FIX IMPLEMENTED, PRODUCTION CERTIFICATION PENDING.** Root cause is now proven by code-level mechanism analysis (the diff, its own precise and technically accurate commit message, and confirmation the fix is live) — a legitimate form of proof for a client-state-dependent bug that doesn't require live reproduction to establish causally. "Production certification pending" reflects one real remaining gap, not doubt about the fix: this environment cannot run a real browser (Playwright has been blocked by a proxy limitation all session, reconfirmed again at the time of this update), so the specific claim "a previously-stuck real browser now recovers" cannot be directly observed here — only reasoned about from the code. See "Remaining Risks" (below, in the original pass) for the standing recommendation this now sharpens: real-browser production telemetry / RUM is the only way to close that last gap, and is now specifically about confirming recovery, not diagnosing an unknown.
+
+---
+
+## EXECUTIVE VERDICT (original pass — superseded above, preserved for the audit trail)
 
 **None of the four prescribed options (A/B/C/D) fits without a misleading label, so this is stated plainly rather than force-fit:**
 
