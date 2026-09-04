@@ -107,6 +107,31 @@ id      = "95faae90943f43afa26d552b8385d339"
 binding = "REVENUE_CRM_KV"
 id      = "1740d5dba5e74c3aafff1c683588395b"
 
+# Enterprise SSO domain authorization (NOT YET PROVISIONED -- see below).
+# Keyed by verified email domain (e.g. "acmecorp.com"), value
+# {"tier":"ENTERPRISE","customer_id":"cust_...","enabled":true} -- written
+# once per enterprise contract, the same operational step that already
+# provisions an API_KEYS_KV record for a paying customer today.
+# handleSsoCallback() (src/index.js) is the only reader; an unrecognized or
+# disabled domain always gets a clear "contact enterprise sales" response,
+# never a silently-granted tier. Deliberately left as a commented-out
+# template rather than a live binding with a placeholder id: Cloudflare
+# validates a bound KV namespace id actually exists at deploy time, so an
+# invalid id here would fail `wrangler deploy` for every future push to
+# this Worker, not just SSO's own code (handleSsoCallback already treats
+# env.SSO_DOMAINS_KV being entirely unbound as "SSO not configured" and
+# fails safe -- see its try/catch -- so this being commented out breaks
+# nothing today).
+#
+# To activate: 1) npx wrangler kv namespace create "SSO_DOMAINS_KV"
+#              2) uncomment the two lines below and paste the real id
+#                 wrangler printed in step 1
+#              3) repeat both lines under [env.production] further down
+#
+# [[kv_namespaces]]
+# binding = "SSO_DOMAINS_KV"
+# id      = "<paste real id from step 1 here>"
+
 # -- R2 Buckets --
 # INTEL_R2: Primary intel storage (feed, STIX, manifests, CTI data)
 # Create: npx wrangler r2 bucket create sentinel-apex-data
@@ -163,6 +188,22 @@ new_sqlite_classes = ["GumroadProvisioningLock"]
 # npx wrangler secret put CDB_JWT_SECRET           -> JWT HS256 signing key (REQUIRED for auth)
 #                                                     Minimum 32 random characters. Generate:
 #                                                     openssl rand -hex 32
+# -- Enterprise SSO (OpenID Connect) -- additive; GET /auth/sso/:provider/start
+#    503s with a clear "not configured" message until these are set, every
+#    other auth path (API key, existing JWT) is completely unaffected either
+#    way.
+# npx wrangler secret put GOOGLE_OAUTH_CLIENT_ID   -> Google Cloud Console -> APIs & Services ->
+#                                                     Credentials -> OAuth client ID (type: Web
+#                                                     application). Authorized redirect URI must be
+#                                                     exactly: https://intel.cyberdudebivash.com/auth/sso/google/callback
+# npx wrangler secret put GOOGLE_OAUTH_CLIENT_SECRET -> paired secret from the same OAuth client
+# npx wrangler secret put MS_OAUTH_CLIENT_ID       -> Azure Portal -> Microsoft Entra ID -> App
+#                                                     registrations -> New registration (supported
+#                                                     account types: "Accounts in any organizational
+#                                                     directory"). Redirect URI (type: Web) must be
+#                                                     exactly: https://intel.cyberdudebivash.com/auth/sso/microsoft/callback
+# npx wrangler secret put MS_OAUTH_CLIENT_SECRET   -> Azure Portal -> that App registration ->
+#                                                     Certificates & secrets -> New client secret
 # npx wrangler secret put STRIPE_WEBHOOK_SECRET    -> Stripe webhook endpoint secret
 #                                                     Get from: Stripe Dashboard -> Webhooks -> Signing secret
 # npx wrangler secret put RAZORPAY_KEY_SECRET       -> Razorpay API Key Secret (private)
