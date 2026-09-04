@@ -13691,10 +13691,35 @@ function renderTopThreats(data) {
             // in this file for the identical reason (a prior forced-reload
             // attempt caused its own "BOOTING..." loop incident).
             try {
+                // v200.2 P0 FIX: confirmed live in real CI (pages-fast-publish
+                // run #42, 2026-09-04 -- render-test/verify_stale_service_
+                // worker_recovery.js's first-ever real execution, previously
+                // always skipped by an earlier fail-fast step). The exact
+                // scenario this block exists to handle -- a stuck SW
+                // intercepting /api/* with a 200-but-empty response -- can
+                // consume this block's ONE allowed attempt on a reload that
+                // itself still lands under the SAME broken SW (e.g. the
+                // fixed server-side script hasn't propagated to this client
+                // yet). This file's own incident history already documents
+                // that pattern: "the new worker can sit in the registration's
+                // waiting state across several real reloads without ever
+                // taking control." A one-shot boolean guard then permanently
+                // disables recovery for the rest of the tab session even
+                // once the real SW is available and eventually takes over on
+                // its own -- reproduced live: 1/4 checks passed, and the
+                // browser never recovered across 12 polls (~24s) plus 2
+                // further ordinary reloads. A small bounded retry budget
+                // (still session-guarded, still capped -- never unbounded
+                // reload-looping) gives the browser's own SW update cycle
+                // enough additional attempts to actually catch up, matching
+                // the 3-attempt retry budget this repo already uses for the
+                // same "may legitimately need more than one try" class of
+                // condition (see Dockerfile, platform-build-deploy.yml).
+                var _swRecoveryAttempts = parseInt(sessionStorage.getItem('apex_sw_recovery_attempts') || '0', 10);
                 if ('serviceWorker' in navigator && navigator.serviceWorker.controller &&
-                    !sessionStorage.getItem('apex_sw_recovery_done')) {
-                    sessionStorage.setItem('apex_sw_recovery_done', '1');
-                    console.warn('[GOC v77.4] All manifest sources failed under an active service worker -- clearing SW + caches, reloading once');
+                    _swRecoveryAttempts < 3) {
+                    sessionStorage.setItem('apex_sw_recovery_attempts', String(_swRecoveryAttempts + 1));
+                    console.warn('[GOC v77.4] All manifest sources failed under an active service worker -- clearing SW + caches, reloading (attempt ' + (_swRecoveryAttempts + 1) + '/3)');
                     Promise.all([
                         navigator.serviceWorker.getRegistrations().then(function(regs) {
                             return Promise.all(regs.map(function(r) { return r.unregister(); }));
