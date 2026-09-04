@@ -21,6 +21,9 @@ Tests cover:
   T21  v184.0 guard: all feed.json local-source report_urls present in dist/reports/
   T22  v185.2 guard: source_url dedup survives late-pipeline reintroduction (Phase 5/stability-lock)
   T23  v185.2 guard: governance scorer recognises mitre_tactics field, vulnerability-class IOC semantics
+  T25  workflow_dispatch-capable workflows never hardcode checkout ref to 'main'
+  T26  P0 R2 cost incident permanent guard: no whole-corpus R2 report sync;
+       every generate_intel_reports.py scheduled call site bound to --since-hours
 
 Exit codes:
   0 = ALL PASS
@@ -1152,6 +1155,106 @@ def t25():
              dispatchable_count)
 
 
+@test("T26_no_whole_corpus_r2_report_sync")
+def t26():
+    """P0 R2 COST INCIDENT PERMANENT REGRESSION GATE (2026-09).
+
+    Root cause: scripts/r2_upload.py used to run `aws s3 sync reports/ ->
+    s3://sentinel-apex-reports/reports/` -- a whole-prefix LIST + full
+    content comparison, no bound -- on every scheduled pipeline run. Against
+    a ~193K-object bucket this produced 3,004,147 billable R2 Class A
+    operations in one billing cycle. See docs/P0_R2_COST_CONTAINMENT.md.
+
+    This is a static source guard, not a live-run check (mirrors the same
+    pattern already established by workers/intel-gateway/src/__tests__/
+    reports-canonical-write-guard.test.js for the Worker side): it fails
+    loudly the moment whole-corpus sync reappears anywhere in the normal
+    scheduled pipeline's source, before it can ever execute against
+    production and generate a real bill.
+    """
+    import re as _re
+
+    offenders: list[str] = []
+
+    # 1. scripts/r2_upload.py must never call s3_sync()/aws s3 sync against
+    #    BUCKET_REPORTS again -- the whole point of moving report publishing
+    #    to scripts/r2_report_publisher.py's deterministic-key, no-LIST design.
+    # Precise, not a blunt string search: s3_sync()/s3_sync_download() are
+    # legitimate, still-used generic helpers (scripts/r2_state_sync.py calls
+    # them for bounded state-dir sync) whose own function BODY necessarily
+    # contains the literal ["aws", "s3", "sync", ...] argv -- a plain
+    # substring/regex search for that literal would always match the
+    # helper's definition itself and never distinguish it from a dangerous
+    # new CALL SITE. What must never reappear is a CALL to s3_sync(...)
+    # (by name, not raw subprocess argv) whose arguments target the reports
+    # bucket -- so only function-call sites are scanned, and only the
+    # module-level code outside the helper definitions themselves.
+    r2_upload_path = REPO_ROOT / "scripts" / "r2_upload.py"
+    if r2_upload_path.exists():
+        content = r2_upload_path.read_text(encoding="utf-8")
+        for m in _re.finditer(r"(?<!def )s3_sync\s*\(\s*[^)]*\)", content, flags=_re.DOTALL):
+            call = m.group(0)
+            if "BUCKET_REPORTS" in call or "sentinel-apex-reports" in call:
+                line_no = content.count("\n", 0, m.start()) + 1
+                offenders.append(f"scripts/r2_upload.py:{line_no} -- s3_sync() call against BUCKET_REPORTS")
+
+    # 2. scripts/r2_report_publisher.py -- the replacement -- must never
+    #    issue a LIST call against R2 in its normal (non-purge) path. A
+    #    boto3/awscli list call appearing here would silently reintroduce
+    #    the "enumerate the whole bucket every run" cost driver this
+    #    module's whole design exists to avoid.
+    publisher_path = REPO_ROOT / "scripts" / "r2_report_publisher.py"
+    if publisher_path.exists():
+        content = publisher_path.read_text(encoding="utf-8")
+        for pattern in (r"list_objects", r"list-objects", r"\bs3\s+ls\b", r"get_paginator"):
+            if _re.search(pattern, content):
+                offenders.append(f"scripts/r2_report_publisher.py -- forbidden bucket-enumeration pattern {pattern!r} found")
+
+    # 3. Every normal-pipeline scheduled invocation of generate_intel_reports.py
+    #    (run_pipeline.py's 3 call sites + sentinel-blogger.yml's direct STAGE
+    #    5.4.0b call) must pass --since-hours -- without it, that call
+    #    regenerates the ENTIRE historical manifest every run regardless of
+    #    what scripts/r2_upload.py or scripts/r2_report_publisher.py do
+    #    downstream (this was the actual upstream root cause, not just the
+    #    sync call itself -- see docs/P0_R2_COST_CONTAINMENT.md).
+    run_pipeline_path = REPO_ROOT / "scripts" / "run_pipeline.py"
+    if run_pipeline_path.exists():
+        content = run_pipeline_path.read_text(encoding="utf-8")
+        for m in _re.finditer(
+            r'\[\s*sys\.executable\s*,\s*["\']scripts/generate_intel_reports\.py["\'].*?\]',
+            content, flags=_re.DOTALL,
+        ):
+            call = m.group(0)
+            if "--since-hours" not in call:
+                line_no = content.count("\n", 0, m.start()) + 1
+                offenders.append(
+                    f"scripts/run_pipeline.py:{line_no} -- generate_intel_reports.py invocation "
+                    f"missing --since-hours (would regenerate the entire historical manifest every run)"
+                )
+
+    blogger_path = REPO_ROOT / ".github" / "workflows" / "sentinel-blogger.yml"
+    if blogger_path.exists():
+        content = blogger_path.read_text(encoding="utf-8")
+        for m in _re.finditer(
+            r"python3 scripts/generate_intel_reports\.py.*?(?=\n\s*\n|\Z)", content, flags=_re.DOTALL,
+        ):
+            call = m.group(0)
+            if "--since-hours" not in call:
+                line_no = content.count("\n", 0, m.start()) + 1
+                offenders.append(
+                    f"sentinel-blogger.yml:{line_no} -- generate_intel_reports.py invocation "
+                    f"missing --since-hours"
+                )
+
+    assert not offenders, (
+        "T26 REGRESSION: whole-corpus R2 report sync (or an unbounded "
+        f"generate_intel_reports.py call feeding it) has reappeared: {offenders}. "
+        "This is the exact P0 cost-incident pattern -- see docs/P0_R2_COST_CONTAINMENT.md."
+    )
+    log.info("[T26] No whole-corpus R2 report sync pattern found; all generate_intel_reports.py "
+             "scheduled-pipeline call sites bound to --since-hours.")
+
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
@@ -1164,7 +1267,7 @@ def main() -> int:
     except Exception:
         _suite_ver = "UNKNOWN"
     log.info("=" * 60)
-    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T25)", _suite_ver)
+    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T26)", _suite_ver)
     log.info("=" * 60)
 
     pass_count = sum(1 for r in RESULTS if r["status"] == "PASS")

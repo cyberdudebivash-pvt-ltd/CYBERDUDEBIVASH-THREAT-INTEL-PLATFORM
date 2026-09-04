@@ -176,6 +176,25 @@ STATE_FILES: list[tuple[str, str]] = [
     ("data/intelligence_repository/intel_retention_registry.json", "data/intelligence_repository/intel_retention_registry.json"),
     ("data/intelligence_repository/intel_lifecycle_registry.json", "data/intelligence_repository/intel_lifecycle_registry.json"),
     ("data/intelligence_repository/historical_feed_registry.json", "data/intelligence_repository/historical_feed_registry.json"),
+    # P0 R2 COST AUDIT FIX (post-merge forensic review of PR #369): this is
+    # scripts/r2_report_publisher.py's own incremental-publish state
+    # (sha256-per-id, keyed by intel id -- see that script's STATE_PATH).
+    # Its "write-only-on-change" cost-reduction architecture depends
+    # entirely on this file surviving between runs; without it, every run
+    # would see an empty state and re-PUT every in-window candidate as
+    # "new" (still bounded by MAX_REPORT_UPLOADS_PER_RUN, but genuinely
+    # redundant every single run -- defeating the incremental design this
+    # file exists for). PR #369 as merged never staged this file anywhere
+    # (not in safe_git_commit.py's JSON_GUARDED, files_to_stage, or
+    # _GENERATED_ARTIFACT_PATHS), so on every fresh CI checkout it silently
+    # reverted to empty. Same root cause this module's own docstring
+    # documents for feed_state.json et al -- main's branch ruleset rejects
+    # a direct git push for this class of file -- so it gets the same fix,
+    # not a second attempt at git-based persistence. No pre-existing R2 key
+    # (confirmed: no reference anywhere in r2_upload.py, r2_report_publisher.py
+    # itself, or the Worker), so its key mirrors its local path, matching
+    # every other entry in this list.
+    ("data/cache/r2_report_publish_state.json", "data/cache/r2_report_publish_state.json"),
 ]
 
 # data/intelligence_repository/advisories/ is a directory of monthly chunk

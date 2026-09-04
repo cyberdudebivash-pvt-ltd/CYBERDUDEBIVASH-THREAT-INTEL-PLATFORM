@@ -19,12 +19,33 @@ content-identity proof. This script supplies the missing proof directly:
 SHA-256 of the exact bytes on both sides.
 
 SCOPE (bounded, not the full ~15k+ historical corpus -- see Section 36 cost
-governance): verifies every report currently in the active generation
-window (data/stix/feed_manifest.json) -- the same set
-generate_intel_reports.py's "Zero-skip" policy unconditionally regenerates
-every pipeline run, so this is exactly the "changed this run" set the
-mission's Section 22 requires full (non-sampled) verification for. Historical
-reports outside this window are out of scope per Section 26.
+governance): verifies reports whose CANONICAL intelligence timestamp
+(scripts/canonical_timestamp.py; timestamp -> processed_at -> published_at
+precedence -- the exact same precedence and window scripts/
+r2_report_publisher.py's canonical_age()/build_publish_candidates() use to
+decide what is actually live in R2) falls within the last
+REPORT_WINDOW_HOURS (default 24h, env-configurable, single source of truth
+shared with the publisher). A missing/unparseable timestamp is excluded
+(fail-safe -- cannot prove it is in-window, matches the publisher's own
+convention). Historical reports outside this window were never re-published
+by r2_report_publisher.py's 24h retention policy, so verifying them here
+would be pure historical-corpus enumeration -- exactly what this cost
+incident exists to eliminate.
+
+P0 R2 COST AUDIT FIX (post-merge forensic review): this docstring previously
+claimed the above scope was already bounded "not the full historical
+corpus" -- that claim was FALSE. The prior implementation of
+_load_in_window_entries() loaded and verified EVERY entry in
+feed_manifest.json unconditionally, with no time filter and no count cap.
+Since feed_manifest.json is the append-only, ever-growing core intelligence
+record (report retention does not remove entries from it -- see
+docs/P0_R2_COST_CONTAINMENT.md Section 4.2), this script's real-world R2
+HEAD+GET cost scaled directly with total historical corpus size, not with
+"changed this run" -- historical evidence showed 150-1040 calls/run. Fixed
+by (1) the genuine time-window filter above, reusing r2_report_publisher.py's
+own canonical-age logic rather than reimplementing it, and (2)
+MAX_VERIFY_ITEMS below as a hard, independent ceiling so a bug in (1) alone
+can never again let this script's cost scale with manifest size.
 
 For each in-window report:
   Layer A (cheap, always): S3 API head-object -- existence, size, ETag.
@@ -89,6 +110,8 @@ if _reports_key_id and _reports_secret:
 
 import r2_upload_verifier as _verifier  # noqa: E402 -- reuse, not reimplement
 import r2_upload as _r2_upload  # noqa: E402 -- BUCKET_REPORTS, get_credentials()
+from canonical_timestamp import parse_timestamp  # noqa: E402 -- reuse, not reimplement
+from r2_cost_guard import R2Budgets, R2OperationPlan, emit_summary  # noqa: E402
 
 # Restore whatever the job-level credentials were, now that the reports-scoped
 # constants have been captured inside _verifier's module globals.
@@ -131,6 +154,30 @@ PUBLIC_RETRY_DELAY = 3
 # the regression.
 PUBLIC_FETCH_MAX_CONCURRENCY = 2
 _public_fetch_semaphore = threading.Semaphore(PUBLIC_FETCH_MAX_CONCURRENCY)
+
+# P0 R2 COST AUDIT FIX: this script issues real R2 HEAD/GET (Class B) calls
+# every run but, before this audit, never reported them through
+# scripts/r2_cost_guard.py's shared cost ledger -- the only R2-mutating/
+# -reading scripts visible in data/quality/r2_cost_guard_report.json were
+# r2_upload.py and r2_report_publisher.py's Class A operations. Counted at
+# the call site (verify_one() runs inside a bounded thread pool -- see
+# VERIFY_MAX_WORKERS) rather than reconstructed after the fact from result
+# dicts, which cannot unambiguously distinguish every HEAD/GET sub-case.
+_op_count_lock = threading.Lock()
+_head_call_count = 0
+_get_call_count = 0
+
+
+def _count_head_call() -> None:
+    global _head_call_count
+    with _op_count_lock:
+        _head_call_count += 1
+
+
+def _count_get_call() -> None:
+    global _get_call_count
+    with _op_count_lock:
+        _get_call_count += 1
 # CodeRabbit finding: worst case (every report exhausts retries) is
 # PUBLIC_MAX_RETRIES * (PUBLIC_TIMEOUT + PUBLIC_RETRY_DELAY) per report --
 # at 150+ in-window reports that can exceed STAGE 3.6a's workflow timeout
@@ -142,6 +189,33 @@ _public_fetch_semaphore = threading.Semaphore(PUBLIC_FETCH_MAX_CONCURRENCY)
 # recorded explicitly (not silently dropped) and the manifest is still
 # written with everything processed so far.
 RUN_DEADLINE_SECONDS = 600
+
+# P0 R2 COST AUDIT FIX: shared with scripts/r2_report_publisher.py -- one env
+# var, one source of truth for what "in-window" means across every script
+# that touches the reports keyspace. Default 24h.
+def _report_window_hours() -> int:
+    raw = os.environ.get("REPORT_WINDOW_HOURS", "").strip()
+    if not raw:
+        return 24
+    try:
+        return int(raw)
+    except ValueError:
+        return 24
+
+
+REPORT_WINDOW_HOURS = _report_window_hours()
+
+# P0 R2 COST AUDIT FIX: hard, independent ceiling on how many reports this
+# script will ever verify in one run -- deliberately separate from the
+# time-window filter above (belt AND suspenders), matching this codebase's
+# own established convention (scripts/r2_reports_integrity.py's
+# MAX_CHECK=200) rather than inventing a new one. Each verified item costs
+# up to 1 HEAD + 1 GET against R2 plus up to 2 public-HTTP fetches (+ an
+# optional cache-purge round trip), run inside VERIFY_MAX_WORKERS threads
+# under RUN_DEADLINE_SECONDS -- this is the single most expensive
+# per-item operation in the whole reports pipeline, so it gets the same
+# conservative cap as its cheaper sibling, not a larger one.
+MAX_VERIFY_ITEMS = int(os.environ.get("MAX_VERIFY_ITEMS", "200"))
 
 # RX-PUB-A0.6D: real production evidence (sentinel-blogger.yml run
 # 31761997953, 2026-08-14, pre-6D code) showed this deadline being hit hard
@@ -189,7 +263,31 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _load_in_window_entries() -> list[dict]:
+def _canonical_age_hours(entry: dict, now: datetime) -> float | None:
+    """Same field precedence and parser as r2_report_publisher.py's
+    canonical_age(): timestamp -> processed_at -> published_at, via
+    canonical_timestamp.parse_timestamp(). Returns None (never a bare
+    exception) when no field is present or parsing failed -- callers must
+    treat that as "cannot prove this is in-window", exactly matching the
+    publisher's own fail-safe convention, not "assume fresh" or "assume
+    stale"."""
+    raw = entry.get("timestamp") or entry.get("processed_at") or entry.get("published_at")
+    if not raw:
+        return None
+    result = parse_timestamp(raw)
+    if result.parse_status != "SUCCESS" or result.normalized is None:
+        return None
+    return (now - result.normalized).total_seconds() / 3600.0
+
+
+def _load_in_window_entries(window_hours: int, now: datetime) -> list[dict]:
+    """P0 R2 COST AUDIT FIX: this function's name has always promised
+    "in window" entries, but until this fix it returned the ENTIRE manifest
+    unconditionally -- see the module docstring's "P0 R2 COST AUDIT FIX"
+    note above. Now genuinely filters to REPORT_WINDOW_HOURS via the same
+    canonical-timestamp precedence r2_report_publisher.py uses, so this
+    script's scope tracks what is actually live in R2 rather than the
+    manifest's total historical size."""
     if not MANIFEST_PATH.exists():
         return []
     try:
@@ -198,11 +296,35 @@ def _load_in_window_entries() -> list[dict]:
         log.error("Cannot parse %s: %s", MANIFEST_PATH, e)
         return []
     if isinstance(data, list):
-        return data
-    for key in ("advisories", "items", "data", "entries"):
-        if isinstance(data.get(key), list):
-            return data[key]
-    return []
+        all_entries = data
+    else:
+        all_entries = []
+        for key in ("advisories", "items", "data", "entries"):
+            if isinstance(data.get(key), list):
+                all_entries = data[key]
+                break
+
+    in_window: list[dict] = []
+    skipped_out_of_window = 0
+    skipped_unparseable = 0
+    for entry in all_entries:
+        age_hours = _canonical_age_hours(entry, now)
+        if age_hours is None:
+            skipped_unparseable += 1
+            continue
+        if 0 <= age_hours <= window_hours:
+            in_window.append(entry)
+        else:
+            skipped_out_of_window += 1
+
+    if skipped_out_of_window or skipped_unparseable:
+        log.info(
+            "Manifest has %d total entries; %d outside the %dh verification window, "
+            "%d with no parseable canonical timestamp (both excluded -- fail-safe, "
+            "matches r2_report_publisher.py's own in-window contract) -- %d in-window.",
+            len(all_entries), skipped_out_of_window, window_hours, skipped_unparseable, len(in_window),
+        )
+    return in_window
 
 
 def _local_report_path(entry: dict) -> Path | None:
@@ -524,8 +646,10 @@ def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict
     }
 
     # -- R2 layer (LOCAL vs R2) -----------------------------------------
+    _count_head_call()
     head = _verifier._s3api_head_object(BUCKET_REPORTS, r2_key)
     if head is None:
+        _count_head_call()
         head = _verifier._boto3_head_object(BUCKET_REPORTS, r2_key)
 
     if head is None:
@@ -535,6 +659,7 @@ def verify_one(local_path: Path, r2_key: str, skip_public: bool = False) -> dict
         result["publication_state"] = "FAILED"
         result["error"] = "R2 object does not exist"
     else:
+        _count_get_call()
         remote_bytes = _get_object_bytes(BUCKET_REPORTS, r2_key)
         if remote_bytes is None:
             result["publication_state"] = "UNKNOWN"
@@ -752,8 +877,10 @@ def main() -> int:
             "Public HTTP layer needs no R2 credentials and still runs."
         )
 
-    entries = _load_in_window_entries()
-    log.info("In-window manifest entries: %d", len(entries))
+    now = datetime.now(timezone.utc)
+    entries = _load_in_window_entries(REPORT_WINDOW_HOURS, now)
+    log.info("In-window (%dh) manifest entries: %d (MAX_VERIFY_ITEMS=%d)",
+             REPORT_WINDOW_HOURS, len(entries), MAX_VERIFY_ITEMS)
 
     manifest_out: dict = {
         "schema_version": "2",
@@ -779,6 +906,7 @@ def main() -> int:
     live_resolution_failed = 0
     live_fetch_failed = 0
     live_not_processed_deadline = 0
+    live_not_processed_budget = 0
     publication_gate_bypass = 0
     # RX-PUB-A0.6B: mission Section 35 -- event-derived only, counted from
     # what _attempt_purge_and_reverify actually recorded per report.
@@ -873,6 +1001,41 @@ def main() -> int:
             continue
         work_items.append((intel_id, entry, local_path, _r2_key_for(local_path)))
 
+    # P0 R2 COST AUDIT FIX: hard, independent ceiling -- deliberately checked
+    # AFTER the time-window filter above, not instead of it, so a defect in
+    # that filter can never again let this script's R2/public-HTTP call
+    # volume scale with feed_manifest.json's total size (historical evidence:
+    # 150-1040 calls/run before this fix). Keeps the most recently-timestamped
+    # items (most relevant to verify freshness for) and records the rest
+    # explicitly -- never silently dropped, matching this script's own
+    # established NOT_PROCESSED_DEADLINE convention below.
+    budget_overflow_count = 0
+    if len(work_items) > MAX_VERIFY_ITEMS:
+        budget_overflow_count = len(work_items) - MAX_VERIFY_ITEMS
+        log.warning(
+            "In-window work items (%d) exceed MAX_VERIFY_ITEMS=%d -- verifying only the "
+            "%d most recently-timestamped and recording the rest as "
+            "NOT_PROCESSED_BUDGET (never silently dropped).",
+            len(work_items), MAX_VERIFY_ITEMS, MAX_VERIFY_ITEMS,
+        )
+
+        def _entry_sort_key(item: tuple[str, dict, Path, str]) -> str:
+            _iid, _entry, _lp, _rk = item
+            return _entry.get("timestamp") or _entry.get("processed_at") or _entry.get("published_at") or ""
+
+        work_items.sort(key=_entry_sort_key, reverse=True)
+        overflow_items = work_items[MAX_VERIFY_ITEMS:]
+        work_items = work_items[:MAX_VERIFY_ITEMS]
+        for intel_id, _entry, _local_path, _r2_key in overflow_items:
+            manifest_out["reports"][intel_id] = {
+                "publication_state": "NOT_PROCESSED_BUDGET",
+                "live_state": "LIVE_NOT_PROCESSED_BUDGET",
+                "error": f"MAX_VERIFY_ITEMS ({MAX_VERIFY_ITEMS}) exceeded -- not verified this "
+                         f"run (cost-governance hard cap, independent of the time-window filter)",
+            }
+            unknown += 1
+            live_not_processed_budget += 1
+
     deadline_hit = False
     if work_items:
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=VERIFY_MAX_WORKERS)
@@ -961,6 +1124,12 @@ def main() -> int:
         "live_resolution_failed": live_resolution_failed,
         "live_fetch_failed":      live_fetch_failed,
         "live_not_processed_deadline": live_not_processed_deadline,
+        # P0 R2 COST AUDIT FIX: items excluded by MAX_VERIFY_ITEMS, distinct
+        # from live_not_processed_deadline (a wall-clock cutoff) -- this one
+        # is a fixed count ceiling, hit regardless of how much time remained.
+        "live_not_processed_budget": live_not_processed_budget,
+        "max_verify_items": MAX_VERIFY_ITEMS,
+        "report_window_hours": REPORT_WINDOW_HOURS,
         "publication_gate_bypass": publication_gate_bypass,
         # RX-PUB-A0.6B (mission Section 35)
         "cache_invalidations_attempted": cache_invalidations_attempted,
@@ -1010,17 +1179,38 @@ def main() -> int:
 
     log.info(
         "R2 summary: %d in-window, %d REMOTE_VERIFIED, %d STALE_OR_DIVERGENT/FAILED, "
-        "%d UNKNOWN, %d missing-local, %.2fs",
-        len(entries), verified, mismatched, unknown, missing_local, elapsed,
+        "%d UNKNOWN, %d missing-local, %d budget-excluded, %.2fs",
+        len(entries), verified, mismatched, unknown, missing_local, budget_overflow_count, elapsed,
     )
     log.info(
         "Public HTTP summary: %d LIVE_VERIFIED, %d LIVE_EXPECTED_DENIAL (gate-correct, "
         "not a failure), %d LIVE_STALE_OR_DIVERGENT/MISSING_UNEXPECTED, "
         "%d LIVE_RESOLUTION_FAILED, %d LIVE_FETCH_FAILED, %d LIVE_NOT_PROCESSED_DEADLINE, "
-        "%d UNKNOWN",
+        "%d LIVE_NOT_PROCESSED_BUDGET, %d UNKNOWN",
         live_verified, live_expected_denial, live_mismatched,
-        live_resolution_failed, live_fetch_failed, live_not_processed_deadline, live_unknown,
+        live_resolution_failed, live_fetch_failed, live_not_processed_deadline,
+        live_not_processed_budget, live_unknown,
     )
+
+    # P0 R2 COST AUDIT FIX: report this script's own real R2 HEAD/GET (Class
+    # B) call volume through the same shared cost ledger r2_upload.py and
+    # r2_report_publisher.py already use, instead of leaving it entirely
+    # unaccounted (see scripts/r2_cost_guard.py's new head/get fields).
+    # Read-only observability only -- never fail-closed here (this script
+    # has its own MAX_VERIFY_ITEMS/RUN_DEADLINE_SECONDS bounds already; a
+    # cost-guard hiccup must never crash an otherwise-successful run).
+    try:
+        _cost_plan = R2OperationPlan(label="r2_reports_verifier", bucket=BUCKET_REPORTS)
+        _cost_plan.record_head(_head_call_count)
+        _cost_plan.record_get(_get_call_count)
+        _cost_plan.note(
+            f"read-only verification pass: {len(work_items)} item(s) processed, "
+            f"{budget_overflow_count} excluded by MAX_VERIFY_ITEMS={MAX_VERIFY_ITEMS}, "
+            f"window={REPORT_WINDOW_HOURS}h"
+        )
+        emit_summary(_cost_plan, R2Budgets.from_env(), status="PASS", is_report_plan=True)
+    except Exception as _cost_exc:
+        log.warning("R2_COST_GUARD emit_summary failed (non-fatal, observability only): %s", _cost_exc)
     if cache_invalidations_attempted:
         log.info(
             "Cache purge summary: %d attempted, %d succeeded, %d failed | "
@@ -1076,6 +1266,7 @@ def main() -> int:
         mismatched + unknown
         + live_mismatched + live_unknown
         + live_resolution_failed + live_fetch_failed + live_not_processed_deadline
+        + live_not_processed_budget
         + publication_gate_bypass
     )
     if total_failures > 0:
@@ -1083,13 +1274,15 @@ def main() -> int:
         log.error(
             "%s -- %d R2 mismatch/missing + %d R2 unverifiable + %d public HTTP "
             "mismatch/missing + %d public resolution-failed + %d public fetch-failed + "
-            "%d not-processed-by-deadline + %d publication-gate bypass(es). A changed, "
+            "%d not-processed-by-deadline + %d not-processed-by-budget + "
+            "%d publication-gate bypass(es). A changed, "
             "certified commercial artifact must be remotely AND publicly "
             "verified before this run can be treated as production-certified "
             "(RX-PUB-A0 Sections 12, 25, 27; RX-PUB-A0.6 Sections 9, 26-27).",
             "HARD FAIL" if args.enforce else "WOULD HARD FAIL (--enforce not set)",
             mismatched, unknown, live_mismatched, live_resolution_failed,
-            live_fetch_failed, live_not_processed_deadline, publication_gate_bypass,
+            live_fetch_failed, live_not_processed_deadline, live_not_processed_budget,
+            publication_gate_bypass,
         )
         log.error("=" * 70)
         return 1 if args.enforce else 0

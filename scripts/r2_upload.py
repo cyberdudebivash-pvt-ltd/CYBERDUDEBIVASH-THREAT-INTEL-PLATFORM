@@ -1,30 +1,35 @@
 #!/usr/bin/env python3
 """
 scripts/r2_upload.py
-CYBERDUDEBIVASH(R) SENTINEL APEX v143.5.1 -- Cloudflare R2 Upload Engine
+CYBERDUDEBIVASH(R) SENTINEL APEX v200.0 -- Cloudflare R2 Upload Engine
 =========================================================================
 P0 FIX: Replaces the inline PYEOF/unquoted-heredoc R2 upload block from
 sentinel-blogger.yml.  Zero inline Python in YAML.
 
-v143.5.1 FIX (R2 TIMEOUT ROOT CAUSE):
-  - timeout-minutes: 60 in the workflow was killing the job before the HTML
-    report sync could complete (18k+ files, ~35 min with default awscli).
-  - Fix 1: configure_awscli_performance() sets 50 concurrent requests and
-    disables per-file checksum (--size-only) for large directory syncs.
-  - Fix 2: subprocess timeout=2700 (45 min) on reports sync -- non-fatal,
-    pipeline continues even if reports upload is incomplete.
-  - Fix 3: workflow timeout-minutes raised to 180 (companion change).
+P0 R2 COST INCIDENT FIX (2026-09): this script no longer touches the
+sentinel-apex-reports bucket at all. It used to run `aws s3 sync reports/
+-> s3://sentinel-apex-reports/reports/` (whole-prefix LIST + full content
+comparison, no bound) on every scheduled run -- confirmed root cause of a
+3,004,147-Class-A-operation billing cycle (docs/P0_R2_COST_CONTAINMENT.md).
+That sync, and its reports/pdf/ counterpart, have been removed entirely --
+not flag-gated. scripts/r2_report_publisher.py is now the sole writer/
+retirer for both keyspaces: deterministic keys, sha256-diffed against its
+own state file (zero R2 LIST), bounded to a rolling 24h window, fail-closed
+operation budget before any mutation. Run it as its own pipeline stage
+immediately after this script.
 
-Responsibilities:
+Responsibilities (bounded to sentinel-apex-data only):
   1.  Validate R2 credentials (CF_ACCOUNT_ID, AWS_ACCESS_KEY_ID,
       AWS_SECRET_ACCESS_KEY).  Exit 1 if any missing.
   2.  Install awscli if not present.
   3.  Configure awscli for high-throughput parallel uploads.
   4.  Upload feed_manifest.json and enriched manifests.
   5.  Upload apex_v2 API endpoint files.
-  6.  Upload generated HTML reports (Tactical Dossiers) -- non-fatal.
-  7.  Upload AI intelligence data files.
-  8.  Write and upload sync_meta.json with advisory count + run metadata.
+  6.  Upload AI intelligence data files.
+  7.  Write and upload sync_meta.json with advisory count + run metadata.
+
+Report/PDF publishing to sentinel-apex-reports and reports/pdf/ moved to
+scripts/r2_report_publisher.py -- see that script's module docstring.
 
 Environment variables consumed (set at job level in workflow):
   CF_ACCOUNT_ID            -- Cloudflare account ID
@@ -58,11 +63,7 @@ log = logging.getLogger("sentinel.r2_upload")
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "200.0")
 BUCKET_DATA = "sentinel-apex-data"
-BUCKET_REPORTS = "sentinel-apex-reports"
-
-# Max seconds the HTML report sync may run before being abandoned (non-fatal).
-# Set to 45 minutes -- generous headroom for 18k+ files at 50 concurrent threads.
-REPORTS_SYNC_TIMEOUT_SECONDS = 2700
+BUCKET_REPORTS = "sentinel-apex-reports"  # written/retired only by scripts/r2_report_publisher.py now
 
 
 def utc_now() -> str:
@@ -229,6 +230,40 @@ def s3_get(
         result.stdout.strip(), result.stderr.strip(),
     )
     return "ERROR"
+
+
+def s3_delete(
+    bucket: str,
+    key: str,
+    endpoint: str,
+) -> bool:
+    """Delete a single object from R2. Returns True on success (including
+    the case where the object is already absent -- `aws s3 rm` on a
+    nonexistent key exits 0, which is the correct outcome for a caller
+    retiring an object it believes exists: idempotent, not an error).
+
+    Cloudflare R2 does not bill DeleteObject as a Class A operation (see
+    scripts/r2_cost_guard.py's module docstring) -- this helper exists for
+    bounded, deterministic-key retirement (scripts/r2_report_publisher.py's
+    24h rolling-window cleanup), not as a cost optimization in itself. Callers
+    remain responsible for keeping the total delete count bounded and
+    tracked through r2_cost_guard -- unbounded blast radius, not billing, is
+    the risk this helper does not protect against on its own.
+    """
+    cmd = [
+        "aws", "s3", "rm", f"s3://{bucket}/{key}",
+        "--endpoint-url", endpoint,
+        "--only-show-errors",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        log.info("OK: Deleted s3://%s/%s", bucket, key)
+        return True
+    log.warning(
+        "WARN: Delete failed (%d): %s %s",
+        result.returncode, result.stdout.strip(), result.stderr.strip(),
+    )
+    return False
 
 
 def s3_sync(
@@ -531,94 +566,40 @@ def main() -> None:
             log.warning("SKIP (AI index): %s not found", src)
     log.info("OK: AI index/detection-rules files uploaded to R2 (%d/%d)", uploaded_ai_index, len(ai_index_files))
 
-    # --- Upload 4a: Generated HTML reports (Tactical Dossiers) ---
-    # v143.5.1 FIX: Two-part fix for 36-minute stall / job-timeout cancellation:
-    #   1. awscli configured with 50 concurrent requests (5x faster)
-    #   2. --size-only skips per-file MD5 checksum (reports already in R2 skip fast)
-    #   3. subprocess timeout=2700 (45 min) -- non-fatal hard cap, pipeline continues
+    # --- Upload 4a / 4a-PDF: REMOVED (P0 R2 COST INCIDENT, 2026-09) ---
+    # ROOT CAUSE: this block used to run `aws s3 sync reports/ ->
+    # s3://sentinel-apex-reports/reports/` (size_only=False, full content/
+    # mtime comparison, no bound) plus a second `aws s3 sync` for
+    # reports/pdf/ -- on EVERY scheduled pipeline run. Because
+    # generate_intel_reports.py's default (non---only-missing) mode
+    # regenerates a report for every item in the manifest -- not just new/
+    # changed ones -- and every regenerated file embeds a fresh minute-
+    # granularity timestamp into its SIGMA/YARA/KQL/SPL blocks, the entire
+    # local reports/ tree looked "changed" to `aws s3 sync` on every single
+    # run. `aws s3 sync` also unconditionally LISTs the entire destination
+    # prefix to build its comparison map regardless of how much actually
+    # changed. Against a ~193K-object bucket, this produced the 3,004,147
+    # billable R2 Class A operations in one billing cycle documented in
+    # docs/P0_R2_COST_CONTAINMENT.md.
     #
-    # v184.2 FIX (P0): --size-only silently skips re-uploading a report whose
-    # content changed but total byte size happened to land close enough to the
-    # previous upload -- confirmed live: a report-template/content fix (RX-PR1)
-    # was merged, the regenerated local HTML was provably correct (verified via
-    # direct CLI reproduction), but the R2-served page kept serving pre-fix
-    # content indefinitely because size-only sync saw "no size delta" and never
-    # re-uploaded it. There is no bounded, safe way to re-derive which past
-    # syncs were silently skipped -- so this reverts to real content comparison
-    # (MD5-based, awscli's sync default) for the reports sync only. Accepted
-    # cost: sync duration returns toward the pre-v143.5.1 measured ~35 min for
-    # the full report corpus at 50 concurrent requests, within the existing
-    # 45-min non-fatal timeout (unchanged) -- a partial/timed-out sync still
-    # leaves existing R2 content valid and retries whole-corpus on the next run.
+    # FIX: whole-corpus sync does not exist in this codebase anymore -- not
+    # flag-gated, structurally removed. scripts/r2_report_publisher.py is
+    # now the sole normal-operation writer/retirer for both the HTML
+    # reports keyspace (sentinel-apex-reports) and reports/pdf/ (sentinel-
+    # apex-data). It works from deterministic keys derived from the
+    # CURRENT manifest, publishes only genuinely new/changed content (sha256
+    # -diffed against its own local state file, never a bucket LIST), is
+    # bounded to the rolling REPORT_WINDOW_HOURS (default 24h) window, and
+    # enforces a fail-closed operation budget (scripts/r2_cost_guard.py)
+    # before issuing a single R2 call. Invoked as its own pipeline stage
+    # (see sentinel-blogger.yml) immediately after this script, not from
+    # inside main() -- keeping this script's own responsibility limited to
+    # the bounded sentinel-apex-data manifest/endpoint uploads below, which
+    # were never the cost driver.
     #
-    # Credentials: uses dedicated CF_R2_REPORTS_KEY_ID / CF_R2_REPORTS_SECRET_KEY
-    # for sentinel-apex-reports bucket (scoped R2 token, injected via step-level env).
-    # Falls back to job-level AWS credentials if per-bucket secrets absent.
-    reports_dir = REPO_ROOT / "reports"
-    if reports_dir.is_dir() and any(reports_dir.rglob("*.html")):
-        log.info("Uploading HTML reports to R2 (sentinel-apex-reports)...")
-        log.info(
-            "Performance: 50 concurrent requests, full content comparison, 45-min hard timeout."
-        )
-
-        # Swap in per-bucket credentials if available
-        reports_key_id = os.environ.get("CF_R2_REPORTS_KEY_ID", "").strip()
-        reports_secret = os.environ.get("CF_R2_REPORTS_SECRET_KEY", "").strip()
-        orig_key_id    = os.environ.get("AWS_ACCESS_KEY_ID", "")
-        orig_secret    = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
-
-        if reports_key_id and reports_secret:
-            os.environ["AWS_ACCESS_KEY_ID"]    = reports_key_id
-            os.environ["AWS_SECRET_ACCESS_KEY"] = reports_secret
-            log.info("Using dedicated sentinel-apex-reports R2 token.")
-        else:
-            log.info("CF_R2_REPORTS_KEY_ID not set -- using job-level R2 credentials.")
-
-        try:
-            reports_ok = s3_sync(
-                "reports/", BUCKET_REPORTS, "reports/", endpoint,
-                content_type="text/html; charset=utf-8",
-                cache_control="public, max-age=300",
-                size_only=False,                      # v184.2: real content comparison -- see fix note above
-                timeout_seconds=REPORTS_SYNC_TIMEOUT_SECONDS,  # 45-min hard cap
-            )
-        finally:
-            # Always restore original credentials regardless of outcome
-            os.environ["AWS_ACCESS_KEY_ID"]    = orig_key_id
-            os.environ["AWS_SECRET_ACCESS_KEY"] = orig_secret
-
-        if reports_ok:
-            log.info("OK: HTML reports uploaded to R2 (%s/reports/)", BUCKET_REPORTS)
-        else:
-            log.warning(
-                "WARN: HTML reports R2 sync incomplete (non-fatal -- existing reports "
-                "in R2 remain valid). Reports will retry on next pipeline run. "
-                "Check bucket permissions for %s and verify CF_R2_REPORTS_KEY_ID secret.",
-                BUCKET_REPORTS,
-            )
-    else:
-        log.info("INFO: No reports/ directory or HTML files -- skipping report upload.")
-
-    # --- Upload 4a-PDF: Advisory PDFs -> sentinel-apex-data (INTEL_R2 binding) ---
-    # v161.3 P0-FIX: PDFs generated by Stage 3.2.6 must land in sentinel-apex-data
-    # so the Worker can serve them via the INTEL_R2 binding at /reports/pdf/{id}.pdf.
-    pdf_dir = REPO_ROOT / "reports" / "pdf"
-    if pdf_dir.is_dir() and any(pdf_dir.glob("*.pdf")):
-        pdf_count = len(list(pdf_dir.glob("*.pdf")))
-        log.info("Uploading %d advisory PDFs to R2 (sentinel-apex-data/reports/pdf/)...", pdf_count)
-        pdf_ok = s3_sync(
-            "reports/pdf/", BUCKET_DATA, "reports/pdf/", endpoint,
-            content_type="application/pdf",
-            cache_control="public, max-age=3600",
-            size_only=True,
-            timeout_seconds=300,
-        )
-        if pdf_ok:
-            log.info("OK: %d advisory PDFs uploaded to R2 (sentinel-apex-data/reports/pdf/)", pdf_count)
-        else:
-            log.warning("WARN: PDF R2 sync incomplete (non-fatal). PDFs retry on next pipeline run.")
-    else:
-        log.info("INFO: No advisory PDFs in reports/pdf/ -- skipping PDF upload.")
+    # R2_REPORT_PUBLISHING_ENABLED=false (env var, read by
+    # r2_report_publisher.py) remains the emergency kill switch if report
+    # publishing itself ever needs to be paused without a code change.
 
     # --- Upload 4b: AI intelligence data ---
     # First generate AI endpoints from current manifest

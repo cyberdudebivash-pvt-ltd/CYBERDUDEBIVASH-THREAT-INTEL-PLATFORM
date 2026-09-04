@@ -179,6 +179,31 @@ jobs:
       # Suppress RequestsDependencyWarning from requests/urllib3 version mismatch
       PYTHONWARNINGS:          "ignore::Warning:urllib3,ignore::Warning:requests"
 
+      # ---------------------------------------------------------------------
+      # P0 R2 COST INCIDENT FIX (2026-09) -- pre-revenue cost-bounded config.
+      # See docs/P0_R2_COST_CONTAINMENT.md for the full incident writeup.
+      # PRE_REVENUE_COST_MODE=true is the standing posture while CYBERDUDEBIVASH
+      # is pre-revenue (scripts/r2_cost_guard.py::is_pre_revenue_cost_mode()) --
+      # flip to "false" only once real revenue changes the cost calculus, never
+      # as a workaround for a budget ceiling being hit.
+      PRE_REVENUE_COST_MODE:   "true"
+      # Rolling hot-report window (hours). Drives scripts/generate_intel_reports.py's
+      # --since-hours (all 4 call sites), scripts/build_reports_index.py, and
+      # scripts/r2_report_publisher.py's publish/retire decisions -- one value,
+      # one source of truth.
+      REPORT_WINDOW_HOURS:     "24"
+      # Emergency kill switch for scripts/r2_report_publisher.py. Default true:
+      # the new architecture is safe-by-construction (bounded, zero LIST,
+      # budget-enforced) and the dashboard must keep showing current reports.
+      R2_REPORT_PUBLISHING_ENABLED: "true"
+      # Evidence-based hard ceilings (scripts/r2_cost_guard.py::R2Budgets) --
+      # see that module's docstring for the observed-volume evidence behind
+      # these numbers. Exceeding any of these aborts BEFORE any R2 mutation.
+      MAX_REPORT_UPLOADS_PER_RUN:   "500"
+      MAX_REPORT_DELETIONS_PER_RUN: "500"
+      MAX_R2_LIST_CALLS_PER_RUN:    "0"
+      MAX_R2_DATA_WRITES_PER_RUN:   "200"
+
     steps:
 
       # -----------------------------------------------------------------------
@@ -1733,6 +1758,40 @@ jobs:
         run: python3 scripts/r2_upload.py
 
       # -----------------------------------------------------------------------
+      # STAGE 3.5a: BOUNDED 24H REPORT PUBLISHER (P0 R2 COST INCIDENT FIX)
+      # Replaces the whole-corpus `aws s3 sync reports/` that used to run
+      # inside r2_upload.py's STAGE 3.5 (confirmed root cause of the
+      # 3,004,147-Class-A-operation billing cycle -- docs/P0_R2_COST_CONTAINMENT.md).
+      # Deterministic keys, sha256-diffed against its own state file (zero R2
+      # LIST), bounded to the rolling REPORT_WINDOW_HOURS window, fail-closed
+      # operation budget enforced before any mutation. See scripts/
+      # r2_report_publisher.py's module docstring for the full architecture.
+      # continue-on-error: the emergency kill switch (R2_REPORT_PUBLISHING_ENABLED)
+      # and the fail-closed budget guard are this stage's OWN internal safety
+      # nets (exit 1 on a real budget breach is still visible in the job log
+      # and the R2_COST_GUARD summary below) -- a transient publish failure
+      # must not cascade-skip STAGE 3.5.1's already-established, independent
+      # verification of what's actually in R2.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.5a - Bounded 24h Report Publisher (P0 R2 Cost Fix)"
+        if: env.PIPELINE_LOCKED != 'true'
+        timeout-minutes: 15
+        continue-on-error: true
+        env:
+          CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
+          CF_R2_REPORTS_SECRET_KEY: ${{ secrets.CF_R2_REPORTS_SECRET_KEY }}
+        run: |
+          if ! python3 scripts/r2_report_publisher.py; then
+            echo "::error::STAGE 3.5a: report publisher aborted (budget breach or R2 error) -- see R2_COST_GUARD summary above. NO R2 mutation was performed for this stage (fail-closed). continue-on-error keeps the rest of the pipeline running -- core dashboard/feed/API are not affected by a report-publish issue."
+          fi
+          if [ -f data/quality/r2_cost_guard_report.json ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            echo '### R2 Cost Guard Report (data/quality/r2_cost_guard_report.json)' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat data/quality/r2_cost_guard_report.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # -----------------------------------------------------------------------
       # STAGE 3.5.1: R2 REPORTS INDEX INTEGRITY GATE (v1.0 P0 PERMANENT FIX)
       # ROOT CAUSE FIX: r2_upload.py (Stage 3.5) treats HTML report upload as
       # non-fatal -- it exits 0 even when upload to sentinel-apex-reports fails.
@@ -3209,6 +3268,15 @@ jobs:
       # (CF_ACCOUNT_ID, AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY) are already
       # job-level env vars (lines 159-169 above) -- no new secrets wiring.
       # -----------------------------------------------------------------------
+      # --since-hours (P0 R2 COST INCIDENT FIX, 2026-09): this direct YAML
+      # invocation bypasses run_pipeline.py entirely, so it needed its own
+      # fix alongside that script's three call sites (see scripts/
+      # run_pipeline.py's stage_html_reports()/3.9-RPT/matbarrier comments).
+      # Without it, an item whose report R2 object was already retired by
+      # the 24h retention policy (report_url cleared to "" by scripts/
+      # r2_report_publisher.py) reads as a fresh --only-missing "repair
+      # candidate" here and gets re-rendered every run forever -- exactly
+      # the full-corpus churn this incident fix eliminates.
       - name: "STAGE 5.4.0b - Report Continuity Final Barrier (P0 FIX)"
         timeout-minutes: 10
         continue-on-error: true
@@ -3216,7 +3284,8 @@ jobs:
           python3 scripts/generate_intel_reports.py \
             --manifest data/stix/feed_manifest.json \
             --public-prefix https://intel.cyberdudebivash.com \
-            --only-missing --upload-r2 --limit 0 || true
+            --only-missing --upload-r2 --limit 0 \
+            --since-hours "${REPORT_WINDOW_HOURS:-24}" || true
 
       # -----------------------------------------------------------------------
       # STAGE 5.4.1: REPORT EXISTENCE VALIDATOR (v184.0 P0 HARD FAIL)

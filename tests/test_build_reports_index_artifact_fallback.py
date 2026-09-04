@@ -35,10 +35,20 @@ import shutil
 import subprocess
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO_ROOT_REAL = Path(__file__).resolve().parent.parent
 REAL_SCRIPT = REPO_ROOT_REAL / "scripts" / "build_reports_index.py"
+REAL_CANONICAL_TS = REPO_ROOT_REAL / "scripts" / "canonical_timestamp.py"
+
+
+def _recent_ts(hours_ago: float = 1) -> str:
+    """P0 R2 cost fix: scripts/build_reports_index.py now requires a
+    provable canonical timestamp (via the item's api/feed.json entry) to
+    include a report in the hot-window index at all -- see that script's
+    module docstring. Every fixture feed entry in this file needs one."""
+    return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _report_html(title, severity=None, risk_score=None, engine_comment=True, description_style="og"):
@@ -72,6 +82,11 @@ class TestBuildReportsIndexArtifactFallback(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="bri_test_"))
         (self.tmp / "scripts").mkdir()
         shutil.copy(REAL_SCRIPT, self.tmp / "scripts" / "build_reports_index.py")
+        # P0 R2 cost fix: build_reports_index.py now imports its sibling
+        # scripts/canonical_timestamp.py for canonical-timestamp-based
+        # windowing -- this isolated fixture copy needs it too, same as
+        # it already needed only build_reports_index.py itself before.
+        shutil.copy(REAL_CANONICAL_TS, self.tmp / "scripts" / "canonical_timestamp.py")
         (self.tmp / "reports" / "2026" / "08").mkdir(parents=True)
         (self.tmp / "api" / "reports").mkdir(parents=True)
 
@@ -106,18 +121,26 @@ class TestBuildReportsIndexArtifactFallback(unittest.TestCase):
     def test_feed_match_is_used_when_present(self):
         self._write_report("intel--aaa1111111111111", _report_html("Ignored Artifact Title", "LOW", 1.0))
         self._write_feed([{"id": "intel--aaa1111111111111", "title": "Real Feed Title",
-                            "severity": "CRITICAL", "risk_score": 9.5}])
+                            "severity": "CRITICAL", "risk_score": 9.5, "timestamp": _recent_ts()}])
         idx = self._run()
         entry = self._entry(idx, "intel--aaa1111111111111")
         self.assertEqual(entry["title"], "Real Feed Title")
         self.assertEqual(entry["severity"], "CRITICAL")
         self.assertEqual(entry["risk_score"], 9.5)
 
-    # 2/3/4. Title/severity/risk enrichment from the artifact when the feed has nothing.
-    def test_artifact_fallback_when_id_scrolled_out_of_feed(self):
+    # 2/3/4. Title/severity/risk enrichment from the artifact when the feed
+    # entry exists (proving the item is within the hot window -- P0 R2 cost
+    # fix requirement) but carries none of those fields itself yet (e.g. an
+    # enrichment stage hasn't populated them). Before that fix this
+    # scenario was "id absent from feed entirely"; a feed entry with truly
+    # NO id at all can no longer be included in the index by design (its
+    # age can't be proven -- see build_reports_index.py's module docstring),
+    # so the meaningful, still-current version of this scenario is "present
+    # in feed, but under-enriched", not "absent from feed".
+    def test_artifact_fallback_when_feed_entry_lacks_enrichment_fields(self):
         self._write_report("intel--bbb2222222222222",
                             _report_html("CVE-2099-00001 Something Bad Happened", "HIGH", 7.6))
-        self._write_feed([])  # empty feed -- this id is not in the current window
+        self._write_feed([{"id": "intel--bbb2222222222222", "timestamp": _recent_ts()}])
         idx = self._run()
         entry = self._entry(idx, "intel--bbb2222222222222")
         self.assertEqual(entry["title"], "CVE-2099-00001 Something Bad Happened")
@@ -127,7 +150,7 @@ class TestBuildReportsIndexArtifactFallback(unittest.TestCase):
     def test_artifact_fallback_works_with_plain_description_meta(self):
         self._write_report("intel--ccc3333333333333",
                             _report_html("Plain Meta Report", "MEDIUM", 5.2, description_style="plain"))
-        self._write_feed([])
+        self._write_feed([{"id": "intel--ccc3333333333333", "timestamp": _recent_ts()}])
         idx = self._run()
         entry = self._entry(idx, "intel--ccc3333333333333")
         self.assertEqual(entry["severity"], "MEDIUM")
@@ -140,7 +163,7 @@ class TestBuildReportsIndexArtifactFallback(unittest.TestCase):
                 "</head><body></body></html>"
                 "\n<!-- " + ("padding " * 80) + "-->")
         self._write_report("intel--ddd4444444444444", html)
-        self._write_feed([])
+        self._write_feed([{"id": "intel--ddd4444444444444", "timestamp": _recent_ts()}])
         idx = self._run()
         entry = self._entry(idx, "intel--ddd4444444444444")
         self.assertEqual(entry["title"], "Old Format Report")
@@ -152,7 +175,15 @@ class TestBuildReportsIndexArtifactFallback(unittest.TestCase):
         bad_path = self.tmp / "reports" / "2026" / "08" / "intel--eee5555555555555.html"
         bad_path.write_bytes(b"\xff\xfe\x00not really html \x00\x01")
         self._write_report("intel--fff6666666666666", _report_html("Fine Report", "LOW", 1.5))
-        self._write_feed([])
+        # Both ids get a feed entry (P0 R2 cost fix: unprovable age is
+        # excluded entirely now) -- the malformed file's entry deliberately
+        # carries no title/severity/risk so the artifact-metadata-extraction
+        # fallback path (the code this test actually exercises) still runs
+        # against its malformed bytes and must not crash.
+        self._write_feed([
+            {"id": "intel--eee5555555555555", "timestamp": _recent_ts()},
+            {"id": "intel--fff6666666666666", "timestamp": _recent_ts()},
+        ])
         idx = self._run()  # must not raise / exit non-zero
         ids = [r["id"] for r in idx["reports"]]
         self.assertIn("intel--fff6666666666666", ids)
@@ -161,7 +192,7 @@ class TestBuildReportsIndexArtifactFallback(unittest.TestCase):
     def test_zero_risk_score_from_feed_is_preserved_not_treated_as_missing(self):
         self._write_report("intel--000aaaaaaaaaaaaa", _report_html("Zero Risk Report", "LOW", 0.0))
         self._write_feed([{"id": "intel--000aaaaaaaaaaaaa", "title": "Zero Risk Feed Title",
-                            "severity": "LOW", "risk_score": 0.0}])
+                            "severity": "LOW", "risk_score": 0.0, "timestamp": _recent_ts()}])
         idx = self._run()
         entry = self._entry(idx, "intel--000aaaaaaaaaaaaa")
         self.assertEqual(entry["risk_score"], 0.0)
@@ -169,7 +200,7 @@ class TestBuildReportsIndexArtifactFallback(unittest.TestCase):
     # 11/12. Only public catalogue metadata is exposed -- no paywalled fields introduced.
     def test_entry_schema_contains_no_restricted_content_fields(self):
         self._write_report("intel--111bbbbbbbbbbbbb", _report_html("Schema Check Report", "HIGH", 8.0))
-        self._write_feed([])
+        self._write_feed([{"id": "intel--111bbbbbbbbbbbbb", "timestamp": _recent_ts()}])
         idx = self._run()
         entry = self._entry(idx, "intel--111bbbbbbbbbbbbb")
         restricted_fields = {"body", "full_text", "iocs", "ioc_list", "attribution",
@@ -179,9 +210,12 @@ class TestBuildReportsIndexArtifactFallback(unittest.TestCase):
 
     # 14/15. latest.json is a strict prefix subset of index.json (consistency).
     def test_latest_json_is_prefix_of_index_json(self):
+        feed_items = []
         for i in range(3):
-            self._write_report(f"intel--2{i:02d}cccccccccccc", _report_html(f"Report {i}", "LOW", 1.0 + i))
-        self._write_feed([])
+            item_id = f"intel--2{i:02d}cccccccccccc"
+            self._write_report(item_id, _report_html(f"Report {i}", "LOW", 1.0 + i))
+            feed_items.append({"id": item_id, "timestamp": _recent_ts(hours_ago=i + 1)})
+        self._write_feed(feed_items)
         self._run()
         index_payload = json.loads((self.tmp / "api" / "reports" / "index.json").read_text())
         latest_payload = json.loads((self.tmp / "api" / "reports" / "latest.json").read_text())
@@ -191,20 +225,27 @@ class TestBuildReportsIndexArtifactFallback(unittest.TestCase):
 
     # 16. total_reports reflects actual file count on disk.
     def test_total_reports_matches_files_on_disk(self):
+        feed_items = []
         for i in range(4):
-            self._write_report(f"intel--3{i:02d}dddddddddddd", _report_html(f"Report {i}", "LOW", 1.0))
-        self._write_feed([])
+            item_id = f"intel--3{i:02d}dddddddddddd"
+            self._write_report(item_id, _report_html(f"Report {i}", "LOW", 1.0))
+            feed_items.append({"id": item_id, "timestamp": _recent_ts(hours_ago=i + 1)})
+        self._write_feed(feed_items)
         idx = self._run()
         self.assertEqual(idx["total_reports"], 4)
         self.assertEqual(idx["reports_listed"], 4)
 
-    # 18. Deterministic newest-first ordering by file mtime.
-    def test_ordering_is_newest_first_by_mtime(self):
-        import time
-        p1 = self._write_report("intel--400eeeeeeeeeeeee", _report_html("Oldest", "LOW", 1.0))
-        time.sleep(0.05)
-        p2 = self._write_report("intel--401eeeeeeeeeeeee", _report_html("Newest", "LOW", 1.0))
-        self._write_feed([])
+    # 18. Deterministic newest-first ordering by CANONICAL TIMESTAMP (P0 R2
+    # cost fix -- was file mtime; forensic analysis found mtime unreliable
+    # in this repo, see build_reports_index.py's module docstring, so
+    # ordering no longer depends on write order/sleep timing at all here).
+    def test_ordering_is_newest_first_by_canonical_timestamp(self):
+        self._write_report("intel--400eeeeeeeeeeeee", _report_html("Oldest", "LOW", 1.0))
+        self._write_report("intel--401eeeeeeeeeeeee", _report_html("Newest", "LOW", 1.0))
+        self._write_feed([
+            {"id": "intel--400eeeeeeeeeeeee", "timestamp": _recent_ts(hours_ago=5)},
+            {"id": "intel--401eeeeeeeeeeeee", "timestamp": _recent_ts(hours_ago=1)},
+        ])
         idx = self._run()
         ids = [r["id"] for r in idx["reports"]]
         self.assertEqual(ids[0], "intel--401eeeeeeeeeeeee")
@@ -213,7 +254,7 @@ class TestBuildReportsIndexArtifactFallback(unittest.TestCase):
     # 19. Idempotent regeneration -- running twice on unchanged inputs gives the same metadata.
     def test_idempotent_regeneration(self):
         self._write_report("intel--500ffffffffffff0", _report_html("Idempotent Report", "MEDIUM", 4.4))
-        self._write_feed([])
+        self._write_feed([{"id": "intel--500ffffffffffff0", "timestamp": _recent_ts()}])
         idx1 = self._run()
         idx2 = self._run()
         e1 = self._entry(idx1, "intel--500ffffffffffff0")

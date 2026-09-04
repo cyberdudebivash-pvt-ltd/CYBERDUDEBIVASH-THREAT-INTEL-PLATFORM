@@ -4,7 +4,31 @@ scripts/backup_r2.py
 CYBERDUDEBIVASH(R) SENTINEL APEX - Cloudflare R2 Bucket Backup
 
 Syncs R2 bucket content to a daily backup manifest with SHA-256 checksums.
-Objects modified since last backup are re-verified and catalogued.
+
+P0 R2 COST INCIDENT FIX (2026-09): this was a SECOND, independent full-bucket
+amplifier alongside scripts/r2_upload.py's whole-corpus sync (see
+docs/P0_R2_COST_CONTAINMENT.md). Confirmed live: this script ran DAILY
+(automated-backup.yml, cron 0 1 * * *, its own concurrency group -- not
+serialized against sentinel-blogger.yml) and unconditionally GET+SHA256'd
+EVERY object in BOTH sentinel-apex-data and sentinel-apex-reports, no
+sampling, no bound (~278,790 GETs/day at incident-time object counts).
+Two fixes, both evidence-based, not just "reduce the number":
+  1. sentinel-apex-reports removed from SOURCE_BUCKETS entirely. Its content
+     is now bounded to a 24h rolling window and fully regenerable from the
+     core intelligence manifest (scripts/generate_intel_reports.py) --
+     backing it up is not needed, and daily-verifying the (formerly ~193K,
+     now historical) object corpus is exactly the "historical verification
+     scan against sentinel-apex-reports" the cost-containment hardening
+     explicitly prohibits in normal operation, independent of retention
+     window. sentinel-apex-data (genuine irreplaceable state: dedup
+     history, manifests, KV snapshots) remains backed up.
+  2. Per-object GET+SHA256 verification is bounded to a rotating sample
+     (MAX_BACKUP_VERIFY_OBJECTS_PER_RUN per run) rather than 100% of the
+     bucket every day -- see verify_sample_indices()'s docstring for the
+     coverage-over-time guarantee this still provides. Objects outside
+     this run's sample are still catalogued in the manifest (key/size/etag
+     from the LIST response, which is already paid for) with sha256 left
+     unset, not silently dropped.
 
 Env vars required:
   CF_R2_ACCESS_KEY_ID     - R2 S3-compatible access key
@@ -12,14 +36,20 @@ Env vars required:
   CF_R2_ENDPOINT          - https://<account_id>.r2.cloudflarestorage.com
 
 Optional:
-  CF_R2_BACKUP_BUCKET     - secondary backup bucket (if set, copies objects there)
-  BACKUP_MANIFEST_PREFIX  - R2 key prefix for manifests (default: r2-backups/)
+  CF_R2_BACKUP_BUCKET             - secondary backup bucket (if set, copies verified objects there)
+  BACKUP_MANIFEST_PREFIX          - R2 key prefix for manifests (default: r2-backups/)
+  MAX_BACKUP_VERIFY_OBJECTS_PER_RUN - per-run GET+SHA256 verification cap (default: 2000)
 """
 import os
 import sys
 import json
 import hashlib
 import datetime
+
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+from r2_cost_guard import R2OperationPlan, emit_summary, R2Budgets  # noqa: E402
 
 try:
     import boto3
@@ -33,10 +63,13 @@ CF_R2_SECRET_KEY = os.environ.get("CF_R2_SECRET_ACCESS_KEY", "")
 CF_R2_ENDPOINT   = os.environ.get("CF_R2_ENDPOINT", "")
 BACKUP_BUCKET    = os.environ.get("CF_R2_BACKUP_BUCKET", "")
 MANIFEST_PREFIX  = os.environ.get("BACKUP_MANIFEST_PREFIX", "r2-backups/")
+MAX_VERIFY_PER_RUN = int(os.environ.get("MAX_BACKUP_VERIFY_OBJECTS_PER_RUN", "2000"))
 
+# sentinel-apex-reports intentionally excluded -- see module docstring's
+# P0 R2 COST INCIDENT FIX note (fix #1). Never touch cyberdudebivash-scan-results
+# either (out of scope for this backup job, always has been -- not listed here).
 SOURCE_BUCKETS = [
     "sentinel-apex-data",
-    "sentinel-apex-reports",
 ]
 
 
@@ -103,45 +136,80 @@ def copy_to_backup(s3, src_bucket, key, dst_bucket):
         return False
 
 
-def backup_bucket(s3, bucket_name, today):
+def verify_sample_indices(total: int, sample_size: int, day_of_year: int) -> set:
+    """Deterministic rotating window into a sorted object list -- gives
+    eventual full coverage (every object gets GET+SHA256-verified at least
+    once every ceil(total/sample_size) days) without ever exceeding
+    sample_size verifications in a single run. Contiguous (not random)
+    purely so a human reading two consecutive days' manifests can see the
+    window visibly advance -- the coverage guarantee doesn't depend on that,
+    only on the offset advancing by sample_size (mod total) every day.
+    """
+    if total <= 0 or sample_size <= 0:
+        return set()
+    if sample_size >= total:
+        return set(range(total))
+    offset = (day_of_year * sample_size) % total
+    if offset + sample_size <= total:
+        return set(range(offset, offset + sample_size))
+    return set(range(offset, total)) | set(range(0, (offset + sample_size) - total))
+
+
+def backup_bucket(s3, bucket_name, today, plan: R2OperationPlan):
     print(f"\n[{bucket_name}]")
     objects = list_objects(s3, bucket_name)
     if objects is None:
         return None
+    objects.sort(key=lambda o: o["key"])  # stable order so the rotating sample is well-defined
+    plan.record_list(n=max(1, -(-len(objects) // 1000)), reason=f"{bucket_name} daily inventory (existing job responsibility, unchanged)")
 
     print(f"  Found {len(objects)} objects")
 
+    day_of_year = datetime.date.today().timetuple().tm_yday
+    sample_idx = verify_sample_indices(len(objects), MAX_VERIFY_PER_RUN, day_of_year)
+    if len(objects) > MAX_VERIFY_PER_RUN:
+        cycle_days = -(-len(objects) // MAX_VERIFY_PER_RUN)
+        print(f"  P0 cost fix: verifying a rotating sample of {len(sample_idx)}/{len(objects)} "
+              f"objects this run (full coverage cycle: ~{cycle_days} day(s)). "
+              f"Un-sampled objects are still catalogued (key/size/etag) with sha256 unset.")
+
     verified = []
     errors = 0
+    verified_this_run = 0
     for i, obj in enumerate(objects):
         key = obj["key"]
+        if i not in sample_idx:
+            verified.append({**obj, "sha256": None, "verified_size": None})
+            continue
         sha256, size = verify_object(s3, bucket_name, key)
+        verified_this_run += 1
         if sha256:
             verified.append({**obj, "sha256": sha256, "verified_size": size})
             if BACKUP_BUCKET:
                 copy_to_backup(s3, bucket_name, key, BACKUP_BUCKET)
+                plan.record_copy()
         else:
             print(f"  WARN: Could not verify {key}")
             verified.append({**obj, "sha256": "ERROR", "verified_size": 0})
             errors += 1
-        if i > 0 and i % 50 == 0:
-            print(f"  Progress: {i}/{len(objects)} objects verified...")
+        if verified_this_run > 0 and verified_this_run % 200 == 0:
+            print(f"  Progress: {verified_this_run}/{len(sample_idx)} sampled objects verified...")
 
     manifest = {
         "bucket": bucket_name,
         "backup_date": today,
         "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
         "total_objects": len(objects),
-        "verified_objects": len(verified) - errors,
+        "verified_this_run": verified_this_run,
         "errors": errors,
-        "total_size_bytes": sum(o.get("size", 0) for o in verified),
+        "total_size_bytes": sum(o.get("size", 0) for o in objects),
         "objects": verified,
     }
-    print(f"  Verified: {len(verified) - errors}/{len(objects)} objects | Errors: {errors}")
+    print(f"  Verified this run: {verified_this_run - errors}/{len(objects)} total objects | Errors: {errors}")
     return manifest
 
 
-def upload_manifest(s3, manifest, bucket, today):
+def upload_manifest(s3, manifest, bucket, today, plan: R2OperationPlan):
     key = f"{MANIFEST_PREFIX}{today}/{manifest['bucket']}-manifest.json"
     body = json.dumps(manifest, indent=2).encode("utf-8")
     try:
@@ -151,6 +219,7 @@ def upload_manifest(s3, manifest, bucket, today):
             Body=body,
             ContentType="application/json",
         )
+        plan.record_put(nbytes=len(body))
         print(f"  Manifest saved: {bucket}/{key}")
         return True
     except ClientError as e:
@@ -181,20 +250,28 @@ def main():
 
     s3 = get_s3()
     failed = []
+    plan = R2OperationPlan(label="backup_r2", bucket=",".join(SOURCE_BUCKETS))
 
     for bucket in SOURCE_BUCKETS:
-        manifest = backup_bucket(s3, bucket, today)
+        manifest = backup_bucket(s3, bucket, today, plan)
         if manifest is None:
             failed.append(bucket)
             continue
         # Write manifest back to the same bucket (under r2-backups/ prefix)
-        upload_manifest(s3, manifest, bucket, today)
+        upload_manifest(s3, manifest, bucket, today, plan)
+
+    # P0 R2 cost fix: observability parity with r2_upload.py/r2_report_publisher.py --
+    # this job is not budget-ENFORCED (it's a bounded-by-construction daily inventory,
+    # continue-on-error in automated-backup.yml), but it must still be counted so the
+    # platform's total R2 footprint is visible in one place (data/quality/r2_cost_guard_report.json).
+    emit_summary(plan, R2Budgets.from_env(), status="PASS", is_report_plan=False)
 
     if failed:
         print(f"\nFATAL: Failed buckets: {failed}")
         sys.exit(1)
 
-    print(f"\n=== R2 Backup complete. {len(SOURCE_BUCKETS)} buckets catalogued. ===")
+    print(f"\n=== R2 Backup complete. {len(SOURCE_BUCKETS)} bucket(s) catalogued "
+          f"(sentinel-apex-reports excluded -- see module docstring). ===")
 
 
 if __name__ == "__main__":

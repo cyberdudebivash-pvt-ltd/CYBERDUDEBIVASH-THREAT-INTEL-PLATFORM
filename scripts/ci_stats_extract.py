@@ -265,6 +265,20 @@ _REPORTS: dict = {
             d.get("verdict_counts", {}).get("MISCLASSIFIED", 0),
         ],
     ),
+    # P0 R2 COST INCIDENT FIX (2026-09) -- scripts/r2_cost_guard.py's merged
+    # per-run report (data/quality/r2_cost_guard_report.json). overall_status
+    # is PASS/BLOCKED across every labeled plan recorded this run (r2_upload.py's
+    # bounded data-bucket uploads, r2_report_publisher.py's publish/retire).
+    "r2_cost_guard": (
+        _ROOT / "data" / "quality" / "r2_cost_guard_report.json",
+        lambda d: [
+            d.get("overall_status", "UNKNOWN"),
+            len(d.get("plans", {})),
+            sum(p.get("put", 0) for p in d.get("plans", {}).values()),
+            sum(p.get("delete", 0) for p in d.get("plans", {}).values()),
+            sum(p.get("estimated_class_a", 0) for p in d.get("plans", {}).values()),
+        ],
+    ),
 }
 
 _FALLBACKS = {
@@ -294,6 +308,7 @@ _FALLBACKS = {
     "metric_integrity_contract": "? ? ?",
     "p41": "UNKNOWN 0 0 0 0 0",
     "capability_runtime": "0 0 0 0 0 0 0 0",
+    "r2_cost_guard": "UNKNOWN 0 0 0 0",
 }
 
 

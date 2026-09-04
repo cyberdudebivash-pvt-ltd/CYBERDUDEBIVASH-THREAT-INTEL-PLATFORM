@@ -16,6 +16,7 @@ import os
 import sys
 import unittest
 import urllib.error
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -27,6 +28,19 @@ import r2_reports_verifier as rrv  # noqa: E402
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _recent_timestamp() -> str:
+    """P0 R2 COST AUDIT FIX: r2_reports_verifier.py now filters manifest
+    entries to REPORT_WINDOW_HOURS via their canonical timestamp (see
+    scripts/r2_reports_verifier.py's _load_in_window_entries()), matching
+    scripts/r2_report_publisher.py's own in-window contract. Fixtures below
+    that exercise main()'s dispatch/deadline/concurrency logic need a
+    genuinely in-window timestamp to reach verify_one() at all -- same
+    "dynamically-computed recent timestamp, not a fixed historical date"
+    fix already applied to tests/test_report_materialization_barrier.py
+    earlier in this same PR."""
+    return (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
 
 
 class TestVerifyOne(unittest.TestCase):
@@ -838,7 +852,8 @@ class TestFailOpenGuard(unittest.TestCase):
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text("<!DOCTYPE html><html>content</html>", encoding="utf-8")
         self.manifest_path.write_text(json.dumps([
-            {"id": entry_id, "internal_report_url": f"/reports/2026/08/{entry_id}.html"}
+            {"id": entry_id, "internal_report_url": f"/reports/2026/08/{entry_id}.html",
+             "timestamp": _recent_timestamp()}
         ]), encoding="utf-8")
 
         with patch.object(rrv, "MANIFEST_PATH", self.manifest_path), \
@@ -849,6 +864,7 @@ class TestFailOpenGuard(unittest.TestCase):
              patch.object(rrv._verifier, "_s3api_head_object", return_value=None), \
              patch.object(rrv._verifier, "_boto3_head_object", return_value=None), \
              patch.object(rrv, "_fetch_public", return_value={"bytes": None, "status": 503, "headers": {}, "error": "HTTP 503"}), \
+             patch.object(rrv, "emit_summary", return_value={}), \
              patch.object(sys, "argv", ["r2_reports_verifier.py", "--enforce"]):
             exit_code = rrv.main()
 
@@ -973,6 +989,7 @@ class TestManifestR2Sync(unittest.TestCase):
              patch.object(rrv._verifier, "ACCESS_KEY", "test"), \
              patch.object(rrv._verifier, "SECRET_KEY", "test"), \
              patch.object(rrv._r2_upload, "s3_cp", return_value=True) as mock_cp, \
+             patch.object(rrv, "emit_summary", return_value={}), \
              patch.object(sys, "argv", ["r2_reports_verifier.py", "--skip-public"]):
             rrv.main()
 
@@ -991,6 +1008,7 @@ class TestManifestR2Sync(unittest.TestCase):
              patch.object(rrv._verifier, "ACCESS_KEY", "test"), \
              patch.object(rrv._verifier, "SECRET_KEY", "test"), \
              patch.object(rrv._r2_upload, "s3_cp") as mock_cp, \
+             patch.object(rrv, "emit_summary", return_value={}), \
              patch.object(sys, "argv", ["r2_reports_verifier.py", "--skip-public"]):
             # Must not raise (in particular, must not call the real
             # r2_upload.get_credentials(), which would sys.exit(1) here).
@@ -1013,6 +1031,7 @@ class TestManifestR2Sync(unittest.TestCase):
              patch.object(rrv._verifier, "ACCESS_KEY", "test"), \
              patch.object(rrv._verifier, "SECRET_KEY", "test"), \
              patch.object(rrv._r2_upload, "s3_cp", side_effect=RuntimeError("boom")), \
+             patch.object(rrv, "emit_summary", return_value={}), \
              patch.object(sys, "argv", ["r2_reports_verifier.py", "--skip-public"]):
             exit_code = rrv.main()
 
@@ -1049,7 +1068,8 @@ class TestBoundedConcurrencyAndDeadline(unittest.TestCase):
             report_path = self.reports_base / "2026" / "08" / f"{entry_id}.html"
             report_path.parent.mkdir(parents=True, exist_ok=True)
             report_path.write_text("<!DOCTYPE html><html>content</html>", encoding="utf-8")
-            entries.append({"id": entry_id, "internal_report_url": f"/reports/2026/08/{entry_id}.html"})
+            entries.append({"id": entry_id, "internal_report_url": f"/reports/2026/08/{entry_id}.html",
+                             "timestamp": _recent_timestamp()})
         self.manifest_path.write_text(json.dumps(entries), encoding="utf-8")
         return ids
 
@@ -1067,6 +1087,14 @@ class TestBoundedConcurrencyAndDeadline(unittest.TestCase):
         stack.enter_context(patch.object(rrv._verifier, "ACCESS_KEY", "test"))
         stack.enter_context(patch.object(rrv._verifier, "SECRET_KEY", "test"))
         stack.enter_context(patch.object(sys, "argv", ["r2_reports_verifier.py", "--skip-public"]))
+        # P0 R2 COST AUDIT FIX: main() now also emits an R2_COST_GUARD summary
+        # via scripts/r2_cost_guard.py's emit_summary(), which writes to
+        # data/quality/r2_cost_guard_report.json using THAT module's own
+        # REPO_ROOT -- independent of the rrv.REPO_ROOT patch above, so an
+        # unmocked call here would write to the real repo's file during a
+        # test run. Mocked for hermeticity; MAX_VERIFY_ITEMS/head/get
+        # accounting itself is covered by TestBoundedVerification below.
+        stack.enter_context(patch.object(rrv, "emit_summary", return_value={}))
 
     def test_deadline_exceeded_before_any_report_finishes_marks_all_not_processed_deadline(self):
         import contextlib
@@ -1108,8 +1136,10 @@ class TestBoundedConcurrencyAndDeadline(unittest.TestCase):
             report_path.parent.mkdir(parents=True, exist_ok=True)
             report_path.write_text("<!DOCTYPE html><html>content</html>", encoding="utf-8")
         self.manifest_path.write_text(json.dumps([
-            {"id": fast_id, "internal_report_url": f"/reports/2026/08/{fast_id}.html"},
-            {"id": slow_id, "internal_report_url": f"/reports/2026/08/{slow_id}.html"},
+            {"id": fast_id, "internal_report_url": f"/reports/2026/08/{fast_id}.html",
+             "timestamp": _recent_timestamp()},
+            {"id": slow_id, "internal_report_url": f"/reports/2026/08/{slow_id}.html",
+             "timestamp": _recent_timestamp()},
         ]), encoding="utf-8")
 
         with contextlib.ExitStack() as stack:
@@ -1145,8 +1175,10 @@ class TestBoundedConcurrencyAndDeadline(unittest.TestCase):
             report_path.parent.mkdir(parents=True, exist_ok=True)
             report_path.write_text("<!DOCTYPE html><html>content</html>", encoding="utf-8")
         self.manifest_path.write_text(json.dumps([
-            {"id": good_id, "internal_report_url": f"/reports/2026/08/{good_id}.html"},
-            {"id": bad_id, "internal_report_url": f"/reports/2026/08/{bad_id}.html"},
+            {"id": good_id, "internal_report_url": f"/reports/2026/08/{good_id}.html",
+             "timestamp": _recent_timestamp()},
+            {"id": bad_id, "internal_report_url": f"/reports/2026/08/{bad_id}.html",
+             "timestamp": _recent_timestamp()},
         ]), encoding="utf-8")
 
         with contextlib.ExitStack() as stack:
@@ -1196,6 +1228,210 @@ class TestBoundedConcurrencyAndDeadline(unittest.TestCase):
             "with 20 independent reports and 4 workers, genuine overlap is expected -- "
             "if this is 1, the pool silently degenerated back into sequential processing"
         )
+
+
+class TestOperationCounting(unittest.TestCase):
+    """P0 R2 COST AUDIT FIX: HEAD/GET calls are counted at their real call
+    sites inside verify_one() and reported through scripts/r2_cost_guard.py's
+    shared ledger -- previously entirely unaccounted for (this platform's
+    cost accounting only ever showed Class A operations from other scripts)."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="rrv_opcount_test_"))
+        self.report_path = self.tmp / "intel--opcounttest0000.html"
+        self.report_path.write_bytes(b"<!DOCTYPE html><html>x</html>")
+        rrv._head_call_count = 0
+        rrv._get_call_count = 0
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        rrv._head_call_count = 0
+        rrv._get_call_count = 0
+
+    def test_successful_verification_counts_one_head_and_one_get(self):
+        data = self.report_path.read_bytes()
+        with patch.object(rrv._verifier, "_s3api_head_object", return_value={"status": 200, "content_length": len(data), "etag": "x"}), \
+             patch.object(rrv, "_get_object_bytes", return_value=data):
+            rrv.verify_one(self.report_path, "reports/2026/08/intel--opcounttest0000.html", skip_public=True)
+
+        self.assertEqual(rrv._head_call_count, 1)
+        self.assertEqual(rrv._get_call_count, 1)
+
+    def test_404_counts_head_but_not_get(self):
+        with patch.object(rrv._verifier, "_s3api_head_object", return_value={"status": 404, "content_length": 0, "etag": ""}), \
+             patch.object(rrv._verifier, "_boto3_head_object", return_value=None):
+            rrv.verify_one(self.report_path, "reports/2026/08/intel--opcounttest0000.html", skip_public=True)
+
+        self.assertEqual(rrv._head_call_count, 1)
+        self.assertEqual(rrv._get_call_count, 0, "a 404 must never trigger a GET -- nothing to fetch")
+
+    def test_totally_unreachable_head_counts_both_the_awscli_and_boto3_fallback_attempts(self):
+        with patch.object(rrv._verifier, "_s3api_head_object", return_value=None), \
+             patch.object(rrv._verifier, "_boto3_head_object", return_value=None):
+            rrv.verify_one(self.report_path, "reports/2026/08/intel--opcounttest0000.html", skip_public=True)
+
+        self.assertEqual(rrv._head_call_count, 2, "one attempt via awscli, one boto3 fallback attempt")
+        self.assertEqual(rrv._get_call_count, 0)
+
+    def test_get_failure_after_head_success_counts_one_head_and_one_get(self):
+        with patch.object(rrv._verifier, "_s3api_head_object", return_value={"status": 200, "content_length": 10, "etag": "z"}), \
+             patch.object(rrv, "_get_object_bytes", return_value=None):
+            rrv.verify_one(self.report_path, "reports/2026/08/intel--opcounttest0000.html", skip_public=True)
+
+        self.assertEqual(rrv._head_call_count, 1)
+        self.assertEqual(rrv._get_call_count, 1, "the GET was attempted even though it failed -- still a real R2 call")
+
+
+class TestBoundedVerification(unittest.TestCase):
+    """P0 R2 COST AUDIT FIX -- the core defect a post-merge forensic audit of
+    this PR found: r2_reports_verifier.py's docstring and this platform's own
+    cost-containment documentation claimed this script was "bounded, not the
+    full historical corpus", but _load_in_window_entries() actually loaded
+    and verified EVERY entry in feed_manifest.json unconditionally -- no time
+    filter, no count cap. Since that manifest is the append-only, ever-
+    growing core intelligence record (report retention removes entries from
+    R2, never from the manifest), this script's real R2 HEAD+GET call volume
+    scaled directly with total historical corpus size (150-1040 calls/run
+    observed). These tests prove the fix actually bounds it, at manifest
+    sizes far larger than any realistic 24h window."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="rrv_bounded_test_"))
+        self.manifest_path = self.tmp / "feed_manifest.json"
+        self.reports_base = self.tmp / "reports"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_manifest(self, n_in_window: int = 0, n_out_of_window: int = 0, n_unparseable: int = 0) -> None:
+        now = datetime.now(timezone.utc)
+        entries = []
+        for i in range(n_in_window):
+            entry_id = f"intel--boundedtest{i:06d}"
+            report_path = self.reports_base / "2026" / "08" / f"{entry_id}.html"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text("<!DOCTYPE html><html>x</html>", encoding="utf-8")
+            entries.append({
+                "id": entry_id,
+                "internal_report_url": f"/reports/2026/08/{entry_id}.html",
+                "timestamp": (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+            })
+        for i in range(n_out_of_window):
+            entry_id = f"intel--oldtest{i:06d}"
+            report_path = self.reports_base / "2025" / "01" / f"{entry_id}.html"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text("<!DOCTYPE html><html>old</html>", encoding="utf-8")
+            entries.append({
+                "id": entry_id,
+                "internal_report_url": f"/reports/2025/01/{entry_id}.html",
+                "timestamp": (now - timedelta(days=400)).isoformat().replace("+00:00", "Z"),
+            })
+        for i in range(n_unparseable):
+            entry_id = f"intel--notstest{i:06d}"
+            entries.append({"id": entry_id, "internal_report_url": f"/reports/2026/08/{entry_id}.html"})
+        self.manifest_path.write_text(json.dumps(entries), encoding="utf-8")
+
+    def test_window_filter_excludes_entries_older_than_report_window_hours(self):
+        self._write_manifest(n_in_window=3, n_out_of_window=5)
+        now = datetime.now(timezone.utc)
+        with patch.object(rrv, "MANIFEST_PATH", self.manifest_path):
+            entries = rrv._load_in_window_entries(24, now)
+        self.assertEqual(len(entries), 3)
+
+    def test_window_filter_excludes_entries_with_no_parseable_timestamp(self):
+        """Fail-safe direction matches r2_report_publisher.py's own
+        build_publish_candidates(): a timestamp we cannot prove is fresh is
+        excluded, never assumed fresh."""
+        self._write_manifest(n_in_window=2, n_unparseable=4)
+        now = datetime.now(timezone.utc)
+        with patch.object(rrv, "MANIFEST_PATH", self.manifest_path):
+            entries = rrv._load_in_window_entries(24, now)
+        self.assertEqual(len(entries), 2)
+
+    def test_verify_item_count_never_exceeds_max_verify_items_regardless_of_manifest_size(self):
+        """The core proof: a manifest with 50x MAX_VERIFY_ITEMS in-window
+        entries must still only ever trigger MAX_VERIFY_ITEMS worth of real
+        verification work."""
+        import contextlib
+        n_entries = rrv.MAX_VERIFY_ITEMS * 50
+        self._write_manifest(n_in_window=n_entries)
+
+        call_count = {"n": 0}
+
+        def _fast_verify_one(local_path, r2_key, skip_public=False):
+            call_count["n"] += 1
+            return {"publication_state": "REMOTE_VERIFIED", "live_state": "PENDING"}
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(rrv, "MANIFEST_PATH", self.manifest_path))
+            stack.enter_context(patch.object(rrv, "REPO_ROOT", self.tmp))
+            stack.enter_context(patch.object(rrv, "OUTPUT_PATH", self.tmp / "manifest_out.json"))
+            stack.enter_context(patch.object(rrv._verifier, "CF_ACCOUNT_ID", "test"))
+            stack.enter_context(patch.object(rrv._verifier, "ACCESS_KEY", "test"))
+            stack.enter_context(patch.object(rrv._verifier, "SECRET_KEY", "test"))
+            stack.enter_context(patch.object(rrv, "verify_one", side_effect=_fast_verify_one))
+            stack.enter_context(patch.object(rrv._r2_upload, "s3_cp", return_value=True))
+            mock_emit = stack.enter_context(patch.object(rrv, "emit_summary", return_value={}))
+            stack.enter_context(patch.object(sys, "argv", ["r2_reports_verifier.py", "--skip-public"]))
+            rrv.main()
+
+        self.assertLessEqual(
+            call_count["n"], rrv.MAX_VERIFY_ITEMS,
+            f"verify_one() was called {call_count['n']} times for a {n_entries}-entry in-window "
+            f"manifest -- must never exceed MAX_VERIFY_ITEMS ({rrv.MAX_VERIFY_ITEMS}) regardless "
+            f"of manifest size (this is the exact defect the P0 R2 cost audit found: 150-1040 "
+            f"calls/run scaling directly with manifest size before this fix)"
+        )
+        manifest = json.loads((self.tmp / "manifest_out.json").read_text())
+        self.assertEqual(len(manifest["reports"]), n_entries, "every entry accounted for -- verified or explicitly excluded, never silently dropped")
+        self.assertEqual(manifest["summary"]["live_not_processed_budget"], n_entries - rrv.MAX_VERIFY_ITEMS)
+        mock_emit.assert_called_once()
+        plan = mock_emit.call_args[0][0]
+        self.assertEqual(plan.label, "r2_reports_verifier")
+        self.assertEqual(plan.bucket, rrv.BUCKET_REPORTS)
+
+    def test_overflow_items_recorded_as_not_processed_budget_never_silently_dropped(self):
+        import contextlib
+        n_entries = rrv.MAX_VERIFY_ITEMS + 50
+        self._write_manifest(n_in_window=n_entries)
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(rrv, "MANIFEST_PATH", self.manifest_path))
+            stack.enter_context(patch.object(rrv, "REPO_ROOT", self.tmp))
+            stack.enter_context(patch.object(rrv, "OUTPUT_PATH", self.tmp / "manifest_out.json"))
+            stack.enter_context(patch.object(rrv._verifier, "CF_ACCOUNT_ID", "test"))
+            stack.enter_context(patch.object(rrv._verifier, "ACCESS_KEY", "test"))
+            stack.enter_context(patch.object(rrv._verifier, "SECRET_KEY", "test"))
+            stack.enter_context(patch.object(rrv, "verify_one", return_value={"publication_state": "REMOTE_VERIFIED", "live_state": "PENDING"}))
+            stack.enter_context(patch.object(rrv._r2_upload, "s3_cp", return_value=True))
+            stack.enter_context(patch.object(rrv, "emit_summary", return_value={}))
+            stack.enter_context(patch.object(sys, "argv", ["r2_reports_verifier.py", "--skip-public"]))
+            rrv.main()
+
+        manifest = json.loads((self.tmp / "manifest_out.json").read_text())
+        budget_excluded = [r for r in manifest["reports"].values() if r["publication_state"] == "NOT_PROCESSED_BUDGET"]
+        self.assertEqual(len(budget_excluded), 50)
+        for r in budget_excluded:
+            self.assertEqual(r["live_state"], "LIVE_NOT_PROCESSED_BUDGET")
+            self.assertIn("MAX_VERIFY_ITEMS", r["error"])
+
+    def test_window_and_budget_bounds_are_independent_defenses(self):
+        """Belt-and-suspenders: even if every in-window entry somehow passed
+        the time filter, the count cap still applies on top of it -- the two
+        are separate, composable defenses, not alternatives."""
+        self._write_manifest(n_in_window=rrv.MAX_VERIFY_ITEMS * 2, n_out_of_window=rrv.MAX_VERIFY_ITEMS * 100)
+        now = datetime.now(timezone.utc)
+        with patch.object(rrv, "MANIFEST_PATH", self.manifest_path):
+            entries = rrv._load_in_window_entries(rrv.REPORT_WINDOW_HOURS, now)
+        # Window filter alone already excludes the out-of-window majority;
+        # what's left still exceeds MAX_VERIFY_ITEMS, so the count cap in
+        # main() (exercised in the tests above) is what ultimately bounds it.
+        self.assertEqual(len(entries), rrv.MAX_VERIFY_ITEMS * 2)
+        self.assertGreater(len(entries), rrv.MAX_VERIFY_ITEMS)
 
 
 if __name__ == "__main__":
