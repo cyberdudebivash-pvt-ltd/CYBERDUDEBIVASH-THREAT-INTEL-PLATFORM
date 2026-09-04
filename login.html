@@ -540,30 +540,42 @@ document.addEventListener('keydown', function(e) {
 
 // ── SSO return handling ────────────────────────────────────
 // handleSsoCallback (workers/intel-gateway/src/index.js) redirects back
-// here with either ?sso_token=&sso_tier=&sso_email=&sso_expires_in= on
-// success, or ?sso_error=<message> if the identity provider round trip
-// failed or the visitor's domain isn't enabled for SSO. Handled the same
-// way a successful /auth/login response is: same storeSession/
+// here with either ?sso_handoff=<single-use code> on success, or
+// ?sso_error=<message> if the identity provider round trip failed or the
+// visitor's domain isn't enabled for SSO. The redirect never carries the
+// session token itself -- only an opaque code, good for one exchange within
+// SSO_HANDOFF_TTL_SEC -- so nothing sensitive ever sits in this page's URL,
+// browser history, or Referer header. The code is stripped from the URL
+// before the exchange even starts, so it can't be replayed from history
+// even if the fetch below never completes. Successful exchange is handled
+// the same way a successful /auth/login response is: same storeSession/
 // showSuccessPanel, so an SSO sign-in and an API-key sign-in land in an
 // identical signed-in state.
-function handleSsoReturn() {
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get('sso_token');
-  const error = params.get('sso_error');
+async function handleSsoReturn() {
+  const params  = new URLSearchParams(window.location.search);
+  const handoff = params.get('sso_handoff');
+  const error   = params.get('sso_error');
+  if (!handoff && !error) return;
 
-  if (token) {
-    const data = { token, tier: params.get('sso_tier') || 'ENTERPRISE' };
-    storeSession(data, params.get('sso_email'));
-    showSuccessPanel(data, params.get('sso_email'), 'login');
-  } else if (error) {
+  const clean = window.location.pathname + window.location.hash;
+  window.history.replaceState({}, document.title, clean);
+
+  if (error) {
     showAlert('sso-error', 'sso-error-msg', error);
+    return;
   }
 
-  if (token || error) {
-    // Strip the query string so a refresh/bookmark never resubmits a token
-    // or re-shows a stale error.
-    const clean = window.location.pathname + window.location.hash;
-    window.history.replaceState({}, document.title, clean);
+  try {
+    const resp = await fetch(API_BASE + '/auth/sso/handoff?code=' + encodeURIComponent(handoff));
+    const data = await resp.json();
+    if (!resp.ok || !data.token) {
+      showAlert('sso-error', 'sso-error-msg', data.error || 'Your sign-in link expired. Please try again.');
+      return;
+    }
+    storeSession(data, data.email);
+    showSuccessPanel(data, data.email, 'login');
+  } catch (err) {
+    showAlert('sso-error', 'sso-error-msg', 'Network error completing sign-in. Please try again.');
   }
 }
 

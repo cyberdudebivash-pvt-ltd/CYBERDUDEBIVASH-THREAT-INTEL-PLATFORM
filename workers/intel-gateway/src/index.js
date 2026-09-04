@@ -2315,6 +2315,8 @@ async function handleLogout(request, env, ctx, auth) {
 // SSO (OpenID Connect) -- Google Workspace / Microsoft Entra ID
 // GET /auth/sso/:provider/start     -- begin the IdP redirect
 // GET /auth/sso/:provider/callback  -- IdP redirects back here with a code
+// GET /auth/sso/handoff             -- login.html exchanges the callback's
+//                                       single-use code for the real JWT
 //
 // Additive only: issues the exact same signJWT()-produced token /auth/login
 // issues (same {sub,tier,iat,exp,iss} shape, same CDB_JWT_SECRET), so every
@@ -2360,9 +2362,10 @@ const SSO_PROVIDERS = {
     client_secret_env: "MS_OAUTH_CLIENT_SECRET",
   },
 };
-const SSO_REDIRECT_BASE = "https://intel.cyberdudebivash.com/auth/sso";
-const SSO_LOGIN_PAGE    = "https://intel.cyberdudebivash.com/login.html";
-const SSO_STATE_TTL_SEC = 600; // 10 min to complete the IdP round trip
+const SSO_REDIRECT_BASE  = "https://intel.cyberdudebivash.com/auth/sso";
+const SSO_LOGIN_PAGE     = "https://intel.cyberdudebivash.com/login.html";
+const SSO_STATE_TTL_SEC  = 600; // 10 min to complete the IdP round trip
+const SSO_HANDOFF_TTL_SEC = 60; // single-use code, just long enough for login.html's own exchange fetch()
 
 function randomUrlSafeToken(byteLen) {
   const bytes = crypto.getRandomValues(new Uint8Array(byteLen));
@@ -2422,12 +2425,19 @@ async function verifyOidcIdToken(env, provider, idToken, clientId) {
   // both providers actually sign with) is ever accepted here.
   if (header.alg !== "RS256") return null;
 
-  let jwks = await getProviderJWKS(env, provider, false);
-  let jwk = (jwks.keys || []).find(k => k.kid === header.kid);
-  if (!jwk) {
-    jwks = await getProviderJWKS(env, provider, true);
-    jwk = (jwks.keys || []).find(k => k.kid === header.kid);
-  }
+  // getProviderJWKS throws on a network/HTTP failure -- caught here so this
+  // function's documented contract ("null on ANY failure") actually holds;
+  // otherwise an IdP-side JWKS outage would throw past handleSsoCallback's
+  // caller too, surfacing a raw 500 instead of ssoErrorRedirect's message.
+  let jwks, jwk;
+  try {
+    jwks = await getProviderJWKS(env, provider, false);
+    jwk  = (jwks.keys || []).find(k => k.kid === header.kid);
+    if (!jwk) {
+      jwks = await getProviderJWKS(env, provider, true);
+      jwk  = (jwks.keys || []).find(k => k.kid === header.kid);
+    }
+  } catch (_) { return null; }
   if (!jwk) return null;
 
   let cryptoKey;
@@ -2475,6 +2485,31 @@ function ssoErrorRedirect(message) {
   return Response.redirect(dest.toString(), 302);
 }
 
+// Anti login-CSRF: handleSsoStart sets this HttpOnly cookie holding the same
+// `state` it stores server-side; handleSsoCallback requires the two to
+// match. Without it, the KV-tracked state alone only proves the (code,
+// state) pair is genuine -- not that the browser presenting it is the one
+// that started the flow. An attacker can start their own OAuth flow,
+// capture the resulting callback URL (a genuine code+state pair for the
+// ATTACKER's own IdP account), and trick a victim into opening it; without
+// a browser-bound check the victim's browser would be signed into the
+// attacker's identity. SameSite=Lax (not Strict) is required so the cookie
+// still rides along on the top-level cross-site redirect the IdP issues
+// back to /callback.
+function ssoNonceCookieName(provider) {
+  return `sso_nonce_${provider}`;
+}
+
+function getCookie(request, name) {
+  const header = request.headers.get("Cookie") || "";
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === name) return part.slice(idx + 1).trim();
+  }
+  return null;
+}
+
 async function handleSsoStart(request, env, ctx, provider) {
   if (!isKnownSsoProvider(provider)) return jsonResp({ error: "Unknown SSO provider" }, 404);
   const cfg = SSO_PROVIDERS[provider];
@@ -2507,7 +2542,13 @@ async function handleSsoStart(request, env, ctx, provider) {
     code_challenge_method: "S256",
   });
   if (provider === "google") { params.set("access_type", "online"); params.set("prompt", "select_account"); }
-  return Response.redirect(`${cfg.authorize_url}?${params.toString()}`, 302);
+  return new Response(null, {
+    status: 302,
+    headers: {
+      "Location": `${cfg.authorize_url}?${params.toString()}`,
+      "Set-Cookie": `${ssoNonceCookieName(provider)}=${state}; Secure; HttpOnly; SameSite=Lax; Max-Age=${SSO_STATE_TTL_SEC}; Path=/auth/sso`,
+    },
+  });
 }
 
 async function handleSsoCallback(request, env, ctx, provider, ip) {
@@ -2524,6 +2565,13 @@ async function handleSsoCallback(request, env, ctx, provider, ip) {
     return ssoErrorRedirect(idpError === "access_denied" ? "Sign-in was cancelled." : "Sign-in failed. Please try again.");
   }
   if (!code || !state) return ssoErrorRedirect("Invalid sign-in response.");
+
+  // See ssoNonceCookieName's comment: this browser must be the one that
+  // started the flow, not just the holder of a genuine (code, state) pair.
+  if (getCookie(request, ssoNonceCookieName(provider)) !== state) {
+    auditLog(ctx, env, { action: "sso_state_cookie_mismatch", provider, ip });
+    return ssoErrorRedirect("Your sign-in session expired. Please try again.");
+  }
 
   const stateKey = `sso_state:${state}`;
   let stateRec;
@@ -2578,10 +2626,22 @@ async function handleSsoCallback(request, env, ctx, provider, ip) {
     return ssoErrorRedirect(`Your organization (${domain}) hasn't enabled Single Sign-On yet. Contact enterprise@cyberdudebivash.com to set it up.`);
   }
 
+  // Fail closed on a misconfigured domain record: TIERS[domainRec.tier]
+  // silently resolving to undefined (a typo, or a record provisioned before
+  // `tier` was set) must never fall back to granting the highest paid tier.
+  // Every other error path in this file's auth resolution defaults to
+  // TIERS.FREE / an explicit rejection, never an upgrade -- this matches
+  // that convention instead of inventing a new, more permissive one.
+  const resolvedTier = TIERS[domainRec.tier];
+  if (!resolvedTier) {
+    auditLog(ctx, env, { action: "sso_login_misconfigured_tier", provider, domain, raw_tier: domainRec.tier, ip });
+    return ssoErrorRedirect(`Your organization's Single Sign-On setup is incomplete. Contact enterprise@cyberdudebivash.com.`);
+  }
+
   const now_sec = Math.floor(Date.now() / 1000);
   const jwtPayload = {
     sub: domainRec.customer_id || `sso:${email}`,
-    tier: TIERS[domainRec.tier] || TIERS.ENTERPRISE,
+    tier: resolvedTier,
     iat: now_sec,
     exp: now_sec + JWT_EXPIRY_SEC,
     iss: "SENTINEL-APEX",
@@ -2589,12 +2649,52 @@ async function handleSsoCallback(request, env, ctx, provider, ip) {
   const token = await signJWT(jwtPayload, env.CDB_JWT_SECRET);
   auditLog(ctx, env, { action: "sso_login_success", provider, domain, sub: jwtPayload.sub, tier: jwtPayload.tier, ip });
 
+  // Hand the JWT to the browser via a single-use, short-lived opaque code --
+  // never in the redirect URL itself. A token placed in a URL survives in
+  // browser history, rides along in the Referer header on any subsequent
+  // navigation, and is routinely captured by CDN/access logs; a code that's
+  // deleted from KV the instant login.html exchanges it is worthless to
+  // anyone who only ever sees the URL.
+  const handoff = randomUrlSafeToken(24);
+  try {
+    await env.RATE_LIMIT_KV.put(
+      `sso_handoff:${handoff}`,
+      JSON.stringify({ token, tier: jwtPayload.tier, sub: jwtPayload.sub, email }),
+      { expirationTtl: SSO_HANDOFF_TTL_SEC }
+    );
+  } catch (_) {
+    return ssoErrorRedirect("Sign-in is temporarily unavailable. Please try again.");
+  }
+
   const dest = new URL(SSO_LOGIN_PAGE);
-  dest.searchParams.set("sso_token", token);
-  dest.searchParams.set("sso_tier", jwtPayload.tier);
-  dest.searchParams.set("sso_email", email);
-  dest.searchParams.set("sso_expires_in", String(JWT_EXPIRY_SEC));
+  dest.searchParams.set("sso_handoff", handoff);
   return Response.redirect(dest.toString(), 302);
+}
+
+// Single-use exchange for the opaque code handleSsoCallback's redirect
+// carries -- see the comment above that redirect for why the token itself
+// never appears in a URL. GET is fine here (no state-changing effect the
+// same request can't already do): the code is deleted on first read
+// regardless of outcome, so it's dead the instant this runs once.
+async function handleSsoHandoff(request, env) {
+  const url  = new URL(request.url);
+  const code = url.searchParams.get("code") || "";
+
+  if (!code) return jsonResp({ error: "Missing code" }, 400, { "Cache-Control": "no-store" });
+
+  const handoffKey = `sso_handoff:${code}`;
+  let rec;
+  try { rec = await env.RATE_LIMIT_KV.get(handoffKey, "json"); } catch (_) {}
+  try { await env.RATE_LIMIT_KV.delete(handoffKey); } catch (_) {} // single-use, even on a bad/duplicate code
+
+  if (!rec) {
+    return jsonResp({ error: "This sign-in link has expired or was already used. Please sign in again." }, 410, { "Cache-Control": "no-store" });
+  }
+  return jsonResp(
+    { token: rec.token, tier: rec.tier, sub: rec.sub, email: rec.email, expires_in: JWT_EXPIRY_SEC },
+    200,
+    { "Cache-Control": "no-store" }
+  );
 }
 
 // =============================================================================
@@ -5390,6 +5490,9 @@ async function handleRequest(request, env, ctx) {
   if (path.startsWith("/auth/sso/") && path.endsWith("/callback") && method === "GET") {
     const provider = path.slice("/auth/sso/".length, -"/callback".length);
     return await handleSsoCallback(request, env, ctx, provider, ip);
+  }
+  if (path === "/auth/sso/handoff" && method === "GET") {
+    return await handleSsoHandoff(request, env);
   }
 
   // --- /api/auth/* aliases ---------------------------------------------------
