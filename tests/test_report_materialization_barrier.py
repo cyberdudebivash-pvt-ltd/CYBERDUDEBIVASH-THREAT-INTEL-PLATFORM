@@ -23,6 +23,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -39,6 +40,17 @@ def _cleanup_reports(*item_ids):
             p.unlink(missing_ok=True)
 
 
+# P0 R2 cost fix: apply_report_materialization_barrier()'s generate_intel_reports.py
+# invocation now passes --since-hours (see scripts/run_pipeline.py) so a
+# >24h-old dangling report_url is correctly left alone rather than
+# re-materialized -- see that call site's own comment for why. Tests below
+# that need the barrier to actually materialize an item compute a shared
+# recent `_ts` inline (not a fixed historical literal), so the item's
+# timestamp and its report_url's yyyy/mm path segment can't drift apart --
+# rel_report_path() derives the path from the timestamp, not from a
+# pre-set URL string.
+
+
 class TestMaterializationBarrierAtomicity(unittest.TestCase):
     """Late-mutation guard: an item appended to the manifest AFTER Stage 3.6
     (simulating stage_sync_root_feed_json()'s reconciliation step carrying a
@@ -47,7 +59,12 @@ class TestMaterializationBarrierAtomicity(unittest.TestCase):
 
     def test_late_mutation_dangling_item_gets_closed(self):
         item_id = "intel--testfixture0000000c01"
-        dangling_url = f"/reports/2026/06/{item_id}.html"
+        # yyyy/mm must match what generate_intel_reports.py's rel_report_path()
+        # will actually compute from the item's OWN timestamp below (it derives
+        # the path from processed_at/timestamp, not from this pre-set URL
+        # string) -- kept as one shared `_ts` so they can't drift apart.
+        _ts = datetime.now(timezone.utc) - timedelta(hours=1)
+        dangling_url = f"/reports/{_ts.strftime('%Y')}/{_ts.strftime('%m')}/{item_id}.html"
         item = {
             "id": item_id,
             "title": "Late-mutation reconciliation test item",
@@ -56,8 +73,8 @@ class TestMaterializationBarrierAtomicity(unittest.TestCase):
                             "was never generated in this run's working tree.",
             "source": "TEST-FIXTURE",
             "severity": "LOW",
-            "timestamp": "2026-06-01T00:00:00Z",
-            "processed_at": "2026-06-01T00:00:00Z",
+            "timestamp": _ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "processed_at": _ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "report_url": dangling_url,
         }
         report_path = REPO_ROOT / dangling_url.lstrip("/")
@@ -111,20 +128,26 @@ class TestMaterializationBarrierAtomicity(unittest.TestCase):
         restored, and an external item survives untouched."""
         dangling_id = "intel--testfixture0000000c03"
         external_id = "intel--testfixture0000000c04"
-        dangling_url = f"/reports/2026/06/{dangling_id}.html"
+        # See test_late_mutation_dangling_item_gets_closed's comment: the URL's
+        # yyyy/mm must match what rel_report_path() derives from the item's
+        # OWN timestamp below, and that timestamp must be within the
+        # matbarrier's --since-hours window for materialization to occur.
+        _ts = datetime.now(timezone.utc) - timedelta(hours=1)
+        dangling_url = f"/reports/{_ts.strftime('%Y')}/{_ts.strftime('%m')}/{dangling_id}.html"
         external_url = "https://example-source.test/articles/some-advisory"
+        _ts_str = _ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         items = [
             {
                 "id": dangling_id, "title": "Dangling item in a bare list",
                 "description": "x" * 60, "source": "TEST-FIXTURE", "severity": "LOW",
-                "timestamp": "2026-06-01T00:00:00Z", "processed_at": "2026-06-01T00:00:00Z",
+                "timestamp": _ts_str, "processed_at": _ts_str,
                 "report_url": dangling_url,
             },
             {
                 "id": external_id, "title": "External item in a bare list",
                 "description": "x" * 60, "source": "TEST-FIXTURE", "severity": "LOW",
-                "timestamp": "2026-06-01T00:00:00Z", "processed_at": "2026-06-01T00:00:00Z",
+                "timestamp": _ts_str, "processed_at": _ts_str,
                 "report_url": external_url,
             },
         ]

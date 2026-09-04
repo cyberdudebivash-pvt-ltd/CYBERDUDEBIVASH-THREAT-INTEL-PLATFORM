@@ -5940,7 +5940,15 @@
               reports = reports.filter(function(r) { return (r.severity||'UNKNOWN').toUpperCase() === filter; });
             }
             if (reports.length === 0) {
-              grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">No reports match filter.</div>';
+              // P0 R2 retention fix: distinguish "genuinely zero reports in
+              // the rolling window" (API-provided empty_state_message, real
+              // truthful state -- never fabricate/show stale reports to
+              // paper over it) from "filtered to zero" (a plain ALL-severity
+              // set that just happens to not match the selected filter).
+              var emptyMsg = (filter === 'ALL' && _cdbReportsData && _cdbReportsData.empty_state_message)
+                ? _cdbReportsData.empty_state_message
+                : 'No reports match filter.';
+              grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">' + _esc(emptyMsg) + '</div>';
             } else {
               grid.innerHTML = reports.map(_renderCard).join('');
             }

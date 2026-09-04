@@ -113,6 +113,24 @@ try:
 except ImportError:
     pass
 
+# P0 R2 COST INCIDENT FIX (2026-09): --since-hours support. Reuses the
+# platform's single canonical-timestamp parser (scripts/canonical_timestamp.py)
+# rather than hand-rolling another datetime.fromisoformat() variant -- see
+# that module's own docstring on why 90+ independent parsers is exactly the
+# failure mode this avoids.
+_CANONICAL_TS_AVAILABLE = False
+_parse_canonical_ts = None
+try:
+    import sys as _ts_sys
+    _ts_scripts_dir = str(Path(__file__).resolve().parent)
+    if _ts_scripts_dir not in _ts_sys.path:
+        _ts_sys.path.insert(0, _ts_scripts_dir)
+    from canonical_timestamp import parse_timestamp as _parse_canonical_ts_fn
+    _parse_canonical_ts = _parse_canonical_ts_fn
+    _CANONICAL_TS_AVAILABLE = True
+except ImportError:
+    pass
+
 # ── v148.1.0: APEX Intelligence Upgrade Engine  -  premium CTI enrichment ─────
 _APEX_UPGRADE_AVAILABLE = False
 try:
@@ -2460,6 +2478,33 @@ def save_manifest(data: dict) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
+def _within_report_window(item: dict, since_hours: Optional[float], now: datetime) -> bool:
+    """P0 R2 COST INCIDENT FIX: True iff --since-hours is unset (unbounded,
+    default -- 100% backward compatible with every existing caller/test that
+    doesn't pass the flag) or item's canonical timestamp (timestamp ->
+    processed_at -> published_at precedence -- the same precedence already
+    used in production by scripts/intelligence_quality_scorer.py::
+    _compute_age_days) falls within the last since_hours hours.
+
+    A missing/unparseable timestamp returns False (fail safe = do NOT
+    render/touch an item we cannot prove is current -- never fabricate a
+    timestamp, never assume "new"). This is deliberately the opposite
+    fail-safe direction from a scoring function that defaults stale data to
+    "assume fresh": rendering a report is a write, and the safe default for
+    an unprovable write is to skip it, not to perform it.
+    """
+    if since_hours is None:
+        return True
+    raw = item.get("timestamp") or item.get("processed_at") or item.get("published_at")
+    if not raw or not _CANONICAL_TS_AVAILABLE:
+        return False
+    result = _parse_canonical_ts(raw)
+    if result.parse_status != "SUCCESS" or result.normalized is None:
+        return False
+    age_hours = (now - result.normalized).total_seconds() / 3600.0
+    return 0 <= age_hours <= since_hours
+
+
 def main(argv=None) -> int:
     global MANIFEST_PATH
 
@@ -2476,6 +2521,14 @@ def main(argv=None) -> int:
                              "already resolves to an existing local file. Lets this "
                              "script be re-invoked cheaply as a late materialization "
                              "barrier without re-rendering the whole manifest.")
+    parser.add_argument("--since-hours", type=float, default=None,
+                        help="P0 R2 cost fix: only render/touch items whose canonical "
+                             "timestamp is within the last N hours. Default: unbounded "
+                             "(process every item -- unchanged, backward-compatible "
+                             "behavior). The normal scheduled pipeline passes 24 here "
+                             "so historical items are never regenerated/re-touched, "
+                             "which would otherwise keep re-uploading content the R2 "
+                             "24h retention policy has already retired.")
     args = parser.parse_args(argv)
 
     MANIFEST_PATH = Path(args.manifest)
@@ -2520,10 +2573,18 @@ def main(argv=None) -> int:
     errors = 0
     only_missing_candidates = 0  # P0.2: items --only-missing actually had to act on
     r2_upload_failed = 0
+    excluded_by_window = 0  # P0 R2 cost fix: items --since-hours excluded, untouched
     t_start = time.monotonic()
+    _window_now = datetime.now(timezone.utc)
     # Absolute batch timeout: 3 hours max regardless of batch size.
     # Prevents indefinite stalls from hanging renders or APEX module deadlocks.
     _BATCH_TIMEOUT_S = 10800  # 3 hours
+
+    if args.since_hours is not None:
+        log(f"--since-hours {args.since_hours}: only items with a canonical timestamp "
+            f"within the last {args.since_hours}h will be rendered/touched; everything "
+            f"older is left completely untouched (report_url, validation_status, etc. "
+            f"unchanged) -- see docs/P0_R2_COST_CONTAINMENT.md.")
 
     for _idx, item in enumerate(items):
         if time.monotonic() - t_start > _BATCH_TIMEOUT_S:
@@ -2564,6 +2625,18 @@ def main(argv=None) -> int:
             if _existing_ru.startswith("/reports/") and (REPO_ROOT / _existing_ru.lstrip("/")).exists():
                 continue
             only_missing_candidates += 1
+
+        # P0 R2 COST INCIDENT FIX: --since-hours gate applies regardless of
+        # --only-missing -- without this, an item whose report R2 object was
+        # already retired by the 24h retention policy (report_url cleared to
+        # "" by scripts/r2_report_publisher.py) would look like a fresh
+        # --only-missing "repair candidate" here and get re-rendered every
+        # run forever, defeating the retention policy it was just retired
+        # under. Left completely untouched when excluded -- no field on
+        # this item is read again below, nothing is written.
+        if not _within_report_window(item, args.since_hours, _window_now):
+            excluded_by_window += 1
+            continue
 
         # ── Zero-skip policy: generate report for EVERY real entry ──
         # Short entries get an enriched template - no blanket skip
@@ -2709,7 +2782,8 @@ def main(argv=None) -> int:
     elapsed = time.monotonic() - t_start
     log(
         f"COMPLETE: written={written} uploaded={uploaded} skipped={skipped_brand} "
-        f"errors={errors} total={len(items)} elapsed={elapsed:.1f}s",
+        f"excluded_by_window={excluded_by_window} errors={errors} total={len(items)} "
+        f"elapsed={elapsed:.1f}s",
     )
 
     # Persist manifest -- preserve top-level array format for list-style
@@ -2781,7 +2855,18 @@ def main(argv=None) -> int:
             log(f"[BARRIER-METRICS] failed to write report_continuity_barrier.json (non-fatal): {_barrier_exc}", "warning")
 
     # v152.1: enforce --fail-on-zero flag (was parsed but never checked)
-    if args.fail_on_zero and written == 0:
+    # P0 R2 COST INCIDENT FIX: written==0 is no longer sufficient on its own
+    # to mean "the renderer is broken" once --since-hours is in play -- it is
+    # also the correct, expected outcome of a genuinely quiet window (zero
+    # new intel in the last N hours), which the platform's retention policy
+    # explicitly requires be treated as valid, not an error (never fabricate
+    # a report to avoid an empty state). Only fail when there was at least
+    # one item this run was actually eligible to render (not window-excluded,
+    # not brand-skipped) and still produced zero written reports -- that
+    # combination means real work existed and nothing came out of it, which
+    # --fail-on-zero exists to catch.
+    eligible = len(items) - excluded_by_window - skipped_brand
+    if args.fail_on_zero and written == 0 and eligible > 0:
         return 1
 
     return 0  # success; written count is not an exit code

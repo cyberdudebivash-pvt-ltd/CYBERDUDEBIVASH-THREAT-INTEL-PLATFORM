@@ -66,6 +66,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+from canonical_timestamp import parse_timestamp  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -78,6 +83,19 @@ BASE_URL     = os.environ.get("PLATFORM_BASE_URL", "https://intel.cyberdudebivas
 # How many reports to include in index.json (full index) vs latest.json (quick-load)
 MAX_INDEX  = int(os.environ.get("REPORTS_INDEX_MAX",  "500"))
 MAX_LATEST = int(os.environ.get("REPORTS_LATEST_MAX",  "50"))
+
+# P0 R2 COST INCIDENT FIX (2026-09): the dashboard report index must reflect
+# only the rolling hot-report window R2 actually retains -- see
+# scripts/r2_report_publisher.py's module docstring for the full incident.
+# Explicitly NOT filesystem mtime (forensic analysis found mtime unreliable
+# here: this repo's reports/ tree has previously been bulk-seeded by single
+# commits and reset on fresh checkouts -- see scripts/report_archive_manager.py's
+# own REPORT_RETENTION_DAYS docstring for the same finding). Uses the
+# platform's canonical-timestamp precedence (timestamp -> processed_at ->
+# published_at, matching scripts/intelligence_quality_scorer.py::
+# _compute_age_days) via scripts/canonical_timestamp.py.
+REPORT_WINDOW_HOURS = float(os.environ.get("REPORT_WINDOW_HOURS", "24"))
+EMPTY_WINDOW_MESSAGE = "No intelligence reports generated during the last 24 hours."
 
 logging.basicConfig(
     level=logging.INFO,
@@ -228,25 +246,8 @@ def main() -> int:
     log.info("Max latest   : %d", MAX_LATEST)
 
     # ------------------------------------------------------------------
-    # 1. Scan reports/ directory for all intel--*.html files
-    # ------------------------------------------------------------------
-    if not REPORTS_ROOT.exists():
-        log.warning("reports/ directory not found — creating empty index")
-        all_report_paths: List[Path] = []
-    else:
-        log.info("Scanning reports/ directory...")
-        all_report_paths = sorted(
-            [
-                p for p in REPORTS_ROOT.rglob("intel--*.html")
-                if p.is_file() and p.stat().st_size > 512
-            ],
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,  # newest first
-        )
-    log.info("Found %d intel report files on disk", len(all_report_paths))
-
-    # ------------------------------------------------------------------
-    # 2. Load api/feed.json for metadata enrichment
+    # 1. Load api/feed.json (needed first now -- it's the source of the
+    #    canonical timestamp the 24h window filter below requires)
     # ------------------------------------------------------------------
     feed_map: Dict[str, dict] = {}
     if API_FEED.exists():
@@ -258,6 +259,61 @@ def main() -> int:
             log.info("api/feed.json: %d items loaded for enrichment", len(feed_map))
     else:
         log.warning("api/feed.json not found — index will have minimal metadata")
+
+    def _canonical_ts(report_id: str) -> Optional[datetime]:
+        """Resolves a report's canonical intelligence timestamp via its
+        api/feed.json entry -- timestamp -> processed_at -> published_at
+        precedence (matches scripts/intelligence_quality_scorer.py::
+        _compute_age_days). None (excluded from the hot index, never
+        fabricated) if the id has no feed entry or no parseable timestamp --
+        see REPORT_WINDOW_HOURS's module-level comment for why mtime is not
+        used as a fallback here."""
+        feed_item = feed_map.get(report_id)
+        if not feed_item:
+            return None
+        raw = feed_item.get("timestamp") or feed_item.get("processed_at") or feed_item.get("published_at")
+        if not raw:
+            return None
+        result = parse_timestamp(raw)
+        return result.normalized if result.parse_status == "SUCCESS" else None
+
+    # ------------------------------------------------------------------
+    # 2. Scan reports/ directory, bounded to the rolling REPORT_WINDOW_HOURS
+    #    window by each file's CANONICAL intelligence timestamp (never
+    #    filesystem mtime -- see module-level comment). A file present on
+    #    disk whose id has no feed_map match, or no parseable canonical
+    #    timestamp, is excluded: this index cannot prove it belongs in the
+    #    hot window, so it is not listed as current (fail safe).
+    # ------------------------------------------------------------------
+    if not REPORTS_ROOT.exists():
+        log.warning("reports/ directory not found — creating empty index")
+        all_report_paths: List[Path] = []
+    else:
+        log.info("Scanning reports/ directory (window = %sh)...", REPORT_WINDOW_HOURS)
+        now = datetime.now(timezone.utc)
+        _dated: List[tuple] = []
+        _excluded_stale_or_unproven = 0
+        for p in REPORTS_ROOT.rglob("intel--*.html"):
+            if not p.is_file() or p.stat().st_size <= 512:
+                continue
+            ts = _canonical_ts(_extract_id_from_path(p))
+            if ts is None:
+                _excluded_stale_or_unproven += 1
+                continue
+            age_hours = (now - ts).total_seconds() / 3600.0
+            if not (0 <= age_hours <= REPORT_WINDOW_HOURS):
+                _excluded_stale_or_unproven += 1
+                continue
+            _dated.append((ts, p))
+        _dated.sort(key=lambda t: t[0], reverse=True)  # newest first
+        all_report_paths = [p for _ts, p in _dated]
+        if _excluded_stale_or_unproven:
+            log.info(
+                "Excluded %d report file(s) on disk: outside the %sh window or no "
+                "provable canonical timestamp (not listed as current -- fail safe).",
+                _excluded_stale_or_unproven, REPORT_WINDOW_HOURS,
+            )
+    log.info("Found %d intel report file(s) within the %sh hot window", len(all_report_paths), REPORT_WINDOW_HOURS)
 
     # ------------------------------------------------------------------
     # 3. Build report entries (newest-first, capped at MAX_INDEX)
@@ -370,10 +426,13 @@ def main() -> int:
         "generated_at":   now_str,
         "platform":       "CYBERDUDEBIVASH SENTINEL APEX v161.2",
         "base_url":       BASE_URL,
-        "total_reports":  len(all_report_paths),   # all files on disk
+        "window_hours":   REPORT_WINDOW_HOURS,
+        "total_reports":  len(all_report_paths),   # all files within the hot window
         "reports_listed": len(report_entries),      # capped at MAX_INDEX
         "reports":        report_entries,
     }
+    if not report_entries:
+        index_payload["empty_state_message"] = EMPTY_WINDOW_MESSAGE
 
     index_path = API_REPORTS / "index.json"
     if _atomic_write(index_path, index_payload):
@@ -389,10 +448,13 @@ def main() -> int:
         "generated_at":   now_str,
         "platform":       "CYBERDUDEBIVASH SENTINEL APEX v161.2",
         "base_url":       BASE_URL,
+        "window_hours":   REPORT_WINDOW_HOURS,
         "total_reports":  len(all_report_paths),
         "reports_listed": min(len(report_entries), MAX_LATEST),
         "reports":        report_entries[:MAX_LATEST],
     }
+    if not report_entries:
+        latest_payload["empty_state_message"] = EMPTY_WINDOW_MESSAGE
 
     latest_path = API_REPORTS / "latest.json"
     if _atomic_write(latest_path, latest_payload):
@@ -412,12 +474,15 @@ def main() -> int:
         "schema_version": "1.0",
         "generated_at":   now_str,
         "platform":       "CYBERDUDEBIVASH SENTINEL APEX v161.2",
+        "window_hours":   REPORT_WINDOW_HOURS,
         "total_reports":  len(all_report_paths),
         "by_severity":    severity_counts,
         "by_month":       sorted_months,
         "latest_report_ts": report_entries[0]["timestamp"] if report_entries else "",
         "oldest_report_ts": report_entries[-1]["timestamp"] if report_entries else "",
     }
+    if not report_entries:
+        stats_payload["empty_state_message"] = EMPTY_WINDOW_MESSAGE
 
     stats_path = API_REPORTS / "stats.json"
     if _atomic_write(stats_path, stats_payload):

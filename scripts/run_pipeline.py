@@ -1617,12 +1617,20 @@ def stage_html_reports() -> None:
     t_start = time.monotonic()
 
     # v184.0: Zero-skip policy -- every intel entry generates a 16-section report.
+    # P0 R2 COST INCIDENT FIX: --since-hours <REPORT_WINDOW_HOURS> bounds
+    # rendering to the rolling hot window -- without it, this call regenerates
+    # EVERY historical item on every pipeline run (confirmed root cause of the
+    # R2 Class A cost incident; see docs/P0_R2_COST_CONTAINMENT.md and
+    # scripts/r2_report_publisher.py's module docstring). --fail-on-zero's
+    # semantics were adjusted (not weakened) alongside this: a genuinely quiet
+    # window still exits 0.
     r = run_script(
         [
             sys.executable, "scripts/generate_intel_reports.py",
             "--manifest", "data/stix/feed_manifest.json",
             "--public-prefix", "https://intel.cyberdudebivash.com",
             "--fail-on-zero",
+            "--since-hours", os.environ.get("REPORT_WINDOW_HOURS", "24"),
             "--limit", "0",
         ],
         stage="3.6.reports",
@@ -1645,6 +1653,7 @@ def stage_html_reports() -> None:
                 sys.executable, "scripts/generate_intel_reports.py",
                 "--manifest", "api/feed.json",
                 "--public-prefix", "https://intel.cyberdudebivash.com",
+                "--since-hours", os.environ.get("REPORT_WINDOW_HOURS", "24"),
                 "--limit", "0",
             ],
             stage="3.6.reports.feed",
@@ -3721,7 +3730,14 @@ def stage_sync_root_feed_json() -> None:
                 )
                 _rpt_result = run_script(
                     [sys.executable, "scripts/generate_intel_reports.py",
-                     "--manifest", "api/feed.json"],
+                     "--manifest", "api/feed.json",
+                     # P0 R2 cost fix: bound gap-fill to the hot window too --
+                     # otherwise an item that aged out of R2's 24h retention
+                     # (report_url already cleared to "" by
+                     # scripts/r2_report_publisher.py) looks exactly like a
+                     # "missing report_url" gap here and gets re-rendered
+                     # every run forever.
+                     "--since-hours", os.environ.get("REPORT_WINDOW_HOURS", "24")],
                     stage="3.9-rpt-fill", allow_fail=True, timeout=120,
                 )
                 if _rpt_result.returncode == 0:
@@ -3855,7 +3871,15 @@ def apply_report_materialization_barrier(manifest_path: Path) -> None:
                 [sys.executable, "scripts/generate_intel_reports.py",
                  "--manifest", str(manifest_path),
                  "--public-prefix", "https://intel.cyberdudebivash.com",
-                 "--only-missing", "--limit", "0"],
+                 # P0 R2 cost fix: defense-in-depth against the same aged-out
+                 # re-render loop as the 3.9-RPT gap-fill above -- _mat_dangling
+                 # already excludes empty report_url (retired items), but this
+                 # closes the residual window where retirement hasn't cleared
+                 # the field in this checkout yet (ordering/race) and a stale
+                 # "/reports/"-prefixed URL to an already-deleted >24h R2 object
+                 # would otherwise still read as a genuine dangling reference.
+                 "--only-missing", "--since-hours", os.environ.get("REPORT_WINDOW_HOURS", "24"),
+                 "--limit", "0"],
                 stage="matbarrier", allow_fail=True, timeout=600,
             )
             if _mat_result.returncode == 0:
