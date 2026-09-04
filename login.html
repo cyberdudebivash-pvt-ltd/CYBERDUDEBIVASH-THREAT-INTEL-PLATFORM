@@ -444,7 +444,7 @@ async function exchangeApiKeyForSession(apiKey, knownEmail, mode) {
       return;
     }
 
-    storeSession(data, knownEmail, apiKey);
+    storeSession(data, knownEmail);
     showSuccessPanel(data, knownEmail, mode);
 
   } catch (err) {
@@ -458,10 +458,13 @@ async function exchangeApiKeyForSession(apiKey, knownEmail, mode) {
 // data is /auth/login's real response shape: {token, tier, sub, ...} --
 // no email field exists there, so the caller passes along whatever email
 // it independently knows (typed at signup, or verified by an IdP via SSO).
-function storeSession(data, knownEmail, apiKey) {
+// Deliberately does NOT persist the raw API key: it's a non-expiring
+// credential (unlike the JWT, which carries its own exp), so caching it
+// client-side would let any future XSS on this page hand an attacker a
+// permanent account credential instead of a bounded-lifetime session.
+function storeSession(data, knownEmail) {
   try {
     sessionStorage.setItem('sentinel_token', data.token || '');
-    if (apiKey) sessionStorage.setItem('sentinel_api_key', apiKey);
     sessionStorage.setItem('sentinel_user', JSON.stringify({
       sub:   data.sub,
       email: knownEmail || null,
@@ -550,7 +553,7 @@ function handleSsoReturn() {
 
   if (token) {
     const data = { token, tier: params.get('sso_tier') || 'ENTERPRISE' };
-    storeSession(data, params.get('sso_email'), null);
+    storeSession(data, params.get('sso_email'));
     showSuccessPanel(data, params.get('sso_email'), 'login');
   } else if (error) {
     showAlert('sso-error', 'sso-error-msg', error);
