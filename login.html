@@ -217,10 +217,25 @@ body{min-height:100vh;display:flex;flex-direction:column;background:radial-gradi
       <p>Create your free account or sign in to access real-time CVE intelligence, STIX 2.1 feeds, and AI-powered SOC automation.</p>
     </div>
 
+    <!-- SSO -->
+    <div class="auth-body" style="padding-bottom:0">
+      <div class="alert error" id="sso-error"><span class="alert-icon">✕</span><div id="sso-error-msg"></div></div>
+      <a class="btn-alt" href="https://intel.cyberdudebivash.com/auth/sso/google/start" style="display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;margin-bottom:8px">
+        <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.6 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.5 0 10.5-2.1 14.3-5.6l-6.6-5.6C29.6 34.7 26.9 36 24 36c-5.3 0-9.7-3.4-11.3-8.1l-6.6 5.1C9.6 39.6 16.3 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.6l6.6 5.6C41.7 35.9 44 30.4 44 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
+        Sign in with Google Workspace
+      </a>
+      <a class="btn-alt" href="https://intel.cyberdudebivash.com/auth/sso/microsoft/start" style="display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;margin-bottom:4px">
+        <svg width="16" height="16" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
+        Sign in with Microsoft
+      </a>
+      <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:18px">Enterprise SSO — for organizations with SSO enabled on their account</p>
+      <div class="divider" style="margin-top:0">or</div>
+    </div>
+
     <!-- Tabs -->
     <div class="auth-tabs">
-      <button class="auth-tab active" onclick="switchTab('signup')" id="tab-signup">CREATE ACCOUNT</button>
-      <button class="auth-tab" onclick="switchTab('login')" id="tab-login">SIGN IN</button>
+      <button class="auth-tab active" onclick="switchTab('signup')" id="tab-signup">CREATE FREE ACCOUNT</button>
+      <button class="auth-tab" onclick="switchTab('login')" id="tab-login">SIGN IN WITH API KEY</button>
     </div>
 
     <!-- Form Body -->
@@ -230,27 +245,18 @@ body{min-height:100vh;display:flex;flex-direction:column;background:radial-gradi
       <div class="form-panel active" id="panel-signup">
         <div class="alert info show" id="signup-info">
           <span class="alert-icon">ℹ</span>
-          <div><strong>Free account</strong> — instant API access. No credit card required. Upgrade to Pro at any time.</div>
+          <div><strong>Free account</strong> — instant API access. No credit card, no password — your API key is emailed to you immediately.</div>
         </div>
         <div class="alert success" id="signup-success"><span class="alert-icon">✓</span><div id="signup-success-msg"></div></div>
         <div class="alert error" id="signup-error"><span class="alert-icon">✕</span><div id="signup-error-msg"></div></div>
 
         <div class="form-group">
-          <label class="form-label">Full Name</label>
-          <input type="text" class="form-input" id="signup-name" placeholder="Jane Smith" autocomplete="name">
-        </div>
-        <div class="form-group">
           <label class="form-label">Work Email</label>
           <input type="email" class="form-input" id="signup-email" placeholder="jane@company.com" autocomplete="email">
         </div>
-        <div class="form-group">
-          <label class="form-label">Password</label>
-          <input type="password" class="form-input" id="signup-password" placeholder="Min 8 characters" autocomplete="new-password" oninput="checkPasswordStrength(this.value)">
-          <div class="pw-strength"><div class="pw-strength-bar" id="pw-bar"></div></div>
-        </div>
 
         <button class="btn-primary" id="btn-signup" onclick="doSignup()">
-          <span class="btn-text">⚡ CREATE FREE ACCOUNT</span>
+          <span class="btn-text">⚡ GET FREE API KEY</span>
           <div class="spinner"></div>
         </button>
 
@@ -263,12 +269,8 @@ body{min-height:100vh;display:flex;flex-direction:column;background:radial-gradi
         <div class="alert error" id="login-error"><span class="alert-icon">✕</span><div id="login-error-msg"></div></div>
 
         <div class="form-group">
-          <label class="form-label">Email Address</label>
-          <input type="email" class="form-input" id="login-email" placeholder="jane@company.com" autocomplete="email">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Password</label>
-          <input type="password" class="form-input" id="login-password" placeholder="Your password" autocomplete="current-password">
+          <label class="form-label">API Key</label>
+          <input type="password" class="form-input" id="login-apikey" placeholder="Paste the API key from your signup email" autocomplete="off">
         </div>
 
         <button class="btn-primary" id="btn-login" onclick="doLogin()">
@@ -276,7 +278,7 @@ body{min-height:100vh;display:flex;flex-direction:column;background:radial-gradi
           <div class="spinner"></div>
         </button>
 
-        <div class="divider">need an account?</div>
+        <div class="divider">don't have a key?</div>
         <button class="btn-alt" onclick="switchTab('signup')">Create free account</button>
       </div>
 
@@ -328,8 +330,8 @@ body{min-height:100vh;display:flex;flex-direction:column;background:radial-gradi
 
 <script>
 // ============================================================
-// SENTINEL APEX Auth Portal — Production JavaScript v184.0
-// Calls: POST /auth/signup  |  POST /auth/login
+// SENTINEL APEX Auth Portal — Production JavaScript v185.0
+// Calls: POST /api/keys/free  |  POST /auth/login  |  GET /auth/sso/:provider/start
 // ============================================================
 
 const API_BASE = 'https://intel.cyberdudebivash.com';
@@ -350,50 +352,53 @@ function clearAlerts() {
   document.querySelectorAll('.alert').forEach(el => el.classList.remove('show'));
 }
 
-// ── Password strength indicator ──────────────────────────
-function checkPasswordStrength(pw) {
-  const bar = document.getElementById('pw-bar');
-  let strength = 0;
-  if (pw.length >= 8)  strength += 25;
-  if (pw.length >= 12) strength += 25;
-  if (/[A-Z]/.test(pw)) strength += 25;
-  if (/[0-9!@#$%^&*]/.test(pw)) strength += 25;
-  bar.style.width = strength + '%';
-  bar.style.background = strength <= 25 ? '#ef4444' : strength <= 50 ? '#f59e0b' : strength <= 75 ? '#3b82f6' : '#10b981';
-}
-
 // ── Sign Up ───────────────────────────────────────────────
+// ROOT CAUSE FIX (live-data audit): this previously posted {name,email,
+// password} to /auth/signup, a route that does not exist anywhere in the
+// backend (confirmed live: HTTP 404) -- account creation via this page was
+// 100% broken for every visitor. The platform's real, working, already-live
+// signup path is POST /api/keys/free (no password -- confirmed via
+// /api/auth/register's own 422 response: "Email registration is not
+// available. API keys are issued upon subscription."). Wired to that real
+// endpoint instead of inventing a new one.
 async function doSignup() {
   clearAlerts();
-  const name     = document.getElementById('signup-name').value.trim();
-  const email    = document.getElementById('signup-email').value.trim().toLowerCase();
-  const password = document.getElementById('signup-password').value;
+  const email = document.getElementById('signup-email').value.trim().toLowerCase();
 
   if (!email || !email.includes('@')) return showAlert('signup-error', 'signup-error-msg', 'Please enter a valid email address.');
-  if (!password || password.length < 8) return showAlert('signup-error', 'signup-error-msg', 'Password must be at least 8 characters.');
 
   const btn = document.getElementById('btn-signup');
   setBtnLoading(btn, true);
 
   try {
-    const resp = await fetch(API_BASE + '/auth/signup', {
+    const resp = await fetch(API_BASE + '/api/keys/free', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ name, email, password }),
+      body:    JSON.stringify({ email }),
     });
     const data = await resp.json();
 
     if (!resp.ok) {
-      const msg = data.message || (data.error === 'email_taken' ? 'An account with this email already exists. Please sign in.' : 'Signup failed. Please try again.');
-      showAlert('signup-error', 'signup-error-msg', msg);
+      showAlert('signup-error', 'signup-error-msg', data.error || 'Signup failed. Please try again.');
       setBtnLoading(btn, false);
       return;
     }
 
-    // Success
-    _authToken = data.token;
-    storeSession(data);
-    showSuccessPanel(data, 'signup');
+    if (data.status === 'check_email') {
+      // Existing account -- the real key was just re-sent to their inbox.
+      // No key is returned here by design (see handleFreeKeyRequest's own
+      // comment: returning it would let anyone pull back someone else's
+      // live credential just by knowing their email).
+      showAlert('signup-success', 'signup-success-msg', "You already have a free account — we've re-sent your API key to " + email + ".");
+      setBtnLoading(btn, false);
+      return;
+    }
+
+    // Brand-new key issued (data.api_key, data.tier). Immediately exchange
+    // it for a session JWT via the real /auth/login, the same call the
+    // Sign In panel below makes, so signup lands the visitor in an actual
+    // signed-in state instead of just handing back a bare key.
+    await exchangeApiKeyForSession(data.api_key, email, 'signup');
 
   } catch (err) {
     showAlert('signup-error', 'signup-error-msg', 'Network error. Please check your connection and try again.');
@@ -402,70 +407,84 @@ async function doSignup() {
 }
 
 // ── Sign In ───────────────────────────────────────────────
+// ROOT CAUSE FIX (live-data audit): this previously posted {email,password}
+// to /auth/login -- the real endpoint (confirmed against workers/intel-
+// gateway/src/index.js's handleLogin) only ever reads body.api_key, so
+// every real submission failed with "api_key is required" regardless of
+// what was typed. There is no password anywhere in this platform's auth
+// model (see doSignup's comment) -- fixed to ask for the API key the
+// signup email actually contains, matching the real contract.
 async function doLogin() {
   clearAlerts();
-  const email    = document.getElementById('login-email').value.trim().toLowerCase();
-  const password = document.getElementById('login-password').value;
+  const apiKey = document.getElementById('login-apikey').value.trim();
+  if (!apiKey || apiKey.length < 16) return showAlert('login-error', 'login-error-msg', 'Please enter your API key (from your signup email).');
+  await exchangeApiKeyForSession(apiKey, null, 'login');
+}
 
-  if (!email || !email.includes('@')) return showAlert('login-error', 'login-error-msg', 'Please enter a valid email address.');
-  if (!password) return showAlert('login-error', 'login-error-msg', 'Please enter your password.');
-
-  const btn = document.getElementById('btn-login');
+// ── API key -> session JWT (shared by Sign Up and Sign In) ────────────
+async function exchangeApiKeyForSession(apiKey, knownEmail, mode) {
+  const btnId = mode === 'signup' ? 'btn-signup' : 'btn-login';
+  const btn = document.getElementById(btnId);
   setBtnLoading(btn, true);
 
   try {
     const resp = await fetch(API_BASE + '/auth/login', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ email, password }),
+      body:    JSON.stringify({ api_key: apiKey }),
     });
     const data = await resp.json();
 
     if (!resp.ok) {
-      const msg = data.message || 'Invalid email or password. Please try again.';
-      showAlert('login-error', 'login-error-msg', msg);
+      const errId = mode === 'signup' ? 'signup-error' : 'login-error';
+      showAlert(errId, errId + '-msg', mode === 'signup'
+        ? 'Your key was issued but signing in failed — copy it from your email and use Sign In.'
+        : (data.error || 'Invalid API key. Please try again.'));
       setBtnLoading(btn, false);
       return;
     }
 
-    _authToken = data.token;
-    storeSession(data);
-    showSuccessPanel(data, 'login');
+    storeSession(data, knownEmail, apiKey);
+    showSuccessPanel(data, knownEmail, mode);
 
   } catch (err) {
-    showAlert('login-error', 'login-error-msg', 'Network error. Please check your connection and try again.');
+    const errId = mode === 'signup' ? 'signup-error' : 'login-error';
+    showAlert(errId, errId + '-msg', 'Network error. Please check your connection and try again.');
     setBtnLoading(btn, false);
   }
 }
 
 // ── Session Storage ────────────────────────────────────────
-function storeSession(data) {
+// data is /auth/login's real response shape: {token, tier, sub, ...} --
+// no email field exists there, so the caller passes along whatever email
+// it independently knows (typed at signup, or verified by an IdP via SSO).
+function storeSession(data, knownEmail, apiKey) {
   try {
     sessionStorage.setItem('sentinel_token', data.token || '');
+    if (apiKey) sessionStorage.setItem('sentinel_api_key', apiKey);
     sessionStorage.setItem('sentinel_user', JSON.stringify({
-      user_id: data.user_id,
-      email:   data.email,
-      name:    data.name,
-      tier:    data.tier,
+      sub:   data.sub,
+      email: knownEmail || null,
+      tier:  data.tier,
     }));
   } catch(e) { /* sessionStorage may be blocked in some contexts */ }
 }
 
 // ── Success Panel ─────────────────────────────────────────
-function showSuccessPanel(data, mode) {
-  // Hide all form panels
+function showSuccessPanel(data, knownEmail, mode) {
   document.getElementById('panel-signup').classList.remove('active');
   document.getElementById('panel-login').classList.remove('active');
 
   const panel = document.getElementById('panel-success');
   panel.classList.add('show');
 
-  const tierMap = { free: 'FREE TIER', premium: 'PRO TIER ⚡', enterprise: 'ENTERPRISE TIER 🛡' };
+  const tierMap = { FREE: 'FREE TIER', PRO: 'PRO TIER ⚡', ENTERPRISE: 'ENTERPRISE TIER 🛡', MSSP: 'MSSP TIER 🛡' };
+  const tier = (data.tier || 'FREE').toUpperCase();
   document.getElementById('success-heading').textContent = mode === 'signup' ? 'Account Created!' : 'Welcome Back!';
-  document.getElementById('success-tier-badge').textContent = tierMap[data.tier] || (data.tier || 'FREE').toUpperCase() + ' TIER';
-  document.getElementById('success-msg').textContent = mode === 'signup'
-    ? `Your SENTINEL APEX API token has been issued. Account: ${data.email} | Tier: ${(data.tier || 'free').toUpperCase()}`
-    : `Signed in as ${data.email} | Tier: ${(data.tier || 'free').toUpperCase()}`;
+  document.getElementById('success-tier-badge').textContent = tierMap[tier] || tier + ' TIER';
+  document.getElementById('success-msg').textContent = knownEmail
+    ? `Signed in as ${knownEmail} | Tier: ${tier}`
+    : `Signed in | Tier: ${tier}`;
 
   const tokenEl = document.getElementById('success-token');
   if (data.token) {
@@ -516,11 +535,42 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+// ── SSO return handling ────────────────────────────────────
+// handleSsoCallback (workers/intel-gateway/src/index.js) redirects back
+// here with either ?sso_token=&sso_tier=&sso_email=&sso_expires_in= on
+// success, or ?sso_error=<message> if the identity provider round trip
+// failed or the visitor's domain isn't enabled for SSO. Handled the same
+// way a successful /auth/login response is: same storeSession/
+// showSuccessPanel, so an SSO sign-in and an API-key sign-in land in an
+// identical signed-in state.
+function handleSsoReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('sso_token');
+  const error = params.get('sso_error');
+
+  if (token) {
+    const data = { token, tier: params.get('sso_tier') || 'ENTERPRISE' };
+    storeSession(data, params.get('sso_email'), null);
+    showSuccessPanel(data, params.get('sso_email'), 'login');
+  } else if (error) {
+    showAlert('sso-error', 'sso-error-msg', error);
+  }
+
+  if (token || error) {
+    // Strip the query string so a refresh/bookmark never resubmits a token
+    // or re-shows a stale error.
+    const clean = window.location.pathname + window.location.hash;
+    window.history.replaceState({}, document.title, clean);
+  }
+}
+
 // ── Auto-detect hash routing (#signup / #login) ──────────
 (function() {
   const hash = window.location.hash.replace('#','');
   if (hash === 'login') switchTab('login');
   else if (hash === 'signup') switchTab('signup');
+
+  handleSsoReturn();
 
   // Check if user already has a session
   try {

@@ -2312,6 +2312,281 @@ async function handleLogout(request, env, ctx, auth) {
 }
 
 // =============================================================================
+// SSO (OpenID Connect) -- Google Workspace / Microsoft Entra ID
+// GET /auth/sso/:provider/start     -- begin the IdP redirect
+// GET /auth/sso/:provider/callback  -- IdP redirects back here with a code
+//
+// Additive only: issues the exact same signJWT()-produced token /auth/login
+// issues (same {sub,tier,iat,exp,iss} shape, same CDB_JWT_SECRET), so every
+// existing auth-consuming route (resolveAuth() above, and every P16-P41
+// handler that reads `auth.tier`) needs ZERO changes to accept an SSO
+// session -- it cannot tell an SSO-issued JWT from an API-key-issued one,
+// by design.
+//
+// SSO does not create new customers. It authenticates an identity (proves
+// the caller really controls user@company.com via Google/Microsoft's own
+// verification) and looks up whether that email's domain has already been
+// enabled for SSO in SSO_DOMAINS_KV -- a small, admin-provisioned mapping
+// (domain -> {tier, customer_id, enabled}), written the same way an
+// enterprise contract already results in an API_KEYS_KV record today. An
+// unrecognized domain gets a clear "contact enterprise sales" message, never
+// a silently-granted tier. See workers/intel-gateway/wrangler.toml for the
+// KV namespace + secrets this requires provisioning before SSO is live.
+// =============================================================================
+
+const SSO_PROVIDERS = {
+  google: {
+    label: "Google Workspace",
+    authorize_url: "https://accounts.google.com/o/oauth2/v2/auth",
+    token_url: "https://oauth2.googleapis.com/token",
+    jwks_url: "https://www.googleapis.com/oauth2/v3/certs",
+    issuers: ["https://accounts.google.com", "accounts.google.com"],
+    scope: "openid email",
+    client_id_env: "GOOGLE_OAUTH_CLIENT_ID",
+    client_secret_env: "GOOGLE_OAUTH_CLIENT_SECRET",
+  },
+  microsoft: {
+    label: "Microsoft Entra ID",
+    // "organizations" endpoint: work/school accounts only, any tenant --
+    // excludes personal Microsoft accounts, which is what a B2B enterprise
+    // login should do. Issuer is therefore per-tenant, not a fixed string
+    // (see verifyOidcIdToken's Microsoft-specific issuer check below).
+    authorize_url: "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
+    token_url: "https://login.microsoftonline.com/organizations/oauth2/v2.0/token",
+    jwks_url: "https://login.microsoftonline.com/organizations/discovery/v2.0/keys",
+    issuers: null,
+    scope: "openid email",
+    client_id_env: "MS_OAUTH_CLIENT_ID",
+    client_secret_env: "MS_OAUTH_CLIENT_SECRET",
+  },
+};
+const SSO_REDIRECT_BASE = "https://intel.cyberdudebivash.com/auth/sso";
+const SSO_LOGIN_PAGE    = "https://intel.cyberdudebivash.com/login.html";
+const SSO_STATE_TTL_SEC = 600; // 10 min to complete the IdP round trip
+
+function randomUrlSafeToken(byteLen) {
+  const bytes = crypto.getRandomValues(new Uint8Array(byteLen));
+  return b64url(String.fromCharCode(...bytes));
+}
+
+async function sha256Base64Url(input) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return b64url(String.fromCharCode(...new Uint8Array(digest)));
+}
+
+// Provider JWKS, KV-cached (1h) to avoid a network round trip to the IdP on
+// every login. forceRefresh bypasses the cache -- used once by
+// verifyOidcIdToken below when a token's `kid` isn't in the cached set,
+// which happens on the IdP's own (rare) key-rotation schedule.
+async function getProviderJWKS(env, provider, forceRefresh) {
+  const cacheKey = `sso_jwks:${provider}`;
+  if (!forceRefresh) {
+    try {
+      const cached = await env.RATE_LIMIT_KV.get(cacheKey, "json");
+      if (cached) return cached;
+    } catch (_) {}
+  }
+  const resp = await fetch(SSO_PROVIDERS[provider].jwks_url);
+  if (!resp.ok) throw new Error(`JWKS fetch failed for ${provider}: HTTP ${resp.status}`);
+  const jwks = await resp.json();
+  try { await env.RATE_LIMIT_KV.put(cacheKey, JSON.stringify(jwks), { expirationTtl: 3600 }); } catch (_) {}
+  return jwks;
+}
+
+// Verifies an RS256 OIDC ID token's signature against the provider's own
+// published JWKS (never trusts the unverified payload), plus alg/exp/iat/
+// aud/iss. Returns the verified payload, or null on ANY failure -- callers
+// must treat null as "reject the login."
+async function verifyOidcIdToken(env, provider, idToken, clientId) {
+  const cfg = SSO_PROVIDERS[provider];
+  const parts = idToken.split(".");
+  if (parts.length !== 3) return null;
+  const [h, p, s] = parts;
+  let header, payload;
+  try {
+    header  = JSON.parse(b64urlDec(h));
+    payload = JSON.parse(b64urlDec(p));
+  } catch (_) { return null; }
+  // Reject alg-confusion / "none"-alg attacks outright: only RS256 (what
+  // both providers actually sign with) is ever accepted here.
+  if (header.alg !== "RS256") return null;
+
+  let jwks = await getProviderJWKS(env, provider, false);
+  let jwk = (jwks.keys || []).find(k => k.kid === header.kid);
+  if (!jwk) {
+    jwks = await getProviderJWKS(env, provider, true);
+    jwk = (jwks.keys || []).find(k => k.kid === header.kid);
+  }
+  if (!jwk) return null;
+
+  let cryptoKey;
+  try {
+    cryptoKey = await crypto.subtle.importKey(
+      "jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]
+    );
+  } catch (_) { return null; }
+
+  const sigBytes = Uint8Array.from(b64urlDec(s), c => c.charCodeAt(0));
+  const valid = await crypto.subtle.verify(
+    "RSASSA-PKCS1-v1_5", cryptoKey, sigBytes, new TextEncoder().encode(`${h}.${p}`)
+  );
+  if (!valid) return null;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (!payload.exp || payload.exp < nowSec) return null;
+  if (!payload.iat || payload.iat > nowSec + 60) return null; // reject not-yet-valid (clock-skew tolerant)
+  if (payload.aud !== clientId) return null;
+  if (cfg.issuers) {
+    if (!cfg.issuers.includes(payload.iss)) return null;
+  } else {
+    // Microsoft multi-tenant "organizations" endpoint: issuer is always
+    // exactly this shape for a real work/school-account token.
+    if (!/^https:\/\/login\.microsoftonline\.com\/[0-9a-f-]{36}\/v2\.0$/i.test(payload.iss || "")) return null;
+  }
+  // Google sets email_verified explicitly (false must be rejected). Absence
+  // (Microsoft work/school accounts, which don't self-attest email) is
+  // treated as verified -- those accounts are already org-managed by the
+  // tenant admin, not self-service-registered.
+  if (payload.email_verified === false) return null;
+
+  return payload;
+}
+
+function ssoDomainOf(email) {
+  const e = String(email || "").toLowerCase().trim();
+  const idx = e.lastIndexOf("@");
+  return idx > 0 ? e.slice(idx + 1) : "";
+}
+
+function ssoErrorRedirect(message) {
+  const dest = new URL(SSO_LOGIN_PAGE);
+  dest.searchParams.set("sso_error", message);
+  return Response.redirect(dest.toString(), 302);
+}
+
+async function handleSsoStart(request, env, ctx, provider) {
+  const cfg = SSO_PROVIDERS[provider];
+  if (!cfg) return jsonResp({ error: "Unknown SSO provider" }, 404);
+  const clientId = env[cfg.client_id_env];
+  if (!clientId) {
+    return ssoErrorRedirect(`${cfg.label} sign-in is not yet configured. Contact enterprise@cyberdudebivash.com.`);
+  }
+
+  const state        = randomUrlSafeToken(24);
+  const codeVerifier  = randomUrlSafeToken(32);
+  const codeChallenge = await sha256Base64Url(codeVerifier);
+
+  try {
+    await env.RATE_LIMIT_KV.put(
+      `sso_state:${state}`,
+      JSON.stringify({ provider, code_verifier: codeVerifier }),
+      { expirationTtl: SSO_STATE_TTL_SEC }
+    );
+  } catch (_) {
+    return ssoErrorRedirect("Sign-in is temporarily unavailable. Please try again.");
+  }
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: `${SSO_REDIRECT_BASE}/${provider}/callback`,
+    response_type: "code",
+    scope: cfg.scope,
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+  });
+  if (provider === "google") { params.set("access_type", "online"); params.set("prompt", "select_account"); }
+  return Response.redirect(`${cfg.authorize_url}?${params.toString()}`, 302);
+}
+
+async function handleSsoCallback(request, env, ctx, provider, ip) {
+  const cfg = SSO_PROVIDERS[provider];
+  if (!cfg) return jsonResp({ error: "Unknown SSO provider" }, 404);
+  if (!env.CDB_JWT_SECRET) return ssoErrorRedirect("Sign-in is not configured on this server.");
+
+  const url      = new URL(request.url);
+  const code     = url.searchParams.get("code");
+  const state    = url.searchParams.get("state");
+  const idpError = url.searchParams.get("error");
+
+  if (idpError) {
+    return ssoErrorRedirect(idpError === "access_denied" ? "Sign-in was cancelled." : "Sign-in failed. Please try again.");
+  }
+  if (!code || !state) return ssoErrorRedirect("Invalid sign-in response.");
+
+  const stateKey = `sso_state:${state}`;
+  let stateRec;
+  try { stateRec = await env.RATE_LIMIT_KV.get(stateKey, "json"); } catch (_) {}
+  if (!stateRec || stateRec.provider !== provider) {
+    return ssoErrorRedirect("Your sign-in session expired. Please try again.");
+  }
+  try { await env.RATE_LIMIT_KV.delete(stateKey); } catch (_) {} // single-use
+
+  const clientId     = env[cfg.client_id_env];
+  const clientSecret = env[cfg.client_secret_env];
+  if (!clientId || !clientSecret) return ssoErrorRedirect("Sign-in is not configured on this server.");
+
+  let tokenResp;
+  try {
+    tokenResp = await fetch(cfg.token_url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: `${SSO_REDIRECT_BASE}/${provider}/callback`,
+        client_id: clientId,
+        client_secret: clientSecret,
+        code_verifier: stateRec.code_verifier,
+      }).toString(),
+    });
+  } catch (_) {
+    return ssoErrorRedirect("Could not reach the identity provider. Please try again.");
+  }
+  if (!tokenResp.ok) {
+    auditLog(ctx, env, { action: "sso_token_exchange_failed", provider, ip, status: tokenResp.status });
+    return ssoErrorRedirect("Sign-in failed. Please try again.");
+  }
+  let tokenData;
+  try { tokenData = await tokenResp.json(); } catch (_) {}
+  if (!tokenData || !tokenData.id_token) return ssoErrorRedirect("Sign-in failed. Please try again.");
+
+  const payload = await verifyOidcIdToken(env, provider, tokenData.id_token, clientId);
+  if (!payload || !payload.email) {
+    auditLog(ctx, env, { action: "sso_token_verify_failed", provider, ip });
+    return ssoErrorRedirect("We could not verify your identity provider account.");
+  }
+
+  const email  = String(payload.email).toLowerCase().trim();
+  const domain = ssoDomainOf(email);
+  let domainRec = null;
+  try { domainRec = await env.SSO_DOMAINS_KV.get(domain, "json"); } catch (_) {}
+
+  if (!domainRec || !domainRec.enabled) {
+    auditLog(ctx, env, { action: "sso_login_denied", provider, domain, ip });
+    return ssoErrorRedirect(`Your organization (${domain}) hasn't enabled Single Sign-On yet. Contact enterprise@cyberdudebivash.com to set it up.`);
+  }
+
+  const now_sec = Math.floor(Date.now() / 1000);
+  const jwtPayload = {
+    sub: domainRec.customer_id || `sso:${email}`,
+    tier: TIERS[domainRec.tier] || TIERS.ENTERPRISE,
+    iat: now_sec,
+    exp: now_sec + JWT_EXPIRY_SEC,
+    iss: "SENTINEL-APEX",
+  };
+  const token = await signJWT(jwtPayload, env.CDB_JWT_SECRET);
+  auditLog(ctx, env, { action: "sso_login_success", provider, domain, sub: jwtPayload.sub, tier: jwtPayload.tier, ip });
+
+  const dest = new URL(SSO_LOGIN_PAGE);
+  dest.searchParams.set("sso_token", token);
+  dest.searchParams.set("sso_tier", jwtPayload.tier);
+  dest.searchParams.set("sso_email", email);
+  dest.searchParams.set("sso_expires_in", String(JWT_EXPIRY_SEC));
+  return Response.redirect(dest.toString(), 302);
+}
+
+// =============================================================================
 // ADMIN API (/api/admin/*)
 // =============================================================================
 
@@ -5094,6 +5369,16 @@ async function handleRequest(request, env, ctx) {
   }
   if (path === "/auth/logout" && method === "POST") {
     return await handleLogout(request, env, ctx, auth);
+  }
+
+  // --- SSO (OpenID Connect) ----------------------------------------------------
+  if (path.startsWith("/auth/sso/") && path.endsWith("/start") && method === "GET") {
+    const provider = path.slice("/auth/sso/".length, -"/start".length);
+    return await handleSsoStart(request, env, ctx, provider);
+  }
+  if (path.startsWith("/auth/sso/") && path.endsWith("/callback") && method === "GET") {
+    const provider = path.slice("/auth/sso/".length, -"/callback".length);
+    return await handleSsoCallback(request, env, ctx, provider, ip);
   }
 
   // --- /api/auth/* aliases ---------------------------------------------------
