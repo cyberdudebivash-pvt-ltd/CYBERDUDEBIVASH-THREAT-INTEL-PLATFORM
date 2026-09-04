@@ -8044,12 +8044,15 @@
                 <!-- Search -->
                 <input id="cve-search-input" type="text" placeholder="Search CVE ID or keyword..." oninput="window.cdbCVETracker.setQuery(this.value)"
                     style="flex:1;min-width:200px;padding:7px 12px;font-family:var(--font-mono);font-size:11px;background:#0b1422;border:1px solid var(--border);border-radius:3px;color:var(--text);outline:none;" />
-                <!-- Date range -->
+                <!-- Date range: server (fetchAndCacheCVEs) only ever retains a
+                     rolling 7-day NVD window (2,459 CVEs in 7 days already
+                     saturates the API's 2000-per-request cap, so widening this
+                     needs multi-page NVD ingestion, not a UI option) -- a
+                     30/90-day choice here would silently return the exact same
+                     rows as 7 days. Only offering what the data actually supports. -->
                 <select id="cve-days-select" onchange="window.cdbCVETracker.setDays(this.value)"
                     style="padding:7px 12px;font-family:var(--font-mono);font-size:10px;background:#0b1422;border:1px solid var(--border);border-radius:3px;color:var(--text);outline:none;">
                     <option value="7">Last 7 Days</option>
-                    <option value="30">Last 30 Days</option>
-                    <option value="90">Last 90 Days</option>
                 </select>
                 <!-- Refresh button -->
                 <button id="cve-refresh-btn" onclick="window.cdbCVETracker.refresh()"
@@ -16805,6 +16808,14 @@ function renderTopThreats(data) {
         }, 16);
     }
 
+    // ROOT CAUSE FIX: all 5 figures here were hardcoded constants with no
+    // connection to any live data -- a "trust" widget asserting numbers
+    // that never changed regardless of platform reality. Advisories, IOCs,
+    // and active feed count now come from the platform's own public stats
+    // endpoint. Uptime SLA and customer count have no technical data source
+    // anywhere in this platform (not an engineering gap -- there is no
+    // uptime-monitoring or customer-count system to read from), so those
+    // two are left out entirely rather than displaying an invented figure.
     function _injectTrustBar() {
         /* Find footer to insert before it */
         var footer = document.querySelector('footer');
@@ -16816,17 +16827,15 @@ function renderTopThreats(data) {
         bar.setAttribute('aria-label', 'Platform trust metrics');
 
         var stats = [
-            { id: 'ts-advisories', val: 14800, suffix: '+', label: 'Threat Advisories' },
-            { id: 'ts-iocs',       val: 892000, suffix: '+', label: 'IOCs Processed' },
-            { id: 'ts-feeds',      val: 74,     suffix: '',  label: 'Live Intel Feeds' },
-            { id: 'ts-uptime',     val: 99.97,  suffix: '%', label: 'API Uptime (SLA)' },
-            { id: 'ts-orgs',       val: 1200,   suffix: '+', label: 'SOC Teams Served' },
+            { id: 'ts-advisories', val: null, suffix: '+', label: 'Threat Advisories' },
+            { id: 'ts-iocs',       val: null, suffix: '+', label: 'IOCs Tracked' },
+            { id: 'ts-feeds',      val: null, suffix: '',  label: 'Live Intel Feeds' },
         ];
 
         var html = stats.map(function(s, i) {
             return (i > 0 ? '<div class="cdb-trust-divider" aria-hidden="true"></div>' : '') +
                 '<div class="cdb-trust-stat">' +
-                '<div class="cdb-trust-stat-val" id="' + s.id + '">0' + s.suffix + '</div>' +
+                '<div class="cdb-trust-stat-val" id="' + s.id + '">&mdash;</div>' +
                 '<div class="cdb-trust-stat-label">' + s.label + '</div>' +
                 '</div>';
         }).join('');
@@ -16834,14 +16843,30 @@ function renderTopThreats(data) {
         bar.innerHTML = html;
         footer.parentNode.insertBefore(bar, footer);
 
+        var started = false;
+        function start() {
+            if (started) return;
+            started = true;
+            fetch('/api/platform/stats', { cache: 'no-store' })
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(d) {
+                    var intel = d && d.intel;
+                    if (!intel) return;
+                    stats[0].val = intel.total_advisories != null ? intel.total_advisories : intel.total_reports;
+                    stats[1].val = intel.ioc_count;
+                    stats[2].val = intel.active_feeds != null ? intel.active_feeds : intel.feed_count;
+                    stats.forEach(function(s) {
+                        var el = document.getElementById(s.id);
+                        if (el && s.val != null) _animCount(el, s.val, s.suffix, 1800);
+                    });
+                }).catch(function() {});
+        }
+
         /* Animate counters using IntersectionObserver */
         var io = new IntersectionObserver(function(entries) {
             if (!entries[0].isIntersecting) return;
             io.disconnect();
-            stats.forEach(function(s) {
-                var el = document.getElementById(s.id);
-                if (el) _animCount(el, s.val, s.suffix, 1800);
-            });
+            start();
         }, { threshold: 0.3 });
         io.observe(bar);
     }
