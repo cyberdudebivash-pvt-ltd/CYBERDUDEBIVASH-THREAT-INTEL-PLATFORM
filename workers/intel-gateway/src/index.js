@@ -2374,11 +2374,21 @@ async function sha256Base64Url(input) {
   return b64url(String.fromCharCode(...new Uint8Array(digest)));
 }
 
+// Exact-match allowlist check for a provider key. Every function that
+// indexes SSO_PROVIDERS with a caller-supplied `provider` string calls this
+// itself -- it never relies solely on an upstream caller's guard -- so a
+// crafted or malformed provider value can't reach fetch()/property access
+// on SSO_PROVIDERS via any current or future call path.
+function isKnownSsoProvider(provider) {
+  return provider === "google" || provider === "microsoft";
+}
+
 // Provider JWKS, KV-cached (1h) to avoid a network round trip to the IdP on
 // every login. forceRefresh bypasses the cache -- used once by
 // verifyOidcIdToken below when a token's `kid` isn't in the cached set,
 // which happens on the IdP's own (rare) key-rotation schedule.
 async function getProviderJWKS(env, provider, forceRefresh) {
+  if (!isKnownSsoProvider(provider)) throw new Error(`Unknown SSO provider: ${provider}`);
   const cacheKey = `sso_jwks:${provider}`;
   if (!forceRefresh) {
     try {
@@ -2398,6 +2408,7 @@ async function getProviderJWKS(env, provider, forceRefresh) {
 // aud/iss. Returns the verified payload, or null on ANY failure -- callers
 // must treat null as "reject the login."
 async function verifyOidcIdToken(env, provider, idToken, clientId) {
+  if (!isKnownSsoProvider(provider)) return null;
   const cfg = SSO_PROVIDERS[provider];
   const parts = idToken.split(".");
   if (parts.length !== 3) return null;
@@ -2465,8 +2476,8 @@ function ssoErrorRedirect(message) {
 }
 
 async function handleSsoStart(request, env, ctx, provider) {
+  if (!isKnownSsoProvider(provider)) return jsonResp({ error: "Unknown SSO provider" }, 404);
   const cfg = SSO_PROVIDERS[provider];
-  if (!cfg) return jsonResp({ error: "Unknown SSO provider" }, 404);
   const clientId = env[cfg.client_id_env];
   if (!clientId) {
     return ssoErrorRedirect(`${cfg.label} sign-in is not yet configured. Contact enterprise@cyberdudebivash.com.`);
@@ -2500,8 +2511,8 @@ async function handleSsoStart(request, env, ctx, provider) {
 }
 
 async function handleSsoCallback(request, env, ctx, provider, ip) {
+  if (!isKnownSsoProvider(provider)) return jsonResp({ error: "Unknown SSO provider" }, 404);
   const cfg = SSO_PROVIDERS[provider];
-  if (!cfg) return jsonResp({ error: "Unknown SSO provider" }, 404);
   if (!env.CDB_JWT_SECRET) return ssoErrorRedirect("Sign-in is not configured on this server.");
 
   const url      = new URL(request.url);
