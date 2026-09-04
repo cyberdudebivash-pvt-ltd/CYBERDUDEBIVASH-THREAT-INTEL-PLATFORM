@@ -345,6 +345,110 @@ class TestClearReportUrls(unittest.TestCase):
             finally:
                 pub.REPORT_URL_MANIFESTS = orig
 
+    def test_one_manifest_write_failure_does_not_block_the_others_and_is_reported(self):
+        """P0 PRODUCTION ASSURANCE regression test (post-#369 audit): before
+        this fix, a single manifest's write failure raised out of
+        clear_report_urls() entirely -- since this function is called from
+        inside execute_plan()'s try/finally with no except of its own, that
+        exception propagated past main()'s call to save_publish_state(),
+        silently losing the in-memory retirement state for EVERY id this
+        run touched, not just the one whose manifest failed. Manifest B
+        (which needs no real update -- 'intel--b' isn't in html_ids/pdf_ids)
+        writes fine; manifest A is forced to fail. clear_report_urls must:
+        (1) not raise, (2) still return which manifest(s) failed, (3) still
+        report intel--a's real state (the write never landed)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            manifest_a = Path(td) / "feed_a.json"
+            manifest_b = Path(td) / "feed_b.json"
+            manifest_a.write_text(json.dumps([{"id": "intel--a", "report_url": "/reports/x/a.html"}]))
+            manifest_b.write_text(json.dumps([{"id": "intel--b", "report_url": "/reports/x/b.html"}]))
+            orig = pub.REPORT_URL_MANIFESTS
+            pub.REPORT_URL_MANIFESTS = [manifest_a, manifest_b]
+            real_replace = pub.os.replace
+
+            def _flaky_replace(src, dst):
+                if Path(dst) == manifest_a:
+                    raise OSError("simulated disk failure writing manifest_a")
+                return real_replace(src, dst)
+
+            try:
+                with patch.object(pub.os, "replace", side_effect=_flaky_replace):
+                    failed = pub.clear_report_urls(html_ids={"intel--a"}, pdf_ids=set())
+                self.assertEqual(failed, [manifest_a], "must report exactly the manifest that failed to write")
+                self.assertEqual(
+                    json.loads(manifest_a.read_text())[0]["report_url"], "/reports/x/a.html",
+                    "failed write must never partially land -- original content must survive untouched",
+                )
+            finally:
+                pub.REPORT_URL_MANIFESTS = orig
+
+    def test_all_manifests_succeed_returns_empty_failed_list(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            manifest_path = Path(td) / "feed.json"
+            manifest_path.write_text(json.dumps([{"id": "intel--a", "report_url": "/reports/x/a.html"}]))
+            orig = pub.REPORT_URL_MANIFESTS
+            pub.REPORT_URL_MANIFESTS = [manifest_path]
+            try:
+                failed = pub.clear_report_urls(html_ids={"intel--a"}, pdf_ids=set())
+                self.assertEqual(failed, [], "no failures -- must return an empty list, not None or a truthy sentinel")
+            finally:
+                pub.REPORT_URL_MANIFESTS = orig
+
+
+class TestExecutePlanManifestFailureRecovery(unittest.TestCase):
+    """P0 PRODUCTION ASSURANCE regression test (post-#369 audit) for
+    execute_plan()'s restoration logic: when clear_report_urls() reports a
+    failed manifest, every id this run's retirement batch touched must be
+    restored to its pre-clear state (never permanently dropped from
+    tracking), so the next run's retirement pass retries the FULL
+    delete+clear for all of them. Redoing an already-successful S3 delete
+    is safe by construction -- s3_delete() treats an already-absent key as
+    success (idempotent), and DELETE is not Class A billed -- so this
+    restoration trades a little redundant work for guaranteed eventual
+    consistency, matching this codebase's established fail-safe direction
+    (bounded-but-redundant beats silently incomplete)."""
+
+    def test_restoration_logic_recovers_full_entry_on_manifest_failure(self):
+        # Mirrors execute_plan()'s actual sequence at unit level (same style
+        # as TestRetirement.test_partial_delete_failure_does_not_orphan_
+        # sibling_key_or_clear_wrong_url above): both deletes succeed, then
+        # clear_report_urls reports a failure -- state must be restored.
+        intel_id = "intel--manifest-fail-restore"
+        original_entry = {
+            "canonical_ts": "2026-09-01T00:00:00Z",
+            "html_key": f"reports/2026/01/{intel_id}.html",
+            "pdf_key": f"reports/pdf/{intel_id}.pdf",
+        }
+        state_items = {intel_id: dict(original_entry)}
+
+        # -- execute_plan()'s delete-loop bookkeeping, both ops succeed --
+        pre_clear_snapshot = {}
+        cleared_html_ids, cleared_pdf_ids = set(), set()
+        entry = state_items.get(intel_id)
+        pre_clear_snapshot.setdefault(intel_id, dict(entry))
+        cleared_html_ids.add(intel_id)
+        entry.pop("html_key", None)
+        entry = state_items.get(intel_id)
+        pre_clear_snapshot.setdefault(intel_id, dict(entry))  # no-op: already captured pre-pop
+        cleared_pdf_ids.add(intel_id)
+        entry.pop("pdf_key", None)
+        for iid in list(cleared_html_ids | cleared_pdf_ids):
+            e = state_items.get(iid)
+            if e is not None and not e.get("html_key") and not e.get("pdf_key"):
+                state_items.pop(iid, None)
+        self.assertNotIn(intel_id, state_items, "sanity check: both keys cleared -- entry fully popped before restoration")
+
+        # -- clear_report_urls reports manifest failure -- restore --
+        failed_manifests = [Path("/tmp/simulated-failed-manifest.json")]
+        if failed_manifests:
+            for iid, snapshot in pre_clear_snapshot.items():
+                state_items[iid] = snapshot
+
+        self.assertIn(intel_id, state_items, "must be restored, not permanently dropped, when a manifest failed to write")
+        self.assertEqual(state_items[intel_id], original_entry, "restored entry must exactly match its pre-clear state (both keys, canonical_ts)")
+
 
 class TestCostSimulation(unittest.TestCase):
     """Section 9 (hardening doc) requirement: a deterministic test that

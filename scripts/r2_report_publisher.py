@@ -455,6 +455,11 @@ def execute_plan(
         # url field for the object that is still live in R2.
         cleared_html_ids: set[str] = set()
         cleared_pdf_ids: set[str] = set()
+        # P0 PRODUCTION ASSURANCE FIX (post-#369 audit): remembers exactly
+        # what each popped key/entry held, so a manifest-write failure below
+        # can restore state to "not yet retired" for every id this batch
+        # touched -- see the restoration block after clear_report_urls().
+        _pre_clear_snapshot: dict[str, dict] = {}
         for op in delete_ops:
             if op["bucket"] == BUCKET_REPORTS:
                 _use_reports_creds()
@@ -466,6 +471,8 @@ def execute_plan(
             if ok:
                 delete_ok += 1
                 entry = state_items.get(op["id"])
+                if entry is not None:
+                    _pre_clear_snapshot.setdefault(op["id"], dict(entry))
                 if op["kind"] == "html":
                     cleared_html_ids.add(op["id"])
                     if entry is not None:
@@ -485,7 +492,32 @@ def execute_plan(
             if entry is not None and not entry.get("html_key") and not entry.get("pdf_key"):
                 state_items.pop(intel_id, None)
 
-        clear_report_urls(html_ids=cleared_html_ids, pdf_ids=cleared_pdf_ids)
+        failed_manifests = clear_report_urls(html_ids=cleared_html_ids, pdf_ids=cleared_pdf_ids)
+        if failed_manifests:
+            # Cannot tell from here which specific ids live in the manifest(s)
+            # that failed to write -- restoring the WHOLE batch (rather than
+            # guessing) means the next run's retirement pass reconsiders
+            # every id touched this run: it re-issues s3_delete (idempotent
+            # -- see s3_delete()'s own docstring: deleting an already-absent
+            # key returns True) and retries clear_report_urls for all of
+            # them, including the ones whose manifest write actually
+            # succeeded this time (redundant but harmless -- clearing an
+            # already-"" field is a no-op). The alternative -- leaving the
+            # successfully-cleared ids fully popped from state -- would
+            # mean the one id whose manifest write failed silently drops
+            # out of retirement tracking forever, leaving that manifest's
+            # dangling report_url/pdf_url unfixed permanently rather than
+            # just until the next run.
+            for intel_id, snapshot in _pre_clear_snapshot.items():
+                state_items[intel_id] = snapshot
+            log.warning(
+                "%d manifest(s) failed to write while clearing retired report URLs: %s -- "
+                "restored %d id(s) to pending-retirement state so the next run retries the "
+                "full retirement (delete + manifest clear) for all of them; non-fatal, "
+                "publish-state save below still proceeds.",
+                len(failed_manifests), ", ".join(str(p) for p in failed_manifests),
+                len(_pre_clear_snapshot),
+            )
     finally:
         _restore_creds()
 
@@ -495,7 +527,7 @@ def execute_plan(
     return put_ok, delete_ok
 
 
-def clear_report_urls(html_ids: set[str], pdf_ids: set[str]) -> None:
+def clear_report_urls(html_ids: set[str], pdf_ids: set[str]) -> list[Path]:
     """Clears report_url/internal_report_url (for html_ids) and pdf_url
     (for pdf_ids) to "" across every manifest file known to carry those
     fields, split per-field so a partial delete failure (html gone, pdf
@@ -507,9 +539,30 @@ def clear_report_urls(html_ids: set[str], pdf_ids: set[str]) -> None:
     is_malformed() treats empty as truthful, not malformed; scripts/
     report_existence_validator.py skips empty report_url entirely) -- so
     this keeps both existing gates green with zero changes to either.
+
+    P0 PRODUCTION ASSURANCE FIX (post-#369 audit): each manifest file is
+    now written in its own try/except -- previously a single manifest's
+    write failure (e.g. a disk error) raised out of this function, which
+    (since this is called from inside execute_plan()'s try/finally, with
+    no except of its own) propagated all the way past main()'s call to
+    save_publish_state(state). That skipped the state save entirely, so
+    the in-memory record of *every* id retired this run -- including
+    manifests that DID write successfully -- was lost, not just the one
+    that failed. The next run would then re-discover all of them via the
+    unaffected retirement path (never an uncontrolled DELETE or LIST --
+    still bounded by the state file's own prior size), but any manifest
+    that failed to update would carry a dangling report_url/pdf_url
+    pointing at an already-deleted R2 object for a full pipeline cycle
+    (hours) rather than self-healing on the very next run. Isolating each
+    manifest's write means one file's failure never blocks the others,
+    and the caller can still call save_publish_state() afterward to
+    persist every retirement that DID succeed. Returns the list of
+    manifest paths that failed to write, for the caller to log/report --
+    empty list means every manifest that needed an update got it.
     """
+    failed: list[Path] = []
     if not html_ids and not pdf_ids:
-        return
+        return failed
     for manifest_path in REPORT_URL_MANIFESTS:
         if not manifest_path.exists():
             continue
@@ -531,16 +584,29 @@ def clear_report_urls(html_ids: set[str], pdf_ids: set[str]) -> None:
                 if item.get("pdf_url"):
                     item["pdf_url"] = ""
                     touched += 1
-        if touched:
+        if not touched:
+            continue
+        try:
+            _display_path = manifest_path.relative_to(REPO_ROOT)
+        except ValueError:
+            _display_path = manifest_path  # e.g. a test fixture outside REPO_ROOT -- log the absolute path rather than crashing
+        try:
             tmp = manifest_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
             os.replace(tmp, manifest_path)
-            try:
-                _display_path = manifest_path.relative_to(REPO_ROOT)
-            except ValueError:
-                _display_path = manifest_path  # e.g. a test fixture outside REPO_ROOT -- log the absolute path rather than crashing
-            log.info("Cleared %d dangling report/PDF URL field(s) in %s (html retired=%d, pdf retired=%d).",
-                      touched, _display_path, len(html_ids), len(pdf_ids))
+        except Exception:
+            log.error(
+                "Failed to write %s while clearing %d dangling report/PDF URL field(s) "
+                "(html retired=%d, pdf retired=%d) -- this manifest still has a dangling "
+                "reference to an already-deleted R2 object until the next run retries it. "
+                "Other manifests and the publish-state save are NOT affected.",
+                _display_path, touched, len(html_ids), len(pdf_ids), exc_info=True,
+            )
+            failed.append(manifest_path)
+            continue
+        log.info("Cleared %d dangling report/PDF URL field(s) in %s (html retired=%d, pdf retired=%d).",
+                  touched, _display_path, len(html_ids), len(pdf_ids))
+    return failed
 
 
 def main() -> int:
