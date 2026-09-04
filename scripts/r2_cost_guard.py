@@ -109,6 +109,12 @@ class R2OperationPlan:
     # always 0 in this platform's current R2 paths (no file crosses the multipart threshold via
     # this module's callers) -- tracked explicitly so a future large-file path can't silently
     # reintroduce Class A volume without showing up here.
+    head: int = 0             # HeadObject calls (Class B). Read-only verification scripts
+    # (r2_reports_verifier.py, r2_reports_integrity.py) issue these every run but, before the
+    # R2 cost-containment audit that added this field, never appeared in this ledger at all --
+    # this platform's cost accounting only ever showed Class A (PUT/LIST). Additive field,
+    # defaults to 0, so every existing R2OperationPlan(...) construction is unaffected.
+    get: int = 0              # GetObject calls (Class B). Same rationale as `head` above.
     bytes_uploaded: int = 0
     notes: list[str] = field(default_factory=list)
 
@@ -150,6 +156,12 @@ class R2OperationPlan:
     def record_multipart(self, n: int = 1) -> None:
         self.multipart += n
 
+    def record_head(self, n: int = 1) -> None:
+        self.head += n
+
+    def record_get(self, n: int = 1) -> None:
+        self.get += n
+
     def note(self, text: str) -> None:
         self.notes.append(text)
 
@@ -158,6 +170,14 @@ class R2OperationPlan:
         docstring's BILLING NOTE: Cloudflare R2 does not bill DeleteObject
         as Class A."""
         return self.put + self.list_calls + self.copy + self.multipart
+
+    def estimated_class_b(self) -> int:
+        """HEAD + GET -- Cloudflare R2 Class B operations. Tracked separately
+        from estimated_class_a() (Class A/B bill at different rates); added
+        so read-mostly verification scripts have a place to report their
+        operation cost in the same shared ledger instead of going
+        unaccounted entirely."""
+        return self.head + self.get
 
 
 @dataclass
@@ -271,8 +291,11 @@ def _format_summary_block(plan: R2OperationPlan, budgets: R2Budgets, status: str
         f"LIST: {plan.list_calls}",
         f"COPY: {plan.copy}",
         f"multipart: {plan.multipart}",
+        f"HEAD: {plan.head}",
+        f"GET: {plan.get}",
         f"bytes_uploaded: {plan.bytes_uploaded}",
         f"estimated Class A operations: {plan.estimated_class_a()}",
+        f"estimated Class B operations: {plan.estimated_class_b()}",
         f"budget (PUT/DELETE/LIST): {write_ceiling}/{budgets.max_report_deletes_per_run}/{budgets.max_list_calls_per_run}",
         f"budget utilization: {utilization_pct}%",
         f"status: {status}",
@@ -323,8 +346,11 @@ def emit_summary(
         "list_calls": plan.list_calls,
         "copy": plan.copy,
         "multipart": plan.multipart,
+        "head": plan.head,
+        "get": plan.get,
         "bytes_uploaded": plan.bytes_uploaded,
         "estimated_class_a": plan.estimated_class_a(),
+        "estimated_class_b": plan.estimated_class_b(),
         "budget_write_ceiling": write_ceiling,
         "budget_delete_ceiling": budgets.max_report_deletes_per_run,
         "budget_list_ceiling": budgets.max_list_calls_per_run,

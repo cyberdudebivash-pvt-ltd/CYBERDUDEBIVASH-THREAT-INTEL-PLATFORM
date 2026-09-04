@@ -26,6 +26,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import r2_state_sync as rs  # noqa: E402
 import r2_upload  # noqa: E402
+import r2_report_publisher as rrp  # noqa: E402
 
 
 def _proc(returncode=0, stdout="", stderr=""):
@@ -101,8 +102,22 @@ class TestStateFilesManifest(unittest.TestCase):
     entry doesn't silently pass just because the generic tests adapted to
     the shorter list."""
 
-    def test_exactly_nine_files_migrated(self):
-        self.assertEqual(len(rs.STATE_FILES), 9)
+    def test_exactly_ten_files_migrated(self):
+        """P0 R2 COST AUDIT FIX: was 9 -- data/cache/r2_report_publish_state.json
+        (scripts/r2_report_publisher.py's own cross-run incremental-publish
+        state) was added after a post-merge forensic audit of PR #369 found
+        it was never staged anywhere in safe_git_commit.py, so it silently
+        reverted to empty on every fresh CI checkout -- same git-push-
+        rejection root cause this module's docstring documents for the
+        other 9 entries, fixed the same way rather than re-attempting
+        git-based persistence for this file too."""
+        self.assertEqual(len(rs.STATE_FILES), 10)
+
+    def test_report_publish_state_is_present_with_path_mirrored_key(self):
+        self.assertIn(
+            ("data/cache/r2_report_publish_state.json", "data/cache/r2_report_publish_state.json"),
+            rs.STATE_FILES,
+        )
 
     def test_all_five_intelligence_repository_registry_files_present(self):
         """CodeRabbit review finding on this migration (verified, not taken
@@ -656,6 +671,146 @@ class TestTopLevelFeedManifestRoundTrip(unittest.TestCase):
             import shutil
             shutil.rmtree(src_dir, ignore_errors=True)
             shutil.rmtree(dst_dir, ignore_errors=True)
+
+
+class TestReportPublishStateRoundTrip(unittest.TestCase):
+    """P0 R2 COST AUDIT FIX: proves scripts/r2_report_publisher.py's
+    incremental-publish state actually survives the real cross-run lifecycle
+    that mechanism depends on -- pipeline run -> publisher writes state ->
+    upload() -> [next scheduled run's fresh checkout, simulated here by a
+    brand-new tmp root with no local copy at all] -> download() -> publisher
+    reads state back. Exercises rs.download()/rs.upload() themselves (the
+    actual functions the workflow's download/upload steps call), not just
+    the s3_cp/s3_get primitives TestRoundTripFidelity above already covers,
+    and confirms the recovered file is genuinely usable by
+    r2_report_publisher.py's own load_publish_state() -- closing the loop
+    between the two modules a unit test of either one in isolation cannot.
+
+    This is the correct analog to "survives a commit+push+checkout cycle"
+    for this specific file: it does NOT go through git at all (confirmed:
+    absent from safe_git_commit.py's staging lists in the original PR), and
+    r2_state_sync.py's own module docstring documents why a git-based fix
+    would be the wrong one here -- main's branch ruleset rejects direct
+    pushes for this exact class of cross-run state file."""
+
+    def test_state_survives_upload_then_fresh_checkout_then_download(self):
+        run1_root = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_pubstate_run1_"))
+        run2_root = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_pubstate_run2_"))
+        fake_bucket: dict[str, bytes] = {}
+        try:
+            local_rel, r2_key = next(
+                (local, key) for local, key in rs.STATE_FILES
+                if local == "data/cache/r2_report_publish_state.json"
+            )
+
+            def _fake_run(cmd, **kwargs):
+                is_download, local_path, key = _parse_cp_cmd(cmd)
+                if not is_download:
+                    fake_bucket[key] = pathlib.Path(local_path).read_bytes()
+                    return _proc(0)
+                if key not in fake_bucket:
+                    return _proc(1, stderr="An error occurred (404) Not Found")
+                pathlib.Path(local_path).write_bytes(fake_bucket[key])
+                return _proc(0)
+
+            # STATE_DIRS (data/intelligence_repository/advisories) uses a
+            # different (sync, not cp) subprocess command shape than
+            # _fake_run/_parse_cp_cmd understand -- this test is about the
+            # STATE_FILES entry for the publisher's state, so STATE_DIRS is
+            # neutralized the same way TestDownload's setUp() already does.
+            with patch.object(r2_upload.subprocess, "run", side_effect=_fake_run), \
+                 patch.object(rs, "s3_sync_download", return_value=True), \
+                 patch.object(rs, "s3_sync", return_value=True):
+                # "Run 1", start of pipeline: genuinely first-ever run --
+                # nothing in R2 yet, nothing on local disk either.
+                rc = rs.download(run1_root, "https://e")
+                self.assertEqual(rc, 0)
+                self.assertFalse((run1_root / local_rel).exists())
+
+                # "Run 1": the publisher runs and writes its state (simulating
+                # r2_report_publisher.py's own save_publish_state()).
+                published_state = {
+                    "schema_version": "1.0",
+                    "items": {
+                        "intel--roundtriptest01": {
+                            "canonical_ts": "2026-09-04T12:00:00Z",
+                            "html_key": "reports/2026/09/intel--roundtriptest01.html",
+                            "html_sha256": "a" * 64,
+                        },
+                    },
+                }
+                state_path = run1_root / local_rel
+                state_path.parent.mkdir(parents=True, exist_ok=True)
+                state_path.write_text(json.dumps(published_state), encoding="utf-8")
+
+                # "Run 1", end of pipeline: STAGE 4.1 uploads it to R2.
+                rc = rs.upload(run1_root, "https://e")
+                self.assertEqual(rc, 0)
+                self.assertIn(r2_key, fake_bucket, "upload() must actually publish this file to R2")
+
+                # "Next scheduled execution": a brand-new ephemeral container,
+                # fresh git checkout -- run2_root has NO local copy of
+                # anything. This file is not staged by safe_git_commit.py, so
+                # a real fresh checkout would never restore it from git
+                # either -- the ONLY way it can reappear is via this download.
+                self.assertFalse((run2_root / local_rel).exists())
+                rc = rs.download(run2_root, "https://e")
+                self.assertEqual(rc, 0)
+
+            recovered_path = run2_root / local_rel
+            self.assertTrue(recovered_path.exists(), "state must be recovered by download() on the next run")
+            recovered = json.loads(recovered_path.read_text())
+            self.assertEqual(recovered, published_state, "recovered state must be byte-for-byte equivalent, not just 'a file exists'")
+
+            # Closes the loop with the OTHER module: the recovered file must
+            # be genuinely usable by r2_report_publisher.py's own state
+            # loader, not just byte-identical JSON.
+            with patch.object(rrp, "STATE_PATH", recovered_path):
+                loaded = rrp.load_publish_state()
+            self.assertEqual(loaded["items"], published_state["items"])
+            self.assertEqual(
+                loaded["items"]["intel--roundtriptest01"]["html_sha256"], "a" * 64,
+                "if this incremental-publish fingerprint is lost, the publisher "
+                "would re-PUT unchanged content as if it were new -- exactly "
+                "the defect this fix closes"
+            )
+        finally:
+            import shutil
+            shutil.rmtree(run1_root, ignore_errors=True)
+            shutil.rmtree(run2_root, ignore_errors=True)
+
+    def test_missing_state_across_a_genuinely_first_run_bootstraps_safely(self):
+        """The other half of the lifecycle: if R2 has never seen this file
+        (a genuinely first-ever run, or the object was somehow lost from R2
+        too), download() must not error, and the publisher must safely
+        bootstrap to an empty state rather than crashing or fail-opening
+        into an unsafe operation."""
+        root = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_pubstate_bootstrap_"))
+        try:
+            def _fake_run(cmd, **kwargs):
+                is_download, _local_path, _key = _parse_cp_cmd(cmd)
+                if is_download:
+                    return _proc(1, stderr="An error occurred (404) Not Found")
+                return _proc(0)
+
+            with patch.object(r2_upload.subprocess, "run", side_effect=_fake_run), \
+                 patch.object(rs, "s3_sync_download", return_value=True):
+                rc = rs.download(root, "https://e")
+            self.assertEqual(rc, 0, "a not-found state file is a safe bootstrap, not an error")
+
+            local_rel, _ = next(
+                (local, key) for local, key in rs.STATE_FILES
+                if local == "data/cache/r2_report_publish_state.json"
+            )
+            state_path = root / local_rel
+            self.assertFalse(state_path.exists())
+
+            with patch.object(rrp, "STATE_PATH", state_path):
+                loaded = rrp.load_publish_state()
+            self.assertEqual(loaded, {"schema_version": "1.0", "items": {}})
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
 
 
 class TestCli(unittest.TestCase):

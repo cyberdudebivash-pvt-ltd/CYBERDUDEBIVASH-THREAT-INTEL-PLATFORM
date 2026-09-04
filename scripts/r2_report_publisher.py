@@ -201,8 +201,41 @@ def _get_items(data) -> list[dict]:
 
 
 def load_publish_state() -> dict:
-    state = _load_json(STATE_PATH, {"schema_version": "1.0", "items": {}})
+    """Loads the incremental-publish state (synced cross-run via
+    scripts/r2_state_sync.py -- see its STATE_FILES entry for this path).
+
+    P0 R2 COST AUDIT FIX: missing state (first-ever run, or r2_state_sync.py's
+    own documented one-time-bootstrap case) is expected and silent. A file
+    that EXISTS but fails to parse or has the wrong shape is a genuine
+    anomaly -- previously indistinguishable in the logs from the routine
+    bootstrap case, silently discarding real publish history. Both fall back
+    to an empty state, which is fail-safe by construction: build_plan()'s
+    retirement pass only ever deletes ids the state file itself already
+    tracks, so an empty state can cause redundant-but-budget-capped PUTs
+    (every in-window candidate looks "new"), never an uncontrolled DELETE,
+    never a LIST, never reconstruction by enumerating R2. The corrupt case
+    is now logged loudly so it is never mistaken for ordinary bootstrap.
+    """
+    existed = STATE_PATH.exists()
+    # A deliberately invalid default (None), not the well-shaped empty state:
+    # _load_json() returns its `default` verbatim on a parse failure too, so
+    # passing the well-shaped dict here would make a genuine JSON syntax
+    # error indistinguishable from "file legitimately empty" below -- the
+    # isinstance check must be able to catch BOTH failure modes, not just
+    # "parsed fine but wrong shape".
+    state = _load_json(STATE_PATH, None)
     if not isinstance(state, dict) or not isinstance(state.get("items"), dict):
+        if existed:
+            log.error(
+                "%s exists but is not a recognized publish-state shape (a valid JSON "
+                "object with an 'items' dict) -- DISCARDING it and starting from an "
+                "empty state this run. Fail-safe (never causes an uncontrolled DELETE, "
+                "LIST, or whole-corpus reconstruction), but every in-window candidate "
+                "will look 'new' this run (bounded by MAX_REPORT_UPLOADS_PER_RUN) and "
+                "real prior publish history was just lost -- investigate why this file "
+                "was corrupted.",
+                STATE_PATH,
+            )
         state = {"schema_version": "1.0", "items": {}}
     return state
 

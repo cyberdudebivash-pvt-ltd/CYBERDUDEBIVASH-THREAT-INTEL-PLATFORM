@@ -16,6 +16,7 @@ import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -381,6 +382,114 @@ class TestCostSimulation(unittest.TestCase):
         self.assertEqual(len(put_ops), 0)
         self.assertEqual(len(delete_ops), 0)
         self.assertEqual(plan.new + plan.changed + plan.unchanged, 0)  # none rendered -> none counted
+
+
+class TestStateFailClosed(unittest.TestCase):
+    """P0 R2 COST AUDIT FIX: missing/corrupt publish state must FAIL CLOSED
+    -- it must never trigger a full bucket LIST, a whole-corpus upload,
+    uncontrolled deletion, or reconstruction by enumerating R2. Proves this
+    holds both at load_publish_state() (the loader itself) and at
+    build_plan() (the consumer), including at candidate/state volumes far
+    beyond any realistic 24h window -- the same "regardless of size" bar
+    TestCostSimulation above already sets for the historical-state case."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="pub_failclosed_test_"))
+        self.state_path = self.tmp / "r2_report_publish_state.json"
+        self.now = datetime.now(timezone.utc)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_missing_state_file_bootstraps_to_empty_without_error_or_loud_log(self):
+        self.assertFalse(self.state_path.exists())
+        with patch.object(pub, "STATE_PATH", self.state_path), \
+             patch.object(pub.log, "error") as mock_error:
+            state = pub.load_publish_state()
+        self.assertEqual(state, {"schema_version": "1.0", "items": {}})
+        mock_error.assert_not_called()  # routine bootstrap, not an anomaly
+
+    def test_corrupt_json_state_file_discards_and_logs_loudly(self):
+        self.state_path.write_text("{not valid json at all", encoding="utf-8")
+        with patch.object(pub, "STATE_PATH", self.state_path), \
+             patch.object(pub.log, "error") as mock_error:
+            state = pub.load_publish_state()
+        self.assertEqual(state, {"schema_version": "1.0", "items": {}})
+        mock_error.assert_called_once()  # unlike missing-file, this IS an anomaly worth flagging loudly
+
+    def test_wrong_shape_state_file_discards_and_logs_loudly(self):
+        """Valid JSON, wrong shape (e.g. a bare list, or a dict with no
+        'items' key) is exactly as dangerous as unparseable JSON -- both
+        mean this script cannot trust what it thinks it already published."""
+        self.state_path.write_text(json.dumps(["not", "the", "right", "shape"]), encoding="utf-8")
+        with patch.object(pub, "STATE_PATH", self.state_path), \
+             patch.object(pub.log, "error") as mock_error:
+            state = pub.load_publish_state()
+        self.assertEqual(state, {"schema_version": "1.0", "items": {}})
+        mock_error.assert_called_once()
+
+    def test_missing_items_key_discards_and_logs_loudly(self):
+        self.state_path.write_text(json.dumps({"schema_version": "1.0"}), encoding="utf-8")
+        with patch.object(pub, "STATE_PATH", self.state_path), \
+             patch.object(pub.log, "error") as mock_error:
+            state = pub.load_publish_state()
+        self.assertEqual(state, {"schema_version": "1.0", "items": {}})
+        mock_error.assert_called_once()
+
+    def test_empty_state_causes_zero_delete_ops_regardless_of_candidate_volume(self):
+        """The concrete 'fails closed' guarantee: build_plan()'s retirement
+        pass only ever iterates the STATE FILE's own tracked ids -- an empty
+        state (from a missing or discarded-corrupt file) means that loop
+        runs zero times, so delete_ops is always [] no matter how many
+        candidates this run sees. Never a full-bucket LIST, never an
+        uncontrolled DELETE, never reconstruction by enumerating R2."""
+        empty_state = {"schema_version": "1.0", "items": {}}
+        candidates = [
+            {
+                "item": {"id": f"intel--failclosed{i:06d}",
+                         "timestamp": (self.now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")},
+                "id": f"intel--failclosed{i:06d}",
+                "canonical_ts": self.now - timedelta(hours=1),
+            }
+            for i in range(10_000)  # far beyond any realistic 24h window
+        ]
+        plan, _put_ops, delete_ops = pub.build_plan(candidates, empty_state, 24, self.now)
+
+        self.assertEqual(plan.list_calls, 0, "empty/lost state must never cause a LIST call")
+        self.assertEqual(delete_ops, [], "empty/lost state must never cause an uncontrolled DELETE")
+        self.assertEqual(plan.delete, 0)
+        self.assertEqual(plan.expired, 0)
+        # Every candidate is legitimately new-looking (nothing rendered to
+        # disk in this simulation, so still zero PUT here too) -- the point
+        # is that whatever PUT volume DOES result stays bounded by candidate
+        # count (itself bounded by the 24h window upstream), never by state
+        # file corruption reconstructing or inflating scope.
+        self.assertEqual(len(plan.notes), 0)
+
+    def test_load_publish_state_recovery_from_corruption_then_next_run_rebuilds_correctly(self):
+        """End-to-end: a corrupted state file does not permanently break the
+        incremental architecture -- the very next successful run, working
+        from the (safely emptied) state, re-establishes real tracking."""
+        self.state_path.write_text("garbage{{{", encoding="utf-8")
+        with patch.object(pub, "STATE_PATH", self.state_path):
+            state = pub.load_publish_state()
+        self.assertEqual(state["items"], {})
+
+        # Simulate this run successfully publishing one item and saving state.
+        state["items"]["intel--recoverytest01"] = {
+            "canonical_ts": self.now.isoformat().replace("+00:00", "Z"),
+            "html_key": "reports/2026/09/intel--recoverytest01.html",
+            "html_sha256": "b" * 64,
+        }
+        with patch.object(pub, "STATE_PATH", self.state_path):
+            pub.save_publish_state(state)
+
+        with patch.object(pub, "STATE_PATH", self.state_path):
+            reloaded = pub.load_publish_state()
+        self.assertIn("intel--recoverytest01", reloaded["items"])
+        self.assertEqual(reloaded["items"]["intel--recoverytest01"]["html_sha256"], "b" * 64)
 
 
 if __name__ == "__main__":
