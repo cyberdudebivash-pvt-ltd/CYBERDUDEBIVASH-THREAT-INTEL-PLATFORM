@@ -5593,6 +5593,33 @@ async function handleRequest(request, env, ctx) {
 
   // --- /api/health ------------------------------------------------------------
   if (path === "/api/health" || path === "/api/health/") {
+    // A public security report demonstrated this endpoint handing any unauthenticated caller a
+    // full infrastructure/security-posture map with zero auth required: JWT algorithm family
+    // (auth: "JWT_HS256+KV" -- signals which algorithm-specific attacks to try), the exact
+    // brute-force lockout threshold, KV binding names, which third-party integrations
+    // (Razorpay, Resend) are enabled, and a staleness signal on top (data_freshness). None of
+    // that is a secret value, but it is a free architecture map for reconnaissance and this
+    // endpoint has zero legitimate reason to hand it to an anonymous caller.
+    //
+    // Fix: reuse the exact admin credential /api/admin/health already requires (X-Admin-Key or
+    // Authorization: Bearer, matched via timingSafeEqual against ADMIN_SECRET) rather than
+    // inventing a second auth mechanism. An authenticated caller gets the identical, unchanged
+    // response this endpoint has always returned -- nothing removed, only gated. An
+    // unauthenticated caller now gets {status, version, generated_at}. version stays public: it
+    // carries materially less reconnaissance value than the auth/security details below it, and
+    // deploy-worker.yml's post-deploy smoke test asserts on it with no credential today.
+    // Dedicated public product stats (advisory/critical counts etc.) already live at
+    // /api/platform/stats, unaffected by this change.
+    const healthAdminKey = (
+      request.headers.get("X-Admin-Key") ||
+      (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "")
+    ).trim();
+    const healthIsAuthenticated = !!env.ADMIN_SECRET && timingSafeEqual(healthAdminKey, env.ADMIN_SECRET);
+
+    if (!healthIsAuthenticated) {
+      return jsonResp({ status: "ok", version: PLATFORM_VERSION, generated_at: now() });
+    }
+
     const feedData = await loadFeedItems(env);
     const stats    = computeStats(feedData.items || []);
     const kvOk     = await env.RATE_LIMIT_KV.get("health:ping").then(() => "ok").catch(() => "error");
