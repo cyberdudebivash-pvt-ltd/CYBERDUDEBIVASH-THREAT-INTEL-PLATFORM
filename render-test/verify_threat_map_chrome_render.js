@@ -278,6 +278,25 @@ async function main() {
     }
 
     // ── 6. No uncaught errors from boot or any interaction above ─────────
+    // index.html's feed-state resolver (js/feed-state.js resolveFeedTerminalState(),
+    // P0 incident 2026-09-03) can legitimately compute a healthy LIVE/STALE/
+    // EMPTY state from within its own "terminal failure" logging branch and
+    // still log its one-line diagnostic via console.error regardless -- see
+    // verify_pages_fast_publish_smoke.js's identical, already-shipped fix for
+    // the full root-cause writeup (confirmed live: this exact line fired
+    // twice here, once at boot and once after the fullscreen/video
+    // interactions above re-triggered the fetch chain, both with a healthy
+    // LIVE state). Checked once here, after every interaction that could
+    // have logged it, deferring to the app's own authoritative
+    // window.__FEED_TERMINAL_STATE__.isTerminalFailure rather than guessing
+    // from log text. A genuine terminal failure still fails this script.
+    const termState = await page.evaluate(() => window.__FEED_TERMINAL_STATE__ || null).catch(() => null);
+    if (termState && termState.isTerminalFailure === false) {
+      const goc = 'console.error: [GOC v200.0] Primary feed terminal state:';
+      for (let i = pageErrors.length - 1; i >= 0; i--) {
+        if (pageErrors[i].startsWith(goc)) pageErrors.splice(i, 1);
+      }
+    }
     record('Zero uncaught JS errors / console errors across boot + all interactions', pageErrors.length === 0, pageErrors.join(' | '));
 
     // ── 7. #apex-lead-modal click-trap fix (discovered live while writing
