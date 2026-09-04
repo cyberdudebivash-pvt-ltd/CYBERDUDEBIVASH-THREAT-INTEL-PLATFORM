@@ -13530,6 +13530,19 @@ function renderTopThreats(data) {
                             }
                         }
                     } catch(_me) {}
+                    // v200.1 P0 FIX: the #m-last-sync WRITE this block used to do here is
+                    // removed (consolidated onto fetchWorkerStats() -> /api/platform/stats
+                    // intel.last_sync, so this page never shows two different answers for
+                    // "how fresh is our data" depending on which of several racing fetches
+                    // happened to finish last) -- but _genAt itself is still a real value
+                    // _syncedAt below needs (the "SYNCED: ..." refresh-bar line, a separate,
+                    // still-legitimate display this function alone owns). Recompute it,
+                    // side-effect-free, so removing the redundant write didn't also delete
+                    // the one variable a completely different line still depends on.
+                    var _genAt;
+                    try {
+                        if (isApiSource) _genAt = (data.preview && data.preview.generated_at) || data.generated_at;
+                    } catch(_gae) {}
                     // v200.1 P0 FIX: last-sync display consolidated onto one source
                     // (fetchWorkerStats() -> /api/platform/stats intel.last_sync) so this
                     // page never shows two different answers for "how fresh is our data"
