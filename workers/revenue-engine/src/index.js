@@ -38,9 +38,29 @@ export default {
     const url      = new URL(request.url);
     const path     = url.pathname;
     const method   = request.method;
+    const requestOrigin = request.headers.get("Origin");
+    const allowedOrigin = isAllowedRevenueOrigin(requestOrigin) ? requestOrigin : null;
 
-    if (method === "OPTIONS") return cors204();
+    if (method === "OPTIONS") return cors204(allowedOrigin);
 
+    const response = await routeRevenueRequest(request, env, ctx, rid, url, path, method);
+    return withCorsOrigin(response, allowedOrigin);
+  },
+
+  // ── Cron handler — email send + follow-ups + trial nudges + sub expiry ────
+  async scheduled(event, env, ctx) {
+    const h = new Date().getUTCHours();
+    if (h === 9)  await runDailyOutreach(env);
+    if (h === 9)  await handleSubExpireCheck({}, env, "cron"); // daily expiry check
+    if (h === 14) await runFollowUps(env);
+    if (h === 18 && new Date().getUTCDay() === 1) await runWeeklyDigest(env);
+  },
+};
+
+// Extracted from fetch() above (behavior unchanged) so the CORS-origin decision in fetch() can
+// be applied exactly once, centrally, to whatever this returns -- rather than threading it
+// through every dispatch line/handler below. See withCorsOrigin()'s comment.
+async function routeRevenueRequest(request, env, ctx, rid, url, path, method) {
     try {
       // ── Public lead/trial endpoints ────────────────────────────────────────
       if (path === "/api/leads/capture" && method === "POST")
@@ -143,17 +163,7 @@ export default {
     } catch (e) {
       return json({ error: "internal_error", message: e.message, rid }, 500);
     }
-  },
-
-  // ── Cron handler — email send + follow-ups + trial nudges + sub expiry ────
-  async scheduled(event, env, ctx) {
-    const h = new Date().getUTCHours();
-    if (h === 9)  await runDailyOutreach(env);
-    if (h === 9)  await handleSubExpireCheck({}, env, "cron"); // daily expiry check
-    if (h === 14) await runFollowUps(env);
-    if (h === 18 && new Date().getUTCDay() === 1) await runWeeklyDigest(env);
-  },
-};
+}
 
 // =============================================================================
 // PHASE 2 — LEAD CAPTURE + TRIAL
@@ -1351,6 +1361,16 @@ async function computePortalToken(env, email) {
  *   `razorpay_plan_ids_configured` booleans.
  */
 export async function handleRevenueEngineHealth(request, env, rid) {
+  // Same fix, same reasoning as intel-gateway's /api/health (see that file): a security report
+  // showed this endpoint handing an anonymous caller the engine name/version, every KV/D1
+  // binding's presence, and which Razorpay integrations are configured -- a free
+  // infrastructure map, gated behind nothing. Reuses the existing isAdmin() (X-Admin-Secret,
+  // timingSafeEqual) rather than a new mechanism: an authenticated admin gets the identical,
+  // unchanged full response; anonymous callers get {status, engine, version, generated_at}.
+  if (!(await isAdmin(request, env))) {
+    return json({ status: "ok", engine: ENGINE.NAME, version: ENGINE.VERSION, generated_at: new Date().toISOString() });
+  }
+
   const kvOk  = env.REVENUE_CRM_KV ? await env.REVENUE_CRM_KV.get("health:ping").then(() => "ok").catch(() => "error") : "not_bound";
   const d1Ok  = env.CRM_DB ? await env.CRM_DB.prepare("SELECT 1").first().then(() => "ok").catch(() => "error") : "not_bound";
 
@@ -1418,9 +1438,18 @@ async function sha256prefix(text, len = 12) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,"0")).join("").slice(0, len);
 }
 
+// Was `^[^\s@]+@[^\s@]+\.[^\s@]+$` -- "anything but whitespace/@" permits every HTML-special
+// character (`<>"'`), which is exactly what let a stored-XSS payload into an email field that
+// payment-status-dashboard.html later rendered unescaped (see that file's fix for the matching
+// output-encoding half of this issue -- input validation on a structured field like email is a
+// real defense, but it's never a substitute for escaping at render time on the free-text fields
+// like payment_notes that legitimately need to allow punctuation). Bounded length matches the
+// column this feeds (email TEXT, no declared limit elsewhere, so cap here) and RFC 5321's 254.
 function sanitizeEmail(email) {
   const e = (email || "").trim().toLowerCase();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null;
+  if (e.length > 254) return null;
+  return /^[a-z0-9][a-z0-9._%+-]*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(e)
+    ? e : null;
 }
 
 function genId(prefix) {
@@ -1433,21 +1462,55 @@ function getWeekLabel() {
   return `Week of ${d.toISOString().slice(0,10)}`;
 }
 
-function cors204() {
-  return new Response(null, { status: 204, headers: {
-    "Access-Control-Allow-Origin":  "*",
+// A security report flagged this Worker returning Access-Control-Allow-Origin: * on every
+// response, including its admin-secret-gated CRM/deals/revenue/payment-approval routes -- with
+// wildcard CORS, any origin's browser-side JS can read those responses whenever an admin secret
+// is in play, and it lets an unauthenticated caller script freely against the API from any
+// origin with none of the (admittedly weak, since it's just a header value) friction a same-
+// origin-only policy would add. This is a server-to-server-style admin API; the only browser
+// callers that legitimately need it are this repo's own admin/customer dashboard HTML pages,
+// all of which are deployed to and served from intel.cyberdudebivash.com (confirmed by grepping
+// this repo for every root-level *.html file referencing this Worker's URL: payment-status-
+// dashboard.html, revenue-dashboard.html, customer/api-keys.html, trial-center.html, lead-
+// pipeline.html, subscription-management.html, payment-submission.html, mssp-tenant-
+// dashboard.html, enterprise-onboarding.html, customer-success.html, demo-intelligence-
+// center.html). Extend this set if a legitimate new browser-based consumer is added elsewhere.
+const REVENUE_ALLOWED_ORIGINS = new Set([
+  "https://intel.cyberdudebivash.com",
+]);
+
+function isAllowedRevenueOrigin(origin) {
+  return typeof origin === "string" && REVENUE_ALLOWED_ORIGINS.has(origin);
+}
+
+// Applies the single, correct Access-Control-Allow-Origin decision to every response this
+// Worker returns, regardless of which handler built it -- see the fetch() entry point below,
+// which is this Worker's only inbound edge, so this is the one place this needs to happen
+// rather than threading `request`/origin through json()'s ~150 existing call sites.
+function withCorsOrigin(response, allowedOrigin) {
+  const headers = new Headers(response.headers);
+  if (allowedOrigin) headers.set("Access-Control-Allow-Origin", allowedOrigin);
+  else headers.delete("Access-Control-Allow-Origin");
+  headers.append("Vary", "Origin");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+function cors204(allowedOrigin) {
+  const headers = {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Admin-Secret, Authorization",
-  }});
+    "Vary": "Origin",
+  };
+  if (allowedOrigin) headers["Access-Control-Allow-Origin"] = allowedOrigin;
+  return new Response(null, { status: 204, headers });
 }
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body, null, 2), {
     status,
     headers: {
-      "Content-Type":                "application/json",
-      "Cache-Control":               "no-cache, no-store",
-      "Access-Control-Allow-Origin": "*",
+      "Content-Type":   "application/json",
+      "Cache-Control":  "no-cache, no-store",
     },
   });
 }
@@ -1663,7 +1726,47 @@ async function handleApiKeyValidate(request, env, rid) {
 // =============================================================================
 // PAYMENT SUBMISSION (customer uploads evidence)
 // =============================================================================
+// Public by design (dispatched before the isAdmin() gate in the router above, alongside the
+// other genuinely-public customer routes) -- a real customer paying by UPI/bank transfer/crypto
+// has no admin secret and needs to submit proof before any account exists. What was missing was
+// everything downstream of "public": no per-IP rate limit, a screenshot_url stored with no
+// scheme check, and payment_notes/email flowing into payment-status-dashboard.html unescaped
+// (fixed in that file). This pass adds the input-side controls; see sanitizeEmail() above and
+// this dashboard's escapeHtml()/escapeJsAttr()/safeHref() for the corresponding output-side fix
+// -- both are required, per "encode untrusted data at output" (input validation alone can't be
+// the whole XSS control for a free-text field like payment_notes).
+const PAYMENT_SUBMIT_MAX_PER_HOUR_PER_IP = 5;
+const PAYMENT_NOTES_MAX_LENGTH = 2000;
+const TRANSACTION_ID_MAX_LENGTH = 128;
+const SCREENSHOT_URL_MAX_LENGTH = 2048;
+
+// Same http(s)-only scheme check the dashboard applies again at render time (safeHref) --
+// rejecting javascript:/data: here means a malicious screenshot_url never even reaches storage,
+// while the dashboard's own check stays as defense in depth for any record written before this
+// fix shipped.
+function sanitizeScreenshotUrl(url) {
+  if (!url) return null;
+  const trimmed = String(url).trim();
+  if (!trimmed || trimmed.length > SCREENSHOT_URL_MAX_LENGTH) return null;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 async function handlePaymentSubmit(request, env, rid) {
+  // Fixed-window per-IP cap (hashed, not stored raw) -- same pattern as handleTrialRequest's
+  // existing anti-automation limiter just above, reused rather than re-implemented.
+  const ipHash = await sha256prefix(request.headers.get("cf-connecting-ip") || "unknown", 16);
+  const rlKey = `payment_submit_rl:${ipHash}:${new Date().toISOString().slice(0, 13)}`; // hour bucket
+  const rlCount = parseInt((await env.REVENUE_CRM_KV?.get(rlKey)) || "0", 10);
+  if (rlCount >= PAYMENT_SUBMIT_MAX_PER_HOUR_PER_IP) {
+    return json({ error:"rate_limited", message:"Too many payment submissions from this network. Try again later." }, 429);
+  }
+  await env.REVENUE_CRM_KV?.put(rlKey, String(rlCount + 1), { expirationTtl: 3600 });
+
   const body = await request.json().catch(() => ({}));
   const { email, plan, payment_method, transaction_id, amount_paid, currency, payment_notes, screenshot_url, billing_cycle } = body;
 
@@ -1671,17 +1774,33 @@ async function handlePaymentSubmit(request, env, rid) {
   if (!cleanEmail) return json({ error:"invalid_email" }, 400);
   if (!plan || !TIERS[plan.toUpperCase()]) return json({ error:"invalid_plan", valid_plans:Object.keys(TIERS) }, 400);
   if (!payment_method || !PAYMENT_METHODS.includes(payment_method)) return json({ error:"invalid_payment_method", valid_methods:PAYMENT_METHODS }, 400);
-  if (!transaction_id && !screenshot_url) return json({ error:"evidence_required", message:"Provide transaction_id or screenshot_url" }, 400);
+  const cleanScreenshotUrl = sanitizeScreenshotUrl(screenshot_url);
+  if (screenshot_url && !cleanScreenshotUrl) return json({ error:"invalid_screenshot_url", message:"screenshot_url must be an http(s) URL." }, 400);
+  if (!transaction_id && !cleanScreenshotUrl) return json({ error:"evidence_required", message:"Provide transaction_id or screenshot_url" }, 400);
+  const cleanTransactionId = transaction_id ? String(transaction_id).trim().slice(0, TRANSACTION_ID_MAX_LENGTH) : null;
+  const cleanNotes = payment_notes ? String(payment_notes).trim().slice(0, PAYMENT_NOTES_MAX_LENGTH) : null;
 
   const paymentId = genId("pay");
   const now = new Date().toISOString();
   const tier = plan.toUpperCase();
 
+  // Idempotency: the same customer resubmitting the same transaction_id (double-click, retry
+  // after a network blip) lands as a duplicate pending record today with no way to tell it apart
+  // from a fresh submission. Reject an exact (email, transaction_id) repeat among recent
+  // submissions rather than queuing another one -- cheap, and needs no new client-sent key.
+  if (cleanTransactionId) {
+    const recentIdx = await env.REVENUE_CRM_KV.get("payments:index", "json") || [];
+    const duplicate = recentIdx.find(p => p.email === cleanEmail && p.transaction_id === cleanTransactionId);
+    if (duplicate) {
+      return json({ error:"duplicate_submission", message:"This transaction was already submitted.", payment_id:duplicate.id, status:duplicate.status }, 409);
+    }
+  }
+
   const record = {
     id: paymentId, email: cleanEmail, plan: tier, billing_cycle: billing_cycle || "monthly",
-    payment_method, transaction_id: transaction_id || null, amount_paid: amount_paid || null,
+    payment_method, transaction_id: cleanTransactionId, amount_paid: amount_paid || null,
     currency: currency || (payment_method === "upi" || payment_method === "neft" ? "INR" : "USD"),
-    screenshot_url: screenshot_url || null, payment_notes: payment_notes || null,
+    screenshot_url: cleanScreenshotUrl, payment_notes: cleanNotes,
     status: PAYMENT_STATUS.PENDING, submitted_at: now, verified_at: null, approved_at: null,
     approved_by: null, rejection_reason: null, rid
   };
@@ -1690,11 +1809,11 @@ async function handlePaymentSubmit(request, env, rid) {
 
   // Append to payment index
   const idx = await env.REVENUE_CRM_KV.get("payments:index", "json") || [];
-  idx.unshift({ id:paymentId, email:cleanEmail, plan:tier, method:payment_method, status:PAYMENT_STATUS.PENDING, submitted_at:now });
+  idx.unshift({ id:paymentId, email:cleanEmail, plan:tier, method:payment_method, transaction_id:cleanTransactionId, status:PAYMENT_STATUS.PENDING, submitted_at:now });
   await env.REVENUE_CRM_KV.put("payments:index", JSON.stringify(idx.slice(0, 500)));
 
   // Notify admin via Slack
-  await slackNotify(env, `💳 *NEW PAYMENT SUBMISSION* — ${cleanEmail}\nPlan: ${tier} | Method: ${payment_method} | TxID: ${transaction_id||"(screenshot)"}\nApprove: https://intel.cyberdudebivash.com/payment-status-dashboard.html`);
+  await slackNotify(env, `💳 *NEW PAYMENT SUBMISSION* — ${cleanEmail}\nPlan: ${tier} | Method: ${payment_method} | TxID: ${cleanTransactionId||"(screenshot)"}\nApprove: https://intel.cyberdudebivash.com/payment-status-dashboard.html`);
 
   // Confirm email to customer
   await queueEmail(env, { to:cleanEmail, template:"payment_received", vars:{ payment_id:paymentId, plan:tier, method:payment_method, expected_hours:"4" } });
@@ -2433,4 +2552,5 @@ function getCommercialEmailTemplate(name, vars) {
 export {
   json, sanitizeEmail, genId, TIERS, SUB_STATUS,
   provisionCustomer, trackEvent, isAdmin, automationTrigger,
+  handlePaymentSubmit, sanitizeScreenshotUrl,
 };
