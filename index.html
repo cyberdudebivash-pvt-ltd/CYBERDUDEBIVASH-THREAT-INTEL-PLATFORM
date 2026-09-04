@@ -8044,12 +8044,15 @@
                 <!-- Search -->
                 <input id="cve-search-input" type="text" placeholder="Search CVE ID or keyword..." oninput="window.cdbCVETracker.setQuery(this.value)"
                     style="flex:1;min-width:200px;padding:7px 12px;font-family:var(--font-mono);font-size:11px;background:#0b1422;border:1px solid var(--border);border-radius:3px;color:var(--text);outline:none;" />
-                <!-- Date range -->
+                <!-- Date range: server (fetchAndCacheCVEs) only ever retains a
+                     rolling 7-day NVD window (2,459 CVEs in 7 days already
+                     saturates the API's 2000-per-request cap, so widening this
+                     needs multi-page NVD ingestion, not a UI option) -- a
+                     30/90-day choice here would silently return the exact same
+                     rows as 7 days. Only offering what the data actually supports. -->
                 <select id="cve-days-select" onchange="window.cdbCVETracker.setDays(this.value)"
                     style="padding:7px 12px;font-family:var(--font-mono);font-size:10px;background:#0b1422;border:1px solid var(--border);border-radius:3px;color:var(--text);outline:none;">
                     <option value="7">Last 7 Days</option>
-                    <option value="30">Last 30 Days</option>
-                    <option value="90">Last 90 Days</option>
                 </select>
                 <!-- Refresh button -->
                 <button id="cve-refresh-btn" onclick="window.cdbCVETracker.refresh()"
