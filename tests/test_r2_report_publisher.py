@@ -352,17 +352,22 @@ class TestClearReportUrls(unittest.TestCase):
         inside execute_plan()'s try/finally with no except of its own, that
         exception propagated past main()'s call to save_publish_state(),
         silently losing the in-memory retirement state for EVERY id this
-        run touched, not just the one whose manifest failed. Manifest B
-        (which needs no real update -- 'intel--b' isn't in html_ids/pdf_ids)
-        writes fine; manifest A is forced to fail. clear_report_urls must:
+        run touched, not just the one whose manifest failed. Both manifests
+        carry an id that needs clearing (CodeRabbit review on PR #370: the
+        original version of this test gave manifest_b an id absent from
+        html_ids, so it never exercised a real write on that file -- it
+        could not have told isolation-works-correctly apart from
+        isolation-is-a-no-op). manifest_a is forced to fail; manifest_b
+        must still get its real, needed update. clear_report_urls must:
         (1) not raise, (2) still return which manifest(s) failed, (3) still
-        report intel--a's real state (the write never landed)."""
+        apply the update to every OTHER manifest, (4) leave the failed
+        manifest's original content untouched (no partial write)."""
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             manifest_a = Path(td) / "feed_a.json"
             manifest_b = Path(td) / "feed_b.json"
             manifest_a.write_text(json.dumps([{"id": "intel--a", "report_url": "/reports/x/a.html"}]))
-            manifest_b.write_text(json.dumps([{"id": "intel--b", "report_url": "/reports/x/b.html"}]))
+            manifest_b.write_text(json.dumps([{"id": "intel--a", "report_url": "/reports/x/a-mirror.html"}]))
             orig = pub.REPORT_URL_MANIFESTS
             pub.REPORT_URL_MANIFESTS = [manifest_a, manifest_b]
             real_replace = pub.os.replace
@@ -379,6 +384,10 @@ class TestClearReportUrls(unittest.TestCase):
                 self.assertEqual(
                     json.loads(manifest_a.read_text())[0]["report_url"], "/reports/x/a.html",
                     "failed write must never partially land -- original content must survive untouched",
+                )
+                self.assertEqual(
+                    json.loads(manifest_b.read_text())[0]["report_url"], "",
+                    "manifest_b's real, needed update must still land even though manifest_a failed",
                 )
             finally:
                 pub.REPORT_URL_MANIFESTS = orig
@@ -411,43 +420,49 @@ class TestExecutePlanManifestFailureRecovery(unittest.TestCase):
     (bounded-but-redundant beats silently incomplete)."""
 
     def test_restoration_logic_recovers_full_entry_on_manifest_failure(self):
-        # Mirrors execute_plan()'s actual sequence at unit level (same style
-        # as TestRetirement.test_partial_delete_failure_does_not_orphan_
-        # sibling_key_or_clear_wrong_url above): both deletes succeed, then
-        # clear_report_urls reports a failure -- state must be restored.
+        """Exercises the REAL execute_plan() (CodeRabbit review on PR #370:
+        an earlier version of this test duplicated execute_plan()'s
+        bookkeeping inline, so it could keep passing even if the production
+        restoration logic regressed). s3_delete() is mocked to succeed for
+        both objects; clear_report_urls() is mocked to report a failed
+        manifest -- execute_plan() itself must then restore the id's full
+        pre-clear state entry."""
         intel_id = "intel--manifest-fail-restore"
         original_entry = {
             "canonical_ts": "2026-09-01T00:00:00Z",
             "html_key": f"reports/2026/01/{intel_id}.html",
             "pdf_key": f"reports/pdf/{intel_id}.pdf",
         }
-        state_items = {intel_id: dict(original_entry)}
+        state = {"items": {intel_id: dict(original_entry)}}
+        delete_ops = [
+            {"id": intel_id, "kind": "html", "bucket": BUCKET_REPORTS, "key": original_entry["html_key"]},
+            {"id": intel_id, "kind": "pdf", "bucket": BUCKET_DATA, "key": original_entry["pdf_key"]},
+        ]
 
-        # -- execute_plan()'s delete-loop bookkeeping, both ops succeed --
-        pre_clear_snapshot = {}
-        cleared_html_ids, cleared_pdf_ids = set(), set()
-        entry = state_items.get(intel_id)
-        pre_clear_snapshot.setdefault(intel_id, dict(entry))
-        cleared_html_ids.add(intel_id)
-        entry.pop("html_key", None)
-        entry = state_items.get(intel_id)
-        pre_clear_snapshot.setdefault(intel_id, dict(entry))  # no-op: already captured pre-pop
-        cleared_pdf_ids.add(intel_id)
-        entry.pop("pdf_key", None)
-        for iid in list(cleared_html_ids | cleared_pdf_ids):
-            e = state_items.get(iid)
-            if e is not None and not e.get("html_key") and not e.get("pdf_key"):
-                state_items.pop(iid, None)
-        self.assertNotIn(intel_id, state_items, "sanity check: both keys cleared -- entry fully popped before restoration")
+        with patch.object(pub, "s3_delete", return_value=True), \
+             patch.object(pub, "clear_report_urls", return_value=[Path("/tmp/simulated-failed-manifest.json")]) as mock_clear:
+            put_ok, delete_ok = pub.execute_plan([], delete_ops, state, "https://fake.example.r2.cloudflarestorage.com")
 
-        # -- clear_report_urls reports manifest failure -- restore --
-        failed_manifests = [Path("/tmp/simulated-failed-manifest.json")]
-        if failed_manifests:
-            for iid, snapshot in pre_clear_snapshot.items():
-                state_items[iid] = snapshot
+        self.assertEqual(delete_ok, 2, "both real (mocked) s3_delete calls must have been counted as successful")
+        mock_clear.assert_called_once_with(html_ids={intel_id}, pdf_ids={intel_id})
+        self.assertIn(intel_id, state["items"], "must be restored, not permanently dropped, when a manifest failed to write")
+        self.assertEqual(state["items"][intel_id], original_entry, "restored entry must exactly match its pre-clear state (both keys, canonical_ts)")
 
-        self.assertIn(intel_id, state_items, "must be restored, not permanently dropped, when a manifest failed to write")
-        self.assertEqual(state_items[intel_id], original_entry, "restored entry must exactly match its pre-clear state (both keys, canonical_ts)")
+    def test_no_restoration_when_all_manifests_succeed(self):
+        """Symmetric case: when clear_report_urls() reports no failures, the
+        id must be fully retired (popped from state), not left behind."""
+        intel_id = "intel--manifest-success-retire"
+        state = {"items": {intel_id: {
+            "canonical_ts": "2026-09-01T00:00:00Z",
+            "html_key": f"reports/2026/01/{intel_id}.html",
+        }}}
+        delete_ops = [{"id": intel_id, "kind": "html", "bucket": BUCKET_REPORTS, "key": state["items"][intel_id]["html_key"]}]
+
+        with patch.object(pub, "s3_delete", return_value=True), \
+             patch.object(pub, "clear_report_urls", return_value=[]):
+            pub.execute_plan([], delete_ops, state, "https://fake.example.r2.cloudflarestorage.com")
+
+        self.assertNotIn(intel_id, state["items"], "must be fully retired when every manifest write actually succeeded")
 
 
 class TestCostSimulation(unittest.TestCase):
