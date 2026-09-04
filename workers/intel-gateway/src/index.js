@@ -5596,29 +5596,38 @@ async function handleRequest(request, env, ctx) {
     // A public security report demonstrated this endpoint handing any unauthenticated caller a
     // full infrastructure/security-posture map with zero auth required: JWT algorithm family
     // (auth: "JWT_HS256+KV" -- signals which algorithm-specific attacks to try), the exact
-    // brute-force lockout threshold, KV binding names, which third-party integrations
-    // (Razorpay, Resend) are enabled, and a staleness signal on top (data_freshness). None of
-    // that is a secret value, but it is a free architecture map for reconnaissance and this
-    // endpoint has zero legitimate reason to hand it to an anonymous caller.
+    // brute-force lockout threshold, and which third-party integrations (Razorpay, Resend) are
+    // enabled. None of that is a secret value, but it is a free architecture map for
+    // reconnaissance and this endpoint has zero legitimate reason to hand it to an anonymous
+    // caller.
+    //
+    // CORRECTION to the first pass at this fix: that pass gated the *entire* response (including
+    // status/advisory_count/checks.jwt_configured/etc.) behind auth, which broke real,
+    // already-wired first-party consumers that have no way to authenticate -- confirmed live:
+    // master-deployment-orchestrator.yml's Gate 1 (reads advisory_count, hard-fails below 10),
+    // post-deploy-validation.yml's GATE D (reads checks.jwt_configured, hard-fails if absent),
+    // and feed_contract_validator.py's CONTRACT-2 (requires a non-empty `checks` object in the
+    // envelope). post_deploy_validator.py/commercial_saas_validator.py/self_healing_engine.py
+    // also read checks.jwt_configured/r2_intel/feed_index unauthenticated. None of those six
+    // consumers reads the `security` block or the four secret-*presence* booleans below --
+    // narrowing the gate to exactly what the report flagged, instead of the whole endpoint, is
+    // what actually satisfies this repo's own backward-compatibility requirement.
     //
     // Fix: reuse the exact admin credential /api/admin/health already requires (X-Admin-Key or
     // Authorization: Bearer, matched via timingSafeEqual against ADMIN_SECRET) rather than
     // inventing a second auth mechanism. An authenticated caller gets the identical, unchanged
-    // response this endpoint has always returned -- nothing removed, only gated. An
-    // unauthenticated caller now gets {status, version, generated_at}. version stays public: it
-    // carries materially less reconnaissance value than the auth/security details below it, and
-    // deploy-worker.yml's post-deploy smoke test asserts on it with no credential today.
-    // Dedicated public product stats (advisory/critical counts etc.) already live at
-    // /api/platform/stats, unaffected by this change.
+    // response this endpoint has always returned. An unauthenticated caller gets everything
+    // real consumers depend on (status, version, advisory/critical counts, checks.gateway/
+    // kv_rate_limit/kv_api_keys/r2_intel/feed_index/jwt_configured) but not the `security` block,
+    // not checks.{admin,razorpay,razorpay_webhook,resend,revenue_admin_secret}_configured (which
+    // secrets exist -- the actual reconnaissance value), and not data_freshness (a narrower,
+    // genuinely non-essential staleness signal the report separately flagged, with no consumer
+    // depending on it).
     const healthAdminKey = (
       request.headers.get("X-Admin-Key") ||
       (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "")
     ).trim();
     const healthIsAuthenticated = !!env.ADMIN_SECRET && timingSafeEqual(healthAdminKey, env.ADMIN_SECRET);
-
-    if (!healthIsAuthenticated) {
-      return jsonResp({ status: "ok", version: PLATFORM_VERSION, generated_at: now() });
-    }
 
     const feedData = await loadFeedItems(env);
     const stats    = computeStats(feedData.items || []);
@@ -5651,19 +5660,25 @@ async function handleRequest(request, env, ctx) {
     // regenerated" timestamp this incident's own root-cause investigation
     // used as its evidence throughout (frozen at 2026-08-26T09:55:27Z).
     const dataFreshness = classifyFreshness(feedData.generated_at);
-    return jsonResp({
+    const body = {
       status: "ok", version: PLATFORM_VERSION,
       advisory_count: stats.total, critical_count: stats.critical,
       kev_confirmed: stats.kev_confirmed, last_sync: stats.last_sync,
       feed_index: `live:${stats.total}_items`,
       platform_reachable: true,
-      data_freshness: dataFreshness,
       intelligence_available: stats.total > 0,
       checks: {
         gateway: "ok", kv_rate_limit: kvOk, kv_api_keys: kvOk,
         r2_intel: feedData.items.length > 0 ? "ok" : "empty",
         feed_index: `live:${stats.total}_items`,
         jwt_configured: !!(env.CDB_JWT_SECRET),
+      },
+      generated_at: now(),
+    };
+
+    if (healthIsAuthenticated) {
+      body.data_freshness = dataFreshness;
+      Object.assign(body.checks, {
         admin_configured: !!(env.ADMIN_SECRET),
         // Additive: surfaces the exact outage verified live on 2026-08-03 -- create-order
         // 503s with "Razorpay not configured on server" whenever either secret is unset,
@@ -5684,17 +5699,18 @@ async function handleRequest(request, env, ctx) {
         // the "manage your subscription" link -- customer still gets their key,
         // nothing customer-facing ever surfaces that the portal link is missing.
         revenue_admin_secret_configured: isSet(env.REVENUE_ADMIN_SECRET),
-      },
-      security: {
+      });
+      body.security = {
         auth: "JWT_HS256+KV",
         rate_limiting: "sliding_window_per_ip",
         brute_force: `lockout_after_${BRUTE_FORCE_MAX}_failures`,
         audit_logging: "SECURITY_HUB_KV",
         headers: "HSTS+CSP+XFO",
         taxii: "2.1",
-      },
-      generated_at: now(),
-    });
+      };
+    }
+
+    return jsonResp(body);
   }
 
   // --- /api/v1/intel/latest.json ----------------------------------------------
