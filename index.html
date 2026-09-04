@@ -13379,6 +13379,28 @@ function renderTopThreats(data) {
                         throw new Error('API returned 0 items');
                     }
                     console.log('[SENTINEL-APEX] API items:', entries.length);
+                    // v200.3 P0 FIX: confirmed live (pages-fast-publish run #45,
+                    // 2026-09-04 -- the v200.2 fix above raised the SW-recovery
+                    // guard from 1 to 3 attempts, taking
+                    // verify_stale_service_worker_recovery.js from 1/4 to 2/4
+                    // checks passing, including the core recovery mechanism
+                    // itself). The remaining failure is a follow-up ordinary
+                    // reload, well after recovery already succeeded once,
+                    // independently tripping the same "all sources failed
+                    // under an active SW" condition (a freshly-installing
+                    // real SW can itself take more than one reload to fully
+                    // settle) -- but by then the 3-attempt budget from the
+                    // EARLIER, already-resolved episode was nearly spent,
+                    // leaving little room for this new one. A budget spent
+                    // resolving one episode should not be held against a
+                    // later, unrelated one: reaching this line proves the
+                    // current page instance's fetch path is genuinely
+                    // healthy again, so any earlier recovery spend no longer
+                    // reflects real risk. Reset it here so a later episode
+                    // -- on this page instance or the next reload -- gets
+                    // its own fresh budget instead of inheriting a
+                    // near-exhausted one.
+                    try { sessionStorage.setItem('apex_sw_recovery_attempts', '0'); } catch (e) {}
 
                     // ── v102.0 SCHEMA NORMALIZATION ──────────────────────────────────────
                     // v74 manifest enricher writes items with 'id' (STIX object ID) instead
@@ -13516,6 +13538,19 @@ function renderTopThreats(data) {
                             }
                         }
                     } catch(_me) {}
+                    // v200.1 P0 FIX: the #m-last-sync WRITE this block used to do here is
+                    // removed (consolidated onto fetchWorkerStats() -> /api/platform/stats
+                    // intel.last_sync, so this page never shows two different answers for
+                    // "how fresh is our data" depending on which of several racing fetches
+                    // happened to finish last) -- but _genAt itself is still a real value
+                    // _syncedAt below needs (the "SYNCED: ..." refresh-bar line, a separate,
+                    // still-legitimate display this function alone owns). Recompute it,
+                    // side-effect-free, so removing the redundant write didn't also delete
+                    // the one variable a completely different line still depends on.
+                    var _genAt;
+                    try {
+                        if (isApiSource) _genAt = (data.preview && data.preview.generated_at) || data.generated_at;
+                    } catch(_gae) {}
                     // v200.1 P0 FIX: last-sync display consolidated onto one source
                     // (fetchWorkerStats() -> /api/platform/stats intel.last_sync) so this
                     // page never shows two different answers for "how fresh is our data"
