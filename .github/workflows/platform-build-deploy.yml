@@ -310,12 +310,33 @@ jobs:
         with:
           version: "3.15.0"
 
+      # v2.1 FIX: confirmed live (run #65, 2026-08-29) -- this step failed
+      # with "read tcp ...->185.199.108.153:443: read: connection reset by
+      # peer" fetching grafana.github.io/helm-charts/index.yaml, a transient
+      # GitHub Pages CDN blip, not a bad repo URL (the same repo add
+      # succeeds on a plain retry). No retry/backoff existed here, unlike
+      # every other external network call in this pipeline's Helm/SBOM jobs.
+      # v2.2 FIX (CodeRabbit review on #364): Helm 3.15.0's `helm repo
+      # update` exits 0 even when a repo's index download fails, unless
+      # --fail-on-repo-update-fail is passed -- confirmed against the real
+      # v3.15.0 binary. Without it, a genuine fetch failure would exit 0,
+      # `&& break` on the first attempt, and silently skip the retry this
+      # step exists to provide.
       - name: Add helm repos
         run: |
-          helm repo add bitnami https://charts.bitnami.com/bitnami
-          helm repo add grafana https://grafana.github.io/helm-charts
-          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-          helm repo update
+          for i in 1 2 3; do
+            helm repo add bitnami https://charts.bitnami.com/bitnami \
+              && helm repo add grafana https://grafana.github.io/helm-charts \
+              && helm repo add prometheus-community https://prometheus-community.github.io/helm-charts \
+              && helm repo update --fail-on-repo-update-fail \
+              && break
+            if [ "$i" = 3 ]; then
+              echo "::error::helm repo add/update failed after 3 attempts"
+              exit 1
+            fi
+            echo "::warning::helm repo add/update attempt $i failed (transient network), retrying in 15s..."
+            sleep 15
+          done
 
       - name: Helm dependency update
         run: |
