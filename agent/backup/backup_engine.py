@@ -245,18 +245,46 @@ class _S3Storage:
         resp = s3.get_object(Bucket=self.bucket, Key=self._full_key(key))
         return resp["Body"].read()
 
+    # P0 R2 COST AUDIT FIX: hard ceiling on paginated list_objects_v2 calls.
+    # This backend is only reached when CDB_BACKUP_ENABLED=true (default
+    # false) AND CDB_BACKUP_DESTINATION is s3/r2 (default "local", which uses
+    # _LocalStorage instead) -- both opt-in, so this path is dormant by
+    # default. But if ever enabled, list_keys() previously had no bound at
+    # all: _purge_old_backups() calls this on every run to find expired
+    # backups, and this backup archive only ever grows over time -- exactly
+    # the "operation cost scales with accumulated history" pattern the R2
+    # cost incident this PR fixes was caused by, just at a much smaller
+    # scale (backup objects accumulate at ~2/day, not per-intel-item). 20
+    # pages x 1000 keys = 20,000 keys is comfortably above any realistic
+    # backup-archive size for this use case while still being a real,
+    # evidenced hard ceiling, not an unbounded loop.
+    _MAX_LIST_PAGES = 20
+
     def list_keys(self, prefix: str = "") -> List[str]:
         s3 = self._get_client()
         full_prefix = self._full_key(prefix)
         paginator = s3.get_paginator("list_objects_v2")
         keys = []
+        page_count = 0
         for page in paginator.paginate(Bucket=self.bucket, Prefix=full_prefix):
+            page_count += 1
             for obj in page.get("Contents", []):
                 # Strip storage prefix to return logical key
                 k = obj["Key"]
                 if self.prefix:
                     k = k[len(self.prefix) + 1:]
                 keys.append(k)
+            if page_count >= self._MAX_LIST_PAGES:
+                logger.warning(
+                    "[BACKUP] list_keys(prefix=%r) hit _MAX_LIST_PAGES=%d "
+                    "(%d keys) -- stopping early rather than scanning "
+                    "unbounded history. Retention/purge acts on what was "
+                    "found; any backups beyond this page are picked up on "
+                    "a later run (fail-safe: under-purging is safe, "
+                    "unbounded LIST volume is not).",
+                    full_prefix, self._MAX_LIST_PAGES, len(keys),
+                )
+                break
         return sorted(keys)
 
     def delete(self, key: str) -> None:
