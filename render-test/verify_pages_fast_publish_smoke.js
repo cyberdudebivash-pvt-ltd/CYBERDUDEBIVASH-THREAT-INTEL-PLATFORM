@@ -149,6 +149,28 @@ async function main() {
       // page polls periodically by design (REFRESH_INTERVAL_MS), so network
       // idle isn't a meaningful signal to wait for here.
       await page.waitForTimeout(3000);
+
+      // js/feed-state.js's resolveFeedTerminalState() (index.html's GOC
+      // loader) can legitimately resolve to a healthy state (LIVE/STALE/
+      // EMPTY) even from its own "terminal failure" code path -- e.g. when
+      // this job's fresh dist/ checkout has real local api/feed.json data
+      // but the two absolute external fallback URLs this test deliberately
+      // aborts (see the page.route() handler above) net-error. It still
+      // logs its one-line diagnostic summary via console.error regardless
+      // of which state that turned out to be. Rather than guess from the
+      // log text, ask the app's own already-computed verdict
+      // (window.__FEED_TERMINAL_STATE__.isTerminalFailure, set at the same
+      // point the diagnostic line is logged) and drop that one diagnostic
+      // from the failure list when the app itself says this wasn't a real
+      // failure -- a genuine terminal failure (isTerminalFailure: true)
+      // still fails this test exactly as before.
+      const termState = await page.evaluate(() => window.__FEED_TERMINAL_STATE__ || null).catch(() => null);
+      if (termState && termState.isTerminalFailure === false) {
+        const goc = 'console.error: [GOC v200.0] Primary feed terminal state:';
+        for (let i = failures.length - 1; i >= 0; i--) {
+          if (failures[i].startsWith(goc)) failures.splice(i, 1);
+        }
+      }
     } catch (navErr) {
       fail(`page failed to load within ${NAV_TIMEOUT_MS}ms: ${navErr.message}`);
     }

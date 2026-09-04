@@ -61,19 +61,43 @@ COPY requirements.txt .
 # vulnerable 2.2.0+cpu for every CPU_ONLY=true build -- defeating the
 # fix specifically for CI/SBOM builds. Captures the actual version with a
 # backreference instead of hardcoding one.
+# v185.0 FIX: confirmed live (sbom-generation.yml run #423, 2026-09-03) --
+# `pip install -r requirements.txt` failed with "Could not find a version
+# that satisfies the requirement pydantic==2.13.4 (from versions: none)"
+# even though that exact version is published and installs cleanly on
+# retry -- a transient empty/stale response from the multi-index resolution
+# (--index-url download.pytorch.org/whl/cpu + --extra-index-url pypi.org),
+# not a bad pin. Every OTHER external network call in this same CI job
+# (Docker Buildx setup, Syft install, Grype install; see sbom-generation
+# .yml's own v47.4-v47.7 history) already has 3-attempt retry+backoff for
+# exactly this transient-failure class -- this was the one unhardened one.
+# Wraps only the two -r <requirements file> resolutions (the actual
+# multi-package failure point); pip's own --upgrade pip bootstrap above is
+# untouched. A persistent, non-transient failure still fails the build
+# after 3 attempts, exactly as before.
 RUN pip install --no-cache-dir --user --upgrade pip \
  && if [ "$CPU_ONLY" = "true" ]; then \
       echo "[BUILD] CPU_ONLY=true: installing torch CPU-only wheel (no CUDA)"; \
       sed -E 's|^torch==([0-9]+\.[0-9]+\.[0-9]+)|torch==\1+cpu|' \
           requirements.txt \
         > /tmp/req-cpu.txt; \
-      pip install --no-cache-dir --user \
-          --index-url https://download.pytorch.org/whl/cpu \
-          --extra-index-url https://pypi.org/simple \
-          -r /tmp/req-cpu.txt; \
+      for i in 1 2 3; do \
+        pip install --no-cache-dir --user \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple \
+            -r /tmp/req-cpu.txt && break; \
+        [ "$i" = 3 ] && { echo "[BUILD] pip install failed after 3 attempts"; exit 1; }; \
+        echo "[BUILD] pip install attempt $i failed (transient index resolution), retrying in 15s..."; \
+        sleep 15; \
+      done; \
     else \
       echo "[BUILD] CPU_ONLY=false: installing full requirements (GPU/CUDA enabled)"; \
-      pip install --no-cache-dir --user -r requirements.txt; \
+      for i in 1 2 3; do \
+        pip install --no-cache-dir --user -r requirements.txt && break; \
+        [ "$i" = 3 ] && { echo "[BUILD] pip install failed after 3 attempts"; exit 1; }; \
+        echo "[BUILD] pip install attempt $i failed (transient index resolution), retrying in 15s..."; \
+        sleep 15; \
+      done; \
     fi
 
 
