@@ -11381,7 +11381,16 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
             let sortedData = [...data].sort((a, b) =>
                 new Date(b.published_at||b.timestamp||b.processed_at||0) - new Date(a.published_at||a.timestamp||a.processed_at||0)
              );
-            const lastTs = sortedData.length ? timeSince(sortedData[0].processed_at||sortedData[0].timestamp) : '\u2014';
+            // v200.1 P0 FIX: "last sync" means "when did WE last ingest something",
+            // not "when was the newest-by-published_at item first published upstream"
+            // (a months-old CVE can be freshly re-processed today after a KEV add).
+            // Take the actual max processed_at/timestamp across the set, independent
+            // of the published_at-first sort above (which exists for card ordering,
+            // not for this stat). This is only ever the pre-fetchWorkerStats() fallback
+            // value shown before the authoritative /api/platform/stats response lands.
+            const _processedTimes = data.filter(d => d.processed_at || d.timestamp)
+                .map(d => new Date(d.processed_at || d.timestamp).getTime());
+            const lastTs = _processedTimes.length ? timeSince(Math.max(..._processedTimes)) : '\u2014';
 
             window._cdbMetricsComputed = true; // v184.0: computeMetrics is authoritative
             window._cdbAvgRisk = avgRisk;
@@ -11791,6 +11800,11 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
             const prevCount = manifestData.length;
             window.__DATA_LOADED__ = false; window.__INTEL_RENDERED__ = false; // P6: manual refresh reset
             await loadGOCIntel();
+            // v200.1 P0 FIX: re-hit the authoritative /api/platform/stats source on every
+            // refresh too -- fetchWorkerStats() used to be a fire-once IIFE at page load,
+            // so "REFRESH NOW" and the 30-min auto-refresh never actually re-synced the
+            // last-sync badge against live truth, only the card grid.
+            try { fetchWorkerStats(); } catch(_fws) {}
             // P0 FIX: was new Date().toLocaleTimeString() -- this write runs on every
             // manual/auto refresh AFTER loadGOCIntel() already sets #last-loaded correctly
             // in its own success path, so it was silently reverting that fix back to the
@@ -13491,17 +13505,11 @@ function renderTopThreats(data) {
                             }
                         }
                     } catch(_me) {}
-                    // v112.1 LAST SYNC FIX: Worker /api/preview nests generated_at under data.preview.generated_at
-                    // Fix: read data.preview.generated_at first, fall back to top-level generated_at
-                    try {
-                        if (isApiSource) {
-                            var _genAt = (data.preview && data.preview.generated_at) || data.generated_at;
-                            if (_genAt) {
-                                var _lsEl = document.getElementById('m-last-sync');
-                                if (_lsEl) _lsEl.textContent = timeSince(_genAt);
-                            }
-                        }
-                    } catch(_lse) {}
+                    // v200.1 P0 FIX: last-sync display consolidated onto one source
+                    // (fetchWorkerStats() -> /api/platform/stats intel.last_sync) so this
+                    // page never shows two different answers for "how fresh is our data"
+                    // depending on which of several racing fetches happened to finish
+                    // last. See fetchWorkerStats for the authoritative update path.
                     // P0 2026-09-03: only an AUTHORITATIVE source may be
                     // labelled LIVE / MANIFEST VERIFIED. When the API sources
                     // were quota-denied, the third-party raw.githubusercontent
@@ -13698,45 +13706,11 @@ function renderTopThreats(data) {
                 String(_termState.detail || 'Feed unavailable.').replace(/[<>&]/g, '') +
                 ' &mdash; <a href="javascript:void(0)" onclick="window.__DATA_LOADED__=false;window.__INTEL_RENDERED__=false;loadGOCIntel();" style="color:var(--accent,#00d4aa);text-decoration:none;font-weight:700;">retry</a></div>';
         }
-        // v64.2 FIX: Freshest-wins sync time
-        async function fetchPipelineSyncTime() {
-            try {
-                const manifestNewest = manifestData.length
-                    ? Math.max(...manifestData.filter(d=>d.processed_at||d.timestamp).map(d=>new Date(d.processed_at||d.timestamp).getTime()))  // v117.0.0
-                    : 0;
-                const SYNC_URLS = [
-                    atob('aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2N5YmVyZHVkZWJpdmFzaC9DWUJFUkRVREVCSVZBU0gtVEhSRUFULUlOVEVMLVBMQVRGT1JNL21haW4v') + 'data/sync_marker.json',
-                    atob('aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2N5YmVyZHVkZWJpdmFzaC9DWUJFUkRVREVCSVZBU0gtVEhSRUFULUlOVEVMLVBMQVRGT1JNL21haW4v') + 'data/status/status.json',
-                ];
-                let bestSyncTs = null;
-                let bestSyncTime = 0;
-                for (const url of SYNC_URLS) {
-                    try {
-                        const r = await fetch(url, {cache:'no-cache'});
-                        if (!r.ok) continue;
-                        const d = await r.json();
-                        const syncTs = d.last_sync || d.generated_at || (d.components && d.components.pipeline && d.components.pipeline.last_run_at);
-                        if (syncTs) {
-                            const syncTime = new Date(syncTs).getTime();
-                            if (syncTime > bestSyncTime) {
-                                bestSyncTime = syncTime;
-                                bestSyncTs = syncTs;
-                            }
-                        }
-                    } catch(e) { continue; }
-                }
-                if (bestSyncTs && bestSyncTime > manifestNewest) {
-                    const el = document.getElementById('m-last-sync');
-                    if (el) el.textContent = timeSince(bestSyncTs);
-                }
-            } catch(e) { console.debug('[SYNC-MARKER]', e); }
-        }
-
         // ── Auto-refresh every 6 hours ──
         function scheduleAutoRefresh() {
             setInterval(() => {
                 const autoRefresh = document.getElementById('auto-refresh-toggle');
-                if (autoRefresh && autoRefresh.checked) { window.__DATA_LOADED__ = false; window.__INTEL_RENDERED__ = false; loadGOCIntel(); }
+                if (autoRefresh && autoRefresh.checked) { window.__DATA_LOADED__ = false; window.__INTEL_RENDERED__ = false; loadGOCIntel(); fetchWorkerStats(); }
             }, 6 * 60 * 60 * 1000);
         }
 
@@ -14684,7 +14658,7 @@ function renderTopThreats(data) {
             // PHASE 1: Instant render from embedded cache (< 50ms, zero network)
             try { bootFromEmbeddedCache(); } catch(e) { console.warn('[BOOT] Embedded cache error:', e); }
             // PHASE 2: Upgrade to live data in background
-            loadGOCIntel().then(() => fetchPipelineSyncTime()).catch(() => {});
+            loadGOCIntel().catch(() => {});
             scheduleAutoRefresh();
         }
         if (document.readyState === 'loading') {
@@ -16170,7 +16144,14 @@ function renderTopThreats(data) {
         // No auth required \u2014 public endpoint with 60s KV cache.
         // Zero Railway dependency \u2014 platform fully self-hosted on Cloudflare.
         // ══════════════════════════════════════════════════════════════════════
-        (function fetchWorkerStats() {
+        // v200.1 P0 FIX: was an anonymous IIFE that only ever ran once at initial
+        // page parse, so the "last sync" badge it sets (see below) could only ever
+        // be as fresh as the moment the page was first opened -- on a platform
+        // sold as real-time, a tab left open for hours would silently drift stale
+        // even though the live API itself was fine. Named + called explicitly so
+        // manualRefresh() and scheduleAutoRefresh() can re-invoke it on every
+        // refresh cycle, not just once.
+        function fetchWorkerStats() {
             var WORKER = 'https://intel.cyberdudebivash.com';
             var set = function(id, val) {
                 var el = document.getElementById(id);
@@ -16271,11 +16252,19 @@ function renderTopThreats(data) {
                 var tabCount = document.getElementById('cdb-tab-live-count');
                 if (tabCount && intel.total_reports) tabCount.textContent = intel.total_reports;
 
-                // ── Last updated badge \u2014 single source of truth: manifest.last_updated ──
-                const _syncTs = intel.last_updated || intel.generated_at || '';
+                // ── Last updated badge \u2014 single source of truth: /api/platform/stats intel.last_sync ──
+                // v200.1 P0 FIX: read intel.last_updated/intel.generated_at, neither of which
+                // the API has ever returned (the real field is last_sync -- confirmed against
+                // computeStats()'s response shape in workers/intel-gateway/src/index.js) -- so
+                // this, the one update path meant to be authoritative on every page load
+                // (cache:'no-store', no stale client cache), silently no-op'd forever, leaving
+                // whatever an earlier/less reliable code path had written on screen. Also
+                // switched to timeSince() (relative "Xh ago") to match every other sync-time
+                // display on this page instead of an absolute locale timestamp.
+                const _syncTs = intel.last_sync || intel.generated_at || '';
                 if (_syncTs) {
                     const _d2 = new Date(_syncTs);
-                    const _label = isNaN(_d2) ? _syncTs : _d2.toLocaleString();
+                    const _label = isNaN(_d2) ? _syncTs : timeSince(_syncTs);
                     // Update ALL sync displays from the same source
                     ['m-last-sync'].forEach(function(eid) {
                         const el = document.getElementById(eid);
@@ -16314,7 +16303,8 @@ function renderTopThreats(data) {
                 clearTimeout(statsTimer);
                 console.debug('[v123.1] Worker stats (non-fatal):', e.message);
             });
-        })();
+        }
+        fetchWorkerStats();
 
     </script>
 
