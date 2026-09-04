@@ -258,9 +258,14 @@ export async function handlePremiumReport(request, env, auth, rid) {
   // index.js:317), so every tier === "free"/"enterprise" comparison below
   // silently never matched for a real customer. Same bug class fixed
   // repeatedly elsewhere this session (revenue-enforcement.js, sla-monitor.js,
-  // alert-engine.js). This file is not currently wired into index.js's
-  // router (dead code), so not live-exploitable today, but fixing the
-  // underlying defect now.
+  // alert-engine.js). CORRECTION (post-#369 production assurance audit):
+  // this file's routes were wired live into index.js's router by commit
+  // 5004465c (PR #313, 2026-09-01) -- POST /api/reports/premium and GET
+  // /api/reports/list/{id} are real, tier-gated, revenue-generating
+  // endpoints (see index.js's "premium-reports.js routes" block), not
+  // dead code. This fix was therefore already live-exploitable before
+  // this correction; treat every defect found in this file as real and
+  // customer-facing, not latent.
 
   // Tier gate -- free users get upsell
   if (tier === "free") {
@@ -498,9 +503,14 @@ export async function handleReportList(request, env, auth, rid) {
   // index.js:317), so every tier === "free"/"enterprise" comparison below
   // silently never matched for a real customer. Same bug class fixed
   // repeatedly elsewhere this session (revenue-enforcement.js, sla-monitor.js,
-  // alert-engine.js). This file is not currently wired into index.js's
-  // router (dead code), so not live-exploitable today, but fixing the
-  // underlying defect now.
+  // alert-engine.js). CORRECTION (post-#369 production assurance audit):
+  // this file's routes were wired live into index.js's router by commit
+  // 5004465c (PR #313, 2026-09-01) -- POST /api/reports/premium and GET
+  // /api/reports/list/{id} are real, tier-gated, revenue-generating
+  // endpoints (see index.js's "premium-reports.js routes" block), not
+  // dead code. This fix was therefore already live-exploitable before
+  // this correction; treat every defect found in this file as real and
+  // customer-facing, not latent.
 
   if (tier === "free") {
     return _json({
@@ -567,9 +577,14 @@ export async function handleReportGet(request, env, auth, rid, reportId) {
   // index.js:317), so every tier === "free"/"enterprise" comparison below
   // silently never matched for a real customer. Same bug class fixed
   // repeatedly elsewhere this session (revenue-enforcement.js, sla-monitor.js,
-  // alert-engine.js). This file is not currently wired into index.js's
-  // router (dead code), so not live-exploitable today, but fixing the
-  // underlying defect now.
+  // alert-engine.js). CORRECTION (post-#369 production assurance audit):
+  // this file's routes were wired live into index.js's router by commit
+  // 5004465c (PR #313, 2026-09-01) -- POST /api/reports/premium and GET
+  // /api/reports/list/{id} are real, tier-gated, revenue-generating
+  // endpoints (see index.js's "premium-reports.js routes" block), not
+  // dead code. This fix was therefore already live-exploitable before
+  // this correction; treat every defect found in this file as real and
+  // customer-facing, not latent.
   const safeId = safeStr(reportId || "", 30);
 
   if (!safeId || !/^rpt_[a-f0-9]{16}$/.test(safeId)) {

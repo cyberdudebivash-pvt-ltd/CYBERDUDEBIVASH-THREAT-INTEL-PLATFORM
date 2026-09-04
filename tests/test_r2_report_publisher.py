@@ -345,6 +345,125 @@ class TestClearReportUrls(unittest.TestCase):
             finally:
                 pub.REPORT_URL_MANIFESTS = orig
 
+    def test_one_manifest_write_failure_does_not_block_the_others_and_is_reported(self):
+        """P0 PRODUCTION ASSURANCE regression test (post-#369 audit): before
+        this fix, a single manifest's write failure raised out of
+        clear_report_urls() entirely -- since this function is called from
+        inside execute_plan()'s try/finally with no except of its own, that
+        exception propagated past main()'s call to save_publish_state(),
+        silently losing the in-memory retirement state for EVERY id this
+        run touched, not just the one whose manifest failed. Both manifests
+        carry an id that needs clearing (CodeRabbit review on PR #370: the
+        original version of this test gave manifest_b an id absent from
+        html_ids, so it never exercised a real write on that file -- it
+        could not have told isolation-works-correctly apart from
+        isolation-is-a-no-op). manifest_a is forced to fail; manifest_b
+        must still get its real, needed update. clear_report_urls must:
+        (1) not raise, (2) still return which manifest(s) failed, (3) still
+        apply the update to every OTHER manifest, (4) leave the failed
+        manifest's original content untouched (no partial write)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            manifest_a = Path(td) / "feed_a.json"
+            manifest_b = Path(td) / "feed_b.json"
+            manifest_a.write_text(json.dumps([{"id": "intel--a", "report_url": "/reports/x/a.html"}]))
+            manifest_b.write_text(json.dumps([{"id": "intel--a", "report_url": "/reports/x/a-mirror.html"}]))
+            orig = pub.REPORT_URL_MANIFESTS
+            pub.REPORT_URL_MANIFESTS = [manifest_a, manifest_b]
+            real_replace = pub.os.replace
+
+            def _flaky_replace(src, dst):
+                if Path(dst) == manifest_a:
+                    raise OSError("simulated disk failure writing manifest_a")
+                return real_replace(src, dst)
+
+            try:
+                with patch.object(pub.os, "replace", side_effect=_flaky_replace):
+                    failed = pub.clear_report_urls(html_ids={"intel--a"}, pdf_ids=set())
+                self.assertEqual(failed, [manifest_a], "must report exactly the manifest that failed to write")
+                self.assertEqual(
+                    json.loads(manifest_a.read_text())[0]["report_url"], "/reports/x/a.html",
+                    "failed write must never partially land -- original content must survive untouched",
+                )
+                self.assertEqual(
+                    json.loads(manifest_b.read_text())[0]["report_url"], "",
+                    "manifest_b's real, needed update must still land even though manifest_a failed",
+                )
+            finally:
+                pub.REPORT_URL_MANIFESTS = orig
+
+    def test_all_manifests_succeed_returns_empty_failed_list(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            manifest_path = Path(td) / "feed.json"
+            manifest_path.write_text(json.dumps([{"id": "intel--a", "report_url": "/reports/x/a.html"}]))
+            orig = pub.REPORT_URL_MANIFESTS
+            pub.REPORT_URL_MANIFESTS = [manifest_path]
+            try:
+                failed = pub.clear_report_urls(html_ids={"intel--a"}, pdf_ids=set())
+                self.assertEqual(failed, [], "no failures -- must return an empty list, not None or a truthy sentinel")
+            finally:
+                pub.REPORT_URL_MANIFESTS = orig
+
+
+class TestExecutePlanManifestFailureRecovery(unittest.TestCase):
+    """P0 PRODUCTION ASSURANCE regression test (post-#369 audit) for
+    execute_plan()'s restoration logic: when clear_report_urls() reports a
+    failed manifest, every id this run's retirement batch touched must be
+    restored to its pre-clear state (never permanently dropped from
+    tracking), so the next run's retirement pass retries the FULL
+    delete+clear for all of them. Redoing an already-successful S3 delete
+    is safe by construction -- s3_delete() treats an already-absent key as
+    success (idempotent), and DELETE is not Class A billed -- so this
+    restoration trades a little redundant work for guaranteed eventual
+    consistency, matching this codebase's established fail-safe direction
+    (bounded-but-redundant beats silently incomplete)."""
+
+    def test_restoration_logic_recovers_full_entry_on_manifest_failure(self):
+        """Exercises the REAL execute_plan() (CodeRabbit review on PR #370:
+        an earlier version of this test duplicated execute_plan()'s
+        bookkeeping inline, so it could keep passing even if the production
+        restoration logic regressed). s3_delete() is mocked to succeed for
+        both objects; clear_report_urls() is mocked to report a failed
+        manifest -- execute_plan() itself must then restore the id's full
+        pre-clear state entry."""
+        intel_id = "intel--manifest-fail-restore"
+        original_entry = {
+            "canonical_ts": "2026-09-01T00:00:00Z",
+            "html_key": f"reports/2026/01/{intel_id}.html",
+            "pdf_key": f"reports/pdf/{intel_id}.pdf",
+        }
+        state = {"items": {intel_id: dict(original_entry)}}
+        delete_ops = [
+            {"id": intel_id, "kind": "html", "bucket": BUCKET_REPORTS, "key": original_entry["html_key"]},
+            {"id": intel_id, "kind": "pdf", "bucket": BUCKET_DATA, "key": original_entry["pdf_key"]},
+        ]
+
+        with patch.object(pub, "s3_delete", return_value=True), \
+             patch.object(pub, "clear_report_urls", return_value=[Path("/tmp/simulated-failed-manifest.json")]) as mock_clear:
+            put_ok, delete_ok = pub.execute_plan([], delete_ops, state, "https://fake.example.r2.cloudflarestorage.com")
+
+        self.assertEqual(delete_ok, 2, "both real (mocked) s3_delete calls must have been counted as successful")
+        mock_clear.assert_called_once_with(html_ids={intel_id}, pdf_ids={intel_id})
+        self.assertIn(intel_id, state["items"], "must be restored, not permanently dropped, when a manifest failed to write")
+        self.assertEqual(state["items"][intel_id], original_entry, "restored entry must exactly match its pre-clear state (both keys, canonical_ts)")
+
+    def test_no_restoration_when_all_manifests_succeed(self):
+        """Symmetric case: when clear_report_urls() reports no failures, the
+        id must be fully retired (popped from state), not left behind."""
+        intel_id = "intel--manifest-success-retire"
+        state = {"items": {intel_id: {
+            "canonical_ts": "2026-09-01T00:00:00Z",
+            "html_key": f"reports/2026/01/{intel_id}.html",
+        }}}
+        delete_ops = [{"id": intel_id, "kind": "html", "bucket": BUCKET_REPORTS, "key": state["items"][intel_id]["html_key"]}]
+
+        with patch.object(pub, "s3_delete", return_value=True), \
+             patch.object(pub, "clear_report_urls", return_value=[]):
+            pub.execute_plan([], delete_ops, state, "https://fake.example.r2.cloudflarestorage.com")
+
+        self.assertNotIn(intel_id, state["items"], "must be fully retired when every manifest write actually succeeded")
+
 
 class TestCostSimulation(unittest.TestCase):
     """Section 9 (hardening doc) requirement: a deterministic test that
