@@ -214,6 +214,11 @@ async function main() {
     }
     record('Recovery is stable across further ordinary reloads (no reload-looping, no regression back to broken)', stable, stableDetail);
 
+    // Note: this script only listens for 'pageerror' (uncaught exceptions),
+    // not 'console' messages -- index.html's GOC diagnostic (see
+    // verify_pages_fast_publish_smoke.js's fix for the full writeup) is a
+    // plain console.error() log call, never a thrown exception, so it can
+    // never reach pageErrors here. No equivalent fix needed in this file.
     record('Zero uncaught JS errors across the whole stuck-then-recover sequence', pageErrors.length === 0, pageErrors.join(' | '));
 
     await context.close();
