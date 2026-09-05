@@ -1,0 +1,37 @@
+{
+  "_comment": "CYBERDUDEBIVASH SENTINEL APEX -- R2 Object Lifecycle Policy (lifecycle-as-code). See scripts/r2_lifecycle_manager.py and docs/P0_R2_COST_CONTAINMENT.md Section 8 for the full evidence trail behind this file's scope. Read/enforced by scripts/r2_lifecycle_manager.py; validated in CI by tests/test_r2_lifecycle_manager.py (schema/shape only -- CI never queries live R2). Applying this configuration against production requires a human/environment with real Cloudflare R2 credentials (CF_ACCOUNT_ID, AWS_ACCESS_KEY_ID/SECRET) -- see the script's --verify / --apply modes.",
+  "policy_id": "pre-revenue-ephemeral-retention-v1",
+  "effective_date": "2026-09-05",
+  "max_expiration_days_allowed": 7,
+  "rules": [
+    {
+      "rule_id": "reports-html-7d-backstop",
+      "bucket": "sentinel-apex-reports",
+      "prefix": "reports/",
+      "expiration_days": 7,
+      "purpose": "Defense-in-depth backstop only. scripts/r2_report_publisher.py already deterministically retires (DELETEs) any report_url once its canonical intelligence timestamp ages past the rolling REPORT_WINDOW_HOURS (default 24h) window, and clears report_url/pdf_url to \"\" in every manifest that carries it BEFORE that delete -- so under normal operation, nothing in this prefix should ever survive to see this rule act. This native rule exists only to bound the worst case if that app-level retirement pass ever fails, stalls, or misses an object (e.g. during a pipeline-health incident) -- 7 days is deliberately wider than the 24h app-level window so it never races normal operation, while still bounding unbounded historical accumulation as a hard backstop. Confirmed safe for an AGE-based rule specifically because every key in this prefix is uniquely dated (reports/{yyyy}/{mm}/{id}.html, never overwritten across unrelated time periods at the same key) and de-referenced from the manifest before retirement -- unlike the single-key, overwrite-in-place manifests in sentinel-apex-data (see excluded_prefixes below), deleting an aged-out object here cannot turn a currently-referenced live pointer into a 404 under normal operation."
+    }
+  ],
+  "incomplete_multipart_abort_days": {
+    "_comment": "Phase 15 (abandoned multipart uploads): bucket-wide AbortIncompleteMultipartUpload is safe to apply unconditionally, unlike object Expiration -- it only ever cleans up uploads that never completed (no live object exists at that key from an incomplete upload), so it cannot turn a served object into a 404 the way an object-Expiration rule on a single-key prefix could. Applied to both production buckets.",
+    "sentinel-apex-data": 7,
+    "sentinel-apex-reports": 7
+  },
+  "excluded_prefixes": [
+    {
+      "bucket": "sentinel-apex-data",
+      "prefix": "*",
+      "reason": "UNSAFE for any age-based native expiration rule. Evidence-based inventory (see docs/P0_R2_COST_CONTAINMENT.md Section 8) found every prefix in this bucket (intel/, apex_v2/, ai/, api/, premium/) holds SINGLE, overwrite-in-place keys that represent CURRENT production state (manifests, feeds, tiered products) -- not date-partitioned historical generations. An age-based lifecycle rule keyed on LastModified would delete the ONLY copy of currently-served data if the pipeline ever stalls for longer than the expiration window (exactly the scenario the 2026-09 dashboard-freshness incident nearly produced with a 10-day stall) -- converting a staleness incident into an outright 404 incident. This bucket's content is governed by pipeline correctness (scripts/r2_upload.py, r2_state_sync.py, r2_resync_manifests.py), not storage-age retention."
+    },
+    {
+      "bucket": "sentinel-apex-data",
+      "prefix": "kv-snapshots/",
+      "reason": "Daily KV namespace disaster-recovery backup snapshots (scripts/backup_kv_to_r2.py). Disaster-recovery/backup metadata is explicitly excluded from the disposable-artifact ephemeral policy (backups conventionally need to outlive whatever incident they protect against; a 7-day-expired backup can be useless if corruption isn't discovered for longer). Retention duration for this prefix is a separate backup-governance decision, not covered by this policy -- flagged for human decision, not silently defaulted to 7 days."
+    },
+    {
+      "bucket": "sentinel-apex-data",
+      "prefix": "r2-backups/",
+      "reason": "The backup inventory/verification manifests themselves (scripts/backup_r2.py). Same rationale as kv-snapshots/ above -- this IS the backup record, not a disposable generated artifact. Excluded pending separate backup-retention governance."
+    }
+  ]
+}
