@@ -81,6 +81,17 @@
 # missing report still hard-fails exactly as before -- see
 # tests/test_validate_reports_window_deferral.py.
 #
+# Also guards against STAGE 5.4.1 (scripts/report_existence_validator.py)
+# hard-failing with the exact same architectural mismatch, one gate later --
+# confirmed live in run #2249 (the first natural run after the STAGE 3.3 fix
+# above unblocked it): this sibling validator was never updated with the
+# same rolling-window/publish-state awareness, so it still required every
+# data/stix/feed_manifest.json entry (including the full historical corpus)
+# to have a local file, hard-failing and skipping GitHub Pages deployment
+# for the rest of that run. Fixed with the identical deferral logic, reusing
+# the same scripts/r2_report_publisher.py helpers -- see
+# tests/test_report_existence_validator_window_deferral.py.
+#
 # Runs on every push and PR to main.
 
 name: Report Generator Regression Gate
@@ -175,3 +186,7 @@ jobs:
       - name: Run Report Validation Gate rolling-window deferral regression tests (P0 report-validation stall)
         run: |
           python -m pytest tests/test_validate_reports_window_deferral.py -v --tb=short
+
+      - name: Run Report Existence Validator rolling-window deferral regression tests (P0 STAGE 5.4.1 deploy-skip)
+        run: |
+          python -m pytest tests/test_report_existence_validator_window_deferral.py -v --tb=short
