@@ -132,6 +132,19 @@ def validate_policy(policy: dict) -> list[str]:
         prefix = rule.get("prefix")
         if not prefix or not isinstance(prefix, str):
             errors.append(f"{label}.prefix missing")
+        elif bucket == BUCKET_REPORTS and prefix != "reports/":
+            # CodeRabbit review finding (PR #377): the bucket-level check
+            # above only rejects sentinel-apex-data -- without this, a
+            # future config edit could add an Expiration rule for some
+            # OTHER, unaudited prefix in sentinel-apex-reports (this bucket
+            # currently has none, but nothing enforced that) and
+            # build_lifecycle_configuration() would apply it unreviewed.
+            # Only reports/ has been evidence-audited (see module
+            # docstring) as safe for age-based expiration.
+            errors.append(
+                f"{label}: sentinel-apex-reports may only carry an Expiration rule for "
+                f"the audited 'reports/' prefix, got {prefix!r}"
+            )
 
         days = rule.get("expiration_days")
         if not isinstance(days, int) or days <= 0:
@@ -225,29 +238,11 @@ def cmd_verify(policy: dict, endpoint: str) -> int:
     overall_ok = True
     for bucket in sorted(KNOWN_BUCKETS):
         expected = build_lifecycle_configuration(policy, bucket)
-        cmd = [
-            "aws", "s3api", "get-bucket-lifecycle-configuration",
-            "--bucket", bucket,
-            "--endpoint-url", endpoint,
-            "--output", "json",
-        ]
-        result = _run_aws(cmd)
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            if "NoSuchLifecycleConfiguration" in stderr:
-                actual = {"Rules": []}
-            else:
-                log.error("Could not read live lifecycle configuration for %s: %s", bucket, stderr[:500])
-                overall_ok = False
-                continue
-        else:
-            try:
-                actual = json.loads(result.stdout or "{}")
-            except json.JSONDecodeError as exc:
-                log.error("Live lifecycle configuration for %s is not valid JSON: %s", bucket, exc)
-                overall_ok = False
-                continue
-            actual = {"Rules": actual.get("Rules", [])}
+        actual, error = _get_live_configuration(bucket, endpoint)
+        if actual is None:
+            log.error("Could not read live lifecycle configuration for %s: %s", bucket, error)
+            overall_ok = False
+            continue
 
         matches = actual == expected
         log.info("%s: live configuration %s intended policy", bucket, "MATCHES" if matches else "DOES NOT MATCH")
@@ -259,29 +254,95 @@ def cmd_verify(policy: dict, endpoint: str) -> int:
     return 0 if overall_ok else 1
 
 
+def _managed_rule_ids(policy: dict, bucket: str) -> set[str]:
+    return {r["ID"] for r in build_lifecycle_configuration(policy, bucket)["Rules"]}
+
+
+def _get_live_configuration(bucket: str, endpoint: str) -> tuple[dict | None, str | None]:
+    """Returns (live_config, error). live_config is {"Rules": []} for a
+    bucket with no lifecycle configuration at all (a real, valid state, not
+    an error) -- distinguished from a genuine read failure via `error`."""
+    cmd = [
+        "aws", "s3api", "get-bucket-lifecycle-configuration",
+        "--bucket", bucket,
+        "--endpoint-url", endpoint,
+        "--output", "json",
+    ]
+    result = _run_aws(cmd)
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if "NoSuchLifecycleConfiguration" in stderr:
+            return {"Rules": []}, None
+        return None, stderr[:500]
+    try:
+        parsed = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        return None, str(exc)
+    return {"Rules": parsed.get("Rules", [])}, None
+
+
 def cmd_apply(policy: dict, endpoint: str | None, *, execute: bool, confirm_bucket: str) -> int:
     buckets_in_policy = sorted({r["bucket"] for r in policy.get("rules", [])} | {
         b for b, d in policy.get("incomplete_multipart_abort_days", {}).items()
         if b in KNOWN_BUCKETS and isinstance(d, int) and d > 0
     })
 
+    if execute:
+        # CodeRabbit review finding (PR #377): this used to loop over EVERY
+        # bucket in the policy regardless of --confirm-bucket, so
+        # `--execute --confirm-bucket sentinel-apex-reports` still visited
+        # sentinel-apex-data, found it didn't match, and returned exit 1 --
+        # a successful single-bucket apply was indistinguishable from a
+        # failure. --execute now targets exactly the confirmed bucket.
+        if confirm_bucket not in buckets_in_policy:
+            log.critical(
+                "FATAL: --confirm-bucket %r does not name a bucket this policy declares "
+                "rules for (%s). Refusing to apply.", confirm_bucket, sorted(buckets_in_policy),
+            )
+            return 1
+        target_buckets = [confirm_bucket]
+    else:
+        target_buckets = buckets_in_policy
+
     exit_code = 0
-    for bucket in buckets_in_policy:
+    for bucket in target_buckets:
         config_doc = build_lifecycle_configuration(policy, bucket)
         log.info("-" * 70)
         log.info("Bucket: %s", bucket)
-        log.info("Intended LifecycleConfiguration: %s", json.dumps(config_doc))
+        log.info("Intended LifecycleConfiguration (this policy's managed rules): %s", json.dumps(config_doc))
 
         if not execute:
             log.warning("[DRY-RUN] Would PUT this configuration. Re-run with --execute "
                         "--confirm-bucket %s to apply.", bucket)
             continue
 
-        if confirm_bucket != bucket:
+        # CodeRabbit review finding (PR #377, backed by AWS/R2 documentation):
+        # PutBucketLifecycleConfiguration REPLACES the bucket's entire
+        # lifecycle configuration -- it does not merge/append. Blindly PUTting
+        # only this policy's rules would silently delete any pre-existing
+        # rule this tool doesn't know about (e.g. configured manually via the
+        # Cloudflare dashboard). Read-modify-write: GET first, and if the
+        # live configuration contains any rule ID this policy doesn't
+        # recognize as its own, abort rather than guess how to merge it --
+        # merging a foreign rule's semantics safely cannot be automated, and
+        # fail-closed-on-uncertainty is this codebase's established pattern
+        # (see scripts/r2_cost_guard.py's enforce_budget()).
+        live_config, get_error = _get_live_configuration(bucket, endpoint)
+        if live_config is None:
+            log.error("Could not read current live lifecycle configuration for %s before "
+                      "applying (refusing to blindly overwrite): %s", bucket, get_error)
+            exit_code = 1
+            continue
+        managed_ids = _managed_rule_ids(policy, bucket)
+        foreign_rules = [r for r in live_config["Rules"] if r.get("ID") not in managed_ids]
+        if foreign_rules:
             log.critical(
-                "FATAL: --execute requires --confirm-bucket %s exactly for this bucket "
-                "(got %r). Refusing to apply destructively without explicit, unambiguous "
-                "confirmation. Run once per bucket.", bucket, confirm_bucket,
+                "FATAL: %s has %d existing lifecycle rule(s) this policy does not manage "
+                "(IDs: %s). PutBucketLifecycleConfiguration would REPLACE the entire "
+                "configuration and silently delete them. Refusing to apply -- review those "
+                "rules manually, then either fold them into config/r2_lifecycle_policy.json "
+                "or remove them via the Cloudflare dashboard before re-running.",
+                bucket, len(foreign_rules), [r.get("ID") for r in foreign_rules],
             )
             exit_code = 1
             continue

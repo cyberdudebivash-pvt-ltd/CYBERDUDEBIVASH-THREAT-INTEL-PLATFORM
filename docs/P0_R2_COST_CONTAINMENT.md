@@ -191,6 +191,18 @@ recurring custom LIST+DELETE sweep (which would itself reintroduce the
 Class A operation-cost pattern Section 1-7 of this document exists to
 eliminate).
 
+### 8-PBC. Proof Before Change
+
+| Field | Entry |
+|---|---|
+| **Objective** | Permanent, native, zero-recurring-cost enforcement of a 7-day maximum retention for genuinely disposable R2 artifacts, without weakening any existing FinOps control or risking the "current live data" outage class this document's Sections 1-7 already fixed once. |
+| **Affected Files** | `config/r2_lifecycle_policy.json` (new), `scripts/r2_lifecycle_manager.py` (new), `tests/test_r2_lifecycle_manager.py` (new), `.github/workflows/r2-finops-regression-gate.yml` (additive `paths` entries + one new step), `docs/P0_R2_COST_CONTAINMENT.md` (this section). No production script that runs in the scheduled pipeline (`r2_upload.py`, `r2_report_publisher.py`, `r2_state_sync.py`, `backup_r2.py`, `generate_intel_reports.py`, etc.) was modified. |
+| **Existing Engine Reused** | `scripts/r2_upload.py`'s `get_credentials()` / `BUCKET_DATA` / `BUCKET_REPORTS` / `install_awscli()` (imported, not re-implemented); `scripts/r2_reports_purge.py`'s dry-run-by-default / `--execute --confirm-bucket <bucket>` safety-gate pattern (mirrored exactly for the new tool's `--apply` mode); `scripts/r2_cost_guard.py`'s fail-closed-on-uncertainty philosophy (cited directly as the precedent for aborting on an unrecognized live lifecycle rule rather than guessing how to merge it). |
+| **Evidence Modification Is Required** | Explicit P0 FinOps mandate: one-time purge of disposable artifacts >3 days, permanent native 7-day ephemeral-retention policy, prefer native lifecycle over custom sweep, prevent recurrence of unbounded historical accumulation. |
+| **Risk Classification** | LOW for the code merged in this PR (additive-only, manual-invoke-only tooling, zero scheduled-workflow wiring, zero R2 mutation performed). MEDIUM for the *eventual* `--apply --execute` action an operator runs afterward against production — mitigated by the dry-run default, explicit per-bucket confirmation, and (per the fixes below) a read-before-write check that refuses to silently delete any live rule this tool doesn't recognize. |
+| **Expected Regression Risk** | None to the scheduled pipeline (no scheduled workflow invokes any file this PR adds). The only realistic regression vector is a *future* misuse of the new tool against production — closed by `validate_policy()` permanently rejecting any `sentinel-apex-data` Expiration rule and any `sentinel-apex-reports` prefix other than the audited `reports/`, both enforced in code, not just documentation. |
+| **Rollback Plan** | Revert this PR's commit (all additions, no edits to existing production files). If `--apply --execute` has already been run against production, `scripts/r2_lifecycle_manager.py --apply --execute --confirm-bucket <bucket>` with an empty `rules`/`incomplete_multipart_abort_days` policy clears the applied configuration (`PutBucketLifecycleConfiguration` with `{"Rules": []}`) — or restore the bucket's prior configuration directly via the Cloudflare dashboard/API if it was captured before applying (see §8b's `--verify` step, which an operator should run and record before ever running `--apply --execute` for the first time). |
+
 ### 8a. One-time historical purge — already built, not re-implemented
 
 `scripts/r2_reports_purge.py` (Section 4.5 above) already is this
@@ -301,3 +313,60 @@ production configuration"), none of the following are claimed here:
 These require an operator (or CI environment) with real production
 credentials to run `scripts/r2_reports_purge.py` and `scripts/
 r2_lifecycle_manager.py --verify` / `--apply`, per Sections 8a/8b above.
+
+### 8e. Adversarial review findings (PR #377, fixed before merge)
+
+An automated code review of the initial PR #377 diff found three real gaps,
+all fixed in the same PR (not deferred):
+
+1. **`validate_policy()` only rejected `sentinel-apex-data` from Expiration
+   rules, not an unaudited prefix within `sentinel-apex-reports` itself.**
+   A future config edit could have added an Expiration rule for some other,
+   never-evidence-checked prefix in that bucket and `build_lifecycle_
+   configuration()` would have applied it unreviewed. Fixed: the validator
+   now requires `sentinel-apex-reports` Expiration rules to target exactly
+   the audited `reports/` prefix.
+2. **`cmd_apply()`'s `--execute` path looped over every bucket the policy
+   declares, regardless of `--confirm-bucket`.** `--execute --confirm-bucket
+   sentinel-apex-reports` would still visit `sentinel-apex-data`, find no
+   match, and return exit 1 — a successful single-bucket apply was
+   indistinguishable from a failure. Fixed: `--execute` now resolves and
+   targets exactly the confirmed bucket (validated to be one the policy
+   actually declares rules for).
+3. **`cmd_apply()` PUT the policy's own rules without first reading the
+   bucket's live configuration.** `PutBucketLifecycleConfiguration` (AWS S3
+   and, per Cloudflare's own S3-compatibility documentation, R2) *replaces*
+   the entire lifecycle configuration rather than merging into it — an
+   `--apply --execute` run would have silently deleted any pre-existing
+   rule this tool doesn't manage (e.g. one configured manually via the
+   Cloudflare dashboard). Fixed with a read-modify-write pattern: `--apply
+   --execute` now GETs the live configuration first and aborts (no PUT
+   issued) if it contains any rule ID this policy doesn't recognize as its
+   own, per this codebase's established fail-closed-on-uncertainty pattern
+   (`scripts/r2_cost_guard.py::enforce_budget()`).
+
+6 additional regression tests added for these three fixes (`tests/
+test_r2_lifecycle_manager.py`, `TestCmdApplyTargetsOnlyConfirmedBucket` and
+`TestCmdApplyPreservesForeignRules`), bringing that file to 25 tests. A
+fourth review comment (add a full P-layer-style certification report /
+`sentinel-blogger.yml` gate / `ci_stats_extract.py` entry / API
+observability endpoint for this capability) was evaluated and not applied
+as originally proposed — see the PR's own review-thread reply for why a
+full P-layer observability surface is disproportionate for a manual,
+non-scheduled admin tool (this platform's own closest precedent, `scripts/
+r2_reports_purge.py`, carries none of those four artifacts either, by the
+same design logic), plus what was added instead.
+
+### 8f. Reuse Report
+
+| Metric | Result |
+|---|---|
+| Existing engines reused (called, not re-implemented) | `r2_upload.get_credentials()`, `BUCKET_DATA`, `BUCKET_REPORTS`, `install_awscli()`; `r2_reports_purge.py`'s dry-run/`--execute --confirm-bucket` safety-gate pattern (mirrored); `r2_cost_guard.py`'s fail-closed-on-uncertainty precedent (cited, applied to the new GET-before-PUT check) |
+| Existing CI gate extended (not duplicated) | `r2-finops-regression-gate.yml` (added `paths` entries + one step; no new workflow file) |
+| Existing one-time purge tool reused (not reimplemented) | `scripts/r2_reports_purge.py` — verified and documented, zero new purge logic written |
+| New engines introduced (justified by gap analysis) | `scripts/r2_lifecycle_manager.py` — no existing tool manages R2's native bucket-level lifecycle configuration; gap confirmed via repo-wide search (zero pre-existing references to `lifecycle-configuration`/`PutBucketLifecycleConfiguration`) |
+| Duplicate engines introduced | 0 |
+| Duplicate routes/endpoints introduced | 0 |
+| Backward compatibility preserved | PASS — no existing production file modified |
+| Certification chain intact | PASS — `p33_production_certification.py` unaffected (not a P-layer capability; see §8e item 4 for why a P-layer-style observability surface was not added) |
+| Regression suite result | 26/26 PASS (`scripts/regression_tests.py`), 25/25 PASS (`tests/test_r2_lifecycle_manager.py`), 33/33 PASS combined with `tests/test_r2_reports_purge_safety.py` (unaffected) |

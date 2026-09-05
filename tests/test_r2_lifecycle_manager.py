@@ -23,6 +23,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "r2_lifecycle_manager.py"
@@ -170,6 +171,21 @@ class TestValidatePolicySchema(unittest.TestCase):
         errors = lm.validate_policy(policy)
         self.assertTrue(any("not one of" in e for e in errors))
 
+    def test_reports_bucket_rule_for_unaudited_prefix_is_rejected(self):
+        """CodeRabbit review finding (PR #377): the bucket-level check alone
+        would let a future edit add an Expiration rule for some OTHER,
+        never-audited prefix in sentinel-apex-reports. Only reports/ has
+        been evidence-audited as safe."""
+        policy = _valid_policy(rules=[{
+            "rule_id": "unaudited-prefix",
+            "bucket": lm.BUCKET_REPORTS,
+            "prefix": "some-other-prefix/",
+            "expiration_days": 7,
+            "purpose": "test",
+        }])
+        errors = lm.validate_policy(policy)
+        self.assertTrue(any("audited 'reports/' prefix" in e for e in errors))
+
 
 class TestBuildLifecycleConfiguration(unittest.TestCase):
     def test_reports_bucket_gets_expiration_and_multipart_rules(self):
@@ -194,6 +210,79 @@ class TestBuildLifecycleConfiguration(unittest.TestCase):
         policy = {"rules": [], "incomplete_multipart_abort_days": {}}
         config = lm.build_lifecycle_configuration(policy, lm.BUCKET_DATA)
         self.assertEqual(config, {"Rules": []})
+
+
+class TestCmdApplyTargetsOnlyConfirmedBucket(unittest.TestCase):
+    """CodeRabbit review finding (PR #377): --execute used to loop over
+    EVERY bucket in the policy regardless of --confirm-bucket, so a
+    successful single-bucket apply (the reports bucket) still visited
+    sentinel-apex-data, found no match, and returned exit 1 -- a genuine
+    success was indistinguishable from a failure."""
+
+    def test_execute_with_matching_confirm_bucket_touches_only_that_bucket(self):
+        policy = _valid_policy()
+        touched = []
+
+        def fake_run_aws(cmd):
+            touched.append(cmd[cmd.index("--bucket") + 1])
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch.object(lm, "_get_live_configuration", return_value=({"Rules": []}, None)), \
+             patch.object(lm, "_run_aws", side_effect=fake_run_aws):
+            exit_code = lm.cmd_apply(
+                policy, "https://fake.endpoint", execute=True, confirm_bucket=lm.BUCKET_REPORTS,
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(touched, [lm.BUCKET_REPORTS])
+
+    def test_execute_with_confirm_bucket_not_in_policy_is_refused(self):
+        policy = _valid_policy()
+        with patch.object(lm, "_run_aws") as mock_run:
+            exit_code = lm.cmd_apply(
+                policy, "https://fake.endpoint", execute=True, confirm_bucket="not-a-real-bucket",
+            )
+        self.assertEqual(exit_code, 1)
+        mock_run.assert_not_called()
+
+
+class TestCmdApplyPreservesForeignRules(unittest.TestCase):
+    """CodeRabbit review finding (PR #377, backed by AWS/R2 docs):
+    PutBucketLifecycleConfiguration REPLACES the entire bucket configuration
+    -- it does not merge. Applying must never silently delete a live rule
+    this policy doesn't recognize as its own."""
+
+    def test_foreign_live_rule_aborts_without_calling_put(self):
+        policy = _valid_policy()
+        live = {"Rules": [{"ID": "someone-elses-rule", "Status": "Enabled",
+                            "Expiration": {"Days": 999}}]}
+        with patch.object(lm, "_get_live_configuration", return_value=(live, None)), \
+             patch.object(lm, "_run_aws") as mock_run:
+            exit_code = lm.cmd_apply(
+                policy, "https://fake.endpoint", execute=True, confirm_bucket=lm.BUCKET_REPORTS,
+            )
+        self.assertEqual(exit_code, 1)
+        mock_run.assert_not_called()
+
+    def test_live_config_with_only_managed_rules_proceeds_to_put(self):
+        policy = _valid_policy()
+        already_live = lm.build_lifecycle_configuration(policy, lm.BUCKET_REPORTS)
+        with patch.object(lm, "_get_live_configuration", return_value=(already_live, None)), \
+             patch.object(lm, "_run_aws", return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="")) as mock_run:
+            exit_code = lm.cmd_apply(
+                policy, "https://fake.endpoint", execute=True, confirm_bucket=lm.BUCKET_REPORTS,
+            )
+        self.assertEqual(exit_code, 0)
+        mock_run.assert_called_once()
+
+    def test_live_config_read_failure_aborts_without_calling_put(self):
+        policy = _valid_policy()
+        with patch.object(lm, "_get_live_configuration", return_value=(None, "network error")), \
+             patch.object(lm, "_run_aws") as mock_run:
+            exit_code = lm.cmd_apply(
+                policy, "https://fake.endpoint", execute=True, confirm_bucket=lm.BUCKET_REPORTS,
+            )
+        self.assertEqual(exit_code, 1)
+        mock_run.assert_not_called()
 
 
 class TestCliSafetyGates(unittest.TestCase):
