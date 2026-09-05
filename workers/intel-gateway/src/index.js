@@ -5782,6 +5782,24 @@ async function handleRequest(request, env, ctx) {
       if (rIdx && rIdx.total_reports) totalReports = rIdx.total_reports;
     } catch(_) {}
     const uniqueActors = new Set(items.filter(i => i.actor_tag).map(i => i.actor_tag)).size;
+    // P0 FIX (2026-09 dashboard/backend freshness-contract audit): this is the
+    // one endpoint the dashboard's fetchWorkerStats() treats as authoritative
+    // (see index.html's "single source of truth" comment on that function) --
+    // but it previously exposed only stats.last_sync (the newest ITEM's own
+    // published date, computeStats()) with no pipeline-freshness signal at
+    // all. The dashboard's "SYNC: LIVE" badge was therefore driven entirely
+    // by an unrelated question -- "did the manifest fetch succeed from the
+    // primary domain" -- with no cross-check against how stale that manifest
+    // actually was, which is exactly how SYNC: LIVE and a 10-day-old Last
+    // Sync value ended up on screen together during the 2026-08-26 core-feed
+    // staleness incident classifyFreshness() was originally added to detect
+    // (see that function's own comment). /api/metrics already exposes this
+    // exact signal publicly (freshness/freshness_age_seconds, computed the
+    // same way from feedData.generated_at) -- reused here, not reimplemented,
+    // so the dashboard's primary stats call carries it too instead of
+    // requiring a second fetch. Purely additive: existing consumers of
+    // intel.last_sync/status are unaffected.
+    const freshness = classifyFreshness(feedData.generated_at);
     return jsonResp({
       intel: {
         total_reports: totalReports,
@@ -5800,6 +5818,9 @@ async function handleRequest(request, env, ctx) {
         avg_risk_score: stats.avg_risk_score,
         total_advisories: stats.total,
         last_sync: stats.last_sync,
+        last_feed_sync_utc: feedData.generated_at || null,
+        freshness: freshness.state,
+        freshness_age_seconds: freshness.age_seconds,
         version: PLATFORM_VERSION,
       },
       api: { calls_today: 0, generated_at: now() },

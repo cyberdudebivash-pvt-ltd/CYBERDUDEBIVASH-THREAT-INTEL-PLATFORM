@@ -66,6 +66,21 @@
 # (correct punctuation is never flagged, genuine double-encoded corruption
 # still is) -- see tests/test_monetization_mojibake_detection.py.
 #
+# Also guards against STAGE 3.3 (scripts/validate_reports.py, the Report
+# Validation Gate) permanently hard-failing every scheduled sentinel-blogger.yml
+# run since PR #369/#370 landed. Root cause: PR #369 bounded report
+# (re)generation to a rolling REPORT_WINDOW_HOURS window to stop the
+# whole-corpus R2 cost incident, but reports/ is gitignored and never
+# persisted across CI runs -- so on every fresh runner, any advisory outside
+# that window has no local file, and this gate previously required EVERY
+# manifest entry (including thousands of historical ones) to have one.
+# Confirmed live in runs #2244/#2245: ~1,394 false-positive RULE 3 failures,
+# 100% outside the window. Fixed by deferring (not failing) advisories that
+# are either outside the rolling window or confirmed durably published via
+# scripts/r2_report_publisher.py's own state -- an in-window genuinely
+# missing report still hard-fails exactly as before -- see
+# tests/test_validate_reports_window_deferral.py.
+#
 # Runs on every push and PR to main.
 
 name: Report Generator Regression Gate
@@ -156,3 +171,7 @@ jobs:
       - name: Run monetization-gate mojibake detection regression tests (P0 AI-publication stall)
         run: |
           python -m pytest tests/test_monetization_mojibake_detection.py -v --tb=short
+
+      - name: Run Report Validation Gate rolling-window deferral regression tests (P0 report-validation stall)
+        run: |
+          python -m pytest tests/test_validate_reports_window_deferral.py -v --tb=short
