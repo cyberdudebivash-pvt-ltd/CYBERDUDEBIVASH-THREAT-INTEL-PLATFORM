@@ -6447,8 +6447,15 @@
                     if(sev==='CRITICAL') critical++;
                     if(sev==='HIGH') high++;
                     iocs += _iocContribution(it);
-                    riskSum += parseFloat(it.risk_score||it.cvss_score||0);
+                    var _riskVal = parseFloat(it.risk_score||it.cvss_score||0);
+                    riskSum += isNaN(_riskVal) ? 0 : _riskVal;
                 });
+                // P0 FIX: a non-numeric risk_score/cvss_score (e.g. an unexpected
+                // string value) made riskSum NaN, so every item's contribution
+                // silently poisoned the whole average -- toFixed(1) on NaN
+                // renders the literal text "NaN", not a usable card value.
+                // Guarded per-item above (never fabricates a score: unparseable
+                // just contributes 0, same as a genuinely absent field already did).
                 var avgRisk = items.length ? (riskSum/items.length).toFixed(1) : '—';
                 // STAGE 2 FIX (zero-fabrication): "|| 74" and "|| 'LIVE'" were
                 // fabricated fallback values -- 74 is not a measured feed count,
@@ -16348,6 +16355,37 @@ function renderTopThreats(data) {
                         aiBar.textContent = diff < 3600 ? Math.floor(diff/60) + 'm ago' :
                                             diff < 86400 ? Math.floor(diff/3600) + 'h ago' :
                                             Math.floor(diff/86400) + 'd ago';
+                    }
+                }
+
+                // SYNC status truthfulness cross-check (P0 GATE).
+                // intel.freshness (backend classifyFreshness() on
+                // feedData.generated_at -- the pipeline's own "last
+                // successfully wrote this file" timestamp, NOT a source
+                // article's publish date) is the one signal that actually
+                // proves whether the intelligence behind this page is
+                // current. The "SYNC: LIVE" / "MANIFEST VERIFIED" badges are
+                // otherwise set purely by whichever manifest fetch succeeded
+                // (isApiSource, elsewhere in this file) with no check at all
+                // on how stale that manifest's own content was -- exactly how
+                // SYNC: LIVE and a 10-day-old Last Sync value ended up on
+                // screen together during the 2026-08-26 core-feed staleness
+                // incident (see classifyFreshness()'s own comment in
+                // workers/intel-gateway/src/index.js). fetchWorkerStats() is
+                // this page's documented single source of truth for
+                // freshness and always runs its own fetch, so this check
+                // runs after the other path's badge write and only ever
+                // downgrades LIVE to STALE on real evidence of staleness; it
+                // never promotes an already-honest STALE/FALLBACK badge.
+                if (intel.freshness && intel.freshness !== 'FRESH' && intel.freshness !== 'RECENT') {
+                    var _syncBadge = document.getElementById('sync-val');
+                    if (_syncBadge) {
+                        _syncBadge.innerHTML = 'SYNC: <span style="color:var(--warning,#ffa502);">STALE</span>';
+                    }
+                    var _integrityBadge = document.getElementById('integrity-status');
+                    if (_integrityBadge) {
+                        _integrityBadge.innerHTML = '<span class="integrity-badge" style="color:var(--warning,#ffa502);">'
+                            + (intel.freshness === 'UNAVAILABLE' ? 'FRESHNESS UNKNOWN' : intel.freshness + ' DATA') + '</span>';
                     }
                 }
 

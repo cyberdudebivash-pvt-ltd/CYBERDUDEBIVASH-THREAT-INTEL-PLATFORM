@@ -23,11 +23,48 @@ Usage:
 P0 RULES (non-negotiable):
   RULE 1: Every advisory MUST have internal_report_url OR report_url
   RULE 2: report_url MUST be a relative /reports/ path (never http)
-  RULE 3: The physical HTML file MUST exist on disk
+  RULE 3: The physical HTML file MUST exist on disk, UNLESS the advisory is
+          outside this run's rolling publish window (see DEFERRAL below)
   RULE 4: The file MUST be >= 500 bytes
   RULE 5: The file MUST begin with <!DOCTYPE html or <html
-  RULE 6: Zero silent skips -- every failure is logged and counted
+  RULE 6: Zero silent skips -- every advisory's disposition (PASS/DEFERRED/
+          SKIP/FAIL) is logged and counted, never silently dropped
   RULE 7: Exit 1 if ANY failure -- pipeline stops, R2 upload is blocked
+
+DEFERRAL (P0 root-cause fix, 2026-09): PR #369 bounded scripts/
+generate_intel_reports.py and scripts/r2_report_publisher.py to a rolling
+REPORT_WINDOW_HOURS window (default 24h) to stop the whole-corpus R2 cost
+incident (docs/P0_R2_COST_CONTAINMENT.md) -- outside that window, a report
+is deliberately NOT regenerated on a given run. reports/ is also gitignored
+and lives only on the ephemeral CI runner's local disk (never restored from
+git or cache), so on every fresh checkout this validator starts with ZERO
+local files for every advisory the current run's generation pass did not
+touch. Before this fix, RULE 3 required EVERY advisory in the manifest --
+including thousands of historical ones outside the window -- to have a
+local file, which held only under the PRE-#369 architecture where every
+report was regenerated on every run. Confirmed live: sentinel-blogger.yml
+runs #2244/#2245 (the first natural runs after #369/#370 landed) both hard-
+failed here with ~1,394 RULE 3 failures, 100% of them advisories outside
+the rolling window -- not a data/manifest corruption, an architecture
+mismatch between this gate's assumption and the (correct, intentional) R2
+cost-bounding fix.
+
+Fix: an advisory whose canonical timestamp (scripts/r2_report_publisher.py's
+own canonical_age(), reused here -- not reimplemented) places it OUTSIDE
+report_window_hours() is not this run's responsibility to have produced or
+verified locally -- its correctness is either scripts/r2_report_publisher.py's
+own durable publish-state record (data/cache/r2_report_publish_state.json,
+reused here too) or, for pre-#369 legacy items with no state record, was
+guaranteed by the whole-corpus sync architecture that ran on every prior
+cycle and has not been touched (R2 objects are never deleted by anything
+outside r2_report_publisher.py's own bounded retirement, and legacy items
+are outside its scope) -- and is verified by the operator-invoked purge/
+audit tooling, not this per-run gate. Such advisories are logged as
+DEFERRED, not PASS and not FAIL: still fully visible (RULE 6), never
+silently reclassified as validated. An advisory INSIDE the window with a
+genuinely missing/malformed local file still HARD FAILS exactly as before --
+this fix narrows RULE 3's scope to what post-#369 architecture actually
+guarantees, it does not weaken the check within that scope.
 """
 from __future__ import annotations
 
@@ -36,8 +73,19 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from r2_report_publisher import (  # noqa: E402
+    canonical_age,
+    load_publish_state,
+    report_window_hours,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -185,10 +233,31 @@ def _resolve_report_path(entry: Dict[str, Any]) -> Tuple[str, str]:
     return url, fs_path
 
 
-def _validate_one(entry: Dict[str, Any], idx: int) -> List[str]:
+def _validate_one(
+    entry: Dict[str, Any],
+    idx: int,
+    *,
+    now: datetime,
+    window_hours: int,
+    published_ids: set[str],
+) -> Tuple[List[str], str]:
     """
-    Validate a single advisory entry. Returns a list of failure messages.
-    Empty list means PASS.
+    Validate a single advisory entry. Returns (failures, disposition).
+
+    disposition is exactly one of:
+      "PASS"     -- fully validated: local file confirmed present & valid HTML,
+                    or explicitly confirmed published via the CDN-URL bypass.
+      "DEFERRED" -- report_url present, local file missing, but the advisory
+                    is outside this run's rolling publish window (or its
+                    canonical timestamp is unparseable) and/or its id is
+                    confirmed durably published via scripts/
+                    r2_report_publisher.py's own state -- not this run's
+                    responsibility to have produced or verified locally.
+                    See module docstring's DEFERRAL section.
+      "SKIP"     -- STIX-bundle-only record, no HTML report expected.
+      "FAIL"     -- one or more RULE violations; see `failures`.
+
+    failures is non-empty only when disposition == "FAIL".
 
     v152.2.0 IMMUTABLE GUARD -- Root cause of Run #1269 false-positive FATAL:
     Previously RULE 1 returned early (failing) whenever report_url /
@@ -218,7 +287,7 @@ def _validate_one(entry: Dict[str, Any], idx: int) -> List[str]:
             f"[{intel_id}] RULE 1 FAIL: no report_url, internal_report_url, "
             f"or derivable id -- cannot locate report file"
         )
-        return failures
+        return failures, "FAIL"
 
     # v160.5e HARDENING: Skip STIX-bundle-only entries (no HTML report).
     # Manifest entries with NEITHER report_url NOR internal_report_url are raw
@@ -228,14 +297,14 @@ def _validate_one(entry: Dict[str, Any], idx: int) -> List[str]:
     # Condition: no explicit URL AND local file does not exist at derived path.
     # This preserves full RULE 3/4/5 checks for genuine intel-- advisory reports.
     if not explicit_url and not os.path.exists(fs_path):
-        return failures  # SKIP -- STIX bundle-only record, no HTML report expected
+        return failures, "SKIP"  # STIX bundle-only record, no HTML report expected
 
     # RULE 2: if an explicit URL is present, it must not be a foreign external URL
     if explicit_url and explicit_url.startswith("http") and "cyberdudebivash" not in explicit_url:
         failures.append(
             f"[{intel_id}] RULE 2 FAIL: report_url is external URL: {explicit_url!r}"
         )
-        return failures
+        return failures, "FAIL"
 
     # v160.5d HARDENING: Already-Deployed CDN Bypass.
     # When report_url is an HTTPS URL on our own published domain
@@ -254,14 +323,27 @@ def _validate_one(entry: Dict[str, Any], idx: int) -> List[str]:
         _pub_url.startswith("https://") and "cyberdudebivash" in _pub_url
     )
     if _already_deployed:
-        return failures  # PASS -- report already live on cyberdudebivash CDN/R2
+        return failures, "PASS"  # report already live on cyberdudebivash CDN/R2
 
     # RULE 3: physical HTML file must exist on disk at resolved path
     if not os.path.exists(fs_path):
+        # DEFERRAL (see module docstring): confirmed durably published via
+        # r2_report_publisher.py's own state, OR outside this run's rolling
+        # publish window (or timestamp unparseable, which r2_report_publisher.py
+        # itself also treats as "not this run's candidate") -- not a failure,
+        # this run was never going to produce or verify this file locally.
+        if intel_id in published_ids:
+            return failures, "DEFERRED"
+        _ts, _age_hours = canonical_age(entry, now)
+        _in_window = _age_hours is not None and 0 <= _age_hours <= window_hours
+        if not _in_window:
+            return failures, "DEFERRED"
         failures.append(
-            f"[{intel_id}] RULE 3 FAIL: report file NOT FOUND: {fs_path}"
+            f"[{intel_id}] RULE 3 FAIL: report file NOT FOUND: {fs_path} "
+            f"(within the {window_hours}h publish window -- this run should "
+            f"have produced or verified it locally)"
         )
-        return failures  # no point checking size/content
+        return failures, "FAIL"  # no point checking size/content
 
     # RULE 3b (v154.0 P0 HARDENING): PUBLIC report_url path MUST ALSO exist.
     # If report_url diverges from internal_report_url and the public path is
@@ -292,15 +374,16 @@ def _validate_one(entry: Dict[str, Any], idx: int) -> List[str]:
         failures.append(
             f"[{intel_id}] RULE 5 FAIL: cannot read report file {fs_path}: {exc}"
         )
-        return failures
+        return failures, "FAIL"
 
     if not any(sig in head for sig in HTML_SIGNATURES):
         failures.append(
             f"[{intel_id}] RULE 5 FAIL: report file is not valid HTML "
             f"(head: {head[:60]!r}): {fs_path}"
         )
+        return failures, "FAIL"
 
-    return failures
+    return failures, "PASS"
 
 
 def validate_all_reports(
@@ -320,25 +403,53 @@ def validate_all_reports(
 
     logger.info("Validating reports for %d advisories from %s", total, manifest_path)
 
+    window_hours = report_window_hours()
+    now = datetime.now(timezone.utc)
+    publish_state = load_publish_state()
+    published_ids = {
+        _id for _id, _rec in publish_state.get("items", {}).items()
+        if isinstance(_rec, dict) and _rec.get("html_key")
+    }
+    logger.info(
+        "Rolling publish window: %dh -- %d id(s) confirmed durably published "
+        "via r2_report_publisher.py's own state.",
+        window_hours, len(published_ids),
+    )
+
     all_failures: List[str] = []
     passed = 0
+    deferred = 0
+    skipped = 0
 
     for idx, entry in enumerate(advisories):
-        failures = _validate_one(entry, idx)
-        if failures:
+        failures, disposition = _validate_one(
+            entry, idx, now=now, window_hours=window_hours, published_ids=published_ids,
+        )
+        intel_id = (entry.get("id") or entry.get("stix_id") or f"entry[{idx}]").strip()
+
+        if disposition == "FAIL":
             for msg in failures:
                 logger.error("REPORT VALIDATION FAIL: %s", msg)
             all_failures.extend(failures)
-        else:
-            intel_id = (entry.get("id") or entry.get("stix_id") or f"entry[{idx}]").strip()
+        elif disposition == "DEFERRED":
+            logger.info(
+                "[DEFERRED] %s -- outside the %dh publish window, not locally "
+                "verifiable this run (see DEFERRAL in module docstring)",
+                intel_id, window_hours,
+            )
+            deferred += 1
+        elif disposition == "SKIP":
+            skipped += 1
+        else:  # PASS
             _url, fs_path = _resolve_report_path(entry)
             size = os.path.getsize(fs_path) if fs_path and os.path.exists(fs_path) else 0
             logger.info("[PASS] %s -- %s (%d bytes)", intel_id, fs_path, size)
             passed += 1
 
     logger.info(
-        "Report validation complete: %d/%d passed, %d failed",
-        passed, total, len(all_failures),
+        "Report validation complete: %d/%d passed, %d deferred (out-of-window, "
+        "not locally verifiable), %d skipped (no report expected), %d failed",
+        passed, total, deferred, skipped, len(all_failures),
     )
 
     if all_failures:
@@ -349,7 +460,11 @@ def validate_all_reports(
         )
         return False
 
-    logger.info("P0 GATE PASS: all %d reports validated. R2 upload is ALLOWED.", total)
+    logger.info(
+        "P0 GATE PASS: %d in-scope report(s) validated, %d deferred as "
+        "out-of-window. R2 upload is ALLOWED.",
+        passed, deferred,
+    )
     return True
 
 
