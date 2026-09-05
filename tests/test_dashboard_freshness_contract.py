@@ -26,6 +26,17 @@ which skips STAGE 3.93 (scripts/generate_api_manifests.py -- the script
 that sets feedData.generated_at) on every one of those runs. See
 tests/test_validate_reports_window_deferral.py for that fix's own coverage.
 
+FOLLOW-UP DEFECT (confirmed live, 2026-09-05, after the above fix had
+already shipped and CI-passed): the public dashboard still showed
+SYNC: LIVE / LAST SYNC: 10d ago even though /api/platform/stats itself
+had already started correctly reporting freshness:"STALE". Root cause:
+index.html has a SECOND, independent badge-writer -- loadGOCIntel()'s own
+isApiSource branch, which predates this fix and labels the badge LIVE
+purely because a manifest fetch succeeded, with no freshness check at all.
+On initial page load this function and fetchWorkerStats() both fire
+unawaited at the same time; whichever resolves last wins. See
+TestSyncBadgeBootRaceIsResolved below for that fix's coverage.
+
 This file is a STATIC source-contract test, not a live/DOM/browser test --
 this repository has no JS DOM test harness for index.html (see this
 codebase's own documented Playwright/service-worker sandbox limitations).
@@ -150,6 +161,72 @@ class TestDashboardSyncBadgeCrossChecksFreshness:
         sync_ts_idx = fn_body.index("const _syncTs =")
         downgrade_idx = fn_body.index("intel.freshness !== 'FRESH'")
         assert sync_ts_idx < downgrade_idx
+
+
+class TestSyncBadgeBootRaceIsResolved:
+    """PHASE 4/18/D (2026-09-05 follow-up): confirmed LIVE production defect
+    -- SYNC: LIVE + LAST SYNC: 10d ago persisted on the public dashboard even
+    AFTER the GATE G fix above shipped, while /api/platform/stats itself
+    already correctly reported freshness:"STALE".
+
+    Root cause: on initial page load, _cdbBootSequence() fires loadGOCIntel()
+    (unawaited) and the page's own top-level fetchWorkerStats() call at the
+    same time -- two independent in-flight fetches with no ordering
+    guarantee. loadGOCIntel()'s own isApiSource branch (a SEPARATE badge
+    write, pre-dating this PR) unconditionally labels the badge LIVE/MANIFEST
+    VERIFIED purely because the manifest fetch succeeded, with no freshness
+    check at all. GATE G's cross-check in fetchWorkerStats() only wins the
+    race when it happens to resolve AFTER loadGOCIntel() -- which the
+    manualRefresh()/auto-refresh path guarantees (awaits loadGOCIntel() then
+    calls fetchWorkerStats()), but initial boot does not. When loadGOCIntel()
+    resolves last, it silently overwrites an already-correct STALE badge
+    back to a false LIVE.
+
+    Fix: window.__CDB_FRESHNESS__, written unconditionally by
+    fetchWorkerStats() from the same classifyFreshness()-derived
+    intel.freshness value GATE G already uses (reused, not reimplemented),
+    is now consulted by loadGOCIntel()'s isApiSource branch before it
+    declares LIVE -- one shared answer both paths agree on, regardless of
+    which resolves last."""
+
+    def test_load_goc_intel_consults_shared_freshness_flag_before_live(self):
+        src = _index_html_source()
+        assert "var _knownStale = window.__CDB_FRESHNESS__" in src, (
+            "loadGOCIntel()'s isApiSource branch must check the shared "
+            "freshness flag before declaring the badge LIVE."
+        )
+        assert "if (isApiSource && _knownStale)" in src, (
+            "A known-stale backend must prevent loadGOCIntel() from "
+            "labelling the badge LIVE, closing the boot-time race with "
+            "fetchWorkerStats()."
+        )
+        idx = src.index("var _knownStale = window.__CDB_FRESHNESS__")
+        window = src[idx: idx + 400]
+        assert "!== 'FRESH'" in window
+        assert "!== 'RECENT'" in window
+
+    def test_known_stale_branch_targets_the_same_badge_elements(self):
+        src = _index_html_source()
+        idx = src.index("if (isApiSource && _knownStale)")
+        branch = src[idx: idx + 500]
+        assert re.search(r"getElementById\('sync-val'\)", branch) or "syncVal" in branch
+        assert "STALE" in branch
+
+    def test_fetch_worker_stats_writes_shared_flag_unconditionally(self):
+        """The flag must be updated on EVERY resolution of fetchWorkerStats()
+        (including a FRESH result), not only inside the downgrade-only `if` --
+        otherwise a stale flag from a prior stale period would never clear
+        once the backend recovers, permanently pinning loadGOCIntel() to
+        STALE even after real intelligence starts flowing again."""
+        src = _index_html_source()
+        assert "window.__CDB_FRESHNESS__ = intel.freshness || null;" in src
+        write_idx = src.index("window.__CDB_FRESHNESS__ = intel.freshness || null;")
+        downgrade_idx = src.index(
+            "if (intel.freshness && intel.freshness !== 'FRESH' && intel.freshness !== 'RECENT')"
+        )
+        # The unconditional write must precede (i.e. not be nested inside)
+        # the downgrade-only conditional.
+        assert write_idx < downgrade_idx
 
 
 class TestAvgRiskScoreNaNGuard:
