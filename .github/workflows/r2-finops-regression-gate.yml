@@ -27,6 +27,21 @@
 # `pytest tests/`) so a newly added, unrelated, or still-flaky test file
 # cannot silently widen or weaken this gate.
 #
+# Also guards against unbounded historical R2 storage accumulation
+# recurring (P0 pre-revenue storage retention, docs/P0_R2_COST_CONTAINMENT.md
+# Section 8): config/r2_lifecycle_policy.json declares this platform's
+# native R2 lifecycle-as-code policy (scripts/r2_lifecycle_manager.py),
+# preferred over any recurring custom LIST+DELETE sweep. This gate is a
+# static schema/shape check only -- it never queries live R2 -- and locks
+# in the policy's central safety finding: sentinel-apex-data holds single,
+# overwrite-in-place current-state keys (not date-partitioned historical
+# generations), so it may never carry an age-based Expiration rule -- doing
+# so would risk deleting the only live copy of production data during a
+# pipeline stall (nearly realized by the 2026-09 dashboard-freshness
+# incident's ~10-day stall). Only sentinel-apex-reports' reports/ prefix,
+# whose keys are uniquely dated and de-referenced from the manifest before
+# retirement, gets a 7-day age-based backstop rule.
+#
 # Runs on every push and PR to main.
 
 name: R2 FinOps Regression Gate
@@ -40,6 +55,8 @@ on:
       - 'scripts/r2_report_publisher.py'
       - 'scripts/r2_reports_verifier.py'
       - 'scripts/r2_reports_purge.py'
+      - 'scripts/r2_lifecycle_manager.py'
+      - 'config/r2_lifecycle_policy.json'
       - 'scripts/r2_state_sync.py'
       - 'scripts/backup_r2.py'
       - 'scripts/backup_kv_to_r2.py'
@@ -100,6 +117,9 @@ jobs:
 
       - name: "GATE F -- r2_reports_purge.py stays the one sanctioned full-bucket LIST tool"
         run: python -m pytest tests/test_r2_reports_purge_safety.py -v --tb=short
+
+      - name: "GATE N -- R2 native lifecycle policy drift gate (7-day ephemeral retention, no sentinel-apex-data age rules)"
+        run: python -m pytest tests/test_r2_lifecycle_manager.py -v --tb=short
 
       - name: "r2_state_sync.py -- bounded state round-trip + retry ceiling"
         run: python -m pytest tests/test_r2_state_sync.py -v --tb=short
