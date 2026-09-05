@@ -13572,7 +13572,35 @@ function renderTopThreats(data) {
                     // real Chromium; see the root-cause report. The data is
                     // still shown (degrading to a mirror beats showing
                     // nothing) -- it is simply labelled honestly as STALE.
-                    if (isApiSource) {
+                    //
+                    // P0 2026-09-05: the comment above about fetchWorkerStats()
+                    // running "after" this write was only true for the
+                    // manualRefresh()/auto-refresh path (which awaits
+                    // loadGOCIntel() THEN calls fetchWorkerStats()). On initial
+                    // page boot, _cdbBootSequence() fires loadGOCIntel() (this
+                    // function, unawaited) and the page's own top-level
+                    // fetchWorkerStats() call at the same time -- two
+                    // independent in-flight requests with no ordering
+                    // guarantee. Confirmed live: /api/platform/stats already
+                    // reported freshness:"STALE" while this branch still
+                    // unconditionally wrote LIVE, because on that page load
+                    // this isApiSource fetch happened to resolve AFTER
+                    // fetchWorkerStats() had already (correctly) downgraded
+                    // the badge -- silently reverting the truthful state back
+                    // to a false LIVE. window.__CDB_FRESHNESS__ (set by
+                    // fetchWorkerStats() from the same classifyFreshness()
+                    // signal, reused not reimplemented) makes the two paths
+                    // consult one shared answer instead of racing -- whichever
+                    // of the two finishes last now reaches the same
+                    // conclusion.
+                    var _knownStale = window.__CDB_FRESHNESS__
+                        && window.__CDB_FRESHNESS__ !== 'FRESH'
+                        && window.__CDB_FRESHNESS__ !== 'RECENT';
+                    if (isApiSource && _knownStale) {
+                        if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--warning,#ffa502);">&#x26A1; STALE</span>';
+                        if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge" style="color:var(--warning,#ffa502);">&#x26A1; '
+                            + (window.__CDB_FRESHNESS__ === 'UNAVAILABLE' ? 'FRESHNESS UNKNOWN' : window.__CDB_FRESHNESS__ + ' DATA') + '</span>';
+                    } else if (isApiSource) {
                         if (syncVal) syncVal.innerHTML = 'SYNC: <span style="color:var(--accent);animation:new-glow 1.5s ease-in-out infinite alternate;">&#x26A1; LIVE</span>';
                         if (integrityEl) integrityEl.innerHTML = '<span class="integrity-badge integrity-ok"><i class="fas fa-shield-check"></i> MANIFEST VERIFIED</span>';
                     } else {
@@ -16371,12 +16399,18 @@ function renderTopThreats(data) {
                 // SYNC: LIVE and a 10-day-old Last Sync value ended up on
                 // screen together during the 2026-08-26 core-feed staleness
                 // incident (see classifyFreshness()'s own comment in
-                // workers/intel-gateway/src/index.js). fetchWorkerStats() is
-                // this page's documented single source of truth for
-                // freshness and always runs its own fetch, so this check
-                // runs after the other path's badge write and only ever
-                // downgrades LIVE to STALE on real evidence of staleness; it
-                // never promotes an already-honest STALE/FALLBACK badge.
+                // workers/intel-gateway/src/index.js).
+                //
+                // P0 2026-09-05: on initial page load, loadGOCIntel() (the
+                // isApiSource badge write above) and this function's own
+                // fetch both fire unawaited from _cdbBootSequence() / the
+                // page's top-level fetchWorkerStats() call -- confirmed live,
+                // there is no guarantee this resolves last. window.__CDB_FRESHNESS__
+                // records the latest known truth here so loadGOCIntel() can
+                // consult it too, regardless of which of the two finishes
+                // last -- one authoritative answer, not a race between two
+                // independent computations.
+                window.__CDB_FRESHNESS__ = intel.freshness || null;
                 if (intel.freshness && intel.freshness !== 'FRESH' && intel.freshness !== 'RECENT') {
                     var _syncBadge = document.getElementById('sync-val');
                     if (_syncBadge) {
