@@ -130,6 +130,56 @@ class TestEnvDrivenConfig(unittest.TestCase):
             else:
                 os.environ["PRE_REVENUE_COST_MODE"] = env_backup
 
+    def test_pre_revenue_cost_mode_case_mismatch_is_still_respected(self):
+        """Phase 6 contract: PRE_REVENUE_COST_MODE must not silently fail
+        open on a case mismatch (e.g. a workflow author writing "False" or
+        "FALSE" instead of the exact lowercase "false")."""
+        env_backup = os.environ.get("PRE_REVENUE_COST_MODE")
+        for value in ("False", "FALSE", "  false  ", "FaLsE"):
+            os.environ["PRE_REVENUE_COST_MODE"] = value
+            try:
+                self.assertFalse(
+                    guard.is_pre_revenue_cost_mode(),
+                    f"PRE_REVENUE_COST_MODE={value!r} must still be recognized as false",
+                )
+            finally:
+                if env_backup is None:
+                    os.environ.pop("PRE_REVENUE_COST_MODE", None)
+                else:
+                    os.environ["PRE_REVENUE_COST_MODE"] = env_backup
+
+    def test_pre_revenue_cost_mode_empty_string_defaults_to_strict(self):
+        """An empty env var (workflow sets `PRE_REVENUE_COST_MODE: ""`) must
+        default to the SAFE (strict) posture, not silently disable it."""
+        env_backup = os.environ.get("PRE_REVENUE_COST_MODE")
+        os.environ["PRE_REVENUE_COST_MODE"] = ""
+        try:
+            self.assertTrue(guard.is_pre_revenue_cost_mode())
+        finally:
+            if env_backup is None:
+                os.environ.pop("PRE_REVENUE_COST_MODE", None)
+            else:
+                os.environ["PRE_REVENUE_COST_MODE"] = env_backup
+
+    def test_pre_revenue_cost_mode_malformed_value_defaults_to_strict(self):
+        """Any value other than an exact (case/whitespace-insensitive) match
+        for "false" must fail closed to the strict/safe posture -- a typo'd
+        workflow env var must never silently restore unbounded behavior."""
+        env_backup = os.environ.get("PRE_REVENUE_COST_MODE")
+        for value in ("maybe", "0", "no", "disabled"):
+            os.environ["PRE_REVENUE_COST_MODE"] = value
+            try:
+                self.assertTrue(
+                    guard.is_pre_revenue_cost_mode(),
+                    f"PRE_REVENUE_COST_MODE={value!r} (not exactly 'false') must "
+                    "default to strict mode, not be treated as disabling it",
+                )
+            finally:
+                if env_backup is None:
+                    os.environ.pop("PRE_REVENUE_COST_MODE", None)
+                else:
+                    os.environ["PRE_REVENUE_COST_MODE"] = env_backup
+
     def test_budgets_from_env_uses_evidence_based_defaults_when_unset(self):
         for var in ("MAX_REPORT_UPLOADS_PER_RUN", "MAX_REPORT_DELETIONS_PER_RUN",
                      "MAX_R2_LIST_CALLS_PER_RUN", "MAX_R2_DATA_WRITES_PER_RUN"):

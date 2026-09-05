@@ -1,0 +1,114 @@
+# SENTINEL APEX -- R2 FinOps Regression Gate (P0)
+#
+# Guards against the P0 Cloudflare R2 billing incident class of defect --
+# unbounded recurring R2 operations, unaccounted writers, and duplicate
+# writers racing for the same logical key -- ever returning.
+#
+# BACKGROUND: PR #369 fixed the confirmed root cause of a 3,004,147-Class-A-
+# operation billing cycle (docs/P0_R2_COST_CONTAINMENT.md): a whole-corpus
+# `aws s3 sync reports/` running on every scheduled pipeline run. PR #370
+# hardened production assurance around that fix and documented two
+# remaining risks: (1) a bounded duplicate-writer race between
+# generate-and-sync.yml and scripts/r2_upload.py for 4 shared AI-tracker R2
+# keys, and (2) scripts/r2_upload.py's R2 operations were not represented
+# in scripts/r2_cost_guard.py's accounting ledger. Both are now fixed --
+# see scripts/r2_upload.py's "P0 DUPLICATE-WRITER RACE FIX" module comment
+# and tests/test_r2_ai_tracker_duplicate_writer.py.
+#
+# This gate exists because none of the tests below were previously wired
+# into any CI workflow -- they existed under tests/ but only protected
+# against regressions when run manually/locally (confirmed via repo-wide
+# audit: no workflow invoked them). scripts/regression_tests.py's T19/T26
+# checks (run from sentinel-blogger.yml) remain the other, complementary
+# static guard against the whole-corpus-sync pattern specifically.
+#
+# Mirrors the existing report-generator-regression-gate.yml pattern: one
+# pytest invocation per guarded concern, explicit file names (not a bare
+# `pytest tests/`) so a newly added, unrelated, or still-flaky test file
+# cannot silently widen or weaken this gate.
+#
+# Runs on every push and PR to main.
+
+name: R2 FinOps Regression Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/r2_upload.py'
+      - 'scripts/r2_cost_guard.py'
+      - 'scripts/r2_report_publisher.py'
+      - 'scripts/r2_reports_verifier.py'
+      - 'scripts/r2_reports_purge.py'
+      - 'scripts/r2_state_sync.py'
+      - 'scripts/backup_r2.py'
+      - 'scripts/backup_kv_to_r2.py'
+      - 'agent/backup/backup_engine.py'
+      - 'scripts/p0_r2_stix_manifest_diagnostic.py'
+      - '.github/workflows/generate-and-sync.yml'
+      - '.github/workflows/sentinel-blogger.yml'
+      - '.github/workflows/automated-backup.yml'
+      - 'tests/test_r2_*.py'
+      - 'tests/test_backup_*.py'
+      - 'tests/test_p0_r2_stix_manifest_diagnostic_read_only.py'
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r2-finops-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  r2-finops-regression:
+    name: "R2 accounting, duplicate-writer, and bounded-operation regression tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5.5.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install test dependencies
+        run: pip install pytest boto3 --quiet
+
+      - name: "GATE D/E -- r2_upload.py accounting + AI-tracker duplicate-writer elimination"
+        run: python -m pytest tests/test_r2_ai_tracker_duplicate_writer.py -v --tb=short
+
+      - name: "r2_upload.py -- reports keyspace never resurrected (PR #369 invariant)"
+        run: python -m pytest tests/test_r2_upload_reports_sync.py -v --tb=short
+
+      - name: "GATE C/I -- r2_cost_guard.py budget enforcement + PRE_REVENUE_COST_MODE fail-safety"
+        run: python -m pytest tests/test_r2_cost_guard.py -v --tb=short
+
+      - name: "GATE C -- r2_report_publisher.py incremental publish + bounded operations"
+        run: python -m pytest tests/test_r2_report_publisher.py -v --tb=short
+
+      - name: "GATE F -- r2_reports_verifier.py bounded verification (no unbounded full-manifest scan)"
+        run: python -m pytest tests/test_r2_reports_verifier.py -v --tb=short
+
+      - name: "GATE F -- r2_reports_purge.py stays the one sanctioned full-bucket LIST tool"
+        run: python -m pytest tests/test_r2_reports_purge_safety.py -v --tb=short
+
+      - name: "r2_state_sync.py -- bounded state round-trip + retry ceiling"
+        run: python -m pytest tests/test_r2_state_sync.py -v --tb=short
+
+      - name: "GATE G -- backup_kv_to_r2.py bounded KV pagination"
+        run: python -m pytest tests/test_backup_kv_to_r2_parallel_fetch.py -v --tb=short
+
+      - name: "GATE G -- agent/backup/backup_engine.py bounded LIST ceiling"
+        run: python -m pytest tests/test_backup_engine_list_bound.py -v --tb=short
+
+      - name: "p0_r2_stix_manifest_diagnostic.py stays read-only (no PUT/DELETE/COPY)"
+        run: python -m pytest tests/test_p0_r2_stix_manifest_diagnostic_read_only.py -v --tb=short
