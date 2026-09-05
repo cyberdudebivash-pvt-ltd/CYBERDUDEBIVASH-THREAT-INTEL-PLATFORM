@@ -1225,6 +1225,19 @@ jobs:
       # Without this step the Worker had no ai/tracker.json, ai/health.json,
       # or ai/executive-brief.json in R2, causing ai-threat-tracker.html to
       # show empty/stalled dashboard (handleAI fell back to ai_index.json).
+      #
+      # P0 DUPLICATE-WRITER RACE FIX (PR #370 follow-up): this step used to
+      # hand-roll `aws s3 cp` for these 4 keys directly in YAML -- a second,
+      # unlocked, unaccounted writer racing scripts/r2_upload.py's main()
+      # (invoked by sentinel-blogger.yml under a DIFFERENT concurrency group,
+      # "sentinel-data-writer", which does NOT serialize against this
+      # workflow's "sentinel-ai-writer" group). Fixed by making this
+      # workflow the sole caller of the sole code path that writes these
+      # keys: `scripts/r2_upload.py --ai-tracker-only`
+      # (main_ai_tracker_only()) -- r2_upload.py's main() no longer uploads
+      # them at all. This also brings the upload under r2_cost_guard.py's
+      # fail-closed budget + telemetry ledger, which the old inline
+      # `aws s3 cp` loop bypassed entirely.
       # ─────────────────────────────────────────────────────────────────────
       - name: "STAGE 9.5 — Upload AI Tracker outputs to Cloudflare R2"
         if: env.DRY_RUN != 'true'
@@ -1232,47 +1245,4 @@ jobs:
           CF_ACCOUNT_ID:          ${{ secrets.CF_ACCOUNT_ID }}
           AWS_ACCESS_KEY_ID:      ${{ secrets.CF_R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY:  ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
-        run: |
-          set -euo pipefail
-          ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          BUCKET="sentinel-apex-data"
-
-          echo "[R2] Installing AWS CLI..."
-          pip install awscli --quiet --break-system-packages 2>/dev/null || pip install awscli --quiet
-
-          echo "[R2] Uploading AI Tracker files to R2..."
-          UPLOADED=0
-          for FILE in \
-            api/ai/tracker.json \
-            api/ai/health.json \
-            api/ai/executive-brief.json \
-            api/ai/monetization.json; do
-            if [ -f "$FILE" ]; then
-              R2_KEY="ai/$(basename $FILE)"
-              aws s3 cp "$FILE" "s3://${BUCKET}/${R2_KEY}" \
-                --endpoint-url "$ENDPOINT" \
-                --content-type "application/json" \
-                --cache-control "max-age=300, s-maxage=300" \
-                --quiet
-              echo "[R2] Uploaded: $FILE → ${R2_KEY}"
-              UPLOADED=$((UPLOADED + 1))
-            else
-              echo "[R2] SKIP (not found): $FILE"
-            fi
-          done
-          echo "[R2] Upload complete — ${UPLOADED} file(s) synced to R2"
-
-          # Issue #274 cleanup: this used to also POST to the Worker's admin
-          # cache-bust endpoint (key=ai:tracker, ai:health, ai:exec-brief, or
-          # ai:monetize) to invalidate a per-key KV cache in front of these
-          # files. That KV
-          # cache scheme doesn't exist anymore -- the Worker's
-          # /api/ai/{filename} handler (workers/intel-gateway/src/index.js)
-          # reads api/ai/health.json etc. straight from this same R2 bucket
-          # (env.INTEL_R2.get(`ai/${filename}`)) with no caching layer to
-          # invalidate, and none of "ai:tracker"/"ai:health"/"ai:exec-brief"/
-          # "ai:monetize" are in that endpoint's ALLOWED_EXACT_KEYS allowlist --
-          # every one of these calls was silently getting HTTP 400 (curl's
-          # exit code was never checked, so this never surfaced). Removed
-          # rather than fixed forward: there's nothing left to bust.
-          echo "[R2] Stage 9.5 complete — AI Tracker live on Worker (R2, read directly, no cache to invalidate)"
+        run: python3 scripts/r2_upload.py --ai-tracker-only
