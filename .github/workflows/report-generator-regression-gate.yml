@@ -92,6 +92,17 @@
 # the same scripts/r2_report_publisher.py helpers -- see
 # tests/test_report_existence_validator_window_deferral.py.
 #
+# Also guards against STAGE 5.8.1b (scripts/report_url_canary.py --local)
+# hard-failing with the exact same architectural mismatch, a THIRD time --
+# confirmed live in run #2250 (the first natural run after the STAGE 3.3 and
+# STAGE 5.4.1 fixes above both unblocked it, and after STAGE 5's GitHub
+# Pages deploy had already succeeded): "LOCAL GATE: 214 ok / 184 missing /
+# 0 invalid (of 398)". This third sibling gate independently re-checked
+# on-disk report_url existence with no rolling-window/publish-state
+# awareness at all. Fixed with the identical deferral logic, reusing the
+# same scripts/r2_report_publisher.py helpers -- see
+# tests/test_report_url_canary_window_deferral.py.
+#
 # Runs on every push and PR to main.
 
 name: Report Generator Regression Gate
@@ -190,3 +201,11 @@ jobs:
       - name: Run Report Existence Validator rolling-window deferral regression tests (P0 STAGE 5.4.1 deploy-skip)
         run: |
           python -m pytest tests/test_report_existence_validator_window_deferral.py -v --tb=short
+
+      - name: Run Report URL Canary publication-status classification regression tests (v187.0)
+        run: |
+          python -m pytest tests/test_report_url_canary_classification.py -v --tb=short
+
+      - name: Run Report URL Canary rolling-window deferral regression tests (P0 STAGE 5.8.1b false-positive gate failure)
+        run: |
+          python -m pytest tests/test_report_url_canary_window_deferral.py -v --tb=short

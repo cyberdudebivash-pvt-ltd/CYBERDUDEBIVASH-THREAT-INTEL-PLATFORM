@@ -43,6 +43,26 @@ ROOT CAUSE FIXED (v174.1):
      appeared missing even though they were present in dist/reports/.
      Fix: _resolve_artifact() checks reports/ first, then dist/reports/.
 
+ROOT CAUSE FIXED (P0 2026-09-05):
+  6. Same architectural mismatch already fixed in scripts/validate_reports.py
+     (STAGE 3.3) and scripts/report_existence_validator.py (STAGE 5.4.1) --
+     confirmed live (run #2250) hard-failing THIS gate instead, one stage
+     later, against the exact same api/feed.json: PR #369 bounded report
+     (re)generation to a rolling REPORT_WINDOW_HOURS window, and reports/ is
+     gitignored (never persisted across CI runs), so a fresh runner has zero
+     local file for a CURRENT-feed report_url whose id was rendered/published
+     in an EARLIER run and is still legitimately current (in-window, or
+     already durably published to R2 per r2_report_publisher.py's own
+     state) but wasn't re-rendered THIS run. --local now applies the exact
+     same deferral rule report_existence_validator.py already established
+     (reused via r2_report_publisher.py's own canonical_age()/
+     load_publish_state()/report_window_hours() helpers, not reimplemented)
+     before treating a missing on-disk artifact as a real P0 defect. A
+     report_url sourced from the deployment_manifest.json fallback (used
+     only when the feed itself is empty) carries no id/timestamp to defer
+     with, so it is conservatively never deferred -- unchanged fail-closed
+     behavior for that path.
+
 Env: PAGES_BASE_URL CANARY_WAIT_SECS CANARY_RETRY_COUNT CANARY_RETRY_WAIT
      CANARY_MAX_PROBES CANARY_TIMEOUT
 (c) 2026 CyberDudeBivash Pvt. Ltd. All Rights Reserved. CONFIDENTIAL.
@@ -57,6 +77,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from typing import Dict, List, Optional, Tuple
@@ -86,6 +107,18 @@ try:
 except Exception as _import_exc:  # pragma: no cover - defensive only
     def query_publication_status(report_id: str) -> Optional[dict]:  # type: ignore
         return None
+
+# P0 2026-09-05 FIX: reuse the SAME rolling-window/publish-state helpers
+# scripts/report_existence_validator.py already reuses from this module
+# (not reimplemented) so --local can distinguish a genuinely missing
+# artifact from one that is legitimately absent on THIS run's fresh
+# runner -- see the "ROOT CAUSE FIXED (P0 2026-09-05)" module docstring
+# section above.
+from r2_report_publisher import (  # noqa: E402
+    canonical_age,
+    load_publish_state,
+    report_window_hours,
+)
 REPORTS_DIR        = REPO_ROOT / "reports"
 DIST_REPORTS_DIR   = REPO_ROOT / "dist" / "reports"
 PAGES_BASE_URL     = os.environ.get("PAGES_BASE_URL", "https://intel.cyberdudebivash.com").rstrip("/")
@@ -165,6 +198,36 @@ def load_current_report_paths(max_count: int) -> List[str]:
     return []
 
 
+def load_current_feed_items() -> List[dict]:
+    """Same feed source/precedence as load_current_report_paths(), returning
+    the raw CURRENT-run feed items (not just normalized paths) so --local can
+    look up each report_url's id/canonical timestamp for rolling-window
+    deferral. Returns [] when the feed is empty/absent -- the
+    deployment_manifest.json fallback path has no item metadata, so paths
+    sourced from it are never deferred (see local_artifact_check())."""
+    for feed_path in FEED_PATHS:
+        if not feed_path.exists():
+            continue
+        items = _parse_feed_safe(feed_path)
+        if items:
+            return items
+    return []
+
+
+def build_path_to_item(items: List[dict]) -> Dict[str, dict]:
+    """Maps each normalized '/reports/....html' path back to its source feed
+    item (first match wins, mirroring load_current_report_paths()'s own
+    dedup-by-first-seen) so local_artifact_check() need not re-parse the feed
+    per path."""
+    mapping: Dict[str, dict] = {}
+    for item in items:
+        for key in ("report_url", "internal_report_url"):
+            rp = _report_path(item.get(key))
+            if rp and rp not in mapping:
+                mapping[rp] = item
+    return mapping
+
+
 def validate_body(body: str) -> Tuple[bool, str]:
     """A real report = sufficient size + html shell + no soft-404 marker."""
     if body is None:
@@ -201,15 +264,32 @@ def _resolve_artifact(rel: str) -> Optional[Path]:
     return None
 
 
-def local_artifact_check(paths: List[str]) -> int:
+def local_artifact_check(
+    paths: List[str],
+    path_to_item: Dict[str, dict],
+    now: datetime,
+    window_hours: int,
+    published_ids: set,
+) -> int:
     """PRE/POST-DEPLOY fail-closed: every current report_url must resolve to a
-    valid on-disk artifact in reports/ OR dist/reports/.  Exit 1 on ANY
-    missing or invalid (report_not_found body).
+    valid on-disk artifact in reports/ OR dist/reports/, UNLESS it is
+    confirmed durably published already or legitimately outside this run's
+    rolling regeneration window.  Exit 1 on any genuinely missing artifact or
+    on any invalid (report_not_found) body -- body validation is never
+    deferred, since a file that exists but fails validation is a real defect
+    regardless of age.
 
     Root cause fix v174.1: Stage 5.4.6b deletes reports/ before Stage 5.8.1b
     runs this gate. dist/reports/ is the authoritative fallback because
     Stage 5.4.6 copies all reports there and nothing deletes dist/ before
     Stage 5.8.1b executes.
+
+    Root cause fix P0 2026-09-05: a report_url whose id is not in
+    path_to_item (deployment_manifest.json fallback -- no item metadata) is
+    never deferred, same fail-closed behavior as before. Otherwise, reuses
+    the exact same deferral rule report_existence_validator.py already
+    established -- see the module docstring's "ROOT CAUSE FIXED (P0
+    2026-09-05)" section.
     """
     reports_present  = REPORTS_DIR.exists()
     dist_present     = DIST_REPORTS_DIR.exists()
@@ -221,12 +301,27 @@ def local_artifact_check(paths: List[str]) -> int:
         log.info("No report_url values in current feed -- nothing to publish, gate PASS (exit 0).")
         return 0
     missing: List[str] = []
+    deferred: List[str] = []
     invalid: List[Tuple[str, str]] = []
     ok = 0
     for rp in paths:
         rel = rp.split("/reports/", 1)[1]
         disk = _resolve_artifact(rel)
         if disk is None:
+            item = path_to_item.get(rp)
+            intel_id = (item.get("id") or "").strip() if item else ""
+            if intel_id and intel_id in published_ids:
+                deferred.append(rp)
+                log.info("[DEFERRED:published] %s  (confirmed durably published via "
+                         "r2_report_publisher.py state)", rp)
+                continue
+            if item is not None:
+                _ts, _age_hours = canonical_age(item, now)
+                if _age_hours is None or not (0 <= _age_hours <= window_hours):
+                    deferred.append(rp)
+                    log.info("[DEFERRED:out-of-window] %s  (not this run's %dh rolling-window "
+                             "regeneration candidate)", rp, window_hours)
+                    continue
             missing.append(rp)
             log.error("[MISSING] %s  (checked reports/ and dist/reports/)", rp)
             continue
@@ -244,14 +339,15 @@ def local_artifact_check(paths: List[str]) -> int:
             invalid.append((rp, why))
             log.error("[INVALID] %s -- %s", rp, why)
     log.info("=" * 70)
-    log.info("LOCAL GATE: %d ok / %d missing / %d invalid (of %d)",
-             ok, len(missing), len(invalid), len(paths))
+    log.info("LOCAL GATE: %d ok / %d missing / %d invalid / %d deferred (of %d)",
+             ok, len(missing), len(invalid), len(deferred), len(paths))
     log.info("=" * 70)
     if missing or invalid:
         log.error("P0 FAIL-CLOSED: %d report_url(s) would publish without a valid artifact.",
                   len(missing) + len(invalid))
         return 1
-    log.info("ALL current report_url artifacts exist on disk and carry valid bodies.")
+    log.info("ALL current report_url artifacts exist on disk and carry valid bodies "
+              "(%d deferred as out-of-window/already-published).", len(deferred))
     return 0
 
 
@@ -466,7 +562,20 @@ def main() -> int:
     log.info("=" * 70)
 
     if args.local:
-        return local_artifact_check(load_current_report_paths(0))   # ALL current paths
+        paths = load_current_report_paths(0)   # ALL current paths
+        path_to_item = build_path_to_item(load_current_feed_items())
+        window_hours = report_window_hours()
+        now = datetime.now(timezone.utc)
+        publish_state = load_publish_state()
+        published_ids = {
+            _id for _id, _rec in publish_state.get("items", {}).items()
+            if isinstance(_rec, dict) and _rec.get("html_key")
+        }
+        log.info(
+            "Rolling publish window: %dh -- %d id(s) confirmed durably published via "
+            "r2_report_publisher.py's own state.", window_hours, len(published_ids),
+        )
+        return local_artifact_check(paths, path_to_item, now, window_hours, published_ids)
 
     report_paths = load_current_report_paths(MAX_PROBES)
     if not report_paths:
