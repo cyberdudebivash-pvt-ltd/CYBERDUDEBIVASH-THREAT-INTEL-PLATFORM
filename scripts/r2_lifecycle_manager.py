@@ -76,8 +76,22 @@ log = logging.getLogger("sentinel.r2_lifecycle_manager")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 POLICY_PATH = REPO_ROOT / "config" / "r2_lifecycle_policy.json"
+# Mirrors scripts/r2_reports_purge.py's PURGE_REPORT_PATH convention: a
+# persisted, observable record of the last --verify/--apply outcome under
+# this platform's standard data/quality/*.json location -- not a new
+# P-layer certification (this is a manual admin tool, not a scheduled
+# pipeline capability; see docs/P0_R2_COST_CONTAINMENT.md Section 8e for
+# why a full P-layer observability surface was judged disproportionate
+# here), but still a real, checkable artifact rather than log-only output.
+LIFECYCLE_REPORT_PATH = REPO_ROOT / "data" / "quality" / "r2_lifecycle_report.json"
 
 KNOWN_BUCKETS = {BUCKET_DATA, BUCKET_REPORTS}
+
+
+def _write_report(mode: str, results: dict) -> None:
+    report = {"mode": mode, **results}
+    LIFECYCLE_REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LIFECYCLE_REPORT_PATH.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
 
 def load_policy() -> dict:
@@ -236,21 +250,25 @@ def cmd_verify(policy: dict, endpoint: str) -> int:
     are absent, per this platform's 'never claim production verification
     without querying production' rule."""
     overall_ok = True
+    per_bucket: dict[str, dict] = {}
     for bucket in sorted(KNOWN_BUCKETS):
         expected = build_lifecycle_configuration(policy, bucket)
         actual, error = _get_live_configuration(bucket, endpoint)
         if actual is None:
             log.error("Could not read live lifecycle configuration for %s: %s", bucket, error)
             overall_ok = False
+            per_bucket[bucket] = {"status": "READ_ERROR", "error": error}
             continue
 
         matches = actual == expected
         log.info("%s: live configuration %s intended policy", bucket, "MATCHES" if matches else "DOES NOT MATCH")
+        per_bucket[bucket] = {"status": "MATCHES" if matches else "DRIFT", "expected": expected, "actual": actual}
         if not matches:
             overall_ok = False
             log.info("  expected: %s", json.dumps(expected))
             log.info("  actual:   %s", json.dumps(actual))
 
+    _write_report("verify", {"overall_status": "PASS" if overall_ok else "DRIFT", "buckets": per_bucket})
     return 0 if overall_ok else 1
 
 
@@ -305,6 +323,7 @@ def cmd_apply(policy: dict, endpoint: str | None, *, execute: bool, confirm_buck
         target_buckets = buckets_in_policy
 
     exit_code = 0
+    per_bucket: dict[str, dict] = {}
     for bucket in target_buckets:
         config_doc = build_lifecycle_configuration(policy, bucket)
         log.info("-" * 70)
@@ -314,6 +333,7 @@ def cmd_apply(policy: dict, endpoint: str | None, *, execute: bool, confirm_buck
         if not execute:
             log.warning("[DRY-RUN] Would PUT this configuration. Re-run with --execute "
                         "--confirm-bucket %s to apply.", bucket)
+            per_bucket[bucket] = {"status": "DRY_RUN", "intended": config_doc}
             continue
 
         # CodeRabbit review finding (PR #377, backed by AWS/R2 documentation):
@@ -332,6 +352,7 @@ def cmd_apply(policy: dict, endpoint: str | None, *, execute: bool, confirm_buck
             log.error("Could not read current live lifecycle configuration for %s before "
                       "applying (refusing to blindly overwrite): %s", bucket, get_error)
             exit_code = 1
+            per_bucket[bucket] = {"status": "GET_ERROR", "error": get_error}
             continue
         managed_ids = _managed_rule_ids(policy, bucket)
         foreign_rules = [r for r in live_config["Rules"] if r.get("ID") not in managed_ids]
@@ -345,6 +366,7 @@ def cmd_apply(policy: dict, endpoint: str | None, *, execute: bool, confirm_buck
                 bucket, len(foreign_rules), [r.get("ID") for r in foreign_rules],
             )
             exit_code = 1
+            per_bucket[bucket] = {"status": "REFUSED_FOREIGN_RULES", "foreign_rule_ids": [r.get("ID") for r in foreign_rules]}
             continue
 
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
@@ -360,9 +382,17 @@ def cmd_apply(policy: dict, endpoint: str | None, *, execute: bool, confirm_buck
         if result.returncode != 0:
             log.error("PUT lifecycle configuration failed for %s: %s", bucket, result.stderr.strip()[:500])
             exit_code = 1
+            per_bucket[bucket] = {"status": "PUT_FAILED", "error": result.stderr.strip()[:500]}
         else:
             log.info("Applied lifecycle configuration to %s.", bucket)
+            per_bucket[bucket] = {"status": "APPLIED", "config": config_doc}
 
+    if execute:
+        _write_report("apply", {
+            "overall_status": "PASS" if exit_code == 0 else "FAIL",
+            "confirm_bucket": confirm_bucket,
+            "buckets": per_bucket,
+        })
     return exit_code
 
 
