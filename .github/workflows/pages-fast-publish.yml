@@ -315,8 +315,8 @@ jobs:
           branch: gh-pages
           folder: dist
           clean: true
-          # CRITICAL (flagged in PR #303 review): reports/, api/, dashboard/,
-          # customer/, and assets/ are build_dist_artifact.py INCLUDE_DIRS,
+          # CRITICAL (flagged in PR #303 review): reports/, api/, customer/,
+          # and assets/ are build_dist_artifact.py INCLUDE_DIRS,
           # but this workflow's fresh checkout never populates them the way
           # the full pipeline does -- most notably api/feed.json and
           # /reports/ are deliberately gitignored (served via Cloudflare
@@ -331,7 +331,7 @@ jobs:
           # scope clean to exactly what it publishes.
           #
           # .well-known/ REMOVED from this list (P0, 2026-09-06): unlike the
-          # five paths above, it is not gitignored or partially populated --
+          # paths above, it is not gitignored or partially populated --
           # it's a single small, fully git-tracked file (security.txt) this
           # workflow's checkout always has complete. Excluding it from clean
           # meant a change to it could never actually deploy via this
@@ -342,11 +342,24 @@ jobs:
           # this exact workflow twice never appeared on gh-pages -- the
           # deployed blob hash matched the pre-fix commit verbatim. The
           # other five paths were not re-verified against the same failure
-          # mode and are left as-is.
+          # mode at that time and were left as-is.
+          #
+          # dashboard/ REMOVED from this list (P0, 2026-09-06): confirmed
+          # live via the exact same method as .well-known/ above, while
+          # independently verifying this same day's PR #382 deployment --
+          # dashboard/enterprise_dashboard_v2.html (fully git-tracked, not
+          # gitignored, present in build_dist_artifact.py's dist/ output
+          # every run, same as every other file under dashboard/) had a
+          # commercial-integrity fix committed to main and published via
+          # this exact workflow, yet the live page still served the
+          # pre-fix content verbatim. Same root cause, same fix. The
+          # remaining four paths (reports/, api/, customer/, assets/) are
+          # still not re-verified against this failure mode and are left
+          # as-is -- each has the gitignored/partial-checkout justification
+          # above, which dashboard/ never had.
           clean-exclude: |
             reports/**
             api/**
-            dashboard/**
             customer/**
             assets/**
           single-commit: true
