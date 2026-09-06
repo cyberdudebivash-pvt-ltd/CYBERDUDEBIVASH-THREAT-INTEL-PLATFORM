@@ -254,37 +254,6 @@ h1 span { color: var(--accent); }
 .contact-row a { color: var(--accent); text-decoration: none; }
 .contact-row a:hover { text-decoration: underline; }
 
-/* ═══ STRIPE PAYMENT SECTION ═══════════════════════════════════════════ */
-.stripe-section { background: linear-gradient(135deg, #0f0a2a 0%, #0a1628 100%); border: 2px solid #5b21b6; border-radius: 14px; padding: 24px; margin-bottom: 20px; position: relative; overflow: hidden; }
-.stripe-section::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #5b21b6, #00d4ff, #10b981, #5b21b6); background-size: 200%; animation: stripe-shine 3s linear infinite; }
-@keyframes stripe-shine { 0%{background-position:0%} 100%{background-position:200%} }
-.stripe-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-.stripe-badge { background: #5b21b6; color: #fff; font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 20px; letter-spacing: 1px; }
-.instant-badge { background: #10b981; color: #fff; font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 20px; letter-spacing: 1px; }
-.stripe-title { font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 4px; }
-.stripe-subtitle { font-size: 12px; color: rgba(255,255,255,0.55); margin-bottom: 20px; }
-.stripe-btns { display: flex; flex-direction: column; gap: 10px; }
-.stripe-pay-btn { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 14px; transition: all 0.15s; border: 2px solid transparent; cursor: pointer; }
-.stripe-pay-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
-.stripe-pay-btn.pro { background: linear-gradient(135deg, #1d4ed8, #00d4ff); color: #fff; }
-.stripe-pay-btn.pro:hover { border-color: #00d4ff; }
-.stripe-pay-btn.enterprise { background: linear-gradient(135deg, #5b21b6, #7c3aed); color: #fff; }
-.stripe-pay-btn.enterprise:hover { border-color: #a78bfa; }
-.stripe-pay-btn.mssp { background: linear-gradient(135deg, #991b1b, #dc2626); color: #fff; }
-.stripe-pay-btn.mssp:hover { border-color: #fca5a5; }
-.stripe-btn-left { display: flex; align-items: center; gap: 10px; }
-.stripe-btn-icon { font-size: 18px; }
-.stripe-btn-name { font-size: 14px; font-weight: 800; }
-.stripe-btn-desc { font-size: 11px; font-weight: 400; opacity: 0.8; }
-.stripe-btn-price { text-align: right; }
-.stripe-btn-amount { font-size: 18px; font-weight: 800; }
-.stripe-btn-period { font-size: 10px; opacity: 0.7; display: block; }
-.stripe-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 14px; }
-.stripe-divider hr { flex: 1; border: none; border-top: 1px solid rgba(255,255,255,0.1); }
-.stripe-divider span { font-size: 11px; color: rgba(255,255,255,0.3); white-space: nowrap; letter-spacing: 1px; }
-.stripe-trust { display: flex; gap: 16px; flex-wrap: wrap; }
-.stripe-trust-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(255,255,255,0.4); }
-.stripe-trust-item span { color: #10b981; }
 .manual-section-label { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .manual-label-text { font-size: 11px; font-weight: 700; color: var(--text-dim); letter-spacing: 1.5px; text-transform: uppercase; }
 .manual-label-badge { font-size: 10px; background: rgba(255,159,11,0.15); color: var(--yellow); border: 1px solid rgba(255,159,11,0.3); padding: 2px 8px; border-radius: 8px; font-weight: 700; }
@@ -1347,90 +1316,6 @@ function updateGumroadPanel() {
   });
 }
 
-/* ── Stripe click handler v184.0 ────────────────────────────────────
-   STRATEGY: Dynamic Checkout Sessions via Worker /api/checkout/session.
-   Worker creates a Stripe Checkout Session server-side (with user metadata
-   for auto-provisioning), then returns a redirect_url. If the Worker
-   endpoint returns 503 (STRIPE_SECRET_KEY not yet configured) we fall back
-   to static Payment Links from STRIPE_LINKS, and if those are also
-   placeholders we guide the user to WhatsApp / email.
-   ──────────────────────────────────────────────────────────────────── */
-function cdbStripeClick(evt, plan) {
-  evt.preventDefault();               // always intercept \u2014 we handle redirect
-  var cycle = isAnnual ? 'annual' : 'monthly';
-  var btn   = evt.currentTarget;
-
-  // Show loading state on button
-  var origHTML = btn.innerHTML;
-  btn.innerHTML = '<span style="margin:auto;font-size:13px;opacity:0.9">⏳ Connecting to Stripe...</span>';
-  btn.style.pointerEvents = 'none';
-
-  var token = (typeof getToken === 'function') ? (getToken() || '') : '';
-  var email = '';
-  try { email = localStorage.getItem('cdb_user_email') || ''; } catch(e) {}
-
-  var headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = 'Bearer ' + token;
-
-  fetch('/api/checkout/session', {
-    method:  'POST',
-    headers: headers,
-    body:    JSON.stringify({ plan: plan, cycle: cycle, email: email || undefined }),
-  })
-  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
-  .then(function(res) {
-    if (res.ok && res.data && res.data.redirect_url) {
-      // Server-side session created \u2014 navigate to Stripe Checkout
-      window.location.href = res.data.redirect_url;
-      return;
-    }
-    // Worker returned 503 (not configured) \u2014 fall back to static Payment Links
-    var linkKey = plan + '_' + cycle;
-    var url = STRIPE_LINKS[linkKey] || STRIPE_LINKS[plan + '_monthly'];
-    if (url && url.indexOf('CONFIGURE') === -1) {
-      try {
-        var u = new URL(url);
-        u.searchParams.set('client_reference_id', plan + '_' + cycle + '_' + Date.now());
-        u.searchParams.set('utm_source', 'upgrade_page');
-        u.searchParams.set('utm_medium', 'stripe_button');
-        u.searchParams.set('utm_campaign', plan);
-        window.open(u.toString(), '_blank', 'noopener');
-      } catch(e) { window.open(url, '_blank', 'noopener'); }
-      return;
-    }
-    // Last resort \u2014 manual contact
-    _showStripeSetupModal(plan, cycle);
-  })
-  .catch(function() {
-    // Network error \u2014 try static links before giving up
-    var url = STRIPE_LINKS[plan + '_' + cycle] || STRIPE_LINKS[plan + '_monthly'];
-    if (url && url.indexOf('CONFIGURE') === -1) { window.open(url, '_blank', 'noopener'); return; }
-    _showStripeSetupModal(plan, cycle);
-  })
-  .finally(function() {
-    btn.innerHTML = origHTML;
-    btn.style.pointerEvents = '';
-  });
-
-  return false;
-}
-
-/* Shown when both dynamic session AND static links are unconfigured */
-function _showStripeSetupModal(plan, cycle) {
-  var prices = { pro: { monthly: '$49', annual: '$470' }, enterprise: { monthly: '$499', annual: '$4,788' }, mssp: { monthly: '$1,999', annual: '$19,188' } };
-  var amount = (prices[plan] || {})[cycle] || '';
-  var msg = '⚡ SENTINEL APEX \u2014 ' + plan.toUpperCase() + ' ' + cycle.charAt(0).toUpperCase() + cycle.slice(1) + (amount ? ' (' + amount + ')' : '') + '\n\n'
-          + 'To complete your upgrade:\n'
-          + '📱 WhatsApp: +91 8179881447\n'
-          + '✉  Email: enterprise@cyberdudebivash.com\n'
-          + '💳 PayPal: paypal.me/cyberdudebivash\n\n'
-          + 'Or use UPI / Bank / Crypto payment options below.';
-  alert(msg);
-  // Scroll to alternative payment section
-  var altSection = document.getElementById('panel-paypal') || document.querySelector('.pay-panel');
-  if (altSection) altSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
 /* ── Direct Payment Gateway strip updater \u2014 v184.0 ─────────────── */
 function updateDGW() {
   var p    = PLANS[currentPlan];
@@ -1445,9 +1330,6 @@ function updateDGW() {
   si('dgw-amount-inr',  inr ? '&#x20B9;' + inr.toLocaleString() : '');
   se('dgw-amount-period', '\u00a0' + period);
 }
-
-/* Stripe button updater \u2014 stub kept for when Stripe re-activates */
-function updateStripeButtons() { updateDGW(); }
 
 function selectPlan(key) {
   if (!PLANS[key]) return;
