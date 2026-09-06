@@ -4129,6 +4129,63 @@ async function sendStatusChangeEmail(env, email, tier, status, reason) {
   }
 }
 
+// Customer-facing counterpart to the operator-only Telegram alert already
+// fired on payment.failed below. Before this, a failed checkout attempt
+// notified nobody but the operator -- the customer got only a transient
+// client-side alert() (if still on the tab) and had no durable channel
+// telling them what happened or how to retry. Mirrors sendActivationEmail/
+// sendStatusChangeEmail's exact Resend call pattern; fails silently (never
+// throws, never blocks the webhook response) on the same RESEND_API_KEY gate.
+async function sendPaymentFailedEmail(env, email, tier, reason) {
+  if (!env.RESEND_API_KEY) {
+    console.warn("[sendPaymentFailedEmail] RESEND_API_KEY not configured  -  skipping notification email");
+    return false;
+  }
+  try {
+    const planParam = ["PRO", "ENTERPRISE", "MSSP"].includes(tier) ? tier.toLowerCase() : "pro";
+    const retryUrl = `https://intel.cyberdudebivash.com/upgrade.html?plan=${planParam}&ref=payment_failed_email`;
+    const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Your CYBERDUDEBIVASH(R) Sentinel APEX payment did not go through</title></head>
+<body style="background:#0a0a0f;color:#e2e8f0;font-family:system-ui,sans-serif;margin:0;padding:32px;">
+  <div style="max-width:600px;margin:0 auto;background:#111827;border:1px solid #1e40af;border-radius:12px;padding:40px;">
+    <h1 style="color:#60a5fa;margin-top:0;">CYBERDUDEBIVASH(R) Sentinel APEX</h1>
+    <h2 style="color:#e2e8f0;">Your Payment Didn't Go Through</h2>
+    <p style="color:#94a3b8;">We tried to process your <strong style="color:#60a5fa;">${tier || "PRO"}</strong> plan payment, but it didn't complete.${reason ? ` Reason given by the payment processor: <em>${reason}</em>.` : ""}</p>
+    <p style="color:#94a3b8;">No charge was made and no access was granted. You can safely try again:</p>
+    <div style="text-align:center;margin:28px 0;">
+      <a href="${retryUrl}" style="background:#2563eb;color:#fff;padding:12px 28px;text-decoration:none;font-weight:700;border-radius:6px;display:inline-block;">Retry Payment &rarr;</a>
+    </div>
+    <p style="color:#94a3b8;">If this keeps happening, contact us at <a href="mailto:support@cyberdudebivash.com" style="color:#60a5fa;">support@cyberdudebivash.com</a> and we'll help you get set up.</p>
+    <p style="color:#475569;font-size:12px;margin-bottom:0;">CYBERDUDEBIVASH(R) SENTINEL APEX  -  Enterprise Threat Intelligence Platform</p>
+  </div>
+</body>
+</html>`;
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({
+        from: "CYBERDUDEBIVASH(R) Sentinel APEX <noreply@cyberdudebivash.com>",
+        to: [email],
+        subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX payment did not go through",
+        html: htmlBody,
+      }),
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      console.error(`[sendPaymentFailedEmail] Resend API error ${resp.status}: ${errText}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[sendPaymentFailedEmail] Failed to send payment-failed email:", err?.message || err);
+    return false;
+  }
+}
+
 async function verifyRazorpayHmac(payload, signature, secret) {
   try {
     const encoder  = new TextEncoder();
@@ -4389,6 +4446,16 @@ async function handleWebhookRazorpay(request, env, ctx) {
       `Payment ID: <code>${pid}</code>\n` +
       `Error: ${entity.error_description || "unknown"}`
     ));
+    // Customer-facing counterpart to the operator alert above -- only when
+    // Razorpay handed back a real address (not the "unknown@razorpay"
+    // fallback, and not a bare contact/phone number in the email slot).
+    if (email.indexOf("@") > 0 && email !== "unknown@razorpay") {
+      ctx.waitUntil((async () => {
+        try { await sendPaymentFailedEmail(env, email, tier, entity.error_description || ""); } catch (err) {
+          console.error("[handleWebhookRazorpay] sendPaymentFailedEmail error:", err?.message || err);
+        }
+      })());
+    }
     return jsonResp({ status: "noted", event });
   }
 

@@ -7,9 +7,12 @@ follow-up email via SendGrid to buyers who paid $0 or a low amount,
 offering a discount on the Enterprise tier.
 
 Strategy:
-  - Free / low buyers ($0-$49)  -> Upsell to Enterprise with SENTINEL20 (20% off)
+  - Free / low buyers ($0-$49)  -> Upsell to Enterprise (see pricing.html for
+                                    current plans; no discount code is issued
+                                    by this responder -- none is configured in
+                                    Razorpay/Gumroad, so promising one here
+                                    would fail at checkout)
   - Higher buyers ($50+)         -> Thank + upsell to annual subscription
-  - All new buyers               -> Receive the "Welcome" onboarding sequence
 
 Run:
   python -m agent.lead_autoresponder          # Manual
@@ -45,10 +48,6 @@ PLATFORM_URL    = "https://intel.cyberdudebivash.com"
 WHATSAPP_URL    = "https://wa.me/918179881447"
 ENTERPRISE_EMAIL = "enterprise@cyberdudebivash.com"
 
-DISCOUNT_CODE   = "SENTINEL20"    # 20% off Enterprise
-DISCOUNT_PCT    = "20%"
-DISCOUNT_HOURS  = 48               # FOMO urgency window
-
 UPSELL_THRESHOLD_CENTS = 5000      # $50 - below this = upsell to Enterprise
 
 
@@ -56,7 +55,7 @@ UPSELL_THRESHOLD_CENTS = 5000      # $50 - below this = upsell to Enterprise
 # Email Templates
 # ---------------------------------------------
 
-def _email_upsell_low_buyer(name: str, product_title: str, expiry: str) -> str:
+def _email_upsell_low_buyer(name: str, product_title: str) -> str:
     """Email for buyers who paid $0-$49."""
     return f"""
 <div style="background:#06080d; color:#94a3b8; font-family:'Segoe UI',Arial,sans-serif;
@@ -89,19 +88,6 @@ def _email_upsell_low_buyer(name: str, product_title: str, expiry: str) -> str:
         <li>? <strong>24/7 IR Hotline</strong> for critical incidents</li>
         <li>? <strong>Custom detection rules</strong> for your environment</li>
     </ul>
-
-    <div style="background:#0a0e17; border:1px solid #00d4aa; border-radius:6px;
-                padding:20px; margin:28px 0; text-align:center;">
-        <p style="color:#ffffff; font-size:18px; font-weight:bold; margin:0 0 8px;">
-            {DISCOUNT_PCT} OFF - Limited Time Offer
-        </p>
-        <p style="color:#00d4aa; font-size:24px; font-weight:900; letter-spacing:3px; margin:8px 0;">
-            {DISCOUNT_CODE}
-        </p>
-        <p style="color:#64748b; font-size:12px; margin:4px 0;">
-            Expires: {expiry} UTC - {DISCOUNT_HOURS}h window
-        </p>
-    </div>
 
     <div style="text-align:center; margin:24px 0;">
         <a href="{ENTERPRISE_URL}?utm_source=autoresponder&utm_medium=email&utm_campaign=pwyw-upsell"
@@ -250,7 +236,6 @@ def process_sales(sales: List[Dict], dry_run: bool = False) -> Dict:
     Returns stats dict.
     """
     processed_ids = _load_processed_ids()
-    expiry_ts = (datetime.now(timezone.utc) + timedelta(hours=DISCOUNT_HOURS)).strftime('%Y-%m-%d %H:%M')
 
     stats = {"total": 0, "upsell_sent": 0, "thank_sent": 0, "skipped_dup": 0, "failed": 0}
 
@@ -280,8 +265,8 @@ def process_sales(sales: List[Dict], dry_run: bool = False) -> Dict:
 
         if price < UPSELL_THRESHOLD_CENTS:
             # Low/Free buyer -> aggressive enterprise upsell
-            subject = f"? Your {DISCOUNT_PCT} Enterprise Discount - Expires in {DISCOUNT_HOURS}h | CyberDudeBivash"
-            body    = _email_upsell_low_buyer(name, product_name, expiry_ts)
+            subject = "? Unlock Enterprise Threat Intelligence | CyberDudeBivash"
+            body    = _email_upsell_low_buyer(name, product_name)
             ok = _send_email(email, name, subject, body)
             if ok:
                 stats["upsell_sent"] += 1
