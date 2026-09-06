@@ -1,0 +1,72 @@
+name: Revenue Manual Payment Authority Gate
+
+on:
+  pull_request:
+    paths:
+      - 'workers/revenue-engine/src/**'
+      - 'workers/revenue-engine/wrangler.toml'
+      - '.github/workflows/revenue-manual-payment-authority-gate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'workers/revenue-engine/src/**'
+      - 'workers/revenue-engine/wrangler.toml'
+      - '.github/workflows/revenue-manual-payment-authority-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authority-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: workers/revenue-engine
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax validation
+        run: |
+          node --check src/index.js
+          node --check src/production-entry.js
+          node --check src/__tests__/manual-payment-retirement.test.js
+
+      - name: P0 manual-payment authority regression
+        run: node --test src/__tests__/manual-payment-retirement.test.js
+
+      - name: Existing Revenue Engine commercial regressions
+        run: |
+          node --test \
+            src/__tests__/subscription-domain.test.js \
+            src/__tests__/subscription-engine.test.js \
+            src/__tests__/revenue-engine-health.test.js \
+            src/__tests__/automation-trigger.test.js \
+            src/__tests__/payment-submit.test.js \
+            src/__tests__/cors.test.js
+
+      - name: Production entrypoint contract
+        run: |
+          grep -Fq 'main              = "src/production-entry.js"' wrangler.toml
+          grep -Fq '/api/payments/submit' src/production-entry.js
+          grep -Fq '/api/payments/approve/' src/production-entry.js
+          grep -Fq 'MANUAL_PAYMENT_RETIRED' src/production-entry.js
+
+      - name: Bundle exact production entrypoint
+        run: |
+          npx --yes esbuild@0.25.9 src/production-entry.js \
+            --bundle \
+            --platform=browser \
+            --target=es2022 \
+            --format=esm \
+            --outfile=/tmp/revenue-production-entry.js \
+            --log-level=warning
+          test -s /tmp/revenue-production-entry.js
+
+      - name: Wrangler production dry-run
+        run: npx --yes wrangler@4.127.0 deploy --env production --dry-run
