@@ -1,6 +1,11 @@
 name              = "sentinel-revenue-engine"
-main              = "src/index.js"
+main              = "src/production-entry.js"
 compatibility_date = "2025-09-01"
+
+# Production security entrypoint:
+# src/production-entry.js fail-closes the retired legacy manual-payment submission
+# and approval mutations before they can reach persistence/provisioning. All other
+# Revenue Engine routes and scheduled jobs delegate unchanged to src/index.js.
 
 # Worker Routes
 #
