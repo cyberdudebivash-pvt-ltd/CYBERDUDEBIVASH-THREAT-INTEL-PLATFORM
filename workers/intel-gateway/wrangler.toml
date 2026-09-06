@@ -213,6 +213,13 @@ new_sqlite_classes = ["GumroadProvisioningLock"]
 #                                                     Configure Gumroad Ping URL as:
 #                                                     https://intel.cyberdudebivash.com/api/webhooks/gumroad?secret=<VALUE>
 #                                                     Get from: Razorpay Dashboard -> Webhooks
+# npx wrangler secret put RESEND_API_KEY           -> Resend API key (sendActivationEmail(),
+#                                                     sendStatusChangeEmail(), sendPaymentFailedEmail()
+#                                                     in src/index.js). Not previously documented here --
+#                                                     if unset, all three fail silently (warn-and-return-
+#                                                     false, provisioning/webhook processing unaffected)
+#                                                     and no activation/status/payment-failure email is
+#                                                     ever sent. Get from: Resend Dashboard -> API Keys
 # npx wrangler secret put STRIPE_PRO_PRICE_ID      -> Stripe Price ID for PRO plan ($29/mo)
 # npx wrangler secret put STRIPE_ENT_PRICE_ID      -> Stripe Price ID for ENTERPRISE plan ($199/mo)
 # npx wrangler secret put REVENUE_ADMIN_SECRET     -> MUST be set to the exact same value as
