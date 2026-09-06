@@ -1165,6 +1165,7 @@ async function initiateRazorpayOneTimeCheckout(email, tier, billing, btn, orig) 
 
     if (!resp.ok || !order.order_id) {
       if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+      if (window.apxTrack) window.apxTrack('payment_failed', { tier: tier, method: 'razorpay', reason: 'order_create_error' });
       alert('Payment is temporarily unavailable. Please try again in a moment, or contact us on WhatsApp: +91 8179881447');
       return;
     }
@@ -1227,6 +1228,7 @@ async function initiateRazorpayOneTimeCheckout(email, tier, billing, btn, orig) 
     if (window.SentinelCheckout) {
       window.SentinelCheckout.bindPaymentFailedHandler(rzp, function(msg) {
         if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+        if (window.apxTrack) window.apxTrack('payment_failed', { tier: tier, method: 'razorpay', reason: 'declined' });
         alert(msg);
       });
     }
@@ -1238,6 +1240,7 @@ async function initiateRazorpayOneTimeCheckout(email, tier, billing, btn, orig) 
 }
 
 function showRazorpaySuccess(apiKey, tier, email) {
+  if (window.apxTrack) window.apxTrack('payment_confirm', { tier: tier, method: 'razorpay' });
   var fc = document.getElementById('checkout-state');
   var ss = document.getElementById('success-state');
   if (fc) fc.style.display = 'none';
@@ -1799,5 +1802,6 @@ updateRazorpayPanel();
 <footer style="text-align:center;padding:24px 16px;font-family:monospace;font-size:11px;color:#64748b;">
   <a href="/privacy.html" style="color:#64748b;">Privacy Policy</a> · <a href="/terms.html" style="color:#64748b;">Terms of Service</a> · <a href="mailto:enterprise@cyberdudebivash.com" style="color:#64748b;">Contact</a>
 </footer>
+<script src="/js/apex-track.js"></script>
 </body>
 </html>
