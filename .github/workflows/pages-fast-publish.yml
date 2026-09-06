@@ -316,25 +316,39 @@ jobs:
           folder: dist
           clean: true
           # CRITICAL (flagged in PR #303 review): reports/, api/, dashboard/,
-          # customer/, assets/, and .well-known/ are build_dist_artifact.py
-          # INCLUDE_DIRS, but this workflow's fresh checkout never populates
-          # them the way the full pipeline does -- most notably api/feed.json
-          # and /reports/ are deliberately gitignored (served via Cloudflare
-          # R2/Worker, not git; see .gitignore's SECURITY v109 and RC-GITIGNORE-1
-          # notes) and are simply absent from this run's dist/. Without this
-          # exclusion, clean:true's rsync --delete would remove the live
-          # gh-pages copies of those paths on every fast-publish run --
-          # reintroducing the exact "No Threat Intelligence Available" P0
-          # this whole workflow exists to prevent, and doing it more often.
-          # None of these paths are in this workflow's trigger list above, so
-          # it never owned them; scope clean to exactly what it publishes.
+          # customer/, and assets/ are build_dist_artifact.py INCLUDE_DIRS,
+          # but this workflow's fresh checkout never populates them the way
+          # the full pipeline does -- most notably api/feed.json and
+          # /reports/ are deliberately gitignored (served via Cloudflare
+          # R2/Worker, not git; see .gitignore's SECURITY v109 and
+          # RC-GITIGNORE-1 notes) and are simply absent from this run's
+          # dist/. Without this exclusion, clean:true's rsync --delete would
+          # remove the live gh-pages copies of those paths on every
+          # fast-publish run -- reintroducing the exact "No Threat
+          # Intelligence Available" P0 this whole workflow exists to
+          # prevent, and doing it more often. None of these paths are in
+          # this workflow's trigger list above, so it never owned them;
+          # scope clean to exactly what it publishes.
+          #
+          # .well-known/ REMOVED from this list (P0, 2026-09-06): unlike the
+          # five paths above, it is not gitignored or partially populated --
+          # it's a single small, fully git-tracked file (security.txt) this
+          # workflow's checkout always has complete. Excluding it from clean
+          # meant a change to it could never actually deploy via this
+          # workflow: build_dist_artifact.py copied the fresh file into
+          # dist/ every run, but clean-exclude told the deploy action to
+          # leave gh-pages's existing copy untouched regardless. Confirmed
+          # live: a security.txt fix committed to main and published via
+          # this exact workflow twice never appeared on gh-pages -- the
+          # deployed blob hash matched the pre-fix commit verbatim. The
+          # other five paths were not re-verified against the same failure
+          # mode and are left as-is.
           clean-exclude: |
             reports/**
             api/**
             dashboard/**
             customer/**
             assets/**
-            .well-known/**
           single-commit: true
 
       - name: Post-deploy freshness verification (reuses pages_deploy_freshness_gate.py -- STAGE 5.4.9.1)
