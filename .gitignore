@@ -29,6 +29,26 @@ data/auth/
 data/sovereign/tenants.json
 data/marketplace/marketplace_state.json
 
+# --- CUSTOMER PII / PAYMENT RECORDS (this repo is PUBLIC — never commit real
+# customer data) ---
+# scripts/customer_onboard.py (the operator tool used to provision real paying
+# customers: name, email, company, country, payment reference) persists to
+# these exact paths, and none of them were previously gitignored — meaning the
+# very first real `provision` run followed by a normal `git add`/commit would
+# have pushed live customer PII and payment references to a public GitHub
+# repository. Verified via full git history: both files have only ever
+# contained their zero-record schema skeleton (single commit, b95242ca),
+# i.e. this tool has never actually been used yet — so gitignoring now, before
+# first use, involves no data loss. data/customers/schema.json and
+# data/subscriptions/schema.json are pure JSON Schema (no PII) and stay
+# tracked as API documentation. data/welcome_packages/ is the same script's
+# per-customer welcome-package output directory (contains the issued API key)
+# and is gitignored pre-emptively since it does not exist yet either.
+data/customers/registry.json
+data/subscriptions/active.json
+data/payment_audit.jsonl
+data/welcome_packages/
+
 # --- ENTERPRISE SELLABLE ASSETS (protect revenue, upload via Gumroad engine) ---
 data/rule_packs/
 data/playbooks/
