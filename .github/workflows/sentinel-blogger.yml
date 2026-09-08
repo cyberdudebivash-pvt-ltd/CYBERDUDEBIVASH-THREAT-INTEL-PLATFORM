@@ -4183,6 +4183,20 @@ jobs:
 
       # -----------------------------------------------------------------------
 
+      # P0 production-architecture-transformation mission (2026-09-08): this
+      # step used to `git add`/`git commit`/`git push origin HEAD` directly
+      # inline in this YAML -- a SECOND, independent runtime-git-persistence
+      # site that bypassed safe_git_commit.py's guards entirely and hit the
+      # exact same main branch ruleset rejection (GH013) as every other
+      # runtime push has since 2026-08-26, silently (all three git commands
+      # above were `|| true`, so this step showed green while never actually
+      # persisting anything). global_release_governance.json is genuinely
+      # two things at once: the CURRENT run's grade (Class A -- latest
+      # operational state, read by nothing else in this repo today but
+      # legitimately "current state" in shape) and, per run, real historical
+      # evidence of what grade THIS release run received (Class D -- audit
+      # evidence, previously overwritten and lost every run). Now persists
+      # both correctly instead of neither.
       - name: "STAGE 5.8.4b - Governance Telemetry Persistence (v184.0)"
         timeout-minutes: 3
         if: always()
@@ -4193,12 +4207,12 @@ jobs:
             GRADE=$(jq -r '.overall_grade // "?"' "$GOVERNANCE_FILE" 2>/dev/null || echo "?")
             BLOCKED=$(jq -r '.release_blocked // "false"' "$GOVERNANCE_FILE" 2>/dev/null || echo "false")
             echo "[GOVERNANCE] Grade=$GRADE | RELEASE_BLOCKED=$BLOCKED"
-            git add "$GOVERNANCE_FILE" 2>/dev/null || true
-            git diff --cached --quiet "$GOVERNANCE_FILE" 2>/dev/null || \
-              git commit -m "ci(governance-telemetry): release governance run Grade=$GRADE BLOCKED=$BLOCKED [skip ci]" \
-                --author="github-actions[bot] <github-actions[bot]@users.noreply.github.com>" 2>/dev/null || true
-            git push origin HEAD 2>/dev/null || true
-            echo "[GOVERNANCE] Telemetry persisted to git"
+            python3 scripts/r2_upload.py --governance-telemetry-only \
+              || echo "::warning::STAGE 5.8.4b: latest-state R2 publish failed for $GOVERNANCE_FILE -- see error above."
+            python3 scripts/audit_snapshot_store.py --family global_release_governance \
+              --source "$GOVERNANCE_FILE" --run-id "$GITHUB_RUN_ID" --source-sha "$GITHUB_SHA" \
+              || echo "::warning::STAGE 5.8.4b: versioned Class-D audit snapshot failed for $GOVERNANCE_FILE -- see error above."
+            echo "[GOVERNANCE] Telemetry persisted to R2 (latest-state + versioned audit snapshot)"
           else
             echo "[GOVERNANCE] $GOVERNANCE_FILE not found -- orchestrator may have skipped"
           fi

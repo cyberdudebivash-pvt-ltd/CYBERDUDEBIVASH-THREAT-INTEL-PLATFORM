@@ -40,6 +40,20 @@ MIGRATED_REGISTRY_FILES = [
 ]
 MIGRATED_REGISTRY_DIR = "data/intelligence_repository/advisories/"
 
+# P0 production-architecture-transformation mission (2026-09-08): a third,
+# later migration wave -- data/cache/intel_index.json (intel_dedup_engine.py's
+# dedup primary index, sibling to feed_state.json in MIGRATED_FILES above)
+# was previously deliberately left OUT of that migration (explicitly kept
+# git-tracked, see the prior version of test_unrelated_cache_file_is_
+# unaffected below) on the assumption that git-based persistence was still
+# viable for it. That assumption was wrong for the same reason it was wrong
+# for the files above: main's branch ruleset rejects this file's direct push
+# too. Tracked as its own constant (not folded into MIGRATED_FILES) so the
+# git history/blame for when this specific file joined the migration stays
+# clear, matching how MIGRATED_REGISTRY_FILES was already kept separate from
+# MIGRATED_FILES for the same reason.
+MIGRATED_INTEL_INDEX_FILE = "data/cache/intel_index.json"
+
 
 def _step_names(doc: dict, job_key: str | None = None) -> list[str]:
     jobs = doc["jobs"]
@@ -100,20 +114,32 @@ class TestGitignoreCompletesTheMigration(unittest.TestCase):
             f"{result.stdout.strip()}",
         )
 
-    def test_unrelated_cache_file_is_unaffected(self):
-        """data/cache/intel_index.json is explicitly out of scope for this
-        migration -- must still be tracked."""
+    def test_intel_index_file_is_gitignored(self):
+        """P0 production-architecture-transformation mission (2026-09-08):
+        data/cache/intel_index.json was previously deliberately kept git-
+        tracked here (see MIGRATED_INTEL_INDEX_FILE's docstring above for
+        why that was wrong) -- now migrated the same as MIGRATED_FILES."""
         result = subprocess.run(
-            ["git", "check-ignore", "data/cache/intel_index.json"],
+            ["git", "check-ignore", MIGRATED_INTEL_INDEX_FILE],
             cwd=REPO_ROOT, capture_output=True,
         )
-        self.assertNotEqual(result.returncode, 0, "intel_index.json must NOT be gitignored")
+        self.assertEqual(
+            result.returncode, 0,
+            f"{MIGRATED_INTEL_INDEX_FILE} is not gitignored -- the R2 migration "
+            f"is incomplete (a fresh `git add .` would re-track it).",
+        )
 
+    def test_intel_index_file_is_not_git_tracked(self):
         result = subprocess.run(
-            ["git", "ls-files", "data/cache/intel_index.json"],
+            ["git", "ls-files", MIGRATED_INTEL_INDEX_FILE],
             cwd=REPO_ROOT, capture_output=True, text=True,
         )
-        self.assertEqual(result.stdout.strip(), "data/cache/intel_index.json")
+        self.assertEqual(
+            result.stdout.strip(), "",
+            f"{MIGRATED_INTEL_INDEX_FILE} is still git-tracked despite being "
+            f"gitignored (git rm --cached was needed, not just a .gitignore "
+            f"entry): {result.stdout.strip()}",
+        )
 
 
 class TestMultiSourceIntelWiring(unittest.TestCase):

@@ -225,12 +225,22 @@ def main() -> None:
         else:
             log.warning("[untrack] Could not untrack '%s': %s", _ut, _ut_result.stderr.strip()[:80])
 
+    # P0 production-architecture-transformation mission (2026-09-08):
+    # data/feed_manifest.json, data/cache/intel_index.json, and
+    # data/cache/feed_state.json removed from this set -- all three are now
+    # exclusively owned by scripts/r2_state_sync.py (--download/--upload,
+    # already wired into sentinel-blogger.yml's "Download/Upload Intel
+    # State from/to R2" steps), which was staging the same three files
+    # here too. Keeping both authorities would mean git and R2 could each
+    # hold a different "correct" copy with no reconciliation -- exactly
+    # the duplicate-state-authority risk this mission was scoped to
+    # eliminate, not merely tolerate. R2 is the durable one (git pushes to
+    # main have been rejected by the branch ruleset since 2026-08-26; see
+    # r2_state_sync.py's own module docstring for the full incident this
+    # traces back to).
     JSON_GUARDED = {
         "feed.json",
         "api/feed.json",
-        "data/feed_manifest.json",
-        "data/cache/intel_index.json",
-        "data/cache/feed_state.json",
         "api/latest.json",
         "api/status.json",
     }
@@ -311,9 +321,15 @@ def main() -> None:
     # --- Stage NON-SENSITIVE files ---
     # NOTE: JSON files that need validation are handled ABOVE by JSON_GUARDED.
     # Do NOT list them here — the unguarded git-add would override the guard.
+    # P0 production-architecture-transformation mission (2026-09-08):
+    # data/sync_marker.json removed -- full trace found zero live producer
+    # or consumer (its only other references are patch_sync_display.py,
+    # patch_workflow_sync.py, self_improve_monitor.py, none invoked by any
+    # workflow). Staging and committing it every run persisted a file
+    # nothing reads, for no reason -- not a persistence-layer defect to fix,
+    # just dead weight to remove.
     files_to_stage = [
         "data/stix/CDB-APEX-*.json",
-        "data/sync_marker.json",
         # api/latest.json        → JSON_GUARDED (validated above)
         # api/status.json        → JSON_GUARDED (validated above)
         "api/engines.json",
@@ -329,7 +345,14 @@ def main() -> None:
         "VERSION",                         # Authoritative semver (v147.0 governance)
         "index.html",
         "sitemap.xml",
-        ".gitignore",
+        # P0 production-architecture-transformation mission (2026-09-08):
+        # .gitignore removed -- traced every write pattern across scripts/;
+        # nothing in the live pipeline ever opens .gitignore for writing
+        # (the one grep hit that looked like a match, generate_detection_pack.py,
+        # turned out to be a comment mentioning an unrelated gitignored path,
+        # not a write to this file). Staging an unchanged Class-C file every
+        # run has no effect beyond risk surface -- removed rather than kept
+        # "just in case".
         "reports/",
         # P0-FIX v184.4: written by build_reports_index.py (Stage 3.3.7) but
         # never explicitly staged here -- meaning any fresh-generated value
@@ -363,19 +386,34 @@ def main() -> None:
         "data/apex_intelligence_report.json",
         "data/apex_enriched_manifest.json",
         "data/validated_manifest.json",
-        "config/feature_flags.json",
-        "data/publish_queue.json",
-        # v171.0 INTELLIGENCE PERSISTENCE REPOSITORY (always stage — append-only)
-        "data/intelligence_repository/intelligence_index.json",
-        "data/intelligence_repository/advisory_registry.json",
-        "data/intelligence_repository/intel_retention_registry.json",
-        "data/intelligence_repository/intel_lifecycle_registry.json",
-        "data/intelligence_repository/historical_feed_registry.json",
-        "data/intelligence_repository/advisories/",
+        # P0 production-architecture-transformation mission (2026-09-08):
+        # config/feature_flags.json removed -- traced every write pattern
+        # across scripts/; nothing in the live pipeline ever opens this
+        # file for writing (a broad grep for "feature_flags.json" plus "any
+        # write pattern in the same file" produced false positives from
+        # unrelated writes elsewhere in those same files; a precise
+        # write-to-this-path check found zero real hits). Class-C
+        # configuration, correctly never runtime-mutated; staging it every
+        # run was already a no-op, now made explicit by removing it.
+        #
+        # data/publish_queue.json removed -- run_pipeline.py's own
+        # stage_purge_publish_queue() unconditionally empties this file near
+        # the start of EVERY run, before anything downstream reads it. It is
+        # not cross-run state by construction (nothing depends on its
+        # content surviving to the next run), so it needed neither git nor
+        # R2 persistence -- committing "0 entries" every run was staging a
+        # file whose content is always about to be discarded.
+        #
+        # The 5 data/intelligence_repository/*.json registries + advisories/
+        # directory removed -- all 6 are now exclusively owned by
+        # scripts/r2_state_sync.py's STATE_FILES/STATE_DIRS (same
+        # duplicate-authority reasoning as data/feed_manifest.json etc.
+        # above; these were already being double-staged here AND synced to
+        # R2 by r2_state_sync.py with no reconciliation between the two).
         "intelligence-archive.html",
-        # data/feed_manifest.json     → JSON_GUARDED (validated above)
-        # data/cache/intel_index.json → JSON_GUARDED (validated above)
-        # data/cache/feed_state.json  → JSON_GUARDED (validated above)
+        # data/feed_manifest.json, data/cache/intel_index.json,
+        # data/cache/feed_state.json, data/intelligence_repository/* →
+        # scripts/r2_state_sync.py (sole authority, see module docstring)
         # feed.json                   → JSON_GUARDED (validated above)
         # api/feed.json               → JSON_GUARDED (validated above)
     ]

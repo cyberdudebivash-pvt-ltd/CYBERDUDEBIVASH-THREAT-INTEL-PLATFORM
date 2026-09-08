@@ -118,6 +118,17 @@ data/intelligence_repository/intel_lifecycle_registry.json
 data/intelligence_repository/historical_feed_registry.json
 data/intelligence_repository/advisories/
 
+# scripts/r2_lifecycle_manager.py (a manual admin tool, not a scheduled
+# pipeline capability -- see that script's own LIFECYCLE_REPORT_PATH
+# comment) writes this locally as an observable record of the last
+# --verify/--apply outcome. Never committed to main (confirmed: no prior
+# entry in git history) -- surfaced as an untracked-file nuisance the
+# first time this repo's test suite (tests/test_r2_lifecycle_manager.py)
+# happened to exercise the script locally. Same category as the
+# rx_pub_a0 artifact manifest immediately below: a local diagnostic
+# snapshot, not a distribution artifact.
+data/quality/r2_lifecycle_report.json
+
 # scripts/r2_reports_verifier.py (STAGE 3.6a) writes this locally as an
 # intermediate step, then syncs it to R2 (BUCKET_DATA, intel/ prefix) itself
 # -- per the script's own comments, that R2 sync is the actual distribution
@@ -149,7 +160,6 @@ api/ai/monetization.json
 # --- PIPELINE-CRITICAL STATE FILES — EXPLICITLY UN-IGNORED ---
 # These MUST be committed so all downstream workflows find them on checkout.
 !data/cache/
-!data/cache/intel_index.json
 
 # P0 FIX: data/cache/feed_state.json moved OFF this un-ignore list, onto R2
 # (scripts/r2_state_sync.py), same migration/reason as feed_manifest.json and
@@ -161,6 +171,22 @@ api/ai/monetization.json
 # here: without it, the broader `!data/cache/` un-ignore two lines up would
 # still un-ignore it.
 data/cache/feed_state.json
+
+# P0 production-architecture-transformation mission (2026-09-08):
+# data/cache/intel_index.json (intel_dedup_engine.py's dedup primary index,
+# sibling to feed_state.json above, same atomic write contract) was
+# previously deliberately kept on this un-ignore list ("explicitly out of
+# scope for this migration" -- see the prior version of
+# tests/test_r2_state_migration_wiring.py's test_unrelated_cache_file_is_
+# unaffected) because git-based persistence was still assumed viable for
+# it. That assumption is the same one that caused the 2026-08-26 staleness
+# incident for feed_state.json/feed_manifest.json/processed_intel.json --
+# main's branch ruleset rejects this file's direct push exactly the same
+# way. Moved onto R2 (scripts/r2_state_sync.py's STATE_FILES) instead,
+# same fix as feed_state.json immediately above. `git rm --cached` was
+# also needed (see that command's own note) since the file was actually
+# git-tracked, not just un-ignored in principle.
+data/cache/intel_index.json
 
 !data/sync_marker.json
 !data/alert_history.json
