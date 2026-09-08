@@ -1256,6 +1256,383 @@ def t26():
 
 
 # ---------------------------------------------------------------------------
+# T27: pipeline_audit.py manifest_report_consistency PASS/DEFERRED/FAIL model
+# (P0 production-architecture-transformation mission, 2026-09-08)
+# ---------------------------------------------------------------------------
+
+@test("T27_manifest_report_consistency_pass_deferred_fail")
+def t27():
+    """Regression guard for scripts/pipeline_audit.py's
+    check_report_manifest_consistency().
+
+    Root cause fixed: the check used to test LOCAL EPHEMERAL RUNNER DISK
+    existence for the entire historical manifest -- always FAILing on a
+    healthy pipeline run, because thousands of historical entries are
+    outside the rolling REPORT_WINDOW_HOURS window by design (PR #369) and
+    are never on a fresh checkout's local disk. This is the exact false-
+    positive "1 critical issue" finding this mission fixes.
+
+    Proves, with synthetic data (no dependency on a real feed_manifest.json
+    or live R2 credentials), that the fixed check now correctly
+    distinguishes:
+      - empty report_url                          -> not checked at all
+      - validation_status outside ok/enriched/valid -> not checked at all
+      - in-window, local file present              -> PASS
+      - in-window, missing, NOT durably confirmed   -> FAIL (the one real defect class)
+      - in-window, missing, durably confirmed in R2 publish-state -> DEFERRED
+      - out-of-window, missing                      -> DEFERRED
+    """
+    import importlib.util as _ilu
+    import tempfile
+    import shutil
+    from datetime import datetime, timedelta, timezone
+
+    scripts_dir = REPO_ROOT / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import r2_report_publisher as _r2pub  # noqa: E402
+
+    tmp_root = Path(tempfile.mkdtemp(prefix="t27_pipeline_audit_"))
+    try:
+        (tmp_root / "reports" / "2026" / "09").mkdir(parents=True)
+        now = datetime.now(timezone.utc)
+
+        def _ts(hours_ago: float) -> str:
+            return (now - timedelta(hours=hours_ago)).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        items = [
+            # A: in-window, local file present -> PASS
+            {"id": "intel--t27a", "validation_status": "ok",
+             "report_url": "/reports/2026/09/intel--t27a.html", "timestamp": _ts(2)},
+            # B: in-window, missing locally, NOT durably confirmed -> FAIL
+            {"id": "intel--t27b", "validation_status": "ok",
+             "report_url": "/reports/2026/09/intel--t27b.html", "timestamp": _ts(3)},
+            # C: in-window, missing locally, durably confirmed -> DEFERRED
+            {"id": "intel--t27c", "validation_status": "enriched",
+             "report_url": "/reports/2026/09/intel--t27c.html", "timestamp": _ts(4)},
+            # D: out-of-window, missing locally -> DEFERRED
+            {"id": "intel--t27d", "validation_status": "valid",
+             "report_url": "/reports/2026/09/intel--t27d.html", "timestamp": _ts(500)},
+            # E: empty report_url -> not checked (documented valid "no report" state)
+            {"id": "intel--t27e", "validation_status": "ok",
+             "report_url": "", "timestamp": _ts(1)},
+            # F: non-publishable validation_status -> not checked
+            {"id": "intel--t27f", "validation_status": "pending",
+             "report_url": "/reports/2026/09/intel--t27f.html", "timestamp": _ts(1)},
+        ]
+        (tmp_root / "reports" / "2026" / "09" / "intel--t27a.html").write_text(
+            "<!doctype html><html><body>t27a</body></html>", encoding="utf-8")
+
+        manifest_path = tmp_root / "feed_manifest.json"
+        manifest_path.write_text(json.dumps(items), encoding="utf-8")
+
+        state_path = tmp_root / "r2_report_publish_state.json"
+        state_path.write_text(json.dumps({
+            "schema_version": "1.0",
+            "items": {"intel--t27c": {"html_key": "reports/2026/09/intel--t27c.html",
+                                       "canonical_ts": _ts(4)}},
+        }), encoding="utf-8")
+
+        # Loaded the same way run_pipeline.py's own Phase 9 loads this exact
+        # file (importlib.util.spec_from_file_location) -- not a parallel
+        # loading mechanism that could behave differently from production.
+        _audit_spec = _ilu.spec_from_file_location(
+            "pipeline_audit_t27", REPO_ROOT / "scripts" / "pipeline_audit.py"
+        )
+        _audit_mod = _ilu.module_from_spec(_audit_spec)
+        _audit_spec.loader.exec_module(_audit_mod)
+        _audit_mod.MANIFEST_PATH = manifest_path
+        _audit_mod.REPO_ROOT = tmp_root
+
+        _prior_state_path = _r2pub.STATE_PATH
+        _prior_window_env = os.environ.get("REPORT_WINDOW_HOURS")
+        _r2pub.STATE_PATH = state_path
+        os.environ["REPORT_WINDOW_HOURS"] = "24"
+        try:
+            findings: list = []
+            stats: dict = {}
+            _audit_mod.check_report_manifest_consistency(findings, stats)
+        finally:
+            _r2pub.STATE_PATH = _prior_state_path
+            if _prior_window_env is None:
+                os.environ.pop("REPORT_WINDOW_HOURS", None)
+            else:
+                os.environ["REPORT_WINDOW_HOURS"] = _prior_window_env
+
+        assert stats.get("manifest_report_cross_checked") == 4, (
+            f"Expected 4 checked entries (A/B/C/D -- E has empty report_url, "
+            f"F has non-publishable validation_status), got "
+            f"{stats.get('manifest_report_cross_checked')}"
+        )
+        assert stats.get("manifest_report_missing") == 1, (
+            f"Expected exactly 1 genuinely-missing entry (B), got "
+            f"{stats.get('manifest_report_missing')}"
+        )
+        assert stats.get("manifest_report_deferred") == 2, (
+            f"Expected exactly 2 deferred entries (C durably-confirmed, D "
+            f"out-of-window), got {stats.get('manifest_report_deferred')}"
+        )
+
+        consistency_findings = [f for f in findings if f["check"] == "manifest_report_consistency"]
+        assert len(consistency_findings) == 1, (
+            f"Expected exactly 1 manifest_report_consistency finding, got "
+            f"{len(consistency_findings)}: {consistency_findings}"
+        )
+        finding = consistency_findings[0]
+        assert finding["level"] == "FAIL", (
+            f"Expected FAIL (case B is a genuine defect), got {finding['level']}: {finding}"
+        )
+        examples_str = " ".join(finding.get("examples", []))
+        assert "intel--t27b" in examples_str, (
+            f"Expected the FAIL to name intel--t27b, got: {finding.get('examples')}"
+        )
+        assert "intel--t27c" not in examples_str and "intel--t27d" not in examples_str, (
+            f"Deferred entries C/D must NOT be reported as missing: {finding.get('examples')}"
+        )
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# T28: r2_state_sync.py owns intel_index.json (Class A persistence)
+# ---------------------------------------------------------------------------
+
+@test("T28_r2_state_sync_intel_index_registered")
+def t28():
+    """P0 production-architecture-transformation mission (2026-09-08):
+    data/cache/intel_index.json (scripts/intel_dedup_engine.py's dedup
+    primary index -- sibling to feed_state.json, same atomic write
+    contract, same "committed to git, persists forever" assumption that
+    caused the 2026-08-26 staleness incident) must be registered in
+    scripts/r2_state_sync.py's STATE_FILES so it durably persists via R2
+    instead of the now-unreliable git path.
+
+    Cross-checks against intel_dedup_engine.py's OWN INDEX_PATH constant
+    (not a hardcoded string) so this guard also catches future drift if
+    either file's path convention changes. Also guards Constitution
+    Principle 3 (single source of truth): no local path or R2 key may be
+    registered twice in STATE_FILES.
+    """
+    scripts_dir = REPO_ROOT / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import r2_state_sync
+    import intel_dedup_engine
+
+    local_paths = {local for local, _key in r2_state_sync.STATE_FILES}
+    expected_rel = str(intel_dedup_engine.INDEX_PATH.relative_to(REPO_ROOT)).replace(os.sep, "/")
+    assert expected_rel in local_paths, (
+        f"scripts/r2_state_sync.py's STATE_FILES is missing "
+        f"intel_dedup_engine.py's own INDEX_PATH ({expected_rel!r}) -- this "
+        f"file will silently revert to empty on every fresh checkout, "
+        f"exactly like feed_state.json did before the 2026-08-26 incident."
+    )
+
+    local_path_list = [local for local, _key in r2_state_sync.STATE_FILES]
+    dupes = {p for p in local_path_list if local_path_list.count(p) > 1}
+    assert not dupes, f"STATE_FILES has duplicate local-path entries (duplicate-authority risk): {dupes}"
+
+    key_list = [key for _local, key in r2_state_sync.STATE_FILES]
+    key_dupes = {k for k in key_list if key_list.count(k) > 1}
+    assert not key_dupes, f"STATE_FILES has duplicate R2-key entries (duplicate-authority risk): {key_dupes}"
+
+
+# ---------------------------------------------------------------------------
+# T29: safe_git_commit.py no longer double-stages R2-owned Class A state
+# ---------------------------------------------------------------------------
+
+@test("T29_safe_git_commit_no_duplicate_state_authority")
+def t29():
+    """P0 production-architecture-transformation mission (2026-09-08):
+    scripts/safe_git_commit.py must no longer stage files that
+    scripts/r2_state_sync.py's STATE_FILES/STATE_DIRS now exclusively own
+    (Class A mutable runtime state) -- staging the same file via both the
+    git path (rejected by the branch ruleset since 2026-08-26) and the R2
+    path, with no reconciliation between the two, is exactly the
+    duplicate-state-authority risk this mission was scoped to eliminate.
+
+    Parses the ACTUAL list/set literals via ast.literal_eval() (not a
+    substring search, which would false-positive on this file's own
+    explanatory comments documenting the removals) so this guard tracks
+    real runtime behaviour, not prose.
+    """
+    scripts_dir = REPO_ROOT / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import r2_state_sync
+
+    sgc_path = REPO_ROOT / "scripts" / "safe_git_commit.py"
+    tree = ast.parse(sgc_path.read_text(encoding="utf-8"), filename=str(sgc_path))
+
+    json_guarded = None
+    files_to_stage = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            target_name = node.targets[0].id
+            if target_name == "JSON_GUARDED":
+                json_guarded = ast.literal_eval(node.value)
+            elif target_name == "files_to_stage":
+                files_to_stage = ast.literal_eval(node.value)
+
+    assert json_guarded is not None, "Could not locate JSON_GUARDED assignment in safe_git_commit.py"
+    assert files_to_stage is not None, "Could not locate files_to_stage assignment in safe_git_commit.py"
+
+    r2_owned = {local for local, _key in r2_state_sync.STATE_FILES}
+    r2_owned |= {local for local, _key in r2_state_sync.STATE_DIRS}
+
+    staged_all = set(json_guarded) | set(files_to_stage)
+    double_staged = staged_all & r2_owned
+    assert not double_staged, (
+        f"safe_git_commit.py stages {sorted(double_staged)}, which "
+        f"scripts/r2_state_sync.py's STATE_FILES/STATE_DIRS already "
+        f"exclusively own -- duplicate-state-authority risk (both paths "
+        f"racing to persist the same file with no reconciliation)."
+    )
+
+    # The 4 specific files this mission's audit confirmed have zero live
+    # producer/consumer of runtime persistence (not R2-owned either --
+    # simply should not be staged at all).
+    should_not_be_staged = {
+        "data/sync_marker.json",
+        ".gitignore",
+        "config/feature_flags.json",
+        "data/publish_queue.json",
+    }
+    still_staged = should_not_be_staged & staged_all
+    assert not still_staged, (
+        f"safe_git_commit.py still stages {sorted(still_staged)} -- these "
+        f"were confirmed to have zero live runtime-persistence "
+        f"producer/consumer and should not be staged at all."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T30: STAGE 5.8.4b governance telemetry -- R2-wired, no independent git push
+# ---------------------------------------------------------------------------
+
+@test("T30_governance_telemetry_r2_wired_no_runtime_git_push")
+def t30():
+    """P0 production-architecture-transformation mission (2026-09-08):
+    STAGE 5.8.4b (.github/workflows/sentinel-blogger.yml) used to run its
+    OWN independent inline `git add` / `git commit` / `git push origin
+    HEAD` for data/telemetry/global_release_governance.json -- a second,
+    entirely separate runtime-git-persistence code path outside
+    scripts/safe_git_commit.py, silently broken the same way by the same
+    branch-ruleset rejection since 2026-08-26 (never surfaced because the
+    step already had continue-on-error: true).
+
+    Verifies:
+      1. scripts/r2_upload.py exposes main_governance_telemetry_only()
+         wired to a real --governance-telemetry-only CLI dispatch branch
+         (not an invented flag -- r2_upload.py has no argparse, only
+         sys.argv membership checks; a caller passing an unmatched flag
+         would silently fall through to main(), which has nothing to do
+         with this file).
+      2. STAGE 5.8.4b calls that exact flag.
+      3. STAGE 5.8.4b no longer contains its own git add/commit/push --
+         Class B (generated artifact) persistence now goes through R2
+         publication like every other generated artifact, not a scheduled
+         runtime commit to main.
+      4. STAGE 5.8.4b still writes the Class D (immutable, versioned)
+         audit trail via scripts/audit_snapshot_store.py -- fixing the git-
+         push bug must not lose the audit trail.
+    """
+    r2_upload_path = REPO_ROOT / "scripts" / "r2_upload.py"
+    assert r2_upload_path.exists(), "scripts/r2_upload.py missing"
+    r2_upload_src = r2_upload_path.read_text(encoding="utf-8")
+
+    assert "def main_governance_telemetry_only" in r2_upload_src, (
+        "scripts/r2_upload.py is missing main_governance_telemetry_only() "
+        "-- STAGE 5.8.4b's Class B governance-telemetry R2 publish has no "
+        "real implementation to call."
+    )
+    assert '"--governance-telemetry-only" in sys.argv' in r2_upload_src, (
+        "scripts/r2_upload.py's __main__ dispatch is missing the "
+        "--governance-telemetry-only branch -- main_governance_telemetry_only() "
+        "exists but is unreachable from the CLI."
+    )
+
+    blogger_path = REPO_ROOT / ".github" / "workflows" / "sentinel-blogger.yml"
+    assert blogger_path.exists(), "sentinel-blogger.yml missing"
+    blogger_src = blogger_path.read_text(encoding="utf-8")
+
+    stage_marker = "STAGE 5.8.4b - Governance Telemetry Persistence"
+    idx = blogger_src.find(stage_marker)
+    assert idx != -1, "STAGE 5.8.4b step not found in sentinel-blogger.yml"
+
+    next_step_idx = blogger_src.find("\n      - name:", idx + len(stage_marker))
+    block = blogger_src[idx: next_step_idx if next_step_idx != -1 else len(blogger_src)]
+
+    assert "r2_upload.py --governance-telemetry-only" in block, (
+        "STAGE 5.8.4b does not call the real "
+        "'r2_upload.py --governance-telemetry-only' flag."
+    )
+    assert "audit_snapshot_store.py" in block and "--family global_release_governance" in block, (
+        "STAGE 5.8.4b no longer writes the Class D versioned audit "
+        "snapshot via scripts/audit_snapshot_store.py."
+    )
+
+    forbidden = ["git add", "git commit", "git push"]
+    found_forbidden = [f for f in forbidden if f in block]
+    assert not found_forbidden, (
+        f"STAGE 5.8.4b still contains runtime git persistence {found_forbidden} "
+        f"-- this stage was migrated to R2 publication specifically to "
+        f"remove its independent (and, since 2026-08-26, silently failing) "
+        f"git push path."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T31: audit_snapshot_store.py (Class D) allowlist + versioned-key contract
+# ---------------------------------------------------------------------------
+
+@test("T31_audit_snapshot_store_allowlist_and_key_format")
+def t31():
+    """P0 production-architecture-transformation mission (2026-09-08):
+    scripts/audit_snapshot_store.py is the new Class D (immutable,
+    versioned audit evidence) store -- the one genuinely-new persistence
+    module this mission adds (Class A and Class B already had mature
+    implementations). Exercises the parts of its contract that are pure/
+    deterministic and need no live R2 credentials or network access:
+      1. write_snapshot() refuses (returns None, never raises) for a
+         family outside KNOWN_FAMILIES -- an uncatalogued audit key must
+         never be created by a typo'd --family value.
+      2. write_snapshot() refuses (returns None) for a source file that
+         does not exist -- never fabricates/writes empty audit evidence.
+      3. _versioned_key() produces the documented
+         audit/<YYYY>/<MM>/<DD>/<run_id>/<family>.json shape exactly.
+    """
+    scripts_dir = REPO_ROOT / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import audit_snapshot_store as _ass
+    from datetime import datetime, timezone
+
+    result = _ass.write_snapshot(
+        Path("/nonexistent/does-not-matter.json"), "not_a_real_family",
+        "run123", "sha123", "https://example-endpoint.test",
+    )
+    assert result is None, "write_snapshot() must refuse an unknown family, returning None"
+
+    result2 = _ass.write_snapshot(
+        Path("/nonexistent/does-not-exist.json"), "pipeline_audit",
+        "run123", "sha123", "https://example-endpoint.test",
+    )
+    assert result2 is None, "write_snapshot() must refuse a missing source file, returning None"
+
+    when = datetime(2026, 9, 8, 12, 0, 0, tzinfo=timezone.utc)
+    key = _ass._versioned_key("pipeline_audit", "run456", when)
+    assert key == "audit/2026/09/08/run456/pipeline_audit.json", (
+        f"Unexpected versioned key shape: {key!r}"
+    )
+
+    assert _ass.KNOWN_FAMILIES == {
+        "pipeline_audit", "global_release_governance",
+        "report_engine_ledger", "quality_drift_report",
+    }, f"KNOWN_FAMILIES changed unexpectedly: {sorted(_ass.KNOWN_FAMILIES)}"
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -1267,7 +1644,7 @@ def main() -> int:
     except Exception:
         _suite_ver = "UNKNOWN"
     log.info("=" * 60)
-    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T26)", _suite_ver)
+    log.info("SENTINEL APEX v%s -- Regression Test Suite (T01-T31)", _suite_ver)
     log.info("=" * 60)
 
     pass_count = sum(1 for r in RESULTS if r["status"] == "PASS")

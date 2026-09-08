@@ -267,7 +267,45 @@ def check_pipeline_metrics(findings: list, stats: dict) -> None:
 
 
 def check_report_manifest_consistency(findings: list, stats: dict) -> None:
-    """Cross-check: every manifest entry with status=ok/enriched has a physical report file."""
+    """
+    Cross-check: every manifest entry with status=ok/enriched/valid that
+    currently claims a report (non-empty report_url) has that report
+    verifiably available -- either on local disk (this run's own
+    generation) or durably published in R2 (scripts/r2_report_publisher.py's
+    own incremental publish-state).
+
+    P0 production-architecture-transformation mission (2026-09-08) root
+    cause: this check previously tested LOCAL EPHEMERAL RUNNER DISK
+    existence for the ENTIRE historical manifest, unconditionally. Since
+    PR #369 bounded report generation/publication to a rolling
+    REPORT_WINDOW_HOURS (default 24h) window (docs/P0_R2_COST_CONTAINMENT.md),
+    thousands of historical entries outside that window are NEVER present
+    on a fresh runner's local disk by design -- their durability guarantee
+    is R2, not the ephemeral checkout. A correctly RETIRED entry (report
+    aged out, r2_report_publisher.py deleted it from R2) also has its
+    report_url correctly cleared to "" -- scripts/report_url_integrity_gate.py
+    already documents this as "a truthful 'no report published' state", not
+    a defect. The old code checked disk existence for both cases
+    unconditionally, so a totally healthy pipeline run always produced
+    "missing" findings -- the exact false-positive "1 critical issue" this
+    mission fixes. This was a scope/persistence-authority mismatch
+    (checking the wrong storage layer), not a real data-integrity gap.
+
+    Fix mirrors scripts/validate_reports.py's own already-proven PASS /
+    DEFERRED / FAIL disposition model for this identical ambiguity --
+    reusing its canonical_age() / load_publish_state() / report_window_hours()
+    directly, never reimplementing them (Constitution Principle 3/4):
+      - report_url == ""   -> not checked (documented valid terminal state)
+      - local file present -> PASS (works regardless of window)
+      - local file absent AND (durably confirmed in r2_report_publisher.py's
+        publish-state OR outside the rolling window OR canonical timestamp
+        unparseable) -> DEFERRED, informational only, never fails the audit
+        -- this run was never going to produce or verify it locally, and
+        R2 (not this ephemeral checkout) is the source of truth for it.
+      - local file absent AND in-window AND NOT durably confirmed -> FAIL
+        (a genuine problem: this run's own generation pass should have
+        produced it, and R2 does not have it either).
+    """
     if not MANIFEST_PATH.exists():
         return
 
@@ -277,7 +315,33 @@ def check_report_manifest_consistency(findings: list, stats: dict) -> None:
         return
 
     items = data if isinstance(data, list) else data.get("advisories", [])
+
+    try:
+        _scripts_dir = str(Path(__file__).resolve().parent)
+        if _scripts_dir not in sys.path:
+            sys.path.insert(0, _scripts_dir)
+        from r2_report_publisher import (
+            canonical_age,
+            load_publish_state,
+            report_window_hours,
+        )
+        window_hours = report_window_hours()
+        publish_state = load_publish_state()
+        published_ids = {
+            _pid for _pid, _rec in publish_state.get("items", {}).items()
+            if isinstance(_rec, dict) and _rec.get("html_key")
+        }
+    except Exception as exc:
+        # Fail-safe: cannot reach the durable-state reader -- skip this
+        # check entirely rather than silently falling back to the
+        # local-disk-only logic that caused the original false positive.
+        findings.append({"level": "WARN", "check": "manifest_report_consistency",
+                         "detail": f"Skipped -- could not load r2_report_publisher durable-state reader: {exc}"})
+        return
+
+    now = datetime.now(timezone.utc)
     missing_files = []
+    deferred = 0
     checked = 0
 
     for item in items:
@@ -288,7 +352,10 @@ def check_report_manifest_consistency(findings: list, stats: dict) -> None:
         # Derive physical path from report_url
         rurl = item.get("report_url", "")
         _id = item.get("id", "") or item.get("advisory_id", "")
-        if not _id:
+        if not _id or not rurl:
+            # Empty report_url is the documented valid "no report currently
+            # published" state (report_url_integrity_gate.py) -- nothing to
+            # check, not a candidate for "missing".
             continue
 
         checked += 1
@@ -300,19 +367,32 @@ def check_report_manifest_consistency(findings: list, stats: dict) -> None:
             found = list(REPORTS_DIR.rglob(f"{_id}.html")) if REPORTS_DIR.is_dir() else []
             rpath = found[0] if found else REPO_ROOT / "reports" / f"{_id}.html"
 
-        if not rpath.exists():
-            missing_files.append(f"{_id} → {rpath.relative_to(REPO_ROOT)}")
+        if rpath.exists():
+            continue  # PASS
+
+        if _id in published_ids:
+            deferred += 1
+            continue  # DEFERRED -- durably confirmed published in R2
+
+        _ts, _age_hours = canonical_age(item, now)
+        _in_window = _age_hours is not None and 0 <= _age_hours <= window_hours
+        if not _in_window:
+            deferred += 1
+            continue  # DEFERRED -- outside rolling window / unparseable timestamp
+
+        missing_files.append(f"{_id} → {rpath.relative_to(REPO_ROOT)}")
 
     stats["manifest_report_cross_checked"] = checked
     stats["manifest_report_missing"] = len(missing_files)
+    stats["manifest_report_deferred"] = deferred
 
     if missing_files:
         findings.append({"level": "FAIL", "check": "manifest_report_consistency",
-                         "detail": f"{len(missing_files)} manifest entries reference non-existent report files",
+                         "detail": f"{len(missing_files)} manifest entries within the {window_hours}h publish window reference report files neither on local disk nor durably confirmed in R2",
                          "examples": missing_files[:10]})
     else:
         findings.append({"level": "PASS", "check": "manifest_report_consistency",
-                         "detail": f"All {checked} publishable entries have physical report files"})
+                         "detail": f"All {checked} publishable entries verified (local disk or durable R2 publish-state); {deferred} outside the {window_hours}h window correctly deferred to R2 as the source of truth"})
 
 
 # ---------------------------------------------------------------------------

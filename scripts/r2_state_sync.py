@@ -154,6 +154,20 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 STATE_FILES: list[tuple[str, str]] = [
     ("data/cache/feed_state.json", "data/cache/feed_state.json"),
     ("data/processed_intel.json", "data/processed_intel.json"),
+    # P0 production-architecture-transformation mission (2026-09-08): the
+    # dedup primary index -- intel_dedup_engine.py's sibling file to
+    # feed_state.json above, written by the same engine with the same
+    # atomic tmp/fsync/os.replace() write contract, loaded at the start of
+    # every run ("Loaded intel_index: N seen items") and rebuilt from the
+    # archive if missing/corrupt. Its own module docstring documents the
+    # identical "committed to git (persists forever)" assumption that
+    # caused the 2026-08-26 staleness incident this migration fixes for
+    # feed_state.json/processed_intel.json above -- confirmed via full
+    # trace of intel_dedup_engine.py before adding, not assumed from the
+    # filename. No pre-existing R2 key (confirmed: no reference anywhere in
+    # r2_upload.py or the Worker), so its key mirrors its local path per
+    # this module's established convention.
+    ("data/cache/intel_index.json", "data/cache/intel_index.json"),
     ("data/stix/feed_manifest.json", "intel/feed_manifest.json"),
     ("data/feed_manifest.json", "data/feed_manifest.json"),
     # CodeRabbit review finding on this migration (verified, not taken on

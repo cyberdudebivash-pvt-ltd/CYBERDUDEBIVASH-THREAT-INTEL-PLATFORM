@@ -128,6 +128,17 @@ P40_SOURCE_FABRIC_FILES: list[tuple[str, str]] = [
     ("data/quality/p40_certification_report.json",    "intel/p40_certification_report.json"),
 ]
 
+# P0 production-architecture-transformation mission (2026-09-08): STAGE
+# 5.8.4b's "latest state" copy of the release-governance telemetry file --
+# this is the Class B (generated artifact) half of that stage's persistence;
+# the Class D (write-once, versioned audit trail) half is a separate call to
+# scripts/audit_snapshot_store.py. Kept as a module-level list (not a bare
+# literal inside the function) so it follows the same candidate-list
+# convention as AI_TRACKER_FILES/P40_SOURCE_FABRIC_FILES above.
+GOVERNANCE_TELEMETRY_FILES: list[tuple[str, str]] = [
+    ("data/telemetry/global_release_governance.json", "data/telemetry/global_release_governance.json"),
+]
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -532,6 +543,52 @@ def main_ai_tracker_only() -> None:
     log.info("AI-tracker-only R2 sync complete.")
 
 
+def main_governance_telemetry_only() -> None:
+    """
+    Publishes the "latest state" copy of data/telemetry/global_release_
+    governance.json to R2. Replaces STAGE 5.8.4b's former inline `git add`
+    / `git commit` / `git push origin HEAD` block (P0 production-
+    architecture-transformation mission, 2026-09-08: this file is Class B,
+    a generated artifact, so it belongs in R2 publication -- not a
+    scheduled runtime git commit to main). The historical, write-once audit
+    trail for this same file is written separately, in the same stage, by
+    scripts/audit_snapshot_store.py (Class D); this function only maintains
+    the single mutable "latest" copy other consumers read.
+    """
+    log.info("=" * 60)
+    log.info("SENTINEL APEX v%s -- R2 Upload Engine (governance-telemetry-only)", PIPELINE_VERSION)
+    log.info("=" * 60)
+    os.chdir(REPO_ROOT)
+    cf_account, _access_key, _secret_key = get_credentials()
+    endpoint = f"https://{cf_account}.r2.cloudflarestorage.com"
+    install_awscli()
+
+    candidates = [(src, dst) for src, dst in GOVERNANCE_TELEMETRY_FILES if (REPO_ROOT / src).exists()]
+    for src, _dst in GOVERNANCE_TELEMETRY_FILES:
+        if not (REPO_ROOT / src).exists():
+            log.warning("SKIP (governance telemetry): %s not found -- orchestrator may have skipped this run", src)
+
+    plan = R2OperationPlan(label="r2_upload_governance_telemetry", bucket=BUCKET_DATA)
+    plan.record_put(len(candidates))
+
+    budgets = R2Budgets.from_env()
+    try:
+        enforce_budget(plan, budgets, is_report_plan=False)
+    except R2BudgetExceeded as exc:
+        log.critical(str(exc))
+        emit_summary(plan, budgets, status="BLOCKED", is_report_plan=False, extra={"reason": str(exc)})
+        sys.exit(1)
+
+    uploaded = 0
+    for src, dst_key in candidates:
+        if s3_cp(src, BUCKET_DATA, dst_key, endpoint):
+            uploaded += 1
+    log.info("OK: Governance telemetry uploaded to R2 (%d/%d)", uploaded, len(GOVERNANCE_TELEMETRY_FILES))
+
+    emit_summary(plan, budgets, status="PASS", is_report_plan=False, extra={"uploaded": uploaded})
+    log.info("Governance-telemetry-only R2 sync complete.")
+
+
 def count_manifest() -> int:
     """Count advisory entries in feed_manifest.json."""
     path = REPO_ROOT / "data" / "stix" / "feed_manifest.json"
@@ -758,6 +815,8 @@ if __name__ == "__main__":
             main_p40_only()
         elif "--ai-tracker-only" in sys.argv:
             main_ai_tracker_only()
+        elif "--governance-telemetry-only" in sys.argv:
+            main_governance_telemetry_only()
         else:
             main()
     except SystemExit:
