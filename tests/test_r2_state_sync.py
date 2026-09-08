@@ -102,7 +102,7 @@ class TestStateFilesManifest(unittest.TestCase):
     entry doesn't silently pass just because the generic tests adapted to
     the shorter list."""
 
-    def test_exactly_ten_files_migrated(self):
+    def test_exactly_eleven_files_migrated(self):
         """P0 R2 COST AUDIT FIX: was 9 -- data/cache/r2_report_publish_state.json
         (scripts/r2_report_publisher.py's own cross-run incremental-publish
         state) was added after a post-merge forensic audit of PR #369 found
@@ -110,8 +110,17 @@ class TestStateFilesManifest(unittest.TestCase):
         reverted to empty on every fresh CI checkout -- same git-push-
         rejection root cause this module's docstring documents for the
         other 9 entries, fixed the same way rather than re-attempting
-        git-based persistence for this file too."""
-        self.assertEqual(len(rs.STATE_FILES), 10)
+        git-based persistence for this file too.
+
+        Was 10 -- P0 production-architecture-transformation mission
+        (2026-09-08): data/cache/intel_index.json (intel_dedup_engine.py's
+        dedup primary index, sibling to feed_state.json, same atomic write
+        contract and same "committed to git, persists forever" assumption
+        that caused the 2026-08-26 staleness incident) had NO persistence
+        path at all -- not git-staged (safe_git_commit.py never listed it),
+        not R2-synced. Added as the 11th entry rather than left with zero
+        durability."""
+        self.assertEqual(len(rs.STATE_FILES), 11)
 
     def test_report_publish_state_is_present_with_path_mirrored_key(self):
         self.assertIn(
