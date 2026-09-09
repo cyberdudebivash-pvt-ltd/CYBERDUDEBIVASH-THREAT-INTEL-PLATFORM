@@ -17,7 +17,23 @@
 #   * All 5 Worker JS files checked for null bytes + non-ASCII BEFORE deploy
 #   * All 5 Worker JS files syntax-validated via node --check BEFORE deploy
 #   * esbuild bundle pre-flight (HARD GATE) catches duplicate keys + bundler errors
-#   * Wrangler v3 (proven stable  -  v4 has breaking TOML/env changes)
+#   * Wrangler pinned to an exact 3.114.17 (see "Install Wrangler" step below
+#     for why exact, not floating). v202.0 (2026-09-09 npm audit remediation)
+#     re-tested v4.130.0 against this exact wrangler.toml via `wrangler
+#     deploy --dry-run` on both versions: the only incompatibility found was
+#     a bare top-level `crons` field ("Unexpected fields found in top-level
+#     field: crons") -- and 3.114.17 ALREADY warns about the identical thing
+#     against the pre-v202.0 toml, so it was never v4-specific. Fixed by
+#     moving crons under [triggers] (byte-identical bundle size on both
+#     versions after the fix). All KV/R2/Durable-Object/env bindings and the
+#     production route table resolved identically on both versions. NOT
+#     re-tested: an actual live deploy (needs real CF_API_TOKEN/CF_ACCOUNT_ID,
+#     not available outside this workflow's own run), and whether this
+#     workflow's stdout-parsing success/failure detection (search for the
+#     "Deploy" step below) still matches v4's exact output strings. Until
+#     both are verified end-to-end, the pin here stays 3.114.17 deliberately
+#     -- this note exists so the next attempt starts from verified evidence
+#     instead of re-deriving it.
 #   * Deploy retried once on transient failure
 #   * Health check is informational-only (never blocks deploy success)
 #

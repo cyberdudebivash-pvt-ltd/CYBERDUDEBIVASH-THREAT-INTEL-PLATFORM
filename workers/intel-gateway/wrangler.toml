@@ -37,6 +37,16 @@ routes = [
 # `scheduled()` handler; index.js's scheduled() branches on event.cron so
 # the "*/15 * * * *" entry above keeps calling fetchAndCacheCVEs() exactly
 # as before -- purely additive, zero change to the existing schedule.
+#
+# v202.0 (2026-09-09 npm audit remediation): moved from a bare top-level
+# `crons = [...]` into the `[triggers]` table. Both wrangler 3.114.17 (the
+# version this repo's deploy pipeline pins) and 4.130.0 already warn
+# "Unexpected fields found in top-level field: crons" against the old
+# placement -- confirmed via `wrangler deploy --dry-run` on both versions,
+# which is also how the [triggers] form was confirmed to produce a
+# byte-for-byte-equivalent bundle on both, so this is a same-behavior
+# syntax correction, not a schedule change.
+[triggers]
 crons = ["*/15 * * * *", "0 */6 * * *"]
 
 [vars]
