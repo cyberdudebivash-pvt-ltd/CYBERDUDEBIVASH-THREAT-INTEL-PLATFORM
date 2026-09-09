@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const FeedState = require('../feed-state.js');
 
-const { STATES, resolveFeedTerminalState, isEntitlementDenial } = FeedState;
+const { STATES, resolveFeedTerminalState, isEntitlementDenial, MAX_USABLE_FALLBACK_AGE_MS } = FeedState;
 
 // ---------------------------------------------------------------------------
 // P0 incident 2026-09-03. index.html's loadGOCIntel() walked MANIFEST_URLS and,
@@ -194,4 +194,69 @@ test('STATES deliberately contains no LOADING member', () => {
   assert.ok(!('LOADING' in STATES), 'LOADING is not a terminal state and must not be resolvable');
   assert.ok(!('BOOTING' in STATES));
   assert.deepEqual(Object.keys(STATES).sort(), ['EMPTY', 'ERROR', 'LIVE', 'OFFLINE', 'RATE_LIMITED', 'STALE']);
+});
+
+// ===========================================================================
+// P0 2026-09-09 -- a customer dashboard showed SYNC: STALE over 14-day-old
+// data. Root cause: the raw.githubusercontent.com fallback mirror reads
+// api/feed.json straight from what's committed to `main` in git, and this
+// platform's R2 migration deliberately stopped git-committing that file --
+// so the mirror is frozen forever at 2026-08-26 (confirmed live) and gets
+// staler every day, while every hit still resolved to the same reassuring
+// "STALE / FALLBACK SOURCE" label regardless of age. These tests pin the
+// fix: a fallback's own content age must be checked, not just whether the
+// HTTP request succeeded.
+// ===========================================================================
+
+const OLD_ISO   = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600 * 1000).toISOString();
+const MIRROR_AGED = (hoursAgo, n = 109) => ({
+  url: 'https://raw.githubusercontent.com/x/y/main/api/feed.json',
+  status: 200, ok: true, authoritative: false, itemCount: n,
+  contentGeneratedAt: OLD_ISO(hoursAgo),
+});
+
+test('CRITICAL: the exact reported incident -- 14-day-old mirror content under quota denial resolves to RATE_LIMITED, never STALE', () => {
+  const r = resolveFeedTerminalState({ attempts: [...ALL_QUOTA_DENIED, MIRROR_AGED(14 * 24)], online: true });
+  assert.notEqual(r.state, STATES.STALE,
+    '14-day-old fallback content must never be presented as merely "stale" -- that is the exact customer-reported defect');
+  assert.equal(r.state, STATES.RATE_LIMITED, 'the real cause (quota denial) must surface instead');
+});
+
+test('a fallback within the usable-age threshold still resolves to STALE (unaffected by this fix)', () => {
+  const r = resolveFeedTerminalState({ attempts: [...ALL_QUOTA_DENIED, MIRROR_AGED(2)] });
+  assert.equal(r.state, STATES.STALE);
+  assert.match(r.detail, /cached mirror/i);
+});
+
+test('a fallback right at the usable-age boundary is accepted; just past it is rejected', () => {
+  const boundaryHours = MAX_USABLE_FALLBACK_AGE_MS / 3600000;
+  const atBoundary  = resolveFeedTerminalState({ attempts: [...ALL_QUOTA_DENIED, MIRROR_AGED(boundaryHours)] });
+  const pastBoundary = resolveFeedTerminalState({ attempts: [...ALL_QUOTA_DENIED, MIRROR_AGED(boundaryHours + 1)] });
+  assert.equal(atBoundary.state, STATES.STALE);
+  assert.equal(pastBoundary.state, STATES.RATE_LIMITED);
+});
+
+test('backward compatible: a fallback hit with no contentGeneratedAt (legacy callers) behaves exactly as before this fix', () => {
+  const r = resolveFeedTerminalState({ attempts: [...ALL_QUOTA_DENIED, MIRROR_OK(109)] });
+  assert.equal(r.state, STATES.STALE, 'unknown age must never be treated as rejected age');
+  assert.equal(r.itemCount, 109);
+});
+
+test('an unparseable or future-dated contentGeneratedAt is treated as unknown age, not rejected', () => {
+  const badDate = { ...MIRROR_AGED(2), contentGeneratedAt: 'not-a-date' };
+  const future   = { ...MIRROR_AGED(2), contentGeneratedAt: new Date(Date.now() + 3600000).toISOString() };
+  assert.equal(resolveFeedTerminalState({ attempts: [...ALL_QUOTA_DENIED, badDate] }).state, STATES.STALE);
+  assert.equal(resolveFeedTerminalState({ attempts: [...ALL_QUOTA_DENIED, future] }).state, STATES.STALE);
+});
+
+test('an aged-out fallback still lets a later authoritative hit win LIVE', () => {
+  const r = resolveFeedTerminalState({ attempts: [MIRROR_AGED(14 * 24), AUTH_OK(500)] });
+  assert.equal(r.state, STATES.LIVE);
+  assert.equal(r.itemCount, 500);
+});
+
+test('an aged-out fallback with no denial and no other source resolves to ERROR, not STALE', () => {
+  const r = resolveFeedTerminalState({ attempts: [MIRROR_AGED(14 * 24)] });
+  assert.equal(r.state, STATES.ERROR);
+  assert.notEqual(r.state, STATES.STALE);
 });
