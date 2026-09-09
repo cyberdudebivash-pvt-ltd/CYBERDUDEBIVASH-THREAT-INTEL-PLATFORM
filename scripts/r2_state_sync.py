@@ -209,6 +209,52 @@ STATE_FILES: list[tuple[str, str]] = [
     # itself, or the Worker), so its key mirrors its local path, matching
     # every other entry in this list.
     ("data/cache/r2_report_publish_state.json", "data/cache/r2_report_publish_state.json"),
+    # ------------------------------------------------------------------
+    # AI PLANE STATE (2026-09-09 post-merge verification of PR #388/#389).
+    #
+    # Same root cause as every entry above, found the same way: the AI
+    # prediction producers were wired into ai-predictions.yml, which persists
+    # via `git push origin main` -- rejected since 2026-08-26 by the branch
+    # ruleset, and swallowed by that workflow's own retry loop
+    # ("Push deferred.", step still exits 0). Verified empirically before
+    # adding: ZERO runtime commits on main since 2026-08-26 (all 52 commits
+    # in that window are PR merges), and data/ai_predictions/ + data/ai/ have
+    # only ever been changed by PR #388 and #389 themselves -- never by a
+    # scheduled run. So these engines execute, produce correct output, and
+    # the output dies with the runner.
+    #
+    # sector_history.json is the one that makes this urgent rather than
+    # cosmetic: it is genuinely bidirectional cross-run state (the accumulated
+    # daily observation series the forecast is fitted on). Without durable
+    # persistence it can never accumulate past a single run, so
+    # sector_forecast_model.py's 35-observed-day threshold is unreachable and
+    # the forecast declines forever. The other three are single-run outputs
+    # that a DIFFERENT workflow consumes: ai_brain_publisher.py runs inside
+    # sentinel-blogger.yml and reads all three, so they must survive the
+    # hand-off between workflows, which only R2 now does.
+    #
+    # DELIBERATELY NOT ADDED (each costs ops on every sync pass):
+    #   data/ai_predictions/predictions_summary.json -- traced every
+    #     reference: written by ai_predictions_engine.py, read by nothing.
+    #   data/ai_predictions/apex_forecast_latest.json -- its producer
+    #     (agent/v30_apex/predictive_cortex.py) is orphaned, so the object
+    #     would be a permanently-EXPIRED file that ai_freshness_guard.py
+    #     already excludes on age. Syncing a dead file buys nothing.
+    #
+    # COST (measured against this module's actual call sites, not estimated):
+    # 4 files x (sentinel-blogger 1 download + 2 uploads, 4 runs/day;
+    # multi-source-intel 1+1, 6/day; dashboard-feeds-sync 1+0, 4/day;
+    # ai-predictions 1+1, 4/day) = 72 GET/day + 72 PUT/day
+    #   = 2,160 Class A + 2,160 Class B per month
+    #   = 0.216% of R2's 1M/month Class A allowance, 0.022% of the 10M Class B.
+    # Storage: sector_history.json ~1 KB/day pruned at 400 days (~400 KB
+    # steady state); the other three overwrite in place (~60 KB, no growth).
+    # Total ~460 KB against a 10 GB allowance.
+    # ------------------------------------------------------------------
+    ("data/ai_predictions/sector_history.json", "data/ai_predictions/sector_history.json"),
+    ("data/ai_predictions/anomalies.json",      "data/ai_predictions/anomalies.json"),
+    ("data/ai_predictions/forecasts.json",      "data/ai_predictions/forecasts.json"),
+    ("data/ai/anomaly_radar.json",              "data/ai/anomaly_radar.json"),
 ]
 
 # data/intelligence_repository/advisories/ is a directory of monthly chunk

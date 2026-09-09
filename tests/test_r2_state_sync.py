@@ -102,7 +102,7 @@ class TestStateFilesManifest(unittest.TestCase):
     entry doesn't silently pass just because the generic tests adapted to
     the shorter list."""
 
-    def test_exactly_eleven_files_migrated(self):
+    def test_exactly_fifteen_files_migrated(self):
         """P0 R2 COST AUDIT FIX: was 9 -- data/cache/r2_report_publish_state.json
         (scripts/r2_report_publisher.py's own cross-run incremental-publish
         state) was added after a post-merge forensic audit of PR #369 found
@@ -119,8 +119,50 @@ class TestStateFilesManifest(unittest.TestCase):
         that caused the 2026-08-26 staleness incident) had NO persistence
         path at all -- not git-staged (safe_git_commit.py never listed it),
         not R2-synced. Added as the 11th entry rather than left with zero
-        durability."""
-        self.assertEqual(len(rs.STATE_FILES), 11)
+        durability.
+
+        Was 11 -- post-merge verification of PR #388/#389 (2026-09-09) found
+        the AI plane persisting through ai-predictions.yml's `git push origin
+        main`, i.e. the same rejected-since-2026-08-26 path this whole module
+        exists to replace, with the failure swallowed by that workflow's own
+        retry loop. Verified empirically: zero runtime commits on main in that
+        window. Four entries added -- sector_history.json (bidirectional
+        cross-run state; without it the forecast's 35-observed-day threshold
+        is unreachable forever) plus anomalies/forecasts/anomaly_radar, which
+        ai_brain_publisher.py consumes from a DIFFERENT workflow and so must
+        survive the hand-off. predictions_summary.json and
+        apex_forecast_latest.json were deliberately NOT added (no consumer /
+        orphaned producer) -- see the rationale block in r2_state_sync.py.
+
+        This count is a FinOps tripwire, not bookkeeping: every entry costs a
+        GET on each download pass and a PUT on each upload pass across four
+        workflows. The +4 here was measured at 2,160 Class A + 2,160 Class B
+        per month = 0.216% of R2's 1M Class A allowance. Any future increase
+        must be justified the same way before this number is changed."""
+        self.assertEqual(len(rs.STATE_FILES), 15)
+
+    def test_ai_plane_state_is_r2_persisted(self):
+        """The AI plane's cross-run state must not regress onto the git path.
+
+        sector_history.json is load-bearing: sector_forecast_model.py needs 35
+        observed days before it will publish a forecast, and the store can only
+        reach that by accumulating across runs. On the git path it accumulated
+        nothing at all, silently."""
+        for entry in (
+            ("data/ai_predictions/sector_history.json", "data/ai_predictions/sector_history.json"),
+            ("data/ai_predictions/anomalies.json", "data/ai_predictions/anomalies.json"),
+            ("data/ai_predictions/forecasts.json", "data/ai_predictions/forecasts.json"),
+            ("data/ai/anomaly_radar.json", "data/ai/anomaly_radar.json"),
+        ):
+            self.assertIn(entry, rs.STATE_FILES)
+
+    def test_no_consumerless_ai_artifacts_added(self):
+        """Guards the cost decision above: these two were traced to no live
+        consumer / an orphaned producer, so syncing them would spend ops for
+        nothing. Re-adding either needs a fresh justification."""
+        local_paths = [local for local, _ in rs.STATE_FILES]
+        self.assertNotIn("data/ai_predictions/predictions_summary.json", local_paths)
+        self.assertNotIn("data/ai_predictions/apex_forecast_latest.json", local_paths)
 
     def test_report_publish_state_is_present_with_path_mirrored_key(self):
         self.assertIn(

@@ -1633,6 +1633,64 @@ def t31():
 
 
 # ---------------------------------------------------------------------------
+# Shared helper for the AI-plane producer gates (T35 / T38 / T40)
+#
+# v201.3: these gates used to assert that the producing workflow `git add`ed
+# its output directory, using git staging as a proxy for "the output is
+# persisted". That proxy became false: main's branch ruleset has rejected
+# direct runtime pushes since 2026-08-26, so a staged-and-pushed artifact was
+# silently discarded while the gate still passed. Persistence now means
+# registered in r2_state_sync.py's STATE_FILES AND uploaded by the workflow
+# that produces it -- which is what these gates assert.
+# ---------------------------------------------------------------------------
+
+def _executable_yaml(path) -> str:
+    """Workflow text with full-line comments stripped.
+
+    A gate that greps raw workflow text matches its own rationale comments --
+    the failure mode mutation-testing exposed in T35's first version.
+    """
+    return "\n".join(
+        ln for ln in path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if not ln.lstrip().startswith("#")
+    )
+
+
+def _assert_producer_persisted(producer_rel: str, artifact_rels: list) -> None:
+    """A producer must run in CI and its output must be durably persisted."""
+    workflows = REPO_ROOT / ".github" / "workflows"
+
+    runners = [
+        wf.name for wf in sorted(workflows.glob("*.yml"))
+        if producer_rel in _executable_yaml(wf)
+    ]
+    assert runners, (
+        f"no workflow invokes {producer_rel} — its artifacts freeze while the AI "
+        "Cyber Brain keeps publishing them (the 2026-09-09 staleness incident)"
+    )
+
+    persisting = [
+        wf.name for wf in sorted(workflows.glob("*.yml"))
+        if producer_rel in (code := _executable_yaml(wf))
+        and "r2_state_sync.py --upload" in code
+    ]
+    assert persisting, (
+        f"workflow(s) {runners} run {producer_rel} but none publish to R2 "
+        "(r2_state_sync.py --upload). Git persistence is NOT an alternative: "
+        "main's ruleset has rejected direct runtime pushes since 2026-08-26, so "
+        "a git-staged artifact is discarded when the runner is destroyed"
+    )
+
+    state_sync = (REPO_ROOT / "scripts" / "r2_state_sync.py").read_text(
+        encoding="utf-8", errors="replace")
+    for rel in artifact_rels:
+        assert f'("{rel}"' in state_sync, (
+            f"{rel} is not registered in r2_state_sync.py's STATE_FILES — the "
+            f"upload step would skip it and {producer_rel}'s output would not survive"
+        )
+
+
+# ---------------------------------------------------------------------------
 # T32: AI plane freshness guard contract
 #
 # Origin: the 2026-09-09 AI plane forensic audit. The public, premium-gated
@@ -1849,43 +1907,12 @@ def t34():
 
 @test("T35_anomaly_radar_engine_wired_to_ci")
 def t35():
-    """An orphaned producer is a silently rotting artifact — keep the radar wired."""
-    engine = REPO_ROOT / "scripts" / "anomaly_radar_engine.py"
-    assert engine.exists(), "scripts/anomaly_radar_engine.py missing"
-
-    workflows = REPO_ROOT / ".github" / "workflows"
-
-    def executable_lines(text: str) -> str:
-        """Workflow text with full-line YAML comments stripped.
-
-        A plain substring search over the raw file is not sufficient: this
-        test's own rationale comment names the script, so a workflow that
-        merely *mentions* anomaly_radar_engine.py in a comment would satisfy
-        the gate while invoking nothing. Caught by mutation-testing this test.
-        """
-        return "\n".join(
-            ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
-        )
-
-    invokers, committers = [], []
-    for wf in sorted(workflows.glob("*.yml")):
-        code = executable_lines(wf.read_text(encoding="utf-8", errors="replace"))
-        if "scripts/anomaly_radar_engine.py" not in code:
-            continue
-        invokers.append(wf.name)
-        if "data/ai/" in code:
-            committers.append(wf.name)
-
-    assert invokers, (
-        "no workflow invokes scripts/anomaly_radar_engine.py — data/ai/anomaly_radar.json "
-        "will freeze while the AI Cyber Brain continues to publish it as live intelligence "
-        "(this is exactly the 127-day staleness found on 2026-09-09)"
-    )
-    # The artifact it writes must also be staged, or each run's output is
-    # discarded and the file stays frozen anyway.
-    assert committers, (
-        f"workflow(s) {invokers} run the anomaly radar but none stage data/ai/ — "
-        "the regenerated radar output would be thrown away every run"
+    """An orphaned or unpersisted producer is a silently rotting artifact."""
+    assert (REPO_ROOT / "scripts" / "anomaly_radar_engine.py").exists(), \
+        "scripts/anomaly_radar_engine.py missing"
+    _assert_producer_persisted(
+        "scripts/anomaly_radar_engine.py",
+        ["data/ai/anomaly_radar.json"],
     )
 
 
@@ -2122,24 +2149,11 @@ def t37():
 @test("T38_ai_predictions_engine_wired_to_ci")
 def t38():
     """An orphaned producer silently freezes the artifacts it owns."""
-    engine_ref = "scripts/ai_predictions_engine.py"
-    assert (REPO_ROOT / engine_ref).exists(), f"{engine_ref} missing"
-
-    workflows = REPO_ROOT / ".github" / "workflows"
-    invokers = []
-    for wf in sorted(workflows.glob("*.yml")):
-        code = "\n".join(
-            ln for ln in wf.read_text(encoding="utf-8", errors="replace").splitlines()
-            if not ln.lstrip().startswith("#")
-        )
-        if engine_ref in code and "data/ai_predictions/" in code:
-            invokers.append(wf.name)
-
-    assert invokers, (
-        f"no workflow both invokes {engine_ref} and stages data/ai_predictions/ — "
-        "anomalies.json / forecasts.json / predictions_summary.json will freeze while "
-        "the AI Cyber Brain continues to publish them (the 128-day staleness found "
-        "on 2026-09-09)"
+    assert (REPO_ROOT / "scripts" / "ai_predictions_engine.py").exists(), \
+        "scripts/ai_predictions_engine.py missing"
+    _assert_producer_persisted(
+        "scripts/ai_predictions_engine.py",
+        ["data/ai_predictions/anomalies.json", "data/ai_predictions/forecasts.json"],
     )
 
 
@@ -2271,24 +2285,18 @@ def t39():
 
 @test("T40_sector_history_store_wired_to_ci")
 def t40():
-    """The daily observation store must be updated and committed by CI."""
-    ref = "scripts/sector_history_store.py"
-    assert (REPO_ROOT / ref).exists(), f"{ref} missing"
+    """The observation store must accumulate durably, or the forecast never starts.
 
-    workflows = REPO_ROOT / ".github" / "workflows"
-    wired = []
-    for wf in sorted(workflows.glob("*.yml")):
-        code = "\n".join(
-            ln for ln in wf.read_text(encoding="utf-8", errors="replace").splitlines()
-            if not ln.lstrip().startswith("#")
-        )
-        if ref in code and "data/ai_predictions/" in code:
-            wired.append(wf.name)
-
-    assert wired, (
-        f"no workflow both runs {ref} and stages data/ai_predictions/ — the daily "
-        "observation store would never accumulate, so the forecaster would decline "
-        "permanently for lack of history"
+    sector_history.json is the load-bearing case: sector_forecast_model.py needs
+    35 observed days before it publishes anything, and the store can only reach
+    that by surviving between runs. On the git path it accumulated nothing at
+    all, silently, because the push was rejected and the failure swallowed.
+    """
+    assert (REPO_ROOT / "scripts" / "sector_history_store.py").exists(), \
+        "scripts/sector_history_store.py missing"
+    _assert_producer_persisted(
+        "scripts/sector_history_store.py",
+        ["data/ai_predictions/sector_history.json"],
     )
 
 
