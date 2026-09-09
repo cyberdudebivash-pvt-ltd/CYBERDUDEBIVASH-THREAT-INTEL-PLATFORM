@@ -1017,6 +1017,14 @@ def build_escalation_tracker(items: list, alpha: dict, beta: dict) -> list:
     return escalations[:10]
 
 def build_monetization_gates() -> dict:
+    # v202.0: "full_anomaly_radar_12plus" was renamed to match the feature
+    # count actually in force. anomaly_radar_engine.py's live/primary output
+    # now comes from ai_predictions_engine.py's extract_features() (8
+    # features -- see that function's own docstring), not its own retired
+    # 12-feature standalone model, which the SSOT consolidation kept only as
+    # a fallback for when the canonical file is unavailable. If either
+    # engine's feature count changes again, update the number here too --
+    # nothing enforces this label against the real feature list.
     return {
         "free_tier": {
             "price": "$0/mo",
@@ -1027,7 +1035,7 @@ def build_monetization_gates() -> dict:
         },
         "pro_tier_49": {
             "price": "$49/mo",
-            "features": ["full_anomaly_radar_12plus", "campaign_deep_dive", "kill_chain_analysis",
+            "features": ["full_anomaly_radar_8plus", "campaign_deep_dive", "kill_chain_analysis",
                          "ioc_arrays", "executive_summaries", "sector_heatmap_full",
                          "soc_recommendations", "ai_explainability"],
             "locked": ["siem_push", "mssp_automation", "predictive_apis", "executive_brief_api",
