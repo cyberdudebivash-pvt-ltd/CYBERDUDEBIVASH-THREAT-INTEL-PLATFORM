@@ -96,6 +96,33 @@ jobs:
       # COST: GitHub Actions compute only. Zero Cloudflare R2/KV/Workers
       # operations — this writes to the repo, not to Cloudflare.
       # ---------------------------------------------------------------------
+      # ---------------------------------------------------------------------
+      # v201.2 — DAILY OBSERVATION STORE (the forecast's substrate)
+      #
+      # The audit's root cause for the sector forecast was that the platform
+      # retains no historical time series: api/feed.json and data/stix/ are
+      # both rolling windows, and the only usable observation history was 14
+      # days across a 16-day span. No model can forecast from that, which is
+      # why the old engine fabricated 91 synthetic days per sector.
+      #
+      # This step accumulates one real observation per sector per day into
+      # data/ai_predictions/sector_history.json (~1 KB/day, pruned at 400
+      # days). It is idempotent, so running every 6h is safe. --bootstrap
+      # seeds from whatever genuine history the archives still hold; it never
+      # overwrites a day already recorded live.
+      #
+      # Until roughly 35 days accumulate the forecaster will keep declining,
+      # by design and with a stated reason. That is the honest state while the
+      # history builds, and it resolves itself as this step runs.
+      #
+      # COST: Actions compute only. Zero Cloudflare operations.
+      # ---------------------------------------------------------------------
+      - name: Update sector daily observation store
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python3 scripts/sector_history_store.py --bootstrap
+
       - name: Run AI Predictions Engine (anomalies + evidence-gated sector forecasts)
         continue-on-error: true
         env:

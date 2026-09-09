@@ -2144,6 +2144,155 @@ def t38():
 
 
 # ---------------------------------------------------------------------------
+# T39: the sector forecast is validated out-of-sample, or not published
+#
+# Origin: the 2026-09-09 forecast redesign. The previous forecast regressed
+# per-advisory risk_score on day_index with a GradientBoostingRegressor -- a
+# target that was not a time series (57 advisories on 3 distinct days), fitted
+# by a model that cannot extrapolate (all 30 forecast days returned the
+# identical boundary-leaf value 6.7800), on history that did not exist (the
+# feed spans 8 days, so 91 synthetic days per sector were fabricated).
+#
+# The replacement forecasts daily sector intensity from a durable observation
+# store, choosing a model by rolling-origin backtest and publishing only when
+# it beats the naive benchmark. This gate locks those properties.
+# ---------------------------------------------------------------------------
+
+@test("T39_sector_forecast_validated_out_of_sample")
+def t39():
+    """A forecast must beat naive out-of-sample, or no forecast is published."""
+    import importlib.util
+    import math as _math
+
+    model_path = REPO_ROOT / "scripts" / "sector_forecast_model.py"
+    store_path = REPO_ROOT / "scripts" / "sector_history_store.py"
+    assert model_path.exists(), "scripts/sector_forecast_model.py missing"
+    assert store_path.exists(), "scripts/sector_history_store.py missing"
+
+    def load(name, path):
+        spec = importlib.util.spec_from_file_location(name, path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            sys.modules.pop(name, None)
+        return mod
+
+    fm = load("sector_forecast_model", model_path)
+    hs = load("sector_history_store", store_path)
+
+    # --- The publish gate must be "beats naive", not a softened threshold. ---
+    assert fm.MASE_PUBLISH_THRESHOLD <= 1.0, (
+        f"MASE publish threshold relaxed to {fm.MASE_PUBLISH_THRESHOLD} — a model "
+        "that loses to 'tomorrow looks like today' would be published as a forecast"
+    )
+
+    # --- A forecastable signal must be forecast. Weekly seasonality is the
+    #     real shape of advisory publishing; if the suite cannot handle it the
+    #     forecast is useless even when it is honest. ---
+    seasonal = [10.0 + 5.0 * _math.sin(2 * _math.pi * i / 7) for i in range(120)]
+    ok = fm.select_and_forecast(seasonal, horizon=14, min_history=35)
+    assert ok["publishable"], f"a clean weekly signal was declined: {ok['reason']}"
+    assert ok["mase"] < 1.0, f"winner did not beat naive: MASE={ok['mase']}"
+    assert len(ok["forecast"]) == 14, "forecast length does not match the horizon"
+    assert len(ok["lower"]) == 14 and len(ok["upper"]) == 14, \
+        "forecast published without prediction intervals"
+
+    # --- Trend AND seasonality together must be forecastable. Testing the
+    #     first version of this suite showed it declined every trending
+    #     seasonal series, because no candidate modelled both at once. ---
+    trending = [20.0 + 0.5 * i + 6.0 * _math.sin(2 * _math.pi * i / 7) for i in range(120)]
+    tr = fm.select_and_forecast(trending, horizon=30, min_history=35)
+    assert tr["publishable"], (
+        f"a trending seasonal series was declined ({tr['reason']}) — the candidate "
+        "set has lost its trend+seasonality models"
+    )
+
+    # --- An unforecastable series must be declined. A random walk is the
+    #     textbook case where naive is optimal; publishing a model there would
+    #     assert skill that does not exist. ---
+    rw, seed = [0.0], 12345
+    for _ in range(150):
+        seed = (1103515245 * seed + 12345) % (2 ** 31)
+        rw.append(rw[-1] + ((seed / 2 ** 31) - 0.5))
+    bad = fm.select_and_forecast(rw, horizon=14, min_history=35)
+    assert not bad["publishable"], (
+        f"a random walk was published as forecastable (MASE={bad.get('mase')}) — "
+        "naive is optimal on a random walk; this is a false skill claim"
+    )
+    assert "forecast" not in bad, \
+        "a declined result still carries a forecast series a caller could render"
+
+    # --- Too little history must decline, whatever the shape. ---
+    assert not fm.select_and_forecast(seasonal[:20], horizon=14)["publishable"], \
+        "forecast published on 20 days of history"
+
+    # --- Backtesting must never score a model on data it was fitted on. ---
+    seen = []
+
+    def spy(train, h, **kw):
+        seen.append(len(train))
+        return [0.0] * h
+
+    fm.rolling_origin_backtest([float(i) for i in range(60)], 10, spy, {}, min_train=20)
+    assert seen and max(seen) <= 50, (
+        f"backtest trained on up to {max(seen)} of 60 points while scoring a "
+        "10-step horizon — future data leaked into training"
+    )
+
+    # --- Determinism: identical input, identical output. ---
+    assert fm.select_and_forecast(seasonal, 14, min_history=35) == \
+           fm.select_and_forecast(seasonal, 14, min_history=35), \
+        "forecast is not deterministic"
+
+    # --- The store must never fabricate an observation. ---
+    from datetime import date as _date, timedelta as _td
+    today = _date(2026, 9, 9)
+    stale = [{"published_at": (today - _td(days=14)).isoformat() + "T00:00:00Z"}]
+    _, action = hs.update_today({"days": {}}, stale, lambda i: "energy",
+                                ["energy"], today=today)
+    assert action.startswith("skipped_stale_feed"), (
+        f"a 14-day-stale feed was recorded as a live observation (action={action}) — "
+        "zeros would be written for days nothing was actually observed"
+    )
+
+    empty = hs.build_series({"days": {}}, "energy")
+    assert empty["values"] == [] and empty["observed_days"] == 0, \
+        "build_series invented a series from an empty store"
+
+
+# ---------------------------------------------------------------------------
+# T40: the observation store stays wired to CI
+#
+# The store only has value if it actually accumulates. An unwired store is an
+# empty store, and the forecaster would decline forever.
+# ---------------------------------------------------------------------------
+
+@test("T40_sector_history_store_wired_to_ci")
+def t40():
+    """The daily observation store must be updated and committed by CI."""
+    ref = "scripts/sector_history_store.py"
+    assert (REPO_ROOT / ref).exists(), f"{ref} missing"
+
+    workflows = REPO_ROOT / ".github" / "workflows"
+    wired = []
+    for wf in sorted(workflows.glob("*.yml")):
+        code = "\n".join(
+            ln for ln in wf.read_text(encoding="utf-8", errors="replace").splitlines()
+            if not ln.lstrip().startswith("#")
+        )
+        if ref in code and "data/ai_predictions/" in code:
+            wired.append(wf.name)
+
+    assert wired, (
+        f"no workflow both runs {ref} and stages data/ai_predictions/ — the daily "
+        "observation store would never accumulate, so the forecaster would decline "
+        "permanently for lack of history"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

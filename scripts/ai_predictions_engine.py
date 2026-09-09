@@ -9,8 +9,8 @@
 ║    - Anomaly score >= 0.90 → "Zero-Day Candidate" flag                      ║
 ║    - Output: data/ai_predictions/anomalies.json                             ║
 ║                                                                              ║
-║  Engine 2: Gradient Boosting 30-Day Sector Forecasts                        ║
-║    - scikit-learn GradientBoostingRegressor per sector                      ║
+║  Engine 2: Validated Sector Intensity Forecasts (v201.2)                    ║
+║    - Model competition scored by rolling-origin backtest (MASE < 1)         ║
 ║    - Sectors: Energy, Healthcare, Government, Finance, Technology,           ║
 ║               Manufacturing, Critical Infrastructure                         ║
 ║    - Sliding 90-day window of OBSERVED advisories only (v201.1)            ║
@@ -74,6 +74,13 @@ BOOTSTRAP_DAYS      = 90        # v201.1: observation LOOKBACK WINDOW in days.
 # the model does not have. Sectors below this floor are reported as
 # NO_PREDICTIVE_SKILL with their measured score, never as a forecast.
 MIN_FORECAST_CONFIDENCE = 0.10
+
+# v201.2: minimum OBSERVED DAYS of history before a sector is forecast. The
+# forecast target is now a daily time series (see run_sector_forecasts), so the
+# unit is days of history, not advisories. Two weekly cycles to see the pattern
+# twice, plus room for the horizon and several backtest origins; below this,
+# MASE is computed from too few errors to be meaningful.
+MIN_HISTORY_DAYS = 35
 
 MIN_REAL_SAMPLES    = 15        # v201.1: minimum OBSERVED advisories with risk scores
                                 # before a sector is forecast at all. Declared since the
@@ -568,171 +575,166 @@ def _gradient_boosting_forecast(
 def run_sector_forecasts(
     items:   List[Dict],
     horizon: int = FORECAST_HORIZON,
+    store_path=None,
 ) -> Dict:
-    """Run 30-day Gradient Boosting forecasts for all sectors."""
+    """Forecast per-sector daily threat intensity, or decline with a reason.
+
+    ══════════════════════════════════════════════════════════════════════════
+    v201.2 FORECAST REDESIGN (AI plane audit, 2026-09-09)
+    ══════════════════════════════════════════════════════════════════════════
+    The previous implementation regressed each advisory's risk_score on a
+    day_index with a GradientBoostingRegressor. Three errors, none fixable by
+    tuning:
+
+      1. The target was not a time series. On the live feed, energy's 57
+         advisories fell on 3 distinct days -- 57 y-values over 3 x-values.
+         Fitting that recovers noise, which is why validated out-of-sample
+         R2 was exactly 0.0.
+      2. Tree ensembles cannot extrapolate. Every one of the 30 forecast days
+         was verified to return the identical value (6.7800), the boundary
+         leaf -- a flat line drawn in the UI as a trend.
+      3. There was no history. api/feed.json is a rolling snapshot spanning
+         8 days; the engine fabricated 91 synthetic days per sector to
+         compensate.
+
+    The redesign forecasts a quantity that genuinely is a time series --
+    per-sector daily risk-weighted advisory intensity -- read from
+    scripts/sector_history_store.py, which durably accumulates one observation
+    per sector per day. Model choice is decided by measured out-of-sample skill
+    (scripts/sector_forecast_model.py): a competition among naive,
+    seasonal-naive, mean, drift, SES and damped-Holt, scored by rolling-origin
+    backtest, published only when the winner beats the naive benchmark
+    (MASE < 1).
+
+    Declining is a correct outcome. Until enough history accumulates, every
+    sector reports why it cannot be forecast and no numbers are invented.
+    ══════════════════════════════════════════════════════════════════════════
+    """
     sectors_output: Dict[str, Dict] = {}
+    declined: List[str] = []
     today = datetime.now(timezone.utc).date()
 
-    declined: List[str] = []
+    try:
+        import sector_history_store as _store_mod
+        import sector_forecast_model as _model
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import sector_history_store as _store_mod
+        import sector_forecast_model as _model
+
+    store = _store_mod.load_store(store_path or _store_mod.STORE_PATH)
+    total_days = len(store.get("days", {}))
 
     for sector in SECTOR_KEYWORDS:
-        X, y = _build_sector_history(items, sector)
         advisories_30d = sum(1 for it in items if classify_sector(it) == sector)
+        series = _store_mod.build_series(store, sector, lookback_days=180, today=today)
 
-        # ------------------------------------------------------------------
-        # v201.1 EVIDENCE GATE. MIN_REAL_SAMPLES has been declared since this
-        # engine was written and was never referenced anywhere in the file --
-        # the documented evidence threshold did not exist in code. It is
-        # enforced here. A sector without enough observed history gets an
-        # explicit INSUFFICIENT_EVIDENCE record carrying its real sample
-        # count, and NO invented numbers: no forecast series, no peak, no
-        # trend, no confidence. Publishing "we do not have the data" is
-        # correct; publishing a number derived from a constant is not.
-        # ------------------------------------------------------------------
-        if len(y) < MIN_REAL_SAMPLES:
+        result = _model.select_and_forecast(
+            series["values"],
+            horizon=horizon,
+            min_history=MIN_HISTORY_DAYS,
+            observed_days=series["observed_days"],
+            span_days=series["span_days"],
+        )
+
+        common = {
+            "sector":                 sector.replace("_", " ").title(),
+            "advisories_30d":         advisories_30d,
+            "observed_days":          series["observed_days"],
+            "span_days":              series["span_days"],
+            "interpolated_days":      series["interpolated_days"],
+            "history_start":          series["start"],
+            "history_end":            series["end"],
+            "synthetic_observations": 0,
+        }
+
+        if not result["publishable"]:
             declined.append(sector)
-            sectors_output[sector] = {
-                "sector":             sector.replace("_", " ").title(),
-                "status":             "INSUFFICIENT_EVIDENCE",
-                "real_observations":  len(y),
-                "required_observations": MIN_REAL_SAMPLES,
-                "synthetic_observations": 0,
-                "advisories_30d":     advisories_30d,
-                "reason": (
-                    f"{len(y)} observed advisories with risk scores in the last "
-                    f"{BOOTSTRAP_DAYS} days; {MIN_REAL_SAMPLES} required to fit a "
-                    "forecast. No forecast is produced for this sector."
-                ),
-            }
-            logger.info(
-                f"  {sector}: DECLINED — {len(y)}/{MIN_REAL_SAMPLES} observed samples"
+            sectors_output[sector] = dict(
+                common,
+                status="INSUFFICIENT_EVIDENCE",
+                reason=result["reason"],
+                measured_mase=result.get("mase"),
+                required_mase=_model.MASE_PUBLISH_THRESHOLD,
             )
+            logger.info("  %s: DECLINED — %s", sector, result["reason"])
             continue
 
-        forecasts, confidence, conf_basis = _gradient_boosting_forecast(X, y, horizon)
+        fc = result["forecast"]
+        labels = [(today + timedelta(days=i + 1)).isoformat() for i in range(len(fc))]
+        current = series["values"][-1]
+        peak_val = max(fc)
+        trough_val = min(fc)
 
-        # Defence in depth: the evidence gate above should already have
-        # declined any sector that cannot produce a forecast, but an empty
-        # series here must degrade to INSUFFICIENT_EVIDENCE rather than raise
-        # on max([]) -- and must never be backfilled with a placeholder.
-        if not forecasts:
-            declined.append(sector)
-            sectors_output[sector] = {
-                "sector":             sector.replace("_", " ").title(),
-                "status":             "INSUFFICIENT_EVIDENCE",
-                "real_observations":  len(y),
-                "required_observations": MIN_REAL_SAMPLES,
-                "synthetic_observations": 0,
-                "advisories_30d":     advisories_30d,
-                "reason": "model produced no usable forecast series for this sector",
-            }
-            logger.warning(f"  {sector}: DECLINED — model returned no forecast series")
-            continue
+        # Trend compares LEVELS, not endpoints. Comparing fc[-1] to fc[0] on a
+        # weekly-seasonal series compares two arbitrary phases of the cycle: an
+        # early test labelled all seven sectors DECLINING purely because the
+        # horizon happened to start on a weekday peak. Averaging whole seasonal
+        # cycles cancels the phase out, so the label reflects the underlying
+        # level moving rather than where the window was cut.
+        _m = _model.SEASONAL_PERIOD
+        recent_level = sum(series["values"][-_m:]) / len(series["values"][-_m:])
+        forecast_level = sum(fc) / len(fc)
+        delta = forecast_level - recent_level
+        rel = delta / max(abs(recent_level), 0.1)
 
-        # ------------------------------------------------------------------
-        # v201.1 PREDICTIVE-SKILL GATE. Having enough observations is not the
-        # same as being able to forecast them. A model whose validated
-        # out-of-sample score is at or near zero predicts unseen days no
-        # better than returning the mean; rendering its output as a 30-day
-        # trend line asserts a capability it does not have. Report the
-        # measured score and decline, rather than publishing the series.
-        # ------------------------------------------------------------------
-        if confidence < MIN_FORECAST_CONFIDENCE:
-            declined.append(sector)
-            sectors_output[sector] = {
-                "sector":                sector.replace("_", " ").title(),
-                "status":                "NO_PREDICTIVE_SKILL",
-                "real_observations":     len(y),
-                "synthetic_observations": 0,
-                "advisories_30d":        advisories_30d,
-                "measured_confidence":   confidence,
-                "confidence_basis":      conf_basis,
-                "required_confidence":   MIN_FORECAST_CONFIDENCE,
-                "reason": (
-                    f"validated confidence {confidence} is below the "
-                    f"{MIN_FORECAST_CONFIDENCE} floor required to publish a forecast; "
-                    "the model showed no out-of-sample skill on this sector's observed history"
-                ),
-            }
-            logger.info(
-                f"  {sector}: DECLINED — no predictive skill "
-                f"(confidence={confidence}, basis={conf_basis}, {len(y)} observed samples)"
-            )
-            continue
-
-        current_risk  = round(float(sum(y[-7:]) / max(len(y[-7:]), 1)), 2)
-        peak_val      = max(forecasts)
-        peak_day      = forecasts.index(peak_val) + 1
-        trough_val    = min(forecasts)
-        trend_delta   = forecasts[-1] - forecasts[0]
-        trend_pct     = round(trend_delta / max(forecasts[0], 0.1) * 100, 1)
-
-        if trend_delta > 0.3:
+        if rel > 0.05:
             trend = "RISING"
-        elif trend_delta < -0.3:
+        elif rel < -0.05:
             trend = "DECLINING"
         else:
             trend = "STABLE"
 
-        # Risk level classification from peak forecast
-        if peak_val >= 8.0:
-            risk_level = "CRITICAL"
-        elif peak_val >= 6.5:
-            risk_level = "HIGH"
-        elif peak_val >= 4.5:
-            risk_level = "MEDIUM"
-        else:
-            risk_level = "LOW"
-
-        # Generate daily labels
-        daily_labels = [(today + timedelta(days=i + 1)).isoformat() for i in range(horizon)]
-
-        sectors_output[sector] = {
-            "sector":           sector.replace("_", " ").title(),
-            "status":           "FORECAST",
-            "current_risk":     current_risk,
-            "forecast_30d":     [round(v, 2) for v in forecasts],
-            "daily_labels":     daily_labels,
-            "trend":            trend,
-            "trend_pct":        trend_pct,
-            "risk_level":       risk_level,
-            "peak_day":         peak_day,
-            "peak_risk":        round(peak_val, 2),
-            "trough_risk":      round(trough_val, 2),
-            "confidence":       confidence,
-            "advisories_30d":   advisories_30d,
-            # v201.1 provenance: every forecast now states the evidence it was
-            # fitted on, so a consumer can weigh it instead of taking the
-            # number on faith. synthetic_observations is always 0 by
-            # construction -- see _build_sector_history().
-            "real_observations":      len(y),
-            "synthetic_observations": 0,
-            "confidence_basis":       conf_basis,
-        }
+        sectors_output[sector] = dict(
+            common,
+            status="FORECAST",
+            current_intensity=round(float(current), 2),
+            # Retained for backward compatibility with existing consumers that
+            # read current_risk/forecast_30d; the units are now daily
+            # risk-weighted intensity rather than a per-advisory risk score.
+            current_risk=round(float(current), 2),
+            forecast_30d=fc,
+            forecast_lower=result["lower"],
+            forecast_upper=result["upper"],
+            daily_labels=labels,
+            trend=trend,
+            trend_pct=round(rel * 100, 1),
+            peak_day=fc.index(peak_val) + 1,
+            peak_risk=round(peak_val, 2),
+            trough_risk=round(trough_val, 2),
+            model=result["model"],
+            model_params=result["params"],
+            mase=result["mase"],
+            benchmark_mase=result["benchmark_mase"],
+            backtest_origins=result["n_origins"],
+            validation=result["validation"],
+            interval_method=result["interval_method"],
+            # `confidence` is retained as a 0-1 field for existing consumers,
+            # derived from measured skill: 1 - MASE, so 0.4 means the model's
+            # error is 60% of the naive benchmark's. It is never floored.
+            confidence=round(max(0.0, 1.0 - result["mase"]), 3),
+            confidence_basis=f"1-MASE over {result['n_origins']} rolling-origin backtests",
+        )
         logger.info(
-            f"  {sector}: risk={current_risk} trend={trend} peak={round(peak_val,2)} "
-            f"conf={confidence} ({conf_basis}) on {len(y)} observed samples"
+            "  %s: %s MASE=%.3f (naive %.3f) over %d origins, %d observed days",
+            sector, result["model"], result["mase"],
+            result["benchmark_mase"] or float("nan"),
+            result["n_origins"], series["observed_days"],
         )
 
     return {
         "generated_at":     datetime.now(timezone.utc).isoformat(),
-        "model":            "GradientBoostingRegressor",
+        "model":            "validated_model_competition",
         "version":          ENGINE_VERSION,
         "forecast_horizon": horizon,
         "total_items_used": len(items),
-        # v201.1 top-level evidence summary. A consumer must be able to see at
-        # a glance how much of this report is an actual forecast.
-        "sectors_forecast":  len(sectors_output) - len(declined),
-        "sectors_declined":  sorted(declined),
-        "min_real_samples":  MIN_REAL_SAMPLES,
+        "sectors_forecast": len(sectors_output) - len(declined),
+        "sectors_declined": sorted(declined),
+        "min_real_samples": MIN_HISTORY_DAYS,
         "synthetic_training_data": False,
+        "history_days_available": total_days,
+        "validation": "rolling_origin_backtest_mase",
         "sectors":          sectors_output,
-        "metadata": {
-            "gstin":       "21ARKPN8270G1ZP",
-            "vendor":      "CyberDudeBivash Pvt. Ltd.",
-            "access_tier": "ENTERPRISE",
-            "endpoint":    "/api/v1/predict/enterprise",
-        },
     }
 
 
@@ -804,7 +806,7 @@ def main() -> int:
 
     # ── Engine 2: Sector Forecasts ────────────────────────────────────────
     if not args.anomaly_only:
-        logger.info("\n[Engine 2] Gradient Boosting 30-Day Sector Forecasts")
+        logger.info("\n[Engine 2] Validated Sector Intensity Forecasts (model competition, MASE-gated)")
         try:
             forecast_report = run_sector_forecasts(items, horizon=args.horizon)
             # v201.1: was len(forecast_report['sectors']), which counts every
