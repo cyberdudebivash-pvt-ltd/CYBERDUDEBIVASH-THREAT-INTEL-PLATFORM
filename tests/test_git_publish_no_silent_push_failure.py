@@ -72,8 +72,17 @@ class TestMultiSourceIntelCommitStepFailsLoudly(unittest.TestCase):
         self.assertIn("multi-source-enrichment", self.doc["jobs"])
 
     def _commit_step_source(self) -> str:
+        """Locate the step that persists this job's ingestion output.
+
+        Renamed from "Commit Intel State & Manifest" to "Upload Intel State
+        to R2" when persistence was migrated off git-push (see module
+        docstring's "Superseded update"): this lookup was never updated to
+        match, which is why the three tests below regressed to failing
+        against current `main` even though the underlying architecture was
+        already correct.
+        """
         steps = self.doc["jobs"]["multi-source-enrichment"]["steps"]
-        commit_steps = [s for s in steps if s.get("name") == "Commit Intel State & Manifest"]
+        commit_steps = [s for s in steps if s.get("name") == "Upload Intel State to R2"]
         self.assertEqual(len(commit_steps), 1)
         return commit_steps[0]["run"]
 
