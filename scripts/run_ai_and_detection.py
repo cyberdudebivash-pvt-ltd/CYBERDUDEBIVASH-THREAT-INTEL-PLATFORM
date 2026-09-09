@@ -2,9 +2,39 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  CYBERDUDEBIVASH SENTINEL APEX — AI + DETECTION WRAPPER v1.0               ║
 # ║  Orchestrates: AI Decision Engine + Detection Rule Forge                   ║
-# ║  Called by: .github/workflows/sentinel-blogger.yml (Stage 6c)             ║
 # ║  Zero-failure design: all errors caught, pipeline never blocked            ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
+#
+# ┌──────────────────────────────────────────────────────────────────────────────┐
+# │ STATUS: DORMANT — NOT INVOKED BY ANY WORKFLOW  (verified 2026-09-09)        │
+# └──────────────────────────────────────────────────────────────────────────────┘
+#
+# This header previously read "Called by: .github/workflows/sentinel-blogger.yml
+# (Stage 6c)". The 2026-09-09 AI plane forensic audit found no such stage and no
+# invocation of this script anywhere in .github/workflows/, scripts/, agent/,
+# tools/ or ops/. The claim was inaccurate, and because it read as authoritative
+# it masked the consequence below.
+#
+# WHY THIS MATTERS: this script is the only caller in the repository of
+# agent/sentinel_ai_engine.py (~1,300 lines, the "AI Decision Engine": signal
+# fusion scoring, attack-chain reconstruction, actor attribution, campaign
+# detection, predictive exploitation scoring). Because nothing runs this
+# wrapper, none of that engine executes in production, and data/ai_intelligence/
+# receives nothing from it.
+#
+# NOT DELETED, per the Deprecation Instead of Deletion policy: the code is
+# intact and runnable on demand (`python3 scripts/run_ai_and_detection.py`).
+#
+# TO REACTIVATE: wiring this into the production pipeline is an architectural
+# event, not a feature toggle — it introduces a previously-unrun ~1,300-line
+# engine into the enrichment path and would change advisory scoring output.
+# The Architecture Preservation Rule requires the full evidence set (current vs
+# proposed architecture, compatibility assessment, migration and rollback plans)
+# before that change is made. Do not wire it in as a side effect of unrelated
+# work.
+#
+# Nothing else in this file was changed by the audit; only this inaccurate
+# provenance claim was corrected.
 
 import sys
 import os

@@ -7221,14 +7221,74 @@ async function handleRequest(request, env, ctx) {
     }
     const filename = path.slice("/api/ai/".length);
 
+    // -------------------------------------------------------------------
+    // v201.0 CLOUDFLARE COST CONTAINMENT (AI plane forensic audit, 2026-09-09)
+    //
+    // A response returned by a Worker is NOT placed in Cloudflare's edge
+    // cache on its own -- on a Worker route the Worker runs in front of the
+    // cache, so the `Cache-Control: public, max-age=300` header below only
+    // ever instructed the *browser*. Every uncached client request therefore
+    // reached the origin logic and cost one R2 Class B GET (or, on R2 miss,
+    // one outbound subrequest to raw.githubusercontent.com). The audit found
+    // zero uses of the Cache API anywhere in this Worker, so this cost scaled
+    // linearly and without ceiling against traffic on the platform's most
+    // frequently polled AI endpoints -- ai-threat-tracker.html fetches all
+    // three of these files on every page load.
+    //
+    // Safe to cache at the edge, specifically here and not generally:
+    //   * GET only, and the filename is whitelisted above.
+    //   * This block performs no auth and reads no per-caller state, so the
+    //     body is byte-identical for every caller. (Contrast
+    //     /api/v1/intel/ai_summary.json, which is in PREMIUM_INTEL_PATHS --
+    //     edge-caching a tier-gated response would serve premium
+    //     intelligence to unauthenticated callers. It is deliberately NOT
+    //     cached here.)
+    //   * 300s TTL matches the Cache-Control this endpoint already declared,
+    //     so client-visible freshness is unchanged.
+    //
+    // The cache key is normalised to origin + pathname, dropping the query
+    // string. Without that, `?cb=1`, `?cb=2`, ... would each be a distinct
+    // key, letting any caller force unbounded cache misses and drive R2
+    // operations at will -- a cost-amplification vector, not just a cache
+    // inefficiency. These three files take no query parameters, so dropping
+    // them loses nothing.
+    // -------------------------------------------------------------------
+    const aiCacheKey = new Request(`${url.origin}${path}`, { method: "GET" });
+    const aiCache = caches.default;
+    try {
+      const cached = await aiCache.match(aiCacheKey);
+      if (cached) return cached;
+    } catch (cacheErr) {
+      console.error(`[api/ai proxy] cache match failed for ${filename}: ${cacheErr && cacheErr.message ? cacheErr.message : cacheErr}`);
+    }
+
+    // Store a 200 in the edge cache without delaying the client response.
+    // Only 200s are stored: caching a 502 would pin an outage in place for
+    // the full TTL. Guarded on ctx because handleRequest is also reachable
+    // from call sites that do not supply one.
+    const cacheAndReturn = (resp) => {
+      if (resp.status === 200 && ctx && typeof ctx.waitUntil === "function") {
+        try {
+          ctx.waitUntil(aiCache.put(aiCacheKey, resp.clone()));
+        } catch (putErr) {
+          console.error(`[api/ai proxy] cache put failed for ${filename}: ${putErr && putErr.message ? putErr.message : putErr}`);
+        }
+      }
+      return resp;
+    };
+
     if (env.INTEL_R2) {
       try {
         const r2Obj = await env.INTEL_R2.get(`ai/${filename}`);
         if (r2Obj) {
-          return new Response(r2Obj.body, {
+          // Buffered rather than streamed so the body can be safely cloned
+          // into the cache. These are small JSON documents (the largest,
+          // tracker.json, is ~222KB) so buffering costs nothing meaningful.
+          const body = await r2Obj.text();
+          return cacheAndReturn(new Response(body, {
             status: 200,
             headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" },
-          });
+          }));
         }
       } catch (r2Err) {
         console.error(`[api/ai proxy] R2 read failed for ${filename}, falling back to gh-pages: ${r2Err && r2Err.message ? r2Err.message : r2Err}`);
@@ -7247,7 +7307,7 @@ async function handleRequest(request, env, ctx) {
         return jsonResp({ error: "upstream_unavailable", filename, request_id: crypto.randomUUID() }, 502, { "Cache-Control": "no-store" });
       }
       const data = await resp.json();
-      return jsonResp(data, 200, { "Cache-Control": "public, max-age=300" });
+      return cacheAndReturn(jsonResp(data, 200, { "Cache-Control": "public, max-age=300" }));
     } catch (e) {
       console.error(`[api/ai proxy] ${filename}: ${e && e.message ? e.message : e}`);
       return jsonResp({ error: "upstream_unavailable", filename, request_id: crypto.randomUUID() }, 502, { "Cache-Control": "no-store" });

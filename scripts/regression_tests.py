@@ -1633,6 +1633,517 @@ def t31():
 
 
 # ---------------------------------------------------------------------------
+# T32: AI plane freshness guard contract
+#
+# Origin: the 2026-09-09 AI plane forensic audit. The public, premium-gated
+# api/v1/intel/ai_summary.json had been republishing AI artifacts frozen since
+# 2026-05-04 (anomalies, forecasts), 2026-05-05 (anomaly radar) and 2026-04-04
+# (apex forecast) under a freshly-stamped `generated_at`, because the publisher
+# checked file presence and never file age.
+#
+# This test locks the *guard*, not the data: it asserts the freshness module
+# exists and that its state machine still classifies age correctly. A CI
+# checkout legitimately has artifacts of varying age, so asserting live data is
+# fresh here would produce a flaky gate; T33 covers the wiring instead.
+# ---------------------------------------------------------------------------
+
+@test("T32_ai_freshness_guard_contract")
+def t32():
+    """ai_freshness_guard.py must exist and classify artifact age correctly."""
+    import importlib.util
+    import tempfile
+    from datetime import datetime, timezone, timedelta
+
+    guard_path = REPO_ROOT / "scripts" / "ai_freshness_guard.py"
+    assert guard_path.exists(), "scripts/ai_freshness_guard.py missing — AI plane has no freshness SSOT"
+
+    spec = importlib.util.spec_from_file_location("ai_freshness_guard", guard_path)
+    fg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fg)
+
+    now = datetime(2026, 9, 9, 12, 0, 0, tzinfo=timezone.utc)
+    tmp = Path(tempfile.mkdtemp())
+
+    def artifact(name: str, hours_old: float) -> Path:
+        p = tmp / name
+        stamp = (now - timedelta(hours=hours_old)).isoformat()
+        p.write_text(json.dumps({"generated_at": stamp}), encoding="utf-8")
+        return p
+
+    # Core state machine.
+    cases = [
+        ("fresh.json", 1.0, fg.FreshnessState.FRESH),
+        ("stale.json", 72.0, fg.FreshnessState.STALE),
+        # The exact shape of the incident: a four-month-old artifact.
+        ("incident.json", 128 * 24.0, fg.FreshnessState.EXPIRED),
+    ]
+    for name, age, expected in cases:
+        v = fg.assess(artifact(name, age), now=now)
+        assert v.state == expected, f"{name}: expected {expected}, got {v.state} (age={v.age_hours}h)"
+
+    # The load-bearing property: an expired artifact must never be
+    # republishable as current intelligence.
+    expired = fg.assess(artifact("expired2.json", 200 * 24.0), now=now)
+    assert not expired.is_publishable, "EXPIRED artifact reported publishable — the incident could recur"
+
+    # Fail closed, never fail open: unreadable and missing inputs must not be
+    # mistaken for fresh ones.
+    missing = fg.assess(tmp / "does-not-exist.json", now=now)
+    assert missing.state == fg.FreshnessState.MISSING and not missing.is_publishable, \
+        "missing artifact must be MISSING and not publishable"
+
+    corrupt = tmp / "corrupt.json"
+    corrupt.write_text("{not valid json", encoding="utf-8")
+    assert fg.assess(corrupt, now=now).state == fg.FreshnessState.UNREADABLE, \
+        "unreadable artifact must be UNREADABLE"
+
+    undated = tmp / "undated.json"
+    undated.write_text(json.dumps({"data": 1}), encoding="utf-8")
+    assert not fg.assess(undated, now=now).is_publishable, \
+        "artifact with no timestamp must not be publishable — presence is not freshness"
+
+    # A single expired input must never be masked by fresh siblings.
+    summary = fg.summarize([
+        fg.assess(artifact("f2.json", 1.0), now=now),
+        fg.assess(artifact("e2.json", 300 * 24.0), now=now),
+    ])
+    assert summary["overall_state"] == fg.FreshnessState.EXPIRED, \
+        f"worst state must win, got {summary['overall_state']}"
+    assert summary["degraded"] is True, "mixed-freshness summary must report degraded"
+
+
+# ---------------------------------------------------------------------------
+# T33: AI Cyber Brain publishes freshness-gated, evidence-backed output
+#
+# Locks the three specific defects the audit found in ai_brain_publisher.py so
+# none can be silently reintroduced:
+#   1. models_active was a hardcoded literal claiming Isolation Forest,
+#      GradientBoostingRegressor and DBSCAN were running when none were.
+#   2. Upstream artifacts were admitted on presence alone, with no age check.
+#   3. The radar's zero-day flag was read under a key the radar never emits
+#      (`is_zero_day_candidate` vs the emitted `is_candidate`), so every
+#      zero-day candidate published as a non-candidate.
+# ---------------------------------------------------------------------------
+
+@test("T33_ai_brain_freshness_gated_and_evidence_backed")
+def t33():
+    """ai_brain_publisher.py must gate on freshness and never hardcode engine claims."""
+    pub = REPO_ROOT / "scripts" / "ai_brain_publisher.py"
+    assert pub.exists(), "scripts/ai_brain_publisher.py missing"
+    src = pub.read_text(encoding="utf-8", errors="replace")
+
+    # 1. No hardcoded ML capability claim.
+    assert '"models_active"        : ["IsolationForest"' not in src, \
+        "models_active is hardcoded again — engine attribution must be derived from bundle content"
+    assert "_derive_active_engines" in src, \
+        "ai_brain_publisher.py no longer derives its active-engine list from evidence"
+
+    # 2. Freshness gating is wired, not merely importable.
+    assert "ai_freshness_guard" in src, "ai_brain_publisher.py no longer imports the freshness guard"
+    assert "_assess_inputs" in src, "ai_brain_publisher.py no longer assesses input freshness"
+    for flag in ("preds_publishable", "radar_publishable", "apex_publishable"):
+        assert flag in src, f"freshness gate '{flag}' removed from ai_brain_publisher.py"
+
+    # 3. The radar's own spelling of the candidate flag must still be honoured.
+    assert 'a.get("is_candidate")' in src, (
+        "ai_brain_publisher.py no longer reads the radar's `is_candidate` key — "
+        "zero-day candidates would silently publish as non-candidates"
+    )
+
+    # The published bundle, when present, must carry the integrity fields that
+    # let a consumer tell current intelligence from stale intelligence.
+    summary_path = REPO_ROOT / "api" / "v1" / "intel" / "ai_summary.json"
+    if not summary_path.exists():
+        log.warning("[T33] ai_summary.json not present — skipping published-contract check")
+        return
+
+    bundle = json.loads(summary_path.read_text(encoding="utf-8"))
+    for field in ("degraded", "freshness_state"):
+        assert field in bundle, (
+            f"ai_summary.json is missing top-level '{field}' — consumers cannot distinguish "
+            "current intelligence from a stale republish"
+        )
+    telemetry = bundle.get("ai_telemetry") or {}
+    assert "data_freshness" in telemetry, "ai_telemetry.data_freshness missing from published bundle"
+    # Backward compatibility: the original presence booleans must survive.
+    assert "data_sources" in telemetry, "ai_telemetry.data_sources removed — breaks existing consumers"
+
+    banned = {"IsolationForest", "GradientBoostingRegressor", "DBSCAN-Actor"}
+    published_models = set(telemetry.get("models_active") or [])
+    assert not (published_models & banned), (
+        f"published models_active still asserts unrun estimators: {sorted(published_models & banned)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T34: AI plane Cloudflare cost containment
+#
+# Origin: the same audit found zero uses of the Cache API anywhere in the
+# Worker fleet. A Worker's own response is not edge-cached automatically, so
+# every request to the public /api/ai/* endpoints cost one R2 Class B GET.
+# This is the guard on the platform's Cloudflare spend, which must not exceed
+# plan again.
+# ---------------------------------------------------------------------------
+
+@test("T34_ai_plane_edge_cache_cost_guard")
+def t34():
+    """The public /api/ai/* proxy must be edge-cached, and premium paths must not be."""
+    gw = REPO_ROOT / "workers" / "intel-gateway" / "src" / "index.js"
+    assert gw.exists(), "workers/intel-gateway/src/index.js missing"
+    src = gw.read_text(encoding="utf-8", errors="replace")
+
+    assert "AI_STATIC_PROXY_FILES" in src, "AI static proxy block missing from the gateway"
+    assert "caches.default" in src, (
+        "no Cache API usage in the gateway — every /api/ai/* request costs an R2 "
+        "Class B operation, the exact Cloudflare cost regression this gate exists to prevent"
+    )
+    assert "aiCacheKey" in src and "aiCache.match" in src, \
+        "AI proxy edge-cache lookup removed — R2 cost per request is unbounded again"
+
+    # The cache key must drop the query string. Without normalisation any
+    # caller can force unlimited misses with ?cb=1, ?cb=2, ... and drive R2
+    # operations (and therefore spend) at will.
+    assert "${url.origin}${path}" in src, (
+        "AI proxy cache key is no longer normalised to origin+pathname — "
+        "query-string cache-busting can amplify R2 cost without bound"
+    )
+
+    # Only successful responses may be stored; caching a 502 pins an outage.
+    assert "resp.status === 200" in src, \
+        "AI proxy caches non-200 responses — an upstream outage would be pinned for the full TTL"
+
+    # SECURITY: the premium-gated AI bundle must never become edge-cacheable,
+    # or premium intelligence would be served to unauthenticated callers.
+    #
+    # Checked against the two authoritative declarations rather than by
+    # scanning a byte window around the proxy block: that window also covers
+    # the comment explaining why ai_summary.json is excluded, which made an
+    # earlier form of this assertion fire on its own documentation.
+    assert '"/api/v1/intel/ai_summary.json"' in src, "ai_summary.json path constant missing"
+
+    proxy_decl_start = src.index("const AI_STATIC_PROXY_FILES")
+    proxy_decl = src[proxy_decl_start:src.index("\n", proxy_decl_start)]
+    assert "ai_summary" not in proxy_decl, (
+        "ai_summary.json was added to AI_STATIC_PROXY_FILES — that block is edge-cached "
+        "and performs no auth, so caching a premium-gated bundle there would serve "
+        "premium intelligence to unauthenticated callers"
+    )
+
+    premium_start = src.index("const PREMIUM_INTEL_PATHS")
+    premium_block = src[premium_start:src.index("]);", premium_start)]
+    assert "/api/v1/intel/ai_summary.json" in premium_block, (
+        "ai_summary.json is no longer in PREMIUM_INTEL_PATHS — the premium tier gate "
+        "on the AI Cyber Brain bundle has been removed"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T35: Anomaly radar engine is actually invoked by CI
+#
+# Origin: the audit found scripts/anomaly_radar_engine.py — the zero-day
+# candidate detector — was referenced by no workflow at all. Its output sat
+# frozen for 127 days while the AI Cyber Brain served it as live intelligence.
+# T13 passed throughout, because it validates the artifact's schema and never
+# asks whether anything still produces it.
+# ---------------------------------------------------------------------------
+
+@test("T35_anomaly_radar_engine_wired_to_ci")
+def t35():
+    """An orphaned producer is a silently rotting artifact — keep the radar wired."""
+    engine = REPO_ROOT / "scripts" / "anomaly_radar_engine.py"
+    assert engine.exists(), "scripts/anomaly_radar_engine.py missing"
+
+    workflows = REPO_ROOT / ".github" / "workflows"
+
+    def executable_lines(text: str) -> str:
+        """Workflow text with full-line YAML comments stripped.
+
+        A plain substring search over the raw file is not sufficient: this
+        test's own rationale comment names the script, so a workflow that
+        merely *mentions* anomaly_radar_engine.py in a comment would satisfy
+        the gate while invoking nothing. Caught by mutation-testing this test.
+        """
+        return "\n".join(
+            ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+        )
+
+    invokers, committers = [], []
+    for wf in sorted(workflows.glob("*.yml")):
+        code = executable_lines(wf.read_text(encoding="utf-8", errors="replace"))
+        if "scripts/anomaly_radar_engine.py" not in code:
+            continue
+        invokers.append(wf.name)
+        if "data/ai/" in code:
+            committers.append(wf.name)
+
+    assert invokers, (
+        "no workflow invokes scripts/anomaly_radar_engine.py — data/ai/anomaly_radar.json "
+        "will freeze while the AI Cyber Brain continues to publish it as live intelligence "
+        "(this is exactly the 127-day staleness found on 2026-09-09)"
+    )
+    # The artifact it writes must also be staged, or each run's output is
+    # discarded and the file stays frozen anyway.
+    assert committers, (
+        f"workflow(s) {invokers} run the anomaly radar but none stage data/ai/ — "
+        "the regenerated radar output would be thrown away every run"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T36: AI predictions engine trains on observed data only
+#
+# Origin: the 2026-09-09 anti-fabrication audit. ai_predictions_engine.py built
+# each sector's forecast training set from 91 fabricated days
+# (SECTOR_BASELINES + Gaussian noise) plus whatever real advisories existed —
+# 91.8% synthetic overall, 100% for manufacturing. It seeded that noise with
+# random.Random(hash(sector)), and hash() of a str is randomised per process,
+# so identical inputs produced different "forecasts" on every run.
+# ---------------------------------------------------------------------------
+
+@test("T36_ai_predictions_no_synthetic_training_data")
+def t36():
+    """Forecasts must be fitted on observed advisories, deterministically."""
+    engine = REPO_ROOT / "scripts" / "ai_predictions_engine.py"
+    assert engine.exists(), "scripts/ai_predictions_engine.py missing"
+    src = engine.read_text(encoding="utf-8", errors="replace")
+
+    def code_only(text: str) -> str:
+        """Return executable source with every docstring and comment removed.
+
+        The audit rationale in this file quotes the removed code verbatim
+        (inside docstrings and comments), so a raw substring search matches the
+        very prose describing the fix. This is the same trap T35 fell into
+        before it was mutation-tested, so the stripping is done properly here:
+        all triple-quoted blocks, then all full-line and trailing # comments.
+        """
+        import re as _re
+        stripped = _re.sub(r'"""[\s\S]*?"""', "", text)
+        stripped = _re.sub(r"'''[\s\S]*?'''", "", stripped)
+        out = []
+        for ln in stripped.splitlines():
+            if ln.lstrip().startswith("#"):
+                continue
+            # Drop trailing comments; no '#' appears inside a string literal in
+            # the regions this test inspects.
+            out.append(ln.split("#", 1)[0])
+        return "\n".join(out)
+
+    code = code_only(src)
+    assert len(code) > 5000, (
+        f"code_only() stripped too much ({len(code)} chars) — the checks below "
+        "would pass vacuously"
+    )
+
+    # 1. No RNG anywhere in the engine — a forecast must not move without a
+    #    change in the underlying data.
+    for banned in ("random.Random", "rng.gauss", "random.gauss", "random.uniform"):
+        assert banned not in code, (
+            f"'{banned}' reintroduced into ai_predictions_engine.py — forecast output "
+            "would vary run-to-run independently of the input data"
+        )
+
+    # 2. The evidence threshold must be enforced. Checked behaviourally below
+    #    (see "evidence gate" assertions) rather than by counting occurrences of
+    #    the constant's name: mutation-testing this test showed that replacing
+    #    `if len(y) < MIN_REAL_SAMPLES:` with `if False:` left every textual
+    #    reference intact and the gate passed while the guard was disabled.
+    assert "INSUFFICIENT_EVIDENCE" in code, (
+        "engine no longer declines under-evidenced sectors — it would publish a "
+        "forecast built from too little observed history"
+    )
+
+    # 3. Confidence must not be floored. `max(0.50, ...)` made a model performing
+    #    worse than the mean still publish confidence 0.50.
+    assert "max(0.50" not in code and "max(0.5," not in code, (
+        "confidence floor reintroduced — a model with no predictive skill would "
+        "publish a floored confidence that carries no information"
+    )
+    assert "MIN_FORECAST_CONFIDENCE" in code, (
+        "predictive-skill gate removed — forecasts with zero validated out-of-sample "
+        "skill would be published as trend lines"
+    )
+
+    # 4. Behavioural check: the engine must declare its training data non-synthetic.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ai_predictions_engine", engine)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["ai_predictions_engine"] = mod   # dataclass/annotation safety
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.modules.pop("ai_predictions_engine", None)
+
+    # A sector with no matching advisories must yield no history at all —
+    # previously it yielded 91 fabricated points.
+    x, y = mod._build_sector_history([], "manufacturing")
+    assert x == [] and y == [], (
+        f"_build_sector_history fabricated {len(y)} points for a sector with zero "
+        "observed advisories — synthetic history has returned"
+    )
+
+    # Determinism: same input, same output, across repeated calls.
+    feed_items = [
+        {"title": "energy grid scada outage", "published_at": "2026-09-01T00:00:00Z", "risk_score": 7.0},
+        {"title": "power utility pipeline ics", "published_at": "2026-09-02T00:00:00Z", "risk_score": 6.0},
+    ]
+    first = mod._build_sector_history(feed_items, "energy")
+    for _ in range(3):
+        assert mod._build_sector_history(feed_items, "energy") == first, \
+            "_build_sector_history is not deterministic for identical input"
+
+    # Evidence gate, checked behaviourally. Build a feed carrying fewer energy
+    # advisories than MIN_REAL_SAMPLES and assert the engine declines to
+    # forecast that sector rather than fitting one on too little history.
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    _now = _dt.now(_tz.utc)
+    thin_feed = [
+        {
+            "title": "energy grid scada advisory",
+            "published_at": (_now - _td(days=i + 1)).isoformat(),
+            "risk_score": 7.0,
+        }
+        for i in range(max(1, mod.MIN_REAL_SAMPLES - 1))
+    ]
+    report = mod.run_sector_forecasts(thin_feed)
+    energy = report["sectors"]["energy"]
+    assert energy.get("status") == "INSUFFICIENT_EVIDENCE", (
+        f"energy has {mod.MIN_REAL_SAMPLES - 1} observations (below the "
+        f"MIN_REAL_SAMPLES={mod.MIN_REAL_SAMPLES} threshold) but the engine "
+        f"returned status={energy.get('status')!r} — the evidence gate is not enforced"
+    )
+    assert "forecast_30d" not in energy, (
+        "a sector declined for insufficient evidence still carries a forecast series"
+    )
+    assert report.get("synthetic_training_data") is False, \
+        "engine no longer declares its training data free of synthetic rows"
+
+
+# ---------------------------------------------------------------------------
+# T37: AI Cyber Brain never fabricates a missing assessment
+#
+# Origin: the same audit. ai_brain_publisher.py coerced absent fields with
+# `or <literal>` throughout. Given a sector record carrying no forecast — which
+# is exactly what the fixed engine emits for a declined sector — build_forecasts
+# manufactured a complete, plausible, invented card: current_risk 5.0,
+# peak_risk 5.0, risk_level MEDIUM, trend STABLE, confidence 0.75, prob 37.
+# ---------------------------------------------------------------------------
+
+@test("T37_ai_brain_no_fabricated_assessments")
+def t37():
+    """Absent inputs must be reported as absent, never defaulted into a number."""
+    pub = REPO_ROOT / "scripts" / "ai_brain_publisher.py"
+    assert pub.exists(), "scripts/ai_brain_publisher.py missing"
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ai_brain_publisher", pub)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["ai_brain_publisher"] = mod
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.modules.pop("ai_brain_publisher", None)
+
+    # A declined sector must produce NO forecast card.
+    declined = {
+        "sectors": {
+            "manufacturing": {
+                "sector": "Manufacturing",
+                "status": "INSUFFICIENT_EVIDENCE",
+                "real_observations": 0,
+            },
+            "energy": {
+                "sector": "Energy",
+                "status": "NO_PREDICTIVE_SKILL",
+                "real_observations": 57,
+                "measured_confidence": 0.0,
+            },
+        }
+    }
+    out = mod.build_forecasts(declined)
+    assert out == [], (
+        f"build_forecasts fabricated {len(out)} forecast card(s) from sectors that "
+        f"carry no forecast: {out}"
+    )
+
+    # A record with no status but no substance either must also be skipped.
+    assert mod.build_forecasts({"sectors": {"x": {"sector": "X"}}}) == [], \
+        "build_forecasts invented a card from an empty sector record"
+
+    # A genuine forecast must still publish (backward compatibility with files
+    # written before `status` existed).
+    legacy = {
+        "sectors": {
+            "energy": {
+                "sector": "Energy", "current_risk": 6.5, "peak_risk": 7.2,
+                "confidence": 0.61, "risk_level": "HIGH", "trend": "RISING",
+                "forecast_30d": [6.5] * 30,
+            }
+        }
+    }
+    legacy_out = mod.build_forecasts(legacy)
+    assert len(legacy_out) == 1 and legacy_out[0]["sector"] == "Energy", \
+        "build_forecasts dropped a legitimate legacy forecast — backward compatibility broken"
+
+    # An unscored anomaly must publish unscored, not as an invented 7.5/HIGH.
+    radar = {
+        "top10_anomalous": [
+            {"stix_id": "intel--unscored", "title": "no score", "anomaly_score": 0.9}
+        ],
+        "zero_day_candidates": [],
+    }
+    anoms = mod.build_anomalies(None, radar)
+    assert len(anoms) == 1, f"expected 1 anomaly, got {len(anoms)}"
+    a = anoms[0]
+    assert a["risk_score"] is None, (
+        f"unscored anomaly published risk_score={a['risk_score']} — a missing "
+        "assessment was fabricated into a number"
+    )
+    assert a["severity"] == "UNKNOWN", (
+        f"unscored anomaly published severity={a['severity']} — severity was invented"
+    )
+    assert a["soc_priority"] == "P?-UNSCORED", (
+        f"unscored anomaly published soc_priority={a['soc_priority']} — a SOC "
+        "priority was derived from a fabricated risk score"
+    )
+
+    # _opt_float must preserve a real 0.0 rather than treating it as absent.
+    assert mod._opt_float(0.0) == 0.0, "_opt_float treats a genuine 0.0 as missing"
+    assert mod._opt_float(None, None) is None, "_opt_float invented a value from nothing"
+
+
+# ---------------------------------------------------------------------------
+# T38: both AI prediction producers stay wired to CI
+#
+# Origin: both scripts that write the AI plane's artifacts were orphaned, which
+# is why every one of those artifacts froze for months while the dashboards
+# kept serving them. T35 covers the radar; this covers the predictions engine.
+# ---------------------------------------------------------------------------
+
+@test("T38_ai_predictions_engine_wired_to_ci")
+def t38():
+    """An orphaned producer silently freezes the artifacts it owns."""
+    engine_ref = "scripts/ai_predictions_engine.py"
+    assert (REPO_ROOT / engine_ref).exists(), f"{engine_ref} missing"
+
+    workflows = REPO_ROOT / ".github" / "workflows"
+    invokers = []
+    for wf in sorted(workflows.glob("*.yml")):
+        code = "\n".join(
+            ln for ln in wf.read_text(encoding="utf-8", errors="replace").splitlines()
+            if not ln.lstrip().startswith("#")
+        )
+        if engine_ref in code and "data/ai_predictions/" in code:
+            invokers.append(wf.name)
+
+    assert invokers, (
+        f"no workflow both invokes {engine_ref} and stages data/ai_predictions/ — "
+        "anomalies.json / forecasts.json / predictions_summary.json will freeze while "
+        "the AI Cyber Brain continues to publish them (the 128-day staleness found "
+        "on 2026-09-09)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

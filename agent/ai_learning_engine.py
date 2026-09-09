@@ -3,6 +3,41 @@
 ai_learning_engine.py — CyberDudeBivash SENTINEL APEX v1.0
 AI LEARNING ENGINE — Self-Improving, Memory-Driven Intelligence System
 
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ STATUS: DORMANT — ZERO CALL SITES IN THIS REPOSITORY  (verified 2026-09-09)  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+The 2026-09-09 AI plane forensic audit searched the entire repository for
+`ai_learning_engine`, `AILearningEngine` and `ai_learning` across every file
+type and found no importer, no workflow step and no script invocation. The
+output directory this module documents below (data/ai_learning/) does not exist
+on disk and no path under it is tracked in git.
+
+CONSEQUENCE: the platform's "gets smarter every run" self-learning capability
+is not running. No learned weights are persisted, no weight history accumulates,
+and no learning report is produced. Any documentation, dashboard copy or
+marketing claim asserting that SENTINEL APEX adapts its scoring from historical
+outcomes is not currently supported by executing code.
+
+Note also that this module reads from data/threat_memory/ and is designed to
+adjust the assessments produced by agent/sentinel_ai_engine.py — which is itself
+dormant for a separate reason (see the STATUS block in
+scripts/run_ai_and_detection.py, its only caller).
+
+NOT DELETED, per the Deprecation Instead of Deletion policy. The implementation
+is intact; it has simply never been connected.
+
+TO REACTIVATE: this is an architectural event under the Architecture
+Preservation Rule, not a feature toggle. Activating it makes advisory scoring
+depend on accumulated state, so identical inputs would no longer produce
+identical outputs across runs — a direct change to the platform's determinism
+guarantee. Required before wiring it in: a documented weight-bounding strategy,
+a reset/rollback path for corrupted learned state, and a compatibility
+assessment for every consumer of the scores it would adjust.
+
+The audit changed nothing in this module's logic — only this status block was
+added.
+
 This engine reads from the Threat Memory Engine's persistent databases and
 applies learned patterns to IMPROVE the accuracy and relevance of every
 AI assessment produced by the sentinel_ai_engine.py.
