@@ -36,9 +36,16 @@ jobs:
 
       - name: Install dependencies
         run: pip install requests
+        # scikit-learn/numpy are installed separately below so a resolver
+        # failure degrades the anomaly radar to its built-in Z-score path
+        # instead of failing this whole job.
+
+      - name: Install anomaly radar ML dependencies (optional)
+        continue-on-error: true
+        run: pip install "numpy>=1.26" "scikit-learn>=1.4"
 
       - name: Ensure directories
-        run: mkdir -p data/ai_predictions data/stix
+        run: mkdir -p data/ai_predictions data/stix data/ai
 
       - name: Run AI Predictive Models on Latest Manifest
         continue-on-error: true
@@ -46,6 +53,40 @@ jobs:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
           PYTHONPATH: ${{ github.workspace }}
         run: python3 scripts/run_ai_predictions.py
+
+      # ---------------------------------------------------------------------
+      # v201.0 (AI plane forensic audit, 2026-09-09) — CAPABILITY RESTORATION
+      #
+      # scripts/anomaly_radar_engine.py is the platform's zero-day candidate
+      # detector. Its header documents it as "called by run_pipeline.py Phase
+      # 2", but the audit found no workflow and no script in the repository
+      # that invoked it, so data/ai/anomaly_radar.json had not been
+      # regenerated since 2026-05-05 (127 days). The AI Cyber Brain consumed
+      # that frozen artifact as if it were live, and the regression suite's
+      # T13 passed on it because T13 checks schema, not age.
+      #
+      # Wired here rather than into a new workflow: this job already runs on
+      # the 6-hourly AI cadence, already reads the same api/feed.json the
+      # radar reads, and already has the commit/rebase/push machinery below.
+      # Reuse over new infrastructure (Constitution Principle 4).
+      #
+      # COST: pure GitHub Actions compute — the engine runs in well under a
+      # second on the live 109-advisory feed and performs zero Cloudflare R2,
+      # KV or Workers operations, so this adds nothing to the Cloudflare bill.
+      #
+      # continue-on-error: the radar is enrichment, never a gate on the
+      # predictions above. If it fails, the freshness guard downstream marks
+      # the artifact stale and the AI Cyber Brain degrades honestly.
+      # ---------------------------------------------------------------------
+      - name: Run Anomaly Radar Engine (zero-day candidate detection)
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python3 scripts/anomaly_radar_engine.py
+
+      - name: AI plane freshness report
+        continue-on-error: true
+        run: python3 scripts/ai_freshness_guard.py
 
       - name: Commit AI prediction results
         env:
@@ -55,6 +96,8 @@ jobs:
           git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
           git config user.name "CYBERDUDEBIVASH"
           git add -f data/ai_predictions/ 2>/dev/null || true
+          # v201.0: data/ai/ carries anomaly_radar.json from the radar step above.
+          git add -f data/ai/ 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "No AI prediction changes."
           else

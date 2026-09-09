@@ -64,6 +64,28 @@ logging.basicConfig(
 )
 log = logging.getLogger("CDB-AI-BRAIN")
 
+# v201.0 (AI plane forensic audit, 2026-09-09) -- input freshness enforcement.
+# This publisher previously checked only `is not None` on each upstream AI
+# artifact, so a producer that had not run in four months was indistinguishable
+# from a healthy one and its output was republished under a freshly-stamped
+# `generated_at`. scripts/ai_freshness_guard.py is the SSOT that decides
+# artifact age; see its header for the full incident record.
+#
+# Imported defensively: if the guard module is ever unavailable, the publisher
+# degrades to "cannot verify freshness" and marks the bundle degraded rather
+# than crashing the pipeline or silently reverting to the old blind behaviour.
+try:
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from ai_freshness_guard import (  # noqa: E402
+        assess as _assess_freshness,
+        summarize as _summarize_freshness,
+    )
+    FRESHNESS_GUARD_AVAILABLE = True
+    _FRESHNESS_IMPORT_ERROR = ""
+except Exception as _fg_err:  # noqa: BLE001
+    FRESHNESS_GUARD_AVAILABLE = False
+    _FRESHNESS_IMPORT_ERROR = str(_fg_err)
+
 REPO_ROOT     = pathlib.Path(__file__).resolve().parent.parent
 FEED_PATH     = REPO_ROOT / "api" / "feed.json"
 AI_PREDS_DIR  = REPO_ROOT / "data" / "ai_predictions"
@@ -237,14 +259,34 @@ def build_campaigns(feed: List[Dict]) -> List[Dict]:
     return campaigns[:MAX_CAMPAIGNS]
 
 
-def build_anomalies(ai_preds: Optional[Dict], radar: Optional[Dict]) -> List[Dict]:
+def build_anomalies(
+    ai_preds: Optional[Dict],
+    radar: Optional[Dict],
+    preds_publishable: bool = True,
+    radar_publishable: bool = True,
+) -> List[Dict]:
     """
-    Build anomaly list from Isolation Forest pipeline outputs.
+    Build anomaly list from the anomaly-detection pipeline outputs.
     Primary: data/ai_predictions/anomalies.json
     Supplementary: data/ai/anomaly_radar.json
+
+    v201.0: each source is admitted only when its freshness verdict says it
+    is publishable as current intelligence. An EXPIRED source is dropped
+    entirely rather than republished -- a "ZERO-DAY CANDIDATE" derived from a
+    four-month-old scoring run is not a zero-day candidate, and presenting it
+    as one on a customer-facing endpoint is a correctness defect, not a
+    cosmetic one. Callers that do not pass the flags keep the previous
+    behaviour, so this is backward compatible for any other consumer.
     """
     anomalies: List[Dict] = []
     seen_ids: set = set()
+
+    if not preds_publishable and ai_preds:
+        log.warning("[FRESHNESS] anomalies.json excluded -- source not publishable as current")
+        ai_preds = None
+    if not radar_publishable and radar:
+        log.warning("[FRESHNESS] anomaly_radar.json excluded -- source not publishable as current")
+        radar = None
 
     # Primary source
     if ai_preds and isinstance(ai_preds.get("anomalies"), list):
@@ -272,27 +314,64 @@ def build_anomalies(ai_preds: Optional[Dict], radar: Optional[Dict]) -> List[Dic
             })
 
     # Supplementary radar source
+    #
+    # v201.0 PRODUCER/CONSUMER CONTRACT FIX. scripts/anomaly_radar_engine.py
+    # writes two arrays. `top10_anomalous` is the compact ranking and marks a
+    # candidate with the key `is_candidate`; `zero_day_candidates` is the rich
+    # record carrying severity, threat_type, kev_present and published_at for
+    # exactly those candidates. This branch read only `top10_anomalous` and
+    # looked for `is_zero_day_candidate` -- a key that array has never
+    # contained -- so on the live 2026-09-09 data every radar-sourced anomaly
+    # published as:
+    #   severity "HIGH"            (actual: CRITICAL, KEV-confirmed)
+    #   is_zero_day_candidate false (actual: true, 10 of 10)
+    #   soc_priority "P2-HIGH"     (actual: P1-CRITICAL)
+    # and the zero-day-first sort below plus the zero_day_candidates telemetry
+    # counter were both permanently inert. The platform's flagship zero-day
+    # radar signal never reached the published bundle.
+    #
+    # Fixed by indexing the rich array once and merging it in, and by accepting
+    # either spelling of the candidate flag. Both reads are defensive: a radar
+    # payload missing either array still produces exactly what it produced
+    # before for the fields it does carry.
     if radar and isinstance(radar.get("top10_anomalous"), list):
+        rich_by_id: Dict[str, Dict] = {}
+        for c in (radar.get("zero_day_candidates") or []):
+            if isinstance(c, dict):
+                cid = c.get("stix_id") or c.get("id") or ""
+                if cid:
+                    rich_by_id[cid] = c
+
         for a in radar["top10_anomalous"]:
             sid = a.get("stix_id") or a.get("id") or ""
             if sid in seen_ids:
                 continue
             seen_ids.add(sid)
-            score = float(a.get("anomaly_score") or 0)
+            rich = rich_by_id.get(sid, {})
+            score = float(a.get("anomaly_score") or rich.get("anomaly_score") or 0)
+            risk = float(a.get("risk_score") or rich.get("risk_score") or 7.5)
+            # `is_candidate` is the radar engine's spelling; presence in the
+            # zero_day_candidates array is itself authoritative evidence.
+            is_zd = bool(
+                a.get("is_zero_day_candidate")
+                or a.get("is_candidate")
+                or rich.get("is_zero_day_candidate")
+                or bool(rich)
+            )
             anomalies.append({
                 "stix_id"             : sid,
-                "title"               : (a.get("title") or "Anomalous Advisory")[:100],
-                "severity"            : (a.get("severity") or "HIGH").upper(),
-                "risk_score"          : float(a.get("risk_score") or 7.5),
+                "title"               : (a.get("title") or rich.get("title") or "Anomalous Advisory")[:100],
+                "severity"            : (a.get("severity") or rich.get("severity") or "HIGH").upper(),
+                "risk_score"          : risk,
                 "anomaly_score"       : round(score, 4),
                 "anomaly_pct"         : round(min(99, max(50, score * 100)), 1),
-                "is_zero_day_candidate": bool(a.get("is_zero_day_candidate")),
+                "is_zero_day_candidate": is_zd,
                 "sector"              : "Unknown",
-                "soc_priority"        : _derive_soc_priority(float(a.get("risk_score") or 7.5), bool(a.get("is_zero_day_candidate"))),
-                "threat_type"         : "Unknown",
-                "published_at"        : a.get("published_at") or "",
+                "soc_priority"        : _derive_soc_priority(risk, is_zd),
+                "threat_type"         : a.get("threat_type") or rich.get("threat_type") or "Unknown",
+                "published_at"        : a.get("published_at") or rich.get("published_at") or "",
                 "anomaly_features"    : {},
-                "report_url"          : a.get("report_url") or "",
+                "report_url"          : a.get("report_url") or rich.get("report_url") or "",
             })
 
     # Sort by anomaly_pct desc, zero-day candidates first
@@ -310,11 +389,22 @@ def _derive_soc_priority(risk_score: float, is_zero_day: bool) -> str:
     return "P4-LOW"
 
 
-def build_forecasts(forecasts_data: Optional[Dict]) -> List[Dict]:
+def build_forecasts(
+    forecasts_data: Optional[Dict],
+    publishable: bool = True,
+) -> List[Dict]:
     """
-    Build sector forecasts from GradientBoostingRegressor pipeline outputs.
+    Build sector forecasts from the forecasting pipeline outputs.
     Input: data/ai_predictions/forecasts.json sectors dict.
+
+    v201.0: a 30-day sector forecast whose source run is older than the
+    forecast horizon itself describes a window that has already fully elapsed.
+    Such a source is dropped rather than presented as a forward-looking
+    prediction.
     """
+    if not publishable and forecasts_data:
+        log.warning("[FRESHNESS] forecasts.json excluded -- forecast window already elapsed")
+        return []
     if not forecasts_data or not isinstance(forecasts_data.get("sectors"), dict):
         return []
 
@@ -353,7 +443,12 @@ def build_forecasts(forecasts_data: Optional[Dict]) -> List[Dict]:
     return forecasts[:MAX_FORECASTS]
 
 
-def build_apex_summary(apex_data: Optional[Dict], feed: List[Dict]) -> str:
+def build_apex_summary(
+    apex_data: Optional[Dict],
+    feed: List[Dict],
+    apex_publishable: bool = True,
+    active_engines: Optional[List[str]] = None,
+) -> str:
     """Generate enterprise-grade AI executive summary (v158.5 — SOC/MSSP quality).
 
     Produces a structured, actionable threat summary consumable by:
@@ -363,14 +458,28 @@ def build_apex_summary(apex_data: Optional[Dict], feed: List[Dict]) -> str:
     """
     import re as _re
 
-    # If upstream apex_forecast_latest.json has a real summary, freshen its count
-    if apex_data and apex_data.get("ai_executive_summary"):
+    # Reuse the upstream executive summary only while its source run is still
+    # publishable as current intelligence.
+    #
+    # v201.0 CORRECTNESS FIX: this branch used to rewrite the advisory-count
+    # numerals inside a stored summary to today's feed count before returning
+    # it. Applied to a stale artifact (apex_forecast_latest.json was found 158
+    # days old during the 2026-09-09 audit) that rewrite made months-old
+    # prose report today's numbers -- the text asserted a present-tense
+    # assessment that no engine had actually made. The count refresh is kept
+    # for a still-current summary, where it is a harmless consistency touch-up,
+    # and the whole branch is skipped once the source is no longer publishable
+    # so the derived live-feed summary below is used instead.
+    if apex_publishable and apex_data and apex_data.get("ai_executive_summary"):
         base = apex_data["ai_executive_summary"]
         count = len(feed)
         base = _re.sub(r"analyzing \d+ recent", f"analyzing {count} recent", base)
         # Update advisory count numerals in the text
         base = _re.sub(r"\b\d+ intelligence advisories?\b", f"{count} intelligence advisories", base)
         return base
+    if apex_data and apex_data.get("ai_executive_summary"):
+        log.warning("[FRESHNESS] apex_forecast_latest.json summary excluded -- "
+                    "deriving summary from the live feed instead")
 
     # --- Enterprise-grade derived summary from live feed stats ---
     count = len(feed)
@@ -425,13 +534,105 @@ def build_apex_summary(apex_data: Optional[Dict], feed: List[Dict]) -> str:
         parts.append(f"Most active threat cluster: {top_actor_str} ({top_actor_count} advisories).")
     if top_sector:
         parts.append(f"Highest-impact target sector: {top_sector}.")
-    parts.append(
-        f"ML engines active: Isolation Forest anomaly detection, "
-        f"GradientBoosting 30-day sector forecasts, DBSCAN actor clustering."
-    )
+    # v201.0 TRUTHFULNESS FIX: this sentence used to be a hardcoded string
+    # asserting "Isolation Forest anomaly detection, GradientBoosting 30-day
+    # sector forecasts, DBSCAN actor clustering" on every single run. The
+    # 2026-09-09 audit found no such estimators anywhere in the repository and
+    # the artifacts they supposedly produced last changed on 2026-05-04, so
+    # the claim was published unconditionally while the engines behind it were
+    # not running at all. The engine list is now derived from which analytic
+    # outputs this bundle actually contains.
+    if active_engines:
+        parts.append(f"Analytic engines contributing to this assessment: {', '.join(active_engines)}.")
+    else:
+        parts.append(
+            "Predictive analytic engines are not contributing to this assessment — "
+            "summary derived from live feed telemetry only."
+        )
     parts.append(f"Threat posture: {posture}.")
 
     return " ".join(parts)
+
+
+# -----------------------------------------------------------------------------
+# v201.0 — Input freshness + evidence-derived engine attribution
+# -----------------------------------------------------------------------------
+
+#: The upstream artifacts this publisher consumes, and the engine each one
+#: represents. `label` is the key used in the published `data_freshness` block.
+_FRESHNESS_INPUTS = (
+    ("anomalies",     AI_PREDS_DIR / "anomalies.json"),
+    ("forecasts",     AI_PREDS_DIR / "forecasts.json"),
+    ("apex_forecast", AI_PREDS_DIR / "apex_forecast_latest.json"),
+    ("anomaly_radar", AI_DIR / "anomaly_radar.json"),
+)
+
+
+def _assess_inputs() -> Tuple[Dict[str, Any], Dict[str, bool]]:
+    """Assess every upstream AI artifact's freshness.
+
+    Returns:
+        (freshness_block, publishable) where `freshness_block` is the JSON-safe
+        observability payload embedded in ai_telemetry, and `publishable` maps
+        each input label to whether it may be republished as current intel.
+
+    If the freshness guard module is unavailable, every input is reported
+    unverifiable and treated as NOT publishable. That is deliberate: the
+    failure mode this whole change exists to remove is publishing unverified
+    content as current, so an unavailable verifier must never re-enable it.
+    """
+    if not FRESHNESS_GUARD_AVAILABLE:
+        log.error("[FRESHNESS] guard module unavailable (%s) — "
+                  "treating all AI inputs as unverifiable", _FRESHNESS_IMPORT_ERROR)
+        return (
+            {
+                "overall_state": "UNVERIFIABLE",
+                "degraded": True,
+                "guard_available": False,
+                "error": _FRESHNESS_IMPORT_ERROR,
+                "fresh_count": 0,
+                "total_count": len(_FRESHNESS_INPUTS),
+                "artifacts": {},
+            },
+            {label: False for label, _ in _FRESHNESS_INPUTS},
+        )
+
+    verdicts = [_assess_freshness(path, label=label) for label, path in _FRESHNESS_INPUTS]
+    block = _summarize_freshness(verdicts)
+    block["guard_available"] = True
+
+    for v in verdicts:
+        level = log.info if v.is_fresh else log.warning
+        level("[FRESHNESS] %-14s %-10s %s", v.label, v.state, v.reason)
+
+    if block["degraded"]:
+        log.warning("[FRESHNESS] AI plane DEGRADED — overall=%s fresh=%d/%d expired=%s",
+                    block["overall_state"], block["fresh_count"],
+                    block["total_count"], block.get("expired") or [])
+
+    return block, {v.label: v.is_publishable for v in verdicts}
+
+
+def _derive_active_engines(
+    campaigns: List[Dict],
+    anomalies: List[Dict],
+    forecasts: List[Dict],
+) -> List[str]:
+    """Name only the analytic engines that actually contributed to this bundle.
+
+    An engine is listed when the output it produces is present and non-empty.
+    Campaign clustering is computed in-process from the live feed by
+    build_campaigns(), so it is evidenced by its own result rather than by an
+    upstream artifact's freshness.
+    """
+    engines: List[str] = []
+    if campaigns:
+        engines.append("Actor-Campaign Clustering")
+    if anomalies:
+        engines.append("Anomaly Detection")
+    if forecasts:
+        engines.append("Sector Risk Forecasting")
+    return engines
 
 
 def main() -> int:
@@ -460,20 +661,37 @@ def main() -> int:
     apex_data = load_json_safe(AI_PREDS_DIR / "apex_forecast_latest.json")
     radar = load_json_safe(AI_DIR / "anomaly_radar.json")
 
+    # ------------------------------------------------------------------
+    # v201.0 -- Assess upstream freshness BEFORE building anything from it.
+    # ------------------------------------------------------------------
+    freshness_block, publishable = _assess_inputs()
+
     # Build components
     log.info("[BUILD] Campaign clusters...")
     campaigns = build_campaigns(feed)
     log.info("[BUILD] %d campaigns clustered", len(campaigns))
 
     log.info("[BUILD] Anomaly list...")
-    anomalies = build_anomalies(ai_preds, radar)
+    anomalies = build_anomalies(
+        ai_preds, radar,
+        preds_publishable=publishable["anomalies"],
+        radar_publishable=publishable["anomaly_radar"],
+    )
     log.info("[BUILD] %d anomalies compiled", len(anomalies))
 
     log.info("[BUILD] Sector forecasts...")
-    forecasts = build_forecasts(forecasts_data)
+    forecasts = build_forecasts(forecasts_data, publishable=publishable["forecasts"])
     log.info("[BUILD] %d sector forecasts", len(forecasts))
 
-    apex_summary = build_apex_summary(apex_data, feed)
+    # Engine attribution is derived from what this bundle actually contains,
+    # never asserted unconditionally.
+    active_engines = _derive_active_engines(campaigns, anomalies, forecasts)
+
+    apex_summary = build_apex_summary(
+        apex_data, feed,
+        apex_publishable=publishable["apex_forecast"],
+        active_engines=active_engines,
+    )
 
     # AI telemetry
     sev_dist: Counter = Counter(
@@ -492,14 +710,23 @@ def main() -> int:
         "forecast_sectors"     : len(forecasts),
         "max_sector_prob"      : max_prob,
         "top_risk_sector"      : top_sector,
-        "models_active"        : ["IsolationForest", "GradientBoostingRegressor", "DBSCAN-Actor"],
+        # v201.0: was a hardcoded ["IsolationForest", "GradientBoostingRegressor",
+        # "DBSCAN-Actor"] literal published on every run regardless of whether any
+        # of those produced anything. Now derived from the bundle's actual content.
+        "models_active"        : active_engines,
         "pipeline_version"     : VERSION,
+        # PRESERVED UNCHANGED for backward compatibility: existing consumers read
+        # these four booleans. They answer "was the file present and parseable",
+        # which is what they have always answered. `data_freshness` below is the
+        # additive block that answers the question these never could -- how old
+        # the artifact is, and whether it is publishable as current intelligence.
         "data_sources"         : {
             "anomalies_json"  : ai_preds is not None,
             "forecasts_json"  : forecasts_data is not None,
             "apex_forecast"   : apex_data is not None,
             "anomaly_radar"   : radar is not None,
         },
+        "data_freshness"       : freshness_block,
     }
 
     runtime = round(time.monotonic() - t0, 3)
@@ -515,6 +742,13 @@ def main() -> int:
         "apex_summary"    : apex_summary,
         "ai_telemetry"    : ai_telemetry,
         "runtime_seconds" : runtime,
+        # v201.0 additive top-level integrity fields. `generated_at` above is
+        # this bundle's publish time and always has been; it says nothing about
+        # how old the intelligence inside it is. These two say exactly that, at
+        # the top level, so a dashboard can render an honest degraded state
+        # without having to reach into ai_telemetry.
+        "degraded"        : bool(freshness_block.get("degraded", True)),
+        "freshness_state" : freshness_block.get("overall_state", "UNVERIFIABLE"),
     }
 
     API_OUT_DIR.mkdir(parents=True, exist_ok=True)

@@ -1633,6 +1633,263 @@ def t31():
 
 
 # ---------------------------------------------------------------------------
+# T32: AI plane freshness guard contract
+#
+# Origin: the 2026-09-09 AI plane forensic audit. The public, premium-gated
+# api/v1/intel/ai_summary.json had been republishing AI artifacts frozen since
+# 2026-05-04 (anomalies, forecasts), 2026-05-05 (anomaly radar) and 2026-04-04
+# (apex forecast) under a freshly-stamped `generated_at`, because the publisher
+# checked file presence and never file age.
+#
+# This test locks the *guard*, not the data: it asserts the freshness module
+# exists and that its state machine still classifies age correctly. A CI
+# checkout legitimately has artifacts of varying age, so asserting live data is
+# fresh here would produce a flaky gate; T33 covers the wiring instead.
+# ---------------------------------------------------------------------------
+
+@test("T32_ai_freshness_guard_contract")
+def t32():
+    """ai_freshness_guard.py must exist and classify artifact age correctly."""
+    import importlib.util
+    import tempfile
+    from datetime import datetime, timezone, timedelta
+
+    guard_path = REPO_ROOT / "scripts" / "ai_freshness_guard.py"
+    assert guard_path.exists(), "scripts/ai_freshness_guard.py missing — AI plane has no freshness SSOT"
+
+    spec = importlib.util.spec_from_file_location("ai_freshness_guard", guard_path)
+    fg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fg)
+
+    now = datetime(2026, 9, 9, 12, 0, 0, tzinfo=timezone.utc)
+    tmp = Path(tempfile.mkdtemp())
+
+    def artifact(name: str, hours_old: float) -> Path:
+        p = tmp / name
+        stamp = (now - timedelta(hours=hours_old)).isoformat()
+        p.write_text(json.dumps({"generated_at": stamp}), encoding="utf-8")
+        return p
+
+    # Core state machine.
+    cases = [
+        ("fresh.json", 1.0, fg.FreshnessState.FRESH),
+        ("stale.json", 72.0, fg.FreshnessState.STALE),
+        # The exact shape of the incident: a four-month-old artifact.
+        ("incident.json", 128 * 24.0, fg.FreshnessState.EXPIRED),
+    ]
+    for name, age, expected in cases:
+        v = fg.assess(artifact(name, age), now=now)
+        assert v.state == expected, f"{name}: expected {expected}, got {v.state} (age={v.age_hours}h)"
+
+    # The load-bearing property: an expired artifact must never be
+    # republishable as current intelligence.
+    expired = fg.assess(artifact("expired2.json", 200 * 24.0), now=now)
+    assert not expired.is_publishable, "EXPIRED artifact reported publishable — the incident could recur"
+
+    # Fail closed, never fail open: unreadable and missing inputs must not be
+    # mistaken for fresh ones.
+    missing = fg.assess(tmp / "does-not-exist.json", now=now)
+    assert missing.state == fg.FreshnessState.MISSING and not missing.is_publishable, \
+        "missing artifact must be MISSING and not publishable"
+
+    corrupt = tmp / "corrupt.json"
+    corrupt.write_text("{not valid json", encoding="utf-8")
+    assert fg.assess(corrupt, now=now).state == fg.FreshnessState.UNREADABLE, \
+        "unreadable artifact must be UNREADABLE"
+
+    undated = tmp / "undated.json"
+    undated.write_text(json.dumps({"data": 1}), encoding="utf-8")
+    assert not fg.assess(undated, now=now).is_publishable, \
+        "artifact with no timestamp must not be publishable — presence is not freshness"
+
+    # A single expired input must never be masked by fresh siblings.
+    summary = fg.summarize([
+        fg.assess(artifact("f2.json", 1.0), now=now),
+        fg.assess(artifact("e2.json", 300 * 24.0), now=now),
+    ])
+    assert summary["overall_state"] == fg.FreshnessState.EXPIRED, \
+        f"worst state must win, got {summary['overall_state']}"
+    assert summary["degraded"] is True, "mixed-freshness summary must report degraded"
+
+
+# ---------------------------------------------------------------------------
+# T33: AI Cyber Brain publishes freshness-gated, evidence-backed output
+#
+# Locks the three specific defects the audit found in ai_brain_publisher.py so
+# none can be silently reintroduced:
+#   1. models_active was a hardcoded literal claiming Isolation Forest,
+#      GradientBoostingRegressor and DBSCAN were running when none were.
+#   2. Upstream artifacts were admitted on presence alone, with no age check.
+#   3. The radar's zero-day flag was read under a key the radar never emits
+#      (`is_zero_day_candidate` vs the emitted `is_candidate`), so every
+#      zero-day candidate published as a non-candidate.
+# ---------------------------------------------------------------------------
+
+@test("T33_ai_brain_freshness_gated_and_evidence_backed")
+def t33():
+    """ai_brain_publisher.py must gate on freshness and never hardcode engine claims."""
+    pub = REPO_ROOT / "scripts" / "ai_brain_publisher.py"
+    assert pub.exists(), "scripts/ai_brain_publisher.py missing"
+    src = pub.read_text(encoding="utf-8", errors="replace")
+
+    # 1. No hardcoded ML capability claim.
+    assert '"models_active"        : ["IsolationForest"' not in src, \
+        "models_active is hardcoded again — engine attribution must be derived from bundle content"
+    assert "_derive_active_engines" in src, \
+        "ai_brain_publisher.py no longer derives its active-engine list from evidence"
+
+    # 2. Freshness gating is wired, not merely importable.
+    assert "ai_freshness_guard" in src, "ai_brain_publisher.py no longer imports the freshness guard"
+    assert "_assess_inputs" in src, "ai_brain_publisher.py no longer assesses input freshness"
+    for flag in ("preds_publishable", "radar_publishable", "apex_publishable"):
+        assert flag in src, f"freshness gate '{flag}' removed from ai_brain_publisher.py"
+
+    # 3. The radar's own spelling of the candidate flag must still be honoured.
+    assert 'a.get("is_candidate")' in src, (
+        "ai_brain_publisher.py no longer reads the radar's `is_candidate` key — "
+        "zero-day candidates would silently publish as non-candidates"
+    )
+
+    # The published bundle, when present, must carry the integrity fields that
+    # let a consumer tell current intelligence from stale intelligence.
+    summary_path = REPO_ROOT / "api" / "v1" / "intel" / "ai_summary.json"
+    if not summary_path.exists():
+        log.warning("[T33] ai_summary.json not present — skipping published-contract check")
+        return
+
+    bundle = json.loads(summary_path.read_text(encoding="utf-8"))
+    for field in ("degraded", "freshness_state"):
+        assert field in bundle, (
+            f"ai_summary.json is missing top-level '{field}' — consumers cannot distinguish "
+            "current intelligence from a stale republish"
+        )
+    telemetry = bundle.get("ai_telemetry") or {}
+    assert "data_freshness" in telemetry, "ai_telemetry.data_freshness missing from published bundle"
+    # Backward compatibility: the original presence booleans must survive.
+    assert "data_sources" in telemetry, "ai_telemetry.data_sources removed — breaks existing consumers"
+
+    banned = {"IsolationForest", "GradientBoostingRegressor", "DBSCAN-Actor"}
+    published_models = set(telemetry.get("models_active") or [])
+    assert not (published_models & banned), (
+        f"published models_active still asserts unrun estimators: {sorted(published_models & banned)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T34: AI plane Cloudflare cost containment
+#
+# Origin: the same audit found zero uses of the Cache API anywhere in the
+# Worker fleet. A Worker's own response is not edge-cached automatically, so
+# every request to the public /api/ai/* endpoints cost one R2 Class B GET.
+# This is the guard on the platform's Cloudflare spend, which must not exceed
+# plan again.
+# ---------------------------------------------------------------------------
+
+@test("T34_ai_plane_edge_cache_cost_guard")
+def t34():
+    """The public /api/ai/* proxy must be edge-cached, and premium paths must not be."""
+    gw = REPO_ROOT / "workers" / "intel-gateway" / "src" / "index.js"
+    assert gw.exists(), "workers/intel-gateway/src/index.js missing"
+    src = gw.read_text(encoding="utf-8", errors="replace")
+
+    assert "AI_STATIC_PROXY_FILES" in src, "AI static proxy block missing from the gateway"
+    assert "caches.default" in src, (
+        "no Cache API usage in the gateway — every /api/ai/* request costs an R2 "
+        "Class B operation, the exact Cloudflare cost regression this gate exists to prevent"
+    )
+    assert "aiCacheKey" in src and "aiCache.match" in src, \
+        "AI proxy edge-cache lookup removed — R2 cost per request is unbounded again"
+
+    # The cache key must drop the query string. Without normalisation any
+    # caller can force unlimited misses with ?cb=1, ?cb=2, ... and drive R2
+    # operations (and therefore spend) at will.
+    assert "${url.origin}${path}" in src, (
+        "AI proxy cache key is no longer normalised to origin+pathname — "
+        "query-string cache-busting can amplify R2 cost without bound"
+    )
+
+    # Only successful responses may be stored; caching a 502 pins an outage.
+    assert "resp.status === 200" in src, \
+        "AI proxy caches non-200 responses — an upstream outage would be pinned for the full TTL"
+
+    # SECURITY: the premium-gated AI bundle must never become edge-cacheable,
+    # or premium intelligence would be served to unauthenticated callers.
+    #
+    # Checked against the two authoritative declarations rather than by
+    # scanning a byte window around the proxy block: that window also covers
+    # the comment explaining why ai_summary.json is excluded, which made an
+    # earlier form of this assertion fire on its own documentation.
+    assert '"/api/v1/intel/ai_summary.json"' in src, "ai_summary.json path constant missing"
+
+    proxy_decl_start = src.index("const AI_STATIC_PROXY_FILES")
+    proxy_decl = src[proxy_decl_start:src.index("\n", proxy_decl_start)]
+    assert "ai_summary" not in proxy_decl, (
+        "ai_summary.json was added to AI_STATIC_PROXY_FILES — that block is edge-cached "
+        "and performs no auth, so caching a premium-gated bundle there would serve "
+        "premium intelligence to unauthenticated callers"
+    )
+
+    premium_start = src.index("const PREMIUM_INTEL_PATHS")
+    premium_block = src[premium_start:src.index("]);", premium_start)]
+    assert "/api/v1/intel/ai_summary.json" in premium_block, (
+        "ai_summary.json is no longer in PREMIUM_INTEL_PATHS — the premium tier gate "
+        "on the AI Cyber Brain bundle has been removed"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T35: Anomaly radar engine is actually invoked by CI
+#
+# Origin: the audit found scripts/anomaly_radar_engine.py — the zero-day
+# candidate detector — was referenced by no workflow at all. Its output sat
+# frozen for 127 days while the AI Cyber Brain served it as live intelligence.
+# T13 passed throughout, because it validates the artifact's schema and never
+# asks whether anything still produces it.
+# ---------------------------------------------------------------------------
+
+@test("T35_anomaly_radar_engine_wired_to_ci")
+def t35():
+    """An orphaned producer is a silently rotting artifact — keep the radar wired."""
+    engine = REPO_ROOT / "scripts" / "anomaly_radar_engine.py"
+    assert engine.exists(), "scripts/anomaly_radar_engine.py missing"
+
+    workflows = REPO_ROOT / ".github" / "workflows"
+
+    def executable_lines(text: str) -> str:
+        """Workflow text with full-line YAML comments stripped.
+
+        A plain substring search over the raw file is not sufficient: this
+        test's own rationale comment names the script, so a workflow that
+        merely *mentions* anomaly_radar_engine.py in a comment would satisfy
+        the gate while invoking nothing. Caught by mutation-testing this test.
+        """
+        return "\n".join(
+            ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+        )
+
+    invokers, committers = [], []
+    for wf in sorted(workflows.glob("*.yml")):
+        code = executable_lines(wf.read_text(encoding="utf-8", errors="replace"))
+        if "scripts/anomaly_radar_engine.py" not in code:
+            continue
+        invokers.append(wf.name)
+        if "data/ai/" in code:
+            committers.append(wf.name)
+
+    assert invokers, (
+        "no workflow invokes scripts/anomaly_radar_engine.py — data/ai/anomaly_radar.json "
+        "will freeze while the AI Cyber Brain continues to publish it as live intelligence "
+        "(this is exactly the 127-day staleness found on 2026-09-09)"
+    )
+    # The artifact it writes must also be staged, or each run's output is
+    # discarded and the file stays frozen anyway.
+    assert committers, (
+        f"workflow(s) {invokers} run the anomaly radar but none stage data/ai/ — "
+        "the regenerated radar output would be thrown away every run"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
