@@ -78,6 +78,30 @@ jobs:
       # predictions above. If it fails, the freshness guard downstream marks
       # the artifact stale and the AI Cyber Brain degrades honestly.
       # ---------------------------------------------------------------------
+      # ---------------------------------------------------------------------
+      # v201.1 — CAPABILITY RESTORATION (second orphaned producer)
+      #
+      # scripts/ai_predictions_engine.py writes anomalies.json, forecasts.json
+      # and predictions_summary.json — the inputs the AI Cyber Brain consumes.
+      # Like the anomaly radar below, it was invoked by no workflow, which is
+      # why those three artifacts had not changed since 2026-05-04. Its only
+      # references were ai_validation_runner.py (which lists its name) and
+      # business_readiness_certifier.py (which checks the file exists and is
+      # non-empty — a readiness gate that certifies presence, not execution).
+      #
+      # It is wired only now that its fabrication defects are fixed (v201.1):
+      # running it beforehand would have replaced stale forecasts with fresh
+      # fabricated ones, which is worse. See the engine header for detail.
+      #
+      # COST: GitHub Actions compute only. Zero Cloudflare R2/KV/Workers
+      # operations — this writes to the repo, not to Cloudflare.
+      # ---------------------------------------------------------------------
+      - name: Run AI Predictions Engine (anomalies + evidence-gated sector forecasts)
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python3 scripts/ai_predictions_engine.py
+
       - name: Run Anomaly Radar Engine (zero-day candidate detection)
         continue-on-error: true
         env:

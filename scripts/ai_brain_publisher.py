@@ -206,7 +206,11 @@ def build_campaigns(feed: List[Dict]) -> List[Dict]:
         ).strip().upper()
 
         sev = (item.get("severity") or item.get("risk_level") or "MEDIUM").upper()
-        risk = float(item.get("risk_score") or item.get("score") or 5.0)
+        # v201.1: was `or 5.0`. max_risk is a MAXIMUM, so imputing a mid-scale
+        # 5.0 for an unscored advisory would publish "max_risk 5.0" for a
+        # campaign whose advisories carry no risk score at all. An unscored
+        # item contributes no risk evidence and is skipped below.
+        risk = _opt_float(item.get("risk_score"), item.get("score"))
 
         if actor not in actor_map:
             actor_map[actor] = {
@@ -227,7 +231,7 @@ def build_campaigns(feed: List[Dict]) -> List[Dict]:
             rec["severity"] = sev
             rec["sample_title"] = (item.get("title") or "")[:100]
 
-        if risk > rec["max_risk"]:
+        if risk is not None and risk > rec["max_risk"]:
             rec["max_risk"] = risk
             if not rec["sample_title"]:
                 rec["sample_title"] = (item.get("title") or "")[:100]
@@ -297,16 +301,23 @@ def build_anomalies(
             seen_ids.add(sid)
             score = float(a.get("anomaly_score") or 0)
             pct = float(a.get("anomaly_pct") or score * 100 or 0)
+            # v201.1: risk_score used to fall back to a literal 7.5 -- a
+            # "HIGH-ish" number invented whenever the upstream record carried
+            # no score, and then fed to _derive_soc_priority() so an entirely
+            # made-up value drove the published SOC priority. An anomaly
+            # without a risk score is published without one; consumers can
+            # distinguish null from a real assessment, but not from a 7.5.
+            risk_val = _opt_float(a.get("risk_score"), a.get("apex_ai_score"))
             anomalies.append({
                 "stix_id"             : sid,
                 "title"               : (a.get("title") or "Unknown Anomaly")[:100],
-                "severity"            : (a.get("severity") or "HIGH").upper(),
-                "risk_score"          : float(a.get("risk_score") or a.get("apex_ai_score") or 7.5),
+                "severity"            : (a.get("severity") or "UNKNOWN").upper(),
+                "risk_score"          : risk_val,
                 "anomaly_score"       : round(score, 4),
                 "anomaly_pct"         : round(min(99, max(50, pct)), 1),
                 "is_zero_day_candidate": bool(a.get("is_zero_day_candidate")),
                 "sector"              : a.get("sector") or "Unknown",
-                "soc_priority"        : a.get("soc_priority") or _derive_soc_priority(float(a.get("risk_score") or 7.5), bool(a.get("is_zero_day_candidate"))),
+                "soc_priority"        : a.get("soc_priority") or _derive_soc_priority(risk_val, bool(a.get("is_zero_day_candidate"))),
                 "threat_type"         : a.get("threat_type") or "Unknown",
                 "published_at"        : a.get("published_at") or "",
                 "anomaly_features"    : a.get("anomaly_features") or {},
@@ -349,7 +360,9 @@ def build_anomalies(
             seen_ids.add(sid)
             rich = rich_by_id.get(sid, {})
             score = float(a.get("anomaly_score") or rich.get("anomaly_score") or 0)
-            risk = float(a.get("risk_score") or rich.get("risk_score") or 7.5)
+            # v201.1: was `or 7.5`. See _opt_float — an unscored anomaly is
+            # published unscored rather than assigned an invented HIGH-band value.
+            risk = _opt_float(a.get("risk_score"), rich.get("risk_score"))
             # `is_candidate` is the radar engine's spelling; presence in the
             # zero_day_candidates array is itself authoritative evidence.
             is_zd = bool(
@@ -361,7 +374,9 @@ def build_anomalies(
             anomalies.append({
                 "stix_id"             : sid,
                 "title"               : (a.get("title") or rich.get("title") or "Anomalous Advisory")[:100],
-                "severity"            : (a.get("severity") or rich.get("severity") or "HIGH").upper(),
+                # v201.1: was `or "HIGH"` -- an unlabelled anomaly was published
+                # as HIGH severity on no evidence. Matches the primary branch.
+                "severity"            : (a.get("severity") or rich.get("severity") or "UNKNOWN").upper(),
                 "risk_score"          : risk,
                 "anomaly_score"       : round(score, 4),
                 "anomaly_pct"         : round(min(99, max(50, score * 100)), 1),
@@ -379,8 +394,37 @@ def build_anomalies(
     return anomalies[:MAX_ANOMALIES]
 
 
-def _derive_soc_priority(risk_score: float, is_zero_day: bool) -> str:
-    if is_zero_day or risk_score >= 9.5:
+def _opt_float(*candidates: Any) -> Optional[float]:
+    """First candidate parseable as a float, else None.
+
+    v201.1: replaces the `float(x or <literal>)` idiom used throughout this
+    module. `or` treats a genuine 0.0 as absent, and the literal fallback
+    fabricated a plausible score whenever a field was missing. Returning None
+    keeps "not assessed" distinguishable from "assessed as N" downstream.
+    """
+    for c in candidates:
+        if c is None:
+            continue
+        try:
+            return float(c)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _derive_soc_priority(risk_score: Optional[float], is_zero_day: bool) -> str:
+    """Map a risk score to a SOC priority band.
+
+    v201.1: accepts None. A zero-day candidate is P1 on that evidence alone.
+    Otherwise, with no risk score there is no basis for a band, and inventing
+    one (previously P4-LOW via a fabricated default) would understate an
+    unassessed item. "P?-UNSCORED" is explicit and sorts as unknown.
+    """
+    if is_zero_day:
+        return "P1-CRITICAL"
+    if risk_score is None:
+        return "P?-UNSCORED"
+    if risk_score >= 9.5:
         return "P1-CRITICAL"
     if risk_score >= 8.0:
         return "P2-HIGH"
@@ -413,14 +457,56 @@ def build_forecasts(
         "CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "MINIMAL": 0
     }
 
+    declined_sectors: List[str] = []
+
     for sector_key, sec in forecasts_data["sectors"].items():
+        if not isinstance(sec, dict):
+            continue
         sector_name = sec.get("sector") or sector_key.replace("_", " ").title()
-        current_risk = float(sec.get("current_risk") or 5.0)
+
+        # ------------------------------------------------------------------
+        # v201.1 ANTI-FABRICATION GATE.
+        #
+        # This loop used to coerce every field with `or <default>`. Handed a
+        # sector record that carries no forecast -- which is exactly what
+        # ai_predictions_engine.py now emits for a sector it declined to
+        # forecast -- those defaults manufactured a complete, plausible,
+        # entirely invented forecast card:
+        #
+        #     current_risk 5.0 | peak_risk 5.0 | risk_level MEDIUM
+        #     trend STABLE     | confidence 0.75 | prob 37
+        #
+        # rendered on the dashboard as a real sector prediction. A missing
+        # value is not a 5.0. Skip any sector that is not an actual forecast.
+        #
+        # Backward compatible: forecast files written before `status` existed
+        # have no such key, so presence of the required numeric fields is the
+        # fallback test -- an older file with real forecasts still publishes,
+        # while a record lacking the substance is skipped either way.
+        # ------------------------------------------------------------------
+        status = str(sec.get("status") or "").upper()
+        if status and status != "FORECAST":
+            declined_sectors.append(f"{sector_name}({status})")
+            continue
+
         forecast_30d = sec.get("forecast_30d") or []
-        peak_risk = float(sec.get("peak_risk") or current_risk)
+        if sec.get("current_risk") is None or sec.get("confidence") is None or not forecast_30d:
+            declined_sectors.append(f"{sector_name}(INCOMPLETE)")
+            continue
+
+        try:
+            current_risk = float(sec["current_risk"])
+            confidence = float(sec["confidence"])
+            peak_risk = float(sec.get("peak_risk") if sec.get("peak_risk") is not None else current_risk)
+        except (TypeError, ValueError):
+            declined_sectors.append(f"{sector_name}(UNPARSEABLE)")
+            continue
+
+        # risk_level / trend are labels the producer derives from the series it
+        # actually computed; absent a series there is nothing to label, and the
+        # guards above have already skipped that case.
         risk_level = (sec.get("risk_level") or "MEDIUM").upper()
         trend = (sec.get("trend") or "STABLE").upper()
-        confidence = float(sec.get("confidence") or 0.75)
 
         # Probability = normalized peak_risk × confidence
         prob = int(min(99, max(10, round(peak_risk * 10 * confidence))))
@@ -438,6 +524,10 @@ def build_forecasts(
             "advisories_30d": int(sec.get("advisories_30d") or 0),
             "forecast_7d" : [round(v, 2) for v in (forecast_30d[:7] if forecast_30d else [])],
         })
+
+    if declined_sectors:
+        log.warning("[EVIDENCE] %d sector(s) carry no publishable forecast, skipped: %s",
+                    len(declined_sectors), ", ".join(sorted(declined_sectors)))
 
     forecasts.sort(key=lambda f: (-sv_map.get(f["risk_level"], 0), -f["prob"]))
     return forecasts[:MAX_FORECASTS]

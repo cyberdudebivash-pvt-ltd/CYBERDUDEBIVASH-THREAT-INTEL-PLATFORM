@@ -1890,6 +1890,260 @@ def t35():
 
 
 # ---------------------------------------------------------------------------
+# T36: AI predictions engine trains on observed data only
+#
+# Origin: the 2026-09-09 anti-fabrication audit. ai_predictions_engine.py built
+# each sector's forecast training set from 91 fabricated days
+# (SECTOR_BASELINES + Gaussian noise) plus whatever real advisories existed —
+# 91.8% synthetic overall, 100% for manufacturing. It seeded that noise with
+# random.Random(hash(sector)), and hash() of a str is randomised per process,
+# so identical inputs produced different "forecasts" on every run.
+# ---------------------------------------------------------------------------
+
+@test("T36_ai_predictions_no_synthetic_training_data")
+def t36():
+    """Forecasts must be fitted on observed advisories, deterministically."""
+    engine = REPO_ROOT / "scripts" / "ai_predictions_engine.py"
+    assert engine.exists(), "scripts/ai_predictions_engine.py missing"
+    src = engine.read_text(encoding="utf-8", errors="replace")
+
+    def code_only(text: str) -> str:
+        """Return executable source with every docstring and comment removed.
+
+        The audit rationale in this file quotes the removed code verbatim
+        (inside docstrings and comments), so a raw substring search matches the
+        very prose describing the fix. This is the same trap T35 fell into
+        before it was mutation-tested, so the stripping is done properly here:
+        all triple-quoted blocks, then all full-line and trailing # comments.
+        """
+        import re as _re
+        stripped = _re.sub(r'"""[\s\S]*?"""', "", text)
+        stripped = _re.sub(r"'''[\s\S]*?'''", "", stripped)
+        out = []
+        for ln in stripped.splitlines():
+            if ln.lstrip().startswith("#"):
+                continue
+            # Drop trailing comments; no '#' appears inside a string literal in
+            # the regions this test inspects.
+            out.append(ln.split("#", 1)[0])
+        return "\n".join(out)
+
+    code = code_only(src)
+    assert len(code) > 5000, (
+        f"code_only() stripped too much ({len(code)} chars) — the checks below "
+        "would pass vacuously"
+    )
+
+    # 1. No RNG anywhere in the engine — a forecast must not move without a
+    #    change in the underlying data.
+    for banned in ("random.Random", "rng.gauss", "random.gauss", "random.uniform"):
+        assert banned not in code, (
+            f"'{banned}' reintroduced into ai_predictions_engine.py — forecast output "
+            "would vary run-to-run independently of the input data"
+        )
+
+    # 2. The evidence threshold must be enforced. Checked behaviourally below
+    #    (see "evidence gate" assertions) rather than by counting occurrences of
+    #    the constant's name: mutation-testing this test showed that replacing
+    #    `if len(y) < MIN_REAL_SAMPLES:` with `if False:` left every textual
+    #    reference intact and the gate passed while the guard was disabled.
+    assert "INSUFFICIENT_EVIDENCE" in code, (
+        "engine no longer declines under-evidenced sectors — it would publish a "
+        "forecast built from too little observed history"
+    )
+
+    # 3. Confidence must not be floored. `max(0.50, ...)` made a model performing
+    #    worse than the mean still publish confidence 0.50.
+    assert "max(0.50" not in code and "max(0.5," not in code, (
+        "confidence floor reintroduced — a model with no predictive skill would "
+        "publish a floored confidence that carries no information"
+    )
+    assert "MIN_FORECAST_CONFIDENCE" in code, (
+        "predictive-skill gate removed — forecasts with zero validated out-of-sample "
+        "skill would be published as trend lines"
+    )
+
+    # 4. Behavioural check: the engine must declare its training data non-synthetic.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ai_predictions_engine", engine)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["ai_predictions_engine"] = mod   # dataclass/annotation safety
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.modules.pop("ai_predictions_engine", None)
+
+    # A sector with no matching advisories must yield no history at all —
+    # previously it yielded 91 fabricated points.
+    x, y = mod._build_sector_history([], "manufacturing")
+    assert x == [] and y == [], (
+        f"_build_sector_history fabricated {len(y)} points for a sector with zero "
+        "observed advisories — synthetic history has returned"
+    )
+
+    # Determinism: same input, same output, across repeated calls.
+    feed_items = [
+        {"title": "energy grid scada outage", "published_at": "2026-09-01T00:00:00Z", "risk_score": 7.0},
+        {"title": "power utility pipeline ics", "published_at": "2026-09-02T00:00:00Z", "risk_score": 6.0},
+    ]
+    first = mod._build_sector_history(feed_items, "energy")
+    for _ in range(3):
+        assert mod._build_sector_history(feed_items, "energy") == first, \
+            "_build_sector_history is not deterministic for identical input"
+
+    # Evidence gate, checked behaviourally. Build a feed carrying fewer energy
+    # advisories than MIN_REAL_SAMPLES and assert the engine declines to
+    # forecast that sector rather than fitting one on too little history.
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    _now = _dt.now(_tz.utc)
+    thin_feed = [
+        {
+            "title": "energy grid scada advisory",
+            "published_at": (_now - _td(days=i + 1)).isoformat(),
+            "risk_score": 7.0,
+        }
+        for i in range(max(1, mod.MIN_REAL_SAMPLES - 1))
+    ]
+    report = mod.run_sector_forecasts(thin_feed)
+    energy = report["sectors"]["energy"]
+    assert energy.get("status") == "INSUFFICIENT_EVIDENCE", (
+        f"energy has {mod.MIN_REAL_SAMPLES - 1} observations (below the "
+        f"MIN_REAL_SAMPLES={mod.MIN_REAL_SAMPLES} threshold) but the engine "
+        f"returned status={energy.get('status')!r} — the evidence gate is not enforced"
+    )
+    assert "forecast_30d" not in energy, (
+        "a sector declined for insufficient evidence still carries a forecast series"
+    )
+    assert report.get("synthetic_training_data") is False, \
+        "engine no longer declares its training data free of synthetic rows"
+
+
+# ---------------------------------------------------------------------------
+# T37: AI Cyber Brain never fabricates a missing assessment
+#
+# Origin: the same audit. ai_brain_publisher.py coerced absent fields with
+# `or <literal>` throughout. Given a sector record carrying no forecast — which
+# is exactly what the fixed engine emits for a declined sector — build_forecasts
+# manufactured a complete, plausible, invented card: current_risk 5.0,
+# peak_risk 5.0, risk_level MEDIUM, trend STABLE, confidence 0.75, prob 37.
+# ---------------------------------------------------------------------------
+
+@test("T37_ai_brain_no_fabricated_assessments")
+def t37():
+    """Absent inputs must be reported as absent, never defaulted into a number."""
+    pub = REPO_ROOT / "scripts" / "ai_brain_publisher.py"
+    assert pub.exists(), "scripts/ai_brain_publisher.py missing"
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ai_brain_publisher", pub)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["ai_brain_publisher"] = mod
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.modules.pop("ai_brain_publisher", None)
+
+    # A declined sector must produce NO forecast card.
+    declined = {
+        "sectors": {
+            "manufacturing": {
+                "sector": "Manufacturing",
+                "status": "INSUFFICIENT_EVIDENCE",
+                "real_observations": 0,
+            },
+            "energy": {
+                "sector": "Energy",
+                "status": "NO_PREDICTIVE_SKILL",
+                "real_observations": 57,
+                "measured_confidence": 0.0,
+            },
+        }
+    }
+    out = mod.build_forecasts(declined)
+    assert out == [], (
+        f"build_forecasts fabricated {len(out)} forecast card(s) from sectors that "
+        f"carry no forecast: {out}"
+    )
+
+    # A record with no status but no substance either must also be skipped.
+    assert mod.build_forecasts({"sectors": {"x": {"sector": "X"}}}) == [], \
+        "build_forecasts invented a card from an empty sector record"
+
+    # A genuine forecast must still publish (backward compatibility with files
+    # written before `status` existed).
+    legacy = {
+        "sectors": {
+            "energy": {
+                "sector": "Energy", "current_risk": 6.5, "peak_risk": 7.2,
+                "confidence": 0.61, "risk_level": "HIGH", "trend": "RISING",
+                "forecast_30d": [6.5] * 30,
+            }
+        }
+    }
+    legacy_out = mod.build_forecasts(legacy)
+    assert len(legacy_out) == 1 and legacy_out[0]["sector"] == "Energy", \
+        "build_forecasts dropped a legitimate legacy forecast — backward compatibility broken"
+
+    # An unscored anomaly must publish unscored, not as an invented 7.5/HIGH.
+    radar = {
+        "top10_anomalous": [
+            {"stix_id": "intel--unscored", "title": "no score", "anomaly_score": 0.9}
+        ],
+        "zero_day_candidates": [],
+    }
+    anoms = mod.build_anomalies(None, radar)
+    assert len(anoms) == 1, f"expected 1 anomaly, got {len(anoms)}"
+    a = anoms[0]
+    assert a["risk_score"] is None, (
+        f"unscored anomaly published risk_score={a['risk_score']} — a missing "
+        "assessment was fabricated into a number"
+    )
+    assert a["severity"] == "UNKNOWN", (
+        f"unscored anomaly published severity={a['severity']} — severity was invented"
+    )
+    assert a["soc_priority"] == "P?-UNSCORED", (
+        f"unscored anomaly published soc_priority={a['soc_priority']} — a SOC "
+        "priority was derived from a fabricated risk score"
+    )
+
+    # _opt_float must preserve a real 0.0 rather than treating it as absent.
+    assert mod._opt_float(0.0) == 0.0, "_opt_float treats a genuine 0.0 as missing"
+    assert mod._opt_float(None, None) is None, "_opt_float invented a value from nothing"
+
+
+# ---------------------------------------------------------------------------
+# T38: both AI prediction producers stay wired to CI
+#
+# Origin: both scripts that write the AI plane's artifacts were orphaned, which
+# is why every one of those artifacts froze for months while the dashboards
+# kept serving them. T35 covers the radar; this covers the predictions engine.
+# ---------------------------------------------------------------------------
+
+@test("T38_ai_predictions_engine_wired_to_ci")
+def t38():
+    """An orphaned producer silently freezes the artifacts it owns."""
+    engine_ref = "scripts/ai_predictions_engine.py"
+    assert (REPO_ROOT / engine_ref).exists(), f"{engine_ref} missing"
+
+    workflows = REPO_ROOT / ".github" / "workflows"
+    invokers = []
+    for wf in sorted(workflows.glob("*.yml")):
+        code = "\n".join(
+            ln for ln in wf.read_text(encoding="utf-8", errors="replace").splitlines()
+            if not ln.lstrip().startswith("#")
+        )
+        if engine_ref in code and "data/ai_predictions/" in code:
+            invokers.append(wf.name)
+
+    assert invokers, (
+        f"no workflow both invokes {engine_ref} and stages data/ai_predictions/ — "
+        "anomalies.json / forecasts.json / predictions_summary.json will freeze while "
+        "the AI Cyber Brain continues to publish them (the 128-day staleness found "
+        "on 2026-09-09)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
