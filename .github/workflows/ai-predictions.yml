@@ -5,15 +5,20 @@ on:
     - cron: '30 */6 * * *'  # Every 6 hours (offset from main pipeline)
   workflow_dispatch:
 
+# v201.3: was `contents: write`, needed only by the git-push persistence this
+# job no longer performs (see the "Publish AI plane state to R2" step). Dropped
+# to read-only per least privilege.
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 # v50.0 FIX (2026-06-08): Unique concurrency group prevents cancellation by
 # other sentinel-data-writer workflows (genesis, nexus, sovereign, zerodayhunter,
 # production-hardening, sentinel-blogger) queuing simultaneously.
-# Git push conflicts are handled by the rebase retry loop in the commit step.
+# v201.3: this job no longer git-pushes, so the group now serialises R2 state
+# writes rather than git pushes -- still required, for the same reason: two
+# concurrent runs would last-write-wins each other's sector_history.json.
 concurrency:
   group: sentinel-data-writer-ai-predictions
   cancel-in-progress: false
@@ -47,6 +52,43 @@ jobs:
       - name: Ensure directories
         run: mkdir -p data/ai_predictions data/stix data/ai
 
+      # =====================================================================
+      # v201.3 DURABLE PERSISTENCE (post-merge verification of PR #388/#389)
+      #
+      # Every artifact this job produces used to persist through a
+      # `git push origin main` at the end. main's branch ruleset has rejected
+      # direct runtime pushes since 2026-08-26, and that step's retry loop
+      # swallowed the rejection ("Push deferred."; the step still exited 0) --
+      # so this job ran green while discarding every byte of its output.
+      # Verified empirically before changing anything: ZERO runtime commits on
+      # main since 2026-08-26, and data/ai_predictions/ + data/ai/ had only
+      # ever been written by PR #388 and #389 themselves.
+      #
+      # That made the sector forecast permanently non-functional rather than
+      # merely slow to start: sector_history.json could never accumulate past
+      # a single run, so sector_forecast_model.py's 35-observed-day threshold
+      # was unreachable forever.
+      #
+      # Fixed exactly as PR #387 fixed it for the ingestion state: R2 is the
+      # durable authority, via the existing scripts/r2_state_sync.py. This
+      # download runs BEFORE every producer below so they extend the
+      # accumulated series instead of restarting from the git checkout's
+      # frozen copy.
+      #
+      # CLOUDFLARE COST (measured, not estimated -- see the rationale block on
+      # r2_state_sync.py's STATE_FILES): the 4 AI entries cost 1 GET each here
+      # and 1 PUT each on publish, 4 runs/day. Across all four workflows that
+      # call r2_state_sync that totals 2,160 Class A + 2,160 Class B per month
+      # = 0.216% of R2's 1,000,000/month Class A allowance and 0.022% of the
+      # 10,000,000 Class B allowance. Storage ~460 KB against 10 GB.
+      # =====================================================================
+      - name: Download AI plane state from R2 (durable authority)
+        env:
+          CF_ACCOUNT_ID:         ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --download
+
       - name: Run AI Predictive Models on Latest Manifest
         continue-on-error: true
         env:
@@ -55,67 +97,22 @@ jobs:
         run: python3 scripts/run_ai_predictions.py
 
       # ---------------------------------------------------------------------
-      # v201.0 (AI plane forensic audit, 2026-09-09) — CAPABILITY RESTORATION
-      #
-      # scripts/anomaly_radar_engine.py is the platform's zero-day candidate
-      # detector. Its header documents it as "called by run_pipeline.py Phase
-      # 2", but the audit found no workflow and no script in the repository
-      # that invoked it, so data/ai/anomaly_radar.json had not been
-      # regenerated since 2026-05-05 (127 days). The AI Cyber Brain consumed
-      # that frozen artifact as if it were live, and the regression suite's
-      # T13 passed on it because T13 checks schema, not age.
-      #
-      # Wired here rather than into a new workflow: this job already runs on
-      # the 6-hourly AI cadence, already reads the same api/feed.json the
-      # radar reads, and already has the commit/rebase/push machinery below.
-      # Reuse over new infrastructure (Constitution Principle 4).
-      #
-      # COST: pure GitHub Actions compute — the engine runs in well under a
-      # second on the live 109-advisory feed and performs zero Cloudflare R2,
-      # KV or Workers operations, so this adds nothing to the Cloudflare bill.
-      #
-      # continue-on-error: the radar is enrichment, never a gate on the
-      # predictions above. If it fails, the freshness guard downstream marks
-      # the artifact stale and the AI Cyber Brain degrades honestly.
-      # ---------------------------------------------------------------------
-      # ---------------------------------------------------------------------
-      # v201.1 — CAPABILITY RESTORATION (second orphaned producer)
-      #
-      # scripts/ai_predictions_engine.py writes anomalies.json, forecasts.json
-      # and predictions_summary.json — the inputs the AI Cyber Brain consumes.
-      # Like the anomaly radar below, it was invoked by no workflow, which is
-      # why those three artifacts had not changed since 2026-05-04. Its only
-      # references were ai_validation_runner.py (which lists its name) and
-      # business_readiness_certifier.py (which checks the file exists and is
-      # non-empty — a readiness gate that certifies presence, not execution).
-      #
-      # It is wired only now that its fabrication defects are fixed (v201.1):
-      # running it beforehand would have replaced stale forecasts with fresh
-      # fabricated ones, which is worse. See the engine header for detail.
-      #
-      # COST: GitHub Actions compute only. Zero Cloudflare R2/KV/Workers
-      # operations — this writes to the repo, not to Cloudflare.
-      # ---------------------------------------------------------------------
-      # ---------------------------------------------------------------------
       # v201.2 — DAILY OBSERVATION STORE (the forecast's substrate)
       #
-      # The audit's root cause for the sector forecast was that the platform
-      # retains no historical time series: api/feed.json and data/stix/ are
-      # both rolling windows, and the only usable observation history was 14
-      # days across a 16-day span. No model can forecast from that, which is
-      # why the old engine fabricated 91 synthetic days per sector.
+      # The 2026-09-09 audit's root cause for the sector forecast was that the
+      # platform retained no historical time series: api/feed.json and
+      # data/stix/ are both rolling windows, and the only usable observation
+      # history was 14 days across a 16-day span. No model can forecast from
+      # that, which is why the old engine fabricated 91 synthetic days per
+      # sector.
       #
-      # This step accumulates one real observation per sector per day into
+      # This accumulates one real observation per sector per day into
       # data/ai_predictions/sector_history.json (~1 KB/day, pruned at 400
-      # days). It is idempotent, so running every 6h is safe. --bootstrap
-      # seeds from whatever genuine history the archives still hold; it never
+      # days). Idempotent, so the 6-hourly cadence is safe. --bootstrap seeds
+      # from whatever genuine history the archives still hold and never
       # overwrites a day already recorded live.
       #
-      # Until roughly 35 days accumulate the forecaster will keep declining,
-      # by design and with a stated reason. That is the honest state while the
-      # history builds, and it resolves itself as this step runs.
-      #
-      # COST: Actions compute only. Zero Cloudflare operations.
+      # COST: Actions compute only. The R2 round-trip is accounted for above.
       # ---------------------------------------------------------------------
       - name: Update sector daily observation store
         continue-on-error: true
@@ -123,12 +120,42 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python3 scripts/sector_history_store.py --bootstrap
 
+      # ---------------------------------------------------------------------
+      # v201.1 — CAPABILITY RESTORATION (orphaned producer #2)
+      #
+      # scripts/ai_predictions_engine.py writes anomalies.json and
+      # forecasts.json, which the AI Cyber Brain consumes. It was invoked by no
+      # workflow at all, which is why those artifacts had not changed since
+      # 2026-05-04. Its only references were ai_validation_runner.py (which
+      # lists its name) and business_readiness_certifier.py (which checks the
+      # file exists and is non-empty -- a readiness gate certifying presence,
+      # not execution).
+      #
+      # Wired only after its fabrication defects were fixed: running it
+      # beforehand would have replaced stale forecasts with fresh fabricated
+      # ones, which is worse.
+      # ---------------------------------------------------------------------
       - name: Run AI Predictions Engine (anomalies + evidence-gated sector forecasts)
         continue-on-error: true
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python3 scripts/ai_predictions_engine.py
 
+      # ---------------------------------------------------------------------
+      # v201.0 — CAPABILITY RESTORATION (orphaned producer #1)
+      #
+      # scripts/anomaly_radar_engine.py is the platform's zero-day candidate
+      # detector. Its header documents it as "called by run_pipeline.py Phase
+      # 2", but no workflow and no script invoked it, so
+      # data/ai/anomaly_radar.json had not been regenerated since 2026-05-05
+      # (127 days). The AI Cyber Brain consumed that frozen artifact as if it
+      # were live, and regression T13 passed on it because T13 checks schema,
+      # not age.
+      #
+      # continue-on-error: the radar is enrichment, never a gate on the
+      # predictions above. If it fails, the freshness guard marks the artifact
+      # stale and the AI Cyber Brain degrades honestly.
+      # ---------------------------------------------------------------------
       - name: Run Anomaly Radar Engine (zero-day candidate detection)
         continue-on-error: true
         env:
@@ -139,26 +166,23 @@ jobs:
         continue-on-error: true
         run: python3 scripts/ai_freshness_guard.py
 
-      - name: Commit AI prediction results
+      # =====================================================================
+      # v201.3: replaces the previous "Commit AI prediction results" step,
+      # which staged data/ai_predictions/ and data/ai/ and pushed them to
+      # main. Both directories are now R2-owned (registered in
+      # r2_state_sync.py's STATE_FILES), so per PR #387's precedent they come
+      # off the git path entirely rather than getting a second attempt at
+      # git-based persistence that the branch ruleset would reject again.
+      #
+      # NOT continue-on-error, deliberately. A swallowed persistence failure
+      # is the exact defect being fixed here: r2_state_sync.py --upload
+      # already retries 4 times per file and reports partial vs total failure,
+      # and if it still fails this job must go red rather than report success
+      # while discarding the run's output.
+      # =====================================================================
+      - name: Publish AI plane state to R2 (durable authority)
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git config user.email "bivash@cyberdudebivash.com"
-          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
-          git config user.name "CYBERDUDEBIVASH"
-          git add -f data/ai_predictions/ 2>/dev/null || true
-          # v201.0: data/ai/ carries anomaly_radar.json from the radar step above.
-          git add -f data/ai/ 2>/dev/null || true
-          if git diff --staged --quiet; then
-            echo "No AI prediction changes."
-          else
-            git commit -m " AI Predictions: $(date -u +'%Y-%m-%d %H:%M UTC') [skip ci]"
-            git rebase --abort 2>/dev/null || true; git merge --abort 2>/dev/null || true
-            for i in 1 2 3 4; do
-              git fetch origin main --quiet 2>/dev/null || true
-              git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null||true; git merge origin/main -X ours --no-edit --quiet||true; }
-              if git push origin main; then echo "Push OK ($i/4)"; break; fi
-              sleep $((i*15))
-              [ $i -eq 4 ] && echo "Push deferred."
-            done
-          fi
+          CF_ACCOUNT_ID:         ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --upload
