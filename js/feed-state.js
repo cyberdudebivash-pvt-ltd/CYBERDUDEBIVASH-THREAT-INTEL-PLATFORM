@@ -38,6 +38,43 @@
  *  PURELY ADDITIVE. Loading this file changes nothing on its own; index.html
  *  calls resolveFeedTerminalState() at the single point where it previously
  *  hard-coded the LOADING label.
+ *
+ *  P0 UPDATE (2026-09-09) — a customer dashboard was found displaying
+ *  SYNC: STALE / FALLBACK SOURCE over data 14 DAYS old. Root-caused end to
+ *  end: the raw.githubusercontent.com fallback mirror reads api/feed.json
+ *  directly from what's committed to `main` in git -- and this platform's
+ *  R2 persistence migration (see scripts/r2_state_sync.py, PR #387/#390)
+ *  deliberately stopped git-committing that file as part of moving runtime
+ *  state authority to R2. That makes the mirror's content permanently
+ *  frozen at whatever it was the day the git-commit step was retired --
+ *  confirmed live: both api/feed.json and api/v1/intel/latest.json's
+ *  committed copies carry generated_at/published_at timestamps from
+ *  2026-08-26, the exact date of the branch-ruleset change that root-caused
+ *  the 2026-08-26 core-feed staleness incident (PR #387's own subject).
+ *  The mirror can never get fresher under the current architecture -- it
+ *  is not "a bit behind", it is permanently stuck, and gets a day staler
+ *  every day forever.
+ *
+ *  Before this fix, ANY transient failure of the authoritative source
+ *  (rate limiting, a cold start, a brief outage -- all normal, expected,
+ *  eventually-recovering events) caused this module to accept that frozen
+ *  mirror as a legitimate "STALE" hit, indefinitely -- an ever-worsening,
+ *  self-inflating staleness with no mechanism to ever resolve itself, wearing
+ *  a label ("STALE / FALLBACK SOURCE", "Showing a cached mirror") that
+ *  reads as "a little behind", not "abandoned by the pipeline weeks ago".
+ *  For a threat-intelligence product specifically, silently degrading to
+ *  weeks-old advisories under a reassuring label is a correctness defect,
+ *  not a cosmetic one.
+ *
+ *  Fix: a fallback hit's OWN content age is now checked against
+ *  MAX_USABLE_FALLBACK_AGE_MS (72h -- reusing, not reinventing, the same
+ *  STALE threshold workers/intel-gateway/src/index.js's classifyFreshness()
+ *  already uses server-side) before it may satisfy fallbackHit. Content
+ *  older than that no longer masquerades as a merely-stale-but-useful
+ *  answer; resolution falls through to the existing, more honest
+ *  RATE_LIMITED/ERROR states instead. Backward compatible by construction:
+ *  an attempt with no contentGeneratedAt (the field this fix adds) is
+ *  treated exactly as before -- age-unknown does not mean age-rejected.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 'use strict';
@@ -91,15 +128,41 @@
   }
 
   /**
+   * A fallback (non-authoritative) hit whose own content is older than this
+   * is no longer treated as a usable "stale but current-ish" answer -- see
+   * the 2026-09-09 P0 update in the module docstring. Matches
+   * workers/intel-gateway/src/index.js's classifyFreshness() STALE
+   * threshold (72h) rather than inventing a second number.
+   */
+  var MAX_USABLE_FALLBACK_AGE_MS = 72 * 60 * 60 * 1000;
+
+  /**
+   * Age of an attempt's own content in ms, or null when unknown (no
+   * contentGeneratedAt, unparseable, or in the future). null is the
+   * pre-2026-09-09-fix default and is deliberately treated as "usable" by
+   * the caller -- unknown age must never be conflated with rejected age.
+   */
+  function _contentAgeMs(attempt, nowMs) {
+    if (!attempt || !attempt.contentGeneratedAt) return null;
+    var t = Date.parse(attempt.contentGeneratedAt);
+    if (isNaN(t)) return null;
+    var age = nowMs - t;
+    return age >= 0 ? age : null;
+  }
+
+  /**
    * Resolve the terminal state of the primary feed.
    *
    * @param {Object} outcome
-   * @param {Array<{url:string, status:number|null, ok:boolean, authoritative:boolean, itemCount:number}>} outcome.attempts
+   * @param {Array<{url:string, status:number|null, ok:boolean, authoritative:boolean, itemCount:number, contentGeneratedAt?:string}>} outcome.attempts
    *        One entry per MANIFEST_URLS source actually tried, in order.
    *        `status` is the HTTP status, or null when the request never
    *        produced one (network error / timeout / abort).
    *        `authoritative` marks a first-party API source, as opposed to a
-   *        third-party mirror.
+   *        third-party mirror. `contentGeneratedAt` (optional, ISO string)
+   *        is when the SOURCE'S OWN content was produced -- e.g. an old
+   *        git-mirror snapshot -- distinct from when the HTTP request
+   *        happened; used only to gate non-authoritative fallback hits.
    * @param {boolean} [outcome.online] navigator.onLine, when available.
    * @returns {{state:string, sync:string, badge:string, detail:string,
    *            httpStatus:number|null, sourceUrl:string|null, itemCount:number,
@@ -109,6 +172,7 @@
     var o = outcome || {};
     var attempts = Array.isArray(o.attempts) ? o.attempts : [];
     var online = (o.online === undefined) ? true : !!o.online;
+    var nowMs = Date.now();
 
     // A source that answered with usable items wins, authoritative first.
     var authoritativeHit = null, fallbackHit = null, authoritativeEmpty = null;
@@ -118,7 +182,14 @@
       var n = typeof a.itemCount === 'number' ? a.itemCount : 0;
       if (n > 0) {
         if (a.authoritative) { if (!authoritativeHit) authoritativeHit = a; }
-        else if (!fallbackHit) fallbackHit = a;
+        else if (!fallbackHit) {
+          // 2026-09-09 P0 fix: a fallback answering with content this old
+          // (age known AND over threshold) is not a usable hit -- fall
+          // through so a more honest RATE_LIMITED/ERROR/OFFLINE state has
+          // the chance to surface instead of an indefinitely-ageing STALE.
+          var age = _contentAgeMs(a, nowMs);
+          if (age === null || age <= MAX_USABLE_FALLBACK_AGE_MS) fallbackHit = a;
+        }
       } else if (a.authoritative && !authoritativeEmpty) {
         authoritativeEmpty = a;
       }
@@ -170,6 +241,7 @@
     VERSION: VERSION,
     STATES: STATES,
     COPY: COPY,
+    MAX_USABLE_FALLBACK_AGE_MS: MAX_USABLE_FALLBACK_AGE_MS,
     isEntitlementDenial: isEntitlementDenial,
     resolveFeedTerminalState: resolveFeedTerminalState,
   };

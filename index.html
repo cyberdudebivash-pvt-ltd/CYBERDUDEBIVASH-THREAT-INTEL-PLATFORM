@@ -13357,10 +13357,30 @@ function renderTopThreats(data) {
                                 : (Array.isArray(data) ? data : []);
                     var entries = items;
                     console.log('[SENTINEL-APEX] ITEM COUNT:', entries.length);
+                    // P0 2026-09-09: how old is this source's OWN content, not
+                    // just whether the HTTP request succeeded -- js/feed-state.js
+                    // uses this to stop an ancient fallback mirror (frozen since
+                    // the pipeline's git-commit step was retired for R2, see that
+                    // file's docstring) from being accepted as a merely-"stale"
+                    // hit forever. Same field-priority order as the existing
+                    // _genAt extraction below; a plain-array response (no
+                    // top-level timestamp) falls back to the newest item's own
+                    // published date, same computation as the Worker's own
+                    // computeStats()/last_sync.
+                    var _contentGeneratedAt = (data && data.preview && data.preview.generated_at) || (data && data.generated_at) || null;
+                    if (!_contentGeneratedAt && entries.length) {
+                        var _cgNewest = 0, _cgNowMs = Date.now();
+                        for (var _cgI = 0; _cgI < entries.length; _cgI++) {
+                            var _cgRaw = entries[_cgI] && (entries[_cgI].published_at || entries[_cgI].published || entries[_cgI].timestamp);
+                            var _cgTs = _cgRaw ? Date.parse(_cgRaw) : NaN;
+                            if (!isNaN(_cgTs) && _cgTs > _cgNewest && _cgTs <= _cgNowMs) _cgNewest = _cgTs;
+                        }
+                        if (_cgNewest) _contentGeneratedAt = new Date(_cgNewest).toISOString();
+                    }
                     // P0 2026-09-03: a 200 that parses to 0 items is a real,
                     // distinct outcome (feed reachable, genuinely empty) and
                     // must not be recorded as the same thing as a 429.
-                    _feedAttempts.push({ url: manifestUrl, status: resp.status, ok: true, authoritative: isApiSource, itemCount: entries.length });
+                    _feedAttempts.push({ url: manifestUrl, status: resp.status, ok: true, authoritative: isApiSource, itemCount: entries.length, contentGeneratedAt: _contentGeneratedAt });
                     if (!entries.length) {
                         console.error('[SENTINEL-APEX] NO DATA FROM API \u2014 all parse paths returned 0 items');
                         throw new Error('API returned 0 items');
