@@ -1,16 +1,44 @@
 #!/usr/bin/env python3
 """
 scripts/anomaly_radar_engine.py
-CYBERDUDEBIVASH(R) SENTINEL APEX v143.1.0 — Anomaly Radar Engine
+CYBERDUDEBIVASH(R) SENTINEL APEX v202.0 — Anomaly Radar Engine
 =================================================================
-Production Isolation Forest engine for Zero-Day candidate detection.
+Zero-Day candidate detection, backed by the platform's single canonical
+Isolation Forest model.
 
-ARCHITECTURE:
-  - Reads api/feed.json (primary) and data/stix/feed_manifest.json (secondary)
-  - Constructs a normalized feature matrix per advisory
-  - Trains sklearn IsolationForest (contamination=0.05, n_estimators=200)
-  - Any item with isolation_score > 0.80 → flagged as ZERO_DAY_CANDIDATE
-  - Writes results to data/ai/anomaly_radar.json (R2-uploadable)
+ARCHITECTURE (v202.0 Single-Source-of-Truth consolidation):
+  Until v202.0 this engine trained its OWN IsolationForest (12-dim
+  RobustScaler features, contamination=0.05, score_samples(), threshold
+  0.80) completely independently of scripts/ai_predictions_engine.py's
+  "Engine 1", which trains a SECOND IsolationForest on the same
+  api/feed.json (8-dim StandardScaler features, contamination=0.10,
+  decision_function(), threshold 0.90) — a Principle 3 (Single Source of
+  Truth) violation flagged during the 2026-09-09 AI-plane audit (PR #389)
+  and deliberately left as "an architectural event, not attempted there".
+
+  scripts/ai_brain_publisher.py already treated ai_predictions_engine.py's
+  output as PRIMARY and this engine's output as merely SUPPLEMENTARY (its
+  opinion only fills gaps for advisories the primary source lacks
+  entirely) — so for the overwhelming majority of advisories, the live
+  product already deferred to the other engine's judgment. This engine now
+  makes that the actual computation: it REUSES
+  data/ai_predictions/anomalies.json (already written earlier in the same
+  ai-predictions.yml job — see that workflow's step order) and reshapes it
+  into this engine's own output schema, rather than running a second,
+  independent model whose opinion the product mostly discarded anyway.
+
+  The original standalone computation (extract_features/run_isolation_forest/
+  _zscore_fallback below) is kept, unchanged, as the fallback path — used
+  automatically when the canonical file is missing, unreadable, or not
+  fresh (e.g. ai_predictions_engine.py's step failed this run; it runs
+  with continue-on-error: true). One engine failing must not silently go
+  dark just because the other is now preferred.
+
+  - Reads data/ai_predictions/anomalies.json (canonical, preferred) or
+    falls back to training on api/feed.json directly (original behaviour)
+  - Writes results to data/ai/anomaly_radar.json (R2-uploadable) —
+    schema unchanged, so every existing consumer (ai_brain_publisher.py,
+    enterprise_signal_push.py, regression_tests.py's T35) needs no changes
   - Emits Telegram alert for any ZERO_DAY_CANDIDATE found (optional)
   - Integration point: called by run_pipeline.py Phase 2 (crash-guard wrapped)
 
@@ -49,15 +77,28 @@ except ImportError:
     _SKLEARN_AVAILABLE = False
     log.warning("scikit-learn not available — falling back to statistical Z-score radar")
 
+# v202.0: defensive import of the freshness guard, same pattern as
+# ai_brain_publisher.py. If unavailable, the canonical path is skipped
+# entirely (never trust an unverifiable freshness claim) and this engine
+# falls back to its own standalone computation.
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from ai_freshness_guard import assess as _assess_freshness  # noqa: E402
+    _FRESHNESS_GUARD_AVAILABLE = True
+except Exception:
+    _FRESHNESS_GUARD_AVAILABLE = False
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 REPO = Path(__file__).resolve().parent.parent
 
 FEED_PATH         = REPO / "api" / "feed.json"
 MANIFEST_PATH     = REPO / "data" / "stix" / "feed_manifest.json"
 OUTPUT_PATH       = REPO / "data" / "ai" / "anomaly_radar.json"
-ZERO_DAY_THRESHOLD = 0.80   # isolation_score > 0.80 → ZERO_DAY_CANDIDATE
-CONTAMINATION      = 0.05   # expected anomaly fraction
-N_ESTIMATORS       = 200    # IsolationForest trees
+# v202.0: canonical source — see module docstring's "SSOT consolidation".
+CANONICAL_ANOMALIES_PATH = REPO / "data" / "ai_predictions" / "anomalies.json"
+ZERO_DAY_THRESHOLD = 0.80   # isolation_score > 0.80 → ZERO_DAY_CANDIDATE (standalone fallback only)
+CONTAMINATION      = 0.05   # expected anomaly fraction (standalone fallback only)
+N_ESTIMATORS       = 200    # IsolationForest trees (standalone fallback only)
 RANDOM_STATE       = 42
 
 
@@ -175,7 +216,73 @@ def extract_features(item: dict) -> list[float]:
     ]
 
 
-# ── Isolation Forest detection ────────────────────────────────────────────────
+# ── Canonical engine reuse (v202.0 SSOT consolidation) ────────────────────────
+
+def _load_canonical_anomalies() -> list[dict] | None:
+    """Return ai_predictions_engine.py's already-scored anomaly list, or None.
+
+    None means "not usable right now" (missing, unreadable, empty, or not
+    fresh) and tells the caller to fall back to this engine's own standalone
+    computation — see module docstring. This is a read of an existing
+    artifact, not a second scoring pass: no model is trained here.
+    """
+    if not CANONICAL_ANOMALIES_PATH.exists():
+        return None
+    try:
+        payload = json.loads(CANONICAL_ANOMALIES_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        log.warning("Canonical anomalies.json unreadable (%s) — using standalone radar", e)
+        return None
+
+    anomalies = payload.get("anomalies")
+    if not isinstance(anomalies, list) or not anomalies:
+        log.warning("Canonical anomalies.json has no scored items — using standalone radar")
+        return None
+
+    if _FRESHNESS_GUARD_AVAILABLE:
+        verdict = _assess_freshness(CANONICAL_ANOMALIES_PATH, label="anomalies")
+        if not verdict.is_publishable:
+            log.warning(
+                "Canonical anomalies.json is %s (%s) — using standalone radar",
+                verdict.state, verdict.reason,
+            )
+            return None
+
+    return anomalies
+
+
+def _reshape_canonical(canonical: list[dict], items: list[dict]) -> list[dict]:
+    """Reshape ai_predictions_engine.py's records into this engine's own
+    annotated-item shape, so every line downstream (candidate filtering,
+    top10 ranking, payload building) is identical regardless of which path
+    produced the scores.
+
+    `canonical` is already sorted descending by anomaly_score (see
+    ai_predictions_engine.py's run_anomaly_detection), so enumeration order
+    is the rank directly.
+    """
+    by_id = {}
+    for it in items:
+        sid = it.get("stix_id") or it.get("id")
+        if sid:
+            by_id[sid] = it
+
+    annotated = []
+    for rank, c in enumerate(canonical, start=1):
+        sid = c.get("stix_id")
+        base = by_id.get(sid, {})
+        is_candidate = bool(c.get("is_zero_day_candidate"))
+        annotated.append({
+            **base,
+            "anomaly_score": float(c.get("anomaly_score") or 0.0),
+            "is_zero_day_candidate": is_candidate,
+            "anomaly_rank": rank,
+            "zero_day_label": "⚡ ZERO-DAY CANDIDATE" if is_candidate else "nominal",
+        })
+    return annotated
+
+
+# ── Isolation Forest detection (standalone fallback) ──────────────────────────
 
 def run_isolation_forest(items: list[dict]) -> list[dict]:
     """
@@ -290,7 +397,7 @@ def _atomic_write(path: Path, data: Any) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    log.info("SENTINEL APEX v143.1.0 — Anomaly Radar Engine starting")
+    log.info("SENTINEL APEX v202.0 — Anomaly Radar Engine starting")
     t0 = time.time()
 
     # Load feed
@@ -310,8 +417,23 @@ def main() -> int:
 
     log.info("Loaded %d advisories for anomaly radar analysis", len(items))
 
-    # Run detector
-    annotated = run_isolation_forest(items)
+    # v202.0: prefer the canonical, already-scored source (SSOT consolidation
+    # — see module docstring). Falls back to this engine's own standalone
+    # IsolationForest/Z-score computation when the canonical file is not
+    # usable, exactly as before v202.0.
+    canonical = _load_canonical_anomalies()
+    if canonical is not None:
+        log.info(
+            "Reusing ai_predictions_engine.py's canonical anomaly scores "
+            "(v202.0 SSOT consolidation) — %d scored items", len(canonical),
+        )
+        annotated = _reshape_canonical(canonical, items)
+        model_used = "IsolationForest(canonical:ai_predictions_engine)"
+        threshold_used = 0.90  # ai_predictions_engine.py's ZERO_DAY_THRESHOLD
+    else:
+        annotated = run_isolation_forest(items)
+        model_used = "IsolationForest" if _SKLEARN_AVAILABLE else "ZScoreFallback"
+        threshold_used = ZERO_DAY_THRESHOLD
 
     candidates = [a for a in annotated if a.get("is_zero_day_candidate")]
     top10 = sorted(annotated, key=lambda x: x.get("anomaly_rank", 9999))[:10]
@@ -329,9 +451,9 @@ def main() -> int:
     # Build output payload
     payload = {
         "generated_at": utc_now(),
-        "engine": "SENTINEL-APEX/143.1.0",
-        "model": "IsolationForest" if _SKLEARN_AVAILABLE else "ZScoreFallback",
-        "threshold": ZERO_DAY_THRESHOLD,
+        "engine": "SENTINEL-APEX/202.0",
+        "model": model_used,
+        "threshold": threshold_used,
         "total_advisories": len(items),
         "zero_day_candidate_count": len(candidates),
         "zero_day_candidates": [
