@@ -103,10 +103,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Python
-        uses: actions/setup-python@v5.6.0  # v48.0: Node.js 24 native (eliminates Node.js 20 deprecation warning)
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0  # v48.0: Node.js 24 native (eliminates Node.js 20 deprecation warning)
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -194,7 +194,7 @@ jobs:
           jq -r '.components[:10][] | "  \(.name // "?")@\(.version // "?") [\(.type // "?")]"' "$JSON_FILE"
 
       - name: Upload Python SBOM artifact
-        uses: actions/upload-artifact@v4.6.2  # v48.0: latest v4 patch (FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 ensures Node.js 24)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2  # v48.0: latest v4 patch (FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 ensures Node.js 24)
         with:
           name: sbom-python-${{ github.sha }}
           path: ${{ env.SBOM_DIR }}/
@@ -212,7 +212,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       # ── v47.3 FIX: Free runner disk space BEFORE Docker build ─────────────
       # torch==2.2.0 with CUDA deps (~3-4 GB) + Docker image export exhausts
@@ -526,7 +526,7 @@ jobs:
           echo "Grype gate passed: 0 actionable critical CVEs."
 
       - name: Upload Docker SBOM + Grype report
-        uses: actions/upload-artifact@v4.6.2  # v47.4: explicit patch pin
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2  # v47.4: explicit patch pin
         if: always()
         with:
           name: sbom-docker-${{ github.sha }}
@@ -545,13 +545,13 @@ jobs:
 
     steps:
       - name: Download Python SBOM
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: sbom-python-${{ github.sha }}
           path: sbom-python/
 
       - name: Download Docker SBOM
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: sbom-docker-${{ github.sha }}
           path: sbom-docker/
