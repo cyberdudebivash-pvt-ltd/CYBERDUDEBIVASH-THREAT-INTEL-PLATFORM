@@ -686,7 +686,21 @@ jobs:
   trufflehog:
     name: TruffleHog Secret Scan
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # FIX (P0, 2026-09-10): this job's own steps -- a full-history checkout
+    # (fetch-depth: 0, needed to scan the whole diff range) followed by the
+    # actual scan -- have taken 8-8.5 minutes on a normal run this session,
+    # leaving a 10-minute budget with little margin. Under observed slower-
+    # than-usual Actions infrastructure (this exact job's own checkout step
+    # alone took 3m10s in one run, more than double its usual time, and
+    # every other job's checkout in that same run was similarly slow),
+    # TruffleHog's job hit this timeout and was cancelled twice in a row
+    # with the scan still in progress -- a false-negative "cancelled", not
+    # a real secret finding or a code defect, and "SAST Gate (required)"
+    # correctly failed closed on it (working as designed for PR #401's own
+    # fail-closed spec). Doubled to give checkout-time variance and the
+    # scan itself a safe margin; a job that finishes early costs nothing
+    # extra, a required check that spuriously cancels blocks every PR.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
