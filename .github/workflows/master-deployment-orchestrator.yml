@@ -304,3 +304,31 @@ jobs:
             echo "DEPLOYMENT STATUS: AMBER -- Review SLA violations before next release"
           fi
           echo "============================================================"
+
+  # FIX (P0, 2026-09-10, operational-readiness audit): see deploy-worker.yml's
+  # identical job for the full rationale -- this workflow had zero failure
+  # notification. `needs` covers every job in this file so a failure at any
+  # stage (guard, integrity, freshness, SLA, readiness) is reported.
+  notify-on-failure:
+    name: "Notify on orchestration failure"
+    needs: [orchestration-guard, deployment-integrity, manifest-freshness, sla-evaluation, deployment-readiness]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Send failure alert
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "Master deployment orchestrator (master-deployment-orchestrator.yml) FAILED." \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

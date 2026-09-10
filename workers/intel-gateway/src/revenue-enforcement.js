@@ -748,7 +748,20 @@ export async function handleTrialIssuance(request, env, rid) {
       rate_limit:  REVENUE_CONFIG.LIMITS.PRO.rpm,
       daily_limit: REVENUE_CONFIG.LIMITS.PRO.api_calls_day,
     };
-    await env.API_KEYS_KV.put(`key:${keyHash}`, JSON.stringify(keyRecord), { expirationTtl: expTtl + 3600 });
+    // FIX (P0, 2026-09-10, CodeRabbit review on PR #407): stored under
+    // `key:${keyHash}` -- every real reader of API_KEYS_KV disagrees.
+    // resolveAuth() (index.js) does env.API_KEYS_KV.get(raw, "json") with
+    // the RAW key and no prefix, matching every other writer in this
+    // codebase (index.js:2911,3775,3853 -- confirmed via repo-wide grep,
+    // none use a hash or a "key:" prefix). A trial key issued via this
+    // function could never actually authenticate on any subsequent
+    // request -- this bug was only ever exercised for the first time when
+    // this function was wired into intel-gateway's live router in this
+    // same PR, so it was latent, not a regression of previously-working
+    // behavior. `keyHash` itself is kept (still stored as the record's own
+    // `key_hash` metadata field above) -- only the KV key this record is
+    // addressed by changes.
+    await env.API_KEYS_KV.put(apiKey, JSON.stringify(keyRecord), { expirationTtl: expTtl + 3600 });
 
     // Record trial activation
     const trialRecord = {

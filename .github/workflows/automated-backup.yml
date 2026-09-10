@@ -113,12 +113,23 @@ jobs:
 
       - name: Notify on failure
         if: failure()
+        # FIX (P0, 2026-09-10, operational-readiness audit): this step
+        # previously only ever emitted a ::error:: annotation, visible
+        # solely inside the Actions UI -- the commented-out curl example
+        # below it had never actually been wired to a real secret. Reuses
+        # scripts/pipeline_alert.py's send_telegram(), already proven live
+        # in enterprise-governance.yml/self-healing.yml, rather than
+        # inventing a new notification path. Exits 0 (never fails this
+        # already-failing job further) when TELEGRAM_BOT_TOKEN/CHAT_ID
+        # aren't configured, matching that script's own established
+        # skip-gracefully convention.
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           echo "::error::Full backup FAILED. Platform data at risk. Investigate immediately."
-          # Extend: post to Slack/PagerDuty via curl if webhook secrets are set
-          # curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
-          #   -H 'Content-type: application/json' \
-          #   --data '{"text":"🚨 SENTINEL APEX: Full backup FAILED! Run ID: ${{ github.run_id }}"}'
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "Full encrypted backup (automated-backup.yml) FAILED. Platform data at risk."
 
   # ── Cloudflare KV + R2 Data Backup (v184.0 - enterprise hardening) ─────────
   cf-data-backup:
@@ -181,10 +192,69 @@ jobs:
           fi
           python3 scripts/backup_r2.py
 
+      - name: "P0 FinOps -- verify R2 lifecycle safety-net policy is live"
+        # docs/P0_R2_COST_CONTAINMENT.md Section 8d has, since 2026-09-05,
+        # explicitly disclosed that whether config/r2_lifecycle_policy.json's
+        # permanent 7-day ephemeral-retention backstop (built in PR #377) was
+        # ever actually applied to production R2 has never been verified --
+        # no sandboxed Claude Code session has ever had CF_ACCOUNT_ID/R2
+        # credentials, and this read-only check (r2_lifecycle_manager.py
+        # --verify: GET bucket-lifecycle-configuration only, never a PUT --
+        # see that script's own cmd_verify docstring) was never wired into
+        # any workflow that does. Reuses the exact CF_R2_* secrets this job
+        # already fetches for backup_r2.py above, aliased to the
+        # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/CF_ACCOUNT_ID names
+        # r2_lifecycle_manager.py expects (get_credentials(), imported from
+        # r2_upload.py) -- the same alias sentinel-blogger.yml's STAGE 3.5
+        # already uses for this identical underlying secret. Zero new
+        # secrets. This step only reports drift; it never applies or
+        # mutates the policy -- doing so remains a deliberate, separate,
+        # human-operator action per that document's own instruction.
+        #
+        # FIX (P0, 2026-09-10, CodeRabbit review on PR #407): `|| echo`
+        # below used to swallow --verify's real exit code -- the step
+        # always exited 0, so drift/not-yet-applied could never actually
+        # trip failure() for "Notify on CF backup failure" below (the job
+        # already has continue-on-error: true at the job level, so letting
+        # this step genuinely fail doesn't block the rest of the daily
+        # backup run). The `&&`/`||` capture keeps the same human-readable
+        # remediation message while preserving the real exit code.
+        env:
+          CF_ACCOUNT_ID:         ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: |
+          if [[ -z "$AWS_ACCESS_KEY_ID" || -z "$CF_ACCOUNT_ID" ]]; then
+            echo "SKIP: CF_ACCOUNT_ID or R2 credentials not configured"
+            exit 0
+          fi
+          python3 scripts/r2_lifecycle_manager.py --verify && VERIFY_EXIT=0 || VERIFY_EXIT=$?
+          if [ "$VERIFY_EXIT" -ne 0 ]; then
+            echo "::warning::R2 lifecycle safety-net policy drift or not-yet-applied -- see uploaded r2-lifecycle-verify artifact. Run 'python3 scripts/r2_lifecycle_manager.py --apply --execute --confirm-bucket sentinel-apex-reports' from an environment with production R2 credentials to arm it (docs/P0_R2_COST_CONTAINMENT.md Section 8b)."
+          fi
+          exit "$VERIFY_EXIT"
+
+      - name: Upload R2 lifecycle verification report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r2-lifecycle-verify-${{ github.run_id }}
+          path: data/quality/r2_lifecycle_report.json
+          retention-days: 90
+          if-no-files-found: ignore
+
       - name: Notify on CF backup failure
         if: failure()
+        # FIX (P0, 2026-09-10, operational-readiness audit): previously
+        # ::warning:: only, visible solely inside the Actions UI -- same
+        # fix as "Notify on failure" above, reusing pipeline_alert.py.
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           echo "::warning::Cloudflare KV/R2 backup failed. Check CF_API_TOKEN and R2 credentials."
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "Cloudflare KV/R2 backup (automated-backup.yml cf-data-backup) FAILED. Check CF_API_TOKEN and R2 credentials."
 
   # ── Backup Integrity Verify ───────────────────────────────────────────────
   verify-backup:
@@ -226,3 +296,26 @@ jobs:
             exit 1
           fi
           python -m agent.backup.backup_engine --verify "$BACKUP_ID"
+
+      - name: Notify on verify failure
+        if: failure()
+        # FIX (P0, 2026-09-10, operational-readiness audit): this job had
+        # no failure-notification step at all -- a failed verify was only
+        # ever visible as a red status in the Actions UI. Same fix as the
+        # other two jobs in this file, reusing pipeline_alert.py.
+        #
+        # FIX (P0, 2026-09-10, CodeRabbit review on PR #407): backup_id is
+        # a free-text workflow_dispatch input -- template-splicing it
+        # straight into --message below (as this step originally did)
+        # interpolates it into the shell command line before bash parses
+        # it, the exact injection class this same file's own v184.8 FIX
+        # comment (a few lines up) already root-caused and fixed once for
+        # a different step. Passed through env: instead, matching that
+        # established pattern.
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BACKUP_ID_INPUT: ${{ github.event.inputs.backup_id }}
+        run: |
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "Backup integrity verify (automated-backup.yml verify-backup) FAILED for backup_id=${BACKUP_ID_INPUT}."

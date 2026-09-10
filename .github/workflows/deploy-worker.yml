@@ -622,3 +622,37 @@ jobs:
 
           echo ""
           echo "=== Post-Deploy Smoke Test COMPLETE ==="
+
+  # FIX (P0, 2026-09-10, operational-readiness audit): this workflow -- the
+  # actual path that ships code to intel.cyberdudebivash.com -- had zero
+  # failure notification of any kind; a failed production deploy was only
+  # ever visible as a red status in the GitHub Actions UI. Reuses
+  # scripts/pipeline_alert.py's send_telegram(), already proven live
+  # elsewhere in this repo (enterprise-governance.yml, self-healing.yml,
+  # and as of today automated-backup.yml), rather than a new mechanism.
+  # Separate job (not a step inside `deploy`) so this can never itself
+  # perturb the deploy job it is reporting on; `if: failure()` + `needs`
+  # means it only ever runs when that job actually failed.
+  notify-on-failure:
+    name: "Notify on deploy failure"
+    needs: deploy
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Send failure alert
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "Production deploy (deploy-worker.yml) FAILED -- intel.cyberdudebivash.com may be running a stale or broken Worker version." \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
