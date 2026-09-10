@@ -139,6 +139,51 @@ for page in ("upgrade.html",):
             f"reverted to hardcoded-only pricing."
         )
 
+# -- 5: revenue-engine internal duplicate pricing tables (2026-09-10 incident) --
+# handleCommercialDashboard() and updateMRR() (workers/revenue-engine/src/index.js)
+# each carried their own hardcoded { FREE:0, PRO:99, ENTERPRISE:999, MSSP:1999 }
+# price map -- a *second* duplicate of the canonical TIERS constant defined
+# ~900 lines earlier in the same file, missed by the 2026-08-31 monetization
+# audit that reconciled TIERS itself (see that constant's own header comment).
+# Silently inflated the live Commercial Analytics Dashboard's mrr_usd/arr_usd
+# and the persisted revenue:mrr_usd KV ledger by ~2x for every PRO/ENTERPRISE
+# customer. Fixed 2026-09-10 by making both read TIERS.<tier>.price_usd
+# directly instead of a second copy. Two checks so this exact incident (not
+# just this exact file state) cannot silently recur:
+revenue_engine_path = "workers/revenue-engine/src/index.js"
+revenue_engine_src = read_text(revenue_engine_path)
+
+# 5a. The canonical TIERS constant itself must still agree with config/pricing.json
+# (protects the single source of truth the two call sites above now depend on).
+tiers_marker = re.search(r"const TIERS\s*=\s*\{", revenue_engine_src)
+tiers_section = revenue_engine_src[tiers_marker.end(): tiers_marker.end() + 2000] if tiers_marker else ""
+if not tiers_marker:
+    failures.append(f"{revenue_engine_path}: could not locate 'const TIERS = {{' - verify manually, this gate depends on it existing.")
+else:
+    for tier_key, ssot_key in (("PRO", "pro"), ("ENTERPRISE", "enterprise"), ("MSSP", "mssp")):
+        m = re.search(rf"{tier_key}:\s*\{{[^}}]*?price_usd:\s*(\d+)", tiers_section)
+        if not m:
+            failures.append(f"{revenue_engine_path}: TIERS.{tier_key}.price_usd not found - verify manually.")
+            continue
+        found = int(m.group(1))
+        expected = declared_ssot[ssot_key]["monthly_usd"]
+        if found != expected:
+            failures.append(
+                f"{revenue_engine_path}: TIERS.{tier_key}.price_usd={found} vs "
+                f"config/pricing.json monthly_usd={expected} - unexpected drift in "
+                f"the canonical tier table this file's revenue math depends on."
+            )
+
+# 5b. The exact historical bad literal must never reappear anywhere in this file,
+# regardless of which function it's copy-pasted into next.
+if re.search(r"PRO:\s*99\s*,\s*ENTERPRISE:\s*999\b", revenue_engine_src):
+    failures.append(
+        f"{revenue_engine_path}: found the exact pre-2026-09-10 hardcoded bad "
+        f"price literal (PRO:99, ENTERPRISE:999) - this is the specific ~2x MRR "
+        f"overstatement bug already fixed once; every price map in this file "
+        f"must read TIERS.<tier>.price_usd instead of a hardcoded copy."
+    )
+
 # -- Report -------------------------------------------------------------------
 if warnings:
     print("WARNINGS (non-blocking, known pending business decision):")

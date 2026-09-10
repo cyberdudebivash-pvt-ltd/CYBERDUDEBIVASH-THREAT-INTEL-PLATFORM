@@ -2460,7 +2460,15 @@ async function handleCommercialDashboard(request, env, rid) {
   const tierCounts = { FREE:0, PRO:0, ENTERPRISE:0, MSSP:0 };
   for (const c of custIdx) { if (tierCounts[c.tier] !== undefined) tierCounts[c.tier]++; }
 
-  const tierPrices = { FREE:0, PRO:99, ENTERPRISE:999, MSSP:1999 };
+  // FIX (P0, 2026-09-10): this table still carried the pre-2026-08-31 wrong
+  // prices (PRO $99, ENTERPRISE $999 -- ~2x the real $49/$499) after the
+  // 2026-08-31 monetization audit reconciled the TIERS constant above
+  // (line ~1550, canonical vs. config/subscription_tiers.json) but missed
+  // this second, independent duplicate -- so the Commercial Analytics
+  // Dashboard's mrr_usd/arr_usd have been silently ~2x-inflated for every
+  // PRO/ENTERPRISE customer since. Reusing TIERS directly (single source of
+  // truth) instead of a second hardcoded copy so this can't drift again.
+  const tierPrices = { FREE:0, PRO:TIERS.PRO.price_usd, ENTERPRISE:TIERS.ENTERPRISE.price_usd, MSSP:TIERS.MSSP.price_usd };
   const mrr = (tierCounts.PRO * tierPrices.PRO) + (tierCounts.ENTERPRISE * tierPrices.ENTERPRISE) + (tierCounts.MSSP * tierPrices.MSSP);
   const arr = mrr * 12;
 
@@ -2489,7 +2497,13 @@ function generateApiKey(tier, prefix) {
 }
 
 async function updateMRR(env, tier, billing_cycle, action) {
-  const price = { FREE:0, PRO:99, ENTERPRISE:999, MSSP:1999 }[tier] || 0;
+  // FIX (P0, 2026-09-10): same stale duplicate as handleCommercialDashboard's
+  // tierPrices above (PRO $99/ENTERPRISE $999 vs. real $49/$499) -- this one
+  // is worse, since it mutates the persisted revenue:mrr_usd KV ledger on
+  // every subscription add/remove (call sites: line ~2017, ~2307), so the
+  // error compounded with every subscription event rather than just
+  // mis-displaying at read time. Reusing the canonical TIERS constant.
+  const price = { FREE:0, PRO:TIERS.PRO.price_usd, ENTERPRISE:TIERS.ENTERPRISE.price_usd, MSSP:TIERS.MSSP.price_usd }[tier] || 0;
   const monthly = billing_cycle === "annual" ? price : price;
   const key = "revenue:mrr_usd";
   const curr = parseFloat(await env.REVENUE_CRM_KV.get(key) || "0");

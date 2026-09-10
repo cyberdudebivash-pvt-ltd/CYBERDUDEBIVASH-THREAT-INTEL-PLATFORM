@@ -97,7 +97,7 @@ import { loadCertificationIndex, persistCertificationRecords, resolveCertificati
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleIOCLookup, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
-import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger } from './revenue-enforcement.js';
+import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger, handleLeadCapture, handleTrialIssuance } from './revenue-enforcement.js';
 import { evaluateDailyQuota, utcDateString, dailyQuotaKey, quotaAlertDedupeKey, secondsUntilNextUtcMidnight } from './daily-quota.js';
 import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
@@ -5618,6 +5618,29 @@ async function handleRequest(request, env, ctx) {
       help: "Subscribe at https://intel.cyberdudebivash.com/#pricing to receive your API key.",
       auth: "POST /api/auth/login with { \"api_key\": \"<your-key>\" } to obtain a Bearer JWT.",
     }, 422);
+  }
+
+  // --- Self-serve lead capture + trial issuance (revenue-enforcement.js) -----
+  // FIX (P0, 2026-09-10): handleLeadCapture/handleTrialIssuance were fully
+  // built, tested and live-correct (confirmed via
+  // docs/BILLING_ENTITLEMENT_ARCHITECTURE_AUDIT.md: issues a real,
+  // correctly-expiring 7-day PRO key) but never imported/routed here --
+  // "fully correct AND fully unreachable" on this domain (only
+  // revenue.intel.cyberdudebivash.com had it wired, via
+  // workers/revenue-engine/src/index.js's separate route table). Wiring the
+  // existing functions in directly rather than re-implementing them.
+  // checkRateLimit reused (FREE-tier ceiling) as IP-based abuse friction on
+  // top of handleTrialIssuance's own one-trial-per-email KV guard -- no new
+  // rate-limiting mechanism introduced.
+  if (path === "/api/leads/capture" && method === "POST") {
+    const rl = await checkRateLimit(env, ip, "FREE");
+    if (!rl.allowed) return jsonResp({ error: "rate_limited", retry_after_seconds: 60 }, 429);
+    return await handleLeadCapture(request, env, crypto.randomUUID());
+  }
+  if (path === "/api/leads/trial" && method === "POST") {
+    const rl = await checkRateLimit(env, ip, "FREE");
+    if (!rl.allowed) return jsonResp({ error: "rate_limited", retry_after_seconds: 60 }, 429);
+    return await handleTrialIssuance(request, env, crypto.randomUUID());
   }
 
   // --- Premium intel gate (MONETIZATION INTEGRITY v148->v180) -----------------

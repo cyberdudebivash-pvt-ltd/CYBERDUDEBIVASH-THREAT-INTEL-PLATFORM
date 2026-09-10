@@ -29,7 +29,15 @@ findings are discoverable from the same place as every other change.
   Cluster, Kubernetes, PagerDuty) not evidenced in the actual single-Worker deployment.
 - `workers/revenue-engine/src/index.js` duplicates tier pricing with a ~2x mismatch against the
   canonical `config/subscription_tiers.json` (PRO $99 vs. $49).
-- 12 `/api/v1/p34/*` "engineering assurance" endpoints have no authentication.
+- ~~12 `/api/v1/p34/*` "engineering assurance" endpoints have no authentication.~~ **RE-AUDITED
+  2026-09-10 — NOT A DEFECT.** All 12 routes (`index.js:6861-6872`) are the confirmed live data
+  source for `enterprise-assurance-center.html` — a public enterprise trust-center page (Security
+  Posture / SBOM / Compliance / Reliability tabs, linked from `enterprise-knowledge-center.html`)
+  that prospects review pre-sale during vendor security due diligence, the same
+  unauthenticated-by-design pattern used by any vendor trust/security page. Sampled handlers
+  (`handleP34Security`, `handleP34Sbom`) return aggregate posture/SBOM-status data, not credentials
+  or infrastructure secrets. Gating these behind auth would break the trust center for anonymous
+  prospects — the audience it exists to serve — so no change was made.
 - CORS wildcard (`Access-Control-Allow-Origin: "*"`) on every response.
 - 219 known dependency vulnerabilities (4 critical) across the repository.
 - `provisionApiKey()`'s revenue-integrity fix (`SUBSCRIPTION_EXPIRY_ENABLED`) ships disabled by
