@@ -102,7 +102,7 @@ class TestStateFilesManifest(unittest.TestCase):
     entry doesn't silently pass just because the generic tests adapted to
     the shorter list."""
 
-    def test_exactly_fifteen_files_migrated(self):
+    def test_exactly_twenty_two_files_migrated(self):
         """P0 R2 COST AUDIT FIX: was 9 -- data/cache/r2_report_publish_state.json
         (scripts/r2_report_publisher.py's own cross-run incremental-publish
         state) was added after a post-merge forensic audit of PR #369 found
@@ -134,12 +134,82 @@ class TestStateFilesManifest(unittest.TestCase):
         apex_forecast_latest.json were deliberately NOT added (no consumer /
         orphaned producer) -- see the rationale block in r2_state_sync.py.
 
+        Was 15 -- P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10):
+        genesis-powerhouse.yml and sovereign-platform.yml persisted via
+        `git push origin main`, rejected every run since ~2026-08-26 and
+        swallowed by `|| echo "... cycle complete"` / a push-retry loop that
+        still exits 0. Seven entries added, traced to real consumers by an
+        exhaustive producer/consumer pass: nexus_output.json,
+        cortex_output.json, quantum_output.json, sovereign_output.json and
+        genesis_output.json are exactly index.html's ENGINE_URLS set for
+        these five engines (the customer dashboard's current-state read);
+        cortex/stream_events.json feeds agent/sdk/cdb_apex_streamer.py;
+        genesis/detection_pack.json feeds agent/product_factory/
+        detection_pack_builder.py's sellable detection ZIP. Every other
+        NEXUS/CORTEX/QUANTUM/SOVEREIGN sub-file was confirmed same-run-only
+        (no cross-run or cross-workflow reader) and deliberately NOT added;
+        neither was data/sovereign/tenants.json (customer-shaped API-key
+        values -- see NEVER_PERSIST_PATHS) nor the billing-adjacent
+        mrr_report.json/invoices.json/stripe_config.json (pre-existing,
+        out-of-scope duplicate-writer with scripts/stripe_webhook.py).
+
         This count is a FinOps tripwire, not bookkeeping: every entry costs a
         GET on each download pass and a PUT on each upload pass across four
         workflows. The +4 here was measured at 2,160 Class A + 2,160 Class B
-        per month = 0.216% of R2's 1M Class A allowance. Any future increase
-        must be justified the same way before this number is changed."""
-        self.assertEqual(len(rs.STATE_FILES), 15)
+        per month = 0.216% of R2's 1M Class A allowance. The +7 here was
+        measured against the exact 2 new call sites (not all four workflows,
+        since both new download/upload steps use --only to scope to just
+        their own files) at 840 Class A + 240 Class B per month = 0.084% /
+        0.0024% of the respective allowances. Any future increase must be
+        justified the same way before this number is changed."""
+        self.assertEqual(len(rs.STATE_FILES), 22)
+
+    def test_p0_runtime_intelligence_plane_is_r2_persisted(self):
+        """The 5 customer dashboard aggregate files plus the 2 sub-files with
+        a real non-dashboard consumer must be R2-persisted, path-mirrored
+        keys (this migration's established convention for genuinely new R2
+        objects -- see data/stix/feed_manifest.json's own comment for the
+        one pre-existing exception)."""
+        for entry in (
+            ("data/nexus/nexus_output.json", "data/nexus/nexus_output.json"),
+            ("data/cortex/cortex_output.json", "data/cortex/cortex_output.json"),
+            ("data/cortex/stream_events.json", "data/cortex/stream_events.json"),
+            ("data/quantum/quantum_output.json", "data/quantum/quantum_output.json"),
+            ("data/sovereign/sovereign_output.json", "data/sovereign/sovereign_output.json"),
+            ("data/genesis/genesis_output.json", "data/genesis/genesis_output.json"),
+            ("data/genesis/detection_pack.json", "data/genesis/detection_pack.json"),
+        ):
+            self.assertIn(entry, rs.STATE_FILES)
+
+    def test_sovereign_tenant_secrets_never_added_to_state_files(self):
+        """Regression guard for the mission's explicit secret-safety
+        requirement: data/sovereign/tenants.json holds customer-shaped
+        API-key values (SEC-2026-07-25/2026-08-28 incidents) and must never
+        be persisted to R2, no matter how this module's STATE_FILES list is
+        edited in the future. This does not depend on remembering to keep
+        this test in sync -- r2_state_sync.py's own NEVER_PERSIST_PATHS
+        module-level assertion enforces the same invariant at import time."""
+        local_paths = [local for local, _ in rs.STATE_FILES]
+        self.assertNotIn("data/sovereign/tenants.json", local_paths)
+        self.assertIn("data/sovereign/tenants.json", rs.NEVER_PERSIST_PATHS)
+
+    def test_sovereign_billing_state_deliberately_not_added(self):
+        """Guards the scope decision above: these are billing-adjacent state
+        with a pre-existing, independent duplicate-writer (stripe_webhook.py)
+        outside this mission's scope, and are not read by any customer
+        intelligence panel this mission targets. Re-adding any of these needs
+        a fresh justification, not a casual directory-level sync."""
+        local_paths = [local for local, _ in rs.STATE_FILES]
+        for f in (
+            "data/sovereign/mrr_report.json",
+            "data/sovereign/invoices.json",
+            "data/sovereign/stripe_config.json",
+            "data/sovereign/onboarding_flow.json",
+            "data/sovereign/whitelabel_config.json",
+            "data/sovereign/soc2_report.json",
+            "data/sovereign/nist_csf_report.json",
+        ):
+            self.assertNotIn(f, local_paths)
 
     def test_ai_plane_state_is_r2_persisted(self):
         """The AI plane's cross-run state must not regress onto the git path.
@@ -874,6 +944,42 @@ class TestCli(unittest.TestCase):
         with self.assertRaises(SystemExit):
             with patch.object(sys, "argv", ["r2_state_sync.py"]):
                 rs.main()
+
+    def test_only_with_unknown_path_is_rejected(self):
+        """A typo'd --only value would otherwise silently download/upload
+        nothing (an empty intersection with STATE_FILES/STATE_DIRS) --
+        exactly the class of silent-failure this whole module exists to
+        eliminate. Must fail loudly at argument-parsing time instead."""
+        with patch.object(rs, "get_credentials", return_value=("acct", "k", "s")), \
+             patch.object(rs, "install_awscli"), \
+             patch.object(sys, "argv", ["r2_state_sync.py", "--download", "--only", "data/typo/not_a_real_path.json"]):
+            with self.assertRaises(SystemExit):
+                rs.main()
+
+    def test_only_filters_to_the_given_subset(self):
+        """--only reaches download()/upload() as the exact frozenset named,
+        not silently ignored or expanded back to everything."""
+        target = "data/stix/feed_manifest.json"
+        with patch.object(rs, "get_credentials", return_value=("acct", "k", "s")), \
+             patch.object(rs, "install_awscli"), \
+             patch.object(rs, "download", return_value=0) as mock_download, \
+             patch.object(sys, "argv", ["r2_state_sync.py", "--download", "--only", target]):
+            rs.main()
+        mock_download.assert_called_once()
+        _, kwargs = mock_download.call_args
+        self.assertEqual(kwargs["only"], frozenset({target}))
+
+    def test_only_omitted_preserves_original_unfiltered_behavior(self):
+        """Every pre-existing caller (ai-predictions.yml, multi-source-intel.yml,
+        sentinel-blogger.yml, ...) omits --only and must see the exact same
+        None passed through as before this flag existed."""
+        with patch.object(rs, "get_credentials", return_value=("acct", "k", "s")), \
+             patch.object(rs, "install_awscli"), \
+             patch.object(rs, "upload", return_value=0) as mock_upload, \
+             patch.object(sys, "argv", ["r2_state_sync.py", "--upload"]):
+            rs.main()
+        _, kwargs = mock_upload.call_args
+        self.assertIsNone(kwargs["only"])
 
 
 if __name__ == "__main__":

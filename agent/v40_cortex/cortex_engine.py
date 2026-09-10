@@ -159,16 +159,27 @@ class IntelFirehose:
         self._subscribers = defaultdict(list)
         self._sequence = 0
 
-    def generate_stream(self, since_hours: int = 24) -> List[Dict]:
+    def generate_stream(self, since_hours: int = 24) -> Dict:
         """Generate stream events from recent intelligence."""
         entries = _entries()
         if not entries:
-            return []
+            return {
+                "metadata": {
+                    "stream_id": _gen_id("stream", datetime.now(timezone.utc).isoformat()),
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "total_events": 0,
+                    "channels": {ch: 0 for ch in self.CHANNELS},
+                    "severity_distribution": {sev: 0 for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]},
+                },
+                "events": [],
+            }
 
         events = []
         cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
 
         for entry in entries:
+            if not isinstance(entry, dict):
+                continue
             ts = entry.get("timestamp", "")
             try:
                 entry_time = datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -199,6 +210,7 @@ class IntelFirehose:
                     "techniques": [
                         t if isinstance(t, str) else t.get("technique_id", t.get("id", ""))
                         for t in entry.get("mitre_tactics", [])
+                        if isinstance(t, (str, dict))
                     ][:5],
                     "ioc_summary": entry.get("ioc_counts", {}),
                     "feed_source": entry.get("feed_source", ""),

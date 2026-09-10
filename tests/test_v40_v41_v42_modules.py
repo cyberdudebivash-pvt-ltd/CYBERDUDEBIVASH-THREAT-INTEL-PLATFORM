@@ -77,6 +77,69 @@ class TestIntelFirehose:
         assert "channels" in config
         assert config["server"]["protocol"] == "wss"
 
+    @patch("agent.v40_cortex.cortex_engine._entries")
+    def test_generate_stream_skips_non_dict_entries(self, mock):
+        # P0 regression: production manifest data has contained non-dict
+        # list items interleaved with valid entries, which previously crashed
+        # generate_stream() with "'list' object has no attribute 'get'"
+        # (live prod: "[CORTEX-C1] Firehose failed: 'list' object has no
+        # attribute 'get'"). Malformed items must be skipped, not fatal.
+        mock.return_value = [MOCK_ENTRIES[0], ["not", "a", "dict"], MOCK_ENTRIES[1]]
+        from agent.v40_cortex.cortex_engine import IntelFirehose
+        fh = IntelFirehose()
+        stream = fh.generate_stream(since_hours=168)
+        assert "metadata" in stream
+        assert stream["metadata"]["total_events"] > 0
+
+    @patch("agent.v40_cortex.cortex_engine._entries")
+    def test_generate_stream_empty_entries_shape(self, mock):
+        # P0 regression: this is the exact live prod bug -- live prod hit
+        # "[CORTEX-C1] Firehose failed: 'list' object has no attribute
+        # 'get'". Root cause: generate_stream() returned a bare [] on empty
+        # entries, but CortexOrchestrator.execute_full_cycle() unconditionally
+        # calls stream.get("metadata", {}) on the result. The empty-entries
+        # shape must match the full-computation dict shape.
+        mock.return_value = []
+        from agent.v40_cortex.cortex_engine import IntelFirehose
+        fh = IntelFirehose()
+        stream = fh.generate_stream(since_hours=168)
+        assert isinstance(stream, dict)
+        assert stream.get("metadata", {}).get("total_events") == 0
+        assert stream["events"] == []
+
+    @patch("agent.v40_cortex.cortex_engine._entries")
+    def test_generate_stream_skips_malformed_mitre_tactics_items(self, mock):
+        # P0 regression: an mitre_tactics item that is neither a str nor a
+        # dict (e.g. a nested list) must not crash technique extraction.
+        entry = dict(MOCK_ENTRIES[0])
+        entry["mitre_tactics"] = ["T1190", ["nested", "list"], {"technique_id": "T1059"}, 42]
+        mock.return_value = [entry]
+        from agent.v40_cortex.cortex_engine import IntelFirehose
+        fh = IntelFirehose()
+        stream = fh.generate_stream(since_hours=168)
+        assert stream["metadata"]["total_events"] > 0
+        techniques = stream["events"][0]["payload"]["techniques"]
+        assert techniques == ["T1190", "T1059"]
+
+
+class TestCortexOrchestrator:
+    @patch("agent.v40_cortex.cortex_engine._entries")
+    def test_full_cycle_with_empty_manifest_never_raises(self, mock, tmp_path, monkeypatch):
+        # P0 regression: reproduces the exact live production scenario --
+        # an empty/missing manifest (data/stix/feed_manifest.json absent)
+        # drove IntelFirehose.generate_stream() down its empty-entries path,
+        # and the orchestrator's unconditional stream.get("metadata", {})
+        # turned that into a silently-caught AttributeError every cycle
+        # (results["stream"] defaulted to {}). After the fix, the full cycle
+        # must populate real (zero-valued but correctly shaped) results.
+        import agent.v40_cortex.cortex_engine as ce
+        monkeypatch.setattr(ce, "CORTEX_DIR", str(tmp_path))
+        mock.return_value = []
+        orch = ce.CortexOrchestrator()
+        results = orch.execute_full_cycle()
+        assert results["stream"] != {}
+        assert results["stream"]["total_events"] == 0
+
 
 class TestThreatKnowledgeGraph:
     @patch("agent.v40_cortex.cortex_engine._entries", side_effect=_mock_entries)
@@ -204,6 +267,22 @@ class TestAnomalyDetector:
         assert "risk_mean" in stats
         assert stats["total_entries"] == len(expanded)
 
+    @patch("agent.v41_quantum.quantum_engine._entries")
+    def test_detect_anomalies_insufficient_data_shape(self, mock):
+        # P0 regression: live prod hit "[QUANTUM-Q1] Anomaly detection
+        # failed: 'anomaly_count'" because the <10-entries early return
+        # omitted keys the orchestrator unconditionally indexes. The
+        # early-return shape must match the full-computation shape.
+        mock.return_value = MOCK_ENTRIES[:3]  # < 10 entries
+        from agent.v41_quantum.quantum_engine import AnomalyDetector
+        d = AnomalyDetector()
+        result = d.detect_anomalies()
+        assert result["anomaly_count"] == 0
+        assert result["overall_anomaly_score"] == 0
+        assert result["anomalies"] == []
+        assert "baseline_stats" in result
+        assert "analyzed_at" in result
+
 
 class TestAdversarialFeedGuard:
     @patch("agent.v41_quantum.quantum_engine._entries", side_effect=_mock_entries)
@@ -214,6 +293,19 @@ class TestAdversarialFeedGuard:
         assert "feed_scores" in result
         assert "overall_trust" in result
         assert result["feed_count"] > 0
+
+    @patch("agent.v41_quantum.quantum_engine._entries")
+    def test_analyze_feeds_empty_shape(self, mock):
+        # P0 regression: live prod hit "[QUANTUM-Q2] Feed guard failed:
+        # 'overall_trust'" because the empty-entries early return omitted
+        # the key the orchestrator unconditionally indexes.
+        mock.return_value = []
+        from agent.v41_quantum.quantum_engine import AdversarialFeedGuard
+        g = AdversarialFeedGuard()
+        result = g.analyze_feeds()
+        assert result["overall_trust"] == 0
+        assert result["feed_count"] == 0
+        assert result["alerts"] == []
 
 
 class TestFalsePositiveReducer:
@@ -226,6 +318,18 @@ class TestFalsePositiveReducer:
         assert result["entries_analyzed"] == len(MOCK_ENTRIES)
         assert "estimated_fp_rate_pct" in result
 
+    @patch("agent.v41_quantum.quantum_engine._entries")
+    def test_analyze_empty_shape(self, mock):
+        # P0 regression: live prod hit "[QUANTUM-Q3] FP reduction failed:
+        # 'estimated_fp_rate_pct'" because the empty-entries early return
+        # omitted the key the orchestrator unconditionally indexes.
+        mock.return_value = []
+        from agent.v41_quantum.quantum_engine import FalsePositiveReducer
+        r = FalsePositiveReducer()
+        result = r.analyze()
+        assert result["estimated_fp_rate_pct"] == 0
+        assert result["fp_candidate_count"] == 0
+
 
 class TestDetectionABTester:
     @patch("agent.v41_quantum.quantum_engine._entries", side_effect=_mock_entries)
@@ -237,6 +341,43 @@ class TestDetectionABTester:
         assert result["total_experiments"] > 0
         assert "variant_a" in result["experiments"][0]
         assert "variant_b" in result["experiments"][0]
+
+    @patch("agent.v41_quantum.quantum_engine._entries")
+    def test_generate_experiments_no_high_risk_shape(self, mock):
+        # P0 regression: live prod hit "[QUANTUM-Q4] A/B testing failed:
+        # 'total_experiments'" because the no-high-risk-entries early
+        # return omitted the key the orchestrator unconditionally indexes.
+        mock.return_value = [e for e in MOCK_ENTRIES if e["risk_score"] < 7]
+        from agent.v41_quantum.quantum_engine import DetectionABTester
+        t = DetectionABTester()
+        result = t.generate_experiments()
+        assert result["total_experiments"] == 0
+        assert result["experiments"] == []
+        assert "framework_config" in result
+
+
+class TestQuantumOrchestrator:
+    @patch("agent.v41_quantum.quantum_engine._entries")
+    def test_full_cycle_with_sparse_data_never_keyerrors(self, mock, tmp_path, monkeypatch):
+        # P0 regression: reproduces the exact live production scenario —
+        # a sparse manifest (< 10 entries, as NEXUS/CORTEX starvation
+        # caused) drove all four QUANTUM sub-engines down their
+        # inconsistent-shape early-return path simultaneously, and the
+        # orchestrator's direct key indexing turned that into 4 silently
+        # caught KeyErrors every single cycle (results defaulted to {}).
+        # After the fix, the full cycle must populate real (zero-valued
+        # but correctly shaped) results with no exception swallowed.
+        import agent.v41_quantum.quantum_engine as qe
+        monkeypatch.setattr(qe, "QUANTUM_DIR", str(tmp_path))
+        mock.return_value = MOCK_ENTRIES[:3]  # sparse: < 10 entries, no high-risk A/B subset issue
+        orch = qe.QuantumOrchestrator()
+        results = orch.execute_full_cycle()
+        assert results["anomalies"] != {}
+        assert results["feed_trust"] != {}
+        assert results["false_positives"] != {}
+        assert results["ab_tests"] != {}
+        assert results["anomalies"]["count"] == 0
+        assert results["feed_trust"]["overall"] >= 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

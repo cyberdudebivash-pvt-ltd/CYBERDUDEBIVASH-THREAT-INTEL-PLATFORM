@@ -64,6 +64,22 @@ function jsonResp(data, status = 200, extra = {}) {
 // data/intelligence/detection_rules/rule_manifest.json static paths are
 // untouched and keep serving their git-committed content unchanged, so any
 // existing consumer of those exact URLs sees no behavior change.
+//
+// ghBranch (optional, per entry): which branch handleIntelStaticProxy()
+// falls back to when R2 is empty/errors. Defaults to "gh-pages" below --
+// unchanged for these first two entries. The 5 P0 RUNTIME INTELLIGENCE
+// STATE RECOVERY entries added underneath explicitly set "main": their
+// fallback content (data/{nexus,cortex,quantum,sovereign,genesis}/
+// *_output.json) was never included in the gh-pages deploy bundle
+// (scripts/build_dist_artifact.py's INCLUDE_DIRS excludes data/ entirely --
+// confirmed, not assumed), so falling back to gh-pages for these would 404
+// even when main has a servable (if stale) copy. Falling back to the exact
+// raw-GitHub-main URL index.html already reads today keeps zero regression:
+// R2 becomes the fresh primary source, and the pre-existing fallback content
+// (frozen, but already what every consumer sees pre-migration) is neither
+// removed nor relocated -- only demoted from "the only source" to "the
+// fallback", per this mission's explicit "no removal of GitHub Raw runtime
+// fallbacks" constraint.
 const INTEL_STATIC_PROXY = {
   "/api/v1/intel/ai_index.json": {
     r2Key:  "intelligence/ai_index.json",
@@ -72,6 +88,31 @@ const INTEL_STATIC_PROXY = {
   "/api/v1/intel/detection_rules_manifest.json": {
     r2Key:  "intelligence/detection_rules_manifest.json",
     ghPath: "data/intelligence/detection_rules/rule_manifest.json",
+  },
+  "/api/v1/intel/nexus_output.json": {
+    r2Key:  "data/nexus/nexus_output.json",
+    ghPath: "data/nexus/nexus_output.json",
+    ghBranch: "main",
+  },
+  "/api/v1/intel/genesis_output.json": {
+    r2Key:  "data/genesis/genesis_output.json",
+    ghPath: "data/genesis/genesis_output.json",
+    ghBranch: "main",
+  },
+  "/api/v1/intel/cortex_output.json": {
+    r2Key:  "data/cortex/cortex_output.json",
+    ghPath: "data/cortex/cortex_output.json",
+    ghBranch: "main",
+  },
+  "/api/v1/intel/quantum_output.json": {
+    r2Key:  "data/quantum/quantum_output.json",
+    ghPath: "data/quantum/quantum_output.json",
+    ghBranch: "main",
+  },
+  "/api/v1/intel/sovereign_output.json": {
+    r2Key:  "data/sovereign/sovereign_output.json",
+    ghPath: "data/sovereign/sovereign_output.json",
+    ghBranch: "main",
   },
 };
 
@@ -90,7 +131,7 @@ async function handleIntelStaticProxy(env, path, method) {
   if (method !== "GET") {
     return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
   }
-  const { r2Key, ghPath } = entry;
+  const { r2Key, ghPath, ghBranch = "gh-pages" } = entry;
 
   if (env.INTEL_R2) {
     try {
@@ -106,7 +147,7 @@ async function handleIntelStaticProxy(env, path, method) {
     }
   }
 
-  const upstreamUrl = `https://raw.githubusercontent.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/gh-pages/${ghPath}`;
+  const upstreamUrl = `https://raw.githubusercontent.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/${ghBranch}/${ghPath}`;
   try {
     const resp = await fetch(upstreamUrl, {
       cf: { cacheEverything: true, cacheTtl: 300 },

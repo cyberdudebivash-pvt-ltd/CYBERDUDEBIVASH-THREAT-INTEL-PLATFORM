@@ -125,10 +125,76 @@ test("gh-pages fetch throwing (e.g. timeout) returns an honest 502", async () =>
   }
 });
 
-test("both proxied paths are registered with distinct R2 keys and gh-pages paths", () => {
-  assert.equal(Object.keys(INTEL_STATIC_PROXY).length, 2);
+test("all proxied paths are registered with distinct R2 keys and gh paths", () => {
+  assert.equal(Object.keys(INTEL_STATIC_PROXY).length, 7);
   assert.equal(INTEL_STATIC_PROXY[AI_INDEX_PATH].r2Key, "intelligence/ai_index.json");
   assert.equal(INTEL_STATIC_PROXY[RULES_PATH].r2Key, "intelligence/detection_rules_manifest.json");
+  const r2Keys = Object.values(INTEL_STATIC_PROXY).map((e) => e.r2Key);
+  assert.equal(new Set(r2Keys).size, r2Keys.length, "R2 keys must be unique across all entries");
+});
+
+// ---------------------------------------------------------------------------
+// P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10): 5 new entries
+// serving index.html's ENGINE_URLS (nexus/cortex/quantum/sovereign/genesis),
+// each with ghBranch: "main" instead of the original two entries' default
+// "gh-pages" -- their fallback content was never in the gh-pages deploy
+// bundle (build_dist_artifact.py's INCLUDE_DIRS excludes data/ entirely),
+// so falling back to gh-pages for these would 404 even when main has a
+// servable (if stale) copy.
+// ---------------------------------------------------------------------------
+const NEXUS_PATH = "/api/v1/intel/nexus_output.json";
+
+test("default ghBranch (unset on an entry) still falls back to gh-pages -- existing entries unaffected", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = null;
+  globalThis.fetch = async (url) => { requestedUrl = url; return { ok: true, json: async () => ({ source: "gh-pages-fallback" }) }; };
+  try {
+    await handleIntelStaticProxy({}, AI_INDEX_PATH, "GET");
+    assert.match(requestedUrl, /\/gh-pages\//);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ghBranch: 'main' entries fall back to the main branch, not gh-pages", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = null;
+  globalThis.fetch = async (url) => { requestedUrl = url; return { ok: true, json: async () => ({ source: "main-fallback" }) }; };
+  try {
+    const resp = await handleIntelStaticProxy({}, NEXUS_PATH, "GET");
+    assert.equal(resp.status, 200);
+    assert.match(requestedUrl, /\/main\/data\/nexus\/nexus_output\.json$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("nexus_output.json prefers R2 over the main-branch fallback", async () => {
+  const r2 = fakeR2({ "data/nexus/nexus_output.json": { generated_at: "fresh-from-r2" } });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("must not reach main branch when R2 has the object"); };
+  try {
+    const resp = await handleIntelStaticProxy({ INTEL_R2: r2 }, NEXUS_PATH, "GET");
+    assert.deepEqual(await resp.json(), { generated_at: "fresh-from-r2" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("all 5 new engine routes are registered with ghBranch main and path-mirrored R2 keys", () => {
+  for (const [path, r2Key] of [
+    ["/api/v1/intel/nexus_output.json", "data/nexus/nexus_output.json"],
+    ["/api/v1/intel/genesis_output.json", "data/genesis/genesis_output.json"],
+    ["/api/v1/intel/cortex_output.json", "data/cortex/cortex_output.json"],
+    ["/api/v1/intel/quantum_output.json", "data/quantum/quantum_output.json"],
+    ["/api/v1/intel/sovereign_output.json", "data/sovereign/sovereign_output.json"],
+  ]) {
+    const entry = INTEL_STATIC_PROXY[path];
+    assert.ok(entry, `${path} must be registered`);
+    assert.equal(entry.r2Key, r2Key);
+    assert.equal(entry.ghPath, r2Key);
+    assert.equal(entry.ghBranch, "main");
+  }
 });
 
 // ---------------------------------------------------------------------------
