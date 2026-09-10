@@ -27,12 +27,49 @@ TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "")
 OVERRIDE_THRESHOLD = os.environ.get("STALENESS_THRESHOLD_HOURS", "")
 
+# v185.0 P0 FIX (2026-09-10): sentinel-blogger and status-monitor's
+# thresholds were tighter than the workflows they monitor can ever actually
+# satisfy, guaranteeing recurring false alarms regardless of platform health.
+#
+# Both run on the identical cron '0 0,8,16 * * *' (3x/day, nominal 8h gaps).
+# status-monitor's threshold was 3h -- stale by this monitor's own definition
+# for 5+ of every 8 hours, every single day, forever. Confirmed live via the
+# GitHub Actions API (5 consecutive successful runs, 2026-09-08/09/10):
+# observed gaps were 7h58m / 9h31m / 6h21m / 8h08m -- GitHub's own scheduler
+# documents that cron runs "may be delayed during periods of high load",
+# which this repository (dozens of scheduled workflows) clearly has, and the
+# observed gaps confirm it empirically rather than assuming a clean 8h.
+# sentinel-blogger shares that same cron with a 8h threshold -- zero margin
+# for that same jitter, on the CRITICAL-severity entry whose alert firing
+# hard-fails this job (sys.exit(1)), not just a soft Telegram notice.
+#
+# Fixed to 16h (2x the 8h nominal cadence) for both: comfortably clear of
+# the worst gap observed above with room to spare for future jitter spikes,
+# while still catching a genuine multi-cycle failure (radio silence for a
+# full day+) far faster than the days-long undetected 2026-08-26 core-feed
+# staleness incident this monitoring exists to prevent a repeat of.
+#
+# Writing that safety rule as an actual mechanical test (below) rather than
+# hand-fixing just these two found a THIRD undersized threshold in the same
+# list: Automated Backup's 26h against its own 24h daily cadence is only an
+# 8% margin, not the 1.3x this incident establishes as the real bar. Left
+# uncorrected, this would just be next month's version of today's alert.
+# Raised to 32h (~1.33x, same margin generate-and-sync already had headroom
+# for at 8h/6h) -- still same-day detection of a genuinely broken daily
+# backup, not the 48h a strict 2x-cadence rule would have given it.
+#
+# test_pipeline_staleness_thresholds.py's test_threshold_has_real_safety_margin
+# mechanically parses every entry's own workflow file cron schedule and
+# fails the build if any threshold here ever again provides less than 1.3x
+# headroom over that workflow's actual maximum scheduled gap -- so this
+# exact misconfiguration class cannot silently return, for these rows or any
+# added later.
 MONITORED_WORKFLOWS = [
-    {"file": "sentinel-blogger.yml",   "name": "sentinel-blogger",    "max_age_hours": 8,  "severity": "CRITICAL"},
+    {"file": "sentinel-blogger.yml",   "name": "sentinel-blogger",    "max_age_hours": 16, "severity": "CRITICAL"},
     {"file": "generate-and-sync.yml",  "name": "generate-and-sync",   "max_age_hours": 8,  "severity": "HIGH"},
-    {"file": "automated-backup.yml",   "name": "Automated Backup",    "max_age_hours": 26, "severity": "HIGH"},
+    {"file": "automated-backup.yml",   "name": "Automated Backup",    "max_age_hours": 32, "severity": "HIGH"},
     {"file": "deploy-worker.yml",      "name": "Deploy Worker",       "max_age_hours": 0,  "severity": "INFO"},
-    {"file": "status-monitor.yml",     "name": "CDB Platform Status", "max_age_hours": 3,  "severity": "MEDIUM"},
+    {"file": "status-monitor.yml",     "name": "CDB Platform Status", "max_age_hours": 16, "severity": "MEDIUM"},
 ]
 
 
