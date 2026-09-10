@@ -22,8 +22,14 @@ concurrency:
   cancel-in-progress: false  # Never cancel in-flight backups
 
 permissions:
+  # P0 (2026-09-10, public-repo zero-trust): actions: write removed --
+  # verified via repo-wide grep that no step in this file calls the
+  # Actions API (no run re-trigger, no artifact/run deletion, no cache
+  # management) across all 4 jobs (setup, full-backup, cf-data-backup,
+  # verify-backup). None of them write to git either. A stale permission
+  # from this workflow's original authoring that granted a capability
+  # nothing here has ever used.
   contents: read
-  actions: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

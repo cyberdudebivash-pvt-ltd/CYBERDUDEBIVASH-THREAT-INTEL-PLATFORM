@@ -73,7 +73,25 @@ on:
   # deliberately NOT path-filtered -- the daily full scan and manual runs are
   # unaffected and still scan everything. Concurrency (cancel-in-progress)
   # and branch restriction below were already correctly configured and are
-  # unchanged. Rollback: remove the `paths:` blocks below.
+  # unchanged.
+  #
+  # P0 FIX (2026-09-10, public-repo zero-trust phase 2): this job's own
+  # "SAST Gate (required)" is intended to become a required branch status
+  # check on main. GitHub's documented behavior for a path-filtered
+  # required check is that a PR NOT touching any listed path never
+  # triggers the workflow at all -- the check stays "Expected"/pending
+  # forever and permanently blocks merging that PR. That is a deadlock
+  # this exact path filter would cause the moment it's bound as required,
+  # for any PR touching only e.g. docs, workflows unrelated to this one,
+  # or frontend files. push: keeps its filter (direct pushes to main are
+  # already blocked by branch protection outside the PR-merge path here,
+  # so it isn't part of the required-check deadlock, and re-tuning its
+  # cost-optimization is out of scope for this change). pull_request:
+  # loses its filter and now runs on every PR to main/develop; the
+  # `changes` job below reclassifies what actually changed and drives
+  # each expensive scanner's own `if:` condition, so an unrelated PR still
+  # doesn't pay for a full Bandit/pip-audit/Semgrep run -- it just always
+  # gets a real, deterministic SAST Gate result instead of never running.
   push:
     branches: [main, develop, "release/**"]
     paths:
@@ -87,15 +105,6 @@ on:
       - ".github/workflows/sast-security-scan.yml"
   pull_request:
     branches: [main, develop]
-    paths:
-      - "agent/**"
-      - "api/**.py"
-      - "requirements.txt"
-      - "requirements-ci-light.txt"
-      - "api/requirements.txt"
-      - "syndicate/requirements_syndicate.txt"
-      - "platform/services/*/requirements.txt"
-      - ".github/workflows/sast-security-scan.yml"
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
@@ -112,7 +121,6 @@ concurrency:
 
 permissions:
   contents: read
-  security-events: write
   actions: read
 
 env:
@@ -122,12 +130,100 @@ env:
 jobs:
 
   # --------------------------------------------------------------------------
+  # Change classification (P0, 2026-09-10, public-repo zero-trust phase 2)
+  # --------------------------------------------------------------------------
+  # Drives which expensive scanners below actually need to run, now that
+  # pull_request: has no path filter of its own (see the `on:` block's
+  # header comment for why). Always runs, unconditionally, on every trigger
+  # -- sast-gate below treats this job's own success as mandatory, because
+  # if change classification itself can't be trusted, none of the
+  # skip-vs-run decisions it drives can be trusted either.
+  #
+  # Only actually classifies pull_request events (the only event this was
+  # about: push/schedule/workflow_dispatch already had -- and keep -- their
+  # own unrelated-to-this-fix behavior). Every other event type reports
+  # every surface relevant, matching exactly what always happened before
+  # this change for those triggers.
+  changes:
+    name: Classify Changed Surfaces
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      python_relevant: ${{ steps.classify.outputs.python_relevant }}
+      dependency_relevant: ${{ steps.classify.outputs.dependency_relevant }}
+      semgrep_relevant: ${{ steps.classify.outputs.semgrep_relevant }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed surfaces
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "Non-PR event ($EVENT_NAME) -- every surface is relevant, matching prior behavior."
+            echo "python_relevant=true" >> "$GITHUB_OUTPUT"
+            echo "dependency_relevant=true" >> "$GITHUB_OUTPUT"
+            echo "semgrep_relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "${PR_BASE_SHA}" "${PR_HEAD_SHA}")
+          echo "Files changed in this PR:"
+          echo "$CHANGED"
+          echo ""
+
+          PYTHON_RELEVANT=false
+          DEPENDENCY_RELEVANT=false
+          SEMGREP_RELEVANT=false
+
+          # Mirrors Bandit's actual scan target (--recursive agent/) plus the
+          # api/**.py restriction the old path filter used for api/.
+          if echo "$CHANGED" | grep -qE '^agent/|^api/.*\.py$'; then
+            PYTHON_RELEVANT=true
+          fi
+
+          # Every dependency manifest pip-audit's own "safety" job scans.
+          if echo "$CHANGED" | grep -qE '^requirements\.txt$|^requirements-ci-light\.txt$|^api/requirements\.txt$|^syndicate/requirements_syndicate\.txt$|^platform/services/[^/]+/requirements\.txt$'; then
+            DEPENDENCY_RELEVANT=true
+          fi
+
+          # Mirrors Semgrep's actual scan target (agent/ api/, whole directory
+          # -- not .py-restricted like Bandit/api's classification above).
+          if echo "$CHANGED" | grep -qE '^agent/|^api/'; then
+            SEMGREP_RELEVANT=true
+          fi
+
+          # This workflow file changing is always relevant to every scanner
+          # it defines -- matches the old path filter's own last entry.
+          if echo "$CHANGED" | grep -qE '^\.github/workflows/sast-security-scan\.yml$'; then
+            PYTHON_RELEVANT=true
+            DEPENDENCY_RELEVANT=true
+            SEMGREP_RELEVANT=true
+          fi
+
+          echo "python_relevant=${PYTHON_RELEVANT}"         | tee -a "$GITHUB_OUTPUT"
+          echo "dependency_relevant=${DEPENDENCY_RELEVANT}" | tee -a "$GITHUB_OUTPUT"
+          echo "semgrep_relevant=${SEMGREP_RELEVANT}"       | tee -a "$GITHUB_OUTPUT"
+
+  # --------------------------------------------------------------------------
   # Bandit: Python AST-based SAST
   # --------------------------------------------------------------------------
   bandit:
     name: Bandit SAST
+    needs: changes
+    if: needs.changes.outputs.python_relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
 
     steps:
       - name: Checkout
@@ -237,6 +333,8 @@ jobs:
   # --------------------------------------------------------------------------
   safety:
     name: Safety Dependency Scan
+    needs: changes
+    if: needs.changes.outputs.dependency_relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -466,8 +564,12 @@ jobs:
   # --------------------------------------------------------------------------
   semgrep:
     name: Semgrep SAST
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
     # v184.3 FIX: was `github.event_name != 'schedule' || ...` -- github.event.inputs
     # doesn't exist on schedule-triggered runs, so `.full_scan` was always empty/
     # undefined there, and the condition evaluated FALSE on every single cron run.
@@ -475,7 +577,14 @@ jobs:
     # unaffected and still scan[s] everything") -- the daily full scan never
     # actually ran Semgrep. workflow_dispatch (default full_scan=false) keeps its
     # existing explicit-opt-in behavior; push/pull_request/schedule now all run it.
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.full_scan == 'true'
+    #
+    # P0 (2026-09-10): added the needs.changes gate alongside the existing
+    # condition (AND, not OR) -- a PR that doesn't touch agent/ or api/ still
+    # skips Semgrep exactly as it always implicitly did when path filtering
+    # lived on the workflow trigger; only a PR that DOES touch those paths
+    # (or any non-PR trigger, where `changes` always reports relevant=true)
+    # reaches the pre-existing workflow_dispatch opt-in check.
+    if: needs.changes.outputs.semgrep_relevant == 'true' && (github.event_name != 'workflow_dispatch' || github.event.inputs.full_scan == 'true')
 
     steps:
       - name: Checkout
@@ -669,44 +778,123 @@ jobs:
         run: pip install pytest pyyaml --quiet
 
       - name: Run public-repo zero-trust workflow gates
-        run: python -m pytest tests/test_public_repo_zero_trust_gates.py -v --tb=short
+        run: |
+          python -m pytest tests/test_public_repo_zero_trust_gates.py -v --tb=short
+          python -m pytest tests/test_sast_gate_required_check_safety.py -v --tb=short
 
   # --------------------------------------------------------------------------
   # Summary Gate
   # --------------------------------------------------------------------------
   sast-gate:
     name: SAST Gate (required)
-    # v184.3 NOTE: semgrep is deliberately NOT in this needs: list yet. Its scan
-    # step (job `semgrep` above) still runs with `|| true` and has no fail-on-
-    # findings check of its own -- unlike bandit/safety/trufflehog, semgrep here
-    # runs 5 broad rulesets (p/python, p/owasp-top-ten, p/jwt, p/secrets,
-    # p/fastapi) whose real false-positive rate against this specific codebase
-    # has not been validated. This gate is used as a required check gating
-    # every PR in this repo; wiring in an unvalidated hard-fail condition here
-    # risks blocking the whole PR flow on noise rather than real findings.
-    # Needs a one-time validation pass (run semgrep, review actual results,
-    # then add a fail-on-error-level-findings check) before it can safely join
-    # this required gate -- flagged rather than silently left unfixed.
-    needs: [bandit, safety, trufflehog, workflow-hygiene]
+    # P0 REWRITE (2026-09-10, public-repo zero-trust phase 2): this is the
+    # job name intended to become a required branch status check on main --
+    # the literal string "SAST Gate (required)" MUST stay stable, that's
+    # the whole point of naming it that. Rewritten to fail CLOSED rather
+    # than only checking for an explicit "failure":
+    #   - changes/trufflehog/workflow-hygiene are mandatory: must be
+    #     exactly "success". cancelled/timed_out/action_required/anything
+    #     else is not success and fails the gate.
+    #   - bandit/safety/semgrep are conditional on the `changes` job's own
+    #     classification: "skipped" is accepted ONLY when classification
+    #     says that scanner's surface is non-applicable to this run; a
+    #     scanner classified relevant must show exactly "success", and a
+    #     scanner classified non-applicable that somehow shows anything
+    #     other than "skipped" (its if: condition disagreeing with the
+    #     result GitHub actually recorded) fails the gate too -- that
+    #     combination should never happen if bandit/safety/semgrep's own
+    #     `if:` conditions above are wired correctly, and this is the
+    #     assertion that catches it if one is ever wired wrong.
+    #   - semgrep keeps one pre-existing, orthogonal carve-out: its own
+    #     workflow_dispatch-without-full_scan=true opt-out (v184.3, above)
+    #     predates and is independent of change classification -- a
+    #     deliberate manual "skip the deep scan this run" choice, not a
+    #     claim the change is inapplicable.
+    # semgrep itself remains NOT part of "must exist and be evaluatable"
+    # in the sense of gating on findings (see the historical v184.3 note
+    # this replaces: its 5 broad rulesets' false-positive rate against
+    # this codebase is still unvalidated) -- but its RESULT is now checked
+    # for internal consistency like every other conditional job, which is
+    # a different, narrower guarantee than "fail the gate on any Semgrep
+    # finding".
+    needs: [changes, bandit, safety, semgrep, trufflehog, workflow-hygiene]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
 
     steps:
-      - name: Check SAST results
+      - name: Check SAST results (fail closed)
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          BANDIT: ${{ needs.bandit.result }}
+          SAFETY: ${{ needs.safety.result }}
+          SEMGREP: ${{ needs.semgrep.result }}
+          TRUFFLE: ${{ needs.trufflehog.result }}
+          HYGIENE: ${{ needs.workflow-hygiene.result }}
+          PYTHON_RELEVANT: ${{ needs.changes.outputs.python_relevant }}
+          DEPENDENCY_RELEVANT: ${{ needs.changes.outputs.dependency_relevant }}
+          SEMGREP_RELEVANT: ${{ needs.changes.outputs.semgrep_relevant }}
+          EVENT_NAME: ${{ github.event_name }}
+          FULL_SCAN: ${{ github.event.inputs.full_scan }}
         run: |
-          BANDIT="${{ needs.bandit.result }}"
-          SAFETY="${{ needs.safety.result }}"
-          TRUFFLE="${{ needs.trufflehog.result }}"
-          HYGIENE="${{ needs.workflow-hygiene.result }}"
+          echo "=== Mandatory jobs (must be exactly 'success') ==="
+          echo "Classify Changed Surfaces: $CHANGES"
+          echo "TruffleHog:                $TRUFFLE"
+          echo "Workflow Hygiene:          $HYGIENE"
+          echo ""
+          echo "=== Conditional jobs (success if applicable, skipped iff proven non-applicable) ==="
+          echo "Bandit  (python_relevant=$PYTHON_RELEVANT):         $BANDIT"
+          echo "Safety  (dependency_relevant=$DEPENDENCY_RELEVANT): $SAFETY"
+          echo "Semgrep (semgrep_relevant=$SEMGREP_RELEVANT):       $SEMGREP"
+          echo ""
 
-          echo "Bandit:            $BANDIT"
-          echo "Safety:            $SAFETY"
-          echo "TruffleHog:        $TRUFFLE"
-          echo "Workflow Hygiene:  $HYGIENE"
+          FAIL=0
 
-          if [[ "$BANDIT" == "failure" || "$SAFETY" == "failure" || "$TRUFFLE" == "failure" || "$HYGIENE" == "failure" ]]; then
-            echo "::error::One or more SAST scans failed."
+          for pair in "Classify Changed Surfaces=$CHANGES" "TruffleHog=$TRUFFLE" "Workflow Hygiene=$HYGIENE"; do
+            name="${pair%%=*}"
+            result="${pair#*=}"
+            if [[ "$result" != "success" ]]; then
+              echo "::error::Mandatory job '$name' did not succeed (result: $result)."
+              FAIL=1
+            fi
+          done
+
+          if [[ "$PYTHON_RELEVANT" == "true" ]]; then
+            if [[ "$BANDIT" != "success" ]]; then
+              echo "::error::Bandit was applicable (python_relevant=true) but did not succeed (result: $BANDIT)."
+              FAIL=1
+            fi
+          elif [[ "$BANDIT" != "skipped" ]]; then
+            echo "::error::Bandit was classified non-applicable (python_relevant=false) but result was '$BANDIT', not 'skipped' -- classification and execution disagree."
+            FAIL=1
+          fi
+
+          if [[ "$DEPENDENCY_RELEVANT" == "true" ]]; then
+            if [[ "$SAFETY" != "success" ]]; then
+              echo "::error::Safety/pip-audit was applicable (dependency_relevant=true) but did not succeed (result: $SAFETY)."
+              FAIL=1
+            fi
+          elif [[ "$SAFETY" != "skipped" ]]; then
+            echo "::error::Safety/pip-audit was classified non-applicable (dependency_relevant=false) but result was '$SAFETY', not 'skipped' -- classification and execution disagree."
+            FAIL=1
+          fi
+
+          SEMGREP_MANUAL_OPT_OUT=false
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$FULL_SCAN" != "true" ]]; then
+            SEMGREP_MANUAL_OPT_OUT=true
+          fi
+          if [[ "$SEMGREP_RELEVANT" == "true" && "$SEMGREP_MANUAL_OPT_OUT" == "false" ]]; then
+            if [[ "$SEMGREP" != "success" ]]; then
+              echo "::error::Semgrep was applicable (semgrep_relevant=true, not manually opted out) but did not succeed (result: $SEMGREP)."
+              FAIL=1
+            fi
+          elif [[ "$SEMGREP" != "skipped" ]]; then
+            echo "::error::Semgrep was classified non-applicable or manually opted out but result was '$SEMGREP', not 'skipped'."
+            FAIL=1
+          fi
+
+          if [[ "$FAIL" -eq 1 ]]; then
+            echo "::error::SAST Gate failed closed -- see errors above."
             exit 1
           fi
-          echo "All SAST scans passed."
+          echo "All SAST scans passed (or were provably non-applicable)."
