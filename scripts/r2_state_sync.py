@@ -255,7 +255,102 @@ STATE_FILES: list[tuple[str, str]] = [
     ("data/ai_predictions/anomalies.json",      "data/ai_predictions/anomalies.json"),
     ("data/ai_predictions/forecasts.json",      "data/ai_predictions/forecasts.json"),
     ("data/ai/anomaly_radar.json",              "data/ai/anomaly_radar.json"),
+    # ------------------------------------------------------------------
+    # NEXUS/CORTEX/QUANTUM/SOVEREIGN/GENESIS CUSTOMER INTELLIGENCE PLANE
+    # (P0 RUNTIME INTELLIGENCE STATE RECOVERY mission, 2026-09-10).
+    #
+    # Same root cause as every entry above: genesis-powerhouse.yml and
+    # sovereign-platform.yml persisted via `git push origin main`, rejected
+    # every run since ~2026-08-26 by the branch ruleset and swallowed by
+    # `|| echo "... cycle complete"` / a push-retry loop that still exits 0
+    # ("push deferred"). Verified live: last real commit to any of
+    # data/{nexus,cortex,quantum,sovereign,genesis}/ was 2026-09-03
+    # (75d3027e2), 7 days of "successful" runs producing nothing durable.
+    #
+    # A second, independent bug compounded this: MANIFEST_PATH
+    # (data/stix/feed_manifest.json) is gitignored and neither workflow ever
+    # populated it from R2, so _entries() returned [] every run regardless
+    # of the push failure -- see the new "download BEFORE engines run" step
+    # this mission adds to both workflows, reusing this same STATE_FILES
+    # entry (the pre-existing "data/stix/feed_manifest.json" row above) via
+    # `--only data/stix/feed_manifest.json`. Confirmed live via
+    # scripts/p0_r2_stix_manifest_diagnostic.py (run 34493014038,
+    # 2026-09-10T15:03Z): R2's intel/feed_manifest.json is a valid 39-record
+    # flat-list manifest, last_modified ~1h before that check -- kept fresh
+    # by sentinel-blogger.yml's own existing STAGE 3.5 upload, needing no
+    # new producer, only a new (read-only, from this workflow pair's
+    # perspective) consumer.
+    #
+    # Scope, decided per-file (not per-directory) against real consumers,
+    # traced by an exhaustive producer/consumer forensic pass:
+    #   - The 5 files below are exactly index.html's initEngineLoader()
+    #     ENGINE_URLS set for these engines (nexus/cortex/quantum/sovereign/
+    #     genesis) -- the customer-facing dashboard's own current-state read.
+    #     Each engine's *_output.json is a same-run aggregate of that
+    #     engine's own sub-computations (confirmed: none of the sub-files
+    #     read their own or another sub-file's PRIOR run output), so only
+    #     the aggregate needs cross-workflow-run persistence.
+    #   - data/cortex/stream_events.json is CORTEX's one sub-file with a
+    #     real consumer beyond its own aggregate: agent/sdk/cdb_apex_streamer.py
+    #     treats it as "the live predictive event bus."
+    #   - data/genesis/detection_pack.json is GENESIS's one sub-file with a
+    #     real consumer beyond its own aggregate: agent/product_factory/
+    #     detection_pack_builder.py packages it into a sellable detection ZIP.
+    #
+    # DELIBERATELY NOT ADDED:
+    #   data/sovereign/tenants.json -- holds customer-shaped API-key values
+    #     (SEC-2026-07-25/2026-08-28 incidents); already excluded from every
+    #     git commit this workflow makes and MUST NEVER be persisted to R2
+    #     either (see tests/test_r2_state_migration_wiring.py's dedicated
+    #     assertion against this exact key ever entering STATE_FILES).
+    #   data/sovereign/{mrr_report,invoices,stripe_config}.json -- billing-
+    #     adjacent state with a pre-existing, independent duplicate-writer
+    #     (scripts/stripe_webhook.py writes mrr_report.json from real Stripe
+    #     events on its own trigger). Migrating sovereign_engine.py's
+    #     fake-tenant recompute of these to R2 would propagate that
+    #     collision into R2 rather than resolve it -- a billing-architecture
+    #     decision (CLAUDE.md: payment logic frozen unless explicitly in
+    #     scope) out of bounds for this intelligence-persistence mission.
+    #     Not read by any customer intelligence panel this mission targets
+    #     (dashboard/revenue_dashboard.html is a separate, internal surface).
+    #   data/sovereign/{onboarding_flow,whitelabel_config,soc2_report,
+    #     nist_csf_report}.json -- 100% same-run-regenerable demo/compliance
+    #     output with no external reader traced; nothing to persist FOR.
+    #   All other NEXUS/CORTEX/QUANTUM sub-files (exposure_score.json,
+    #     campaigns.json, threat_hunts.json, knowledge_graph.json,
+    #     anomaly_detection.json, feed_guard.json, etc.) -- confirmed
+    #     same-run-only intermediates feeding solely their own engine's
+    #     aggregate; no cross-run or cross-workflow reader exists.
+    #
+    # COST (measured against the exact steps this mission adds, not
+    # estimated): download side adds 1 GET/run (feed_manifest.json only,
+    # via --only) to each of the 2 workflows x 4 runs/day = 8 GET/day.
+    # Upload side: sovereign-platform.yml uploads 5 files x 4 runs/day = 20
+    # PUT/day; genesis-powerhouse.yml uploads 2 files x 4 runs/day = 8
+    # PUT/day. Total added: 28 PUT/day + 8 GET/day = 840 Class A + 240
+    # Class B per month = 0.084% of R2's 1M/month Class A allowance, 0.0024%
+    # of the 10M Class B allowance. No LIST operations added (--only
+    # bypasses STATE_DIRS' advisories sync for these 2 new call sites).
+    # Storage: all 7 files are overwritten in place every run (no
+    # accumulation), combined well under 1 MB against a 10 GB allowance.
+    ("data/nexus/nexus_output.json",         "data/nexus/nexus_output.json"),
+    ("data/cortex/cortex_output.json",       "data/cortex/cortex_output.json"),
+    ("data/cortex/stream_events.json",       "data/cortex/stream_events.json"),
+    ("data/quantum/quantum_output.json",     "data/quantum/quantum_output.json"),
+    ("data/sovereign/sovereign_output.json", "data/sovereign/sovereign_output.json"),
+    ("data/genesis/genesis_output.json",     "data/genesis/genesis_output.json"),
+    ("data/genesis/detection_pack.json",     "data/genesis/detection_pack.json"),
 ]
+
+# Local relative paths that must NEVER be added to STATE_FILES/STATE_DIRS --
+# enforced by tests/test_r2_state_migration_wiring.py so this can't silently
+# regress if a future edit adds a convenience entry without re-reading this
+# comment block's reasoning above.
+NEVER_PERSIST_PATHS = frozenset({
+    "data/sovereign/tenants.json",
+})
+_leaked = NEVER_PERSIST_PATHS & {local_rel for local_rel, _ in STATE_FILES}
+assert not _leaked, f"NEVER_PERSIST_PATHS entries found in STATE_FILES: {_leaked}"
 
 # data/intelligence_repository/advisories/ is a directory of monthly chunk
 # files (registry_<YYYYMM>.json, "never overwritten" per
@@ -292,9 +387,19 @@ def _is_recognized_state_shape(data) -> bool:
     return isinstance(data, (list, dict))
 
 
-def download(root: pathlib.Path, endpoint: str) -> int:
+def download(root: pathlib.Path, endpoint: str, only: frozenset[str] | None = None) -> int:
     """
     Populate each local state path from its R2-authoritative copy.
+
+    `only`, when given, restricts processing to STATE_FILES/STATE_DIRS rows
+    whose local_rel is in the set -- e.g. a workflow that only ever reads
+    data/stix/feed_manifest.json has no reason to pay for (or wait on) a
+    LIST+download pass over the unrelated advisories directory sync or the
+    other 18 unrelated state files this module also tracks. `None` (the
+    default) preserves this function's original all-rows behavior exactly,
+    so every pre-existing caller (ai-predictions.yml, multi-source-intel.yml,
+    sentinel-blogger.yml, dashboard-feeds-sync.yml,
+    report-generator-regression-gate.yml) is unaffected.
 
     Three-way outcome per file, per s3_get()'s contract:
       OK        -> local path now holds the R2 copy.
@@ -327,6 +432,8 @@ def download(root: pathlib.Path, endpoint: str) -> int:
     """
     had_error = False
     for local_rel, r2_key in STATE_FILES:
+        if only is not None and local_rel not in only:
+            continue
         local_path = root / local_rel
         local_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = local_path.with_name(local_path.name + ".r2sync.tmp")
@@ -399,6 +506,8 @@ def download(root: pathlib.Path, endpoint: str) -> int:
         had_error = True
 
     for local_rel, r2_prefix in STATE_DIRS:
+        if only is not None and local_rel not in only:
+            continue
         local_dir = root / local_rel
         local_dir.mkdir(parents=True, exist_ok=True)
         if not s3_sync_download(str(local_dir), BUCKET_DATA, r2_prefix, endpoint):
@@ -413,7 +522,7 @@ def download(root: pathlib.Path, endpoint: str) -> int:
     return 1 if had_error else 0
 
 
-def upload(root: pathlib.Path, endpoint: str) -> int:
+def upload(root: pathlib.Path, endpoint: str, only: frozenset[str] | None = None) -> int:
     """Publish each local state path back to its R2-authoritative key, with
     the same 4-attempt retry budget already established for git-push
     exhaustion elsewhere in this pipeline (see safe_git_commit.py /
@@ -432,11 +541,17 @@ def upload(root: pathlib.Path, endpoint: str) -> int:
     instead this function tracks succeeded vs. failed files explicitly so a
     genuinely partial run is loudly distinguishable from a total failure --
     the previous per-file-only message wrongly implied 'NOT persisted' even
-    when other files in the same run *had* persisted."""
+    when other files in the same run *had* persisted.
+
+    `only`, see download()'s docstring -- same filtering contract, same
+    `None`-preserves-original-behavior default.
+    """
     had_error = False
     succeeded: list[str] = []
     failed: list[str] = []
     for local_rel, r2_key in STATE_FILES:
+        if only is not None and local_rel not in only:
+            continue
         local_path = root / local_rel
         if not local_path.exists():
             log.info("SKIP: %s has no local copy to publish (nothing changed?).", local_rel)
@@ -461,6 +576,8 @@ def upload(root: pathlib.Path, endpoint: str) -> int:
             had_error = True
 
     for local_rel, r2_prefix in STATE_DIRS:
+        if only is not None and local_rel not in only:
+            continue
         local_dir = root / local_rel
         if not local_dir.exists() or not any(local_dir.iterdir()):
             log.info("SKIP: %s has no local content to publish.", local_rel)
@@ -497,21 +614,49 @@ def upload(root: pathlib.Path, endpoint: str) -> int:
     return 1 if had_error else 0
 
 
+KNOWN_LOCAL_RELS = frozenset(local_rel for local_rel, _ in STATE_FILES) | frozenset(
+    local_rel for local_rel, _ in STATE_DIRS
+)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--download", action="store_true", help="Populate local state from R2 before processing.")
     mode.add_argument("--upload", action="store_true", help="Publish local state to R2 after processing.")
     parser.add_argument("--root", type=pathlib.Path, default=REPO_ROOT, help="Repository root (default: auto-detected).")
+    parser.add_argument(
+        "--only",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated subset of STATE_FILES/STATE_DIRS local paths to process "
+            "(e.g. 'data/stix/feed_manifest.json'). Omit to process every entry "
+            "(original, unfiltered behavior). Use this when a caller genuinely only "
+            "needs a handful of the tracked files -- e.g. a workflow that reads only "
+            "the STIX manifest has no reason to also pay for the unrelated advisories "
+            "directory sync or the AI-plane files this module also tracks."
+        ),
+    )
     args = parser.parse_args()
+
+    only = None
+    if args.only is not None:
+        only = frozenset(p.strip() for p in args.only.split(",") if p.strip())
+        unknown = only - KNOWN_LOCAL_RELS
+        if unknown:
+            parser.error(
+                f"--only references path(s) not in STATE_FILES/STATE_DIRS: {sorted(unknown)}. "
+                f"A typo here would otherwise silently download/upload nothing."
+            )
 
     cf_account, _, _ = get_credentials()
     endpoint = f"https://{cf_account}.r2.cloudflarestorage.com"
     install_awscli()
 
     if args.download:
-        return download(args.root, endpoint)
-    return upload(args.root, endpoint)
+        return download(args.root, endpoint, only=only)
+    return upload(args.root, endpoint, only=only)
 
 
 if __name__ == "__main__":

@@ -5,8 +5,17 @@ on:
     - cron: '15 */6 * * *'    # Every 6 hours (offset from other workflows)
   workflow_dispatch:
 
+# P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10): reduced from
+# `write`. This job's only prior use of write access was `git push origin
+# main` for data/{nexus,cortex,quantum,sovereign}/ -- rejected by main's
+# branch ruleset on every run since ~2026-08-26 (confirmed live: 7 days of
+# "successful" runs, zero landed commits), silently swallowed by this
+# workflow's own retry loop ("push deferred", step still exits 0). Runtime
+# state now persists to Cloudflare R2 (see the "Upload intelligence state
+# to R2" step below) instead -- this job never needs to write to the git
+# repository again. See config/workflow_permissions_allowlist.json.
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -40,68 +49,115 @@ jobs:
 
       - name: Ensure directories
         run: |
-          mkdir -p data/cortex data/quantum data/sovereign data/nexus
+          mkdir -p data/cortex data/quantum data/sovereign data/nexus data/stix
 
+      # P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10): every
+      # engine below reads MANIFEST_PATH=data/stix/feed_manifest.json via
+      # _entries(), but that file is gitignored (.gitignore:92) and this
+      # workflow never populated it -- so _entries() returned [] on every
+      # single run, independent of the git-push failure this mission also
+      # fixes. sentinel-blogger.yml's existing STAGE 3.5 (scripts/
+      # r2_upload.py) already uploads this exact file to R2 as
+      # intel/feed_manifest.json on its own 8h schedule; confirmed live via
+      # scripts/p0_r2_stix_manifest_diagnostic.py (run 34493014038,
+      # 2026-09-10T15:03Z) that R2's copy is a valid 39-record flat-list
+      # manifest, last_modified ~1h before that check. This step makes this
+      # workflow a read-only consumer of that already-fresh object -- no new
+      # producer, --only scopes the download to exactly this one file so
+      # this workflow pays for a single GET, not the other 21 unrelated
+      # STATE_FILES entries or the advisories directory LIST+sync.
+      - name: Download STIX manifest from R2
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --download --only data/stix/feed_manifest.json
+
+      # continue-on-error: true on the 4 engine steps below (same
+      # already-approved pattern as ai-predictions.yml): one engine crashing
+      # must not skip its siblings. This is safe ONLY because the "Validate
+      # engine outputs are non-degenerate" step further down independently
+      # fails the job closed if any engine's aggregate is missing or stale
+      # -- replacing the previous `|| echo "... cycle complete"` shell
+      # suppression, which had zero observability (the step showed green
+      # even when the engine raised) with a step that genuinely shows
+      # failed/red in the Actions UI while still letting the cycle continue.
       - name: Execute NEXUS Intelligence (v39)
+        continue-on-error: true
         env:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent.v39_nexus.nexus_engine || echo "NEXUS cycle complete"
+        run: python -m agent.v39_nexus.nexus_engine
 
       - name: Execute CORTEX Knowledge Graph (v40)
+        continue-on-error: true
         env:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent.v40_cortex.cortex_engine || echo "CORTEX cycle complete"
+        run: python -m agent.v40_cortex.cortex_engine
 
       - name: Execute QUANTUM ML Analysis (v41)
+        continue-on-error: true
         env:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent.v41_quantum.quantum_engine || echo "QUANTUM cycle complete"
+        run: python -m agent.v41_quantum.quantum_engine
 
       - name: Execute SOVEREIGN Platform (v42)
+        continue-on-error: true
         env:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m agent.v42_sovereign.sovereign_engine || echo "SOVEREIGN cycle complete"
+        run: python -m agent.v42_sovereign.sovereign_engine
 
       - name: Run validation tests
         run: |
           python -m pytest tests/test_v39_modules.py tests/test_v40_v41_v42_modules.py -v --tb=short 2>&1 | tail -20
 
-      - name: Commit all intelligence data
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # FAIL-CLOSED (not continue-on-error): proves each orchestrator
+      # genuinely executed this run rather than leaving an hours-old
+      # leftover aggregate on disk after a continue-on-error'd crash. See
+      # scripts/validate_intelligence_plane_output.py's header for why a
+      # fresh generated_at is a precise, engine-shape-agnostic proxy for
+      # "this engine actually ran," reused identically across all 4 engines
+      # here rather than four different per-engine schema validators.
+      - name: Validate engine outputs are non-degenerate
         run: |
-          git config user.name "CYBERDUDEBIVASH"
-          git config user.email "bivash@cyberdudebivash.com"
-          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
-          git add data/nexus/ data/cortex/ data/quantum/ data/sovereign/ -f
-          # SEC-2026-07-25 fast-follow to #61: data/sovereign/tenants.json holds
-          # real customer API keys in plaintext. execute_full_cycle() rewrites
-          # the whole file every run, so the -f add above would keep re-leaking
-          # it to this PUBLIC repo on every 6h cycle even after #61 stopped
-          # revenue-orchestrator.yml from doing the same. Unstage it here --
-          # this workflow has no KV wiring like revenue-orchestrator.yml, so
-          # never committing the file from this workflow is the safe fix
-          # (adding KV sync here would instead pollute the KV-backed registry
-          # with this step's re-provisioned demo tenants every cycle).
-          git restore --staged data/sovereign/tenants.json 2>/dev/null || git reset -q data/sovereign/tenants.json 2>/dev/null || true
-          git diff --cached --quiet || git commit -m " SOVEREIGN v184.0: Full platform cycle $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
-          # FIX v184.0 BUG-B+C: stash-safe 5-attempt push retry
-          git stash --include-untracked --quiet 2>/dev/null || true
-          git fetch origin main --quiet 2>/dev/null || true
-          git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null || true; git merge origin/main -X ours --no-edit --quiet 2>/dev/null || true; }
-          git stash pop --quiet 2>/dev/null || true
-          SOVEREIGN_PUSH_OK=0
-          for ATTEMPT in 1 2 3 4 5; do
-            if git push origin main; then SOVEREIGN_PUSH_OK=1; break; fi
-            echo "::warning::SOVEREIGN push attempt ${ATTEMPT}/5 failed, retrying..."
-            git stash --include-untracked --quiet 2>/dev/null || true
-            git fetch origin main --quiet 2>/dev/null || true
-            git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null || true; git merge origin/main -X ours --no-edit --quiet 2>/dev/null || true; }
-            git stash pop --quiet 2>/dev/null || true
-            sleep $((ATTEMPT * 8))
-          done
-          [ "$SOVEREIGN_PUSH_OK" -eq 0 ] && echo "::warning::SOVEREIGN push deferred — will sync next cycle." || true
+          set -e
+          python3 scripts/validate_intelligence_plane_output.py --file data/nexus/nexus_output.json --engine NEXUS
+          python3 scripts/validate_intelligence_plane_output.py --file data/cortex/cortex_output.json --engine CORTEX
+          python3 scripts/validate_intelligence_plane_output.py --file data/quantum/quantum_output.json --engine QUANTUM
+          python3 scripts/validate_intelligence_plane_output.py --file data/sovereign/sovereign_output.json --engine SOVEREIGN
+
+      # FAIL-CLOSED (not continue-on-error): "A swallowed persistence
+      # failure is the exact defect being fixed here" (ai-predictions.yml's
+      # own established precedent for this exact step shape). Replaces the
+      # git add/commit/5-attempt-push-retry block entirely -- that path
+      # rejected every push since ~2026-08-26 and this job never needs
+      # `contents: write` again. data/sovereign/tenants.json is never part
+      # of this --only list and never will be (see r2_state_sync.py's
+      # NEVER_PERSIST_PATHS module-level assertion + its own dedicated
+      # regression tests) -- it holds customer-shaped API-key values and
+      # must never reach R2, exactly as it was already excluded from every
+      # git commit this workflow made.
+      - name: Upload intelligence state to R2
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: >
+          python3 scripts/r2_state_sync.py --upload --only
+          data/nexus/nexus_output.json,data/cortex/cortex_output.json,data/cortex/stream_events.json,data/quantum/quantum_output.json,data/sovereign/sovereign_output.json
+
+      # FAIL-CLOSED (not continue-on-error): independent post-write proof
+      # that what is now in R2 actually matches what this run just produced
+      # -- a real second GET, not a re-inspection of the same local file the
+      # upload step already had. See scripts/r2_round_trip_verifier.py header.
+      - name: Verify R2 round trip
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: >
+          python3 scripts/r2_round_trip_verifier.py --only
+          data/nexus/nexus_output.json,data/cortex/cortex_output.json,data/cortex/stream_events.json,data/quantum/quantum_output.json,data/sovereign/sovereign_output.json

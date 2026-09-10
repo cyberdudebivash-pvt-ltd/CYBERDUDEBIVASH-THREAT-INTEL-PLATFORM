@@ -15283,12 +15283,26 @@ function renderTopThreats(data) {
 
         (function initEngineLoader() {
             const RAW_BASE = atob('aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2N5YmVyZHVkZWJpdmFzaC9DWUJFUkRVREVCSVZBU0gtVEhSRUFULUlOVEVMLVBMQVRGT1JNL21haW4v');
+            // P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10):
+            // nexus/genesis/cortex/quantum/sovereign now go through the
+            // same-origin Worker proxy (workers/intel-gateway/src/
+            // intel-static-proxy.js), which reads Cloudflare R2 first (kept
+            // fresh by genesis-powerhouse.yml/sovereign-platform.yml's new
+            // R2 upload step, replacing their previous `git push origin
+            // main` that main's branch ruleset had been silently rejecting
+            // since 2026-08-26) and falls back to this exact raw-GitHub-main
+            // URL -- unchanged -- if R2 is ever empty or errors. Same
+            // zero-regression pattern already proven for ai_index.json /
+            // detection_rules_manifest.json above this file's AI-record
+            // widget. bughunter/incidents/responses/hunts are unrelated to
+            // this mission's scope and are deliberately left reading
+            // straight from main, unchanged.
             const ENGINE_URLS = {
-                nexus:    RAW_BASE + 'data/nexus/nexus_output.json',
-                genesis:  RAW_BASE + 'data/genesis/genesis_output.json',
-                cortex:   RAW_BASE + 'data/cortex/cortex_output.json',
-                quantum:  RAW_BASE + 'data/quantum/quantum_output.json',
-                sovereign: RAW_BASE + 'data/sovereign/sovereign_output.json',
+                nexus:    '/api/v1/intel/nexus_output.json',
+                genesis:  '/api/v1/intel/genesis_output.json',
+                cortex:   '/api/v1/intel/cortex_output.json',
+                quantum:  '/api/v1/intel/quantum_output.json',
+                sovereign: '/api/v1/intel/sovereign_output.json',
                 bughunter: RAW_BASE + 'data/bughunter/bughunter_output.json',
                 incidents: RAW_BASE + 'data/incidents/incidents.json',
                 responses: RAW_BASE + 'data/responses/response_log.json',

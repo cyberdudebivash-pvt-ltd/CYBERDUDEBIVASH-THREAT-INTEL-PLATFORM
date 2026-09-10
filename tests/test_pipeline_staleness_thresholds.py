@@ -53,6 +53,15 @@ SAFETY_FACTOR = 1.3
 # conservative, not a blind spot).
 _DAILY_CRON_RE = re.compile(r"^(\d{1,2})\s+([\d,]+)\s+\*\s+\*\s+\*$")
 
+# A "fixed minute, every N hours" cron (e.g. '15 */6 * * *') -- the shape
+# P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10) added
+# sovereign-platform.yml/genesis-powerhouse.yml under, a genuinely new
+# schedule shape not covered by _DAILY_CRON_RE above (no workflow in this
+# list used step syntax before). A '*/N' step fires evenly every N hours by
+# construction, so its own max gap is exactly N hours -- no minute-set
+# math needed the way the hour-list shape requires.
+_STEP_CRON_RE = re.compile(r"^(\d{1,2})\s+\*/(\d{1,2})\s+\*\s+\*\s+\*$")
+
 
 def _daily_fire_minutes(cron_expr: str) -> "set[int] | None":
     """Every minutes-since-midnight this 'M H,H,H * * *' entry fires at, or
@@ -74,6 +83,17 @@ def _daily_fire_minutes(cron_expr: str) -> "set[int] | None":
     return {int(h) * 60 + minute for h in m.group(2).split(",")}
 
 
+def _step_cron_gap_hours(cron_expr: str) -> "float | None":
+    """Max gap (hours) for a '*/N' step cron, or None if cron_expr isn't
+    that shape. A fixed minute offset (the '15' in '15 */6 * * *') shifts
+    every fire time equally, so it never changes the gap BETWEEN fires --
+    only N (how many hours between steps) matters."""
+    m = _STEP_CRON_RE.match(cron_expr.strip())
+    if not m:
+        return None
+    return float(m.group(2))
+
+
 def _max_gap_hours(fire_minutes: "set[int]") -> float:
     """Largest gap (hours), with wraparound across midnight, between a set
     of daily fire-times expressed as minutes-since-midnight."""
@@ -88,25 +108,37 @@ def _max_gap_hours(fire_minutes: "set[int]") -> float:
 
 def max_gap_hours_for_workflow(workflow_file: str) -> float:
     """The largest possible gap (hours) between this workflow's own
-    scheduled fires, unioning every 'daily' cron entry it declares."""
+    scheduled fires, unioning every 'daily' cron entry it declares, or --
+    for a workflow using '*/N' step syntax instead -- that step's own gap.
+    No workflow in MONITORED_WORKFLOWS today mixes both shapes across
+    multiple schedule entries, so this doesn't attempt to combine them."""
     path = WORKFLOWS_DIR / workflow_file
     doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     on_block = doc.get(True, doc.get("on"))  # PyYAML parses bare `on:` as bool True
     schedules = (on_block or {}).get("schedule") or []
 
     fire_minutes: set[int] = set()
+    step_gaps: list[float] = []
     for entry in schedules:
-        found = _daily_fire_minutes(entry.get("cron", ""))
+        cron = entry.get("cron", "")
+        found = _daily_fire_minutes(cron)
         if found:
             fire_minutes |= found
+            continue
+        step_gap = _step_cron_gap_hours(cron)
+        if step_gap is not None:
+            step_gaps.append(step_gap)
 
-    assert fire_minutes, (
-        f"{workflow_file}: no recognisable daily 'M H,H,H * * *' cron schedule "
-        f"found (schedules seen: {schedules}) -- this test's cron parser needs "
-        f"extending before it can validate this workflow's threshold"
+    assert fire_minutes or step_gaps, (
+        f"{workflow_file}: no recognisable daily 'M H,H,H * * *' or step "
+        f"'M */N * * *' cron schedule found (schedules seen: {schedules}) -- "
+        f"this test's cron parser needs extending before it can validate "
+        f"this workflow's threshold"
     )
 
-    return _max_gap_hours(fire_minutes)
+    if fire_minutes:
+        return _max_gap_hours(fire_minutes)
+    return max(step_gaps)
 
 
 class TestPipelineStalenessThresholds(unittest.TestCase):
@@ -175,6 +207,29 @@ class TestMixedMinuteCronEntries(unittest.TestCase):
         self.assertEqual(true_max_gap, 16.5)
         candidate_threshold = 21.0
         self.assertLess(candidate_threshold, true_max_gap * SAFETY_FACTOR)
+
+
+class TestStepCronEntries(unittest.TestCase):
+    """P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10): the
+    '*/N' step shape sovereign-platform.yml/genesis-powerhouse.yml use,
+    added alongside the pre-existing 'M H,H,H * * *' shape."""
+
+    def test_step_cron_gap_equals_the_step_interval(self):
+        self.assertEqual(_step_cron_gap_hours("15 */6 * * *"), 6.0)
+        self.assertEqual(_step_cron_gap_hours("45 */6 * * *"), 6.0)
+        self.assertEqual(_step_cron_gap_hours("0 */8 * * *"), 8.0)
+
+    def test_minute_offset_does_not_change_the_gap(self):
+        """A fixed minute shifts every fire time equally -- it cannot widen
+        or narrow the gap BETWEEN fires, only when in the hour they land."""
+        self.assertEqual(_step_cron_gap_hours("15 */6 * * *"), _step_cron_gap_hours("45 */6 * * *"))
+
+    def test_non_step_cron_returns_none(self):
+        self.assertIsNone(_step_cron_gap_hours("0 0,8,16 * * *"))
+
+    def test_sovereign_and_genesis_recognised_as_step_cron(self):
+        self.assertEqual(max_gap_hours_for_workflow("sovereign-platform.yml"), 6.0)
+        self.assertEqual(max_gap_hours_for_workflow("genesis-powerhouse.yml"), 6.0)
 
 
 if __name__ == "__main__":

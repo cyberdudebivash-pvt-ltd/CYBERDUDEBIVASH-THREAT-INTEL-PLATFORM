@@ -5,8 +5,17 @@ on:
     - cron: '45 */6 * * *'
   workflow_dispatch:
 
+# P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10): reduced from
+# `write`. This job's only prior use of write access was `git push origin
+# main` for data/genesis/ -- rejected by main's branch ruleset on every run
+# since ~2026-08-26 (confirmed live: 7 days of "successful" runs, zero
+# landed commits), silently downgraded to "Push deferred." by this
+# workflow's own retry loop while the step still exited 0. Runtime state
+# now persists to Cloudflare R2 (see the "Upload GENESIS state to R2" step
+# below) instead -- this job never needs to write to the git repository
+# again. See config/workflow_permissions_allowlist.json.
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -26,7 +35,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: '3.12', cache: 'pip' }
       - run: pip install -r requirements.txt
-      - run: mkdir -p data/genesis data/nexus data/cortex data/quantum data/sovereign
+      - run: mkdir -p data/genesis data/nexus data/cortex data/quantum data/sovereign data/stix
       - name: "Pipeline Lock Check"
         run: |
           if [ -f ".PIPELINE_LOCK" ]; then
@@ -34,32 +43,62 @@ jobs:
             exit 0
           fi
           echo "[OK] No lock active."
+
+      # P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10): GENESIS
+      # reads MANIFEST_PATH=data/stix/feed_manifest.json via _entries(), but
+      # that file is gitignored (.gitignore:92) and this workflow never
+      # populated it -- so _entries() returned [] on every run, independent
+      # of the git-push failure this mission also fixes. Same fix as
+      # sovereign-platform.yml: read-only consumption of the object
+      # sentinel-blogger.yml's existing STAGE 3.5 already keeps fresh in R2
+      # (confirmed live via scripts/p0_r2_stix_manifest_diagnostic.py, run
+      # 34493014038, 2026-09-10T15:03Z: valid 39-record manifest,
+      # last_modified ~1h before that check). --only scopes this to exactly
+      # one GET, not the other 21 unrelated STATE_FILES entries.
+      - name: Download STIX manifest from R2
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --download --only data/stix/feed_manifest.json
+
       - name: Execute GENESIS 12-Engine Cycle
         env:
           CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
           PYTHONPATH: ${{ github.workspace }}
         run: python -m agent.v43_genesis.genesis_engine
+
       - name: Validate
         run: python -m pytest tests/test_v43_genesis.py -v --tb=short 2>&1 | tail -15
-      - name: Commit
+
+      # FAIL-CLOSED (not continue-on-error): proves the orchestrator
+      # genuinely executed this run rather than a stale leftover surviving
+      # from hours ago. See scripts/validate_intelligence_plane_output.py's
+      # header for why a fresh generated_at is a precise, engine-shape-
+      # agnostic proxy for "this engine actually ran."
+      - name: Validate GENESIS output is non-degenerate
+        run: python3 scripts/validate_intelligence_plane_output.py --file data/genesis/genesis_output.json --engine GENESIS
+
+      # FAIL-CLOSED (not continue-on-error): "A swallowed persistence
+      # failure is the exact defect being fixed here" (ai-predictions.yml's
+      # own established precedent for this exact step shape). Replaces the
+      # git add/commit/4-attempt-push-retry block entirely -- that path
+      # rejected every push since ~2026-08-26 and this job never needs
+      # `contents: write` again.
+      - name: Upload GENESIS state to R2
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git config user.name "CYBERDUDEBIVASH"
-          git config user.email "bivash@cyberdudebivash.com"
-          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
-          git add data/genesis/ -f
-          if git diff --cached --quiet; then
-            echo "No GENESIS changes to commit."
-          else
-            git commit -m " GENESIS v184.0: 12-engine cycle $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
-            git rebase --abort 2>/dev/null || true; git merge --abort 2>/dev/null || true
-            rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
-            for i in 1 2 3 4; do
-              git fetch origin main --quiet 2>/dev/null || true
-              git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null||true; git merge origin/main -X ours --no-edit --quiet||true; }
-              if git push origin main; then echo "Push OK ($i/4)"; break; fi
-              sleep $((i*15))
-              [ $i -eq 4 ] && echo "Push deferred."
-            done
-          fi
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --upload --only data/genesis/genesis_output.json,data/genesis/detection_pack.json
+
+      # FAIL-CLOSED (not continue-on-error): independent post-write proof
+      # that what is now in R2 actually matches what this run just produced
+      # -- a real second GET, not a re-inspection of the same local file the
+      # upload step already had. See scripts/r2_round_trip_verifier.py header.
+      - name: Verify R2 round trip
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_round_trip_verifier.py --only data/genesis/genesis_output.json,data/genesis/detection_pack.json

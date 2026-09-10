@@ -70,6 +70,18 @@ MONITORED_WORKFLOWS = [
     {"file": "automated-backup.yml",   "name": "Automated Backup",    "max_age_hours": 32, "severity": "HIGH"},
     {"file": "deploy-worker.yml",      "name": "Deploy Worker",       "max_age_hours": 0,  "severity": "INFO"},
     {"file": "status-monitor.yml",     "name": "CDB Platform Status", "max_age_hours": 16, "severity": "MEDIUM"},
+    # P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10): both run
+    # on a 6h cron ('15 */6 * * *' / '45 */6 * * *'). 12h = 2x nominal
+    # cadence, matching this list's own established ratio for the other
+    # 6-8h-cadence entries above (sentinel-blogger/status-monitor also use
+    # 2x). Verified against real observed gaps for these exact two
+    # workflows during this mission's forensic pass (4h18m-7h47m,
+    # non-uniform due to GitHub's own scheduling jitter under load) --12h
+    # clears the worst observed gap (~7h47m) with ~1.5x real margin on top,
+    # deliberately not repeating the earlier pipeline-monitor bug where a
+    # 3h threshold monitored a workflow that naturally ran roughly every 8h.
+    {"file": "sovereign-platform.yml",  "name": "sovereign-platform",  "max_age_hours": 12, "severity": "HIGH"},
+    {"file": "genesis-powerhouse.yml",  "name": "genesis-powerhouse",  "max_age_hours": 12, "severity": "HIGH"},
 ]
 
 

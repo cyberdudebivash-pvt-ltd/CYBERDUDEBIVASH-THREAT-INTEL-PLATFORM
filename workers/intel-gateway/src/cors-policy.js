@@ -149,6 +149,11 @@ const PUBLIC_EXACT_PATHS = new Set([
   "/api/v1/intel/cybermap",
   "/api/v1/intel/ai_index.json",                 // intel-static-proxy.js
   "/api/v1/intel/detection_rules_manifest.json", // intel-static-proxy.js
+  "/api/v1/intel/nexus_output.json",             // intel-static-proxy.js
+  "/api/v1/intel/genesis_output.json",           // intel-static-proxy.js
+  "/api/v1/intel/cortex_output.json",            // intel-static-proxy.js
+  "/api/v1/intel/quantum_output.json",           // intel-static-proxy.js
+  "/api/v1/intel/sovereign_output.json",         // intel-static-proxy.js
   "/api/v1/ioc/lookup",
   "/api/v1/cve/live",
   "/api/v1/cve/stats",

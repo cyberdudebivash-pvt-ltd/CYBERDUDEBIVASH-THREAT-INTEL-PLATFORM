@@ -74,7 +74,14 @@ class AnomalyDetector:
         """Run full anomaly detection suite across intelligence data."""
         entries = _entries()
         if len(entries) < 10:
-            return {"anomalies": [], "message": "Insufficient data for anomaly detection"}
+            return {
+                "anomaly_count": 0,
+                "overall_anomaly_score": 0,
+                "anomalies": [],
+                "baseline_stats": {},
+                "analyzed_at": datetime.now(timezone.utc).isoformat(),
+                "message": "Insufficient data for anomaly detection",
+            }
 
         anomalies = []
 
@@ -319,7 +326,13 @@ class AdversarialFeedGuard:
         """Analyze all feeds for adversarial manipulation."""
         entries = _entries()
         if not entries:
-            return {"feed_scores": {}, "alerts": []}
+            return {
+                "feed_count": 0,
+                "feed_scores": {},
+                "alerts": [],
+                "overall_trust": 0,
+                "analyzed_at": datetime.now(timezone.utc).isoformat(),
+            }
 
         feed_groups = defaultdict(list)
         for e in entries:
@@ -479,7 +492,15 @@ class FalsePositiveReducer:
         """Analyze entries for false positive likelihood."""
         entries = _entries()
         if not entries:
-            return {"entries_analyzed": 0, "fp_candidates": []}
+            return {
+                "entries_analyzed": 0,
+                "fp_candidates": [],
+                "fp_candidate_count": 0,
+                "estimated_fp_rate_pct": 0,
+                "suppression_recommendations": 0,
+                "review_recommendations": 0,
+                "analyzed_at": datetime.now(timezone.utc).isoformat(),
+            }
 
         fp_candidates = []
         for entry in entries:
@@ -558,7 +579,17 @@ class DetectionABTester:
         entries = _entries()
         high_risk = [e for e in entries if (e.get("risk_score", 0) or 0) >= 7]
         if not high_risk:
-            return {"experiments": []}
+            return {
+                "total_experiments": 0,
+                "experiments": [],
+                "framework_config": {
+                    "min_sample_size": 100,
+                    "confidence_level": 0.95,
+                    "statistical_test": "chi_squared",
+                    "rollout_strategy": "gradual",
+                },
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
 
         experiments = []
 
