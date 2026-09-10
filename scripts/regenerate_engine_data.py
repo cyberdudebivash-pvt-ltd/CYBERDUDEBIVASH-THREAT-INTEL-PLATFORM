@@ -1264,17 +1264,50 @@ def main():
 
     results = []
 
-    # 1. NEXUS
+    # P0 RUNTIME INTELLIGENCE STATE RECOVERY mission follow-up (2026-09-10):
+    # NEXUS/GENESIS/CORTEX/QUANTUM/SOVEREIGN are no longer written to their
+    # canonical data/<engine>/<engine>_output.json paths here. Those 5 paths
+    # now have a dedicated, fresher, independently R2-persisted authoritative
+    # producer (sovereign-platform.yml running the real agent.v39_nexus/
+    # v40_cortex/v41_quantum/v42_sovereign engines on a 6h cron;
+    # genesis-powerhouse.yml running agent.v43_genesis) -- see
+    # scripts/r2_state_sync.py's STATE_FILES. Before that mission, this
+    # script's own recomputation of these 5 was harmless: sentinel-blogger.yml
+    # ran it every cycle, but the local files it wrote were gitignored and
+    # never uploaded anywhere, so they were discarded at the end of every job
+    # with zero customer-facing effect. The moment these 5 paths were
+    # registered in STATE_FILES, sentinel-blogger.yml's own PRE-EXISTING,
+    # unchanged `r2_state_sync.py --upload` calls (broad, no --only) started
+    # picking up whatever THIS script last wrote to those same local paths
+    # and publishing it to the SAME R2 keys -- a second, differently-computed
+    # writer racing the canonical one. Confirmed live (not theorized): a
+    # production curl caught all 5 R2 objects holding one shared, older
+    # generated_at (this module's own NOW_UTC, stamped identically into every
+    # generate_*() output) that had silently overwritten a freshly-verified,
+    # newer canonical write from genesis-powerhouse.yml minutes earlier.
+    # Per Principle 3 (Single Source of Truth): the newer, dedicated,
+    # already-tested engine pipeline is the canonical source for these 5;
+    # this script duplicating them is the defect to remove, not the other
+    # writer. generate_nexus()/generate_genesis() are kept (computed, not
+    # written) because generate_engines_api() below still depends on their
+    # return values as input -- that consumer is unaffected by this change.
+    # generate_cortex()/generate_quantum()/generate_sovereign() have no other
+    # in-process consumer, so their own file-write is simply dropped; the
+    # functions themselves are kept, unremoved, per Deprecation Instead of
+    # Deletion, since api/engines.json's schema doesn't reference their
+    # output today but a future consumer might.
+
+    # 1. NEXUS (computed for generate_engines_api() below; no longer written
+    # to data/nexus/nexus_output.json -- see comment above)
     nexus = generate_nexus(items)
-    results.append(_safe_write(os.path.join(ROOT, "data", "nexus", "nexus_output.json"), nexus))
     kc = nexus.get("kill_chain_coverage", {})
     active_phases = sum(1 for v in kc.values() if v > 0)
     log.info(f"NEXUS: exposure={nexus['exposure_index']} | hunts={len(nexus['threat_hunts'])} | "
              f"campaigns={len(nexus['campaigns'])} | kill_chain_phases={active_phases}/9")
 
-    # 2. GENESIS
+    # 2. GENESIS (computed for generate_engines_api() below; no longer
+    # written to data/genesis/genesis_output.json -- see comment above)
     genesis = generate_genesis(items)
-    results.append(_safe_write(os.path.join(ROOT, "data", "genesis", "genesis_output.json"), genesis))
     m = genesis.get("metrics", {})
     log.info(f"GENESIS: 12/12 engines | sensors={m.get('sensor_count')} | actors={m.get('actors_tracked')} | "
              f"iocs={m.get('iocs_total')} | rules={m.get('detection_rules')} | hunts={m.get('hunt_hypotheses')}")
@@ -1285,21 +1318,21 @@ def main():
     log.info(f"ENGINES API: {engines_api['engines_ok']}/{engines_api['engines_total']} engines | "
              f"{engines_api['platform_health']['total_advisories']} advisories")
 
-    # 4. CORTEX
+    # 4. CORTEX (no longer written to data/cortex/cortex_output.json --
+    # see comment above; no other consumer in this script)
     cortex = generate_cortex(items)
-    results.append(_safe_write(os.path.join(ROOT, "data", "cortex", "cortex_output.json"), cortex))
     kg = cortex.get("knowledge_graph", {})
     log.info(f"CORTEX: nodes={kg.get('total_nodes')} edges={kg.get('total_edges')} clusters={cortex.get('cluster_count')}")
 
-    # 5. QUANTUM
+    # 5. QUANTUM (no longer written to data/quantum/quantum_output.json --
+    # see comment above; no other consumer in this script)
     quantum = generate_quantum(items)
-    results.append(_safe_write(os.path.join(ROOT, "data", "quantum", "quantum_output.json"), quantum))
     ft = quantum.get("feed_trust", {})
     log.info(f"QUANTUM: trust={ft.get('overall')}% anomalies={len(quantum.get('anomalies',[]))}")
 
-    # 6. SOVEREIGN
+    # 6. SOVEREIGN (no longer written to data/sovereign/sovereign_output.json
+    # -- see comment above; no other consumer in this script)
     sovereign = generate_sovereign(items)
-    results.append(_safe_write(os.path.join(ROOT, "data", "sovereign", "sovereign_output.json"), sovereign))
     comp = sovereign.get("compliance", {})
     log.info(f"SOVEREIGN: soc2={comp.get('soc2_score')}% nist={comp.get('nist_score')}%")
 
@@ -1336,7 +1369,16 @@ def main():
     if ok < len(results):
         log.warning("Some engine files failed to write — check errors above")
         sys.exit(1)
-    log.info("✅ All engine data files fresh and consistent with live intel feed")
+    # CodeRabbit review (PR #409): this used to claim ALL engine data was
+    # fresh, including NEXUS/GENESIS/CORTEX/QUANTUM/SOVEREIGN -- no longer
+    # true now that this script doesn't write those 5 canonical files (see
+    # the comment above step 1). This message only speaks for what `results`
+    # actually covers: api/engines.json + bughunter/incidents/responses/
+    # hunts/ai_tracker. It says nothing about whether the 5 canonical
+    # engines are fresh -- that's sovereign-platform.yml/genesis-powerhouse
+    # .yml's own job status to check, not this script's to claim.
+    log.info(f"✅ {ok}/{len(results)} orchestrator-managed engine data files written and consistent with live intel feed "
+             f"(NEXUS/GENESIS/CORTEX/QUANTUM/SOVEREIGN freshness is reported by their own dedicated workflows, not this script)")
 
 
 if __name__ == "__main__":
