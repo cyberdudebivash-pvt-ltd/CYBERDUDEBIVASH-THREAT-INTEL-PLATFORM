@@ -1390,18 +1390,24 @@ jobs:
 
       # -----------------------------------------------------------------------
       # STAGE 3.1.22: ENGINE DATA REGENERATOR (v185.1 — LIVE INTEL SYNC)
-      # Derives all frontend engine JSON files from api/feed.baseline.json:
-      #   data/nexus/nexus_output.json       — Nexus Intelligence engine
-      #   data/genesis/genesis_output.json   — Genesis 12 Strategic Engines
-      #   data/cortex/cortex_output.json     — Cortex Knowledge Graph
-      #   data/quantum/quantum_output.json   — Quantum Signal Intelligence
-      #   data/sovereign/sovereign_output.json — Sovereign Compliance
+      # Derives frontend engine JSON files from api/feed.baseline.json:
       #   data/bughunter/bughunter_output.json — Bug Hunter Recon Engines
       #   data/incidents/incidents.json      — TIP+SOAR incident feed
       #   data/responses/response_log.json   — TIP+SOAR response log
       #   data/threathunts/hunts.json        — Threat hunt hypotheses
       #   api/ai/tracker.json                — AI Cyber Brain tracker
       #   api/engines.json                   — Engines API manifest
+      # P0 RUNTIME INTELLIGENCE STATE RECOVERY mission follow-up (PR #409):
+      # NEXUS/GENESIS/CORTEX/QUANTUM/SOVEREIGN are deliberately NOT in this
+      # list anymore -- those 5 now have a dedicated, fresher, R2-persisted
+      # canonical producer (sovereign-platform.yml / genesis-powerhouse.yml).
+      # This script still COMPUTES them in-memory (api/engines.json's own
+      # generation depends on 2 of the 5 as input) but no longer WRITES them,
+      # to stop silently overwriting the canonical writer with a stale,
+      # differently-computed duplicate every time this stage runs -- the
+      # exact defect this mission fix removed. Check sovereign-platform.yml/
+      # genesis-powerhouse.yml's own job status for those 5's freshness, not
+      # this stage's.
       # Non-blocking: engine regen failure retains prior engine data.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.1.22 - Engine Data Regenerator (v185.1 — live intel sync)"
@@ -1415,13 +1421,13 @@ jobs:
           ENG_EXIT=$?
           set -e
           if [ "$ENG_EXIT" -eq 0 ]; then
-            for ENG_FILE in data/nexus/nexus_output.json data/genesis/genesis_output.json api/ai/tracker.json api/engines.json; do
+            for ENG_FILE in api/ai/tracker.json api/engines.json; do
               if [ -f "$ENG_FILE" ]; then
                 LINES=$(wc -l < "$ENG_FILE" 2>/dev/null || echo "?")
                 echo "[PASS] ${ENG_FILE}: ${LINES} lines"
               fi
             done
-            echo "::notice::ENGINE DATA: all 11 engine files regenerated from live intel feed"
+            echo "::notice::ENGINE DATA: orchestrator-managed engine files regenerated from live intel feed (NEXUS/GENESIS/CORTEX/QUANTUM/SOVEREIGN are produced by their own dedicated workflows, not this stage)"
           else
             echo "::warning::regenerate_engine_data.py exited ${ENG_EXIT} — non-fatal, prior engine data retained"
           fi

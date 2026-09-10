@@ -84,6 +84,37 @@ class TestRegenerateEngineDataDoesNotOverwriteCanonicalOutputs(unittest.TestCase
                 f"own broad `r2_state_sync.py --upload`.",
             )
 
+    def test_main_does_not_touch_a_pre_existing_canonical_engine_file(self):
+        """CodeRabbit review (PR #409): the absent-file case above proves
+        main() doesn't CREATE these 5 files, but not that it leaves an
+        already-present one untouched -- a future regression reintroducing
+        a conditional write ("only if missing"/"only if stale") would slip
+        past that test alone. Pre-populates each canonical path with sentinel
+        content before running main(), then asserts it's still byte-identical
+        afterward -- covering the case a real production checkout is
+        actually in (sentinel-blogger.yml's own r2_state_sync.py --download
+        step, or a leftover from a prior job, may well have left these files
+        present locally before this script ever runs)."""
+        sentinel_content = b'{"sentinel": "PRE-EXISTING-CONTENT-MUST-SURVIVE"}'
+        for subdir, filename in CANONICAL_PATHS:
+            path = pathlib.Path(self._tmp) / "data" / subdir / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(sentinel_content)
+
+        try:
+            regen.main()
+        except SystemExit as exc:
+            self.assertIn(exc.code, (0, 1), f"unexpected exit code {exc.code}")
+
+        for subdir, filename in CANONICAL_PATHS:
+            path = pathlib.Path(self._tmp) / "data" / subdir / filename
+            self.assertEqual(
+                path.read_bytes(), sentinel_content,
+                f"regenerate_engine_data.py must not modify a pre-existing "
+                f"{subdir}/{filename} -- it has a dedicated canonical producer now "
+                f"and this script must leave it alone whether it's present or absent.",
+            )
+
     def test_main_still_writes_engines_api_which_has_no_other_producer(self):
         """Guards against the fix accidentally breaking the one output this
         script remains the sole legitimate source for."""

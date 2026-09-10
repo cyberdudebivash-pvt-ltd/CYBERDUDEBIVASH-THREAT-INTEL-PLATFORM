@@ -1369,7 +1369,16 @@ def main():
     if ok < len(results):
         log.warning("Some engine files failed to write — check errors above")
         sys.exit(1)
-    log.info("✅ All engine data files fresh and consistent with live intel feed")
+    # CodeRabbit review (PR #409): this used to claim ALL engine data was
+    # fresh, including NEXUS/GENESIS/CORTEX/QUANTUM/SOVEREIGN -- no longer
+    # true now that this script doesn't write those 5 canonical files (see
+    # the comment above step 1). This message only speaks for what `results`
+    # actually covers: api/engines.json + bughunter/incidents/responses/
+    # hunts/ai_tracker. It says nothing about whether the 5 canonical
+    # engines are fresh -- that's sovereign-platform.yml/genesis-powerhouse
+    # .yml's own job status to check, not this script's to claim.
+    log.info(f"✅ {ok}/{len(results)} orchestrator-managed engine data files written and consistent with live intel feed "
+             f"(NEXUS/GENESIS/CORTEX/QUANTUM/SOVEREIGN freshness is reported by their own dedicated workflows, not this script)")
 
 
 if __name__ == "__main__":
