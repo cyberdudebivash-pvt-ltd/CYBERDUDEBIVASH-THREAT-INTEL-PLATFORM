@@ -20,7 +20,13 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  # P0 (2026-09-10, public-repo zero-trust): narrowed from a workflow-wide
+  # contents: write. Of this workflow's 3 jobs, only `storage-prune`
+  # (git add + commit + push of data/telemetry/, data/governance/) writes
+  # to git; `telemetry-collection` and `storage-scan` only run Python
+  # scripts that print reports/alerts, never touching git. storage-prune
+  # now declares its own job-level contents: write below instead.
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -89,6 +95,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [storage-scan]
     timeout-minutes: 10
+    permissions:
+      contents: write
 
     steps:
       - name: "Checkout"

@@ -15,7 +15,15 @@ on:
         default: 'report'
 
 permissions:
-  contents: write
+  # P0 (2026-09-10, public-repo zero-trust): narrowed from a workflow-wide
+  # contents: write. `fulfillment-and-provisioning` is explicitly documented
+  # in-line (SEC-2026-07-25 fix) as never git-committing anything -- it
+  # persists to Cloudflare KV instead, precisely to stop customer API keys
+  # from ever reaching this public repo. Only `ceo-financial-briefing`
+  # (git add/commit/push of data/sovereign/mrr_report.json,
+  # data/revenue/transaction_log.json) writes to git, and now declares its
+  # own job-level contents: write below instead.
+  contents: read
   actions: read
 
 env:
@@ -116,6 +124,8 @@ jobs:
     if: github.event_name == 'schedule' || github.event.inputs.action == 'report'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout

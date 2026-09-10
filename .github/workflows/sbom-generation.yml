@@ -83,8 +83,21 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
-  security-events: write
+  # P0 (2026-09-10, public-repo zero-trust): narrowed from a workflow-wide
+  # contents: write. Of this workflow's 4 jobs, only `attach-to-release`
+  # (softprops/action-gh-release, which needs contents:write to attach
+  # assets to a GitHub Release) writes anything; `sbom-python`/`sbom-docker`
+  # only generate SBOM files and upload them as workflow artifacts, and
+  # `sbom-gate` only inspects other jobs' .result -- neither touches git or
+  # any GitHub write API. attach-to-release now declares its own job-level
+  # contents: write below instead.
+  #
+  # security-events: write removed outright, not narrowed: verified via
+  # repo-wide grep that no step in this file calls upload-sarif or any
+  # other Security-tab API -- this workflow has never produced SARIF
+  # output (SAST's own sast-security-scan.yml already owns that), so the
+  # grant did nothing.
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -542,6 +555,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: github.event_name == 'release'
+    permissions:
+      contents: write
 
     steps:
       - name: Download Python SBOM

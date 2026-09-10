@@ -89,7 +89,12 @@ on:
       - 'api/feed.json'
 
 permissions:
-  contents: write
+  # P0 (2026-09-10, public-repo zero-trust): narrowed from a workflow-wide
+  # contents: write. Of this workflow's 2 jobs, only `governance_gate`
+  # (git add/commit/push) writes to git; `canary_contract_check` only runs
+  # a read-only alignment check and prints a summary. governance_gate now
+  # declares its own job-level contents: write below instead.
+  contents: read
 
 # Governance writer never overlaps with itself
 # Does NOT use sentinel-data-writer to avoid blocking production ingestion
@@ -112,6 +117,8 @@ jobs:
     name: "Enterprise Governance Gate"
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: write
 
     outputs:
       governance_grade:    ${{ steps.gov_engine.outputs.grade }}

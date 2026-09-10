@@ -36,9 +36,23 @@ concurrency:
   cancel-in-progress: false  # Never cancel an in-flight rollback
 
 permissions:
-  contents: write
+  # P0 (2026-09-10, public-repo zero-trust): narrowed from a workflow-wide
+  # contents: write to the safe read default -- of this workflow's 6 jobs,
+  # only `snapshot` (creates+pushes a git tag) and `rollback` (git revert +
+  # commit + push to main) ever perform a git write; `authorize` (a bash
+  # confirm-string check), `validate-target` (git rev-parse/diff/merge-base
+  # -- read-only), `post-rollback-canary` (HTTP health probes only), and
+  # `audit-log` (prints a JSON record to the job log + a Telegram POST, no
+  # git or GitHub API write of any kind) never do. Each of those two jobs
+  # now declares its own job-level `contents: write` below instead.
+  #
+  # `deployments: write` removed outright, not narrowed: verified via
+  # repo-wide grep that no step in this file calls the GitHub Deployments
+  # API (no createDeployment, no deployment-status action) -- a stale
+  # permission from this workflow's original authoring that granted a
+  # capability nothing here has ever used.
+  contents: read
   actions: read
-  deployments: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -86,6 +100,8 @@ jobs:
     if: needs.authorize.outputs.authorized == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
     outputs:
       current_sha: ${{ steps.capture.outputs.current_sha }}
       rollback_tag: ${{ steps.capture.outputs.rollback_tag }}
@@ -194,6 +210,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

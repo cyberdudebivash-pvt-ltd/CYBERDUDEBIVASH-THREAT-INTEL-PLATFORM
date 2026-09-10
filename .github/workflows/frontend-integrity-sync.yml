@@ -79,7 +79,13 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write
+  # P0 (2026-09-10, public-repo zero-trust): narrowed from a workflow-wide
+  # contents: write. Only `sync-on-pr` commits+pushes the regenerated
+  # registry back onto the PR branch; `verify-on-push-to-main` is already
+  # documented above (see its own header comment) as a deliberately
+  # read-only backstop that "never attempts to write". sync-on-pr now
+  # declares its own job-level contents: write below instead.
+  contents: read
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -90,6 +96,8 @@ jobs:
     name: Regenerate frontend checksum registry (pre-merge)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
     # Same-repo PRs only: a fork's GITHUB_TOKEN can't push back to the fork's
     # branch (GitHub's own security default), and this repo doesn't take
     # fork contributions today -- fails clean (skipped) rather than red for
