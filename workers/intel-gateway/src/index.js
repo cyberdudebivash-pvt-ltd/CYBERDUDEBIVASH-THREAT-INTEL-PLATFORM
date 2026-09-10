@@ -128,6 +128,12 @@ import {
   isFirstPartyRead, WEB_PLANE_LIMITS, webPlaneRateKey, webPlaneDailyKey,
   evaluateWebPlaneDaily, firstPartyPlaneObservability,
 } from './first-party-plane.js';
+// SENTINEL APEX PUBLIC-REPO ZERO-TRUST -- PHASE 3: single source of truth
+// for every Access-Control-* decision this Worker makes (see that file's
+// own header comment for the full before/after rationale). Applied at the
+// one true response choke point -- withBaselineHeaders() and the OPTIONS
+// branch below -- so no individual route handler needs to change.
+import { applyCorsPolicy, buildPreflightResponse } from './cors-policy.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -168,12 +174,20 @@ const TAXII_KEV_COLL      = "sentinel-apex-kev";
 const TAXII_CT            = "application/taxii+json;version=2.1";
 const STIX_CT             = "application/stix+json;version=2.1";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, X-API-Key, X-Admin-Key",
-  "Access-Control-Max-Age": "86400",
-};
+// SENTINEL APEX PUBLIC-REPO ZERO-TRUST -- PHASE 3 (2026-09-10): this used to
+// hardcode Access-Control-Allow-Origin: "*" (plus Methods/Headers/Max-Age),
+// spread into ~10 response sites below and into every P-layer handler file
+// that lacks its own response helper -- unconditionally, for admin,
+// premium, and billing responses included. withBaselineHeaders() (this
+// file's one true response choke point, at the bottom of this file) always
+// overwrote whatever this produced with the identical wildcard value
+// anyway, so emptying it here changes no behavior on its own; the real,
+// now origin-aware policy lives in cors-policy.js and is applied once, by
+// withBaselineHeaders() and the OPTIONS branch below. Kept as an object
+// (now empty) rather than removed so the ~10 `...CORS_HEADERS` call sites
+// below don't each need an individual edit -- see the Reuse Report in this
+// PR's description.
+const CORS_HEADERS = {};
 
 const SECURITY_HEADERS = {
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -5343,9 +5357,17 @@ async function handleRequest(request, env, ctx) {
   const pathname = path; // gate-required alias: PREMIUM_INTEL_PATHS.has(pathname)
   const method   = request.method.toUpperCase();
 
-  // CORS preflight
+  // CORS preflight -- SENTINEL APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this
+  // used to unconditionally return 204 + wildcard CORS_HEADERS for every
+  // path, method, and Origin with zero validation -- a preflight grant is
+  // meaningless if it's identical for /api/admin/keys and /api/feed.json.
+  // buildPreflightResponse() classifies the actual target route and
+  // validates Origin/Access-Control-Request-Method/-Headers against what
+  // that route's trust class genuinely supports before granting anything;
+  // see cors-policy.js. Still returns before any auth/routing/business
+  // logic runs, same as before.
   if (method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: { ...CORS_HEADERS, ...SECURITY_HEADERS } });
+    return buildPreflightResponse(request, path);
   }
 
   // Client IP for rate limiting and brute-force tracking
@@ -7469,25 +7491,35 @@ async function handleRequest(request, env, ctx) {
 }
 
 // --- Worker entry point -------------------------------------------------------
-// CORS_HEADERS/SECURITY_HEADERS are already inlined by most handlers, but a
-// subset of P-layer handler files (p20/p22/p23/p25-p29/p33/p34-p38) use their
-// own local response helper that doesn't set them, so browser callers (e.g.
-// a customer's SOC dashboard) pass CORS preflight (handled globally above)
-// and then have the real GET/POST response silently discarded by the browser.
-// Applying the same fixed, origin-independent policy here once, to every
-// response regardless of which handler produced it, closes that gap without
-// touching each handler file individually.
-function withBaselineHeaders(response) {
+// SECURITY_HEADERS are already inlined by most handlers, but a subset of
+// P-layer handler files (p20/p22/p23/p25-p29/p33/p34-p38) use their own
+// local response helper that doesn't set them -- applying them here once,
+// to every response regardless of which handler produced it, closes that
+// gap without touching each handler file individually.
+//
+// SENTINEL APEX PUBLIC-REPO ZERO-TRUST -- PHASE 3: this is also the one
+// true choke point for Access-Control-Allow-Origin -- every response this
+// Worker returns passes through here exactly once, so applyCorsPolicy()
+// (cors-policy.js) applied here is authoritative regardless of what any
+// individual handler already set (Headers.set() below overwrites it).
+// Needs `request`/`path`/`method` now, purely to classify the route that
+// was actually served -- no other behavior of this function changed.
+function withBaselineHeaders(response, request, path, method) {
   const headers = new Headers(response.headers);
   for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  return applyCorsPolicy(
+    new Response(response.body, { status: response.status, statusText: response.statusText, headers }),
+    request, path, method
+  );
 }
 
 export default {
   async fetch(request, env, ctx) {
+    const { pathname } = new URL(request.url);
+    const method = request.method.toUpperCase();
     try {
-      return withBaselineHeaders(await handleRequest(request, env, ctx));
+      return withBaselineHeaders(await handleRequest(request, env, ctx), request, pathname, method);
     } catch (err) {
       // Logged server-side (visible via wrangler tail / any configured
       // Logpush) but never returned to the caller -- this is the top-level
@@ -7495,10 +7527,13 @@ export default {
       // err.message can carry internal detail (paths, binding names,
       // upstream API error text).
       console.error(`[fetch] unhandled error: ${err && err.message ? err.message : err}`);
-      return new Response(JSON.stringify({ error: "Internal gateway error" }), {
-        status: 500,
-        headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, ...JSON_CONTENT },
-      });
+      return withBaselineHeaders(
+        new Response(JSON.stringify({ error: "Internal gateway error" }), {
+          status: 500,
+          headers: { ...JSON_CONTENT },
+        }),
+        request, pathname, method
+      );
     }
   },
   async scheduled(event, env, ctx) {

@@ -41,7 +41,12 @@ function _json(body, status = 200, extra = {}) {
     headers: {
       "Content-Type":                "application/json; charset=utf-8",
       "Cache-Control":               "no-store",
-      "Access-Control-Allow-Origin": "*",
+      // Access-Control-Allow-Origin intentionally not set here -- SENTINEL
+      // APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this is a $49/report PRO+
+      // commercial route (index.js's own route comment), never genuinely
+      // public -- index.js's withBaselineHeaders() applies the real,
+      // origin-aware decision via cors-policy.js to every response
+      // including this one; see that file's header comment.
       "X-Sentinel-Module":           "premium-reports/143.0.0",
       ...extra,
     },

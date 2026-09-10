@@ -334,9 +334,17 @@ jobs:
         # authorization-boundary question as subscription-lifecycle.test.js
         # above. Extracted into its own dependency-free module for the
         # identical reason (see gumroad-lifecycle.js header comment).
+        #
+        # SENTINEL APEX PUBLIC-REPO ZERO-TRUST PHASE 3: cors-policy.test.js
+        # added -- covers the centralized cross-origin trust-boundary policy
+        # (which browser Origin gets to read which response) that replaced
+        # 14 independent hardcoded-wildcard declarations across this Worker,
+        # the same "what can a customer/attacker be told or do" class of
+        # regression this gate already exists to catch. Dependency-free for
+        # the identical reason (see cors-policy.js header comment).
         run: |
           cd ${WORKER_DIR}
-          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js src/__tests__/detection-registry.test.js src/__tests__/subscription-lifecycle.test.js src/__tests__/revenue-enforcement.upgrade-trigger.test.js src/__tests__/daily-quota.test.js src/__tests__/first-party-plane.test.js src/__tests__/api-extensions.cve-scope.test.js src/__tests__/gumroad-lifecycle.test.js src/__tests__/metric-integrity-contract.test.js
+          node --test src/__tests__/certification-registry.test.js src/__tests__/publication-gate.test.js src/__tests__/reports-canonical-write-guard.test.js src/__tests__/detection-registry.test.js src/__tests__/subscription-lifecycle.test.js src/__tests__/revenue-enforcement.upgrade-trigger.test.js src/__tests__/daily-quota.test.js src/__tests__/first-party-plane.test.js src/__tests__/api-extensions.cve-scope.test.js src/__tests__/gumroad-lifecycle.test.js src/__tests__/metric-integrity-contract.test.js src/__tests__/cors-policy.test.js
 
       - name: " esbuild bundle pre-flight (HARD GATE)"
         run: |
