@@ -95,12 +95,21 @@ const REAL_ISH_FEED = JSON.stringify({
   version: "v200.0", count: REAL_ISH_INTEL_ITEMS.length, items: REAL_ISH_INTEL_ITEMS, sha256: "test",
 });
 
-async function routeAPIs(context, { proxiesSucceed, feedHasRealData }) {
+const REAL_ISH_NEWS_FEED = JSON.stringify({
+  items: [{ title: 'Backend-Sourced Advisory Via Same-Origin Feed', url: 'https://example.com/backend', source: 'The Hacker News', published: new Date().toISOString() }],
+  count: 1, sources: 5, generated_at: new Date().toISOString(), cache_ttl: 300,
+});
+
+async function routeAPIs(context, { proxiesSucceed, feedHasRealData, backendNewsSucceeds, onProxyHit }) {
   await context.route('**/*', (route) => {
     const url = route.request().url();
     const json = (body) => route.fulfill({ status: 200, contentType: 'application/json', body });
 
+    if (/\/api\/v1\/news\/feed|\/api\/news\/feed/.test(url)) {
+      return backendNewsSucceeds ? json(REAL_ISH_NEWS_FEED) : route.abort();
+    }
     if (/api\.allorigins\.win|corsproxy\.io|api\.rss2json\.com/.test(url)) {
+      if (onProxyHit) onProxyHit(url);
       if (proxiesSucceed) {
         return route.fulfill({
           status: 200, contentType: 'application/rss+xml',
@@ -179,6 +188,36 @@ async function runLiveSuccessScenario(browser) {
     };
   });
   record('When the proxy fetch succeeds, the SYNCING banner clears and real live content replaces the cached fallback', state.bannerHidden === true && state.gridText.includes('Live Test Advisory From Proxy'), JSON.stringify(state));
+
+  await context.close();
+}
+
+/**
+ * P0 FIX (2026-09-10): initLiveCyberNews() previously went straight to the
+ * third-party proxy chain. It now tries this platform's own same-origin
+ * GET /api/v1/news/feed first. Negative-control design: proxiesSucceed is
+ * ALSO true here, so if the code regressed to trying proxies first (or at
+ * all when the backend already succeeded), the grid would show the proxy's
+ * distinct fixture text instead -- this scenario would then fail loudly.
+ */
+async function runBackendFeedPriorityScenario(browser) {
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  let proxyHits = 0;
+  await routeAPIs(context, { proxiesSucceed: true, backendNewsSucceeds: true, onProxyHit: () => { proxyHits++; } });
+  const page = await context.newPage();
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(2000);
+
+  const gridText = await page.evaluate(() => {
+    const grid = document.getElementById('lcn-grid');
+    return grid ? grid.textContent : '__MISSING_ELEMENT__';
+  });
+  record('When the same-origin backend feed succeeds, its content renders',
+    gridText.includes('Backend-Sourced Advisory Via Same-Origin Feed'), `gridText(first 200)="${gridText.slice(0, 200)}"`);
+  record('The third-party proxy chain is never even attempted when the backend feed already succeeded',
+    proxyHits === 0, `proxyHits=${proxyHits}`);
+  record('The proxy fixture text does NOT appear (proves this is not a lucky race, the proxy path was genuinely skipped)',
+    !gridText.includes('Live Test Advisory From Proxy'), `gridText(first 200)="${gridText.slice(0, 200)}"`);
 
   await context.close();
 }
@@ -274,6 +313,8 @@ async function main() {
     await runCachedFallbackHonestTimestampScenario(browser);
     console.log('\n--- Scenario: live proxy fetch succeeds -> real content replaces fallback ---');
     await runLiveSuccessScenario(browser);
+    console.log('\n--- Scenario: same-origin backend feed is tried first and skips the proxy chain entirely ---');
+    await runBackendFeedPriorityScenario(browser);
     console.log('\n--- Scenario: Global Cyber Intel LIVE populates once real data arrives ---');
     await runGlobalIntelBootRaceScenario(browser);
     console.log('\n--- Scenario: all retries exhausted -> honest terminal state (slow, ~11s) ---');

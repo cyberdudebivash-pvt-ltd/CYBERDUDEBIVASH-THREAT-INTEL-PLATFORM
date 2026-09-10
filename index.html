@@ -6445,7 +6445,18 @@
                 // guarantee of carrying feed_count/source_count/last_updated/
                 // generated_at. Absent data now renders the same honest '—'
                 // placeholder already used before first paint, never a guess.
-                var feeds   = data.feed_count || data.source_count || '—';
+                // FIX (P0, 2026-09-10): feed_count/source_count never exist on this
+                // API's real shape (confirmed, not a regression -- see STAGE 2 FIX
+                // comment above). renderSourceBreakdown() below independently derives
+                // the real active-feed count from these same `items` by counting
+                // distinct feed_source values (matches the "N FEEDS ACTIVE" chip
+                // elsewhere on this page) -- reusing that exact computation here
+                // instead of leaving this honest-but-permanently-empty '—'.
+                var feedSources = {};
+                items.forEach(function(it){
+                    if (it.feed_source) feedSources[it.feed_source.replace(/https?:\/\/(www\.)?/, '').split('/')[0]] = 1;
+                });
+                var feeds = Object.keys(feedSources).length || '—';
                 var sync    = data.last_updated || data.generated_at || '';
                 var syncStr = sync ? (function(){
                     var d = new Date(sync);
@@ -7291,6 +7302,36 @@
                 } catch(e) {}
                 return null;
             }
+            // FIX (P0, 2026-09-10): this feature only ever tried third-party
+            // CORS proxies (api.allorigins.win, corsproxy.io, api.rss2json.com --
+            // free, unaffiliated, rate-limited, no uptime guarantee), even
+            // though this platform's own Worker backend already aggregates
+            // the same 5 outlets server-side with no CORS dependency at all:
+            // GET /api/v1/news/feed (confirmed live, KV-cached, returns fresh
+            // same-day items). Tried first below; the proxy chain remains as
+            // a fallback rather than being removed.
+            var SOURCE_STYLE = {
+                'THEHACKERNEWS':   { label: 'THE HACKER NEWS',  color: '#f97316' },
+                'BLEEPINGCOMPUTER':{ label: 'BLEEPINGCOMPUTER', color: '#3b82f6' },
+                'CISAADVISORIES':  { label: 'CISA ADVISORY',    color: '#00d4aa' },
+                'KREBSONSECURITY': { label: 'KREBS SECURITY',   color: '#8b5cf6' },
+                'SECURITYWEEK':    { label: 'SECURITY WEEK',    color: '#f43f5e' },
+            };
+            function _styleFor(source) {
+                var key = (source||'').toUpperCase().replace(/[^A-Z]/g,'');
+                return SOURCE_STYLE[key] || { label: (source||'NEWS').toUpperCase(), color: '#00d4aa' };
+            }
+            function _tryBackendFeed() {
+                return fetch('/api/v1/news/feed', {signal:AbortSignal.timeout(6000)})
+                    .then(function(r){ return r.ok ? r.json() : Promise.reject('http'); })
+                    .then(function(d){
+                        if (!d || !d.items || !d.items.length) return Promise.reject('empty');
+                        return d.items.map(function(it){
+                            var style = _styleFor(it.source);
+                            return {title: it.title||'', link: it.url||'', pubDate: it.published||'', label: style.label, labelColor: style.color};
+                        });
+                    });
+            }
             function _tryProxy(feed, idx) {
                 if (idx>=PROXY_CHAIN.length) return Promise.resolve([]);
                 return fetch(PROXY_CHAIN[idx](feed.url), {signal:AbortSignal.timeout(6000)})
@@ -7347,9 +7388,13 @@
             }
             function _loadAll(attempt) {
                 attempt = attempt || 1;
-                Promise.allSettled(FEEDS.map(function(f){return _tryProxy(f,0);})).then(function(results){
-                    var all=[];
-                    results.forEach(function(r){if(r.status==='fulfilled')all=all.concat(r.value||[]);});
+                _tryBackendFeed().catch(function() {
+                    return Promise.allSettled(FEEDS.map(function(f){return _tryProxy(f,0);})).then(function(results){
+                        var all=[];
+                        results.forEach(function(r){if(r.status==='fulfilled')all=all.concat(r.value||[]);});
+                        return all;
+                    });
+                }).then(function(all){
                     var seen=new Set(),fresh=[];
                     all.forEach(function(it){var k=_normT(it.title);if(!k||seen.has(k))return;seen.add(k);fresh.push(it);});
                     fresh.sort(function(a,b){return new Date(b.pubDate)-new Date(a.pubDate);});
@@ -17009,6 +17054,15 @@ function renderTopThreats(data) {
             start();
         }, { threshold: 0.3 });
         io.observe(bar);
+
+        // FIX (P0, 2026-09-10): the observer above was the ONLY trigger --
+        // any load path that never scrolls this bar into view (short pages,
+        // automated renders, users who never reach the footer) left these
+        // three values on the seeded '&mdash;' forever, even though the data
+        // itself is live and correct. start()'s own `started` guard makes
+        // this eager call and the observer's call mutually safe (whichever
+        // fires first wins; the other is a no-op).
+        start();
     }
 
     if (document.readyState === 'loading') {
@@ -21996,7 +22050,25 @@ a:focus-visible {
   // stayed on its initial shimmer placeholder forever. refreshNews() already
   // no-ops when the cached item count hasn't changed, so calling it here on
   // every successful fetch is safe and does not cause redundant re-renders.
+  // FIX (P0, 2026-09-10): #ai-bar-predicted ("High-Risk 30d") had no writer
+  // anywhere in this file -- runAIBrain() above only ever sets campaigns/
+  // anomalies/soc/actors/families, all client-side heuristics; nothing wrote
+  // this one field, which permanently showed the seeded '&mdash;'. Unlike
+  // those, the real APEX AI backend (GET /api/v1/intel/ai_summary.json,
+  // confirmed live) already publishes exactly this number under the same
+  // field name (high_risk_30d) -- wiring it directly rather than
+  // approximating it client-side. One-time fetch at boot, not on the 30s
+  // poller below: this AI-computed summary updates on the backend's own
+  // model-run cadence, not every raw-feed poll.
+  function _loadApexAISummary(){
+    fetch('/api/v1/intel/ai_summary.json', {cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if (d && d.high_risk_30d != null) txt('ai-bar-predicted', d.high_risk_30d);
+      }).catch(function(){});
+  }
   function _startAIBrainPoller(){
+    _loadApexAISummary();
     _fetchLiveIntel(function(){runAIBrain();injectEnterpriseSignals(window.__GOC_LIVE_INTEL||window.EMBEDDED_INTEL||[]);refreshNews();});
     setInterval(function(){_fetchLiveIntel(function(){runAIBrain();refreshNews();});},30000);
   }

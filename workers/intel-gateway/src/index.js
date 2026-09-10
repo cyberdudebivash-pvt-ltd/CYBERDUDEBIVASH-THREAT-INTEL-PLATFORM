@@ -1876,7 +1876,21 @@ function computeKillChain(items) {
   };
   const campaigns = [];
   for (const item of items) {
-    const kc = item.kill_chain_phases || item.kill_chain || [];
+    // FIX (P0, 2026-09-10): item.kill_chain_phases is an always-present but
+    // always-empty array on every real item (confirmed live and in feed
+    // data -- no producer anywhere populates it), so `|| item.kill_chain`
+    // never ran and total_tactics/coverage_pct were always 0 regardless of
+    // active_campaigns.length. The two fields that DO carry real per-item
+    // tactic data: item.mitre_tactics[].tactic (space-separated, e.g.
+    // "Initial Access" -- already matches phaseMap's key format) and the
+    // singular item.kill_chain_phase (hyphenated, e.g. "Initial-Access" --
+    // normalized to spaces below to match). Deduped since only presence
+    // (phases[m] > 0), not raw count, feeds total_tactics/coverage_pct.
+    const mitreTactics = (item.mitre_tactics || [])
+      .map(t => (t && typeof t === 'object') ? t.tactic : null)
+      .filter(Boolean);
+    const singlePhase = item.kill_chain_phase ? [item.kill_chain_phase.replace(/-/g, ' ')] : [];
+    const kc = [...new Set([...(item.kill_chain_phases || []), ...mitreTactics, ...singlePhase])];
     for (const phase of kc) { const m = phaseMap[phase]; if (m) phases[m]++; }
     if ((item.severity || "") === "CRITICAL" || parseFloat(item.risk_score || 0) >= 8.0) {
       campaigns.push({
