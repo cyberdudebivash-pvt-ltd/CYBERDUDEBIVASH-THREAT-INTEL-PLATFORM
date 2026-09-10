@@ -181,6 +181,45 @@ jobs:
           fi
           python3 scripts/backup_r2.py
 
+      - name: "P0 FinOps -- verify R2 lifecycle safety-net policy is live"
+        # docs/P0_R2_COST_CONTAINMENT.md Section 8d has, since 2026-09-05,
+        # explicitly disclosed that whether config/r2_lifecycle_policy.json's
+        # permanent 7-day ephemeral-retention backstop (built in PR #377) was
+        # ever actually applied to production R2 has never been verified --
+        # no sandboxed Claude Code session has ever had CF_ACCOUNT_ID/R2
+        # credentials, and this read-only check (r2_lifecycle_manager.py
+        # --verify: GET bucket-lifecycle-configuration only, never a PUT --
+        # see that script's own cmd_verify docstring) was never wired into
+        # any workflow that does. Reuses the exact CF_R2_* secrets this job
+        # already fetches for backup_r2.py above, aliased to the
+        # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/CF_ACCOUNT_ID names
+        # r2_lifecycle_manager.py expects (get_credentials(), imported from
+        # r2_upload.py) -- the same alias sentinel-blogger.yml's STAGE 3.5
+        # already uses for this identical underlying secret. Zero new
+        # secrets. This step only reports drift; it never applies or
+        # mutates the policy -- doing so remains a deliberate, separate,
+        # human-operator action per that document's own instruction.
+        env:
+          CF_ACCOUNT_ID:         ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: |
+          if [[ -z "$AWS_ACCESS_KEY_ID" || -z "$CF_ACCOUNT_ID" ]]; then
+            echo "SKIP: CF_ACCOUNT_ID or R2 credentials not configured"
+            exit 0
+          fi
+          python3 scripts/r2_lifecycle_manager.py --verify || \
+            echo "::warning::R2 lifecycle safety-net policy drift or not-yet-applied -- see uploaded r2-lifecycle-verify artifact. Run 'python3 scripts/r2_lifecycle_manager.py --apply --execute --confirm-bucket sentinel-apex-reports' from an environment with production R2 credentials to arm it (docs/P0_R2_COST_CONTAINMENT.md Section 8b)."
+
+      - name: Upload R2 lifecycle verification report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r2-lifecycle-verify-${{ github.run_id }}
+          path: data/quality/r2_lifecycle_report.json
+          retention-days: 90
+          if-no-files-found: ignore
+
       - name: Notify on CF backup failure
         if: failure()
         run: |
