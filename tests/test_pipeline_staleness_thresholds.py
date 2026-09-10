@@ -54,11 +54,36 @@ SAFETY_FACTOR = 1.3
 _DAILY_CRON_RE = re.compile(r"^(\d{1,2})\s+([\d,]+)\s+\*\s+\*\s+\*$")
 
 
-def _daily_fire_hours(cron_expr: str) -> "set[int] | None":
+def _daily_fire_minutes(cron_expr: str) -> "set[int] | None":
+    """Every minutes-since-midnight this 'M H,H,H * * *' entry fires at, or
+    None if cron_expr isn't that shape.
+
+    CodeRabbit review (PR #393): an earlier version of this returned bare
+    hours, dropping the minute entirely. That's exact as long as every
+    daily entry for a workflow shares one minute (true for every row in
+    MONITORED_WORKFLOWS today), but silently understates the true gap the
+    moment two entries differ -- e.g. '30 0 * * *' + '0 8 * * *' is really
+    a 16.5h max gap, not the 16h an hours-only union would report, which
+    could let an insufficient threshold clear the 1.3x safety check below.
+    Keeping the minute makes the gap math exact regardless.
+    """
     m = _DAILY_CRON_RE.match(cron_expr.strip())
     if not m:
         return None
-    return {int(h) for h in m.group(2).split(",")}
+    minute = int(m.group(1))
+    return {int(h) * 60 + minute for h in m.group(2).split(",")}
+
+
+def _max_gap_hours(fire_minutes: "set[int]") -> float:
+    """Largest gap (hours), with wraparound across midnight, between a set
+    of daily fire-times expressed as minutes-since-midnight."""
+    ordered = sorted(fire_minutes)
+    gaps_minutes = [
+        (ordered[i + 1] - ordered[i]) if i + 1 < len(ordered)
+        else (1440 - ordered[-1] + ordered[0])
+        for i in range(len(ordered))
+    ]
+    return max(gaps_minutes) / 60.0
 
 
 def max_gap_hours_for_workflow(workflow_file: str) -> float:
@@ -69,25 +94,19 @@ def max_gap_hours_for_workflow(workflow_file: str) -> float:
     on_block = doc.get(True, doc.get("on"))  # PyYAML parses bare `on:` as bool True
     schedules = (on_block or {}).get("schedule") or []
 
-    hours: set[int] = set()
+    fire_minutes: set[int] = set()
     for entry in schedules:
-        found = _daily_fire_hours(entry.get("cron", ""))
+        found = _daily_fire_minutes(entry.get("cron", ""))
         if found:
-            hours |= found
+            fire_minutes |= found
 
-    assert hours, (
+    assert fire_minutes, (
         f"{workflow_file}: no recognisable daily 'M H,H,H * * *' cron schedule "
         f"found (schedules seen: {schedules}) -- this test's cron parser needs "
         f"extending before it can validate this workflow's threshold"
     )
 
-    ordered = sorted(hours)
-    gaps = [
-        (ordered[i + 1] - ordered[i]) if i + 1 < len(ordered)
-        else (24 - ordered[-1] + ordered[0])
-        for i in range(len(ordered))
-    ]
-    return float(max(gaps))
+    return _max_gap_hours(fire_minutes)
 
 
 class TestPipelineStalenessThresholds(unittest.TestCase):
@@ -123,6 +142,39 @@ class TestPipelineStalenessThresholds(unittest.TestCase):
         this test's own analysis is built on."""
         self.assertEqual(max_gap_hours_for_workflow("status-monitor.yml"), 8.0)
         self.assertEqual(max_gap_hours_for_workflow("sentinel-blogger.yml"), 8.0)
+
+
+class TestMixedMinuteCronEntries(unittest.TestCase):
+    """CodeRabbit review (PR #393)'s exact worked example: two daily entries
+    on different minutes -- '30 0 * * *' and '0 8 * * *' -- are really a
+    16.5h max gap (00:30 -> 08:00), not the 16h an hours-only union would
+    report. No row in MONITORED_WORKFLOWS mixes minutes today (verified:
+    every entry uses a single shared minute across its listed hours), so
+    this couldn't yet under-approve a real threshold -- but it is exactly
+    the shape a future row could take, which is what this class pins
+    against regressing back to hours-only math."""
+
+    def test_daily_fire_minutes_keeps_the_minute_component(self):
+        self.assertEqual(_daily_fire_minutes("30 6,18 * * *"), {6 * 60 + 30, 18 * 60 + 30})
+
+    def test_non_matching_cron_shape_returns_none(self):
+        self.assertIsNone(_daily_fire_minutes("*/15 * * * *"))
+
+    def test_mixed_minute_entries_report_the_true_fractional_gap(self):
+        fire_minutes = _daily_fire_minutes("30 0 * * *") | _daily_fire_minutes("0 8 * * *")
+        self.assertEqual(_max_gap_hours(fire_minutes), 16.5)
+
+    def test_hours_only_threshold_would_have_wrongly_passed_this_case(self):
+        """The exact false-negative CodeRabbit named: a 21h threshold clears
+        an hours-only-computed 16h*1.3=20.8h bar but not the true
+        16.5h*1.3=21.45h one -- proving this isn't just a cosmetic precision
+        difference, it changes which thresholds the safety-margin test
+        would accept."""
+        fire_minutes = _daily_fire_minutes("30 0 * * *") | _daily_fire_minutes("0 8 * * *")
+        true_max_gap = _max_gap_hours(fire_minutes)
+        self.assertEqual(true_max_gap, 16.5)
+        candidate_threshold = 21.0
+        self.assertLess(candidate_threshold, true_max_gap * SAFETY_FACTOR)
 
 
 if __name__ == "__main__":
