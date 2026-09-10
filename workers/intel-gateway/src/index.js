@@ -133,7 +133,7 @@ import {
 // own header comment for the full before/after rationale). Applied at the
 // one true response choke point -- withBaselineHeaders() and the OPTIONS
 // branch below -- so no individual route handler needs to change.
-import { applyCorsPolicy, buildPreflightResponse } from './cors-policy.js';
+import { applyCorsPolicy, buildPreflightResponse, classifyRoute } from './cors-policy.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -2808,10 +2808,29 @@ export async function handleAdmin(request, env, ctx, path, method) {
     (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "")
   ).trim();
 
+  // FIX (P0, 2026-09-10, edge-security audit): checkBruteForce/recordAuthFailure
+  // (KV-backed lockout, already proven at /auth/login and resolveAuth()'s
+  // customer-key path) were never wired here -- this credential guarded
+  // key mint/revoke, cache purge, and audit-log read with only the shared,
+  // bypassable per-IP request counter (checkRateLimit) and no attempt
+  // lockout at all. Derives ip locally (matching handleRequest's own
+  // derivation) rather than threading a new parameter through this
+  // function's signature, since handleAdmin is called from existing tests
+  // with a fixed 5-argument shape.
+  const adminIp = request.headers.get("CF-Connecting-IP") ||
+    (request.headers.get("X-Forwarded-For") || "127.0.0.1").split(",")[0].trim();
+  const adminBf = await checkBruteForce(env, adminIp);
+  if (adminBf.locked) {
+    auditLog(ctx, env, { action: "admin_auth_locked", path, method, ip: adminIp });
+    return jsonResp({ error: "Too many failed attempts", retry_after: adminBf.until }, 429);
+  }
+
   if (!env.ADMIN_SECRET || !timingSafeEqual(adminKey, env.ADMIN_SECRET)) {
-    auditLog(ctx, env, { action: "admin_auth_failed", path, method });
+    await recordAuthFailure(env, adminIp);
+    auditLog(ctx, env, { action: "admin_auth_failed", path, method, ip: adminIp });
     return jsonResp({ error: "Forbidden: invalid admin credentials" }, 403);
   }
+  await clearAuthFailures(env, adminIp);
 
   // GET /api/admin/health
   if (path === "/api/admin/health" && method === "GET") {
@@ -5828,7 +5847,14 @@ async function handleRequest(request, env, ctx) {
       });
       body.security = {
         auth: "JWT_HS256+KV",
-        rate_limiting: "sliding_window_per_ip",
+        // FIX (P0, 2026-09-10, edge-security audit): this self-reported
+        // "sliding_window_per_ip" regardless of what checkRateLimit() (the
+        // only rate limiter in this file) actually implements -- a fixed
+        // 60-second window (`minute = Math.floor(Date.now()/60000)`), not a
+        // sliding one. Never independently verified against the real
+        // implementation until this audit. Corrected to match reality
+        // rather than the aspirational label.
+        rate_limiting: "fixed_window_per_ip_60s",
         brute_force: `lockout_after_${BRUTE_FORCE_MAX}_failures`,
         audit_logging: "SECURITY_HUB_KV",
         headers: "HSTS+CSP+XFO",
@@ -7553,12 +7579,75 @@ function withBaselineHeaders(response, request, path, method) {
   return applyCorsPolicy(withSecurity, request, path, method);
 }
 
+// P0 EDGE CACHE (2026-09-10, global-hardening pass): classifyRoute()'s
+// PUBLIC bucket (cors-policy.js) is already this platform's single,
+// security-audited source of truth for "this route's response is
+// identical for every caller -- no auth, no per-identity/tier variance"
+// (config/cors_public_wildcard_allowlist.json records the full,
+// evidence-reasoned list; every entry: data_sensitivity "none",
+// mutation_capability false). Reused here rather than building a second
+// list, so anything added to or removed from PUBLIC for a CORS reason is
+// automatically cached or not, with zero risk of the two ever drifting.
+//
+// Evidence this matters: data/health/sla_status.json's last real
+// production probe measured 754-1352ms p95 on exactly these routes
+// (/api/health, /api/v1/intel/latest.json, .../top10.json, /api/feed.json,
+// /api/v1/intel/apex.json) -- all uncached Worker compute + KV/R2 reads on
+// every single request, against this platform's own documented
+// <500ms-p95-cached performance target. PR #388 already proved this exact
+// mechanism (caches.default) safe and effective for one route family
+// (/api/ai/*, see its own cache block below in handleRequest) -- this
+// generalizes it to the rest of the already-audited PUBLIC surface
+// instead of re-implementing it per route.
+const EDGE_CACHE_TTL_SECONDS = 300; // matches the /api/ai/* precedent's own TTL
+function isEdgeCacheableRequest(pathname, method) {
+  return method === "GET" && classifyRoute(pathname, method).bucket === "PUBLIC";
+}
+
 export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
     const method = request.method.toUpperCase();
+
+    // Cache key is the FULL request (Cache API default: path + query
+    // string), deliberately NOT stripped the way the ai/* proxy strips its
+    // key -- that was only safe there because those three files take no
+    // query parameters (verified in that PR). Several PUBLIC routes here
+    // (e.g. /api/v1/cve/detail) are query-parameter-driven; stripping would
+    // collide two different lookups onto one cache key and serve the wrong
+    // caller's data back -- a correctness bug, not just an inefficiency.
+    const cacheable = isEdgeCacheableRequest(pathname, method);
+    const edgeCache = cacheable ? caches.default : null;
+    if (edgeCache) {
+      try {
+        const cached = await edgeCache.match(request);
+        if (cached) return cached;
+      } catch (cacheErr) {
+        console.error(`[fetch] edge cache match failed for ${pathname}: ${cacheErr && cacheErr.message ? cacheErr.message : cacheErr}`);
+      }
+    }
+
     try {
-      return withBaselineHeaders(await handleRequest(request, env, ctx), request, pathname, method);
+      const response = withBaselineHeaders(await handleRequest(request, env, ctx), request, pathname, method);
+      // Only a 200 is ever stored -- never pins an error/outage in place
+      // for the TTL. Cache-Control is normalised to a known, bounded value
+      // here rather than trusting each individual handler to have set one
+      // correctly, so this is safe even for a PUBLIC route whose handler
+      // omitted or under-specified it. Store is non-blocking.
+      if (edgeCache && response.status === 200 && ctx && typeof ctx.waitUntil === "function") {
+        try {
+          const toCache = new Response(response.clone().body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: new Headers(response.headers),
+          });
+          toCache.headers.set("Cache-Control", `public, max-age=${EDGE_CACHE_TTL_SECONDS}`);
+          ctx.waitUntil(edgeCache.put(request, toCache));
+        } catch (putErr) {
+          console.error(`[fetch] edge cache put failed for ${pathname}: ${putErr && putErr.message ? putErr.message : putErr}`);
+        }
+      }
+      return response;
     } catch (err) {
       // Logged server-side (visible via wrangler tail / any configured
       // Logpush) but never returned to the caller -- this is the top-level
