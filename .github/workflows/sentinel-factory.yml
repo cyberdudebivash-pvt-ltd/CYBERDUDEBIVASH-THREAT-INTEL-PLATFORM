@@ -38,27 +38,47 @@ jobs:
       - name: Install v45 Dependencies
         run: pip install -r requirements-ci-light.txt
 
+      # Builds every sellable asset into data/premium_staging/products/
+      # (gitignored) and publishes it to the private premium/ prefix of the
+      # existing sentinel-apex-data R2 bucket, served behind the intel-gateway's
+      # ENTERPRISE/MSSP entitlement check.
       - name: Run Intelligence Product Factory
         run: python3 -m agent.product_factory.intel_product_factory
         env:
-          CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
-          AUTHORITY: "CYBERDUDEBIVASH OFFICIAL"
+          CDB_JWT_SECRET:        ${{ secrets.CDB_JWT_SECRET }}
+          AUTHORITY:             "CYBERDUDEBIVASH OFFICIAL"
+          CF_ACCOUNT_ID:         ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
 
-      - name: Commit Packaged Products
+      # Blocks the run when an asset is unpriced, unlicensed, undeployable, has
+      # colliding IDS SIDs, or would ship benign reference infrastructure in an
+      # enforcement blocklist.
+      - name: Commercial Asset Audit Gate
+        run: python3 scripts/commercial_asset_audit.py
+
+      # NOTE -- v184.4 removed the premium detection pack from this PUBLIC
+      # repository because it was fetchable by anyone with zero auth. This
+      # workflow was not migrated at the time: it ran `git add -f data/products/`
+      # and pushed ENTERPRISE-tier artefacts to the public default branch on
+      # every run. The factory now writes to gitignored staging and publishes to
+      # private R2 (see agent/product_factory/asset_publisher.py), so there is
+      # no product commit here at all. Only the audit certification report --
+      # which contains counts and gate results, never product content -- is
+      # committed, so the certification chain stays observable in-repo.
+      - name: Commit Asset Audit Certification
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git config --local user.name "CYBERDUDEBIVASH"
           git config --local user.email "bivash@cyberdudebivash.com"
           git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
-          git add -f data/products/ || true
+          git add data/quality/commercial_asset_audit.json || true
           if git diff --staged --quiet; then
-            echo "No product changes to commit"
+            echo "No certification changes to commit"
           else
-            git commit -m " v45.0: New Intelligence Products Packaged [skip ci]"
-            git stash --include-untracked --quiet 2>/dev/null || true
+            git commit -m "chore(factory): commercial asset audit certification [skip ci]"
             git fetch origin main --quiet 2>/dev/null || true
             git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null || true; git merge origin/main -X ours --no-edit --quiet 2>/dev/null || true; }
-            git stash pop --quiet 2>/dev/null || true
             git push origin main || echo '::warning::Push deferred — will sync next run.'
           fi

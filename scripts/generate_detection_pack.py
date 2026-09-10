@@ -58,6 +58,14 @@ BASELINE_PATH = Path(os.environ.get("BASELINE_PATH", str(REPO / "api" / "feed.ba
 DETECTIONS_DIR = REPO / "data" / "premium_staging" / "detections"
 PREMIUM_BUCKET = "sentinel-apex-data"
 DRY_RUN       = os.environ.get("DRY_RUN", "false").strip().lower() == "true"
+# Additive opt-out (default false -- unchanged behaviour for every existing
+# caller). agent/product_factory/detection_pack_builder.py reuses this script
+# as the single detection-content engine rather than re-implementing Sigma/KQL/
+# IOC/CVE extraction, but it runs on the sentinel-factory.yml runner, which has
+# no R2 credentials and is not the publisher of record for premium/detections/*
+# (sentinel-blogger.yml is). Without this flag that reuse either crashes in
+# get_credentials() or reports a false upload failure via the exit code.
+SKIP_R2_UPLOAD = os.environ.get("SKIP_R2_UPLOAD", "false").strip().lower() == "true"
 PLATFORM_BASE = "https://intel.cyberdudebivash.com"
 VERSION       = "185.0"
 
@@ -398,7 +406,9 @@ def main() -> int:
 
     # ── Upload to R2 (v184.4 FIX -- see DETECTIONS_DIR comment above) ────────────
     upload_failures = 0
-    if not DRY_RUN:
+    if SKIP_R2_UPLOAD:
+        log.info("SKIP_R2_UPLOAD=true -- artifacts staged locally, R2 publish skipped")
+    if not DRY_RUN and not SKIP_R2_UPLOAD:
         from scripts.r2_upload import get_credentials, s3_cp
         _CONTENT_TYPES = {
             ".yml": "application/x-yaml", ".kql": "text/plain", ".txt": "text/plain",

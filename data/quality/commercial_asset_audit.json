@@ -1,0 +1,199 @@
+{
+  "_meta": {
+    "report": "SENTINEL APEX -- Commercial Asset Audit",
+    "audit_version": "1.0.0",
+    "generated_at": "2026-09-10T20:07:37.559135+00:00",
+    "ioc_validation_engine": "1.0.0"
+  },
+  "certification": "COMMERCIAL_RELEASE",
+  "summary": {
+    "gates_total": 10,
+    "gates_passed": 9,
+    "blockers": 0,
+    "warnings": 1,
+    "asset_classes_audited": 3
+  },
+  "catalog_summary": {
+    "asset_classes": 3,
+    "priced_asset_classes": 3,
+    "available_asset_classes": 3,
+    "total_artefacts": 15
+  },
+  "gates": [
+    {
+      "gate_id": "ASSET-1",
+      "title": "Every asset class is priced from the pricing SSOT",
+      "status": "PASS",
+      "blockers": [],
+      "warnings": [],
+      "evidence": {
+        "APEX-ASSET-DETPACK": {
+          "usd": 149,
+          "inr": 12400,
+          "included_in": [
+            "enterprise",
+            "mssp"
+          ]
+        },
+        "APEX-ASSET-IOCBNDL": {
+          "usd": 99,
+          "inr": 8300,
+          "included_in": [
+            "pro",
+            "enterprise",
+            "mssp"
+          ]
+        },
+        "APEX-ASSET-PLAYBOOK": {
+          "usd": 199,
+          "inr": 16600,
+          "included_in": [
+            "enterprise",
+            "mssp"
+          ]
+        }
+      }
+    },
+    {
+      "gate_id": "ASSET-2",
+      "title": "Every artefact carries commercial licence terms",
+      "status": "PASS",
+      "blockers": [],
+      "warnings": [],
+      "evidence": {
+        "detection_pack_licence_bytes": 1970
+      }
+    },
+    {
+      "gate_id": "ASSET-3",
+      "title": "Detection packs carry deployable content, not empty arrays",
+      "status": "PASS",
+      "blockers": [],
+      "warnings": [],
+      "evidence": {
+        "pack": "CDB_DETECTION_PACK_ENTERPRISE_20260910_2007.zip",
+        "file_count": 23,
+        "contents": {
+          "sigma_rules": 337,
+          "kql_queries": 337,
+          "suricata_rules": 48,
+          "snort_rules": 48,
+          "enforcement_iocs": 64,
+          "monitoring_iocs": 398,
+          "structured_iocs": 462,
+          "cve_rows": 349,
+          "attack_techniques": 11
+        },
+        "size_bytes": 115622
+      }
+    },
+    {
+      "gate_id": "ASSET-4",
+      "title": "IDS rules parse as rule syntax with collision-free SIDs",
+      "status": "PASS",
+      "blockers": [],
+      "warnings": [],
+      "evidence": {
+        "suricata": {
+          "rules": 48,
+          "unique_sids": 48
+        },
+        "snort": {
+          "rules": 48,
+          "unique_sids": 48
+        }
+      }
+    },
+    {
+      "gate_id": "ASSET-5",
+      "title": "IOC bundles contain validated indicators, not feed articles",
+      "status": "PASS",
+      "blockers": [],
+      "warnings": [],
+      "evidence": {
+        "bundle": "IOC-BNDL-20260910_2007.json",
+        "counts": {
+          "source_items": 985,
+          "curated_source_items": 0,
+          "indicator_candidates": 3030,
+          "validated_indicators": 462,
+          "enforcement_tier": 64,
+          "monitoring_tier": 398
+        },
+        "publishable": true,
+        "stix_indicators": 453
+      }
+    },
+    {
+      "gate_id": "ASSET-6",
+      "title": "Enforcement blocklists are free of benign reference infrastructure",
+      "status": "PASS",
+      "blockers": [],
+      "warnings": [],
+      "evidence": {
+        "indicators_checked": 128
+      }
+    },
+    {
+      "gate_id": "ASSET-7",
+      "title": "Every artefact carries an integrity manifest / checksum",
+      "status": "PASS",
+      "blockers": [],
+      "warnings": [],
+      "evidence": {
+        "checksums_verified": 22
+      }
+    },
+    {
+      "gate_id": "ASSET-8",
+      "title": "Every artefact carries deployment documentation",
+      "status": "PASS",
+      "blockers": [],
+      "warnings": [],
+      "evidence": {
+        "deployment_guides": [
+          "deployment/firewall-edl.md",
+          "deployment/microsoft-sentinel.md",
+          "deployment/splunk-elastic.md",
+          "deployment/suricata-snort.md",
+          "deployment/vulnerability-management.md"
+        ]
+      }
+    },
+    {
+      "gate_id": "ASSET-9",
+      "title": "Playbooks cover the full NIST SP 800-61 lifecycle",
+      "status": "PASS",
+      "blockers": [],
+      "warnings": [],
+      "evidence": {
+        "playbooks": 10,
+        "threat_types": [
+          "Apt",
+          "Apt",
+          "Data Breach",
+          "Data Breach",
+          "Malware",
+          "Malware",
+          "Phishing",
+          "Phishing",
+          "Ransomware",
+          "Ransomware"
+        ]
+      }
+    },
+    {
+      "gate_id": "ASSET-10",
+      "title": "No paid artefact is committed to the public repository",
+      "status": "WARN",
+      "blockers": [],
+      "warnings": [
+        "699 legacy 1.x artefact(s) still tracked under data/products/; the factory no longer writes there (see sentinel-factory.yml)"
+      ],
+      "evidence": {
+        "tracked_paid": 0,
+        "tracked_legacy": 699
+      }
+    }
+  ]
+}
