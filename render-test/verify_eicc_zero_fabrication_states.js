@@ -116,7 +116,29 @@ function startServer(root) {
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ items: [REAL_ITEM], feed_count: 42, last_updated: new Date().toISOString() }));
+      // FIX (P0, 2026-09-10 follow-up): this fixture used to lean on
+      // `feed_count: 42` to populate the Active Feeds metric, but
+      // index.html's set('eicc-m-feeds', feeds) (see its own "P0 FIX
+      // (2026-09-10)" comment) stopped reading feed_count/source_count
+      // entirely in favor of deriving the count from distinct `feed_source`
+      // values across real items -- confirmed live (not assumed) not to
+      // exist on the real API response shape. This fixture's single
+      // REAL_ITEM carries no feed_source, so the derived count silently
+      // fell to the honest '—' the day that production change landed,
+      // failing this assertion (caught via pages-fast-publish's pre-deploy
+      // gate) and blocking every frontend deploy since -- not a fabrication
+      // regression itself, but exactly the kind of drift Section 4's own
+      // stale-fixture warning (aiMode: 'escalation' above) already exists to
+      // catch for the AI side. Two items with two distinct feed_source
+      // domains exercise the real derivation this metric now performs.
+      res.end(JSON.stringify({
+        items: [
+          REAL_ITEM,
+          { id: 'intel--real-2', title: 'REGRESSION-TEST-CANARY-ITEM-2', severity: 'HIGH', risk_score: 6.4, feed_source: 'https://example-regression-source-a.test/feed' },
+          { id: 'intel--real-3', title: 'REGRESSION-TEST-CANARY-ITEM-3', severity: 'HIGH', risk_score: 6.1, feed_source: 'https://example-regression-source-b.test/feed' },
+        ],
+        last_updated: new Date().toISOString(),
+      }));
       return;
     }
 
@@ -279,8 +301,8 @@ async function main() {
 
       record('Full success: ticker renders the real item',
         !!s.tickerText && /REGRESSION-TEST-CANARY-ITEM/.test(s.tickerText), JSON.stringify(s.tickerText));
-      record('Full success: Active Feeds shows the real measured value (42), not "—" or "74"',
-        s.metricsFeeds === '42', JSON.stringify(s.metricsFeeds));
+      record('Full success: Active Feeds shows the real measured value (2 distinct feed_source domains), not "—" or "74"',
+        s.metricsFeeds === '2', JSON.stringify(s.metricsFeeds));
       record('Full success: AI status shows ONLINE with a real retrieved prediction, not the old hardcoded set',
         !!s.aiStatusHtml && /online/i.test(s.aiStatusHtml) &&
         !!s.aiPredictionsHtml && /REGRESSION-TEST-REAL-PREDICTION/.test(s.aiPredictionsHtml) &&
