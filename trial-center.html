@@ -549,9 +549,12 @@ async function submitTrialRequest(){
       btn.textContent = 'Activate Trial →'; btn.disabled = false;
       return;
     }
-    lastIssuedTrialKey = data.api_key || '';
+    // FIX (P0, 2026-09-10, CodeRabbit review): handleTrialIssuance's real
+    // response nests these under `trial: {...}`, not top-level.
+    const trialData = data.trial || {};
+    lastIssuedTrialKey = trialData.api_key || '';
     document.getElementById('trialKeyValue').textContent = lastIssuedTrialKey || 'Sent to your email — check your inbox.';
-    document.getElementById('trialExpiryMsg').textContent = 'Expires: ' + (data.expires_at ? data.expires_at.slice(0,10) : '7 days from now');
+    document.getElementById('trialExpiryMsg').textContent = 'Expires: ' + (trialData.expires_at ? trialData.expires_at.slice(0,10) : '7 days from now');
     document.getElementById('trialStepForm').style.display = 'none';
     document.getElementById('trialStepResult').style.display = 'block';
   }catch(e){

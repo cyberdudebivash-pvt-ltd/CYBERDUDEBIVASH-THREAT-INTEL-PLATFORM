@@ -7600,8 +7600,24 @@ function withBaselineHeaders(response, request, path, method) {
 // generalizes it to the rest of the already-audited PUBLIC surface
 // instead of re-implementing it per route.
 const EDGE_CACHE_TTL_SECONDS = 300; // matches the /api/ai/* precedent's own TTL
+// FIX (P0, 2026-09-10, CodeRabbit review on PR #407): classifyRoute()'s
+// PUBLIC bucket means "safe to expose cross-origin to any caller" (every
+// PUBLIC route's response body is identical regardless of WHO reads it) --
+// it does NOT mean "identical regardless of WHAT the caller sends."
+// /api/v1/intel/ai_summary.json and apex.json are both PUBLIC (safe for a
+// browser on any origin to read the same anonymous response) AND in
+// PREMIUM_INTEL_PATHS (servePremiumIntelManifest() varies the response
+// body by the caller's actual tier/API key). Without this exclusion, the
+// first cached response for one of these paths -- anonymous or paying,
+// whichever request happened to populate the cache -- would be served to
+// every caller for the TTL: a paying customer silently downgraded to
+// free-tier content, or free-tier content silently upgraded to leak
+// premium intelligence, depending on which request won the race. Reuses
+// PREMIUM_INTEL_PATHS, the existing, already-authoritative marker for
+// exactly this property (index.js's own tier-gate dispatch), rather than
+// inferring tier-variance from allowlist prose.
 function isEdgeCacheableRequest(pathname, method) {
-  return method === "GET" && classifyRoute(pathname, method).bucket === "PUBLIC";
+  return method === "GET" && classifyRoute(pathname, method).bucket === "PUBLIC" && !PREMIUM_INTEL_PATHS.has(pathname);
 }
 
 export default {

@@ -88,13 +88,17 @@ wired into `enterprise-governance.yml`, `enterprise-rollback-governance.yml`, `s
 secrets but never actually sent a message — fixed to use the same `send_telegram()` function the
 other call sites already prove works, rather than left as silent false confidence.
 
+**Resolved in this same change:** the production deploy path (`deploy-worker.yml`,
+`master-deployment-orchestrator.yml`, `post-deploy-validation.yml`) and the R2 FinOps regression gate
+each previously had no failure notification at all — a failure was visible only as a red status in
+the GitHub Actions UI. Each now has an additive `notify-on-failure` job (reusing
+`scripts/pipeline_alert.py`'s proven `send_telegram()`, `if: failure()`, `needs:` the existing job(s))
+that alerts for real.
+
 **Open items, not yet closed:**
 - One Telegram channel + one email inbox (`ops/INCIDENT-RESPONSE.md`) — no on-call rotation, no
   escalation tiers, no PagerDuty (the prior version of this document claimed PagerDuty; it is not
   configured anywhere in this repository).
-- The production deploy path itself (`deploy-worker.yml`, `master-deployment-orchestrator.yml`,
-  `post-deploy-validation.yml`) and the R2 FinOps regression gate have no failure notification at
-  all — a failure here is visible only as a red status in the GitHub Actions UI.
 - No uptime/synthetic monitoring exists from outside Cloudflare's own infrastructure — a
   Cloudflare-wide incident would not be independently detected by anything in this repository.
 - No evidence either core static secret (`ADMIN_SECRET`, the JWT signing secret) has ever been
@@ -105,8 +109,9 @@ other call sites already prove works, rather than left as silent false confidenc
 ## 5. Actual Recovery Scenarios
 
 ### 5.1 Worker deploy failure / bad release
-**Detection:** `deploy-worker.yml` / `post-deploy-validation.yml` CI status (currently: manual
-observation of the Actions tab only — see §4's open item).
+**Detection:** `deploy-worker.yml` / `post-deploy-validation.yml` CI status, now alerted in real time
+via each workflow's `notify-on-failure` job (§4) rather than requiring manual observation of the
+Actions tab.
 **Recovery:** `wrangler rollback` to the prior Worker version, or revert-and-redeploy via a new PR
 per this repository's standard git workflow. No automated traffic failover exists or is needed —
 Cloudflare serves the previously-deployed Worker version until a new deploy completes; there is no
@@ -137,9 +142,8 @@ alarms — see that script's own header comment).
    record the result and actual time-to-restore here, and wire it into a periodic CI check —
    carefully, since this script's target is a live Cloudflare KV namespace and a careless
    implementation could overwrite production data. Requires design review before automating.
-2. Add real failure notification (reusing `scripts/pipeline_alert.py`'s proven `send_telegram()`) to
-   `deploy-worker.yml`, `master-deployment-orchestrator.yml`, `post-deploy-validation.yml`, and
-   `r2-finops-regression-gate.yml`.
+2. ~~Add real failure notification to `deploy-worker.yml`, `master-deployment-orchestrator.yml`,
+   `post-deploy-validation.yml`, and `r2-finops-regression-gate.yml`.~~ **DONE, this change** — see §4.
 3. Establish rotation for `ADMIN_SECRET` and the JWT signing secret, and populate
    `data/sovereign/secret_metadata.json` so `scripts/jwt_governance.py`'s existing age-check has
    real data to evaluate. Requires an operator with production secret-management access.
