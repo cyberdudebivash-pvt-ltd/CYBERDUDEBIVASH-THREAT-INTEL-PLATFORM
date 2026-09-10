@@ -68,8 +68,21 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m agent.v43_genesis.genesis_engine
 
+      # P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10)
+      # follow-up: identical defect to sovereign-platform.yml's "Run
+      # validation tests" step, found via that same live-production
+      # verification pass -- pytest was never installed (requirements.txt
+      # has no pytest entry either) and `| tail -15` masked the resulting
+      # "No module named pytest" failure (no `pipefail`), so this step
+      # reported success without ever running a test. Fixed identically:
+      # a dedicated install step matching 4 sibling workflows' own
+      # regression-gate convention, and no more tail-piping the real exit
+      # code away. Verified locally first: the suite genuinely passes --
+      # 13/13 -- before letting this step go red on a real failure.
+      - run: pip install pytest --quiet
+
       - name: Validate
-        run: python -m pytest tests/test_v43_genesis.py -v --tb=short 2>&1 | tail -15
+        run: python -m pytest tests/test_v43_genesis.py -v --tb=short
 
       # FAIL-CLOSED (not continue-on-error): proves the orchestrator
       # genuinely executed this run rather than a stale leftover surviving

@@ -110,9 +110,29 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m agent.v42_sovereign.sovereign_engine
 
+      # P0 RUNTIME INTELLIGENCE STATE RECOVERY mission (2026-09-10)
+      # follow-up, found via this mission's own required live-production
+      # verification (run 34515087369's job log): this step's `pytest` was
+      # never installed by "Install Dependencies" (requirements-ci-light.txt
+      # deliberately excludes it -- see that file's own header), and piping
+      # to `tail` swallowed the resulting "No module named pytest" failure
+      # (`bash -e`, no `pipefail`, so the pipeline's exit code was tail's,
+      # not pytest's) -- the step reported success on every run without ever
+      # executing a single test. Same failure-suppression class this
+      # mission's own mandate required eliminating, just one step later in
+      # the same job. Fixed the same way 4 sibling workflows already install
+      # pytest for their own regression gates (access-governance-gate.yml,
+      # r2-finops-regression-gate.yml, report-generator-regression-gate.yml,
+      # sast-security-scan.yml): a dedicated install step, and no more
+      # tail-piping to mask the real exit code. Verified locally first
+      # (Level 2 Production Stability): both files' full suites genuinely
+      # pass -- 62/62 -- before making this step capable of going red.
+      - name: Install test dependencies
+        run: pip install pytest --quiet
+
       - name: Run validation tests
         run: |
-          python -m pytest tests/test_v39_modules.py tests/test_v40_v41_v42_modules.py -v --tb=short 2>&1 | tail -20
+          python -m pytest tests/test_v39_modules.py tests/test_v40_v41_v42_modules.py -v --tb=short
 
       # FAIL-CLOSED (not continue-on-error): proves each orchestrator
       # genuinely executed this run rather than leaving an hours-old
