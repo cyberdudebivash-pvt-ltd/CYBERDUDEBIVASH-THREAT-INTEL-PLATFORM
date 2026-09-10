@@ -352,6 +352,48 @@ NEVER_PERSIST_PATHS = frozenset({
 _leaked = NEVER_PERSIST_PATHS & {local_rel for local_rel, _ in STATE_FILES}
 assert not _leaked, f"NEVER_PERSIST_PATHS entries found in STATE_FILES: {_leaked}"
 
+# P0 RUNTIME INTELLIGENCE STATE RECOVERY mission follow-up (2026-09-10,
+# second-order fix): confirmed live via this mission's own fail-closed
+# r2_round_trip_verifier.py -- a fresh sovereign-platform.yml dispatch's
+# genuinely successful upload (confirmed via its own "OK: Uploaded" log
+# lines) was found, ~10 seconds later in the SAME job's own round-trip
+# check, to have already been overwritten in R2 by different content.
+# Root cause: PR #409 stopped regenerate_engine_data.py from GENERATING
+# fresh (wrong) content for these 5 canonical paths, but did nothing about
+# a plain, unchanged echo -- sentinel-blogger.yml's own broad (no --only)
+# `--download` call (line ~409) still pulls these paths onto local disk at
+# the START of its run, reflecting whatever R2 held AT THAT MOMENT; with
+# nothing left to regenerate them mid-job, that downloaded snapshot sits
+# untouched on disk for the rest of a run documented elsewhere in this repo
+# as taking 2-3+ hours, and its own later broad `--upload` calls (lines
+# ~3204/~4356) blindly re-publish that byte-identical, hours-stale snapshot
+# -- silently reverting any newer write sovereign-platform.yml/
+# genesis-powerhouse.yml made to the SAME R2 keys in the meantime, even
+# with zero code left that produces wrong content. A "did nothing new" step
+# is not the same as "touched nothing" when it re-asserts old state on top
+# of newer state.
+#
+# Fixed at the single shared source (this module), not by chasing every
+# existing or future broad-sweep caller individually: these paths remain in
+# STATE_FILES (so sovereign-platform.yml's/genesis-powerhouse.yml's own
+# explicit `--only <these-paths>` calls are completely unaffected -- an
+# explicit request always wins) but a caller doing a BROAD sweep (only is
+# None, e.g. sentinel-blogger.yml/multi-source-intel.yml/ai-predictions.yml's
+# existing, unchanged invocations) now skips them in both download() and
+# upload(), exactly like NEVER_PERSIST_PATHS above except these ARE meant to
+# reach R2 -- just only via the one pair of workflows that own them.
+BROAD_SWEEP_EXCLUDED_PATHS = frozenset({
+    "data/nexus/nexus_output.json",
+    "data/cortex/cortex_output.json",
+    "data/cortex/stream_events.json",
+    "data/quantum/quantum_output.json",
+    "data/sovereign/sovereign_output.json",
+    "data/genesis/genesis_output.json",
+    "data/genesis/detection_pack.json",
+})
+_not_tracked = BROAD_SWEEP_EXCLUDED_PATHS - {local_rel for local_rel, _ in STATE_FILES}
+assert not _not_tracked, f"BROAD_SWEEP_EXCLUDED_PATHS entries missing from STATE_FILES: {_not_tracked}"
+
 # data/intelligence_repository/advisories/ is a directory of monthly chunk
 # files (registry_<YYYYMM>.json, "never overwritten" per
 # intel_persistence_engine.py's own docstring) -- not a single JSON object,
@@ -433,6 +475,15 @@ def download(root: pathlib.Path, endpoint: str, only: frozenset[str] | None = No
     had_error = False
     for local_rel, r2_key in STATE_FILES:
         if only is not None and local_rel not in only:
+            continue
+        if only is None and local_rel in BROAD_SWEEP_EXCLUDED_PATHS:
+            # See BROAD_SWEEP_EXCLUDED_PATHS' own comment: a broad sweep must
+            # not even DOWNLOAD these onto local disk, or a long-running
+            # caller (sentinel-blogger.yml) sits on an hours-stale snapshot
+            # that its own later broad upload then blindly re-publishes,
+            # reverting whatever sovereign-platform.yml/genesis-powerhouse.yml
+            # wrote to the same R2 keys in the meantime. Only an explicit
+            # `--only` naming one of these paths may touch it.
             continue
         local_path = root / local_rel
         local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -551,6 +602,13 @@ def upload(root: pathlib.Path, endpoint: str, only: frozenset[str] | None = None
     failed: list[str] = []
     for local_rel, r2_key in STATE_FILES:
         if only is not None and local_rel not in only:
+            continue
+        if only is None and local_rel in BROAD_SWEEP_EXCLUDED_PATHS:
+            # See BROAD_SWEEP_EXCLUDED_PATHS' own comment: a broad sweep must
+            # not blindly re-publish whatever happens to be sitting locally
+            # for these paths (whether never downloaded, or a stale snapshot
+            # from this same job's own earlier broad download) -- only an
+            # explicit `--only` naming one of these paths may upload it.
             continue
         local_path = root / local_rel
         if not local_path.exists():

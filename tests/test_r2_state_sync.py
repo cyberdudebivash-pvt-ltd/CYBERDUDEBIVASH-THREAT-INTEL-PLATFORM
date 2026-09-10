@@ -301,13 +301,23 @@ class TestDownload(unittest.TestCase):
             return _proc(1, stderr="Connection timed out")
         return _fake_run
 
-    def test_all_ok_populates_every_local_file(self):
+    def test_all_ok_populates_every_local_file_except_broad_sweep_excluded(self):
+        """P0 mission follow-up (2026-09-10): a broad (no --only) download
+        must skip BROAD_SWEEP_EXCLUDED_PATHS entirely -- see that set's own
+        comment in r2_state_sync.py for why (a stale snapshot downloaded here
+        would otherwise sit untouched for the rest of a long-running caller's
+        job and get blindly re-published by that same job's later broad
+        upload, reverting a newer write sovereign-platform.yml/
+        genesis-powerhouse.yml made to the same R2 keys in the meantime)."""
         with patch.object(r2_upload.subprocess, "run",
                            side_effect=self._mock_run_for({k: "OK" for _, k in rs.STATE_FILES})):
             rc = rs.download(self.tmp, "https://e")
         self.assertEqual(rc, 0)
         for local_rel, _ in rs.STATE_FILES:
-            self.assertTrue((self.tmp / local_rel).exists())
+            if local_rel in rs.BROAD_SWEEP_EXCLUDED_PATHS:
+                self.assertFalse((self.tmp / local_rel).exists())
+            else:
+                self.assertTrue((self.tmp / local_rel).exists())
 
     def test_not_found_keeps_existing_local_bootstrap_copy(self):
         local_rel, r2_key = rs.STATE_FILES[0]
@@ -482,7 +492,11 @@ class TestUpload(unittest.TestCase):
                 rc = rs.upload(self.tmp, "https://e")
         self.assertEqual(rc, 0)
         sleep_mock.assert_not_called()
-        self.assertEqual(m.call_count, len(rs.STATE_FILES))
+        # P0 mission follow-up (2026-09-10): a broad (no --only) upload must
+        # skip BROAD_SWEEP_EXCLUDED_PATHS even though setUp gave every
+        # STATE_FILES entry a local copy -- see that set's own comment for
+        # why a broad upload must never touch these paths.
+        self.assertEqual(m.call_count, len(rs.STATE_FILES) - len(rs.BROAD_SWEEP_EXCLUDED_PATHS))
 
     def test_succeeds_after_retries(self):
         attempts_for_first_file = {"n": 0}
@@ -666,7 +680,14 @@ class TestMixedStateVisibility(unittest.TestCase):
                                             "succeeded and others failed")
         # Names both the stale (failed) and fresh (succeeded) files, not just a count.
         self.assertIn(keys[0], mixed_state_lines[0])
+        # P0 mission follow-up (2026-09-10): BROAD_SWEEP_EXCLUDED_PATHS' own
+        # r2_keys are skipped entirely on a broad upload (this test never
+        # passes --only), so they're neither "succeeded" nor "failed" here --
+        # excluded from this loop rather than asserted as succeeded.
+        excluded_keys = {r2_key for local_rel, r2_key in rs.STATE_FILES if local_rel in rs.BROAD_SWEEP_EXCLUDED_PATHS}
         for k in keys[1:]:
+            if k in excluded_keys:
+                continue
             self.assertIn(k, mixed_state_lines[0])
 
     def test_total_failure_does_not_log_mixed_state_warning(self):
@@ -980,6 +1001,50 @@ class TestCli(unittest.TestCase):
             rs.main()
         _, kwargs = mock_upload.call_args
         self.assertIsNone(kwargs["only"])
+
+
+class TestBroadSweepExcludedPathsExplicitOnlyStillWorks(unittest.TestCase):
+    """P0 mission follow-up (2026-09-10): BROAD_SWEEP_EXCLUDED_PATHS'
+    entries must be untouchable by a broad sweep (covered above) but fully
+    reachable via an explicit `--only` naming them -- exactly what
+    sovereign-platform.yml/genesis-powerhouse.yml's own real invocations do.
+    An excluded-but-unreachable path would be as broken as an
+    excluded-but-still-swept one, just in the opposite direction."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="r2sync_excl_only_"))
+        patcher = patch.object(rs, "s3_sync_download", return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_explicit_only_download_still_reaches_a_broad_sweep_excluded_path(self):
+        target = next(iter(rs.BROAD_SWEEP_EXCLUDED_PATHS))
+
+        def _fake_run(cmd, **kwargs):
+            _is_download, local_path, _r2_key = _parse_cp_cmd(cmd)
+            pathlib.Path(local_path).write_text(json.dumps({"ok": True}), encoding="utf-8")
+            return _proc(0)
+
+        with patch.object(r2_upload.subprocess, "run", side_effect=_fake_run):
+            rc = rs.download(self.tmp, "https://e", only=frozenset({target}))
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.tmp / target).exists())
+
+    def test_explicit_only_upload_still_reaches_a_broad_sweep_excluded_path(self):
+        target = next(iter(rs.BROAD_SWEEP_EXCLUDED_PATHS))
+        local_path = self.tmp / target
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text(json.dumps({"file": target}), encoding="utf-8")
+
+        with patch.object(r2_upload.subprocess, "run", return_value=_proc(0)) as m:
+            with patch.object(rs.time, "sleep"):
+                rc = rs.upload(self.tmp, "https://e", only=frozenset({target}))
+        self.assertEqual(rc, 0)
+        self.assertEqual(m.call_count, 1)
 
 
 if __name__ == "__main__":
