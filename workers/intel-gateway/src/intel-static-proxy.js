@@ -31,12 +31,17 @@
 
 const PLATFORM_VERSION = "200.0";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, X-API-Key, X-Admin-Key",
-  "Access-Control-Max-Age": "86400",
-};
+// SENTINEL APEX PUBLIC-REPO ZERO-TRUST -- PHASE 3 (2026-09-10): both of this
+// file's routes ARE genuinely public (unauthenticated, read-only threat-
+// intel metadata -- see this file's own header comment), so wildcard CORS
+// here was never the bug; the duplicate local declaration was. index.js's
+// withBaselineHeaders() now applies the real policy (cors-policy.js) to
+// every response including this file's, and cors-policy.js's own
+// PUBLIC_EXACT_PATHS already lists both INTEL_STATIC_PROXY paths below --
+// so this stays wildcard-open in production, just from one source instead
+// of two. Kept as an empty object rather than removed so the two
+// `...CORS_HEADERS` call sites below don't each need an individual edit.
+const CORS_HEADERS = {};
 
 const SECURITY_HEADERS = {
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",

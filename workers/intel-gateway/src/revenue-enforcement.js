@@ -986,7 +986,12 @@ export function buildUsageLimitResponse(usageState, rid) {
       "X-RateLimit-Remaining":       "0",
       "X-RateLimit-Reset":           usageState.reset_at,
       "Cache-Control":               "no-cache, no-store",
-      "Access-Control-Allow-Origin": "*",
+      // Access-Control-Allow-Origin intentionally not set here -- SENTINEL
+      // APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this is a customer-specific
+      // 402 rate-limit/upgrade response, never genuinely public -- index.js's
+      // withBaselineHeaders() applies the real, origin-aware decision via
+      // cors-policy.js to every response including this one; see that
+      // file's header comment.
     },
   });
 }
@@ -1067,7 +1072,12 @@ function revenueJson(body, status = 200) {
     headers: {
       "Content-Type":                "application/json",
       "Cache-Control":               "no-cache, no-store",
-      "Access-Control-Allow-Origin": "*",
+      // Access-Control-Allow-Origin intentionally not set here -- SENTINEL
+      // APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this is a shared revenue-
+      // enforcement helper (upgrade prompts, entitlement state), never
+      // genuinely public -- index.js's withBaselineHeaders() applies the
+      // real, origin-aware decision via cors-policy.js to every response
+      // including this one; see that file's header comment.
     },
   });
 }

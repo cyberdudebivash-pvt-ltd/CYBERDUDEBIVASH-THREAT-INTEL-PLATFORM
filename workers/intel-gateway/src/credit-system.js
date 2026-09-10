@@ -257,7 +257,12 @@ export async function checkCredits(env, userId, tier, cost, requestId) {
         "X-Plan":                    tier,
         "X-Upgrade-Url":             body402.upgrade_url,
         "Cache-Control":             "no-cache, no-store",
-        "Access-Control-Allow-Origin": "*",
+        // Access-Control-Allow-Origin intentionally not set here -- SENTINEL
+        // APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this is a customer's own
+        // billing/credit-balance response (X-Credits-*/X-Plan), never
+        // genuinely public -- index.js's withBaselineHeaders() applies the
+        // real, origin-aware decision via cors-policy.js to every response
+        // including this one; see that file's header comment.
         "Access-Control-Expose-Headers": "X-Credits-Remaining,X-Credits-Limit,X-Credits-Period,X-Usage-Today,X-Plan,X-Upgrade-Url",
       },
     });

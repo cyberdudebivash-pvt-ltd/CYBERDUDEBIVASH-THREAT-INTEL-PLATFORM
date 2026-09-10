@@ -785,7 +785,11 @@ export async function handleMISPExport(request, env, auth, rid) {
         "Content-Type":                "application/json",
         "Content-Disposition":         `attachment; filename="sentinel-apex-misp-${new Date().toISOString().slice(0,10)}.json"`,
         "Cache-Control":               "no-cache, no-store",
-        "Access-Control-Allow-Origin": "*",
+        // Access-Control-Allow-Origin intentionally not set here -- SENTINEL
+        // APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this is an authenticated MISP
+        // export, never genuinely public -- index.js's withBaselineHeaders()
+        // applies the real, origin-aware decision via cors-policy.js to
+        // every response including this one; see that file's header comment.
         "X-Export-Format":             "MISP-2.4",
         "X-Record-Count":              String(mispEvents.length),
       },
@@ -951,7 +955,12 @@ export async function handleCSVExport(request, env, auth, rid) {
         "Content-Type":                "text/csv",
         "Content-Disposition":         `attachment; filename="sentinel-apex-iocs-${new Date().toISOString().slice(0,10)}.csv"`,
         "Cache-Control":               "no-cache, no-store",
-        "Access-Control-Allow-Origin": "*",
+        // Access-Control-Allow-Origin intentionally not set here -- SENTINEL
+        // APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this is an authenticated IOC
+        // CSV export, never genuinely public -- index.js's
+        // withBaselineHeaders() applies the real, origin-aware decision via
+        // cors-policy.js to every response including this one; see that
+        // file's header comment.
         "X-Record-Count":              String(count),
       },
     });
@@ -1425,7 +1434,12 @@ function extJson(body, status = 200) {
     headers: {
       "Content-Type":                "application/json",
       "Cache-Control":               "no-cache, no-store",
-      "Access-Control-Allow-Origin": "*",
+      // Access-Control-Allow-Origin intentionally not set here -- SENTINEL
+      // APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this is a shared authenticated-
+      // route helper, never genuinely public -- index.js's
+      // withBaselineHeaders() applies the real, origin-aware decision via
+      // cors-policy.js to every response including this one; see that
+      // file's header comment.
     },
   });
 }

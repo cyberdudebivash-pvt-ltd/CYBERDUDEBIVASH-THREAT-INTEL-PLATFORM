@@ -828,6 +828,14 @@ jobs:
   # (188 Action references across 63 workflow files resolved to real
   # commit SHAs via `git ls-remote`, none guessed); this job is what stops
   # either from silently regressing in a future workflow.
+  #
+  # Phase 3 (2026-09-10) extended the same test file with a third, over
+  # application code rather than workflow YAML: no hardcoded wildcard
+  # Access-Control-Allow-Origin outside workers/intel-gateway/src/
+  # cors-policy.js, no duplicate origin-allowlist, no Access-Control-Allow-
+  # Credentials: true, and exactly one OPTIONS preflight branch in the
+  # whole Worker -- see that test file's own module docstring and
+  # config/cors_public_wildcard_allowlist.json for the full rationale.
   workflow-hygiene:
     name: Public-Repo Zero-Trust Workflow Hygiene
     runs-on: ubuntu-latest

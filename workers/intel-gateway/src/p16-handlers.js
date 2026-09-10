@@ -23,7 +23,11 @@ const _jsonResp = (body, status = 200) =>
     status,
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
+      // Access-Control-Allow-Origin intentionally not set here -- SENTINEL
+      // APEX PUBLIC-REPO ZERO-TRUST PHASE 3: index.js's withBaselineHeaders()
+      // (the one true response choke point) applies the real, origin-aware
+      // decision via cors-policy.js to every response including this one;
+      // see that file's header comment.
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       "Cache-Control": "no-store",

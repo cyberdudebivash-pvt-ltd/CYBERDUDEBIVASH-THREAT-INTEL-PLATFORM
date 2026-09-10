@@ -399,7 +399,11 @@ function _json(body, status = 200) {
     headers: {
       "Content-Type":                "application/json; charset=utf-8",
       "Cache-Control":               "no-store",
-      "Access-Control-Allow-Origin": "*",
+      // Access-Control-Allow-Origin intentionally not set here -- SENTINEL
+      // APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this is a PRO+ premium-feature
+      // response, never genuinely public -- index.js's withBaselineHeaders()
+      // applies the real, origin-aware decision via cors-policy.js to every
+      // response including this one; see that file's header comment.
       "X-Sentinel-Module":           "dark-web-monitor/143.0.0",
     },
   });
