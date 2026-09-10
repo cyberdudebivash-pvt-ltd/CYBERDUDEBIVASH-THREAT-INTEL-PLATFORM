@@ -132,3 +132,31 @@ jobs:
 
       - name: "p0_r2_stix_manifest_diagnostic.py stays read-only (no PUT/DELETE/COPY)"
         run: python -m pytest tests/test_p0_r2_stix_manifest_diagnostic_read_only.py -v --tb=short
+
+  # FIX (P0, 2026-09-10, operational-readiness audit): see deploy-worker.yml's
+  # identical job for the full rationale. This gate specifically exists to
+  # catch a regression of the P0 R2 billing-overage incident class -- a
+  # silent failure here is exactly the scenario it was built to prevent.
+  notify-on-failure:
+    name: "Notify on R2 FinOps gate failure"
+    needs: r2-finops-regression
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Send failure alert
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "R2 FinOps Regression Gate (r2-finops-regression-gate.yml) FAILED -- a regression of the P0 R2 billing-overage incident class may have been reintroduced." \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

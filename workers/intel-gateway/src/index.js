@@ -97,7 +97,7 @@ import { loadCertificationIndex, persistCertificationRecords, resolveCertificati
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleIOCLookup, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
-import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger } from './revenue-enforcement.js';
+import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger, handleLeadCapture, handleTrialIssuance } from './revenue-enforcement.js';
 import { evaluateDailyQuota, utcDateString, dailyQuotaKey, quotaAlertDedupeKey, secondsUntilNextUtcMidnight } from './daily-quota.js';
 import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
@@ -133,7 +133,7 @@ import {
 // own header comment for the full before/after rationale). Applied at the
 // one true response choke point -- withBaselineHeaders() and the OPTIONS
 // branch below -- so no individual route handler needs to change.
-import { applyCorsPolicy, buildPreflightResponse } from './cors-policy.js';
+import { applyCorsPolicy, buildPreflightResponse, classifyRoute } from './cors-policy.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -2808,10 +2808,29 @@ export async function handleAdmin(request, env, ctx, path, method) {
     (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "")
   ).trim();
 
+  // FIX (P0, 2026-09-10, edge-security audit): checkBruteForce/recordAuthFailure
+  // (KV-backed lockout, already proven at /auth/login and resolveAuth()'s
+  // customer-key path) were never wired here -- this credential guarded
+  // key mint/revoke, cache purge, and audit-log read with only the shared,
+  // bypassable per-IP request counter (checkRateLimit) and no attempt
+  // lockout at all. Derives ip locally (matching handleRequest's own
+  // derivation) rather than threading a new parameter through this
+  // function's signature, since handleAdmin is called from existing tests
+  // with a fixed 5-argument shape.
+  const adminIp = request.headers.get("CF-Connecting-IP") ||
+    (request.headers.get("X-Forwarded-For") || "127.0.0.1").split(",")[0].trim();
+  const adminBf = await checkBruteForce(env, adminIp);
+  if (adminBf.locked) {
+    auditLog(ctx, env, { action: "admin_auth_locked", path, method, ip: adminIp });
+    return jsonResp({ error: "Too many failed attempts", retry_after: adminBf.until }, 429);
+  }
+
   if (!env.ADMIN_SECRET || !timingSafeEqual(adminKey, env.ADMIN_SECRET)) {
-    auditLog(ctx, env, { action: "admin_auth_failed", path, method });
+    await recordAuthFailure(env, adminIp);
+    auditLog(ctx, env, { action: "admin_auth_failed", path, method, ip: adminIp });
     return jsonResp({ error: "Forbidden: invalid admin credentials" }, 403);
   }
+  await clearAuthFailures(env, adminIp);
 
   // GET /api/admin/health
   if (path === "/api/admin/health" && method === "GET") {
@@ -5620,6 +5639,29 @@ async function handleRequest(request, env, ctx) {
     }, 422);
   }
 
+  // --- Self-serve lead capture + trial issuance (revenue-enforcement.js) -----
+  // FIX (P0, 2026-09-10): handleLeadCapture/handleTrialIssuance were fully
+  // built, tested and live-correct (confirmed via
+  // docs/BILLING_ENTITLEMENT_ARCHITECTURE_AUDIT.md: issues a real,
+  // correctly-expiring 7-day PRO key) but never imported/routed here --
+  // "fully correct AND fully unreachable" on this domain (only
+  // revenue.intel.cyberdudebivash.com had it wired, via
+  // workers/revenue-engine/src/index.js's separate route table). Wiring the
+  // existing functions in directly rather than re-implementing them.
+  // checkRateLimit reused (FREE-tier ceiling) as IP-based abuse friction on
+  // top of handleTrialIssuance's own one-trial-per-email KV guard -- no new
+  // rate-limiting mechanism introduced.
+  if (path === "/api/leads/capture" && method === "POST") {
+    const rl = await checkRateLimit(env, ip, "FREE");
+    if (!rl.allowed) return jsonResp({ error: "rate_limited", retry_after_seconds: 60 }, 429);
+    return await handleLeadCapture(request, env, crypto.randomUUID());
+  }
+  if (path === "/api/leads/trial" && method === "POST") {
+    const rl = await checkRateLimit(env, ip, "FREE");
+    if (!rl.allowed) return jsonResp({ error: "rate_limited", retry_after_seconds: 60 }, 429);
+    return await handleTrialIssuance(request, env, crypto.randomUUID());
+  }
+
   // --- Premium intel gate (MONETIZATION INTEGRITY v148->v180) -----------------
   if (PREMIUM_INTEL_PATHS.has(pathname)) {
     return await servePremiumIntelManifest(request, env, ctx, pathname);
@@ -5805,7 +5847,14 @@ async function handleRequest(request, env, ctx) {
       });
       body.security = {
         auth: "JWT_HS256+KV",
-        rate_limiting: "sliding_window_per_ip",
+        // FIX (P0, 2026-09-10, edge-security audit): this self-reported
+        // "sliding_window_per_ip" regardless of what checkRateLimit() (the
+        // only rate limiter in this file) actually implements -- a fixed
+        // 60-second window (`minute = Math.floor(Date.now()/60000)`), not a
+        // sliding one. Never independently verified against the real
+        // implementation until this audit. Corrected to match reality
+        // rather than the aspirational label.
+        rate_limiting: "fixed_window_per_ip_60s",
         brute_force: `lockout_after_${BRUTE_FORCE_MAX}_failures`,
         audit_logging: "SECURITY_HUB_KV",
         headers: "HSTS+CSP+XFO",
@@ -7530,12 +7579,91 @@ function withBaselineHeaders(response, request, path, method) {
   return applyCorsPolicy(withSecurity, request, path, method);
 }
 
+// P0 EDGE CACHE (2026-09-10, global-hardening pass): classifyRoute()'s
+// PUBLIC bucket (cors-policy.js) is already this platform's single,
+// security-audited source of truth for "this route's response is
+// identical for every caller -- no auth, no per-identity/tier variance"
+// (config/cors_public_wildcard_allowlist.json records the full,
+// evidence-reasoned list; every entry: data_sensitivity "none",
+// mutation_capability false). Reused here rather than building a second
+// list, so anything added to or removed from PUBLIC for a CORS reason is
+// automatically cached or not, with zero risk of the two ever drifting.
+//
+// Evidence this matters: data/health/sla_status.json's last real
+// production probe measured 754-1352ms p95 on exactly these routes
+// (/api/health, /api/v1/intel/latest.json, .../top10.json, /api/feed.json,
+// /api/v1/intel/apex.json) -- all uncached Worker compute + KV/R2 reads on
+// every single request, against this platform's own documented
+// <500ms-p95-cached performance target. PR #388 already proved this exact
+// mechanism (caches.default) safe and effective for one route family
+// (/api/ai/*, see its own cache block below in handleRequest) -- this
+// generalizes it to the rest of the already-audited PUBLIC surface
+// instead of re-implementing it per route.
+const EDGE_CACHE_TTL_SECONDS = 300; // matches the /api/ai/* precedent's own TTL
+// FIX (P0, 2026-09-10, CodeRabbit review on PR #407): classifyRoute()'s
+// PUBLIC bucket means "safe to expose cross-origin to any caller" (every
+// PUBLIC route's response body is identical regardless of WHO reads it) --
+// it does NOT mean "identical regardless of WHAT the caller sends."
+// /api/v1/intel/ai_summary.json and apex.json are both PUBLIC (safe for a
+// browser on any origin to read the same anonymous response) AND in
+// PREMIUM_INTEL_PATHS (servePremiumIntelManifest() varies the response
+// body by the caller's actual tier/API key). Without this exclusion, the
+// first cached response for one of these paths -- anonymous or paying,
+// whichever request happened to populate the cache -- would be served to
+// every caller for the TTL: a paying customer silently downgraded to
+// free-tier content, or free-tier content silently upgraded to leak
+// premium intelligence, depending on which request won the race. Reuses
+// PREMIUM_INTEL_PATHS, the existing, already-authoritative marker for
+// exactly this property (index.js's own tier-gate dispatch), rather than
+// inferring tier-variance from allowlist prose.
+function isEdgeCacheableRequest(pathname, method) {
+  return method === "GET" && classifyRoute(pathname, method).bucket === "PUBLIC" && !PREMIUM_INTEL_PATHS.has(pathname);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
     const method = request.method.toUpperCase();
+
+    // Cache key is the FULL request (Cache API default: path + query
+    // string), deliberately NOT stripped the way the ai/* proxy strips its
+    // key -- that was only safe there because those three files take no
+    // query parameters (verified in that PR). Several PUBLIC routes here
+    // (e.g. /api/v1/cve/detail) are query-parameter-driven; stripping would
+    // collide two different lookups onto one cache key and serve the wrong
+    // caller's data back -- a correctness bug, not just an inefficiency.
+    const cacheable = isEdgeCacheableRequest(pathname, method);
+    const edgeCache = cacheable ? caches.default : null;
+    if (edgeCache) {
+      try {
+        const cached = await edgeCache.match(request);
+        if (cached) return cached;
+      } catch (cacheErr) {
+        console.error(`[fetch] edge cache match failed for ${pathname}: ${cacheErr && cacheErr.message ? cacheErr.message : cacheErr}`);
+      }
+    }
+
     try {
-      return withBaselineHeaders(await handleRequest(request, env, ctx), request, pathname, method);
+      const response = withBaselineHeaders(await handleRequest(request, env, ctx), request, pathname, method);
+      // Only a 200 is ever stored -- never pins an error/outage in place
+      // for the TTL. Cache-Control is normalised to a known, bounded value
+      // here rather than trusting each individual handler to have set one
+      // correctly, so this is safe even for a PUBLIC route whose handler
+      // omitted or under-specified it. Store is non-blocking.
+      if (edgeCache && response.status === 200 && ctx && typeof ctx.waitUntil === "function") {
+        try {
+          const toCache = new Response(response.clone().body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: new Headers(response.headers),
+          });
+          toCache.headers.set("Cache-Control", `public, max-age=${EDGE_CACHE_TTL_SECONDS}`);
+          ctx.waitUntil(edgeCache.put(request, toCache));
+        } catch (putErr) {
+          console.error(`[fetch] edge cache put failed for ${pathname}: ${putErr && putErr.message ? putErr.message : putErr}`);
+        }
+      }
+      return response;
     } catch (err) {
       // Logged server-side (visible via wrangler tail / any configured
       // Logpush) but never returned to the caller -- this is the top-level
