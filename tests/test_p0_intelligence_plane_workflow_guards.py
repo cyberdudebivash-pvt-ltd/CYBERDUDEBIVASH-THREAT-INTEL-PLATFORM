@@ -101,6 +101,48 @@ class TestNoSwallowedEngineFailures(unittest.TestCase):
             self.assertTrue(step.get("continue-on-error"), f"{step['name']} must use continue-on-error: true")
             self.assertNotIn("||", step["run"], f"{step['name']} must not shell-suppress failures")
 
+    def test_sovereign_and_genesis_test_runner_steps_are_not_pipe_masked(self):
+        """Residual gap this mission's own required live-production
+        verification found (run 34515087369's job log, 2026-09-10): both
+        workflows' pytest-invoking step piped `2>&1 | tail -N`. GitHub's
+        default `bash -e` shell does not set `pipefail`, so the pipeline's
+        exit code was `tail`'s (always 0), not pytest's -- meaning the step
+        reported success even when pytest raised "No module named pytest"
+        and never ran a single test. `|| echo`-style suppression was
+        already guarded above; a masking pipe is a different mechanism
+        producing the identical blind spot, so it needs its own guard."""
+        cases = [
+            (SOVEREIGN_YML, "sovereign-cycle", "Run validation tests"),
+            (GENESIS_YML, "genesis-cycle", "Validate"),
+        ]
+        for yml, job, step_name in cases:
+            _, doc = _load(yml)
+            steps = {s.get("name"): s for s in doc["jobs"][job]["steps"] if "name" in s}
+            self.assertIn(step_name, steps, f"{yml}: expected a '{step_name}' step")
+            run_body = steps[step_name]["run"]
+            self.assertNotIn("|", run_body, f"{yml}: '{step_name}' must not pipe its test runner's output through another command without `pipefail` -- doing so masks a real test/runner failure as success")
+
+    def test_sovereign_and_genesis_install_pytest_before_running_it(self):
+        """Companion to the guard above: removing the masking pipe is only
+        a genuine fix if pytest is actually installed first -- otherwise
+        the step still never runs a real test, it just fails on a missing
+        interpreter instead of silently passing. Verified locally this
+        mission that both suites genuinely pass once installed (sovereign:
+        62/62 across test_v39_modules.py + test_v40_v41_v42_modules.py;
+        genesis: 13/13 in test_v43_genesis.py) before this became a
+        requirement."""
+        cases = [
+            (SOVEREIGN_YML, "sovereign-cycle", "Run validation tests"),
+            (GENESIS_YML, "genesis-cycle", "Validate"),
+        ]
+        for yml, job, step_name in cases:
+            _, doc = _load(yml)
+            steps = doc["jobs"][job]["steps"]
+            names = [s.get("name") for s in steps]
+            self.assertIn(step_name, names, f"{yml}: expected a '{step_name}' step")
+            preceding_run = "\n".join(s.get("run", "") for s in steps[:names.index(step_name)])
+            self.assertIn("pip install pytest", preceding_run, f"{yml}: pytest must be installed by a step before '{step_name}' runs it")
+
 
 class TestRequiredStepsPresentAndFailClosed(unittest.TestCase):
     """Mutation-test scenarios 3/6/7/8 (remove an R2 upload / missing
