@@ -7498,20 +7498,36 @@ async function handleRequest(request, env, ctx) {
 // gap without touching each handler file individually.
 //
 // SENTINEL APEX PUBLIC-REPO ZERO-TRUST -- PHASE 3: this is also the one
-// true choke point for Access-Control-Allow-Origin -- every response this
-// Worker returns passes through here exactly once, so applyCorsPolicy()
-// (cors-policy.js) applied here is authoritative regardless of what any
-// individual handler already set (Headers.set() below overwrites it).
-// Needs `request`/`path`/`method` now, purely to classify the route that
-// was actually served -- no other behavior of this function changed.
+// true choke point for Access-Control-Allow-Origin on every NON-preflight
+// response this Worker returns, so applyCorsPolicy() (cors-policy.js)
+// applied here is authoritative regardless of what any individual handler
+// already set (Headers.set() below overwrites it). Needs `request`/`path`/
+// `method` now, purely to classify the route that was actually served.
+//
+// POST-MERGE FIX (2026-09-10, found via this PR's own required live-
+// production verification): an OPTIONS request's response is `handleRequest()`'s
+// buildPreflightResponse() call, which is ALREADY the sole, fully
+// authoritative preflight decision (Origin/method/header validation and
+// all). Re-running applyCorsPolicy() on top of that -- which happened
+// unconditionally here for every response including that one -- recomputed
+// the same grant redundantly and, worse, called headers.append("Vary",
+// "Origin") on a response that already had "Vary: Origin" from
+// buildPreflightResponse() itself, producing a live, verified
+// "Vary: Origin, Origin" on every successful preflight. Not a security
+// weakening (the actual Allow-Origin/-Methods/-Headers values were still
+// exactly correct either way -- only the redundant Vary token was wrong),
+// but a real spec-conformance bug, not a cosmetic one to leave uncounted.
+// Skipping applyCorsPolicy() for OPTIONS (SECURITY_HEADERS still applied,
+// same as any other response) is the direct fix: it stops the second,
+// unnecessary CORS decision from running at all, rather than papering
+// over its symptom.
 function withBaselineHeaders(response, request, path, method) {
   const headers = new Headers(response.headers);
   for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
-  return applyCorsPolicy(
-    new Response(response.body, { status: response.status, statusText: response.statusText, headers }),
-    request, path, method
-  );
+  const withSecurity = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  if (method === "OPTIONS") return withSecurity;
+  return applyCorsPolicy(withSecurity, request, path, method);
 }
 
 export default {

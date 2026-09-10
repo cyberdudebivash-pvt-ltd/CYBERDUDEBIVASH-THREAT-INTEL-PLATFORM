@@ -247,3 +247,33 @@ test("bare TAXII discovery root is public, but /taxii/collections/* (PRO/ENTERPR
   assert.equal(classifyRoute("/taxii/", "GET").bucket, "PUBLIC");
   assert.equal(classifyRoute("/taxii/collections/", "GET").bucket, "BROWSER");
 });
+
+// -- Post-merge fix: applyCorsPolicy() must be idempotent on Vary ----------
+// Found via this PR's own required live-production verification: index.js's
+// OPTIONS branch (buildPreflightResponse()) already sets "Vary: Origin",
+// and withBaselineHeaders() used to unconditionally re-run applyCorsPolicy()
+// on every response including that one, producing a live
+// "Vary: Origin, Origin". Fixed at the root cause in index.js (OPTIONS
+// responses no longer get a second pass), but applyCorsPolicy() itself is
+// also hardened here so calling it twice on the same response -- by
+// accident, or from a future call site -- can never reproduce the bug.
+test("applyCorsPolicy() calling twice on the same response never duplicates the Vary token", () => {
+  const r = req("https://intel.cyberdudebivash.com/api/v1/p33/dashboard", { Origin: APPROVED });
+  const once = applyCorsPolicy(okResponse(), r, "/api/v1/p33/dashboard", "GET");
+  assert.equal(once.headers.get("Vary"), "Origin");
+  const twice = applyCorsPolicy(once, r, "/api/v1/p33/dashboard", "GET");
+  assert.equal(twice.headers.get("Vary"), "Origin"); // not "Origin, Origin"
+});
+
+test("applyCorsPolicy() preserves an unrelated existing Vary token instead of overwriting it", () => {
+  const withAcceptVary = new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", "Vary": "Accept-Encoding" },
+  });
+  const r = req("https://intel.cyberdudebivash.com/api/v1/p33/dashboard", { Origin: APPROVED });
+  const applied = applyCorsPolicy(withAcceptVary, r, "/api/v1/p33/dashboard", "GET");
+  const tokens = applied.headers.get("Vary").split(",").map((t) => t.trim());
+  assert.ok(tokens.includes("Accept-Encoding"));
+  assert.ok(tokens.includes("Origin"));
+  assert.equal(tokens.length, 2); // each token exactly once
+});

@@ -242,13 +242,32 @@ _CREDENTIALS_TRUE_RE = re.compile(
 # policies outside approved architecture" mission Section 9 asks this gate
 # to catch.
 _ORIGIN_ALLOWLIST_LITERAL_RE = re.compile(r'new Set\(\s*\[\s*["\']https://')
-_OPTIONS_PREFLIGHT_BRANCH_RE = re.compile(r'method\s*===\s*["\']OPTIONS["\']')
+# The one call site that actually GRANTS a preflight -- not every
+# `method === "OPTIONS"` string match, which a companion guard elsewhere
+# (e.g. "skip re-processing a response OPTIONS already fully decided") can
+# legitimately also contain without being a second, competing preflight
+# authority. Counting call sites of the decision function itself is the
+# precise version of the same check.
+_BUILD_PREFLIGHT_CALL_RE = re.compile(r'buildPreflightResponse\s*\(')
+# Any place at all that checks for an OPTIONS request -- broader than the
+# call-site check above on purpose; used only to find candidate branches to
+# inspect for the hand-rolled-bypass pattern, not to count them.
+_OPTIONS_METHOD_CHECK_RE = re.compile(r'method\s*===\s*["\']OPTIONS["\']')
 
 
 def _intel_gateway_js_files(exclude=frozenset()):
     files = sorted(INTEL_GATEWAY_SRC_DIR.glob("*.js"))
     assert files, f"no .js files found under {INTEL_GATEWAY_SRC_DIR} -- test can't validate anything"
     return [f for f in files if f.name not in exclude]
+
+
+def _is_line_comment(line):
+    """True if `line`'s first non-whitespace characters are `//`. A
+    pragmatic heuristic (not a real JS parser -- this repo's own established
+    tolerance for "mechanical, evidence-based" regex checks over an AST),
+    good enough to stop this file's own explanatory `// ... functionName()
+    ...` prose from being counted as a real call site of that function."""
+    return line.strip().startswith("//")
 
 
 class TestCorsZeroTrustWildcardIsCentralized(unittest.TestCase):
@@ -334,27 +353,64 @@ class TestCorsZeroTrustWildcardIsCentralized(unittest.TestCase):
             "outside approved architecture\"). Found in:\n  " + "\n  ".join(violations),
         )
 
-    def test_exactly_one_options_preflight_branch_in_the_entire_worker(self):
-        # A second, independent `method === "OPTIONS"` branch anywhere in
-        # this Worker would mean some route bypasses buildPreflightResponse()'s
-        # strict, route-aware validation entirely -- a "cosmetic CORS header
-        # replacement" the mission explicitly warns against reappearing.
+    def test_exactly_one_call_site_grants_a_preflight(self):
+        # A second, independent call to buildPreflightResponse() (or, worse,
+        # a hand-rolled OPTIONS branch that never calls it at all) anywhere
+        # in this Worker would mean some route bypasses its strict, route-
+        # aware validation entirely -- a "cosmetic CORS header replacement"
+        # the mission explicitly warns against reappearing. Scoped to every
+        # file except cors-policy.js itself, where the function is defined
+        # (and would otherwise match its own `function buildPreflightResponse(`
+        # declaration) but never called.
         hits = []
-        for path in _intel_gateway_js_files():
+        for path in _intel_gateway_js_files(exclude={"cors-policy.js"}):
             text = path.read_text(encoding="utf-8")
             for lineno, line in enumerate(text.splitlines(), start=1):
-                if _OPTIONS_PREFLIGHT_BRANCH_RE.search(line):
+                if _is_line_comment(line):
+                    continue
+                if _BUILD_PREFLIGHT_CALL_RE.search(line):
                     hits.append(f"{path.relative_to(REPO_ROOT)}:{lineno}")
         self.assertEqual(
             len(hits), 1,
-            "expected exactly one `method === \"OPTIONS\"` branch in the whole "
-            "Worker (index.js's, delegating to buildPreflightResponse()) -- "
-            f"a second one means some route bypasses strict preflight validation; found: {hits}",
+            "expected exactly one call to buildPreflightResponse() in the whole "
+            "Worker (index.js's OPTIONS branch) -- a second one, or a hand-rolled "
+            f"OPTIONS branch that bypasses it entirely, means preflight validation "
+            f"can be sidestepped for some route; found: {hits}",
         )
         self.assertTrue(
             hits[0].startswith("workers/intel-gateway/src/index.js:"),
-            f"the one OPTIONS branch should be in index.js, found it in: {hits[0]}",
+            f"the one buildPreflightResponse() call should be in index.js, found it in: {hits[0]}",
         )
+
+    def test_no_hand_rolled_options_branch_bypassing_the_preflight_authority(self):
+        # Complements the call-site check above: every `method === "OPTIONS"`
+        # branch in the Worker must be reachable only through index.js's own
+        # OPTIONS handling (which calls buildPreflightResponse() -- see the
+        # test above) or through a companion guard that explicitly avoids
+        # re-deciding a response that call already fully decided (e.g.
+        # withBaselineHeaders() skipping a second, redundant CORS pass on an
+        # OPTIONS response). What must never exist is a THIRD kind: a branch
+        # that itself constructs Access-Control-* headers for an OPTIONS
+        # request without going through buildPreflightResponse() at all.
+        for path in _intel_gateway_js_files(exclude={"cors-policy.js"}):
+            text = path.read_text(encoding="utf-8")
+            lines = text.splitlines()
+            for lineno, line in enumerate(lines, start=1):
+                if _is_line_comment(line) or not _OPTIONS_METHOD_CHECK_RE.search(line):
+                    continue
+                # Look at this line plus the next few for what it actually
+                # does -- either delegate to buildPreflightResponse() or
+                # return/skip without independently building CORS headers.
+                window = "\n".join(lines[lineno - 1: lineno + 4])
+                delegates = "buildPreflightResponse(" in window
+                builds_own_cors_headers = "Access-Control-Allow-Origin" in window
+                self.assertFalse(
+                    builds_own_cors_headers and not delegates,
+                    f"{path.relative_to(REPO_ROOT)}:{lineno}: an OPTIONS branch appears to "
+                    "build its own Access-Control-* headers instead of delegating to "
+                    "buildPreflightResponse() -- this is exactly the hand-rolled preflight "
+                    "bypass this gate exists to catch.",
+                )
 
 
 class TestCorsZeroTrustWildcardAllowlist(unittest.TestCase):
