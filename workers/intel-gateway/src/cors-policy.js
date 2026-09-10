@@ -253,6 +253,25 @@ function headersAllowed(requested, allowedList) {
     .every((h) => allowedLower.has(h));
 }
 
+// Headers.append() always adds a new value, even if the exact token is
+// already present -- calling this twice on the same response (index.js's
+// own POST-MERGE FIX comment on withBaselineHeaders() documents exactly
+// how that happened live: an OPTIONS response already carrying "Vary:
+// Origin" from buildPreflightResponse() got run through applyCorsPolicy()
+// a second time) would otherwise produce "Vary: Origin, Origin". Fixed at
+// the root cause there (that second call no longer happens), but this
+// function is kept idempotent as defense in depth -- correct no matter how
+// many times, or in what order, it's ever called on the same response.
+function addVaryOrigin(headers) {
+  const existing = headers.get("Vary");
+  if (!existing) {
+    headers.set("Vary", "Origin");
+    return;
+  }
+  const tokens = existing.split(",").map((t) => t.trim());
+  if (!tokens.includes("Origin")) headers.append("Vary", "Origin");
+}
+
 /**
  * The final, authoritative Access-Control-Allow-Origin / Vary decision for
  * a non-OPTIONS response. Never used to gate whether the route's own
@@ -298,7 +317,7 @@ function applyCorsPolicy(response, request, path, method) {
   // than merely "never set" so a future accidental addition anywhere
   // upstream of this function can never survive to the actual response.
   headers.delete("Access-Control-Allow-Credentials");
-  if (vary) headers.append("Vary", "Origin");
+  if (vary) addVaryOrigin(headers);
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
