@@ -6,7 +6,7 @@
 //   GET  /api/sla/status      -- public: current uptime + SLA health
 //   GET  /api/sla/report      -- Enterprise: 30-day SLA compliance report
 //   GET  /api/sla/incidents   -- Enterprise: incident log
-//   POST /api/sla/ping        -- internal: heartbeat recorder (called by cron)
+//   POST /api/sla/ping        -- internal: heartbeat recorder (external prober: .github/workflows/sla-heartbeat.yml)
 //   GET  /api/sla/certificate -- Enterprise: downloadable SLA compliance cert data
 //
 // SLA Targets:
@@ -59,6 +59,10 @@ const SLA_WINDOW_DAYS   = 30;
 const PING_TTL          = 60 * 60 * 24 * 35; // 35-day retention
 const ENTERPRISE_SLA    = 99.9;
 const PRO_SLA           = 99.5;
+// The external heartbeat probes every 10 minutes; GitHub's scheduler can run
+// late, so a ping counts as current for 45 minutes.
+const HEARTBEAT_STALE_S = 45 * 60;
+const SLA_MAX_BATCH     = 500;
 
 /* ===========================================================================
    handleSLAStatus  -- GET /api/sla/status  (public)
@@ -76,7 +80,9 @@ export async function handleSLAStatus(request, env, rid) {
   // Check last ping freshness (stale = potential outage)
   const lastPing = pings[pings.length - 1];
   const lastPingAge = lastPing ? Math.round((now - lastPing.ts) / 1000) : null;
-  const isLikelyUp  = !lastPingAge || lastPingAge < 300; // <5min = healthy
+  // Up = the latest heartbeat succeeded and is current (was: any ping in the
+  // last 5 minutes, whatever its result -- a failed ping still read "operational").
+  const isLikelyUp  = !!lastPing && lastPing.ok !== false && lastPingAge !== null && lastPingAge < HEARTBEAT_STALE_S;
 
   const incidents = await _loadIncidents(env);
   const recentIncidents = incidents.filter(i => (now - new Date(i.start).getTime()) <= windowMs);
@@ -97,7 +103,9 @@ export async function handleSLAStatus(request, env, rid) {
   // customer integration to stay compatible with), so there is no cost to
   // reporting real absence-of-data honestly instead.
   const hasData = total > 0;
-  const displayUptime = hasData ? Math.max(uptimePct, calculatedUptime) : null;
+  // The more conservative of the two real signals (was Math.max, the less
+  // conservative one, despite this pairing being documented as conservative).
+  const displayUptime = hasData ? Math.min(uptimePct, calculatedUptime) : null;
 
   return _json(200, {
     status:           !hasData ? "insufficient_data" : (isLikelyUp ? "operational" : "degraded"),
@@ -236,7 +244,8 @@ export async function handleSLAIncidents(request, env, auth, rid) {
 
 /* ===========================================================================
    handleSLAPing  -- POST /api/sla/ping  (internal cron/admin)
-   Records a heartbeat. Called by Cloudflare Cron Trigger every 5 minutes.
+   Records heartbeats from the external prober (scripts/sla_heartbeat.py,
+   every 10 minutes via .github/workflows/sla-heartbeat.yml).
    =========================================================================== */
 export async function handleSLAPing(request, env, rid) {
   const secret = request.headers.get("X-Admin-Secret") || "";
@@ -248,42 +257,130 @@ export async function handleSLAPing(request, env, rid) {
   let body;
   try { body = await request.json(); } catch { body = {}; }
 
-  const ping = {
-    ts:       Date.now(),
-    ok:       body.ok !== false,
-    latency:  safeNum(body.latency_ms, 0),
-    component: safe(body.component, "intel-gateway"),
-    region:   safe(body.region || (request.cf?.colo) || "unknown"),
-    note:     safe(body.note || "", ""),
-  };
+  // 2026-09-26: the heartbeat is an external prober (.github/workflows/
+  // sla-heartbeat.yml via scripts/sla_heartbeat.py). A failed probe is often
+  // observed while this Worker is unreachable, so the prober replays it later:
+  // it sends observed_at (when the probe ran) and a probe_id (so a replay that
+  // already landed is not counted twice), several at once via `pings`.
+  // A body without them records one ping at the Worker's clock, as before.
+  const now   = Date.now();
+  const batch = Array.isArray(body.pings) ? body.pings.slice(0, SLA_MAX_BATCH) : [body];
+  const cutoff = now - 35 * 86400000;
 
   const pings = await _loadPings(env);
-  pings.push(ping);
-
-  // Keep only last 35 days of pings (trim aggressively to control KV size)
-  const cutoff = Date.now() - 35 * 86400000;
-  const trimmed = pings.filter(p => p.ts > cutoff).slice(-10000);
-
-  // Detect incident: 3+ consecutive failures
-  if (!ping.ok) {
-    const last3 = trimmed.slice(-3);
-    if (last3.length >= 3 && last3.every(p => !p.ok)) {
-      await _recordIncident(env, {
-        start:       new Date(last3[0].ts).toISOString(),
-        component:   ping.component,
-        severity:    "P2",
-        description: "3+ consecutive health check failures detected.",
-        duration_ms: Date.now() - last3[0].ts,
-        auto_detected: true,
-      });
-    }
+  const seen  = new Set(pings.map(p => p.probe_id).filter(Boolean));
+  const added = [];
+  for (const b of batch) {
+    const ping = _pingFromBody(b || {}, request, now);
+    if (ping.ts <= cutoff) continue;
+    if (ping.probe_id && seen.has(ping.probe_id)) continue;
+    if (ping.probe_id) seen.add(ping.probe_id);
+    pings.push(ping);
+    added.push(ping);
   }
 
-  if (env.SECURITY_HUB_KV) {
+  // Keep only last 35 days of pings, in time order (replays arrive late).
+  pings.sort((a, b) => a.ts - b.ts);
+  const trimmed = pings.filter(p => p.ts > cutoff).slice(-10000);
+
+  // Incident = 3+ consecutive failures. One incident per failure streak,
+  // extended while the streak lasts (previously every further failure
+  // recorded another overlapping incident).
+  if (added.some(p => !p.ok)) {
+    await _syncIncidents(env, trimmed);
+  }
+
+  if (env.SECURITY_HUB_KV && added.length) {
     await env.SECURITY_HUB_KV.put(SLA_PING_KEY, JSON.stringify(trimmed), { expirationTtl: PING_TTL });
   }
 
-  return _json(200, { recorded: true, ts: new Date(ping.ts).toISOString(), ok: ping.ok, rid });
+  const last = added[added.length - 1];
+  return _json(200, {
+    recorded: added.length > 0,
+    recorded_count: added.length,
+    duplicates_skipped: batch.length - added.length,
+    ts: last ? new Date(last.ts).toISOString() : null,
+    ok: last ? last.ok : null,
+    rid,
+  });
+}
+
+// One ping from an untrusted-shape body (the caller is authenticated, but the
+// fields are still bounded). observed_at is honoured only within the retention
+// window and not more than a minute ahead of this Worker's clock.
+function _pingFromBody(b, request, now) {
+  let ts = now;
+  if (typeof b.observed_at === "string") {
+    const t = Date.parse(b.observed_at);
+    if (Number.isFinite(t) && t <= now + 60000) ts = Math.min(t, now);
+  }
+  const probeId = typeof b.probe_id === "string" && /^[A-Za-z0-9._:-]{1,64}$/.test(b.probe_id) ? b.probe_id : null;
+  const ping = {
+    ts,
+    ok:        b.ok !== false,
+    latency:   safeNum(b.latency_ms, 0),
+    component: safe(b.component, "intel-gateway").slice(0, 64),
+    region:    safe(b.region || (request.cf?.colo) || "unknown").slice(0, 64),
+    note:      safe(b.note || "", "").slice(0, 200),
+  };
+  if (probeId) ping.probe_id = probeId;
+  return ping;
+}
+
+// Failure streaks of 3+ in the (time-ordered) ping list, per component.
+export function _failureStreaks(pings) {
+  const byComp = new Map();
+  for (const p of pings) {
+    if (!byComp.has(p.component)) byComp.set(p.component, []);
+    byComp.get(p.component).push(p);
+  }
+  const streaks = [];
+  for (const [component, list] of byComp) {
+    let run = [];
+    const flush = () => {
+      if (run.length >= 3) streaks.push({ component, start: run[0].ts, end: run[run.length - 1].ts, count: run.length });
+      run = [];
+    };
+    for (const p of list) { if (p.ok) flush(); else run.push(p); }
+    flush();
+  }
+  return streaks;
+}
+
+async function _syncIncidents(env, pings) {
+  if (!env.SECURITY_HUB_KV) return;
+  try {
+    const incidents = await _loadIncidents(env);
+    let changed = false;
+    for (const s of _failureStreaks(pings)) {
+      const startIso = new Date(s.start).toISOString();
+      const existing = incidents.find(i => i.auto_detected && i.component === s.component && i.start === startIso);
+      const duration = s.end - s.start;
+      if (existing) {
+        if (existing.duration_ms !== duration) {
+          existing.duration_ms = duration;
+          existing.failed_checks = s.count;
+          changed = true;
+        }
+      } else {
+        incidents.push({
+          start:         startIso,
+          component:     s.component,
+          severity:      "P2",
+          description:   "3+ consecutive health check failures detected.",
+          duration_ms:   duration,
+          failed_checks: s.count,
+          auto_detected: true,
+          id:            `INC-${s.start.toString(36).toUpperCase()}`,
+        });
+        changed = true;
+      }
+    }
+    if (changed) {
+      incidents.sort((a, b) => new Date(a.start) - new Date(b.start));
+      await env.SECURITY_HUB_KV.put(SLA_INCIDENT_KEY, JSON.stringify(incidents.slice(-500)), { expirationTtl: PING_TTL });
+    }
+  } catch {}
 }
 
 /* ===========================================================================
@@ -328,7 +425,7 @@ export async function handleSLACertificate(request, env, auth, rid) {
   // Same "take the more conservative real signal" combination handleSLAStatus
   // uses -- an incident can be recorded (and thus count against uptime) even
   // in a window with sparse ping coverage.
-  const actualUptime = hasData ? Math.max(pingUptime, incidentUptime) : null;
+  const actualUptime = hasData ? Math.min(pingUptime, incidentUptime) : null;
   const slaStatus = !hasData
     ? "INSUFFICIENT_DATA"
     : (actualUptime >= ENTERPRISE_SLA ? "COMPLIANT" : "BREACHED");
@@ -366,16 +463,6 @@ async function _loadPings(env) {
 async function _loadIncidents(env) {
   if (!env.SECURITY_HUB_KV) return [];
   try { return JSON.parse(await env.SECURITY_HUB_KV.get(SLA_INCIDENT_KEY) || "[]"); } catch { return []; }
-}
-
-async function _recordIncident(env, incident) {
-  if (!env.SECURITY_HUB_KV) return;
-  try {
-    const incidents = await _loadIncidents(env);
-    incidents.push({ ...incident, id: `INC-${Date.now().toString(36).toUpperCase()}` });
-    const trimmed = incidents.slice(-500); // keep last 500 incidents
-    await env.SECURITY_HUB_KV.put(SLA_INCIDENT_KEY, JSON.stringify(trimmed), { expirationTtl: PING_TTL });
-  } catch {}
 }
 
 function _json(status, body) {

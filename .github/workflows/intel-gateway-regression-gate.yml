@@ -75,6 +75,8 @@ on:
       - 'blog/**'
       - 'sitemap*.xml'
       - 'favicon.ico'
+      - 'dashboard/**'
+      - '.github/workflows/sla-heartbeat.yml'
       - 'scripts/build_dist_artifact.py'
       - 'js/apex-status-model.js'
       - 'js/card_renderer.js'
@@ -134,6 +136,8 @@ on:
       - 'blog/**'
       - 'sitemap*.xml'
       - 'favicon.ico'
+      - 'dashboard/**'
+      - '.github/workflows/sla-heartbeat.yml'
       - 'scripts/build_dist_artifact.py'
       - 'js/apex-status-model.js'
       - 'js/card_renderer.js'
@@ -348,6 +352,13 @@ jobs:
             # Every internal link in every deployed page, and every sitemap
             # URL, resolves to a file dist/ ships. Local files.
             tests/test_site_links_resolve.py
+            # External uptime heartbeat for /api/sla/*: probe/replay logic,
+            # workflow hardening, and no SLA page defaulting a missing figure
+            # to 100%. No network.
+            tests/test_sla_heartbeat.py
+            # Integrity gate B: placeholder (CDB-UNATTR-*) actor dominance
+            # warns, named/synthetic actor dominance still HARD_FAILs.
+            tests/test_integrity_gate_actor_entropy.py
             # Public status page shows only measured values: uptime from
             # /api/sla/status, /api/health top-level fields, and probes of
             # routes the Worker serves. Local files.

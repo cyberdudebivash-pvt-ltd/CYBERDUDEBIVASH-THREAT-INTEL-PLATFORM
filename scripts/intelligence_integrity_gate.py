@@ -482,14 +482,30 @@ class EntropyGate:
                 findings.append(f"[B] Title entropy: {te:.3f} bits (OK, min={ENTROPY_TITLE_MIN})")
 
         # Actor entropy
+        # 2026-09-26: low entropy is a HARD_FAIL only when a *named* label (a real
+        # actor, or a synthetic CDB-*-GEN one) dominates -- the templated-generation
+        # signature this check exists for. When the platform's own unattributed
+        # placeholder (CDB-UNATTR-*) dominates, it is a WARN: a CVE-heavy window
+        # routinely reaches ~90% CDB-UNATTR-CVE (~0.4 bits), which blocked the
+        # 18:30 and 22:11 publish runs on 2026-09-26 with gates A/C/F/H all passing.
+        # Synthetic labels are still caught by gate A regardless.
         if actors:
             ae = self._shannon_entropy(actors)
             if ae < ENTROPY_ACTOR_MIN:
-                findings.append(
-                    f"[B] LOW ACTOR DIVERSITY: Shannon entropy={ae:.3f} bits "
-                    f"(minimum: {ENTROPY_ACTOR_MIN}). Single or very few actors dominate the feed."
-                )
-                hard_fail = True
+                top_actor = Counter(actors).most_common(1)[0][0]
+                if top_actor.upper().startswith("CDB-UNATTR"):
+                    findings.append(
+                        f"[B] WARN — Low actor diversity: Shannon entropy={ae:.3f} bits "
+                        f"(minimum: {ENTROPY_ACTOR_MIN}), dominated by the unattributed "
+                        f"placeholder {top_actor}. Attribution coverage is low; not a "
+                        f"synthetic-generation signal."
+                    )
+                else:
+                    findings.append(
+                        f"[B] LOW ACTOR DIVERSITY: Shannon entropy={ae:.3f} bits "
+                        f"(minimum: {ENTROPY_ACTOR_MIN}). Single or very few actors dominate the feed."
+                    )
+                    hard_fail = True
             else:
                 findings.append(f"[B] Actor diversity entropy: {ae:.3f} bits (OK, min={ENTROPY_ACTOR_MIN})")
 
