@@ -1083,30 +1083,34 @@ async function loadSLA(){
     const r=await fetchWithTimeout(BASE+'/api/sla/status',{headers:{'Accept':'application/json'}},8000);
     if(r.ok){
       const d=await r.json(); STATE.sla=d;
-      const up=parseFloat(d.uptime_pct_30d||100).toFixed(3);
-      document.getElementById('slaUptimeVal').textContent=up+'%';
-      document.getElementById('slaStatusVal').textContent=d.status==='operational'?'Operational':'Degraded';
-      document.getElementById('slaStatusVal').style.color=d.status==='operational'?'var(--green)':'var(--high)';
+      // Only measured values: no heartbeat data -> no figure (was `||100`,
+      // i.e. 100% by default, and a null sla_met rendered as "BREACHED").
+      const measured=typeof d.uptime_pct_30d==='number';
+      const up=measured?d.uptime_pct_30d.toFixed(3)+'%':'Not yet measured';
+      const noData=d.status==='insufficient_data';
+      document.getElementById('slaUptimeVal').textContent=up;
+      document.getElementById('slaStatusVal').textContent=d.status==='operational'?'Operational':noData?'Not yet measured':'Degraded';
+      document.getElementById('slaStatusVal').style.color=d.status==='operational'?'var(--green)':noData?'var(--text-dim)':'var(--high)';
       document.getElementById('slaIncidents').textContent=d.incidents_30d||0;
-      document.getElementById('slaUptimeVal').style.color=parseFloat(up)>=99.9?'var(--green)':'var(--high)';
+      document.getElementById('slaUptimeVal').style.color=!measured?'var(--text-dim)':d.uptime_pct_30d>=99.9?'var(--green)':'var(--high)';
       // Update header SLA indicator
       const dot=document.getElementById('slaDot');
-      dot.className='sla-dot '+(d.status==='operational'?'up':'down');
-      document.getElementById('slaUptime').textContent=up+'%';
+      dot.className='sla-dot '+(d.status==='operational'?'up':noData?'':'down');
+      document.getElementById('slaUptime').textContent=measured?up:'—';
       // Components table
       const comps=d.components||{};
       document.getElementById('slaComponents').innerHTML=Object.entries(comps).map(([name,c])=>`
         <tr>
           <td><span class="comp-status-dot ${c.status==='operational'?'op':c.status==='degraded'?'deg':'down'}"></span>${name}</td>
           <td style="color:${c.status==='operational'?'var(--green)':'var(--high)'}; font-weight:600">${c.status||'—'}</td>
-          <td style="font-family:var(--font-mono)">${parseFloat(c.uptime||100).toFixed(3)}%</td>
+          <td style="font-family:var(--font-mono)">${typeof c.uptime==='number'?c.uptime.toFixed(3)+'%':'—'}</td>
         </tr>`).join('');
       // Credit policy
       if(d.credit_policy||d.sla_met_enterprise!==undefined){
         document.getElementById('slaCreditPolicy').style.display='';
         document.getElementById('slaCreditText').innerHTML=
           `Enterprise SLA Target: <strong>${d.sla_target_enterprise||99.9}%</strong> &nbsp;|&nbsp; 
-           Status: <strong style="color:${d.sla_met_enterprise?'var(--green)':'var(--critical)'}">${d.sla_met_enterprise?'MET ✓':'BREACHED ✗'}</strong><br>
+           Status: <strong style="color:${d.sla_met_enterprise===true?'var(--green)':d.sla_met_enterprise===false?'var(--critical)':'var(--text-dim)'}">${d.sla_met_enterprise===true?'MET ✓':d.sla_met_enterprise===false?'BREACHED ✗':'NOT YET MEASURED'}</strong><br>
            Credit Policy: 10% per day of breach, up to 30% of monthly fee. Contact <a href="mailto:enterprise@cyberdudebivash.com" style="color:var(--accent)">enterprise@cyberdudebivash.com</a> with this report to claim.`;
       }
     }

@@ -1693,30 +1693,34 @@ async function loadSLA() {
   const data = await apiFetch('/api/sla/status');
   if (data.error) { showToast('SLA data unavailable', 'error'); return; }
 
-  const pct  = (data.uptime_pct_30d || 100).toFixed(3);
+  // Only what /api/sla/status measured: no heartbeat data -> no figure
+  // (previously a missing figure defaulted to 100% and "operational").
+  const measured = typeof data.uptime_pct_30d === 'number';
+  const pct  = measured ? data.uptime_pct_30d.toFixed(3) : null;
   const met  = data.sla_met_enterprise;
-  const st   = (data.status || 'operational').toUpperCase();
+  const st   = String(data.status || 'unknown').replace(/_/g, ' ').toUpperCase();
 
   function se(id, val) { const e = document.getElementById(id); if (e) e.textContent = val; }
   function sc(id, col) { const e = document.getElementById(id); if (e) e.style.color = col; }
 
-  se('slaUptimePct', pct + '%');
-  sc('slaUptimePct', parseFloat(pct) >= 99.9 ? '#10b981' : parseFloat(pct) >= 99.5 ? '#f59e0b' : '#ef4444');
+  se('slaUptimePct', measured ? pct + '%' : 'Not yet measured');
+  sc('slaUptimePct', !measured ? '#94a3b8' : parseFloat(pct) >= 99.9 ? '#10b981' : parseFloat(pct) >= 99.5 ? '#f59e0b' : '#ef4444');
   se('slaStatus', st);
-  sc('slaStatus', st === 'OPERATIONAL' ? '#10b981' : '#f59e0b');
+  sc('slaStatus', st === 'OPERATIONAL' ? '#10b981' : st === 'INSUFFICIENT DATA' ? '#94a3b8' : '#f59e0b');
   se('slaIncidents', data.incidents_30d || 0);
-  se('slaMet', met ? 'YES ✅' : 'NO ❌');
-  sc('slaMet', met ? '#10b981' : '#ef4444');
+  se('slaMet', met === true ? 'YES ✅' : met === false ? 'NO ❌' : '—');
+  sc('slaMet', met === true ? '#10b981' : met === false ? '#ef4444' : '#94a3b8');
 
   const tbody = document.getElementById('slaComponentsBody');
   if (tbody && data.components) {
     tbody.innerHTML = Object.entries(data.components).map(([name, comp]) => {
-      const up = (comp.uptime || 100).toFixed(3);
-      const ok = parseFloat(up) >= 99.5;
+      const measured = typeof comp.uptime === 'number';
+      const up = measured ? comp.uptime.toFixed(3) + '%' : '—';
+      const ok = measured && comp.uptime >= 99.5;
       return `<tr>
         <td style="font-weight:600;">${escHtml(name)}</td>
-        <td><span class="status-dot ${comp.status === 'operational' ? 'dot-green' : 'dot-yellow'}"></span>${escHtml(comp.status || 'operational')}</td>
-        <td style="font-weight:700;color:${ok ? '#10b981' : '#f59e0b'};">${up}%</td>
+        <td><span class="status-dot ${comp.status === 'operational' ? 'dot-green' : 'dot-yellow'}"></span>${escHtml(String(comp.status || 'unknown').replace(/_/g, ' '))}</td>
+        <td style="font-weight:700;color:${!measured ? '#94a3b8' : ok ? '#10b981' : '#f59e0b'};">${up}</td>
         <td style="color:var(--text3);">99.9%</td>
       </tr>`;
     }).join('');
