@@ -65,9 +65,6 @@ h1{font-size:28px;font-weight:900;background:linear-gradient(135deg,var(--accent
 .badge-warn{background:rgba(234,179,8,.15);color:var(--yellow);padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700}
 .badge-err{background:rgba(239,68,68,.15);color:var(--red);padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700}
 .badge-nc{background:rgba(100,116,139,.15);color:var(--muted);padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700}
-.uptime-bar{display:flex;gap:2px;margin-top:8px}
-.uptime-seg{height:20px;flex:1;border-radius:2px;background:var(--green)}
-.uptime-seg.miss{background:var(--red)}.uptime-seg.warn-seg{background:var(--yellow)}
 .log-box{background:#020409;border:1px solid var(--border);border-radius:8px;padding:16px;font-family:var(--mono);font-size:12px;color:#7c9abc;max-height:280px;overflow-y:auto;line-height:1.8}
 .log-ok{color:var(--green)}.log-warn{color:var(--yellow)}.log-err{color:var(--red)}.log-info{color:#7c9abc}
 .log-time{color:var(--muted);margin-right:8px}
@@ -112,8 +109,8 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
   <div class="grid grid-4">
     <div class="card">
       <div class="card-label">API Uptime (30d)</div>
-      <div class="card-value ok" id="kpi-uptime">99.9%</div>
-      <div class="card-sub">Enterprise SLA target</div>
+      <div class="card-value" id="kpi-uptime">&mdash;</div>
+      <div class="card-sub" id="kpi-uptime-sub">Measured by /api/sla/status</div>
     </div>
     <div class="card">
       <div class="card-label">Active Advisories</div>
@@ -166,9 +163,8 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
   <div class="grid grid-2">
     <div class="card">
       <div class="card-label">30-Day Uptime</div>
-      <div class="card-value ok">99.9%</div>
-      <div class="card-sub">Enterprise SLA commitment</div>
-      <div class="uptime-bar" id="uptime-bar"></div>
+      <div class="card-value" id="sla-uptime">&mdash;</div>
+      <div class="card-sub" id="sla-uptime-sub">Enterprise SLA target 99.9%</div>
     </div>
     <div class="card">
       <div class="card-label">Gateway Response P95</div>
@@ -181,9 +177,9 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
       <div class="card-sub">Hours since last pipeline sync (target &lt;6h)</div>
     </div>
     <div class="card">
-      <div class="card-label">KV Cache Status</div>
+      <div class="card-label">Publication Integrity</div>
       <div class="card-value" id="sla-kv">&mdash;</div>
-      <div class="card-sub">Cloudflare KV namespace health</div>
+      <div class="card-sub">Published feed structure consistent</div>
     </div>
   </div>
 
@@ -291,16 +287,18 @@ function renderHealthChecks(checks, health) {
 }
 
 function renderTelemetry(health) {
-  const pl = health?.pipeline || {};
+  // /api/health publishes these at the top level; .pipeline is honoured if it ever returns.
+  const pl = health?.pipeline || health || {};
   const rows = [
     {comp:'API Gateway',     s:'ok',  ver:health?.gateway||health?.version||'—',  detail:`Platform: ${health?.platform||'SENTINEL APEX'}`},
     {comp:'Platform Version',s:'ok',  ver:health?.version||'—',                   detail:`Manifest: ${pl.manifest_version||health?.version||'—'}`},
     {comp:'IOC Engine',      s:'ok',  ver:pl.ioc_engine||'v201.0',                detail:'IOC extraction, dedup, fingerprinting'},
     {comp:'AI Brain Engine', s:'ok',  ver:pl.ai_engine||'v201.0',                 detail:'Campaigns, Anomalies, Predictions'},
     {comp:'STIX Exporter',   s:'ok',  ver:pl.stix_version||'2.1',                 detail:'STIX 2.1 bundle export'},
-    {comp:'Feed Dedup',      s:pl.dedup_active?'ok':'warn', ver:'—',              detail:pl.dedup_active?'Active':'Inactive'},
-    {comp:'Advisory Count',  s:'ok',  ver:'—',                                    detail:`${pl.advisory_count||'156+'}+ active advisories`},
-    {comp:'Last Sync',       s:'ok',  ver:'—',                                    detail:pl.last_sync||'Unknown'},
+    ...(pl.dedup_active === undefined ? [] :
+      [{comp:'Feed Dedup',   s:pl.dedup_active?'ok':'warn', ver:'—',              detail:pl.dedup_active?'Active':'Inactive'}]),
+    {comp:'Advisory Count',  s:pl.advisory_count!=null?'ok':'warn', ver:'—',      detail:pl.advisory_count!=null?`${pl.advisory_count} active advisories`:'Not reported'},
+    {comp:'Last Sync',       s:pl.last_sync?'ok':'warn', ver:'—',                 detail:pl.last_sync||'Unknown'},
   ];
   if (!health) {
     document.getElementById('telemetry-rows').innerHTML =
@@ -315,8 +313,8 @@ function renderTelemetry(health) {
 async function renderApiDiag() {
   const probeList = [
     ['/api/health',              '/api/health',                      200, 'PUBLIC'],
-    ['/api/v1/intel/preview',    '/api/v1/intel/preview.json',       200, 'FREE'],
-    ['/api/v1/intel/feed',       '/api/v1/intel/feed.json',          401, 'PRO'],
+    ['/api/preview',             '/api/preview',                     200, 'FREE'],
+    ['/api/v1/intel/apex',       '/api/v1/intel/apex.json',          200, 'PRO'],
     ['/api/ai/tracker',          '/api/ai/tracker.json',             200, 'PRO'],
     ['/api/ai/health',           '/api/ai/health.json',              200, 'PUBLIC'],
     ['/api/v1/intel/ai_summary', '/api/v1/intel/ai_summary.json',   401, 'PRO'],
@@ -351,12 +349,30 @@ async function renderApiDiag() {
   });
 }
 
-function renderUptimeBar() {
-  const bar = document.getElementById('uptime-bar');
-  bar.innerHTML = Array.from({length:30},(_,i) => {
-    const cls = i===22 ? 'warn-seg' : '';
-    return `<div class="uptime-seg ${cls}" title="Day ${30-i}"></div>`;
-  }).join('');
+async function fetchSla() {
+  try {
+    const r = await fetch(`${API_BASE}/api/sla/status`, {cache:'no-cache'});
+    return r.ok ? await r.json() : null;
+  } catch(e) { return null; }
+}
+
+// Uptime is shown only as measured by /api/sla/status; never a fixed figure.
+function renderSla(sla) {
+  const pct = sla && typeof sla.uptime_pct_30d === 'number' ? sla.uptime_pct_30d : null;
+  const target = (sla && sla.sla_target_enterprise) || 99.9;
+  const val = pct === null ? 'Not yet measured' : `${pct.toFixed(2)}%`;
+  const cls = pct === null ? 'warn' : pct >= target ? 'ok' : 'error';
+  const sub = pct === null
+    ? `Enterprise SLA target ${target}% · no heartbeat data yet`
+    : `Enterprise SLA target ${target}% · ${sla.incidents_30d||0} incident(s) in 30d`;
+  for (const [id, subId] of [['kpi-uptime','kpi-uptime-sub'],['sla-uptime','sla-uptime-sub']]) {
+    setVal(id, val, cls);
+    const v = document.getElementById(id);
+    if (v) v.style.fontSize = pct === null ? '20px' : '';
+    const el = document.getElementById(subId);
+    if (el) el.textContent = sub;
+  }
+  log(`SLA status: ${sla ? (sla.status||'unknown') : 'unreachable'}${pct===null?'':` (${pct.toFixed(2)}%)`}`, pct===null?'log-warn':'log-ok');
 }
 
 async function refreshAll() {
@@ -385,29 +401,29 @@ async function refreshAll() {
   document.getElementById('overall-indicator').className = `status-indicator ${sCls}`;
   document.getElementById('overall-status').textContent  = sTxt;
 
-  const pl  = data.pipeline || {};
+  const pl  = data.pipeline || data;
   const hrs = elapsedHours(pl.last_sync);
 
-  setVal('kpi-advisories', fmt(pl.advisory_count,'156+'));
+  setVal('kpi-advisories', fmt(pl.advisory_count));
   setVal('kpi-ai-engine',  fmt(pl.ai_engine,'v3.0'), 'ok');
   setVal('kpi-last-sync',  pl.last_sync ? pl.last_sync.replace('T',' ').slice(0,16)+' UTC' : '—',
     hrs&&parseFloat(hrs)<6?'ok':'warn');
 
   document.getElementById('platform-version').textContent = `SENTINEL APEX ${data.version||'v201.0'}`;
-  document.getElementById('advisory-count').textContent   = `${pl.advisory_count||'156+'}`;
+  document.getElementById('advisory-count').textContent   = fmt(pl.advisory_count);
   document.getElementById('last-sync').textContent        = hrs ? `Synced ${hrs}h ago` : '—';
 
   setVal('sla-freshness', hrs?`${hrs}h`:'—', hrs&&parseFloat(hrs)<6?'ok':hrs&&parseFloat(hrs)<12?'warn':'error');
   setVal('sla-p95', `${ms}ms`, ms<200?'ok':ms<500?'warn':'error');
-  setVal('sla-kv',  checks.kv_rate_limit==='ok'?'OK':(checks.kv_rate_limit||'—').toUpperCase(),
-    checks.kv_rate_limit==='ok'?'ok':'warn');
+  setVal('sla-kv',  checks.publication_integrity==='ok'?'OK':(checks.publication_integrity||'—').toUpperCase(),
+    checks.publication_integrity==='ok'?'ok':'warn');
   setVal('ai-ioc',  fmt(pl.ioc_engine,'v184.0'), 'ok');
   setVal('ai-brain',fmt(pl.ai_engine,'v3.0'),  'ok');
   setVal('ai-stix', fmt(pl.stix_version,'2.1'),'ok');
 
   renderHealthChecks(checks, data);
   renderTelemetry(data);
-  renderUptimeBar();
+  renderSla(await fetchSla());
   renderApiDiag();
 
   const ts = new Date().toLocaleTimeString();
