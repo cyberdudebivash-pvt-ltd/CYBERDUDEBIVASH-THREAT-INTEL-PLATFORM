@@ -101,6 +101,10 @@ KNOWN_LIVE_DATA_SCRIPTS = (
     # script.
     "metric-normalize.js",
     "apex-data-plane.js",
+    # Added 2026-09-27: js/feed-topic-view.js -- FeedTopicView.render() fetches
+    # /api/feed.json and renders one topic's advisories (malware-intel-hub.html,
+    # ai-runtime-defense.html).
+    "feed-topic-view.js",
 )
 
 

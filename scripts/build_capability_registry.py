@@ -45,8 +45,13 @@ CLASSIFICATIONS = {
         "for a per-tenant support-ticket API exists yet; tracked as a residual orphan."),
     # -- Genuine CUSTOMER_UI orphans: real customer surfaces showing hardcoded/placeholder data,
     #    not yet wired this session. best-fit route(s) noted for the next pass. --
-    "ai-runtime-defense.html": ("CUSTOMER_UI", "orphan", "Hardcoded/animated stat counters, zero fetch. No dedicated backend route found; partial fit /api/v1/ai-ops/analytics."),
-    "ai-security-ops-hub.html": ("CUSTOMER_UI", "orphan", "Hardcoded inference/prompt-firewall counters, zero fetch. Partial fit /api/v1/ai-ops/analytics."),
+    "ai-runtime-defense.html": ("CUSTOMER_UI", "live",
+                                "Fixed 2026-09-27: random counters and fake blocked-attack log removed; states the hosted "
+                                "runtime service is not offered and lists AI-security advisories from /api/feed.json "
+                                "(js/feed-topic-view.js)."),
+    "ai-security-ops-hub.html": ("DEPRECATED", None,
+        "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a "
+        "redirect to /ai-runtime-defense.html (same pattern as customer-portal.html); kept so existing links still resolve."),
     "api-management-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded API usage/success-rate stats, zero fetch. No key/webhook CRUD route exists (see api-key-manager.html for the one page with a real fetch() pattern)."),
     "api-reference-card.html": ("CUSTOMER_UI", "orphan", "Hardcoded 'live' advisory badge with pulsing indicator, no fetch. Best fit: /api/health."),
     "billing-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded usage-meter numbers, zero fetch. Partial fit /api/payment/status."),
@@ -61,20 +66,34 @@ CLASSIFICATIONS = {
         "('login-screen'/'dashboard-screen') that don't match its own DOM ('auth-gate'/'dashboard'). "
         "Needs an auth-model decision before any fix, not a frontend-only patch."),
     "dependency-platform.html": ("CUSTOMER_UI", "orphan", "Hardcoded 'sticky score' and API-call stats. No obvious existing backend route."),
-    "evidence-threat-map.html": ("CUSTOMER_UI", "orphan", "Hardcoded map stats with fake Math.random()-driven 'live counters'. Fits /api/v1/intel/graph, /api/v1/geo/cybermap, /api/v1/intel/relations."),
+    "evidence-threat-map.html": ("DEPRECATED", None,
+        "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a "
+        "redirect to /enterprise-knowledge-graph.html (same pattern as customer-portal.html); kept so existing links still resolve."),
     "executive-reporting-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded board-report figures ('$9.7M Annualized ROI'). Fits /api/v1/executive/command-center, /api/v1/reports/."),
-    "malware-intel-hub.html": ("CUSTOMER_UI", "orphan", "Hardcoded sample counters, fake sandbox hash stream via Math.random(). Partial fit /api/yara, /api/sigma."),
+    "malware-intel-hub.html": ("CUSTOMER_UI", "live",
+        "Fixed 2026-09-27: rebuilt on /api/feed.json (malware-related advisories, counts and feed "
+        "time read at load) plus the /api/v1/export/* detection downloads. Removed the Math.random() "
+        "'sandbox detonation' stream (invented hashes and 'C2' IPs, one a real public address), the "
+        "fixed sample/YARA/family counts and a 'C2 infrastructure registry' naming real ASNs."),
     "mssp-console.html": ("CUSTOMER_UI", "orphan", "1785-line MSSP console, fully hardcoded, zero fetch. Fits /api/mssp, /api/mssp/feed, /api/mssp/tenants/{id}/feed."),
     "mssp-customer-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded partner/customer arrays. Fits /api/mssp, /api/mssp/feed."),
     "mssp-partner-portal.html": ("CUSTOMER_UI", "orphan", "Hardcoded tenant list. Fits /api/mssp/tenants/{id}/feed, /api/mssp/feed."),
     "my-exposure-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded CVEs/campaigns/recommendations presented as personalized. Fits /api/v1/cve/live, /api/v1/intel/campaigns, /api/v1/assets/intelligence."),
     "payment-confirmation.html": ("CUSTOMER_UI", "orphan", "Activation timeline derived only from URL query params, never calls the real payment-status API. Fits /api/payment/status."),
     "soc-operations-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded INTEL_ITEMS array despite an in-code comment claiming 'No fake data -- Real manifest-driven'. Fits /api/v1/incidents, /api/v1/intel/graph, /api/v1/geo/cybermap."),
-    "soc-workspace.html": ("CUSTOMER_UI", "orphan", "Hardcoded incidents/hunts/timeline; updateStats() fakes live numbers via Math.random(). Fits /api/v1/incidents, /api/v1/detections."),
+    "soc-workspace.html": ("DEPRECATED", None,
+        "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a "
+        "redirect to /enterprise-cyber-intelligence-os.html (same pattern as customer-portal.html); kept so existing links still resolve."),
     "subscription-billing-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded MRR/usage figures; every action button alert()s a nonexistent route. Partial fit /api/payment/status."),
-    "telemetry-embedding.html": ("CUSTOMER_UI", "orphan", "Hardcoded/rotated telemetry counters via setInterval + Math.random(). No obvious existing route."),
-    "telemetry-visibility-ops.html": ("CUSTOMER_UI", "orphan", "Hardcoded event-rate counters and tickets. Fits /api/v1/detections, /api/v1/incidents, /api/v1/intel/graph."),
-    "unified-ops-hub.html": ("CUSTOMER_UI", "orphan", "Hardcoded alert/IOC/score tiles across all tabs. Fits /api/v1/incidents, /api/v1/intel/graph, /api/v1/detections."),
+    "telemetry-embedding.html": ("DEPRECATED", None,
+        "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a "
+        "redirect to /observability.html (same pattern as customer-portal.html); kept so existing links still resolve."),
+    "telemetry-visibility-ops.html": ("DEPRECATED", None,
+        "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a "
+        "redirect to /observability.html (same pattern as customer-portal.html); kept so existing links still resolve."),
+    "unified-ops-hub.html": ("DEPRECATED", None,
+        "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a "
+        "redirect to /enterprise-cyber-intelligence-os.html (same pattern as customer-portal.html); kept so existing links still resolve."),
     "value-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded ROI/threat figures with a fake 'LIVE' badge; period selector re-displays the same static numbers. Fits /api/v1/incidents, /api/v1/detections, /api/v1/stats."),
     "login.html": ("CUSTOMER_UI", "orphan",
         "Investigated this session, deliberately NOT fixed: fetch() calls are missing the /api/ "

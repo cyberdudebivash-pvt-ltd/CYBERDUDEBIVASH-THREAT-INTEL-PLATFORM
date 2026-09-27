@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "generated_at": "2026-09-03T07:40:53.063239+00:00",
+  "generated_at": "2026-09-27T00:45:20.190045+00:00",
   "generator": "scripts/build_capability_registry.py (one-time build; hand-maintained CLASSIFICATIONS dict thereafter)",
   "scope": "top-level *.html (repo root) -- see CLAUDE.md's P-layer table and scripts/capability_coverage_audit.py for the /api/v1/pXX/* backend route -> handler registry (a distinct, complementary artifact; this file classifies FRONTEND pages, not backend routes)",
   "taxonomy": [
@@ -10,13 +10,13 @@
     "INTERNAL",
     "DEPRECATED"
   ],
-  "total_pages": 150,
+  "total_pages": 135,
   "by_category": {
-    "CUSTOMER_UI": 134,
-    "INTERNAL": 5,
-    "ADMIN": 11
+    "CUSTOMER_UI": 127,
+    "DEPRECATED": 6,
+    "ADMIN": 2
   },
-  "customer_ui_orphan_count": 27,
+  "customer_ui_orphan_count": 15,
   "unclassified_count": 0,
   "note": "unclassified_count is the mission-tracked metric (target: 0). A page's presence in this file's `entries` array with a category from `taxonomy` IS its classification -- there is no separate UNCLASSIFIED bucket by construction (see scripts/capability_registry_gate.py, which fails CI if a top-level *.html page exists with no entry here). customer_ui_orphan_count tracks a SEPARATE, non-blocking metric: CUSTOMER_UI pages that are correctly classified but still show static/placeholder data pending a live-API wiring fix -- see each entry's `notes`.",
   "access_navigation_audit_status": "NOT YET DONE for most entries. The mission's requested `access` (public/api_key_required/admin) and `navigation` (which nav menus link to this page) fields were audited and are accurate ONLY for the 9 pages this session touched directly (see the P21-P40 dashboard family and the git log for claude/sentinel-apex-transformation-8x3y26). Populating them accurately for the other 140 pages requires reading each page's own auth-wall markup and cross-referencing every nav/header partial across the site -- exactly the 'Unified Application Shell' audit (mission item 4) this session did not have room for. Recommended as the next P0: a dedicated navigation-shell audit pass, not a guess encoded into this file.",
@@ -29,55 +29,11 @@
       "notes": "Legitimately static marketing/legal/informational content."
     },
     {
-      "id": "ENTERPRISE-CUSTOMER-RESPONSE-SYSTEM.html",
-      "frontend_route": "/ENTERPRISE-CUSTOMER-RESPONSE-SYSTEM.html",
-      "category": "CUSTOMER_UI",
-      "status": "static_content",
-      "notes": "Legitimately static marketing/legal/informational content."
-    },
-    {
-      "id": "GODMODE-REVENUE-AUDIT-REPORT.html",
-      "frontend_route": "/GODMODE-REVENUE-AUDIT-REPORT.html",
-      "category": "INTERNAL",
-      "notes": "One-off internal audit report artifact (added to the static allowlist -- zero real form/fetch; its 'fetch(' matches are prose describing suggested code, not executable JS)."
-    },
-    {
       "id": "PAYMENT-GATEWAY.html",
       "frontend_route": "/PAYMENT-GATEWAY.html",
       "category": "CUSTOMER_UI",
       "status": "static_content",
       "notes": "Legitimately static marketing/legal/informational content."
-    },
-    {
-      "id": "SENTINEL-APEX-CEO-CTO-CISO-EXECUTIVE-AUDIT-REPORT-v161.html",
-      "frontend_route": "/SENTINEL-APEX-CEO-CTO-CISO-EXECUTIVE-AUDIT-REPORT-v161.html",
-      "category": "INTERNAL",
-      "notes": "Internal engineering audit report (ISSUE ID/ROOT CAUSE/FIX/COMMIT defect table), not customer-facing content. Zero <script> tags."
-    },
-    {
-      "id": "SENTINEL-APEX-PRODUCTION-BACKLOG.html",
-      "frontend_route": "/SENTINEL-APEX-PRODUCTION-BACKLOG.html",
-      "category": "CUSTOMER_UI",
-      "status": "static_content",
-      "notes": "Legitimately static marketing/legal/informational content."
-    },
-    {
-      "id": "SENTINEL-APEX-SOVEREIGN-MASTER-REPORT-2026.html",
-      "frontend_route": "/SENTINEL-APEX-SOVEREIGN-MASTER-REPORT-2026.html",
-      "category": "INTERNAL",
-      "notes": "Internal engineering/revenue audit report (\"REVENUE BLOCKED -- 5 FIXES REQUIRED\", per-tier enforcement-gap notes), not customer-facing content. Zero <script> tags."
-    },
-    {
-      "id": "SENTINEL_APEX_ENTERPRISE_AUDIT_v145.html",
-      "frontend_route": "/SENTINEL_APEX_ENTERPRISE_AUDIT_v145.html",
-      "category": "INTERNAL",
-      "notes": "Internal production audit report discussing live sales-pipeline figures and unresolved P0 revenue-blocking gaps, not customer-facing content. Zero <script> tags. Already independently described as 'a prose audit report' in frontend_api_coverage_gate.py's own docstring (an unrelated false-positive fix) prior to this classification correction."
-    },
-    {
-      "id": "SENTINEL_APEX_P0_AUDIT_REPORT.html",
-      "frontend_route": "/SENTINEL_APEX_P0_AUDIT_REPORT.html",
-      "category": "INTERNAL",
-      "notes": "Internal full-system audit report, not customer-facing content. Zero <script> tags."
     },
     {
       "id": "about.html",
@@ -89,8 +45,9 @@
     {
       "id": "admin.html",
       "frontend_route": "/admin.html",
-      "category": "ADMIN",
-      "notes": "Password-gated internal admin control panel."
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
     },
     {
       "id": "advisories.html",
@@ -103,15 +60,14 @@
       "id": "ai-runtime-defense.html",
       "frontend_route": "/ai-runtime-defense.html",
       "category": "CUSTOMER_UI",
-      "notes": "Hardcoded/animated stat counters, zero fetch. No dedicated backend route found; partial fit /api/v1/ai-ops/analytics.",
-      "status": "orphan"
+      "status": "live",
+      "notes": "Wired to a live backend API. (includes feed-topic-view.js)"
     },
     {
       "id": "ai-security-ops-hub.html",
       "frontend_route": "/ai-security-ops-hub.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded inference/prompt-firewall counters, zero fetch. Partial fit /api/v1/ai-ops/analytics.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a redirect to /ai-runtime-defense.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "ai-threat-tracker.html",
@@ -170,6 +126,13 @@
       "status": "orphan"
     },
     {
+      "id": "billing.html",
+      "frontend_route": "/billing.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
       "id": "capability-directory.html",
       "frontend_route": "/capability-directory.html",
       "category": "CUSTOMER_UI",
@@ -218,12 +181,6 @@
       "status": "orphan"
     },
     {
-      "id": "customer-health-platform.html",
-      "frontend_route": "/customer-health-platform.html",
-      "category": "ADMIN",
-      "notes": "CDB-internal customer health/churn scoring tool."
-    },
-    {
       "id": "customer-intake.html",
       "frontend_route": "/customer-intake.html",
       "category": "CUSTOMER_UI",
@@ -231,29 +188,11 @@
       "notes": "Legitimately static marketing/legal/informational content."
     },
     {
-      "id": "customer-intelligence.html",
-      "frontend_route": "/customer-intelligence.html",
-      "category": "ADMIN",
-      "notes": "CDB-internal customer health-scoring engine."
-    },
-    {
-      "id": "customer-ops-center.html",
-      "frontend_route": "/customer-ops-center.html",
-      "category": "ADMIN",
-      "notes": "CDB-internal 'Global Ops' command center."
-    },
-    {
       "id": "customer-portal.html",
       "frontend_route": "/customer-portal.html",
       "category": "CUSTOMER_UI",
       "notes": "Hardcoded threat/IOC counts and a fake masked API key. Fits /api/v1/intel/feed, /api/v1/detections, /api/health.",
       "status": "orphan"
-    },
-    {
-      "id": "customer-success-center.html",
-      "frontend_route": "/customer-success-center.html",
-      "category": "ADMIN",
-      "notes": "CDB-internal CS team tool."
     },
     {
       "id": "customer-success-stories.html",
@@ -298,6 +237,13 @@
       "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
     },
     {
+      "id": "cyber-watchdog.html",
+      "frontend_route": "/cyber-watchdog.html",
+      "category": "CUSTOMER_UI",
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
+    },
+    {
       "id": "daily-operations-center.html",
       "frontend_route": "/daily-operations-center.html",
       "category": "CUSTOMER_UI",
@@ -308,8 +254,8 @@
       "id": "dashboard.html",
       "frontend_route": "/dashboard.html",
       "category": "CUSTOMER_UI",
-      "notes": "Investigated this session, deliberately NOT fixed: its fetch() calls target /auth/login and /auth/keys (missing /api/ prefix AND /api/auth/keys does not exist as a route at all -- only /api/admin/keys [admin-scoped] and /api/keys/free [free-tier signup] exist). This is an auth-model mismatch, not a URL typo -- see login.html note. Also references stale element IDs ('login-screen'/'dashboard-screen') that don't match its own DOM ('auth-gate'/'dashboard'). Needs an auth-model decision before any fix, not a frontend-only patch.",
-      "status": "orphan"
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
     },
     {
       "id": "demo-conversion-center.html",
@@ -523,9 +469,8 @@
     {
       "id": "evidence-threat-map.html",
       "frontend_route": "/evidence-threat-map.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded map stats with fake Math.random()-driven 'live counters'. Fits /api/v1/intel/graph, /api/v1/geo/cybermap, /api/v1/intel/relations.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a redirect to /enterprise-knowledge-graph.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "executive-briefing.html",
@@ -612,12 +557,6 @@
       "status": "form_only"
     },
     {
-      "id": "lead-intelligence.html",
-      "frontend_route": "/lead-intelligence.html",
-      "category": "ADMIN",
-      "notes": "CDB-internal lead-scoring engine."
-    },
-    {
       "id": "lead-pipeline.html",
       "frontend_route": "/lead-pipeline.html",
       "category": "CUSTOMER_UI",
@@ -628,8 +567,8 @@
       "id": "login.html",
       "frontend_route": "/login.html",
       "category": "CUSTOMER_UI",
-      "notes": "Investigated this session, deliberately NOT fixed: fetch() calls are missing the /api/ prefix (/auth/login, /auth/signup), but the deeper issue is an auth-MODEL mismatch, not a URL typo -- POST /api/auth/login expects {api_key}, not {email,password} (this platform has no password-based account system), and POST /api/auth/register unconditionally returns 422 'Email registration is not available.' A shallow /api/ prefix fix would still be broken and would look fixed when it isn't; CLAUDE.md freezes auth-logic changes outright. Needs a product decision (build real email/password auth, or redesign this page around API-key issuance via the already-working /api/keys/free flow that get-api-key.html correctly uses) before any code changes here.",
-      "status": "orphan"
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
     },
     {
       "id": "lookup.html",
@@ -642,8 +581,8 @@
       "id": "malware-intel-hub.html",
       "frontend_route": "/malware-intel-hub.html",
       "category": "CUSTOMER_UI",
-      "notes": "Hardcoded sample counters, fake sandbox hash stream via Math.random(). Partial fit /api/yara, /api/sigma.",
-      "status": "orphan"
+      "status": "live",
+      "notes": "Wired to a live backend API. (includes feed-topic-view.js)"
     },
     {
       "id": "methodology.html",
@@ -651,19 +590,6 @@
       "category": "CUSTOMER_UI",
       "status": "static_content",
       "notes": "Legitimately static marketing/legal/informational content."
-    },
-    {
-      "id": "monetization-ops.html",
-      "frontend_route": "/monetization-ops.html",
-      "category": "ADMIN",
-      "notes": "CDB-internal revenue/monetization ops dashboard."
-    },
-    {
-      "id": "mssp-console.html",
-      "frontend_route": "/mssp-console.html",
-      "category": "CUSTOMER_UI",
-      "notes": "1785-line MSSP console, fully hardcoded, zero fetch. Fits /api/mssp, /api/mssp/feed, /api/mssp/tenants/{id}/feed.",
-      "status": "orphan"
     },
     {
       "id": "mssp-customer-center.html",
@@ -820,12 +746,6 @@
       "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
     },
     {
-      "id": "revenue-intelligence.html",
-      "frontend_route": "/revenue-intelligence.html",
-      "category": "ADMIN",
-      "notes": "CDB-internal revenue-ops engine; own code comment says data is 'seeded...in production fetched from revenue registry API'."
-    },
-    {
       "id": "roi-calculator.html",
       "frontend_route": "/roi-calculator.html",
       "category": "CUSTOMER_UI",
@@ -845,12 +765,6 @@
       "category": "CUSTOMER_UI",
       "status": "static_content",
       "notes": "Legitimately static marketing/legal/informational content."
-    },
-    {
-      "id": "sentinel-master-ops-center.html",
-      "frontend_route": "/sentinel-master-ops-center.html",
-      "category": "ADMIN",
-      "notes": "CDB-internal master operations command center."
     },
     {
       "id": "sentinel-onboarding.html",
@@ -897,9 +811,8 @@
     {
       "id": "soc-workspace.html",
       "frontend_route": "/soc-workspace.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded incidents/hunts/timeline; updateStats() fakes live numbers via Math.random(). Fits /api/v1/incidents, /api/v1/detections.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a redirect to /enterprise-cyber-intelligence-os.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "status.html",
@@ -914,13 +827,6 @@
       "category": "CUSTOMER_UI",
       "status": "static_content",
       "notes": "Legitimately static marketing/legal/informational content."
-    },
-    {
-      "id": "subscription-billing-center.html",
-      "frontend_route": "/subscription-billing-center.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded MRR/usage figures; every action button alert()s a nonexistent route. Partial fit /api/payment/status.",
-      "status": "orphan"
     },
     {
       "id": "subscription-management.html",
@@ -939,16 +845,14 @@
     {
       "id": "telemetry-embedding.html",
       "frontend_route": "/telemetry-embedding.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded/rotated telemetry counters via setInterval + Math.random(). No obvious existing route.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a redirect to /observability.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "telemetry-visibility-ops.html",
       "frontend_route": "/telemetry-visibility-ops.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded event-rate counters and tickets. Fits /api/v1/detections, /api/v1/incidents, /api/v1/intel/graph.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a redirect to /observability.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "terms.html",
@@ -1002,9 +906,8 @@
     {
       "id": "unified-ops-hub.html",
       "frontend_route": "/unified-ops-hub.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded alert/IOC/score tiles across all tabs. Fits /api/v1/incidents, /api/v1/intel/graph, /api/v1/detections.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a redirect to /enterprise-cyber-intelligence-os.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "upgrade.html",
