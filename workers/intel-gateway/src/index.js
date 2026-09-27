@@ -3486,7 +3486,7 @@ async function handleTAXII(request, env, ctx, path, auth) {
         {
           id: TAXII_COLLECTION_ID,
           title: "SENTINEL APEX - Primary Threat Intelligence",
-          description: "CVEs, IOCs, APT activity, ransomware alerts, dark web findings",
+          description: "CVEs, IOCs, APT activity and ransomware advisories from the SENTINEL APEX feed",
           can_read: true, can_write: false, media_types: [STIX_CT],
         },
         {
