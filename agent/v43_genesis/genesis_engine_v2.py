@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 """
+DEPRECATED (2026-09-27) -- do not run or import.
+  No workflow runs this module; the canonical GENESIS producer is
+  agent/v43_genesis/genesis_engine.py (genesis-powerhouse.yml, and
+  scripts/regenerate_engine_data.py via GenesisOrchestrator.compute()).
+  Its G01/G02/G09/G11 builders simulate telemetry (sensor events, honeypot
+  captures from hash(), fixed dark-web sources, keyword attack corridors)
+  that the platform does not collect. Replacement: genesis_engine.py.
+  Kept per the Deprecation Instead of Deletion policy; remove at the next
+  major P-layer once no consumer is confirmed (none known today).
+
 CYBERDUDEBIVASH(R) SENTINEL APEX v45.0 - GENESIS ENGINE v2.0
 ============================================================
 Production-grade AI-powered genesis intelligence engine.
