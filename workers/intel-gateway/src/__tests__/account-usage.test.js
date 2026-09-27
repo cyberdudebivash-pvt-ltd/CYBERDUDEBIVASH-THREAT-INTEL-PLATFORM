@@ -21,7 +21,11 @@ test("API-key caller: tier, masked key, enforced daily quota, today's usage", ()
                                 subscription_status: "active", expires_at: "2027-01-01T00:00:00Z" }, quota, today);
   assert.equal(r.tier, "PRO");
   assert.equal(r.account.customer_id, "cust_42");
-  assert.equal(r.account.credential, `${KEY.slice(0, 8)}…${KEY.slice(-4)}`);
+  // \u2026 escape, not a literal ellipsis: deploy-worker.yml runs
+  // sanitize_encoding.py --fix before this suite, which rewrites non-ASCII in
+  // Worker JS (U+2026 -> "...") and would make this expectation disagree with
+  // account-usage.js, which emits U+2026 through the same escape.
+  assert.equal(r.account.credential, `${KEY.slice(0, 8)}\u2026${KEY.slice(-4)}`);
   assert.equal(r.account.credential_type, "api_key");
   assert.equal(r.account.subscription_status, "active");
   assert.deepEqual(r.daily_quota, { ...quota, used_pct: 25 });
