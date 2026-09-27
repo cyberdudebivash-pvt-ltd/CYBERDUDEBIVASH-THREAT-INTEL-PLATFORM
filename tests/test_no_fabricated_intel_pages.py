@@ -16,6 +16,7 @@ ai-runtime-defense.html (2026-09-27) showed Math.random() "prompts screened"
 counters and a blocked-attack log for a hosted runtime-guardrail service that
 does not exist; it now says so and lists AI-security advisories from the feed.
 """
+import json
 import re
 from pathlib import Path
 
@@ -100,3 +101,33 @@ def test_registry_marks_cleaned_pages_live():
     for page in CLEANED_PAGES:
         m = re.search(r'"' + re.escape(page) + r'":\s*\("CUSTOMER_UI",\s*"(\w+)"', reg)
         assert m and m.group(1) == "live", page
+
+
+# Mockup pages with invented "live" data and no API call, replaced by a
+# redirect to the nearest real page (2026-09-27): page -> redirect target.
+REDIRECTED_PAGES = {
+    "ai-security-ops-hub.html": "ai-runtime-defense.html",
+    "evidence-threat-map.html": "enterprise-knowledge-graph.html",
+    "soc-workspace.html": "enterprise-cyber-intelligence-os.html",
+    "unified-ops-hub.html": "enterprise-cyber-intelligence-os.html",
+    "telemetry-embedding.html": "observability.html",
+    "telemetry-visibility-ops.html": "observability.html",
+}
+
+
+@pytest.mark.parametrize("page", sorted(REDIRECTED_PAGES))
+def test_mockup_page_redirects_to_a_live_page(page):
+    html = _text(page)
+    target = REDIRECTED_PAGES[page]
+    assert f'content="0; url=/{target}"' in html
+    assert f"window.location.replace('/{target}'" in html
+    assert 'name="robots" content="noindex' in html
+    assert "Math.random" not in html and "setInterval" not in html
+    cov = json.loads((REPO / "data" / "quality" / "frontend_api_coverage_report.json").read_text(encoding="utf-8"))
+    assert target in {p["file"] for p in cov["dynamic_pages"]}, f"{target} is not a live (API-backed) page"
+
+
+def test_redirected_pages_are_not_in_sitemaps():
+    maps = "\n".join(p.read_text(encoding="utf-8") for p in REPO.glob("sitemap*.xml"))
+    listed = [p for p in REDIRECTED_PAGES if "/" + p + "<" in maps]
+    assert listed == []
