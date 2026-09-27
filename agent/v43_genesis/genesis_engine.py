@@ -1,36 +1,58 @@
 #!/usr/bin/env python3
 """
-genesis_engine.py - CYBERDUDEBIVASH(R) SENTINEL APEX v43.0 (GENESIS)
+genesis_engine.py - CYBERDUDEBIVASH(R) SENTINEL APEX v43.1 (GENESIS)
 =====================================================================
-The Global Cybersecurity Intelligence Powerhouse - 12 Strategic Engines.
+The 12 GENESIS engines behind the homepage "Global Cybersecurity
+Intelligence Powerhouse" grid and /api/v1/intel/genesis_output.json.
 
-Non-Breaking: Reads from manifest/STIX/nexus/cortex/quantum/sovereign data.
-Writes to data/genesis/. Zero modification to any existing file.
+Every figure is computed from the intelligence feed items (the STIX feed
+manifest, or items passed in by a caller). v43.1 (2026-09-27) removed
+figures that had no data behind them: an 8-region AWS "sensor network"
+(events = advisories x 47, random uptime, fixed source-country shares), an
+8-trap "honeypot grid" (captures = keyword hits x 12, sample credentials),
+9 "monitored" dark-web sources, sandbox/scanner capability lists, attack
+flows whose source country was random.choice() when unknown, TAXII URLs
+and a WebSocket stream that do not exist, and Suricata/Snort/EDR "rules"
+with no rule body. Capabilities the platform does not operate (sensors,
+honeypots, dark-web monitoring) report operated=False with a note and the
+feed-derived figure that is real (ingestion sources, KEV/exploit evidence,
+ransomware/leak advisories).
+
+Writes to data/genesis/ (canonical producer: genesis-powerhouse.yml).
+scripts/regenerate_engine_data.py calls GenesisOrchestrator.compute() for
+api/engines.json instead of computing a second GENESIS of its own.
 
 Author: CyberDudeBivash Pvt. Ltd. - GOC
 """
 
-import os, re, json, math, hashlib, logging, time, random, statistics, uuid, ipaddress
+import os, re, json, hashlib, logging, time, statistics
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Any, Optional, Tuple, Set
-from collections import Counter, defaultdict, deque
-from dataclasses import dataclass, field, asdict
-from enum import Enum
+from typing import Dict, List, Any, Optional, Tuple
+from collections import Counter, defaultdict
 
 logger = logging.getLogger("CDB-Genesis")
 
 MANIFEST_PATH = os.environ.get("MANIFEST_PATH", "data/stix/feed_manifest.json")
 GENESIS_DIR = os.environ.get("GENESIS_DIR", "data/genesis")
 CVE_RE = re.compile(r'CVE-\d{4}-\d{4,7}', re.IGNORECASE)
-IP_RE = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
-DOMAIN_RE = re.compile(r'\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b', re.I)
-HASH_RE = re.compile(r'\b[a-fA-F0-9]{64}\b')
+TECHNIQUE_RE = re.compile(r'^T\d{4}(?:\.\d{3})?$')
+
+# Actor tags the pipeline writes when nothing is attributed. They are not
+# actors: counting them made "UNC-CDB-INGEST" a registry actor and a campaign.
+_PLACEHOLDER_ACTORS = {"", "UNC-CDB-99", "UNC-CDB-INGEST", "UNC-UNKNOWN", "UNKNOWN",
+                       "UNATTRIBUTED", "NONE", "NULL", "N/A", "-"}
+# Country placeholders; same set as the homepage geographic panel (buildHeatmap).
+_PLACEHOLDER_GEO = re.compile(r'^(unknown|unattributed|n/a|none|null|-)$', re.IGNORECASE)
+_EXPLOIT_MATURITY = {"POC", "WEAPONIZED", "FUNCTIONAL", "HIGH", "ACTIVE"}
+# Per-item detection fields written by scripts/detection_bundle_injector.py;
+# same map as workers/intel-gateway/src/detection-registry.js RULE_FIELD.
+DETECTION_FIELDS = {"sigma": "sigma_rule", "kql": "kql_query", "suricata": "suricata_rule", "yara": "yara_rule"}
 
 
 def _load(p):
     try:
         with open(p, 'r', encoding='utf-8') as f: return json.load(f)
-    except: return None
+    except Exception: return None
 
 def _save(p, d):
     try:
@@ -38,12 +60,16 @@ def _save(p, d):
         t = p + ".tmp"
         with open(t, 'w', encoding='utf-8') as f: json.dump(d, f, indent=2, default=str)
         os.replace(t, p); return True
-    except: return False
+    except Exception: return False
 
 def _entries():
     d = _load(MANIFEST_PATH)
     if isinstance(d, list): return d
     return d.get("entries", []) if isinstance(d, dict) else []
+
+def _items(entries):
+    """Feed items to compute from: the given list, else the manifest."""
+    return [e for e in (_entries() if entries is None else entries) if isinstance(e, dict)]
 
 def _gid(pfx, seed):
     return f"{pfx}--{hashlib.sha256(seed.encode()).hexdigest()[:12]}"
@@ -51,95 +77,119 @@ def _gid(pfx, seed):
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
+def _num(v, default=0.0):
+    try:
+        f = float(v)
+        return f if f == f else default
+    except (TypeError, ValueError):
+        return default
+
+def _risk(e):
+    return _num(e.get("risk_score"))
+
+def _title(e):
+    return str(e.get("title") or "")
+
+def _ts(e) -> Optional[datetime]:
+    for k in ("published_at", "timestamp", "published", "processed_at"):
+        v = e.get(k)
+        if not v: continue
+        try:
+            dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+def _is_placeholder_actor(tag) -> bool:
+    t = str(tag or "").strip().upper()
+    return t in _PLACEHOLDER_ACTORS or t.startswith("CDB-UNATTR")
+
+def _actor(e) -> str:
+    """The item's actor tag, or "" when it is a placeholder."""
+    a = str(e.get("actor_tag") or "").strip()
+    return "" if _is_placeholder_actor(a) else a
+
+def _kev(e) -> bool:
+    if e.get("kev_present") is True or e.get("kev") is True: return True
+    return str(e.get("kev") or "").strip().upper() in ("YES", "TRUE", "CONFIRMED")
+
+def _public_exploit(e) -> bool:
+    return (str(e.get("exploit_maturity") or "").strip().upper() in _EXPLOIT_MATURITY
+            or _num(e.get("exploit_count")) > 0 or _num(e.get("poc_github_count")) > 0
+            or e.get("metasploit_available") is True)
+
+def _epss(e) -> Optional[float]:
+    v = e.get("epss_score")
+    if v is None: return None
+    f = _num(v, -1.0)
+    if f < 0: return None
+    return f / 100.0 if f > 1.0 else f   # tolerate a percentage
+
+def _techniques(e) -> List[str]:
+    out = []
+    for src in (e.get("attck_technique_ids") or [], e.get("mitre_tactics") or []):
+        for t in src if isinstance(src, list) else []:
+            tid = t if isinstance(t, str) else (t.get("id") or t.get("technique_id") or "") if isinstance(t, dict) else ""
+            tid = str(tid).strip().upper()
+            if TECHNIQUE_RE.match(tid) and tid not in out: out.append(tid)
+    return out
+
+def _cves(e) -> List[str]:
+    found = []
+    for c in list(e.get("cve_ids") or []) + CVE_RE.findall(_title(e)):
+        c = str(c).upper()
+        if CVE_RE.fullmatch(c) and c not in found: found.append(c)
+    return found
+
 
 # ===============================================================================
-# G01 - GLOBAL CYBER SENSOR NETWORK
+# G01 - INGESTION SOURCE NETWORK (no sensors are operated)
 # ===============================================================================
 
 class GlobalCyberSensorNetwork:
-    """Distributed telemetry sensor network - collects attack data from
-    global cloud regions: port scans, exploit attempts, botnet callbacks,
-    credential attacks, C2 beacons."""
+    """The intelligence feed sources the platform ingests. No sensor
+    network is operated, so no sensor telemetry is reported."""
 
-    SENSOR_REGIONS = [
-        {"region": "us-east-1", "location": "Virginia, USA", "provider": "AWS"},
-        {"region": "eu-west-1", "location": "Ireland, EU", "provider": "AWS"},
-        {"region": "ap-southeast-1", "location": "Singapore, APAC", "provider": "AWS"},
-        {"region": "me-south-1", "location": "Bahrain, MEA", "provider": "AWS"},
-        {"region": "sa-east-1", "location": "Sao Paulo, LATAM", "provider": "AWS"},
-        {"region": "af-south-1", "location": "Cape Town, Africa", "provider": "AWS"},
-        {"region": "ap-south-1", "location": "Mumbai, India", "provider": "AWS"},
-        {"region": "eu-central-1", "location": "Frankfurt, EU", "provider": "AWS"},
-    ]
+    NOTE = "No sensor network is operated. These are the intelligence feed sources the platform ingests."
 
-    ATTACK_CATEGORIES = [
-        "port_scan", "brute_force", "exploit_attempt", "botnet_callback",
-        "c2_beacon", "credential_stuffing", "web_exploit", "dns_tunnel",
-        "lateral_movement", "data_exfiltration",
-    ]
-
-    def generate_telemetry(self) -> Dict:
-        """Generate sensor network telemetry from threat intelligence."""
-        entries = _entries()
-        if not entries:
-            return {"sensors": [], "telemetry_events": 0}
-
-        sensors = []
-        total_events = 0
-
-        for region in self.SENSOR_REGIONS:
-            # Derive sensor telemetry from intelligence data
-            region_entries = entries[: len(entries) // len(self.SENSOR_REGIONS) + 1]
-            attack_dist = self._compute_attack_distribution(region_entries)
-            event_count = len(region_entries) * 47  # Amplification factor
-
-            sensor = {
-                "sensor_id": _gid("sensor", region["region"]),
-                "region": region["region"],
-                "location": region["location"],
-                "provider": region["provider"],
-                "status": "ONLINE",
-                "uptime_pct": round(99.5 + random.uniform(0, 0.49), 2),
-                "events_24h": event_count,
-                "attack_distribution": attack_dist,
-                "top_source_countries": self._derive_source_countries(region_entries),
-                "top_targeted_ports": [22, 3389, 445, 80, 443, 8080, 8443, 1433, 3306, 5432],
-                "unique_source_ips": len(set(e.get("stix_id", "")[:12] for e in region_entries)),
-                "last_heartbeat": _now(),
-            }
-            sensors.append(sensor)
-            total_events += event_count
-
+    def generate_telemetry(self, entries=None) -> Dict:
+        items = _items(entries)
+        now = datetime.now(timezone.utc)
+        by_src = defaultdict(lambda: {"advisories": 0, "latest": None})
+        unsourced = 0
+        n24 = n7 = 0
+        for e in items:
+            ts = _ts(e)
+            if ts and ts >= now - timedelta(hours=24): n24 += 1
+            if ts and ts >= now - timedelta(days=7): n7 += 1
+            src = str(e.get("feed_source") or e.get("source") or "").strip()
+            if not src:
+                unsourced += 1; continue
+            s = by_src[src[:80]]
+            s["advisories"] += 1
+            if ts and (s["latest"] is None or ts > s["latest"]): s["latest"] = ts
+        sources = [{"source": k, "advisories": v["advisories"],
+                    "latest_published": v["latest"].isoformat() if v["latest"] else None}
+                   for k, v in sorted(by_src.items(), key=lambda kv: kv[1]["advisories"], reverse=True)]
         return {
-            "network_id": _gid("sensornet", _now()),
-            "sensor_count": len(sensors),
-            "sensors": sensors,
-            "total_events_24h": total_events,
-            "global_threat_level": self._compute_global_threat_level(entries),
+            "operated": False,
+            "capability": "feed_ingestion",
+            "note": self.NOTE,
+            "sensors_operated": 0,
+            "source_count": len(sources),
+            "sources": sources[:25],
+            "advisories_total": len(items),
+            "advisories_without_source": unsourced,
+            "advisories_24h": n24,
+            "advisories_7d": n7,
+            "global_threat_level": self._compute_global_threat_level(items),
             "generated_at": _now(),
         }
 
-    def _compute_attack_distribution(self, entries):
-        dist = {cat: 0 for cat in self.ATTACK_CATEGORIES}
-        for e in entries:
-            risk = e.get("risk_score", 0) or 0
-            if risk >= 8: dist["exploit_attempt"] += 3; dist["c2_beacon"] += 2
-            elif risk >= 6: dist["brute_force"] += 2; dist["web_exploit"] += 2
-            else: dist["port_scan"] += 3; dist["credential_stuffing"] += 1
-            if e.get("kev_present"): dist["exploit_attempt"] += 5
-        return dist
-
-    def _derive_source_countries(self, entries):
-        return [
-            {"country": "CN", "pct": 22}, {"country": "RU", "pct": 18},
-            {"country": "US", "pct": 12}, {"country": "KP", "pct": 8},
-            {"country": "IR", "pct": 7}, {"country": "BR", "pct": 6},
-            {"country": "IN", "pct": 5}, {"country": "OTHER", "pct": 22},
-        ]
-
     def _compute_global_threat_level(self, entries):
         if not entries: return "LOW"
-        avg_risk = statistics.mean(e.get("risk_score", 0) or 0 for e in entries)
+        avg_risk = statistics.mean(_risk(e) for e in entries)
         if avg_risk >= 7: return "CRITICAL"
         if avg_risk >= 5: return "HIGH"
         if avg_risk >= 3: return "ELEVATED"
@@ -147,185 +197,79 @@ class GlobalCyberSensorNetwork:
 
 
 # ===============================================================================
-# G02 - SENTINEL GLOBAL HONEYPOT GRID
+# G02 - EXPLOITATION EVIDENCE (no honeypots are operated)
 # ===============================================================================
 
 class HoneypotGrid:
-    """Multi-protocol deception infrastructure capturing attacker behavior,
-    payloads, credentials, and malware samples."""
+    """Exploitation evidence carried by the feed: CISA KEV status, public
+    exploit references, EPSS. No honeypots are operated."""
 
-    HONEYPOT_TYPES = [
-        {"type": "ssh", "port": 22, "protocol": "SSH", "emulation": "OpenSSH 8.9"},
-        {"type": "rdp", "port": 3389, "protocol": "RDP", "emulation": "Windows Server 2022"},
-        {"type": "smb", "port": 445, "protocol": "SMB", "emulation": "Samba 4.17"},
-        {"type": "http_exploit", "port": 80, "protocol": "HTTP", "emulation": "Apache 2.4 + WordPress"},
-        {"type": "ics_modbus", "port": 502, "protocol": "Modbus/TCP", "emulation": "Schneider PLC"},
-        {"type": "iot_mqtt", "port": 1883, "protocol": "MQTT", "emulation": "Mosquitto Broker"},
-        {"type": "db_mysql", "port": 3306, "protocol": "MySQL", "emulation": "MySQL 8.0"},
-        {"type": "smtp", "port": 25, "protocol": "SMTP", "emulation": "Postfix 3.7"},
-    ]
+    NOTE = ("No honeypots are operated. Exploitation evidence comes from the feed: "
+            "CISA KEV status, public exploit references and EPSS.")
 
-    def generate_grid_telemetry(self) -> Dict:
-        """Generate honeypot grid capture data from intel signals."""
-        entries = _entries()
-        honeypots = []
-        captures = []
-
-        for hp_type in self.HONEYPOT_TYPES:
-            # Derive captures from advisory data
-            relevant = [e for e in entries if self._matches_protocol(e, hp_type)]
-            capture_count = max(1, len(relevant) * 12)
-
-            hp = {
-                "honeypot_id": _gid("honeypot", hp_type["type"]),
-                "type": hp_type["type"],
-                "port": hp_type["port"],
-                "protocol": hp_type["protocol"],
-                "emulation": hp_type["emulation"],
-                "status": "ACTIVE",
-                "captures_24h": capture_count,
-                "unique_attackers": max(1, capture_count // 3),
-                "credentials_harvested": capture_count // 5 if hp_type["type"] in ["ssh", "rdp", "smtp", "db_mysql"] else 0,
-                "payloads_captured": capture_count // 8 if hp_type["type"] in ["http_exploit", "smb"] else 0,
-                "top_credentials": self._common_credentials(hp_type["type"]),
-            }
-            honeypots.append(hp)
-
-            # Generate sample capture events
-            for e in relevant[:3]:
-                captures.append({
-                    "capture_id": _gid("capture", f"{hp_type['type']}:{e.get('stix_id','')}"),
-                    "honeypot_type": hp_type["type"],
-                    "advisory_link": e.get("stix_id", ""),
-                    "risk_score": e.get("risk_score", 0),
-                    "actor_tag": e.get("actor_tag", ""),
-                    "timestamp": _now(),
-                })
-
+    def generate_grid_telemetry(self, entries=None) -> Dict:
+        items = _items(entries)
+        kev = [e for e in items if _kev(e)]
+        expl = [e for e in items if _public_exploit(e)]
+        weaponized = [e for e in items if str(e.get("exploit_maturity") or "").upper() == "WEAPONIZED"]
+        epss_scored = [x for x in (_epss(e) for e in items) if x is not None]
         return {
-            "grid_id": _gid("grid", _now()),
-            "honeypot_count": len(honeypots),
-            "honeypots": honeypots,
-            "total_captures_24h": sum(h["captures_24h"] for h in honeypots),
-            "sample_captures": captures[:20],
+            "operated": False,
+            "capability": "exploitation_evidence",
+            "note": self.NOTE,
+            "honeypots_operated": 0,
+            "kev_confirmed": len(kev),
+            "public_exploit_available": len(expl),
+            "weaponized": len(weaponized),
+            "epss_scored": len(epss_scored),
+            "epss_high": sum(1 for x in epss_scored if x >= 0.5),
+            "kev_advisories": [{"stix_id": e.get("stix_id") or e.get("id"), "title": _title(e)[:120],
+                                "risk_score": _risk(e)}
+                               for e in sorted(kev, key=_risk, reverse=True)[:10]],
             "generated_at": _now(),
         }
 
-    def _matches_protocol(self, entry, hp_type):
-        title = (entry.get("title", "") or "").lower()
-        keywords = {
-            "ssh": ["ssh", "openssh", "brute force"],
-            "rdp": ["rdp", "remote desktop", "bluekeep"],
-            "smb": ["smb", "samba", "eternalblue", "worm"],
-            "http_exploit": ["http", "web", "wordpress", "apache", "nginx", "xss", "sqli", "rce"],
-            "ics_modbus": ["ics", "scada", "plc", "modbus", "industrial"],
-            "iot_mqtt": ["iot", "mqtt", "smart", "embedded"],
-            "db_mysql": ["sql", "mysql", "database", "injection"],
-            "smtp": ["email", "phishing", "smtp", "spam"],
-        }
-        return any(kw in title for kw in keywords.get(hp_type["type"], []))
-
-    def _common_credentials(self, hp_type):
-        creds = {
-            "ssh": [("root", "password"), ("admin", "admin"), ("root", "123456")],
-            "rdp": [("Administrator", "Password1"), ("admin", "admin")],
-            "db_mysql": [("root", ""), ("root", "root"), ("admin", "admin123")],
-            "smtp": [("admin", "password"), ("postmaster", "postmaster")],
-        }
-        return [{"username": u, "password_hash": hashlib.md5(p.encode(), usedforsecurity=False).hexdigest()[:8]}
-                for u, p in creds.get(hp_type, [])]
-
 
 # ===============================================================================
-# G03 - MALWARE ANALYSIS CLOUD
+# G03 - MALWARE FAMILIES NAMED IN ADVISORIES
 # ===============================================================================
 
 class MalwareAnalysisCloud:
-    """Scalable malware analysis: static analysis, sandbox execution,
-    behavior extraction, YARA scanning, packer detection."""
+    """Malware families named in advisory titles, and the ATT&CK techniques
+    those advisories carry. No sandbox or sample analysis is operated."""
 
-    def analyze_landscape(self) -> Dict:
-        """Generate malware landscape analysis from advisory data."""
-        entries = _entries()
-        malware_families = Counter()
-        techniques_used = Counter()
-        file_types = Counter()
+    FAMILIES = ["lockbit", "cl0p", "alphv", "blackcat", "akira", "play", "medusa",
+                "rhysida", "black basta", "ransomhub", "xmrig", "cobalt strike",
+                "emotet", "qbot", "trickbot", "mimikatz", "metasploit", "sliver", "havoc"]
 
-        for e in entries:
-            title = (e.get("title", "") or "").lower()
-            # Extract malware family signals
-            for family in ["lockbit", "cl0p", "alphv", "blackcat", "ransomware",
-                          "xmrig", "cobalt strike", "emotet", "qbot", "trickbot",
-                          "mimikatz", "metasploit", "sliver", "havoc"]:
-                if family in title:
-                    malware_families[family.title()] += 1
-
-            for t in e.get("mitre_tactics", []):
-                tid = t if isinstance(t, str) else t.get("technique_id", "")
-                if tid: techniques_used[tid] += 1
-
-            # Infer file types from IOC counts
-            iocs = e.get("ioc_counts", {})
-            if iocs.get("sha256", 0) > 0: file_types["PE/EXE"] += 1
-            if iocs.get("domain", 0) > 0: file_types["Script/Document"] += 1
-
-        # Build analysis report
-        yara_rules = self._generate_landscape_yara(malware_families)
-
+    def analyze_landscape(self, entries=None) -> Dict:
+        items = _items(entries)
+        families, techniques = Counter(), Counter()
+        for e in items:
+            title = _title(e).lower()
+            for family in self.FAMILIES:
+                if re.search(r'\b' + re.escape(family) + r'\b', title):
+                    families[family.title()] += 1
+            for tid in _techniques(e): techniques[tid] += 1
         return {
-            "analysis_id": _gid("malcloud", _now()),
-            "malware_families_detected": len(malware_families),
-            "top_families": malware_families.most_common(10),
-            "technique_distribution": techniques_used.most_common(15),
-            "file_type_distribution": dict(file_types),
-            "yara_rule_count": len(yara_rules),
-            "yara_rules": yara_rules[:5],
-            "sandbox_config": {
-                "environments": ["Windows 10 x64", "Windows 11 x64", "Ubuntu 22.04", "macOS 14"],
-                "timeout_seconds": 300,
-                "network_capture": True,
-                "memory_dump": True,
-                "api_hooking": True,
-            },
-            "analysis_capabilities": [
-                "Static PE analysis", "Dynamic sandbox execution",
-                "Behavioral extraction", "YARA scanning", "Packer detection",
-                "String extraction", "Import/Export analysis",
-                "Network indicator extraction", "Mutex detection",
-                "Registry modification tracking", "File system monitoring",
-            ],
+            "method": "Malware family names matched in advisory titles (no sandbox or sample analysis is operated).",
+            "malware_families_detected": len(families),
+            "top_families": families.most_common(10),
+            "technique_distribution": techniques.most_common(15),
+            "advisories_with_family": sum(1 for e in items
+                                          if any(re.search(r'\b' + re.escape(f) + r'\b', _title(e).lower())
+                                                 for f in self.FAMILIES)),
             "generated_at": _now(),
         }
 
-    def _generate_landscape_yara(self, families):
-        rules = []
-        for family, count in families.most_common(5):
-            safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', family)
-            rules.append({
-                "rule_name": f"CDB_Malware_{safe_name}",
-                "family": family,
-                "advisory_count": count,
-                "rule_text": f'rule CDB_Malware_{safe_name} {{\n'
-                    f'    meta:\n'
-                    f'        author = "CyberDudeBivash GOC"\n'
-                    f'        description = "Detects {family} malware family"\n'
-                    f'        date = "{datetime.now(timezone.utc).strftime("%Y-%m-%d")}"\n'
-                    f'    strings:\n'
-                    f'        $family = "{family}" ascii wide nocase\n'
-                    f'    condition:\n'
-                    f'        $family\n'
-                    f'}}',
-            })
-        return rules
-
 
 # ===============================================================================
-# G04 - THREAT ACTOR INTELLIGENCE REGISTRY
+# G04 - THREAT ACTOR REGISTRY (actors observed in the feed)
 # ===============================================================================
 
 class ThreatActorIntelRegistry:
-    """Structured threat actor database with MITRE ATT&CK mapping,
-    campaigns, infrastructure, malware families, and targeting."""
+    """Actors observed in the feed (placeholder tags excluded), enriched with
+    a reference profile where one exists."""
 
     ACTOR_DB = {
         "APT28": {"aliases": ["Fancy Bear", "Sofacy", "Strontium", "Forest Blizzard"],
@@ -354,658 +298,442 @@ class ThreatActorIntelRegistry:
                   "active_since": "2021", "confidence": "HIGH"},
     }
 
-    def build_registry(self) -> Dict:
-        """Build complete actor registry from known DB + intelligence signals."""
-        entries = _entries()
-        actor_activity = defaultdict(lambda: {"advisories": 0, "max_risk": 0, "techniques": set(), "cves": set()})
-
-        for e in entries:
-            actor = e.get("actor_tag", "")
-            if actor and actor != "UNC-CDB-99":
-                aa = actor_activity[actor]
-                aa["advisories"] += 1
-                aa["max_risk"] = max(aa["max_risk"], e.get("risk_score", 0) or 0)
-                for t in e.get("mitre_tactics", []):
-                    tid = t if isinstance(t, str) else t.get("technique_id", "")
-                    if tid: aa["techniques"].add(tid)
-                for cve in CVE_RE.findall(e.get("title", "")):
-                    aa["cves"].add(cve.upper())
+    def build_registry(self, entries=None) -> Dict:
+        items = _items(entries)
+        activity = defaultdict(lambda: {"advisories": 0, "max_risk": 0.0, "techniques": set(), "cves": set()})
+        unattributed = 0
+        for e in items:
+            actor = _actor(e)
+            if not actor:
+                unattributed += 1; continue
+            a = activity[actor]
+            a["advisories"] += 1
+            a["max_risk"] = max(a["max_risk"], _risk(e))
+            a["techniques"].update(_techniques(e))
+            a["cves"].update(_cves(e))
 
         registry = []
-        for actor_name, profile in self.ACTOR_DB.items():
-            activity = actor_activity.get(actor_name, {"advisories": 0, "max_risk": 0, "techniques": set(), "cves": set()})
+        for name, a in activity.items():
+            profile = self.ACTOR_DB.get(name)
             registry.append({
-                "actor_id": _gid("actor", actor_name),
-                "name": actor_name,
-                **profile,
-                "observed_advisories": activity["advisories"],
-                "max_observed_risk": activity["max_risk"],
-                "observed_techniques": sorted(activity["techniques"]),
-                "observed_cves": sorted(activity["cves"]),
-                "threat_level": "CRITICAL" if activity["max_risk"] >= 9 else "HIGH" if activity["max_risk"] >= 7 else "MEDIUM",
+                "actor_id": _gid("actor", name),
+                "name": name,
+                **(profile or {"aliases": [], "origin": "Unknown", "motivation": "Unknown",
+                               "sectors": [], "active_since": "Unknown", "confidence": "LOW"}),
+                "profiled": profile is not None,
+                "observed_advisories": a["advisories"],
+                "max_observed_risk": a["max_risk"],
+                "observed_techniques": sorted(a["techniques"]),
+                "observed_cves": sorted(a["cves"]),
+                "threat_level": "CRITICAL" if a["max_risk"] >= 9 else "HIGH" if a["max_risk"] >= 7 else "MEDIUM",
             })
-
-        # Add unknown actors from intelligence
-        for actor, activity in actor_activity.items():
-            if actor not in self.ACTOR_DB:
-                registry.append({
-                    "actor_id": _gid("actor", actor),
-                    "name": actor,
-                    "aliases": [], "origin": "Unknown", "motivation": "Unknown",
-                    "sectors": ["Unknown"], "active_since": "Unknown", "confidence": "LOW",
-                    "observed_advisories": activity["advisories"],
-                    "max_observed_risk": activity["max_risk"],
-                    "observed_techniques": sorted(activity["techniques"]),
-                    "observed_cves": sorted(activity["cves"]),
-                    "threat_level": "HIGH" if activity["max_risk"] >= 7 else "MEDIUM",
-                })
-
+        known = sum(1 for r in registry if r["profiled"])
         return {
             "registry_id": _gid("registry", _now()),
+            "method": "Actor tags observed in the feed; placeholder tags (UNC-CDB-*, CDB-UNATTR-*) are not actors.",
             "total_actors": len(registry),
-            "known_actors": len(self.ACTOR_DB),
-            "discovered_actors": len(registry) - len(self.ACTOR_DB),
-            "actors": sorted(registry, key=lambda a: a.get("max_observed_risk", 0), reverse=True),
+            "known_actors": known,
+            "discovered_actors": len(registry) - known,
+            "profiles_available": len(self.ACTOR_DB),
+            "unattributed_advisories": unattributed,
+            "actors": sorted(registry, key=lambda r: (r["max_observed_risk"], r["observed_advisories"]), reverse=True),
             "generated_at": _now(),
         }
 
 
 # ===============================================================================
-# G05 - CAMPAIGN CORRELATION ENGINE
+# G05 - CAMPAIGN CORRELATION (actor-tag grouping + same-day bursts)
 # ===============================================================================
 
 class CampaignCorrelationEngine:
-    """Graph-based campaign detection through infrastructure reuse,
-    malware similarity, and attack timeline correlation."""
+    """Groups advisories by attributed actor tag, and flags days where two
+    or more attributed actors appear in five or more advisories."""
 
-    def correlate(self) -> Dict:
-        entries = _entries()
-        if not entries: return {"campaigns": []}
-
-        # Build correlation indexes
-        actor_idx = defaultdict(list)
-        tech_idx = defaultdict(list)
-        cve_idx = defaultdict(list)
-        time_idx = defaultdict(list)
-
-        for i, e in enumerate(entries):
-            a = e.get("actor_tag", "")
-            if a and a != "UNC-CDB-99": actor_idx[a].append(i)
-            for t in e.get("mitre_tactics", []):
-                tid = t if isinstance(t, str) else t.get("technique_id", "")
-                if tid: tech_idx[tid].append(i)
-            for c in CVE_RE.findall(e.get("title", "")):
-                cve_idx[c.upper()].append(i)
-            ts = e.get("timestamp", "")[:10]
-            if ts: time_idx[ts].append(i)
+    def correlate(self, entries=None) -> Dict:
+        items = _items(entries)
+        by_actor, by_day = defaultdict(list), defaultdict(list)
+        for e in items:
+            actor = _actor(e)
+            if actor: by_actor[actor].append(e)
+            ts = _ts(e)
+            if ts: by_day[ts.date().isoformat()].append(e)
 
         campaigns = []
-
-        # Actor-centered campaigns
-        for actor, indices in actor_idx.items():
-            if len(indices) < 2: continue
-            campaign_entries = [entries[i] for i in indices]
-            techs = set()
-            cves = set()
-            for ce in campaign_entries:
-                for t in ce.get("mitre_tactics", []):
-                    tid = t if isinstance(t, str) else t.get("technique_id", "")
-                    if tid: techs.add(tid)
-                for c in CVE_RE.findall(ce.get("title", "")): cves.add(c.upper())
-
-            max_risk = max((ce.get("risk_score", 0) or 0) for ce in campaign_entries)
+        for actor, group in by_actor.items():
+            if len(group) < 2: continue
+            techs = sorted({t for e in group for t in _techniques(e)})
+            cves = sorted({c for e in group for c in _cves(e)})
+            max_risk = max(_risk(e) for e in group)
             campaigns.append({
-                "campaign_id": _gid("campaign", f"{actor}:{len(indices)}"),
-                "name": f"Campaign: {actor} Multi-Vector Operation",
+                "campaign_id": _gid("campaign", f"{actor}:{len(group)}"),
+                "name": f"{actor} activity cluster",
                 "actor": actor,
-                "advisory_count": len(indices),
-                "techniques": sorted(techs)[:15],
-                "cves": sorted(cves)[:10],
+                "advisory_count": len(group),
+                "techniques": techs[:15],
+                "cves": cves[:10],
                 "max_risk": max_risk,
                 "severity": "CRITICAL" if max_risk >= 9 else "HIGH" if max_risk >= 7 else "MEDIUM",
-                "confidence": min(95, 30 + len(indices) * 10 + len(techs) * 3),
-                "correlation_type": "actor_infrastructure",
+                "confidence": min(95, 30 + len(group) * 10 + len(techs) * 3),
+                "confidence_basis": "heuristic: advisory and technique counts",
+                "correlation_type": "actor_tag_grouping",
             })
-
-        # Temporal burst correlation
-        for date, indices in time_idx.items():
-            if len(indices) >= 5:
-                burst_entries = [entries[i] for i in indices]
-                actors = set(e.get("actor_tag", "") for e in burst_entries if e.get("actor_tag"))
-                if len(actors) >= 2:
-                    campaigns.append({
-                        "campaign_id": _gid("campaign", f"burst:{date}"),
-                        "name": f"Coordinated Activity Burst: {date}",
-                        "actor": ", ".join(sorted(actors)[:3]),
-                        "advisory_count": len(indices),
-                        "techniques": [],
-                        "cves": [],
-                        "max_risk": max((e.get("risk_score", 0) or 0) for e in burst_entries),
-                        "severity": "HIGH",
-                        "confidence": min(80, 20 + len(indices) * 5),
-                        "correlation_type": "temporal_burst",
-                    })
-
+        for day, group in by_day.items():
+            actors = sorted({_actor(e) for e in group} - {""})
+            if len(group) >= 5 and len(actors) >= 2:
+                campaigns.append({
+                    "campaign_id": _gid("campaign", f"burst:{day}"),
+                    "name": f"Same-day activity: {day}",
+                    "actor": ", ".join(actors[:3]),
+                    "advisory_count": len(group),
+                    "techniques": [], "cves": [],
+                    "max_risk": max(_risk(e) for e in group),
+                    "severity": "HIGH",
+                    "confidence": min(80, 20 + len(group) * 5),
+                    "confidence_basis": "heuristic: advisory count",
+                    "correlation_type": "same_day_burst",
+                })
         return {
             "total_campaigns": len(campaigns),
             "campaigns": sorted(campaigns, key=lambda c: c["max_risk"], reverse=True),
-            "correlation_methods": ["actor_infrastructure", "temporal_burst", "technique_overlap"],
+            "correlation_methods": ["actor_tag_grouping", "same_day_burst"],
             "generated_at": _now(),
         }
 
 
 # ===============================================================================
-# G06 - IOC REPUTATION ENGINE
+# G06 - CVE REPUTATION
 # ===============================================================================
 
 class IOCReputationEngine:
-    """Multi-signal reputation scoring for IPs, domains, URLs, hashes."""
+    """Reputation score per CVE referenced by the feed (sightings, risk,
+    actor associations, KEV, source spread)."""
 
-    def compute_reputations(self) -> Dict:
-        entries = _entries()
-        if not entries: return {"ioc_reputations": [], "stats": {}}
-
-        ioc_scores = defaultdict(lambda: {"sightings": 0, "max_risk": 0, "actors": set(),
-                                           "kev_associated": False, "sources": set()})
-
-        for e in entries:
-            risk = e.get("risk_score", 0) or 0
-            actor = e.get("actor_tag", "")
-            kev = e.get("kev_present", False)
-            source = e.get("feed_source", "")
-            title = e.get("title", "")
-
-            for cve in CVE_RE.findall(title):
-                ioc = ioc_scores[f"cve:{cve.upper()}"]
-                ioc["sightings"] += 1
-                ioc["max_risk"] = max(ioc["max_risk"], risk)
-                if actor: ioc["actors"].add(actor)
-                if kev: ioc["kev_associated"] = True
-                if source: ioc["sources"].add(source[:30])
-
-        # Score computation
+    def compute_reputations(self, entries=None) -> Dict:
+        items = _items(entries)
+        scores = defaultdict(lambda: {"sightings": 0, "max_risk": 0.0, "actors": set(), "kev": False, "sources": set()})
+        for e in items:
+            for cve in _cves(e):
+                s = scores[f"cve:{cve}"]
+                s["sightings"] += 1
+                s["max_risk"] = max(s["max_risk"], _risk(e))
+                if _actor(e): s["actors"].add(_actor(e))
+                if _kev(e): s["kev"] = True
+                src = str(e.get("feed_source") or "").strip()
+                if src: s["sources"].add(src[:30])
         reputations = []
-        for ioc_key, data in ioc_scores.items():
-            score = min(100, (
-                data["max_risk"] * 8 +
-                min(data["sightings"], 10) * 3 +
-                len(data["actors"]) * 5 +
-                (20 if data["kev_associated"] else 0) +
-                len(data["sources"]) * 2
-            ))
+        for key, d in scores.items():
+            score = min(100.0, d["max_risk"] * 8 + min(d["sightings"], 10) * 3 + len(d["actors"]) * 5
+                        + (20 if d["kev"] else 0) + len(d["sources"]) * 2)
             reputations.append({
-                "ioc": ioc_key,
+                "ioc": key,
                 "reputation_score": round(score, 1),
                 "verdict": "MALICIOUS" if score >= 70 else "SUSPICIOUS" if score >= 40 else "UNKNOWN",
-                "sightings": data["sightings"],
-                "max_risk": data["max_risk"],
-                "actor_associations": sorted(data["actors"]),
-                "kev_confirmed": data["kev_associated"],
-                "source_count": len(data["sources"]),
+                "sightings": d["sightings"],
+                "max_risk": d["max_risk"],
+                "actor_associations": sorted(d["actors"]),
+                "kev_confirmed": d["kev"],
+                "source_count": len(d["sources"]),
             })
-
         reputations.sort(key=lambda r: r["reputation_score"], reverse=True)
-
         return {
+            "ioc_types_scored": ["cve"],
             "total_iocs_scored": len(reputations),
             "malicious_count": sum(1 for r in reputations if r["verdict"] == "MALICIOUS"),
             "suspicious_count": sum(1 for r in reputations if r["verdict"] == "SUSPICIOUS"),
+            "kev_cves": sum(1 for r in reputations if r["kev_confirmed"]),
             "ioc_reputations": reputations[:100],
             "generated_at": _now(),
         }
 
 
 # ===============================================================================
-# G07 - AUTOMATED DETECTION RULE GENERATOR
+# G07 - DETECTION CONTENT (rules actually attached to feed items)
 # ===============================================================================
 
 class AutoDetectionGenerator:
-    """Auto-generates Sigma, YARA, Suricata, Snort, and EDR hunting queries."""
+    """Counts the detection rules attached to feed items by
+    scripts/detection_bundle_injector.py (served per item at
+    /api/v1/detections). No rules are synthesized here."""
 
-    def generate_full_pack(self) -> Dict:
-        entries = _entries()
-        high_risk = [e for e in entries if (e.get("risk_score", 0) or 0) >= 7]
-        if not high_risk: return {"rules": {}, "stats": {}}
-
-        sigma_rules, yara_rules, suricata_rules, snort_rules, edr_queries = [], [], [], [], []
-
-        for entry in high_risk[:25]:
-            title = entry.get("title", "")
-            safe = re.sub(r'[^a-zA-Z0-9_]', '_', title[:40])
-            cves = CVE_RE.findall(title)
-            risk = entry.get("risk_score", 0) or 0
-            tactics = [t if isinstance(t, str) else t.get("technique_id", "")
-                       for t in entry.get("mitre_tactics", [])]
-
-            # Sigma
-            if cves or tactics:
-                sigma_rules.append({
-                    "id": _gid("sigma", safe),
-                    "title": f"CDB-APEX: {title[:60]}",
-                    "level": "critical" if risk >= 9 else "high",
-                    "tags": [f"attack.{t.lower()}" for t in tactics[:3]],
-                })
-
-            # YARA
-            if cves:
-                yara_rules.append({
-                    "name": f"CDB_{safe[:30]}",
-                    "cves": cves[:3],
-                    "severity": "critical" if risk >= 9 else "high",
-                })
-
-            # Suricata
-            sid = abs(hash(safe)) % 9000000 + 1000000
-            suricata_rules.append({
-                "sid": sid,
-                "msg": f"CDB APEX: {title[:50]}",
-                "severity": 1 if risk >= 9 else 2,
-            })
-
-            # Snort
-            snort_rules.append({
-                "sid": sid + 1,
-                "msg": f"CDB-SNORT: {title[:50]}",
-            })
-
-            # EDR query (KQL-style)
-            if tactics:
-                edr_queries.append({
-                    "query_name": f"Hunt: {title[:40]}",
-                    "kql": f'DeviceProcessEvents | where ProcessCommandLine contains "{tactics[0]}" | project Timestamp, DeviceName, ProcessCommandLine',
-                    "platform": "Microsoft Defender / Sentinel",
-                })
-
+    def generate_full_pack(self, entries=None) -> Dict:
+        items = _items(entries)
+        lists = {kind: [] for kind in DETECTION_FIELDS}
+        covered = 0
+        for e in items:
+            has_any = False
+            for kind, field in DETECTION_FIELDS.items():
+                if str(e.get(field) or "").strip():
+                    has_any = True
+                    lists[kind].append({"stix_id": e.get("stix_id") or e.get("id"), "title": _title(e)[:100]})
+            covered += has_any
+        high_risk = [e for e in items if _risk(e) >= 7]
+        uncovered_high = sum(1 for e in high_risk
+                             if not any(str(e.get(f) or "").strip() for f in DETECTION_FIELDS.values()))
+        counts = {k: len(v) for k, v in lists.items()}
         return {
             "detection_pack_id": _gid("detpack", _now()),
-            "sigma_rules": sigma_rules,
-            "yara_rules": yara_rules,
-            "suricata_rules": suricata_rules,
-            "snort_rules": snort_rules,
-            "edr_queries": edr_queries,
+            "source": "Per-advisory rules from scripts/detection_bundle_injector.py (served at /api/v1/detections).",
+            "sigma_rules": lists["sigma"][:50],
+            "kql_queries": lists["kql"][:50],
+            "suricata_rules": lists["suricata"][:50],
+            "yara_rules": lists["yara"][:50],
+            "total_rules": sum(counts.values()),
+            "sigma_count": counts["sigma"], "kql_count": counts["kql"],
+            "suricata_count": counts["suricata"], "yara_count": counts["yara"],
+            "advisories_with_detections": covered,
+            "high_risk_without_detections": uncovered_high,
             "stats": {
-                "total_rules": len(sigma_rules) + len(yara_rules) + len(suricata_rules) + len(snort_rules) + len(edr_queries),
-                "sigma": len(sigma_rules), "yara": len(yara_rules),
-                "suricata": len(suricata_rules), "snort": len(snort_rules),
-                "edr": len(edr_queries),
+                "total_rules": sum(counts.values()),
+                "sigma": counts["sigma"], "kql": counts["kql"], "yara": counts["yara"],
+                "suricata": counts["suricata"],
             },
             "generated_at": _now(),
         }
 
 
 # ===============================================================================
-# G08 - TAXII / CTI API SERVER
+# G08 - TAXII 2.1 (the collections the Worker serves)
 # ===============================================================================
 
 class TAXIIServer:
-    """Enterprise-grade STIX/TAXII 2.1 distribution configuration."""
+    """The TAXII 2.1 surface the intel-gateway Worker serves. Collection ids
+    mirror TAXII_COLLECTION_ID / TAXII_KEV_COLL in
+    workers/intel-gateway/src/index.js (parity is tested)."""
 
-    def generate_server_config(self) -> Dict:
-        entries = _entries()
-        collections = [
-            {"id": "cdb-threat-intel", "title": "CDB Threat Intelligence Feed", "can_read": True, "can_write": False,
-             "description": "Real-time threat advisories from Sentinel APEX"},
-            {"id": "cdb-ioc-feed", "title": "CDB IOC Feed", "can_read": True, "can_write": False,
-             "description": "Indicators of Compromise extracted from advisories"},
-            {"id": "cdb-detection-rules", "title": "CDB Detection Rules", "can_read": True, "can_write": False,
-             "description": "Auto-generated Sigma, YARA, and Snort rules"},
-            {"id": "cdb-actor-intel", "title": "CDB Actor Intelligence", "can_read": True, "can_write": False,
-             "description": "Threat actor profiles and campaign intelligence"},
-        ]
+    COLLECTIONS = [
+        {"id": "sentinel-apex-main", "title": "SENTINEL APEX - Primary Threat Intelligence",
+         "access": "PRO or ENTERPRISE", "can_read": True, "can_write": False},
+        {"id": "sentinel-apex-kev", "title": "SENTINEL APEX - CISA KEV Confirmed",
+         "access": "ENTERPRISE", "can_read": True, "can_write": False},
+    ]
 
+    def generate_server_config(self, entries=None) -> Dict:
+        items = _items(entries)
         return {
             "taxii_server": {
-                "title": "CyberDudeBivash TAXII Server",
-                "description": "Sentinel APEX Threat Intelligence Distribution",
+                "title": "SENTINEL APEX TAXII 2.1",
                 "version": "2.1",
-                "api_root": "https://api.cyberdudebivash.com/taxii2/",
-                "discovery_url": "https://api.cyberdudebivash.com/taxii2/",
-                "max_content_length": 10485760,
+                "discovery": "/taxii/",
+                "collections_endpoint": "/taxii/collections/",
+                "objects_endpoint": "/taxii/collections/{id}/objects/",
+                "auth": "PRO or ENTERPRISE API key (JWT via /auth/login)",
             },
-            "collections": collections,
-            "api_endpoints": {
-                "discovery": "GET /taxii2/",
-                "api_root": "GET /taxii2/api/",
-                "collections": "GET /taxii2/api/collections/",
-                "objects": "GET /taxii2/api/collections/{id}/objects/",
-                "manifest": "GET /taxii2/api/collections/{id}/manifest/",
-            },
-            "rest_api": {
-                "base_url": "https://api.cyberdudebivash.com/v1/",
-                "endpoints": {
-                    "advisories": "GET /v1/advisories",
-                    "advisories_by_id": "GET /v1/advisories/{stix_id}",
-                    "iocs": "GET /v1/iocs",
-                    "actors": "GET /v1/actors",
-                    "campaigns": "GET /v1/campaigns",
-                    "detection_rules": "GET /v1/detection-rules",
-                    "exposure_score": "GET /v1/exposure",
-                    "stix_bundle": "GET /v1/stix/{bundle_id}",
-                    "search": "POST /v1/search",
-                    "stream": "WS wss://stream.cyberdudebivash.com/v1/stream",
-                },
-                "auth": "Bearer token (API key)",
-                "rate_limits": {"free": "100/day", "pro": "5000/day", "enterprise": "unlimited"},
-                "formats": ["json", "stix2.1", "csv", "misp"],
-            },
+            "collections": self.COLLECTIONS,
+            "collection_count": len(self.COLLECTIONS),
             "current_stats": {
-                "total_objects": len(entries),
-                "stix_bundles": len(entries),
+                "advisories_available": len(items),
+                "kev_advisories": sum(1 for e in items if _kev(e)),
             },
             "generated_at": _now(),
         }
 
 
 # ===============================================================================
-# G09 - DARKWEB INTELLIGENCE ENGINE
+# G09 - RANSOMWARE & LEAK ADVISORIES (no dark-web monitoring is operated)
 # ===============================================================================
 
 class DarkWebIntelligence:
-    """Monitor ransomware leak sites, darknet markets, paste sites,
-    Telegram channels, and forums for threat intelligence."""
+    """Advisories in the feed about ransomware and data leaks. No dark-web
+    monitoring is operated (the Worker's /api/dark-web/* routes return 503)."""
 
-    MONITORED_SOURCES = [
-        {"type": "ransomware_leak", "name": "LockBit Leak Site", "status": "ACTIVE"},
-        {"type": "ransomware_leak", "name": "Cl0p Data Leak", "status": "ACTIVE"},
-        {"type": "ransomware_leak", "name": "ALPHV/BlackCat Blog", "status": "DEFUNCT"},
-        {"type": "paste_site", "name": "Pastebin Monitoring", "status": "ACTIVE"},
-        {"type": "paste_site", "name": "GitHub Gist Monitoring", "status": "ACTIVE"},
-        {"type": "forum", "name": "Exploit.in Forum", "status": "MONITORED"},
-        {"type": "forum", "name": "XSS.is Forum", "status": "MONITORED"},
-        {"type": "telegram", "name": "Threat Actor Channels", "status": "ACTIVE"},
-        {"type": "marketplace", "name": "Initial Access Broker Markets", "status": "MONITORED"},
-    ]
+    NOTE = ("No dark-web monitoring is operated (/api/dark-web/* returns 503). "
+            "Figures count feed advisories about ransomware and data leaks.")
+    RANSOMWARE_KW = ["ransomware", "extort", "ransom", "lockbit", "cl0p", "alphv", "akira", "rhysida"]
+    LEAK_KW = ["credential", "password", "breach", "leak", "stolen", "dump"]
 
-    def generate_darkweb_report(self) -> Dict:
-        entries = _entries()
-        # Derive darkweb signals from advisory data
-        ransomware_entries = [e for e in entries if any(
-            kw in (e.get("title", "") or "").lower()
-            for kw in ["ransomware", "leak", "extort", "ransom", "lockbit", "cl0p", "alphv"]
-        )]
-
-        credential_entries = [e for e in entries if any(
-            kw in (e.get("title", "") or "").lower()
-            for kw in ["credential", "password", "breach", "leak", "stolen", "dump"]
-        )]
-
+    def generate_darkweb_report(self, entries=None) -> Dict:
+        items = _items(entries)
+        ransomware = [e for e in items if any(kw in _title(e).lower() for kw in self.RANSOMWARE_KW)]
+        leaks = [e for e in items if any(kw in _title(e).lower() for kw in self.LEAK_KW)]
+        relevant = {id(e) for e in ransomware} | {id(e) for e in leaks}
         return {
-            "report_id": _gid("darkweb", _now()),
-            "monitored_sources": self.MONITORED_SOURCES,
-            "source_count": len(self.MONITORED_SOURCES),
+            "operated": False,
+            "capability": "feed_advisories",
+            "note": self.NOTE,
+            "sources_monitored": 0,
+            "source_count": 0,
+            "ransomware_advisories": len(ransomware),
+            "leak_or_credential_advisories": len(leaks),
+            "relevant_advisories": len(relevant),
             "intelligence_signals": {
-                "ransomware_leak_activity": len(ransomware_entries),
-                "credential_exposure_signals": len(credential_entries),
-                "total_advisories_with_darkweb_relevance": len(ransomware_entries) + len(credential_entries),
+                "ransomware_leak_activity": len(ransomware),
+                "credential_exposure_signals": len(leaks),
+                "total_advisories_with_darkweb_relevance": len(relevant),
             },
-            "top_ransomware_groups": self._extract_ransomware_groups(entries),
-            "monitoring_capabilities": [
-                "Ransomware leak site monitoring",
-                "Paste site credential leak detection",
-                "Dark forum exploit trading alerts",
-                "Telegram channel intelligence",
-                "Initial access broker marketplace tracking",
-                "Data breach notification",
-                "Stolen credential alerting",
-            ],
+            "top_ransomware_groups": self._extract_ransomware_groups(items),
             "generated_at": _now(),
         }
 
     def _extract_ransomware_groups(self, entries):
         groups = Counter()
         for e in entries:
-            title = (e.get("title", "") or "").lower()
+            title = _title(e).lower()
             for group in ["lockbit", "cl0p", "alphv", "blackcat", "play", "medusa",
                           "bianlian", "8base", "akira", "rhysida", "hunters"]:
-                if group in title:
+                if re.search(r'\b' + re.escape(group) + r'\b', title):
                     groups[group.title()] += 1
         return groups.most_common(10)
 
 
 # ===============================================================================
-# G10 - ATTACK SURFACE INTELLIGENCE ENGINE
+# G10 - EXPOSURE SIGNALS IN ADVISORIES
 # ===============================================================================
 
 class AttackSurfaceIntelligence:
-    """External exposure intelligence: open ports, vulnerable services,
-    exposed dashboards, misconfigurations."""
+    """Exposure-related signals in advisory titles (misconfiguration,
+    unauthenticated RCE, API/admin exposure) and the products named. No
+    external scanning is operated."""
 
-    def analyze_exposure(self) -> Dict:
-        entries = _entries()
-        exposure_categories = defaultdict(int)
-        vulnerable_services = Counter()
+    SERVICES = ["apache", "nginx", "wordpress", "exchange", "fortinet",
+                "cisco", "palo alto", "vmware", "citrix", "jenkins"]
 
-        for e in entries:
-            title = (e.get("title", "") or "").lower()
-            if any(kw in title for kw in ["exposed", "open", "misconfigur", "default"]):
-                exposure_categories["misconfiguration"] += 1
+    def analyze_exposure(self, entries=None) -> Dict:
+        items = _items(entries)
+        categories = defaultdict(int)
+        services = Counter()
+        for e in items:
+            title = _title(e).lower()
+            if any(kw in title for kw in ["exposed", "misconfigur", "default credential", "default password"]):
+                categories["misconfiguration"] += 1
             if any(kw in title for kw in ["rce", "remote code", "unauthenticated"]):
-                exposure_categories["critical_vulnerability"] += 1
-            if any(kw in title for kw in ["api", "endpoint", "rest"]):
-                exposure_categories["api_exposure"] += 1
-            if any(kw in title for kw in ["dashboard", "admin", "panel"]):
-                exposure_categories["admin_exposure"] += 1
-
-            # Service detection
-            for svc in ["apache", "nginx", "wordpress", "exchange", "fortinet",
-                        "cisco", "palo alto", "vmware", "citrix", "jenkins"]:
-                if svc in title:
-                    vulnerable_services[svc.title()] += 1
-
+                categories["critical_vulnerability"] += 1
+            if any(kw in title for kw in [" api", "endpoint", "rest api"]):
+                categories["api_exposure"] += 1
+            if any(kw in title for kw in ["dashboard", "admin panel", "admin interface"]):
+                categories["admin_exposure"] += 1
+            for svc in self.SERVICES:
+                if svc in title: services[svc.title()] += 1
         return {
             "report_id": _gid("asm", _now()),
-            "exposure_categories": dict(exposure_categories),
-            "vulnerable_services": vulnerable_services.most_common(15),
-            "scan_capabilities": [
-                "Port scanning (TCP/UDP)", "Service fingerprinting",
-                "SSL/TLS analysis", "DNS enumeration",
-                "Web technology detection", "Admin panel discovery",
-                "API endpoint enumeration", "Cloud misconfiguration detection",
-                "Certificate transparency monitoring", "Subdomain discovery",
-            ],
-            # v48.0 FIX: top-level scalars survive _summarize() (fixes G10 "?" display bug)
-            "total_exposures": sum(exposure_categories.values()),
-            "critical_exposures": exposure_categories.get("critical_vulnerability", 0),
+            "method": "Keyword signals in advisory titles; no external scanning is operated.",
+            "exposure_categories": dict(categories),
+            "vulnerable_services": services.most_common(15),
+            "total_exposures": sum(categories.values()),
+            "critical_exposures": categories.get("critical_vulnerability", 0),
             "risk_summary": {
-                "total_exposure_signals": sum(exposure_categories.values()),
-                "critical_exposures": exposure_categories.get("critical_vulnerability", 0),
-                "misconfigurations": exposure_categories.get("misconfiguration", 0),
+                "total_exposure_signals": sum(categories.values()),
+                "critical_exposures": categories.get("critical_vulnerability", 0),
+                "misconfigurations": categories.get("misconfiguration", 0),
             },
             "generated_at": _now(),
         }
 
 
 # ===============================================================================
-# G11 - REAL-TIME GLOBAL ATTACK MAP
+# G11 - ORIGIN ATTRIBUTION (no attack flows: the feed has no attack geodata)
 # ===============================================================================
 
 class GlobalAttackMap:
-    """Real-time attack visualization data for global threat mapping."""
+    """Advisories with a threat-actor country. The feed carries no attack
+    source/target geolocation, so no attack flows are produced."""
 
-    GEO_COORDS = {
-        "CN": (35.86, 104.19), "RU": (61.52, 105.32), "US": (37.09, -95.71),
-        "KP": (40.34, 127.51), "IR": (32.43, 53.69), "BR": (-14.24, -51.93),
-        "IN": (20.59, 78.96), "DE": (51.17, 10.45), "GB": (55.38, -3.44),
-        "UA": (48.38, 31.17), "IL": (31.05, 34.85), "JP": (36.20, 138.25),
-        "KR": (35.91, 127.77), "AU": (-25.27, 133.78), "SG": (1.35, 103.82),
-    }
+    NOTE = ("The feed carries no attack source/target geolocation, so no attack flows are produced. "
+            "Origins count advisories whose threat actor has a country.")
 
-    def generate_map_data(self) -> Dict:
-        entries = _entries()
-        attack_flows = []
-        hotspots = Counter()
-
-        for e in entries:
-            risk = e.get("risk_score", 0) or 0
-            actor = e.get("actor_tag", "")
-            title = (e.get("title", "") or "").lower()
-
-            source_country = self._infer_source(actor, title)
-            target_countries = self._infer_targets(title)
-
-            for target in target_countries:
-                if source_country in self.GEO_COORDS and target in self.GEO_COORDS:
-                    attack_flows.append({
-                        "source": {"country": source_country, "lat": self.GEO_COORDS[source_country][0],
-                                   "lng": self.GEO_COORDS[source_country][1]},
-                        "target": {"country": target, "lat": self.GEO_COORDS[target][0],
-                                   "lng": self.GEO_COORDS[target][1]},
-                        "severity": "critical" if risk >= 9 else "high" if risk >= 7 else "medium",
-                        "risk_score": risk,
-                        "actor": actor,
-                    })
-                    hotspots[source_country] += 1
-                    hotspots[target] += 1
-
+    def generate_map_data(self, entries=None) -> Dict:
+        items = _items(entries)
+        origins = Counter()
+        for e in items:
+            c = str(e.get("actor_country") or "").strip()
+            if c and not _PLACEHOLDER_GEO.match(c): origins[c[:40]] += 1
+        attributed = sum(origins.values())
         return {
             "map_id": _gid("attackmap", _now()),
-            "attack_flows": attack_flows[:100],
-            "hotspots": [{"country": c, "intensity": n} for c, n in hotspots.most_common(15)],
-            "total_flows": len(attack_flows),
-            "active_corridors": len(set((f["source"]["country"], f["target"]["country"]) for f in attack_flows)),
+            "note": self.NOTE,
+            "attack_flows": [],
+            "total_flows": 0,
+            "active_corridors": 0,
+            "attributed_advisories": attributed,
+            "unattributed_advisories": len(items) - attributed,
+            "origin_countries": dict(origins.most_common(15)),
+            "hotspots": [{"country": c, "advisories": n} for c, n in origins.most_common(15)],
             "generated_at": _now(),
         }
 
-    def _infer_source(self, actor, title):
-        actor_origins = {"APT28": "RU", "APT29": "RU", "Lazarus": "KP",
-                         "Volt Typhoon": "CN", "CDB-APT-22": "CN"}
-        if actor in actor_origins: return actor_origins[actor]
-        if "china" in title or "chinese" in title: return "CN"
-        if "russia" in title or "russian" in title: return "RU"
-        if "iran" in title or "iranian" in title: return "IR"
-        if "north korea" in title: return "KP"
-        return random.choice(["CN", "RU", "US", "BR", "IN"])
-
-    def _infer_targets(self, title):
-        targets = []
-        if any(kw in title for kw in ["us ", "american", "united states", "federal"]): targets.append("US")
-        if any(kw in title for kw in ["uk ", "british", "ncsc"]): targets.append("GB")
-        if any(kw in title for kw in ["german", "europe"]): targets.append("DE")
-        if any(kw in title for kw in ["japan", "japanese"]): targets.append("JP")
-        if any(kw in title for kw in ["india", "indian"]): targets.append("IN")
-        return targets if targets else ["US"]
-
 
 # ===============================================================================
-# G12 - AI THREAT HUNTING ENGINE
+# G12 - THREAT HUNTING (technique clusters and velocity)
 # ===============================================================================
 
 class AIThreatHuntingEngine:
-    """AI-driven threat analysis: emerging campaign identification,
-    attack clustering, infrastructure reuse detection, prediction."""
+    """Clusters advisories that share ATT&CK techniques, finds actors with
+    overlapping techniques, and reports techniques trending in 7 days."""
 
-    def execute_hunt(self) -> Dict:
-        entries = _entries()
-        if not entries: return {"hunts": [], "predictions": []}
-
-        # Cluster analysis
-        clusters = self._cluster_threats(entries)
-
-        # Infrastructure reuse detection
-        infra_reuse = self._detect_infra_reuse(entries)
-
-        # Emerging threat prediction
-        predictions = self._predict_emerging(entries)
-
-        # Hunt hypotheses
-        hunts = self._generate_hunt_hypotheses(entries, clusters)
-
+    def execute_hunt(self, entries=None) -> Dict:
+        items = _items(entries)
+        clusters = self._cluster_threats(items)
+        overlap = self._detect_infra_reuse(items)
+        trending = self._predict_emerging(items)
+        hunts = self._generate_hunt_hypotheses(items, clusters)
         return {
             "hunt_id": _gid("aihunt", _now()),
+            "method": "Grouping by shared ATT&CK techniques and 7-day technique counts.",
             "threat_clusters": clusters,
-            "infrastructure_reuse": infra_reuse,
-            "emerging_predictions": predictions,
+            "infrastructure_reuse": overlap,
+            "emerging_predictions": trending,
             "hunt_hypotheses": hunts,
+            "clusters_identified": len(clusters),
+            "trending_techniques": len(trending),
             "stats": {
                 "clusters_identified": len(clusters),
-                "infra_reuse_cases": len(infra_reuse),
-                "predictions_generated": len(predictions),
+                "infra_reuse_cases": len(overlap),
+                "predictions_generated": len(trending),
                 "hunt_hypotheses": len(hunts),
             },
             "generated_at": _now(),
         }
 
     def _cluster_threats(self, entries):
-        """Simple technique-based threat clustering."""
-        technique_groups = defaultdict(list)
+        groups = defaultdict(list)
         for e in entries:
-            techniques = tuple(sorted(
-                t if isinstance(t, str) else t.get("technique_id", "")
-                for t in e.get("mitre_tactics", [])
-            ))
-            if techniques:
-                technique_groups[techniques].append(e.get("title", "")[:50])
-
+            techs = tuple(sorted(_techniques(e)))
+            if techs: groups[techs].append(_title(e)[:50])
         clusters = []
-        for techs, titles in sorted(technique_groups.items(), key=lambda x: len(x[1]), reverse=True)[:10]:
+        for techs, titles in sorted(groups.items(), key=lambda x: len(x[1]), reverse=True)[:10]:
             if len(titles) >= 2:
                 clusters.append({
                     "cluster_id": _gid("cluster", str(techs)),
                     "techniques": list(techs),
                     "advisory_count": len(titles),
                     "sample_titles": titles[:3],
-                    "assessment": "Coordinated TTP usage" if len(titles) >= 5 else "Related activity",
+                    "assessment": "Shared technique set" if len(titles) >= 5 else "Related activity",
                 })
         return clusters
 
     def _detect_infra_reuse(self, entries):
-        """Detect actors reusing infrastructure across campaigns."""
-        actor_techniques = defaultdict(set)
+        """Attributed actors whose observed techniques overlap (3+ shared)."""
+        by_actor = defaultdict(set)
         for e in entries:
-            actor = e.get("actor_tag", "")
-            if not actor or actor == "UNC-CDB-99": continue
-            for t in e.get("mitre_tactics", []):
-                tid = t if isinstance(t, str) else t.get("technique_id", "")
-                if tid: actor_techniques[actor].add(tid)
-
-        reuse_cases = []
-        actors = list(actor_techniques.keys())
+            actor = _actor(e)
+            if actor: by_actor[actor].update(_techniques(e))
+        actors = sorted(by_actor)
+        cases = []
         for i in range(len(actors)):
             for j in range(i + 1, len(actors)):
-                overlap = actor_techniques[actors[i]] & actor_techniques[actors[j]]
-                if len(overlap) >= 3:
-                    reuse_cases.append({
-                        "actors": [actors[i], actors[j]],
-                        "shared_techniques": sorted(overlap),
-                        "overlap_count": len(overlap),
-                        "assessment": "Possible shared tooling or operational overlap",
-                    })
-        return reuse_cases
+                shared = by_actor[actors[i]] & by_actor[actors[j]]
+                if len(shared) >= 3:
+                    cases.append({"actors": [actors[i], actors[j]], "shared_techniques": sorted(shared),
+                                  "overlap_count": len(shared),
+                                  "assessment": "Overlapping techniques (not proof of shared infrastructure)"})
+        return cases
 
     def _predict_emerging(self, entries):
-        """Predict emerging threats based on velocity and pattern analysis."""
-        recent = [e for e in entries if e.get("timestamp", "") > (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()]
-        if not recent: return []
-
-        technique_velocity = Counter()
-        for e in recent:
-            for t in e.get("mitre_tactics", []):
-                tid = t if isinstance(t, str) else t.get("technique_id", "")
-                if tid: technique_velocity[tid] += 1
-
-        predictions = []
-        for tech, count in technique_velocity.most_common(5):
-            if count >= 3:
-                predictions.append({
-                    "technique": tech,
-                    "velocity": count,
-                    "prediction": f"{tech} usage trending - {count} sightings in 7 days",
-                    "confidence": min(85, 30 + count * 10),
-                    "action": f"Deploy targeted detection for {tech} across all endpoints",
-                })
-        return predictions
+        """Techniques seen 3+ times in advisories published in the last 7 days."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        velocity = Counter(t for e in entries if (_ts(e) or cutoff) > cutoff for t in _techniques(e))
+        return [{"technique": tech, "velocity": count,
+                 "prediction": f"{tech} in {count} advisories in the last 7 days",
+                 "confidence": min(85, 30 + count * 10),
+                 "action": f"Review detection coverage for {tech}"}
+                for tech, count in velocity.most_common(5) if count >= 3]
 
     def _generate_hunt_hypotheses(self, entries, clusters):
-        """Generate AI-driven hunt hypotheses."""
-        hypotheses = []
-        for cluster in clusters[:5]:
-            hypotheses.append({
-                "hypothesis": f"Coordinated campaign using techniques {', '.join(cluster['techniques'][:3])} across {cluster['advisory_count']} advisories",
-                "priority": "CRITICAL" if cluster["advisory_count"] >= 5 else "HIGH",
-                "data_sources": ["Process Creation", "Network Connection", "DNS Query"],
-                "recommended_action": "Proactive threat hunt across all endpoints",
-            })
-        return hypotheses
+        return [{"hypothesis": f"{c['advisory_count']} advisories share techniques {', '.join(c['techniques'][:3])}; "
+                               f"hunt for their use in your environment",
+                 "priority": "CRITICAL" if c["advisory_count"] >= 5 else "HIGH",
+                 "data_sources": ["Process Creation", "Network Connection", "DNS Query"],
+                 "recommended_action": "Targeted hunt for these techniques"}
+                for c in clusters[:5]]
 
 
 # ===============================================================================
@@ -1013,7 +741,9 @@ class AIThreatHuntingEngine:
 # ===============================================================================
 
 class GenesisOrchestrator:
-    """Master orchestrator for all 12 GENESIS engines."""
+    """Runs the 12 GENESIS engines over one set of feed items."""
+
+    VERSION = "43.1.0"
 
     def __init__(self):
         self.sensor_net = GlobalCyberSensorNetwork()
@@ -1029,12 +759,8 @@ class GenesisOrchestrator:
         self.attack_map = GlobalAttackMap()
         self.ai_hunter = AIThreatHuntingEngine()
 
-    def execute_full_cycle(self) -> Dict:
-        logger.info("[GENESIS] Starting full 12-engine intelligence cycle...")
-        start = time.time()
-        results = {"version": "43.0.0", "codename": "GENESIS", "generated_at": _now(), "engines": {}}
-
-        engines = [
+    def _engines(self) -> List[Tuple[str, Any, str]]:
+        return [
             ("G01_SensorNetwork", self.sensor_net.generate_telemetry, "sensor_network.json"),
             ("G02_HoneypotGrid", self.honeypot.generate_grid_telemetry, "honeypot_grid.json"),
             ("G03_MalwareCloud", self.malware.analyze_landscape, "malware_analysis.json"),
@@ -1049,22 +775,34 @@ class GenesisOrchestrator:
             ("G12_AIThreatHunter", self.ai_hunter.execute_hunt, "ai_threat_hunter.json"),
         ]
 
-        for name, func, filename in engines:
+    def compute(self, entries=None) -> Tuple[Dict, Dict[str, Dict]]:
+        """(genesis_output, {engine: full result}) for one set of items. No files written."""
+        items = _items(entries)
+        start = time.time()
+        results = {"version": self.VERSION, "codename": "GENESIS", "generated_at": _now(),
+                   "items_analyzed": len(items), "engines": {}}
+        raw = {}
+        for name, func, _ in self._engines():
             try:
-                result = func()
-                results["engines"][name] = {"status": "OK", "summary": self._summarize(result)}
-                _save(os.path.join(GENESIS_DIR, filename), result)
-                logger.info(f"[GENESIS-{name}] Complete")
+                r = func(items)
+                raw[name] = r
+                results["engines"][name] = {"status": "OK", "summary": self._summarize(r)}
             except Exception as e:
                 logger.error(f"[GENESIS-{name}] Failed: {e}")
                 results["engines"][name] = {"status": "ERROR", "error": str(e)}
-
-        elapsed = round((time.time() - start) * 1000, 2)
-        results["execution_time_ms"] = elapsed
+        results["execution_time_ms"] = max(0.01, round((time.time() - start) * 1000, 2))
         results["engines_ok"] = sum(1 for v in results["engines"].values() if v["status"] == "OK")
-        results["engines_total"] = 12
+        results["engines_total"] = len(self._engines())
+        return results, raw
+
+    def execute_full_cycle(self, entries=None) -> Dict:
+        logger.info("[GENESIS] Starting 12-engine cycle...")
+        results, raw = self.compute(entries)
+        for name, _, filename in self._engines():
+            if name in raw: _save(os.path.join(GENESIS_DIR, filename), raw[name])
         _save(os.path.join(GENESIS_DIR, "genesis_output.json"), results)
-        logger.info(f"[GENESIS] Full cycle: {results['engines_ok']}/12 engines OK in {elapsed}ms")
+        logger.info(f"[GENESIS] {results['engines_ok']}/{results['engines_total']} engines OK "
+                    f"over {results['items_analyzed']} items in {results['execution_time_ms']}ms")
         return results
 
     def _summarize(self, result):
@@ -1084,12 +822,10 @@ class GenesisOrchestrator:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
     print("=" * 70)
-    print("CYBERDUDEBIVASH(R) SENTINEL APEX v43.0 - GENESIS")
-    print("The Global Cybersecurity Intelligence Powerhouse")
+    print("CYBERDUDEBIVASH(R) SENTINEL APEX - GENESIS")
     print("=" * 70)
-    o = GenesisOrchestrator()
-    r = o.execute_full_cycle()
-    print(f"\n? GENESIS Cycle: {r['engines_ok']}/{r['engines_total']} engines OK in {r['execution_time_ms']}ms")
+    r = GenesisOrchestrator().execute_full_cycle()
+    print(f"\nGENESIS cycle: {r['engines_ok']}/{r['engines_total']} engines OK over "
+          f"{r['items_analyzed']} items in {r['execution_time_ms']}ms")
     for name, info in r["engines"].items():
-        status = "?" if info["status"] == "OK" else "?"
-        print(f"   {status} {name}")
+        print(f"   [{info['status']}] {name}")

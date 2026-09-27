@@ -161,6 +161,7 @@ import { resolveGumroadProduct, checkGumroadSalePrice, looksLikePlatformProduct,
 import { routeAiFeed, AI_FEED_CATALOG_KEY } from './ai-threat-feed.js';
 import { getUsageSummary } from './usage-meter.js';
 import { buildAccountUsage } from './account-usage.js';
+import { buildReportsSitemapXml, MAX_SITEMAP_URLS } from './reports-sitemap.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -3485,7 +3486,7 @@ async function handleTAXII(request, env, ctx, path, auth) {
         {
           id: TAXII_COLLECTION_ID,
           title: "SENTINEL APEX - Primary Threat Intelligence",
-          description: "CVEs, IOCs, APT activity, ransomware alerts, dark web findings",
+          description: "CVEs, IOCs, APT activity and ransomware advisories from the SENTINEL APEX feed",
           can_read: true, can_write: false, media_types: [STIX_CT],
         },
         {
@@ -7255,6 +7256,28 @@ async function handleRequest(request, env, ctx) {
       ? { ...feedTruth.headers, "Cache-Control": "private, no-store" }
       : { ...feedTruth.headers, "Cache-Control": "public, max-age=120", "X-Sentinel-Edge-Ttl": String(feedTruth.edge_ttl_seconds) };
     return jsonResp(data, 200, feedHeaders);
+  }
+
+  // --- GET /reports/sitemap.xml (2026-09-27, SEO) ------------------------------
+  // The customer-ready report catalog as a sitemap (reports-sitemap.js), so
+  // search engines discover reports as they publish. Reuses
+  // buildCertifiedReportsFeed() -- the /api/reports/index.json gate -- so it
+  // never lists a withheld report (those 404 below). Must precede the
+  // /reports/** handler, which would treat "sitemap.xml" as a report key.
+  if (path === "/reports/sitemap.xml") {
+    if (method !== "GET" && method !== "HEAD") {
+      return new Response("Method not allowed", { status: 405, headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Allow": "GET, HEAD", "Content-Type": "text/plain" } });
+    }
+    const catalog = await buildCertifiedReportsFeed(env, ctx, { limit: MAX_SITEMAP_URLS, feedType: "reports_sitemap" });
+    if (!catalog) {
+      // 503 + Retry-After tells crawlers to come back, rather than treating
+      // an empty sitemap as "no reports exist".
+      return new Response("Report catalog unavailable", { status: 503, headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Retry-After": "3600", "Content-Type": "text/plain", "Cache-Control": "no-store" } });
+    }
+    return new Response(buildReportsSitemapXml(catalog.reports), {
+      status: 200,
+      headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "public, max-age=3600" },
+    });
   }
 
   // --- /reports/** (HTML intel reports from REPORTS_R2) -----------------------
