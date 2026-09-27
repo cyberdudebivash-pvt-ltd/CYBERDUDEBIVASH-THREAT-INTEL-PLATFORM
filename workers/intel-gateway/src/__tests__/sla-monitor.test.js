@@ -159,9 +159,18 @@ test("status: a failed latest heartbeat -> degraded (was operational if recent)"
   assert.equal(d.uptime_pct_30d, 50);
 });
 
-test("status: heartbeats stopped (older than 45 min) -> degraded", async () => {
+test("status: last heartbeat OK but stale -> monitoring_delayed, not an outage", async () => {
   const env = envWith();
   await handleSLAPing(pingReq({ ok: true, observed_at: iso(60 * MIN), probe_id: "old" }), env, "r");
+  const d = await status(env);
+  assert.equal(d.status, "monitoring_delayed");
+  assert.equal(d.components["intel-gateway"].status, "monitoring_delayed");
+  assert.equal(d.heartbeat_stale_after_seconds, 45 * 60);
+});
+
+test("status: last heartbeat FAILED, even if stale -> degraded", async () => {
+  const env = envWith();
+  await handleSLAPing(pingReq({ ok: false, observed_at: iso(90 * MIN), probe_id: "down" }), env, "r");
   assert.equal((await status(env)).status, "degraded");
 });
 
