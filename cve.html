@@ -179,7 +179,15 @@ h1{font-size:30px;font-weight:700;margin-bottom:10px}
       return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c];
     });
   }
-  function fmtPct(x) { return (x == null) ? "&mdash;" : Math.round(x * 100) + "%"; }
+  // EPSS arrives as a 0-1 probability or a 0-100 percent depending on the feed
+  // source; "x * 100" showed 18.166 as 1817%. Same rule as CDB_NORMALIZE.epss
+  // (js/metric-normalize.js): <=1 is a probability, (1,100] a percent, else unknown.
+  function fmtPct(x) {
+    if (x == null || x === "") return "&mdash;";
+    var n = Number(x);
+    if (!isFinite(n) || n < 0 || n > 100) return "&mdash;";
+    return (n <= 1 ? n * 100 : n).toFixed(1) + "%";
+  }
   function fmtScore(x) { return (x == null) ? "&mdash;" : Number(x).toFixed(1); }
 
   var params = new URLSearchParams(window.location.search);

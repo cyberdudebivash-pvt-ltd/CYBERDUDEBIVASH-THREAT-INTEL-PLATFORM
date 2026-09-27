@@ -652,7 +652,9 @@ function renderTable(data) {
   tbody.innerHTML = data.map(i => {
     const risk   = (i.risk_score||0).toFixed(1);
     const cvss   = i.cvss_score > 0 ? i.cvss_score.toFixed(1) : '—';
-    const epss   = i.epss_score > 0 ? i.epss_score.toFixed(1)+'%' : '—';
+    // 0-1 probability or 0-100 percent by source; same rule as CDB_NORMALIZE.epss.
+    const _en    = Number(i.epss_score);
+    const epss   = (i.epss_score != null && isFinite(_en) && _en > 0 && _en <= 100) ? (_en <= 1 ? _en * 100 : _en).toFixed(1)+'%' : '—';
     const kev    = i.kev_present ? '<span style="color:var(--red);font-weight:800;">KEV</span>' : '—';
     const iocSum = i.ioc_counts && typeof i.ioc_counts==='object'
       ? Object.values(i.ioc_counts).reduce((a,v)=>a+(typeof v==='number'?v:0),0) : 0;
