@@ -236,6 +236,17 @@ jobs:
       - name: "Cyber Watchdog safe rollback artifact builds"
         run: node deploy/cyber-watchdog/safe-rollback/build.mjs --out "$RUNNER_TEMP/wd-safe-rollback"
 
+      # Deploy parity: deploy-worker.yml runs sanitize_encoding.py --fix (which
+      # rewrites non-ASCII in Worker JS, e.g. U+2026 -> "...") BEFORE its full
+      # unit-suite gate. A test that passes on the raw checkout can fail there
+      # and silently block every Worker deploy (it did, from #551 to #557).
+      # Last step of this job, so the steps above still test the raw checkout.
+      - name: "Full gateway unit suite after deploy encoding sanitization"
+        run: |
+          python3 scripts/sanitize_encoding.py --fix
+          cd workers/intel-gateway
+          node --test "src/**/*.test.js" "src/**/*.test.mjs"
+
   python-tests:
     name: "scripts/ + tests/ -- Python unit and regression suites"
     runs-on: ubuntu-latest
