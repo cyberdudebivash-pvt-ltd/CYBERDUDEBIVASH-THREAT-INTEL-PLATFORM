@@ -89,7 +89,11 @@ def gateway_src() -> str:
 
 @pytest.fixture(scope="module")
 def gumroad_webhook_body(gateway_src: str) -> str:
-    return _extract_function(gateway_src, "handleWebhookGumroad")
+    # #525 moved sale provisioning (catalog tier, key issue, activation email)
+    # out of handleWebhookGumroad into processGumroadSale, which it calls for
+    # every paid sale; the webhook's behaviour is the two together.
+    return (_extract_function(gateway_src, "handleWebhookGumroad")
+            + _extract_function(gateway_src, "processGumroadSale"))
 
 
 @pytest.fixture(scope="module")
@@ -198,7 +202,11 @@ def test_gumroad_webhook_sends_activation_email(gumroad_webhook_body: str):
 
 
 def test_gumroad_webhook_reuses_pure_tier_inference(gumroad_webhook_body: str):
-    assert "inferGumroadTier(product_name, variants)" in gumroad_webhook_body
+    # S16 (#525): a sale's tier comes from the product catalog
+    # (gumroad-products.js), never from the product name; inferGumroadTier()
+    # is deprecated for sale decisions. The name is kept so history lines up.
+    assert "resolveGumroadProduct(formData)" in gumroad_webhook_body
+    assert "inferGumroadTier(product_name, variants)" not in gumroad_webhook_body
 
 
 def test_index_js_reexports_gumroad_lifecycle_functions(gateway_src: str):

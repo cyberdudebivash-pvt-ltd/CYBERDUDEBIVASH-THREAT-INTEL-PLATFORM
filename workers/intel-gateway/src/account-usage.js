@@ -35,7 +35,7 @@ export function maskCredential(raw, isJwt) {
   if (isJwt) return "session token (JWT)";
   const s = String(raw || "");
   if (s.length < 12) return "****";
-  return `${s.slice(0, 8)}…${s.slice(-4)}`;
+  return `${s.slice(0, 8)}\u2026${s.slice(-4)}`;
 }
 
 export function buildAccountUsage(auth, quota, today) {

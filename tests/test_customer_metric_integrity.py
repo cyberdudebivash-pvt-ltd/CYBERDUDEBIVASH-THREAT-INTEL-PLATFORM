@@ -22,7 +22,11 @@ def test_homepage_does_not_invent_origins_or_tor_coverage():
         "ukrain",
     ):
         assert banned not in src, banned
-    assert "No country tags" in src
+    # #513 moved the threat-origin panel renderer (and its "no country tags"
+    # empty state) into js/sentinel-live-feeds.js, which index.html loads.
+    feeds_js = (REPO / "js/sentinel-live-feeds.js").read_text(encoding="utf-8")
+    assert '<script src="/js/sentinel-live-feeds.js"></script>' in src
+    assert "No country tags" in feeds_js
     assert "NOT A CRAWL" in src
     assert "FEED ONLY" in src
 
