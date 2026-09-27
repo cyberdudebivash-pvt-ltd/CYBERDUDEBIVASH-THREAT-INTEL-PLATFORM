@@ -72,7 +72,9 @@ def test_reviewed_public_pages_are_in_the_sitemap():
                  "integration-catalog.html", "platform-capabilities.html", "services.html",
                  "enterprise-use-cases.html", "reference-architecture.html", "roi-calculator.html",
                  "executive-briefing.html", "sla.html", "privacy.html", "terms.html", "eula.html",
-                 "pricing.html", "enterprise.html", "get-api-key.html", "api-docs.html"):
+                 "pricing.html", "enterprise.html", "get-api-key.html", "api-docs.html",
+                 # Added once their claims were verified (tests/test_comparison_claims_truth.py).
+                 "compare.html", "alternative-to-mandiant.html", "alternative-to-recorded-future.html"):
         assert f"<loc>{SITE}/{page}</loc>" in SITEMAP, page
         assert (REPO / page).exists(), page
 
