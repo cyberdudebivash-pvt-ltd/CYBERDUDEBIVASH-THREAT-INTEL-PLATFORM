@@ -3077,6 +3077,11 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                 // so a "source→target" pair is never fabricated either:
                 // only the single real origin code renders, or nothing.
                 var geoSrc = d.source_country || d.actor_country || (d.tags && d.tags.find(function(t){ return t && t.length===2; })) || '';
+                // Placeholder values are not an origin: the feed writes
+                // "UNKNOWN" when nothing is attributed, which rendered as
+                // "UNKNOWN CRITICAL ..." on every item. Same placeholder set
+                // buildHeatmap() (index.html) excludes.
+                if (/^(unknown|unattributed|n\/a|none|null|-)$/i.test(String(geoSrc).trim())) geoSrc = '';
                 var geo = geoSrc ? (_cdbEsc(geoSrc.toUpperCase()) + ' ') : '';
                 return '<span style="color:' + col + ';font-weight:700;">' + geo + sev + '</span>'
                      + ' <span style="color:rgba(200,220,255,0.75);">' + label + '</span>';
@@ -5791,8 +5796,10 @@ function renderTopThreats(data) {
                 {id:'G10',name:'Attack Surface',icon:'🔍',color:'#22c55e',
                  val: data.filter(d=>{const t=(d.title||'').toLowerCase();return t.includes('expos')||t.includes('rce')||t.includes('misconfigur')}).length+'',
                  desc:'Exposure signals'},
+                // No attack geodata exists in the feed; this tile used to show the
+                // item count as "Attack flows mapped".
                 {id:'G11',name:'Attack Map',icon:'🗺️',color:'#e11d48',
-                 val: data.length+'', desc:'Attack flows mapped'},
+                 val: 'N/A', desc:'No attack geodata in feed'},
                 {id:'G12',name:'AI Hunter',icon:'🤖',color:'#7c3aed',
                  val: Math.min(10,Math.max(1,Math.floor(data.length/5)))+'',
                  desc:'Threat clusters'},
@@ -5807,27 +5814,13 @@ function renderTopThreats(data) {
                 </div>`
             ).join('');
 
-            // Attack flows
+            // Attack flows: the feed has no attack source/target geolocation.
+            // This box used to guess "flows" per country from title keywords
+            // (a title containing "us " counted as USA, lockbit as Russia).
+            // Origin attribution lives in one place, the EICC geographic panel
+            // (#eicc-heatmap, actor_country only), so this links there.
             const flowsEl = document.getElementById('genesis-attack-flows');
-            if (flowsEl) {
-                const countries = {'CN':'China','RU':'Russia','US':'USA','KP':'N.Korea','IR':'Iran'};
-                const flows = Object.entries(countries).map(([code,name]) => {
-                    const count = data.filter(d => {
-                        const t = (d.title||'').toLowerCase();
-                        const a = (d.actor_tag||'').toLowerCase();
-                        return (code==='CN'&&(t.includes('china')||a.includes('volt'))) ||
-                               (code==='RU'&&(t.includes('russia')||a.includes('apt28')||a.includes('apt29')||a.includes('lockbit'))) ||
-                               (code==='KP'&&(a.includes('lazarus')||t.includes('korea'))) ||
-                               (code==='IR'&&t.includes('iran')) ||
-                               (code==='US'&&t.includes('us '));
-                    }).length;
-                    return {code,name,count};
-                }).filter(f=>f.count>0).sort((a,b)=>b.count-a.count);
-
-                flowsEl.innerHTML = flows.length ?
-                    flows.map(f => `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span>${f.code} ${f.name}</span><span style="color:#ec4899;font-weight:700;">${f.count} flows</span></div>`).join('') :
-                    `<div>Active flows: ${data.length} global</div>`;
-            }
+            if (flowsEl) flowsEl.innerHTML = `<div style="padding:4px 0;">No attack flows are shown: the feed carries no attack source/target geolocation, so none are estimated.</div><div style="padding:4px 0;"><a href="#eicc-heatmap" style="color:#ec4899;">Geographic attribution (actor country, from the feed) &darr;</a></div>`;
 
             // Actor registry
             const actorsEl = document.getElementById('genesis-actors');
@@ -6033,8 +6026,10 @@ function renderTopThreats(data) {
                         {key:'G10_AttackSurface', id:'G10', name:'Attack Surface', icon:'🔍', color:'#22c55e',
                          valFn: s => { var pn=function(v){if(typeof v==='number')return v;if(typeof v==='string'){var m=v.match(/^(\d+)/);return m?parseInt(m[1]):0;}if(Array.isArray(v))return v.length;if(typeof v==='object'&&v)return Object.keys(v).length;return 0;}; var te=pn(s.total_exposures||s.total_exposure_signals||0); var vs=pn(s.vulnerable_services); var ec=pn(s.exposure_categories); var rs=pn(s.risk_summary); var total=te||(vs+ec+rs)||pn(s.scan_capabilities)||0; return total+' EXPOSURES'; },
                          descFn: s => { var pn=function(v){if(typeof v==='number')return v;if(typeof v==='string'){var m=v.match(/^(\d+)/);return m?parseInt(m[1]):0;}return 0;}; if(typeof s.risk_summary==='object'&&s.risk_summary)return (s.risk_summary.critical||s.risk_summary.critical_exposures||0)+' critical'; return pn(s.critical_findings||s.critical_exposures||0)+' critical'; }},
+                        // genesis_engine_v2 G11 derives "flows" from feed-source domains
+                        // and title keywords, not observed attacks: not shown as data.
                         {key:'G11_GlobalAttackMap', id:'G11', name:'Attack Map',      icon:'🗺️', color:'#e11d48',
-                         valFn: s => (s.total_flows||s.attack_count||s.event_count||'?') + ' FLOWS', descFn: s => (s.active_corridors||s.origin_countries||s.regions_active||0) + ' regions active'},
+                         valFn: s => 'N/A', descFn: s => 'No attack geodata in feed'},
                         {key:'G12_AIThreatHunter', id:'G12', name:'AI Hunter', icon:'🤖', color:'#7c3aed',
                          valFn: s => { var hh=Array.isArray(s.hunt_hypotheses)?s.hunt_hypotheses.length:(parseInt(s.hunt_hypotheses)||0); var tc=Array.isArray(s.threat_clusters)?s.threat_clusters.length:(parseInt(s.threat_clusters)||0); return (hh||tc||s.hunts_generated||'?')+' HUNTS'; },
                          descFn: s => { var st=typeof s.stats==='object'&&s.stats?s.stats:{}; var ca=st.confidence_avg||st.avg_confidence||s.confidence_avg||0; return (typeof ca==='number'?ca.toFixed(0):ca||0)+'% avg confidence'; }},
@@ -6080,21 +6075,10 @@ function renderTopThreats(data) {
                         </div>`;
                     }
 
-                    // Attack Map flows \u2014 always render (no "Computing..." hang)
+                    // Attack Map: not rendered from G11 (keyword-derived corridors,
+                    // not observed attacks); same honest note as renderGenesis().
                     const flowsEl = document.getElementById('genesis-attack-flows');
-                    const mapEng = engines['G11_GlobalAttackMap'] || engines['G11_AttackMap'] || {};
-                    const mapSum = mapEng.summary || {};
-                    if (flowsEl) {
-                        flowsEl.innerHTML = `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
-                            <span>Total Attack Flows</span><span style="color:#e11d48;font-weight:700;">${(mapSum.total_flows||mapSum.attack_count||0).toLocaleString()}</span>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
-                            <span>Regions Active</span><span style="color:#f59e0b;font-weight:700;">${mapSum.active_corridors||mapSum.origin_countries||mapSum.regions_active||0}</span>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;padding:4px 0;">
-                            <span>Critical Incidents</span><span style="color:#ef4444;font-weight:700;">${mapSum.critical_attacks||mapSum.critical||0}</span>
-                        </div>`;
-                    }
+                    if (flowsEl) flowsEl.innerHTML = `<div style="padding:4px 0;">No attack flows are shown: the feed carries no attack source/target geolocation, so none are estimated.</div><div style="padding:4px 0;"><a href="#eicc-heatmap" style="color:#ec4899;">Geographic attribution (actor country, from the feed) &darr;</a></div>`;
 
                     // Engine health badge
                     const engOk = data.engines_ok || 0;
