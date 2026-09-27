@@ -1,0 +1,29 @@
+{
+  "_comment": "CYBERDUDEBIVASH SENTINEL APEX -- security response headers for the static site",
+  "_why": "The static site is served by GitHub Pages behind Cloudflare. GitHub Pages ignores _headers, so the live pages carry only HSTS: no X-Frame-Options / CSP frame-ancestors (clickjacking), X-Content-Type-Options, Referrer-Policy or Permissions-Policy. /api/* already gets these from the Worker (SECURITY_HEADERS in workers/intel-gateway/src/index.js) and is excluded here.",
+  "_apply": "Cloudflare dashboard -> Rules -> Transform Rules -> Modify Response Header -> Create rule: use the expression and the 'set' operations below. Or PUT this ruleset to /zones/{zone_id}/rulesets/phases/http_response_headers_transform/entrypoint with an API token that has Zone Transform Rules Edit.",
+  "_csp_note": "Only frame-ancestors is set in the header CSP. Browsers enforce every CSP they receive, so a header policy containing only frame-ancestors restricts nothing else, and the pages' existing <meta> CSPs keep governing scripts/styles/connect.",
+  "_verify": "curl -sSI https://intel.cyberdudebivash.com/get-api-key.html | grep -iE 'x-frame-options|content-security-policy|x-content-type-options|referrer-policy|permissions-policy'",
+  "ruleset": {
+    "name": "CDB static-site security headers",
+    "kind": "zone",
+    "phase": "http_response_headers_transform",
+    "rules": [
+      {
+        "description": "Security headers on static pages (not /api, /reports, /taxii, /auth -- the Worker sets its own)",
+        "expression": "(http.host eq \"intel.cyberdudebivash.com\") and not starts_with(http.request.uri.path, \"/api/\") and not starts_with(http.request.uri.path, \"/reports/\") and not starts_with(http.request.uri.path, \"/taxii/\") and not starts_with(http.request.uri.path, \"/auth/\")",
+        "action": "rewrite",
+        "action_parameters": {
+          "headers": {
+            "X-Frame-Options": { "operation": "set", "value": "SAMEORIGIN" },
+            "Content-Security-Policy": { "operation": "set", "value": "frame-ancestors 'self'" },
+            "X-Content-Type-Options": { "operation": "set", "value": "nosniff" },
+            "Referrer-Policy": { "operation": "set", "value": "strict-origin-when-cross-origin" },
+            "Permissions-Policy": { "operation": "set", "value": "geolocation=(), camera=(), microphone=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=()" }
+          }
+        },
+        "enabled": true
+      }
+    ]
+  }
+}
