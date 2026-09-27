@@ -195,6 +195,27 @@ def _fmt_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+_CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
+
+
+def _item_cves(feed_item: Dict[str, Any]) -> List[str]:
+    """CVE IDs carried by a feed item's own structured fields.
+
+    The feed stores them as ``cve_id`` (str), ``cve_ids`` and ``cves``
+    (lists); ``cve`` (list or str) is kept for older items. Reading ``cve``
+    alone left every catalog entry with an empty list. Only well-formed
+    CVE IDs are kept, upper-cased, de-duplicated in first-seen order.
+    """
+    out: List[str] = []
+    for key in ("cve", "cves", "cve_ids", "cve_id"):
+        val = feed_item.get(key)
+        for v in (val if isinstance(val, list) else [val]):
+            s = str(v or "").strip().upper()
+            if _CVE_ID_RE.match(s) and s not in out:
+                out.append(s)
+    return out
+
+
 def _fmt_ts(path: Path) -> str:
     """Get file modification time as ISO 8601 string."""
     try:
@@ -412,9 +433,7 @@ def main() -> int:
 
         if not title:
             title = report_id
-        cve_list   = feed_item.get("cve") or []
-        if not isinstance(cve_list, list):
-            cve_list = [str(cve_list)] if cve_list else []
+        cve_list   = _item_cves(feed_item)
         timestamp  = (
             feed_item.get("timestamp") or
             feed_item.get("processed_at") or
