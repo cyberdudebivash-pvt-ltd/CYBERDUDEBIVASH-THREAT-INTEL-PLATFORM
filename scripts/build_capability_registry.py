@@ -63,7 +63,11 @@ CLASSIFICATIONS = {
     "dependency-platform.html": ("CUSTOMER_UI", "orphan", "Hardcoded 'sticky score' and API-call stats. No obvious existing backend route."),
     "evidence-threat-map.html": ("CUSTOMER_UI", "orphan", "Hardcoded map stats with fake Math.random()-driven 'live counters'. Fits /api/v1/intel/graph, /api/v1/geo/cybermap, /api/v1/intel/relations."),
     "executive-reporting-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded board-report figures ('$9.7M Annualized ROI'). Fits /api/v1/executive/command-center, /api/v1/reports/."),
-    "malware-intel-hub.html": ("CUSTOMER_UI", "orphan", "Hardcoded sample counters, fake sandbox hash stream via Math.random(). Partial fit /api/yara, /api/sigma."),
+    "malware-intel-hub.html": ("CUSTOMER_UI", "live",
+        "Fixed 2026-09-27: rebuilt on /api/feed.json (malware-related advisories, counts and feed "
+        "time read at load) plus the /api/v1/export/* detection downloads. Removed the Math.random() "
+        "'sandbox detonation' stream (invented hashes and 'C2' IPs, one a real public address), the "
+        "fixed sample/YARA/family counts and a 'C2 infrastructure registry' naming real ASNs."),
     "mssp-console.html": ("CUSTOMER_UI", "orphan", "1785-line MSSP console, fully hardcoded, zero fetch. Fits /api/mssp, /api/mssp/feed, /api/mssp/tenants/{id}/feed."),
     "mssp-customer-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded partner/customer arrays. Fits /api/mssp, /api/mssp/feed."),
     "mssp-partner-portal.html": ("CUSTOMER_UI", "orphan", "Hardcoded tenant list. Fits /api/mssp/tenants/{id}/feed, /api/mssp/feed."),
