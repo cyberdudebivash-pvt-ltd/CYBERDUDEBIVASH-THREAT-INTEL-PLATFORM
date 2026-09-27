@@ -1793,7 +1793,15 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                             </div>`;
                         } catch(e) { return ''; }
                     })()}
-                    ${item.epss_score != null ? `<div class="epss-bar-wrap"><span class="epss-bar-label">EPSS RISK</span><div class="epss-bar-track"><div class="epss-bar-fill" style="width:${Math.min(item.epss_score,100)}%;background:${item.epss_score>=50?'#ff3b3b':item.epss_score>=10?'#ff8c00':item.epss_score>=1?'#f59e0b':'var(--accent)'};"></div></div><span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">${item.epss_score}%</span></div>` : ''}
+                    ${(() => {
+                        // Raw epss_score is 0-1 or 0-100 depending on source; printing it
+                        // as-is showed a 0.0942 probability as "0.0942%". Same
+                        // CDB_NORMALIZE.epss scale rule as the other EPSS renders here.
+                        const _en = (typeof window !== 'undefined' && window.CDB_NORMALIZE && typeof window.CDB_NORMALIZE.epss === 'function') ? window.CDB_NORMALIZE.epss(item.epss_score) : null;
+                        if (!_en || _en.state !== 'OK') return '';
+                        const _p = _en.percent;
+                        return `<div class="epss-bar-wrap"><span class="epss-bar-label">EPSS RISK</span><div class="epss-bar-track"><div class="epss-bar-fill" style="width:${Math.min(_p,100).toFixed(1)}%;background:${_p>=50?'#ff3b3b':_p>=10?'#ff8c00':_p>=1?'#f59e0b':'var(--accent)'};"></div></div><span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">${_p.toFixed(1)}%</span></div>`;
+                    })()}
                     <div class="card-copy-strip">
                         ${cves.map(cve => `<span class="copy-chip" onclick="copyToClipboard('${cve}',this)"><i class="fas fa-copy"></i>${cve}</span>`).join('')}
                     </div>
@@ -2233,9 +2241,10 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                             var cvssColor = item.cvss_score >= 9 ? '#ff4444' : item.cvss_score >= 7 ? '#ff7700' : item.cvss_score >= 4 ? '#ffcc00' : '#00d4aa';
                             enrichParts.push('<span class="enrich-item">CVSS <span class="e-val" style="color:' + cvssColor + ';">' + parseFloat(item.cvss_score).toFixed(1) + '</span></span>');
                         }
-                        if (item.epss_score != null) {
-                            var epssColor = item.epss_score >= 70 ? '#ff4444' : item.epss_score >= 40 ? '#ff7700' : '#888';
-                            enrichParts.push('<span class="enrich-item">EPSS <span class="e-val" style="color:' + epssColor + ';">' + item.epss_score + '%</span></span>');
+                        var _enE = (typeof window !== 'undefined' && window.CDB_NORMALIZE && typeof window.CDB_NORMALIZE.epss === 'function') ? window.CDB_NORMALIZE.epss(item.epss_score) : null;
+                        if (_enE && _enE.state === 'OK') {
+                            var epssColor = _enE.percent >= 70 ? '#ff4444' : _enE.percent >= 40 ? '#ff7700' : '#888';
+                            enrichParts.push('<span class="enrich-item">EPSS <span class="e-val" style="color:' + epssColor + ';">' + _enE.percent.toFixed(1) + '%</span></span>');
                         }
                         enrichParts.push('<span class="enrich-item">CONF <span class="e-val">' + conf + '%</span></span>');
                         if (source) enrichParts.push('<span class="enrich-item" style="margin-left:auto;">SRC: <span class="e-val">' + source + '</span></span>');
@@ -2592,7 +2601,13 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                         <div class="modal-field">
                             <div class="modal-field-label">EPSS Score</div>
                             <div class="modal-field-val">
-                                ${item.epss_score != null ? `<div class="epss-bar-wrap"><div class="epss-bar-track" style="max-width:200px;"><div class="epss-bar-fill" style="width:${Math.min(item.epss_score,100)}%;background:${item.epss_score>=50?'var(--critical)':item.epss_score>=10?'var(--high)':item.epss_score>=1?'#f59e0b':'var(--accent)'};"></div></div><span style="font-size:11px;font-family:var(--font-mono);">${item.epss_score}%</span></div>` : 'Pending enrichment'}
+                                ${(() => {
+                                    // Same normalized scale as the card EPSS bar; unreadable -> pending.
+                                    const _en = (typeof window !== 'undefined' && window.CDB_NORMALIZE && typeof window.CDB_NORMALIZE.epss === 'function') ? window.CDB_NORMALIZE.epss(item.epss_score) : null;
+                                    if (!_en || _en.state !== 'OK') return 'Pending enrichment';
+                                    const _p = _en.percent;
+                                    return `<div class="epss-bar-wrap"><div class="epss-bar-track" style="max-width:200px;"><div class="epss-bar-fill" style="width:${Math.min(_p,100).toFixed(1)}%;background:${_p>=50?'var(--critical)':_p>=10?'var(--high)':_p>=1?'#f59e0b':'var(--accent)'};"></div></div><span style="font-size:11px;font-family:var(--font-mono);">${_p.toFixed(1)}%</span></div>`;
+                                })()}
                             </div>
                         </div>
                         <div class="modal-field">
@@ -2778,9 +2793,15 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
             const riskLabel = { CRITICAL:'critical', HIGH:'high', MEDIUM:'moderate', LOW:'low', INFO:'informational' }[sev] || 'moderate';
             // v76.1: aligned EPSS thresholds with corrected card logic
             const kevNote = item.kev_present ? ' This vulnerability is confirmed in CISA Known Exploited Vulnerabilities (KEV) catalog, indicating active exploitation in the wild.' : '';
-            const epssNote = item.epss_score >= 50 ? ` EPSS score of ${item.epss_score}% indicates critical probability of exploitation within the next 30 days.` :
-                             item.epss_score >= 10 ? ` EPSS score of ${item.epss_score}% signals elevated exploitation likelihood.` :
-                             item.epss_score >= 1  ? ` EPSS score of ${item.epss_score}% warrants proactive monitoring.` : '';
+            // Normalized: raw epss_score may be a 0-1 probability, which the old
+            // comparisons silently treated as "<1%" (no note) or printed as-is.
+            const _enN = (typeof window !== 'undefined' && window.CDB_NORMALIZE && typeof window.CDB_NORMALIZE.epss === 'function') ? window.CDB_NORMALIZE.epss(item.epss_score) : null;
+            const _epssPct = (_enN && _enN.state === 'OK') ? _enN.percent : null;
+            const _epssTxt = _epssPct != null ? _epssPct.toFixed(1) : '';
+            const epssNote = _epssPct == null ? '' :
+                             _epssPct >= 50 ? ` EPSS score of ${_epssTxt}% indicates critical probability of exploitation within the next 30 days.` :
+                             _epssPct >= 10 ? ` EPSS score of ${_epssTxt}% signals elevated exploitation likelihood.` :
+                             _epssPct >= 1  ? ` EPSS score of ${_epssTxt}% warrants proactive monitoring.` : '';
             const mitreNote = tactics.length ? ` MITRE ATT&CK mapping identifies ${tactics.slice(0,3).join(', ')} techniques \u2014 adversary tactics aligned with ${tactics.length > 2 ? 'multi-stage attack chains' : 'targeted exploitation'}.` : '';
             const confNote = item.confidence_score >= 60 ? ' High analyst confidence in this assessment.' : item.confidence_score < 20 ? ' Low confidence \u2014 corroborate with additional threat feeds.' : '';
 
@@ -3187,7 +3208,7 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                 `"${decodeHtmlEntities(d.title || '').replace(/"/g, '""')}"`,
                 d.risk_score, getSeverity(d.risk_score, d), getTlpLabel(d),
                 d.confidence_score || '', decodeHtmlEntities(d.actor_tag || ''),
-                d.cvss_score || '', d.epss_score != null ? d.epss_score + '%' : '',
+                d.cvss_score || '', (() => { const _en = (typeof window !== 'undefined' && window.CDB_NORMALIZE && typeof window.CDB_NORMALIZE.epss === 'function') ? window.CDB_NORMALIZE.epss(d.epss_score) : null; return (_en && _en.state === 'OK') ? _en.percent.toFixed(1) + '%' : ''; })(),
                 d.kev_present ? 'YES' : 'NO',
                 d.report_url || '', d.source_url || '', d.processed_at || d.timestamp || ''
             ]);
@@ -3440,7 +3461,7 @@ function renderTopThreats(data) {
         if (item.__norm && item.__norm.apex_ai && item.__norm.apex_ai.soc_priority) {
             return item.__norm.apex_ai.soc_priority;
         }
-        const kev=item.kev_present, epss=parseFloat(item.epss_score)||0, cvss=parseFloat(item.cvss_score)||0, risk=parseFloat(item.risk_score)||0;
+        const kev=item.kev_present, epss=((typeof window!=='undefined'&&window.CDB_NORMALIZE&&typeof window.CDB_NORMALIZE.epss==='function')?(window.CDB_NORMALIZE.epss(item.epss_score).percent||0):(parseFloat(item.epss_score)||0)), cvss=parseFloat(item.cvss_score)||0, risk=parseFloat(item.risk_score)||0;
         if(kev||epss>=50) return 'P1';
         if(cvss>=9||risk>=9) return 'P1';
         if(cvss>=7||risk>=7) return 'P2';
@@ -3497,7 +3518,7 @@ function renderTopThreats(data) {
         const tacs = (item.mitre_tactics||[]).slice(0,3);
         const actor = (item.actor_tag&&item.actor_tag!=='UNC-CDB-99'&&item.actor_tag!=='UNC-UNKNOWN')?item.actor_tag:null;
         const kev = item.kev_present;
-        const epss = parseFloat(item.epss_score)||0;
+        const epss = ((typeof window!=='undefined'&&window.CDB_NORMALIZE&&typeof window.CDB_NORMALIZE.epss==='function')?(window.CDB_NORMALIZE.epss(item.epss_score).percent||0):(parseFloat(item.epss_score)||0));
         const cvss = parseFloat(item.cvss_score)||0;
         const pr = prio(item);
         const prC = prioColor(pr);
@@ -3563,7 +3584,7 @@ function renderTopThreats(data) {
             // Metrics strip
             '<div style="padding:0 14px 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+
                 (cvss>0?'<div style="text-align:center;padding:4px 8px;background:rgba(255,255,255,0.03);border-radius:3px;border:1px solid rgba(255,255,255,0.06);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">CVSS</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:'+(cvss>=9?'#dc2626':cvss>=7?'#ea580c':'#d97706')+';">'+cvss.toFixed(1)+'</div></div>':'')+
-                (epss>0?'<div style="text-align:center;padding:4px 8px;background:rgba(255,255,255,0.03);border-radius:3px;border:1px solid rgba(255,255,255,0.06);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">EPSS</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:'+(epss>=50?'#dc2626':epss>=10?'#ea580c':'#d97706')+';">'+epss+'%</div></div>':'')+
+                (epss>0?'<div style="text-align:center;padding:4px 8px;background:rgba(255,255,255,0.03);border-radius:3px;border:1px solid rgba(255,255,255,0.06);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">EPSS</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:'+(epss>=50?'#dc2626':epss>=10?'#ea580c':'#d97706')+';">'+epss.toFixed(1)+'%</div></div>':'')+
                 (iocCount>0?'<div style="text-align:center;padding:4px 8px;background:rgba(0,212,170,0.06);border-radius:3px;border:1px solid rgba(0,212,170,0.2);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">IOCs</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:#00d4aa;">'+iocCount+'</div></div>':'')+
                 '<div style="margin-left:auto;text-align:right;">'+
                     (actor?
@@ -3651,7 +3672,7 @@ function renderTopThreats(data) {
         // TOP 3 \u2014 fully visible
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:16px;">' +
             top.slice(0,3).map(function(item,idx){
-                var sc=parseFloat(item.risk_score)||0,sv=sevInfo(item.__norm?item.__norm.severity:null,sc),cve=(item.title||'').match(/CVE-\d{4}-\d{4,}/i),tacs=(item.mitre_tactics||[]).slice(0,3),actor=(item.actor_tag&&item.actor_tag!=='UNC-CDB-99'&&item.actor_tag!=='UNC-UNKNOWN')?item.actor_tag:null,kev=item.kev_present,epss=parseFloat(item.epss_score)||0,cvss=parseFloat(item.cvss_score)||0,pr=prio(item),prC=prioColor(pr),iocCount=item.ioc_count||(item.ioc_counts?Object.values(item.ioc_counts).reduce(function(a,b){return a+b;},0):0),barW=Math.min(sc*10,100),kcPhase=(item.mitre_tactics&&item.mitre_tactics.length)?(item.mitre_tactics[0]||'').toUpperCase().split('.')[0]:'',_its2=item.processed_at||item.timestamp||'',_iD2=_its2?new Date(_its2):null,_iyr2=_iD2?_iD2.getFullYear():'',_imo2=_iD2?String(_iD2.getMonth()+1).padStart(2,'0'):'',_sid2=item.stix_id||item.id||'',_verifiedReportUrl2=cdbBuildReportUrl(item),hasVerifiedReport2=!!_verifiedReportUrl2,intelUrl2=_verifiedReportUrl2||(item.source_url||'https://intel.cyberdudebivash.com');
+                var sc=parseFloat(item.risk_score)||0,sv=sevInfo(item.__norm?item.__norm.severity:null,sc),cve=(item.title||'').match(/CVE-\d{4}-\d{4,}/i),tacs=(item.mitre_tactics||[]).slice(0,3),actor=(item.actor_tag&&item.actor_tag!=='UNC-CDB-99'&&item.actor_tag!=='UNC-UNKNOWN')?item.actor_tag:null,kev=item.kev_present,epss=((typeof window!=='undefined'&&window.CDB_NORMALIZE&&typeof window.CDB_NORMALIZE.epss==='function')?(window.CDB_NORMALIZE.epss(item.epss_score).percent||0):(parseFloat(item.epss_score)||0)),cvss=parseFloat(item.cvss_score)||0,pr=prio(item),prC=prioColor(pr),iocCount=item.ioc_count||(item.ioc_counts?Object.values(item.ioc_counts).reduce(function(a,b){return a+b;},0):0),barW=Math.min(sc*10,100),kcPhase=(item.mitre_tactics&&item.mitre_tactics.length)?(item.mitre_tactics[0]||'').toUpperCase().split('.')[0]:'',_its2=item.processed_at||item.timestamp||'',_iD2=_its2?new Date(_its2):null,_iyr2=_iD2?_iD2.getFullYear():'',_imo2=_iD2?String(_iD2.getMonth()+1).padStart(2,'0'):'',_sid2=item.stix_id||item.id||'',_verifiedReportUrl2=cdbBuildReportUrl(item),hasVerifiedReport2=!!_verifiedReportUrl2,intelUrl2=_verifiedReportUrl2||(item.source_url||'https://intel.cyberdudebivash.com');
                 return '<div style="position:relative;background:linear-gradient(135deg,var(--bg-card) 0%,rgba(220,38,38,0.03) 100%);border:1px solid '+sv.c+'44;overflow:hidden;transition:all 0.25s;border-radius:4px;box-shadow:0 0 16px '+sv.glow+';" onmouseover="this.style.borderColor=\''+sv.c+'66\';this.style.transform=\'translateY(-3px)\';this.style.boxShadow=\'0 8px 32px '+sv.glow+'\'" onmouseout="this.style.borderColor=\''+sv.c+'44\';this.style.transform=\'none\';this.style.boxShadow=\'0 0 16px '+sv.glow+'\'">'+
                 '<div style="height:3px;background:linear-gradient(90deg,'+sv.c+' '+barW+'%,rgba(255,255,255,0.04) '+barW+'%);"></div>'+
                 '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px 6px;">'+
@@ -3669,7 +3690,7 @@ function renderTopThreats(data) {
                 '<div style="padding:2px 14px 8px;"><div style="font-size:12px;font-weight:700;color:var(--white);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">'+_tt((item.title||'Unknown').substring(0,110))+'</div></div>'+
                 '<div style="padding:0 14px 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+
                     (cvss>0?'<div style="text-align:center;padding:4px 8px;background:rgba(255,255,255,0.03);border-radius:3px;border:1px solid rgba(255,255,255,0.06);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">CVSS</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:'+(cvss>=9?'#dc2626':cvss>=7?'#ea580c':'#d97706')+';">'+cvss.toFixed(1)+'</div></div>':'')+
-                    (epss>0?'<div style="text-align:center;padding:4px 8px;background:rgba(255,255,255,0.03);border-radius:3px;border:1px solid rgba(255,255,255,0.06);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">EPSS</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:'+(epss>=50?'#dc2626':epss>=10?'#ea580c':'#d97706')+';">'+epss+'%</div></div>':'')+
+                    (epss>0?'<div style="text-align:center;padding:4px 8px;background:rgba(255,255,255,0.03);border-radius:3px;border:1px solid rgba(255,255,255,0.06);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">EPSS</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:'+(epss>=50?'#dc2626':epss>=10?'#ea580c':'#d97706')+';">'+epss.toFixed(1)+'%</div></div>':'')+
                     (iocCount>0?'<div style="text-align:center;padding:4px 8px;background:rgba(0,212,170,0.06);border-radius:3px;border:1px solid rgba(0,212,170,0.2);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">IOCs</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:#00d4aa;">'+iocCount+'</div></div>':'')+
                     (actor?'<div style="font-family:var(--font-mono);font-size:9px;color:'+sv.c+';font-weight:700;margin-left:auto;">'+_tt(actor)+'</div>':'<div style="font-family:var(--font-mono);font-size:9px;color:#3a4a5a;margin-left:auto;">UNATTRIBUTED</div>')+
                 '</div>'+
@@ -3719,7 +3740,7 @@ function renderTopThreats(data) {
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;position:relative;">' +
             '<style>.t10-blur-card{filter:blur(5px);pointer-events:none;user-select:none;opacity:0.5;}</style>'+
             top.slice(3).map(function(item,i){
-                var idx=i+3,sc=parseFloat(item.risk_score)||0,sv=sevInfo(item.__norm?item.__norm.severity:null,sc),cve=(item.title||'').match(/CVE-\d{4}-\d{4,}/i),kev=item.kev_present,epss=parseFloat(item.epss_score)||0,cvss=parseFloat(item.cvss_score)||0,pr=prio(item),prC=prioColor(pr),barW=Math.min(sc*10,100);
+                var idx=i+3,sc=parseFloat(item.risk_score)||0,sv=sevInfo(item.__norm?item.__norm.severity:null,sc),cve=(item.title||'').match(/CVE-\d{4}-\d{4,}/i),kev=item.kev_present,epss=((typeof window!=='undefined'&&window.CDB_NORMALIZE&&typeof window.CDB_NORMALIZE.epss==='function')?(window.CDB_NORMALIZE.epss(item.epss_score).percent||0):(parseFloat(item.epss_score)||0)),cvss=parseFloat(item.cvss_score)||0,pr=prio(item),prC=prioColor(pr),barW=Math.min(sc*10,100);
                 return '<div style="position:relative;">' +
                     '<div class="t10-blur-card" style="background:linear-gradient(135deg,var(--bg-card),rgba(220,38,38,0.02));border:1px solid var(--border);border-radius:4px;overflow:hidden;">'+
                         '<div style="height:3px;background:linear-gradient(90deg,'+sv.c+' '+barW+'%,rgba(255,255,255,0.04) '+barW+'%);"></div>'+
@@ -4503,6 +4524,13 @@ function renderTopThreats(data) {
                 var panel = document.getElementById('cdb-panel-' + tab);
                 if (panel) panel.classList.add('active');
 
+                // REPORTS renders from the report catalog, not manifestData; its
+                // loader lives in index.html (this function replaces the wrapper
+                // that used to call it, so the tab loaded nothing).
+                if (tab === 'reports') {
+                    if (typeof window.cdbOpenReportsPanel === 'function') window.cdbOpenReportsPanel();
+                    return;
+                }
                 if (tab === 'live') return; // LIVE uses existing renderCards pipeline
                 // P0 FIX: this used to silently call cdbFallbackLive() here --
                 // a customer clicking SOC VIEW (or Timeline/Campaigns/Actors)
@@ -4805,7 +4833,7 @@ function renderTopThreats(data) {
                 var title = item.title || 'Unknown Threat';
                 var cves = (title.match(/CVE-\d{4}-\d{4,}/gi) || []);
                 var cvss = item.cvss_score != null ? parseFloat(item.cvss_score) : null;
-                var epss = item.epss_score != null ? parseFloat(item.epss_score) : null;
+                var epss = item.epss_score != null ? ((typeof window !== 'undefined' && window.CDB_NORMALIZE && typeof window.CDB_NORMALIZE.epss === 'function') ? window.CDB_NORMALIZE.epss(item.epss_score).percent : parseFloat(item.epss_score)) : null;  // percent scale (0-100) or null
                 var kev = !!item.kev_present;
                 var actor = item.actor_tag || 'Unattributed';
                 var tactics = item.mitre_tactics || [];
@@ -5079,7 +5107,8 @@ function renderTopThreats(data) {
             // Quick fact row
             html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">';
             if (item.cvss_score != null) html += '<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">CVSS ' + parseFloat(item.cvss_score).toFixed(1) + '</span>';
-            if (item.epss_score != null) html += '<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">EPSS ' + parseFloat(item.epss_score).toFixed(1) + '%</span>';
+            var _enM = (typeof window !== 'undefined' && window.CDB_NORMALIZE && typeof window.CDB_NORMALIZE.epss === 'function') ? window.CDB_NORMALIZE.epss(item.epss_score) : null;
+            if (_enM && _enM.state === 'OK') html += '<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">EPSS ' + _enM.percent.toFixed(1) + '%</span>';
             if (ai.tte_days != null) html += '<span style="font-family:var(--font-mono);font-size:10px;color:#ffd600;">TTE: ' + ai.tte_days + 'd</span>';
             if (ai.campaign_id) html += '<span style="font-family:var(--font-mono);font-size:9px;color:#a78bfa;border:1px solid rgba(167,139,250,0.3);padding:1px 6px;border-radius:3px;">' + ai.campaign_id + '</span>';
             html += '</div>';

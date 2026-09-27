@@ -394,6 +394,12 @@ jobs:
             # Comparison pages and discount claims: only verified statements;
             # annual discount matches pricing-data.json. Local files.
             tests/test_comparison_claims_truth.py
+            # EPSS shown on one scale whatever scale the item carries (0-1 or
+            # 0-100): no "1816.6%" or "0.09%". Local files + node.
+            tests/test_epss_display_scale.py
+            # Homepage REPORTS tab loads the catalog: the engine's global
+            # cdbSwitchTab calls window.cdbOpenReportsPanel. Local files + node.
+            tests/test_reports_tab_wiring.py
           )
           python3 -m pytest "${SUITES[@]}" -q
           # Refuse to pass having run nothing. pytest.ini forces --verbose, so
