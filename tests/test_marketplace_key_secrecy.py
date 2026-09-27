@@ -25,6 +25,7 @@ a public commit or a readable file.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -54,6 +55,23 @@ UNTRACKABLE_STATE_FILES = ("data/marketplace/marketplace_state.json",)
 LIVE_KEY_PATTERN = r"cdb_(free|pro|ent|mssp)_[A-Za-z0-9_-]{32,}"
 
 PLAINTEXT_PREFIX = "cdb_"
+
+# Test fixtures need key-shaped strings. A hit is treated as a fixture only
+# when BOTH hold: it is in a test file, and every key-shaped token on the line
+# carries a synthetic marker a real random key cannot plausibly contain (an
+# ascending hex run, a long run of one digit, or the word SYNTHETIC). A real key
+# pasted into a test still fails; so does any key outside test files.
+_TEST_PATH = re.compile(r"(^|/)(tests?|__tests__)/|\.test\.[cm]?js$|(^|/)test_[^/]*\.py$")
+_SYNTHETIC_MARKERS = ("SYNTHETIC", "123456789abcdef", "ffffffffffffffff")
+
+
+def _is_synthetic_fixture(hit: str) -> bool:
+    path, _, rest = hit.partition(":")
+    _, _, text = rest.partition(":")
+    if not _TEST_PATH.search(path):
+        return False
+    keys = [m.group(0) for m in re.finditer(LIVE_KEY_PATTERN, text)]
+    return bool(keys) and all(any(k in key for k in _SYNTHETIC_MARKERS) for key in keys)
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -100,11 +118,29 @@ class TestSecretStateFilesAreNotTracked:
         """
         result = _git("grep", "-I", "-n", "-E", LIVE_KEY_PATTERN, "--", ".")
         # `git grep` exits 1 with no output when there are no matches.
-        hits = [ln for ln in result.stdout.splitlines() if ln.strip()]
+        hits = [ln for ln in result.stdout.splitlines()
+                if ln.strip() and not _is_synthetic_fixture(ln)]
         assert not hits, (
             "plaintext live-format API key(s) found in tracked files:\n  "
             + "\n  ".join(hits[:10])
         )
+
+    # Random-looking example keys are assembled at runtime so this file does
+    # not itself hold a key-shaped literal for the scan (or secret scanners).
+    _RANDOMISH = "cdb_" + "pro_" + "9f2c1e7a4b8d03c6e5f1a2b7c9d4e8f0a1b2c3d4"
+
+    @pytest.mark.parametrize("hit, synthetic", [
+        ('workers/intel-gateway/src/__tests__/x.test.js:3:const K = "cdb_pro_test_0123456789abcdef0123456789abcdef";', True),
+        ('tests/test_x.py:9:    k = "cdb_ent_SYNTHETIC0FIXTURE0NOT0A0REAL0KEY0000000"', True),
+        # a random-looking key is never a fixture, even inside a test file
+        (f'tests/test_x.py:9:    k = "{_RANDOMISH}"', False),
+        # a synthetic-looking key outside test files is still a leak
+        ('data/state.json:1:{"k": "cdb_pro_test_0123456789abcdef0123456789abcdef"}', False),
+        # one real key next to a synthetic one on the same line still fails
+        (f'tests/test_x.py:9:a="cdb_pro_test_0123456789abcdef0123456789abcdef"; b="{_RANDOMISH}"', False),
+    ])
+    def test_fixture_allowance_is_narrow(self, hit, synthetic):
+        assert _is_synthetic_fixture(hit) is synthetic
 
     def test_marketplace_state_on_disk_holds_no_plaintext_key(self):
         """The working copy itself must not carry a usable credential."""

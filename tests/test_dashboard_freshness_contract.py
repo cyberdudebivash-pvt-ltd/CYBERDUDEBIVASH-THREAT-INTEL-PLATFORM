@@ -81,7 +81,10 @@ class TestPlatformStatsExposesFreshnessPublicly:
         stats_block_end = src.index('if (path ===', stats_block_start + 10)
         stats_block = src[stats_block_start:stats_block_end]
 
-        assert "classifyFreshness(feedData.generated_at)" in stats_block, (
+        # The handler reads the R2 feed as `rawFeed` (was `feedData`) and
+        # reports the publication contract's generated_at, which is that
+        # same field (evaluatePublicIntelligence(rawFeed)).
+        assert "classifyFreshness(rawFeed && rawFeed.generated_at ? rawFeed.generated_at : null)" in stats_block, (
             "/api/platform/stats must compute its freshness signal from "
             "feedData.generated_at (the pipeline's own 'last successfully "
             "wrote this file' timestamp) via the existing classifyFreshness() "
@@ -91,7 +94,8 @@ class TestPlatformStatsExposesFreshnessPublicly:
         )
         assert "freshness: freshness.state" in stats_block
         assert "freshness_age_seconds: freshness.age_seconds" in stats_block
-        assert "last_feed_sync_utc: feedData.generated_at" in stats_block
+        assert "evaluatePublicIntelligence(rawFeed," in stats_block
+        assert "last_feed_sync_utc: publication.intelligence.generated_at" in stats_block
         # Backward compatibility: the pre-existing field must still be present
         # and unrenamed for existing consumers.
         assert "last_sync: stats.last_sync" in stats_block
@@ -238,11 +242,14 @@ class TestAvgRiskScoreNaNGuard:
     poison the whole average into the literal string 'NaN'."""
 
     def test_fill_metrics_guards_against_nan_contribution(self):
+        # Since #513 the homepage metrics render from one snapshot
+        # (js/apex-dashboard-snapshot.js build()); fillMetrics(state) only
+        # displays intelligence.avg_risk. The guard lives where the average is
+        # computed: a non-numeric risk_score is left out of the average
+        # (neither NaN nor a fabricated 0), and no scores at all -> null
+        # ("N/A"), never 0.0.
+        snap = (REPO_ROOT / "js" / "apex-dashboard-snapshot.js").read_text(encoding="utf-8")
+        assert "if (isFinite(r)) { riskSum += r; riskN++; }" in snap
+        assert "avg_risk: riskN ? Math.round((riskSum / riskN) * 10) / 10 : null," in snap
         src = _index_html_source()
-        fn_start = src.index("function fillMetrics(data){")
-        fn_end = src.index("\n            }\n", fn_start)
-        fn_body = src[fn_start:fn_end]
-        assert "isNaN(_riskVal)" in fn_body
-        # Never fabricates a score -- an unparseable value contributes 0,
-        # the same as a genuinely absent field already did.
-        assert "riskSum += isNaN(_riskVal) ? 0 : _riskVal;" in fn_body
+        assert "i.avg_risk != null ? i.avg_risk.toFixed(1) : 'N/A'" in src

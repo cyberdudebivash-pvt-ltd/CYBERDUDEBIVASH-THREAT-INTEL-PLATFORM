@@ -62,7 +62,12 @@ def test_ai_proxy_checks_r2_before_gh_pages_fallback(worker_src_text: str):
         worker_src_text, re.DOTALL,
     )
     assert match, "could not locate the /api/ai/ static proxy handler in index.js"
-    handler_body = match.group(1)
+    # Compare positions in code only: the handler's own comments mention
+    # raw.githubusercontent.com (explaining the fallback) above the R2 read.
+    handler_body = "\n".join(
+        line for line in match.group(1).splitlines()
+        if not line.strip().startswith("//")
+    )
 
     r2_pos = handler_body.find("env.INTEL_R2.get(`ai/")
     ghpages_pos = handler_body.find("raw.githubusercontent.com")

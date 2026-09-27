@@ -43,7 +43,17 @@ def test_tiers_still_returns_real_pricing_data():
     and must keep working exactly as before."""
     r = client.get("/tiers")
     assert r.status_code == 200
-    assert r.json()["tiers"]["pro"]["price_monthly_usd"] == 499
+    # v184.4 (#500) corrected the invented $499 Pro price to the canonical
+    # $49. Compare against the canonical pricing file rather than a literal,
+    # so the engine and the checkout prices cannot drift apart silently.
+    import json
+    canonical = json.loads(
+        (Path(__file__).resolve().parents[2] / "workers" / "intel-gateway" / "src" / "pricing-data.json")
+        .read_text(encoding="utf-8")
+    )["tiers"]
+    tiers = r.json()["tiers"]
+    assert tiers["pro"]["price_monthly_usd"] == canonical["PRO"]["usd_monthly"] == 49
+    assert tiers["enterprise"]["price_monthly_usd"] == canonical["ENTERPRISE"]["usd_monthly"]
 
 
 def test_mrr_no_longer_returns_fabricated_numbers():

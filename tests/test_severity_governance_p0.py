@@ -117,10 +117,11 @@ class TestSIIInterface:
     def test_has_apply_invariants_to_file(self, sii):
         assert callable(getattr(sii, "apply_invariants_to_file", None))
 
-    def test_version_is_180(self, sii):
+    def test_version_is_182(self, sii):
+        # 180.0 -> 182.0 in #500 (be7b3b0ec), bumped with the module.
         v = getattr(sii, "VERSION", None)
         assert v is not None, "VERSION constant must be defined"
-        assert str(v) == "180.0", f"Expected VERSION='180.0', got '{v}'"
+        assert str(v) == "182.0", f"Expected VERSION='182.0', got '{v}'"
 
     def test_paywall_tactical_fields_defined(self, sii):
         fields = getattr(sii, "PAYWALL_TACTICAL_FIELDS", None)
@@ -526,9 +527,10 @@ class TestSREIntegration:
         out, _, _, _, _ = sre.recalibrate_item({"title": "V", "cvss_score": 9.5, "severity": "LOW"})
         assert float(out.get("risk_score", 0)) >= 9.0
 
-    def test_version_is_180(self, sre):
-        assert str(getattr(sre, "VERSION", "")) == "180.0", \
-            f"SRE VERSION must be '180.0', got '{getattr(sre, 'VERSION', None)}'"
+    def test_version_is_182(self, sre):
+        # 180.0 -> 182.0 in #500 (be7b3b0ec), bumped with the module.
+        assert str(getattr(sre, "VERSION", "")) == "182.0", \
+            f"SRE VERSION must be '182.0', got '{getattr(sre, 'VERSION', None)}'"
 
     def test_kev_plus_active_exploit_is_critical(self, sre):
         item = {
