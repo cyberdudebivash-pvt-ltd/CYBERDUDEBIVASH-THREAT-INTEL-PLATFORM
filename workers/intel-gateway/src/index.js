@@ -159,6 +159,8 @@ import { buildCampaignsPayload, buildRansomwarePayload, geoAttributionCoverage, 
 import { normalizeBuyerTaxId } from './tax-id.js';
 import { resolveGumroadProduct, checkGumroadSalePrice, looksLikePlatformProduct, gumroadPermalinkFrom, GUMROAD_CONTENT_PRODUCTS } from './gumroad-products.js';
 import { routeAiFeed, AI_FEED_CATALOG_KEY } from './ai-threat-feed.js';
+import { getUsageSummary } from './usage-meter.js';
+import { buildAccountUsage } from './account-usage.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -8116,6 +8118,26 @@ async function handleRequest(request, env, ctx) {
       return jsonResp({ error: "SLA compliance certificates require Enterprise or MSSP tier. Upgrade at /upgrade.html" }, 403);
     }
     return await handleSLACertificate(request, env, auth, crypto.randomUUID());
+  }
+
+  // GET /api/account/usage (2026-09-26) -- the customer API console's Keys and
+  // Usage tabs called this route but it did not exist (404). Composes the
+  // enforced daily quota (readSwarmQuotaSnapshot, keyed by auth.key like
+  // checkDailyQuota) and usage-meter.js's per-customer counters
+  // (getUsageSummary, keyed by auth.sub like trackApiUsage); shaping lives in
+  // account-usage.js. Read-only; the credential is never echoed (masked).
+  if (path === "/api/account/usage") {
+    if (method !== "GET") {
+      return jsonResp({ error: "method_not_allowed", allowed: ["GET"] }, 405, { "Allow": "GET", "Cache-Control": "no-store" });
+    }
+    if (!auth.key) {
+      return jsonResp({ error: "authentication_required", message: "Provide your API key or session token." }, 401, { "Cache-Control": "no-store" });
+    }
+    const [quota, today] = await Promise.all([
+      readSwarmQuotaSnapshot(env, auth.key, auth.tier),
+      getUsageSummary(env, auth.sub, utcDateString()),
+    ]);
+    return jsonResp(buildAccountUsage(auth, quota, today), 200, { "Cache-Control": "private, no-store" });
   }
 
   // v185.9 (Mission Wave A Phase 7): "alerts" already existed in
