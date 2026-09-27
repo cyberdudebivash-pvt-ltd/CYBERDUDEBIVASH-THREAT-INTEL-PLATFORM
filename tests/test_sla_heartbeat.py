@@ -170,3 +170,15 @@ def test_null_sla_met_is_not_rendered_as_breached():
     html = (REPO / "dashboard" / "enterprise_dashboard.html").read_text(encoding="utf-8")
     assert "d.sla_met_enterprise?'MET ✓':'BREACHED ✗'" not in html
     assert "d.sla_met_enterprise===false?'BREACHED ✗'" in html
+
+
+def test_pages_render_monitoring_delayed_as_no_data_not_outage():
+    """GitHub's scheduler is best-effort; a late heartbeat is reported as
+    monitoring_delayed, and pages must not render that as an outage."""
+    status = (REPO / "status.html").read_text(encoding="utf-8")
+    assert "comp.status === 'monitoring_delayed'" in status and "'Monitoring Delayed'" in status
+    assert "comp.status === 'degraded'" in status
+    dash = (REPO / "dashboard" / "enterprise_dashboard.html").read_text(encoding="utf-8")
+    assert "d.status==='monitoring_delayed'?'Monitoring delayed'" in dash
+    js = (REPO / "workers" / "intel-gateway" / "src" / "sla-monitor.js").read_text(encoding="utf-8")
+    assert '"monitoring_delayed"' in js

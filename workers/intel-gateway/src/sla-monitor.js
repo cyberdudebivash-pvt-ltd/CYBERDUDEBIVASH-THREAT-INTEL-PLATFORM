@@ -80,9 +80,16 @@ export async function handleSLAStatus(request, env, rid) {
   // Check last ping freshness (stale = potential outage)
   const lastPing = pings[pings.length - 1];
   const lastPingAge = lastPing ? Math.round((now - lastPing.ts) / 1000) : null;
-  // Up = the latest heartbeat succeeded and is current (was: any ping in the
-  // last 5 minutes, whatever its result -- a failed ping still read "operational").
-  const isLikelyUp  = !!lastPing && lastPing.ok !== false && lastPingAge !== null && lastPingAge < HEARTBEAT_STALE_S;
+  // "operational" = the latest heartbeat succeeded and is current.
+  // "degraded"    = the latest heartbeat FAILED (a real signal).
+  // "monitoring_delayed" = the latest heartbeat succeeded but is older than
+  //   HEARTBEAT_STALE_S. GitHub's scheduler is best-effort and can skip or
+  //   delay runs; missing data is not evidence of an outage, so it is not
+  //   reported as one (it was "degraded" on 2026-09-27 with the site up).
+  const heartbeatFresh = lastPingAge !== null && lastPingAge < HEARTBEAT_STALE_S;
+  const liveStatus = !lastPing ? "insufficient_data"
+    : lastPing.ok === false ? "degraded"
+    : heartbeatFresh ? "operational" : "monitoring_delayed";
 
   const incidents = await _loadIncidents(env);
   const recentIncidents = incidents.filter(i => (now - new Date(i.start).getTime()) <= windowMs);
@@ -108,7 +115,8 @@ export async function handleSLAStatus(request, env, rid) {
   const displayUptime = hasData ? Math.min(uptimePct, calculatedUptime) : null;
 
   return _json(200, {
-    status:           !hasData ? "insufficient_data" : (isLikelyUp ? "operational" : "degraded"),
+    status:           !hasData ? "insufficient_data" : liveStatus,
+    heartbeat_stale_after_seconds: HEARTBEAT_STALE_S,
     uptime_pct_30d:   hasData ? parseFloat(displayUptime.toFixed(4)) : null,
     sla_target_enterprise: ENTERPRISE_SLA,
     sla_target_pro:        PRO_SLA,
@@ -131,7 +139,7 @@ export async function handleSLAStatus(request, env, rid) {
     // dark-web-monitor.js route registration) -- reported honestly as disabled
     // rather than fabricated-operational.
     components: {
-      "intel-gateway":    { status: !hasData ? "insufficient_data" : (isLikelyUp ? "operational" : "degraded"), uptime: displayUptime },
+      "intel-gateway":    { status: !hasData ? "insufficient_data" : liveStatus, uptime: displayUptime },
       "stix-feed":        { status: "not_separately_monitored", uptime: null },
       "ai-engine":        { status: "not_separately_monitored", uptime: null },
       "dark-web-monitor": { status: "disabled", uptime: null, note: "Simulated-data endpoints intentionally disabled pending real data-source integration -- see dark-web-monitor.js" },

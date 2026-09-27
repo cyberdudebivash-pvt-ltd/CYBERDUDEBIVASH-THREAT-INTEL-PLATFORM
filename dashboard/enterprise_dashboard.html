@@ -1087,9 +1087,9 @@ async function loadSLA(){
       // i.e. 100% by default, and a null sla_met rendered as "BREACHED").
       const measured=typeof d.uptime_pct_30d==='number';
       const up=measured?d.uptime_pct_30d.toFixed(3)+'%':'Not yet measured';
-      const noData=d.status==='insufficient_data';
+      const noData=d.status==='insufficient_data'||d.status==='monitoring_delayed';
       document.getElementById('slaUptimeVal').textContent=up;
-      document.getElementById('slaStatusVal').textContent=d.status==='operational'?'Operational':noData?'Not yet measured':'Degraded';
+      document.getElementById('slaStatusVal').textContent=d.status==='operational'?'Operational':d.status==='monitoring_delayed'?'Monitoring delayed':noData?'Not yet measured':'Degraded';
       document.getElementById('slaStatusVal').style.color=d.status==='operational'?'var(--green)':noData?'var(--text-dim)':'var(--high)';
       document.getElementById('slaIncidents').textContent=d.incidents_30d||0;
       document.getElementById('slaUptimeVal').style.color=!measured?'var(--text-dim)':d.uptime_pct_30d>=99.9?'var(--green)':'var(--high)';
