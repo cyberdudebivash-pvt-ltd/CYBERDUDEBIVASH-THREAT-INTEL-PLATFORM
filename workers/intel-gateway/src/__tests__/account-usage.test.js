@@ -32,7 +32,9 @@ test("API-key caller: tier, masked key, enforced daily quota, today's usage", ()
 test("the raw credential never appears anywhere in the response", () => {
   const r = buildAccountUsage({ tier: "PRO", key: KEY, sub: "c" }, quota, today);
   assert.ok(!JSON.stringify(r).includes(KEY));
-  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjIn0.c2lnbmF0dXJlc2lnbmF0dXJl";
+  // Synthetic, unsigned token assembled at runtime (no token-shaped literal in source).
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const jwt = [b64({ alg: "none" }), b64({ sub: "test" }), "x".repeat(24)].join(".");
   const j = buildAccountUsage({ tier: "ENTERPRISE", key: jwt, sub: "c", jwt: true }, quota, today);
   assert.ok(!JSON.stringify(j).includes(jwt.slice(10)));
   assert.equal(j.account.credential_type, "jwt");
