@@ -216,7 +216,7 @@ export async function getUsageSummary(env, userId, date) {
     const endpoint_usage = Object.fromEntries(epEntries.filter(([,v]) => v > 0));
 
     return {
-      date,
+      date:             d,
       user_id:          uid,
       requests_count:   parseInt(totalRaw || "0"),
       credits_consumed: parseInt(costRaw  || "0"),
