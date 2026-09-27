@@ -12,6 +12,9 @@ Microsoft, AS16509 Amazon, AS20473 Vultr).
 Each page listed here has been rebuilt on the live feed. The test keeps
 fabrication from coming back: no random or fixed "live" numbers, no invented
 network indicators, and the page must read the live feed.
+ai-runtime-defense.html (2026-09-27) showed Math.random() "prompts screened"
+counters and a blocked-attack log for a hosted runtime-guardrail service that
+does not exist; it now says so and lists AI-security advisories from the feed.
 """
 import re
 from pathlib import Path
@@ -23,7 +26,10 @@ REPO = Path(__file__).resolve().parent.parent
 # page -> the live API the page must read
 CLEANED_PAGES = {
     "malware-intel-hub.html": "/api/feed.json",
+    "ai-runtime-defense.html": "/api/feed.json",
 }
+
+SHARED_VIEW = REPO / "js" / "feed-topic-view.js"
 
 IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 ASN = re.compile(r"\bAS\d{3,6}\b")
@@ -48,14 +54,35 @@ def test_no_invented_network_indicators(page):
 
 @pytest.mark.parametrize("page", sorted(CLEANED_PAGES))
 def test_reads_the_live_feed(page):
+    """Either fetches the API inline, or renders through the shared
+    js/feed-topic-view.js, which fetches /api/feed.json."""
     html = _text(page)
-    assert f"fetch('{CLEANED_PAGES[page]}'" in html
+    api = CLEANED_PAGES[page]
+    if 'src="/js/feed-topic-view.js"' in html:
+        assert "FeedTopicView.render(" in html
+        assert f"fetch(opts.feedUrl || '{api}'" in SHARED_VIEW.read_text(encoding="utf-8")
+    else:
+        assert f"fetch('{api}'" in html
+
+
+def test_shared_view_has_no_fabrication_and_escapes_feed_text():
+    js = SHARED_VIEW.read_text(encoding="utf-8")
+    assert "Math.random" not in js and "setInterval" not in js
+    assert "esc(i.title)" in js and "safeUrl(i.source_url)" in js
 
 
 def test_malware_hub_claims_removed():
     html = _text("malware-intel-hub.html")
     for claim in ("4.28M", "Sandbox Detonation", "18,441", "C2 Infrastructure Registry", "setInterval"):
         assert claim not in html, claim
+
+
+def test_ai_runtime_defense_claims_removed():
+    html = _text("ai-runtime-defense.html")
+    for claim in ("2.84M", "tenant=ent", "setInterval"):
+        assert claim not in html, claim
+    # The hosted runtime product does not exist; the page must say so.
+    assert "not offered as a hosted service today" in html
 
 
 def test_malware_hub_detection_links_are_real_worker_routes():

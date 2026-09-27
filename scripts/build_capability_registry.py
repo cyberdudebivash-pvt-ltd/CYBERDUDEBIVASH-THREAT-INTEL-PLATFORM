@@ -45,7 +45,10 @@ CLASSIFICATIONS = {
         "for a per-tenant support-ticket API exists yet; tracked as a residual orphan."),
     # -- Genuine CUSTOMER_UI orphans: real customer surfaces showing hardcoded/placeholder data,
     #    not yet wired this session. best-fit route(s) noted for the next pass. --
-    "ai-runtime-defense.html": ("CUSTOMER_UI", "orphan", "Hardcoded/animated stat counters, zero fetch. No dedicated backend route found; partial fit /api/v1/ai-ops/analytics."),
+    "ai-runtime-defense.html": ("CUSTOMER_UI", "live",
+                                "Fixed 2026-09-27: random counters and fake blocked-attack log removed; states the hosted "
+                                "runtime service is not offered and lists AI-security advisories from /api/feed.json "
+                                "(js/feed-topic-view.js)."),
     "ai-security-ops-hub.html": ("CUSTOMER_UI", "orphan", "Hardcoded inference/prompt-firewall counters, zero fetch. Partial fit /api/v1/ai-ops/analytics."),
     "api-management-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded API usage/success-rate stats, zero fetch. No key/webhook CRUD route exists (see api-key-manager.html for the one page with a real fetch() pattern)."),
     "api-reference-card.html": ("CUSTOMER_UI", "orphan", "Hardcoded 'live' advisory badge with pulsing indicator, no fetch. Best fit: /api/health."),
