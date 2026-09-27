@@ -432,272 +432,57 @@ def generate_nexus(items: List[Dict]) -> Dict:
 # ════════════════════════════════════════════════════════════════════════════
 
 def generate_genesis(items: List[Dict]) -> Dict:
-    actor_set: Dict[str, List] = {}
-    malware_set: set = set()
-    cve_set: set = set()
-    ioc_total = 0
-    sigma_count = yara_count = suricata_count = edr_count = 0
+    """GENESIS for api/engines.json, computed by the canonical engine.
 
-    now_ts = NOW_UTC.timestamp()
-    items_24h: List[Dict] = []
-    for i in items:
-        ts_str = i.get("published_at") or i.get("timestamp") or ""
-        if ts_str:
-            try:
-                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
-                if (now_ts - ts) < 86400:
-                    items_24h.append(i)
-            except Exception:
-                pass
+    2026-09-27: this used to be a second GENESIS implementation whose figures
+    were synthesized rather than measured (sensor_count = len(items)//8 + 35,
+    honeypot_count = 18, total_captures = min(9999, ...), 9 dark-web sources,
+    rule counts padded by +280/+480, 4 TAXII collections, a fixed
+    execution_time_ms). It now delegates to
+    agent.v43_genesis.genesis_engine.GenesisOrchestrator.compute() -- the same
+    engine genesis-powerhouse.yml publishes -- over the same feed items, so
+    api/engines.json and /api/v1/intel/genesis_output.json agree. Return keys
+    are unchanged for generate_engines_api().
+    """
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
+    from agent.v43_genesis.genesis_engine import GenesisOrchestrator
 
-    for item in items:
-        actor = _extract_actor(item)
-        if actor != "UNK":
-            actor_set.setdefault(actor, []).append(item)
+    results, raw = GenesisOrchestrator().compute(items)
 
-        ioc_total += int(item.get("ioc_count") or 0)
-        ttps = _extract_ttps(item)
-        if ttps:
-            sigma_count    += max(1, len(ttps))
-            yara_count     += max(1, len(ttps) // 2)
-            suricata_count += 1
-            edr_count      += max(1, len(ttps) // 3)
+    def s(key: str) -> Dict:
+        return raw.get(key) or {}
 
-        cves = re.findall(r"CVE-\d{4}-\d{4,7}",
-                          (item.get("title") or "") + " " + (item.get("description") or ""))
-        cve_set.update(cves)
-
-        title_l = (item.get("title") or "").lower()
-        for fam in ["ransomware","trojan","rootkit","backdoor","spyware","botnet",
-                    "wiper","stealer","rat","dropper","loader","cryptominer","keylogger",
-                    "malware","virus","exploit"]:
-            if fam in title_l:
-                malware_set.add(fam.title())
-
-    critical_items = [i for i in items if _safe_float(i.get("risk_score")) >= 9.0]
-    high_items     = [i for i in items if 7.0 <= _safe_float(i.get("risk_score")) < 9.0]
-    kev_items      = [i for i in items if i.get("kev") is True or i.get("kev_present") is True]
-
-    # ── Derived metrics ───────────────────────────────────────────────────
-    sensor_count          = min(247, len(items) // 8 + 35)
-    total_events_24h      = len(items_24h) * 94 + len(items) * 3
-    honeypot_count        = 18
-    total_captures_24h    = min(9999, sigma_count * 47 + len(items_24h) * 8)
-    malware_families      = len(malware_set) + max(0, len(cve_set) // 4) + 12
-    yara_rule_count       = min(9999, yara_count + 280)
-    total_actors          = len(actor_set) + 8
-    known_actors          = len(actor_set)
-    discovered_actors     = max(0, len(actor_set) - 5)
-    campaign_count        = max(len(actor_set), 4)
-    total_iocs_scored     = max(ioc_total, len(items) * 5, len(cve_set) * 8)
-    average_trust_score   = round(min(99.0, 82.0 + len(kev_items) * 0.3), 1)
-    total_sigma           = min(9999, sigma_count + 480)
-    total_yara            = min(9999, yara_count + 280)
-    total_suricata        = min(9999, suricata_count + 120)
-    total_edr             = min(9999, edr_count + 95)
-    total_exposures       = len(cve_set) + len(critical_items)
-    total_flows           = min(99999, len(items) * 12 + len(items_24h) * 47)
-    active_corridors      = min(12, len(actor_set) + 5)
-    sources_monitored     = 9
-    alerts_24h_dark       = min(999, len([i for i in items_24h if _safe_float(i.get("risk_score")) >= 8]) * 3 + 12)
-    risk_summary_obj      = {
-        "critical": len(critical_items),
-        "high":     len(high_items),
-        "medium":   max(0, len(items) - len(critical_items) - len(high_items)) // 2,
-        "critical_exposures": len(critical_items),
-    }
-
-    # G12 — AI Threat Hunter
-    HUNT_TEMPLATES = [
-        "Supply-chain compromise via trusted package manager injection",
-        "Ransomware deployment using LOLBins for lateral movement",
-        "Credential harvesting targeting enterprise identity providers",
-        "Active zero-day exploitation of internet-facing systems",
-        "Cloud infrastructure compromise via stolen API keys",
-        "Nation-state persistence via registry/WMI/scheduled-task abuse",
-        "Covert data exfiltration via encrypted C2 channels",
-        "Remote access trojan persistence via startup folder run keys",
-        "DDoS botnet assembly targeting critical infrastructure",
-        "Mobile spyware deployment via zero-click exploitation chain",
-    ]
-    HUNT_KWS = [
-        ["supply","chain","package"],["ransom","lockbit","encrypt"],
-        ["credential","phishing","harvest"],["zero-day","0day"],
-        ["cloud","aws","azure","api key"],["apt","nation","state"],
-        ["exfil","theft","breach"],["backdoor","trojan","rat"],
-        ["botnet","ddos","flood"],["mobile","android","ios","spyware"],
-    ]
-    hunt_hyps: List[Dict] = []
-    used_hyps: set = set()
-    for item in [i for i in items if _safe_float(i.get("risk_score")) >= 7][:40]:
-        tl = (item.get("title") or "").lower()
-        for kws, hyp in zip(HUNT_KWS, HUNT_TEMPLATES):
-            if hyp in used_hyps:
-                continue
-            if any(k in tl for k in kws):
-                hunt_hyps.append({
-                    "id": _short_id(hyp, "HUNT"),
-                    "hypothesis": hyp,
-                    "priority": "CRITICAL" if _safe_float(item.get("risk_score")) >= 9 else "HIGH",
-                    "confidence": round(min(99, 75 + _safe_float(item.get("risk_score")) * 2), 1),
-                    "status": "ACTIVE",
-                    "created_at": NOW_ISO,
-                })
-                used_hyps.add(hyp)
-                break
-
-    threat_clusters = list({_extract_actor(i) for i in items if _extract_actor(i) != "UNK"})
-    avg_confidence  = round(sum(h.get("confidence", 80) for h in hunt_hyps) / max(len(hunt_hyps), 1), 1)
-
-    # Actor registry detail
-    actor_registry: List[Dict] = []
-    for actor, actor_items in sorted(actor_set.items(), key=lambda x: -len(x[1]))[:15]:
-        all_ttps = list({t for i in actor_items for t in _extract_ttps(i)})
-        avg_r = round(sum(_safe_float(i.get("risk_score")) for i in actor_items) / max(len(actor_items), 1), 1)
-        actor_registry.append({
-            "actor": actor, "risk_score": avg_r,
-            "incident_count": len(actor_items), "ttps": all_ttps[:5],
-            "last_seen": NOW_ISO, "status": "ACTIVE",
-        })
-
-    # Attack flows sample (for G11)
-    COUNTRY_CODES = ["CN","RU","IR","KP","UA","IN","DE","BR","GB","FR","PK","SY","US","EU"]
-    TARGETS = ["Finance","Healthcare","Government","Energy","Telecom","Defense","Manufacturing","Technology"]
-    attack_flows_sample = []
-    for item in items[:30]:
-        if _safe_float(item.get("risk_score")) >= 7.0:
-            actor = _extract_actor(item)
-            attack_flows_sample.append({
-                "origin":    COUNTRY_CODES[hash(item.get("title","")) % len(COUNTRY_CODES)],
-                "target":    TARGETS[hash(item.get("id","")) % len(TARGETS)],
-                "actor":     actor if actor != "UNK" else "UNC",
-                "risk":      _safe_float(item.get("risk_score")),
-                "technique": (_extract_ttps(item) or ["T1059"])[0],
-            })
-
-    engines = {
-        "G01_SensorNetwork": {"status": "OK", "summary": {
-            "sensor_count":       sensor_count,
-            "total_events_24h":   total_events_24h,
-            "anomalies_detected": min(999, sensor_count // 5),
-            "events_per_sec":     round(total_events_24h / 86400, 1),
-        }},
-        "G02_HoneypotGrid": {"status": "OK", "summary": {
-            "honeypot_count":      honeypot_count,
-            "total_captures_24h":  total_captures_24h,
-            "unique_attackers":    min(999, sigma_count * 3 + 40),
-            "top_lure":            "SSH/RDP",
-        }},
-        "G03_MalwareCloud": {"status": "OK", "summary": {
-            "malware_families_detected": malware_families,
-            "yara_rule_count":           yara_rule_count,
-            "samples_analyzed_24h":      min(9999, len(items_24h) * 8 + 240),
-            "active_c2s":                min(99, len(critical_items) // 3 + 8),
-        }},
-        "G04_ActorRegistry": {"status": "OK", "summary": {
-            "total_actors":      total_actors,
-            "known_actors":      known_actors,
-            "discovered_actors": discovered_actors,
-            "actors":            actor_registry[:10],
-        }},
-        "G05_CampaignCorrelation": {"status": "OK", "summary": {
-            "total_campaigns":      campaign_count,
-            "campaign_count":       campaign_count,
-            "campaigns":            list(actor_set.keys())[:campaign_count],
-            "incidents_correlated": min(9999, len(items) * 2),
-            "avg_duration_days":    47,
-        }},
-        "G06_IOCReputation": {"status": "OK", "summary": {
-            "total_iocs_scored":    total_iocs_scored,
-            "ioc_count":            total_iocs_scored,
-            "average_trust_score":  average_trust_score,
-            "false_positive_rate":  round(max(0.1, 2.5 - len(items) * 0.001), 2),
-            "kev_iocs":             len(kev_items),
-        }},
-        "G07_DetectionGenerator": {"status": "OK", "summary": {
-            "sigma_rules":     total_sigma,
-            "yara_rules":      total_yara,
-            "suricata_rules":  total_suricata,
-            "edr_queries":     total_edr,
-            "total_rules":     total_sigma + total_yara + total_suricata + total_edr,
-        }},
-        "G08_TAXIIServer": {"status": "OK", "summary": {
-            "collection_count": 4,
-            "collections":      4,
-            "stix_objects":     min(99999, len(items) * 12),
-            "taxii_clients":    24,
-            "protocol":         "STIX 2.1",
-        }},
-        "G09_DarkWebIntel": {"status": "OK", "summary": {
-            "sources_monitored":         sources_monitored,
-            "source_count":              sources_monitored,
-            "alerts_24h":                alerts_24h_dark,
-            "findings_count":            alerts_24h_dark,
-            "forums_monitored":          47,
-            "leaked_credentials_tracked": min(9999, alerts_24h_dark * 110),
-        }},
-        "G10_AttackSurface": {"status": "OK", "summary": {
-            "total_exposures":         total_exposures,
-            "total_exposure_signals":  total_exposures,
-            "vulnerable_services":     min(99, len(critical_items) + 15),
-            "exposure_categories":     7,
-            "risk_summary":            risk_summary_obj,
-            "critical_findings":       len(critical_items),
-            "critical_exposures":      len(critical_items),
-            "scan_capabilities":       8,
-        }},
-        "G11_GlobalAttackMap": {"status": "OK", "summary": {
-            "total_flows":      total_flows,
-            "attack_count":     total_flows,
-            "event_count":      total_flows,
-            "active_corridors": active_corridors,
-            "origin_countries": active_corridors,
-            "regions_active":   active_corridors,
-            "critical_attacks": len(critical_items),
-            "live_flows":       attack_flows_sample[:15],
-        }},
-        "G12_AIThreatHunter": {"status": "OK", "summary": {
-            "hunt_hypotheses":  hunt_hyps,
-            "hunts_generated":  len(hunt_hyps),
-            "threat_clusters":  threat_clusters,
-            "confidence_avg":   avg_confidence,
-            "stats": {
-                "confidence_avg":     avg_confidence,
-                "avg_confidence":     avg_confidence,
-                "confirmed_threats":  len(critical_items),
-                "hunt_success_rate":  round(min(99.0, 78.0 + len(kev_items) * 0.5), 1),
-            },
-        }},
-    }
-
-    total_rules = total_sigma + total_yara + total_suricata + total_edr
+    cves = {c for i in items for c in re.findall(r"CVE-\d{4}-\d{4,7}",
+                                                   (i.get("title") or "") + " " + " ".join(i.get("cve_ids") or []))}
     return {
-        "version":        "47.1.0",
-        "codename":       "GENESIS INTELLIGENCE POWERHOUSE",
-        "generated_at":   NOW_ISO,
-        "execution_time_ms": 122.3,
-        "engines":        engines,
-        "engines_ok":     12,
-        "engines_total":  12,
-        "global_attack_flows": attack_flows_sample[:20],
-        "actor_registry":      actor_registry[:15],
+        "version":        results["version"],
+        "codename":       "GENESIS",
+        "generated_at":   results["generated_at"],
+        "execution_time_ms": results["execution_time_ms"],
+        "engines":        results["engines"],
+        "engines_ok":     results["engines_ok"],
+        "engines_total":  results["engines_total"],
+        "global_attack_flows": [],
+        "actor_registry": s("G04_ActorRegistry").get("actors", [])[:15],
         "metrics": {
             "total_advisories": len(items),
-            "critical_count":   len(critical_items),
-            "high_count":       len(high_items),
-            "kev_count":        len(kev_items),
-            "actors_tracked":   total_actors,
-            "iocs_total":       total_iocs_scored,
-            "cves_tracked":     len(cve_set),
-            "malware_families": malware_families,
-            "detection_rules":  total_rules,
-            "hunt_hypotheses":  len(hunt_hyps),
-            "campaign_count":   campaign_count,
-            "darkweb_sources":  sources_monitored,
-            "sensor_count":     sensor_count,
-            "honeypots":        honeypot_count,
-            "taxii_collections": 4,
-            "total_flows":      total_flows,
+            "critical_count":   sum(1 for i in items if _safe_float(i.get("risk_score")) >= 9.0),
+            "high_count":       sum(1 for i in items if 7.0 <= _safe_float(i.get("risk_score")) < 9.0),
+            "kev_count":        s("G02_HoneypotGrid").get("kev_confirmed", 0),
+            "actors_tracked":   s("G04_ActorRegistry").get("total_actors", 0),
+            "iocs_total":       s("G06_IOCReputation").get("total_iocs_scored", 0),
+            "cves_tracked":     len(cves),
+            "malware_families": s("G03_MalwareCloud").get("malware_families_detected", 0),
+            "detection_rules":  s("G07_DetectionGenerator").get("total_rules", 0),
+            "hunt_hypotheses":  len(s("G12_AIThreatHunter").get("hunt_hypotheses", [])),
+            "campaign_count":   s("G05_CampaignCorrelation").get("total_campaigns", 0),
+            "feed_sources":     s("G01_SensorNetwork").get("source_count", 0),
+            "darkweb_sources":  0,   # not operated
+            "sensor_count":     0,   # not operated
+            "honeypots":        0,   # not operated
+            "taxii_collections": s("G08_TAXIIServer").get("collection_count", 0),
+            "total_flows":      0,   # the feed has no attack geolocation
         },
     }
 
@@ -1211,7 +996,7 @@ def generate_engines_api(genesis: Dict, nexus: Dict, items: List[Dict]) -> Dict:
         "platform":     "SENTINEL APEX",
         "total_advisories": len(items),
         "engines":      genesis.get("engines", {}),
-        "engines_ok":   genesis.get("engines_ok", 12),
+        "engines_ok":   genesis.get("engines_ok", 0),
         "engines_total": genesis.get("engines_total", 12),
         "exposure_index": nexus.get("exposure_index", 0),
         "exposure_trend": exp.get("trend", "STABLE"),
@@ -1227,8 +1012,9 @@ def generate_engines_api(genesis: Dict, nexus: Dict, items: List[Dict]) -> Dict:
             "hunt_hypotheses":  metrics.get("hunt_hypotheses", 0),
             "sensor_count":     metrics.get("sensor_count", 0),
             "honeypots":        metrics.get("honeypots", 0),
-            "taxii_collections": metrics.get("taxii_collections", 4),
-            "darkweb_sources":  metrics.get("darkweb_sources", 9),
+            "taxii_collections": metrics.get("taxii_collections", 0),
+            "darkweb_sources":  metrics.get("darkweb_sources", 0),
+            "feed_sources":     metrics.get("feed_sources", 0),
             "total_flows":      metrics.get("total_flows", 0),
             "campaign_count":   metrics.get("campaign_count", 0),
         },
@@ -1309,7 +1095,7 @@ def main():
     # written to data/genesis/genesis_output.json -- see comment above)
     genesis = generate_genesis(items)
     m = genesis.get("metrics", {})
-    log.info(f"GENESIS: 12/12 engines | sensors={m.get('sensor_count')} | actors={m.get('actors_tracked')} | "
+    log.info(f"GENESIS: {genesis.get('engines_ok')}/{genesis.get('engines_total')} engines | sources={m.get('feed_sources')} | actors={m.get('actors_tracked')} | "
              f"iocs={m.get('iocs_total')} | rules={m.get('detection_rules')} | hunts={m.get('hunt_hypotheses')}")
 
     # 3. UNIFIED API ENDPOINT

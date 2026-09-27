@@ -5766,71 +5766,29 @@ function renderTopThreats(data) {
         // ═══════════════════════════════════════════════════════
 
         function renderGenesis(data) {
-            if (!data || !data.length) return;
+            // GENESIS tiles come from one place: the canonical engine output
+            // (/api/v1/intel/genesis_output.json, rendered by
+            // renderGenesisEngine below). This function used to compute its
+            // own tiles from the feed on every poll -- with invented values
+            // ("8 REGIONS" sensors, "8 TRAPS" honeypots, "4 FEEDS", "9
+            // SOURCES" dark web, rules = high-risk count x 5) -- and overwrote
+            // the engine's figures each time. It now only shows a pending
+            // state until the engine output has rendered, and never after.
+            if (window.__CDB_GENESIS_RENDERED) return;
             const grid = document.getElementById('genesis-grid');
-            if (!grid) return;
-
-            const engines = [
-                {id:'G01',name:'Sensor Network',icon:'📡',color:'#3b82f6',
-                 val: '8 REGIONS', desc:'Global telemetry sensors'},
-                {id:'G02',name:'Honeypot Grid',icon:'🍯',color:'#f59e0b',
-                 val: '8 TRAPS', desc:'Multi-protocol deception'},
-                {id:'G03',name:'Malware Cloud',icon:'🧬',color:'#ef4444',
-                 val: data.filter(d=>(d.risk_score||0)>=7).length+'', desc:'Samples analyzed'},
-                {id:'G04',name:'Actor Registry',icon:'🎭',color:'#8b5cf6',
-                 val: new Set(data.map(d=>d.actor_tag).filter(a=>a&&a!=='UNC-CDB-99')).size+'',
-                 desc:'Tracked actors'},
-                {id:'G05',name:'Campaign Engine',icon:'🔗',color:'#ec4899',
-                 val: Object.entries(data.reduce((a,e)=>{const t=e.actor_tag;if(t&&t!=='UNC-CDB-99'){a[t]=(a[t]||0)+1}return a},{})).filter(([,c])=>c>=2).length+'',
-                 desc:'Campaigns detected'},
-                {id:'G06',name:'IOC Reputation',icon:'🛡️',color:'#14b8a6',
-                 val: new Set(data.flatMap(d=>(d.title||'').match(/CVE-\d{4}-\d{4,7}/gi)||[])).size+'',
-                 desc:'IOCs scored'},
-                {id:'G07',name:'Detection Gen',icon:'⚡',color:'#f97316',
-                 val: (data.filter(d=>(d.risk_score||0)>=7).length*5)+'',
-                 desc:'Rules generated'},
-                {id:'G08',name:'TAXII Server',icon:'📦',color:'#06b6d4',
-                 val:'4 FEEDS', desc:'STIX/TAXII collections'},
-                {id:'G09',name:'DarkWeb Intel',icon:'💢¸️',color:'#a855f7',
-                 val:'9 SOURCES', desc:'Monitored darkweb'},
-                {id:'G10',name:'Attack Surface',icon:'🔍',color:'#22c55e',
-                 val: data.filter(d=>{const t=(d.title||'').toLowerCase();return t.includes('expos')||t.includes('rce')||t.includes('misconfigur')}).length+'',
-                 desc:'Exposure signals'},
-                // No attack geodata exists in the feed; this tile used to show the
-                // item count as "Attack flows mapped".
-                {id:'G11',name:'Attack Map',icon:'🗺️',color:'#e11d48',
-                 val: 'N/A', desc:'No attack geodata in feed'},
-                {id:'G12',name:'AI Hunter',icon:'🤖',color:'#7c3aed',
-                 val: Math.min(10,Math.max(1,Math.floor(data.length/5)))+'',
-                 desc:'Threat clusters'},
-            ];
-
-            grid.innerHTML = engines.map(e =>
-                `<div style="background:var(--bg-card);border:1px solid ${e.color}22;border-radius:4px;padding:12px;text-align:center;">
-                    <div style="font-size:18px;margin-bottom:4px;">${e.icon}</div>
-                    <div style="font-family:var(--font-mono);font-size:7px;letter-spacing:2px;color:${e.color};margin-bottom:4px;">${e.id} ${e.name.toUpperCase()}</div>
-                    <div style="font-size:22px;font-weight:900;color:${e.color};font-family:var(--font-mono);">${e.val}</div>
-                    <div style="font-size:8px;color:var(--text-muted);margin-top:2px;">${e.desc}</div>
-                </div>`
-            ).join('');
-
+            if (grid && !grid.getAttribute('data-genesis-pending')) {
+                grid.setAttribute('data-genesis-pending', '1');
+                grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:18px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:1px;">Loading GENESIS engine output&hellip;</div>';
+            }
             // Attack flows: the feed has no attack source/target geolocation.
-            // This box used to guess "flows" per country from title keywords
-            // (a title containing "us " counted as USA, lockbit as Russia).
             // Origin attribution lives in one place, the EICC geographic panel
             // (#eicc-heatmap, actor_country only), so this links there.
             const flowsEl = document.getElementById('genesis-attack-flows');
             if (flowsEl) flowsEl.innerHTML = `<div style="padding:4px 0;">No attack flows are shown: the feed carries no attack source/target geolocation, so none are estimated.</div><div style="padding:4px 0;"><a href="#eicc-heatmap" style="color:#ec4899;">Geographic attribution (actor country, from the feed) &darr;</a></div>`;
-
-            // Actor registry
             const actorsEl = document.getElementById('genesis-actors');
-            if (actorsEl) {
-                const actorCounts = {};
-                data.forEach(d => {const a=d.actor_tag; if(a&&a!=='UNC-CDB-99') actorCounts[a]=(actorCounts[a]||0)+1;});
-                const sorted = Object.entries(actorCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
-                actorsEl.innerHTML = sorted.length ?
-                    sorted.map(([actor,count]) => `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--white);">${actor}</span><span style="color:#8b5cf6;">${count} advisories</span></div>`).join('') :
-                    '<div>Processing actor intelligence...</div>';
+            if (actorsEl && !actorsEl.getAttribute('data-genesis-pending')) {
+                actorsEl.setAttribute('data-genesis-pending', '1');
+                actorsEl.textContent = 'Loading GENESIS engine output\u2026';
             }
         }
 
@@ -6003,37 +5961,40 @@ function renderTopThreats(data) {
                         return;
                     }
                     const engines = data.engines || {};
+                    // Each tile shows what its engine measures from the feed.
+                    // G01/G02/G09 are capabilities the platform does not operate
+                    // (sensors, honeypots, dark-web monitoring): the engine says
+                    // so (operated:false, grey dot) and reports the feed-derived
+                    // figure that is real. See agent/v43_genesis/genesis_engine.py.
                     const engineDefs = [
-                        {key:'G01_SensorNetwork',  id:'G01', name:'Sensor Network',  icon:'📡', color:'#3b82f6',
-                         valFn: s => (s.sensor_count||'?') + ' SENSORS', descFn: s => (s.total_events_24h||0).toLocaleString() + ' events/24h'},
-                        {key:'G02_HoneypotGrid',   id:'G02', name:'Honeypot Grid',   icon:'🍯', color:'#f59e0b',
-                         valFn: s => (s.honeypot_count||'?') + ' TRAPS', descFn: s => (s.total_captures_24h||0) + ' captures/24h'},
-                        {key:'G03_MalwareCloud',   id:'G03', name:'Malware Cloud',   icon:'🧬', color:'#ef4444',
-                         valFn: s => (s.malware_families_detected!=null?s.malware_families_detected:'?') + ' FAMILIES', descFn: s => (s.yara_rule_count||0) + ' YARA rules'},
+                        {key:'G01_SensorNetwork',  id:'G01', name:'Feed Sources',  icon:'📡', color:'#3b82f6',
+                         valFn: s => (s.source_count||0) + ' SOURCES', descFn: s => (s.advisories_24h||0) + ' advisories in 24h'},
+                        {key:'G02_HoneypotGrid',   id:'G02', name:'Exploitation',  icon:'💥', color:'#f59e0b',
+                         valFn: s => (s.kev_confirmed||0) + ' KEV', descFn: s => (s.public_exploit_available||0) + ' with public exploit'},
+                        {key:'G03_MalwareCloud',   id:'G03', name:'Malware Families', icon:'🧬', color:'#ef4444',
+                         valFn: s => (s.malware_families_detected||0) + ' FAMILIES', descFn: s => 'named in ' + (s.advisories_with_family||0) + ' advisories'},
                         {key:'G04_ActorRegistry',  id:'G04', name:'Actor Registry',  icon:'🎭', color:'#8b5cf6',
-                         valFn: s => (s.total_actors||'?') + ' ACTORS', descFn: s => (s.known_actors||0) + ' known / ' + (s.discovered_actors||0) + ' new'},
-                        {key:'G05_CampaignCorrelation', id:'G05', name:'Campaign Engine', icon:'🔗', color:'#ec4899',
-                         valFn: s => (s.total_campaigns||s.campaign_count||'?') + ' CAMPAIGNS', descFn: s => { const camps=Array.isArray(s.campaigns)?s.campaigns.length:parseInt(s.campaigns)||0; return camps + ' active campaigns'; }},
-                        {key:'G06_IOCReputation',  id:'G06', name:'IOC Reputation',  icon:'🛡️', color:'#14b8a6',
-                         valFn: s => (s.total_iocs_scored||s.ioc_count||'?') + ' IOCs', descFn: s => 'avg trust: ' + ((s.average_trust_score||0)).toFixed(0) + '%'},
-                        {key:'G07_DetectionGenerator', id:'G07', name:'Detection Gen', icon:'⚡', color:'#f97316',
-                         valFn: s => { var sig=Array.isArray(s.sigma_rules)?s.sigma_rules.length:(parseInt(s.sigma_rules)||0); var yar=Array.isArray(s.yara_rules)?s.yara_rules.length:(parseInt(s.yara_rules)||0); var sur=Array.isArray(s.suricata_rules)?s.suricata_rules.length:(parseInt(s.suricata_rules)||0); var edr=Array.isArray(s.edr_queries)?s.edr_queries.length:(parseInt(s.edr_queries)||0); return (sig+yar+sur+edr||s.total_rules||'?')+' RULES'; },
-                         descFn: s => { var sig=Array.isArray(s.sigma_rules)?s.sigma_rules.length:(parseInt(s.sigma_rules)||0); var yar=Array.isArray(s.yara_rules)?s.yara_rules.length:(parseInt(s.yara_rules)||0); return sig+' Sigma / '+yar+' YARA'; }},
-                        {key:'G08_TAXIIServer',    id:'G08', name:'TAXII Server',    icon:'📦', color:'#06b6d4',
-                         valFn: s => (s.collection_count||s.collections||'4') + ' FEEDS', descFn: s => 'STIX 2.1 compliant'},
-                        {key:'G09_DarkWebIntel',   id:'G09', name:'DarkWeb Intel',   icon:'💢¸️', color:'#a855f7',
-                         valFn: s => (s.sources_monitored||s.source_count||'9') + ' SOURCES', descFn: s => (s.alerts_24h||s.findings_count||0) + ' alerts/24h'},
-                        {key:'G10_AttackSurface', id:'G10', name:'Attack Surface', icon:'🔍', color:'#22c55e',
-                         valFn: s => { var pn=function(v){if(typeof v==='number')return v;if(typeof v==='string'){var m=v.match(/^(\d+)/);return m?parseInt(m[1]):0;}if(Array.isArray(v))return v.length;if(typeof v==='object'&&v)return Object.keys(v).length;return 0;}; var te=pn(s.total_exposures||s.total_exposure_signals||0); var vs=pn(s.vulnerable_services); var ec=pn(s.exposure_categories); var rs=pn(s.risk_summary); var total=te||(vs+ec+rs)||pn(s.scan_capabilities)||0; return total+' EXPOSURES'; },
-                         descFn: s => { var pn=function(v){if(typeof v==='number')return v;if(typeof v==='string'){var m=v.match(/^(\d+)/);return m?parseInt(m[1]):0;}return 0;}; if(typeof s.risk_summary==='object'&&s.risk_summary)return (s.risk_summary.critical||s.risk_summary.critical_exposures||0)+' critical'; return pn(s.critical_findings||s.critical_exposures||0)+' critical'; }},
-                        // genesis_engine_v2 G11 derives "flows" from feed-source domains
-                        // and title keywords, not observed attacks: not shown as data.
+                         valFn: s => (s.total_actors||0) + ' ACTORS', descFn: s => (s.unattributed_advisories||0) + ' advisories unattributed'},
+                        {key:'G05_CampaignCorrelation', id:'G05', name:'Campaigns', icon:'🔗', color:'#ec4899',
+                         valFn: s => (s.total_campaigns||0) + ' CLUSTERS', descFn: s => 'grouped by actor and date'},
+                        {key:'G06_IOCReputation',  id:'G06', name:'CVE Reputation',  icon:'🛡️', color:'#14b8a6',
+                         valFn: s => (s.total_iocs_scored||0) + ' CVEs', descFn: s => (s.malicious_count||0) + ' scored malicious'},
+                        {key:'G07_DetectionGenerator', id:'G07', name:'Detection Rules', icon:'⚡', color:'#f97316',
+                         valFn: s => (s.total_rules||0) + ' RULES',
+                         descFn: s => (s.sigma_count||0) + ' Sigma · ' + (s.kql_count||0) + ' KQL · ' + (s.suricata_count||0) + ' Suricata'},
+                        {key:'G08_TAXIIServer',    id:'G08', name:'TAXII 2.1',    icon:'📦', color:'#06b6d4',
+                         valFn: s => (s.collection_count||0) + ' COLLECTIONS', descFn: s => 'served at /taxii/'},
+                        {key:'G09_DarkWebIntel',   id:'G09', name:'Ransomware & Leaks', icon:'🔓', color:'#a855f7',
+                         valFn: s => (s.relevant_advisories||0) + ' ADVISORIES', descFn: s => 'dark-web monitoring not operated'},
+                        {key:'G10_AttackSurface', id:'G10', name:'Exposure Signals', icon:'🔍', color:'#22c55e',
+                         valFn: s => (s.total_exposures||0) + ' SIGNALS', descFn: s => (s.critical_exposures||0) + ' RCE / unauthenticated'},
+                        // No attack geodata exists in the feed (G11 produces no flows).
                         {key:'G11_GlobalAttackMap', id:'G11', name:'Attack Map',      icon:'🗺️', color:'#e11d48',
                          valFn: s => 'N/A', descFn: s => 'No attack geodata in feed'},
-                        {key:'G12_AIThreatHunter', id:'G12', name:'AI Hunter', icon:'🤖', color:'#7c3aed',
-                         valFn: s => { var hh=Array.isArray(s.hunt_hypotheses)?s.hunt_hypotheses.length:(parseInt(s.hunt_hypotheses)||0); var tc=Array.isArray(s.threat_clusters)?s.threat_clusters.length:(parseInt(s.threat_clusters)||0); return (hh||tc||s.hunts_generated||'?')+' HUNTS'; },
-                         descFn: s => { var st=typeof s.stats==='object'&&s.stats?s.stats:{}; var ca=st.confidence_avg||st.avg_confidence||s.confidence_avg||0; return (typeof ca==='number'?ca.toFixed(0):ca||0)+'% avg confidence'; }},
+                        {key:'G12_AIThreatHunter', id:'G12', name:'Threat Clusters', icon:'🤖', color:'#7c3aed',
+                         valFn: s => (s.clusters_identified||0) + ' CLUSTERS', descFn: s => (s.trending_techniques||0) + ' techniques trending (7d)'},
                     ];
+                    const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
                     const grid = document.getElementById('genesis-grid');
                     if (grid) {
@@ -6042,21 +6003,26 @@ function renderTopThreats(data) {
                             const summary = eng.summary || {};
                             const status = eng.status || 'OK';
                             const hasData = Object.keys(summary).length > 0;
+                            const notOperated = summary.operated === false;
                             const statusColor = status === 'OK' ? def.color : '#6b7280';
+                            const dotColor = status === 'OK' && !notOperated ? def.color : '#6b7280';
+                            const tip = esc(summary.note || summary.method || '');
                             // Null guard: show '0' not '?' when field is absent but summary exists
                             let val = hasData ? '0' : 'SYNC', desc = hasData ? 'processing...' : 'awaiting data...';
                             try { val = def.valFn(summary); } catch(e) { val = hasData ? '0' : 'SYNC'; }
                             try { desc = def.descFn(summary); } catch(e) { desc = 'syncing...'; }
                             // Final guard: replace any residual '?' with '0'
                             val = String(val).replace(/^\?/, '0');
-                            return `<div style="background:var(--bg-card);border:1px solid ${statusColor}22;border-radius:4px;padding:12px;text-align:center;position:relative;">
-                                <div style="position:absolute;top:6px;right:6px;width:5px;height:5px;border-radius:50%;background:${statusColor};${status==='OK'?'box-shadow:0 0 4px '+statusColor:''}"></div>
+                            return `<div title="${tip}" style="background:var(--bg-card);border:1px solid ${statusColor}22;border-radius:4px;padding:12px;text-align:center;position:relative;">
+                                <div style="position:absolute;top:6px;right:6px;width:5px;height:5px;border-radius:50%;background:${dotColor};${dotColor!=='#6b7280'?'box-shadow:0 0 4px '+dotColor:''}"></div>
                                 <div style="font-size:18px;margin-bottom:4px;">${def.icon}</div>
                                 <div style="font-family:var(--font-mono);font-size:7px;letter-spacing:2px;color:${statusColor};margin-bottom:4px;">${def.id} ${def.name.toUpperCase()}</div>
-                                <div style="font-size:20px;font-weight:900;color:${statusColor};font-family:var(--font-mono);">${val}</div>
-                                <div style="font-size:8px;color:var(--text-muted);margin-top:2px;">${desc}</div>
+                                <div style="font-size:20px;font-weight:900;color:${statusColor};font-family:var(--font-mono);">${esc(val)}</div>
+                                <div style="font-size:8px;color:var(--text-muted);margin-top:2px;">${esc(desc)}</div>
                             </div>`;
                         }).join('');
+                        grid.removeAttribute('data-genesis-pending');
+                        window.__CDB_GENESIS_RENDERED = true;
                     }
 
                     // Actor Registry Detail \u2014 always render (no "Loading..." hang)
@@ -6064,14 +6030,16 @@ function renderTopThreats(data) {
                     const actorEng = engines['G04_ActorRegistry'] || {};
                     const actorSum = actorEng.summary || {};
                     if (actorsEl) {
+                        // Actors observed in the feed; placeholder tags are not counted.
+                        actorsEl.removeAttribute('data-genesis-pending');
                         actorsEl.innerHTML = `<div style="padding:4px 0;display:flex;justify-content:space-between;border-bottom:1px solid var(--border);">
-                            <span style="color:var(--text);">Total Tracked</span><span style="color:#8b5cf6;font-weight:700;">${actorSum.total_actors||0} actors</span>
+                            <span style="color:var(--text);">Actors observed in feed</span><span style="color:#8b5cf6;font-weight:700;">${+actorSum.total_actors||0}</span>
                         </div>
                         <div style="padding:4px 0;display:flex;justify-content:space-between;border-bottom:1px solid var(--border);">
-                            <span style="color:var(--text);">Known APT Groups</span><span style="color:#3b82f6;font-weight:700;">${actorSum.known_actors||0}</span>
+                            <span style="color:var(--text);">With a reference profile</span><span style="color:#3b82f6;font-weight:700;">${+actorSum.known_actors||0}</span>
                         </div>
                         <div style="padding:4px 0;display:flex;justify-content:space-between;">
-                            <span style="color:var(--text);">Newly Discovered</span><span style="color:#ef4444;font-weight:700;">${actorSum.discovered_actors||0}</span>
+                            <span style="color:var(--text);">Advisories without attribution</span><span style="color:var(--text-muted);font-weight:700;">${+actorSum.unattributed_advisories||0}</span>
                         </div>`;
                     }
 
@@ -6088,7 +6056,10 @@ function renderTopThreats(data) {
                         const badge = document.createElement('span');
                         badge.id = 'genesis-health-badge';
                         badge.style.cssText = 'margin-left:12px;font-size:10px;font-family:var(--font-mono);background:#00d4aa22;color:#00d4aa;border-radius:3px;padding:2px 8px;letter-spacing:1px;';
-                        badge.textContent = engOk + '/' + engTotal + ' ENGINES LIVE';
+                        const genMs = Date.parse(data.generated_at || '');
+                        const ageH = isNaN(genMs) ? null : Math.max(0, Math.floor((Date.now() - genMs) / 3600000));
+                        badge.textContent = engOk + '/' + engTotal + ' ENGINES' +
+                            (ageH === null ? '' : ' · UPDATED ' + (ageH < 1 ? '<1H' : ageH + 'H') + ' AGO');
                         genesisHeader.appendChild(badge);
                     }
 
@@ -6670,6 +6641,15 @@ function renderTopThreats(data) {
                 // intelligence values always take precedence over potentially stale engine JSON.
                 try { if (manifestData && manifestData.length) renderNexusIntelligence(manifestData); } catch(e) { console.warn('[NEXUS] Post-engine re-render:', e); }
                 route('genesis',   renderGenesisEngine);
+                // No engine output (fetch failed twice): say so instead of
+                // leaving renderGenesis()'s pending state up indefinitely.
+                if (!results.genesis && !window.__CDB_GENESIS_RENDERED) {
+                    const msg = 'GENESIS engine output is unavailable right now (it is recomputed every 6 hours).';
+                    const g = document.getElementById('genesis-grid');
+                    if (g) g.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:18px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:1px;">' + msg + '</div>';
+                    const a = document.getElementById('genesis-actors');
+                    if (a) a.textContent = msg;
+                }
                 route('cortex',    renderCortexEngine);
                 route('quantum',   renderQuantumEngine);
                 route('sovereign', renderSovereignEngine);
