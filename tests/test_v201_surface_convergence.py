@@ -38,11 +38,18 @@ def test_dashboard_sections_and_map_hud_are_v201():
 
 def test_feed_panels_accept_a_raw_array_and_do_not_require_cdb_normalize():
     src = read_homepage_source()
-    assert "function eiccItems(" in src
-    assert "eiccItems(result.data)" in src
-    assert "eiccItems(data)" in src
-    assert "eiccNewestMs(" in src
+    # #513: the EICC panels render one snapshot (js/apex-dashboard-snapshot.js);
+    # eiccItems() became its itemsOf(), which still accepts a raw array or
+    # {items:[...]}. eiccNewestMs() was removed on purpose: Last Sync is the
+    # feed's publication time, not the newest article's date.
+    assert '<script src="/js/apex-dashboard-snapshot.js"></script>' in src
+    snap = (REPO / "js" / "apex-dashboard-snapshot.js").read_text(encoding="utf-8")
+    assert "function itemsOf(data) {\n    if (Array.isArray(data)) return data;" in snap
+    assert "Array.isArray(data.items)" in snap
+    assert "var items = feed ? itemsOf(feed)" in snap
+    assert "eiccNewestMs(" not in src
     assert "var _norm = window.CDB_NORMALIZE" in src
+    assert "_norm && typeof _norm.kevState === 'function'" in src
     assert "cdb-darkweb-live" in src
     assert "eicc-heatmap-sub" in src
     assert "API ● CHECKING" in src

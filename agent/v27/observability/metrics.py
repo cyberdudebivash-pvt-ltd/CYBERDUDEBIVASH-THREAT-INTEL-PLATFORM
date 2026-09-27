@@ -53,6 +53,14 @@ except ImportError:
     PROMETHEUS_AVAILABLE = False
     logger.warning("prometheus_client not installed, using fallback metrics")
 
+# Prometheus collectors register in the process-wide REGISTRY (which
+# start_http_server/export serve), so a metric name can be registered once
+# per process. They are created on the first MetricsExporter and shared by
+# every later instance; building them again raised DuplicateTimeseries, so a
+# second MetricsExporter() (e.g. a direct one plus get_metrics()) crashed.
+_PROMETHEUS_COLLECTORS: Optional[Dict[str, Any]] = None
+_PROMETHEUS_COLLECTORS_LOCK = threading.Lock()
+
 
 class FallbackMetric:
     """Fallback metric when prometheus_client not available"""
@@ -116,7 +124,17 @@ class MetricsExporter:
         self._initialized = True
     
     def _init_prometheus_metrics(self):
-        """Initialize Prometheus metrics"""
+        """Initialize Prometheus metrics (created once per process, then shared)."""
+        global _PROMETHEUS_COLLECTORS
+        with _PROMETHEUS_COLLECTORS_LOCK:
+            if _PROMETHEUS_COLLECTORS is None:
+                self._create_prometheus_collectors()
+                _PROMETHEUS_COLLECTORS = self._metrics
+            else:
+                self._metrics = _PROMETHEUS_COLLECTORS
+
+    def _create_prometheus_collectors(self):
+        """Create and register the Prometheus collectors in REGISTRY."""
         # Counters
         self._metrics["threats_total"] = Counter(
             f"{self.PREFIX}_threats_total",

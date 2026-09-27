@@ -157,11 +157,16 @@ class TestMultiSourceIntelWiring(unittest.TestCase):
         )
 
     def test_upload_step_runs_after_ingestion_and_before_commit(self):
+        # #500 removed the "Commit Intel State & Manifest" step outright (its
+        # push could never succeed against main's ruleset), so R2 is the only
+        # place this workflow persists state: upload must follow ingestion
+        # and the persistence validation that gates publication.
         ingest = self.names.index("True Incremental Intel Ingestion")
+        validate = self.names.index("Validate persistence outputs before publication")
         upload = self.names.index("Upload Intel State to R2")
-        commit = self.names.index("Commit Intel State & Manifest")
         self.assertLess(ingest, upload)
-        self.assertLess(upload, commit)
+        self.assertLess(validate, upload)
+        self.assertNotIn("Commit Intel State & Manifest", self.names)
 
     def test_r2_credentials_present_on_both_new_steps(self):
         for name in ("Download Intel State from R2", "Upload Intel State to R2"):
@@ -174,16 +179,13 @@ class TestMultiSourceIntelWiring(unittest.TestCase):
         """CodeRabbit review finding on this migration (verified and fixed):
         this step's git push was guaranteed to fail on every run regardless
         of which files it carried -- main's branch ruleset rejects ANY
-        direct push, not just pushes of specific paths -- so the fix is a
-        complete no-op, not just removing the 3 originally-migrated files
-        while leaving the 5 registry files + advisories/ still staged."""
-        commit_step = next(
-            s for s in self.doc["jobs"]["multi-source-enrichment"]["steps"]
-            if s.get("name") == "Commit Intel State & Manifest"
-        )
-        run_block = commit_step["run"]
-        self.assertNotIn("git add -f", run_block)
-        self.assertNotIn("git push", run_block)
+        direct push, not just pushes of specific paths. #500 went further
+        and removed the commit step entirely; no step may stage, commit or
+        push anything (migrated state lives in R2 only)."""
+        for step in self.doc["jobs"]["multi-source-enrichment"]["steps"]:
+            run_block = step.get("run", "") or ""
+            for cmd in ("git add", "git commit", "git push"):
+                self.assertNotIn(cmd, run_block, f"step {step.get('name')!r} runs {cmd!r}")
 
     def test_persistence_engine_runs_before_upload_not_after(self):
         """CodeRabbit review finding on this migration (verified and fixed):
