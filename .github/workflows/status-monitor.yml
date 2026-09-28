@@ -40,23 +40,28 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python3 scripts/run_platform_status_monitor.py
 
-      - name: "Safe Commit Status"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: "Validate and stage status publication"
         run: |
-          git config --local user.email "bivash@cyberdudebivash.com"
-          git config --local user.name  "CYBERDUDEBIVASH"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
-          git rebase --abort 2>/dev/null || true; git merge --abort 2>/dev/null || true
-          rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
+          set -euo pipefail
+          test -s data/status/status.json
 
-          git add -f data/status/ 2>/dev/null || true
-          if git diff --staged --quiet; then echo "No status changes."; exit 0; fi
+          rm -rf .publish
+          mkdir -p .publish/data/status
+          cp -a data/status/. .publish/data/status/
 
-          git commit -m "Status update: $(date -u +'%Y-%m-%d %H:%M UTC') [skip ci]"
-          for i in 1 2 3; do
-            git fetch origin main --quiet 2>/dev/null || true
-            git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null||true; git merge origin/main -X ours --no-edit --quiet||true; }
-            if git push origin main; then break; fi
-            sleep $((i*10)); [ $i -eq 3 ] && echo "Push deferred."
-          done
+          echo "Status publication manifest:"
+          find .publish/data/status -type f -print0 \
+            | sort -z \
+            | xargs -0 sha256sum
+
+      - name: "Publish status to GitHub Pages"
+        uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4.9.0
+        with:
+          folder: .publish
+          branch: gh-pages
+          clean: false
+          single-commit: false
+          token: ${{ secrets.GH_TOKEN || github.token }}
+          git-config-name: 'github-actions[bot]'
+          git-config-email: 'github-actions[bot]@users.noreply.github.com'
+          commit-message: 'deploy(status): Platform status update [skip ci]'
