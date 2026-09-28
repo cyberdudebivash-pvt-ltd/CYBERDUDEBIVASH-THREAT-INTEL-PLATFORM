@@ -77,6 +77,7 @@ def test_cloudflare_rule_covers_static_pages_only():
     rs = rule["ruleset"]
     assert rs["phase"] == "http_response_headers_transform"
     (r,) = rs["rules"]
+    assert 'not (http.request.uri.path in {"/api" "/reports" "/taxii" "/auth"})' in r["expression"]
     for prefix in ("/api/", "/reports/", "/taxii/", "/auth/"):
         assert f'not starts_with(http.request.uri.path, "{prefix}")' in r["expression"]
     h = r["action_parameters"]["headers"]

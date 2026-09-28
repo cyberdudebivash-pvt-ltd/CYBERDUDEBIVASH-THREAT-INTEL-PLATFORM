@@ -1,259 +1,65 @@
-name: "SENTINEL APEX — Final Production Hardening v201.0"
+# Synthetic engine checks only; release approval requires live customer-path evidence.
+name: "SENTINEL APEX — Engine Smoke Evidence v201.0"
 
 on:
   schedule:
-    # Runs at :00 every 6 hours — staggered from ingestion (:45) and observability (:30)
     - cron: "0 1,7,13,19 * * *"
   workflow_dispatch:
     inputs:
       run_quality:
-        description: "Run Dossier Quality Engine"
-        required: false
-        default: "true"
+        description: "Run synthetic dossier quality check"
+        type: boolean
+        default: true
       run_tenant:
-        description: "Run Tenant Isolation Report"
-        required: false
-        default: "true"
+        description: "Run synthetic tenant permission checks"
+        type: boolean
+        default: true
       run_monetization:
-        description: "Run Monetization Analytics"
-        required: false
-        default: "true"
+        description: "Run synthetic monetization check"
+        type: boolean
+        default: true
 
-# v184.0 FIX (2026-06-08): Unique concurrency group prevents cancellation by
-# other sentinel-data-writer workflows queuing simultaneously.
 concurrency:
-  group: sentinel-data-writer-hardening
+  group: sentinel-hardening-smoke
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   production-hardening:
-    name: "Production Hardening Pipeline"
+    name: "Synthetic engine checks (not production certification)"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
+    timeout-minutes: 10
     steps:
-      - name: "Checkout"
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
-
-      - name: "Setup Python 3.11"
+          persist-credentials: false
+      - name: Setup Python 3.11
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-          cache: "pip"
-
-      - name: "Install Dependencies"
+      # The three engines use the Python standard library. No cloud credentials,
+      # network access, package installation or repository writes are needed.
+      - name: Run isolated engine checks
+        env:
+          RUN_QUALITY: ${{ github.event.inputs.run_quality || 'true' }}
+          RUN_TENANT: ${{ github.event.inputs.run_tenant || 'true' }}
+          RUN_MONETIZATION: ${{ github.event.inputs.run_monetization || 'true' }}
         run: |
-          pip install --upgrade pip --quiet
-          if [ -f requirements.txt ]; then pip install -r requirements-ci-light.txt --quiet; fi
-
-      - name: "Syntax Gate — Validate All Production Engines"
-        run: |
-          set -e
-          echo "=== SYNTAX GATE: Final Production Engines ==="
-          FILES=(
-            "agent/dossier_quality_engine.py"
-            "agent/enterprise_tenant_isolation_engine.py"
-            "agent/enterprise_monetization_analytics_engine.py"
-            "agent/apex_engine.py"
-          )
-          FAILED=0
-          for f in "${FILES[@]}"; do
-            if python3 -m py_compile "$f" 2>&1; then
-              echo "  PASS: $f"
-            else
-              echo "  FAIL: $f"
-              FAILED=$((FAILED+1))
-            fi
-          done
-          if [ $FAILED -gt 0 ]; then
-            echo "SYNTAX GATE: $FAILED file(s) failed — aborting pipeline"
-            exit 1
-          fi
-          echo "SYNTAX GATE PASSED: All production engines valid"
-
-      - name: "Phase 1 — Dossier Quality Engine"
-        if: ${{ github.event.inputs.run_quality != 'false' }}
-        continue-on-error: true
-        run: |
-          echo "=== DOSSIER QUALITY ENGINE ==="
-          mkdir -p data/quality
-          python3 -c "
-          import json, os, glob
-          from agent.dossier_quality_engine import DossierQualityEngine
-          engine = DossierQualityEngine()
-
-          # Load advisories from intelligence feed if available
-          feed_files = sorted(glob.glob('data/intelligence/*.json'))[-5:]
-          if not feed_files:
-              print('No intelligence feed files found — skipping live run')
-          else:
-              grades = {'A':0,'B':0,'C':0,'D':0,'F':0}
-              suppressed_total = 0
-              for fp in feed_files:
-                  try:
-                      with open(fp) as f:
-                          advisories = json.load(f)
-                      if isinstance(advisories, list):
-                          for adv in advisories[:20]:
-                              r = engine.process_advisory(adv)
-                              grades[r.grade] = grades.get(r.grade, 0) + 1
-                              suppressed_total += r.iocs_suppressed
-                  except Exception as ex:
-                      print(f'  WARN: {fp}: {ex}')
-              print(f'Quality Grades: {grades}')
-              print(f'IOCs Suppressed: {suppressed_total}')
-              with open('data/quality/ci_quality_summary.json','w') as f:
-                  json.dump({'grades':grades,'iocs_suppressed':suppressed_total}, f, indent=2)
-          print('Dossier Quality Engine: OK')
-          " 2>&1
-
-      - name: "Phase 2 — Tenant Isolation Report"
-        if: ${{ github.event.inputs.run_tenant != 'false' }}
-        continue-on-error: true
-        run: |
-          echo "=== TENANT ISOLATION REPORT ==="
-          mkdir -p data/tenant data/audit
-          python3 -c "
-          from agent.enterprise_tenant_isolation_engine import EnterpriseTenantIsolationEngine, TierLevel
-          engine = EnterpriseTenantIsolationEngine()
-          # CI validation: register synthetic tenants and generate report
-          engine.register_tenant('ci-free', 'ci-free@test.local', 'free')
-          engine.register_tenant('ci-pro',  'ci-pro@test.local',  'pro')
-          engine.register_tenant('ci-ent',  'ci-ent@test.local',  'enterprise')
-          # Simulate access pattern
-          for perm in ['read:preview','read:feed','read:ioc','read:stix']:
-              engine.gate_request('ci-ent', perm, '/api/test', '127.0.0.1')
-          report = engine.generate_report()
-          print(f'Isolation Score:   {report.isolation_score}')
-          print(f'Integrity Status:  {report.integrity_status}')
-          print(f'Audit Events:      {report.audit_event_count}')
-          print(f'Tenant Isolation Report: WRITTEN')
-          " 2>&1
-
-      - name: "Phase 3 — Monetization Analytics"
-        if: ${{ github.event.inputs.run_monetization != 'false' }}
-        continue-on-error: true
-        run: |
-          echo "=== MONETIZATION ANALYTICS (CI SMOKE TEST -- SYNTHETIC DATA) ==="
-          mkdir -p data/monetization/ci_validation
-          python3 -c "
-          from agent.enterprise_monetization_analytics_engine import EnterpriseMonetizationAnalyticsEngine
-          from datetime import datetime, timezone
-          # v185.2 FIX (Workstream 17): this run uses synthetic ci-t1..ci-t4
-          # tenants to smoke-test that the engine executes and produces valid
-          # JSON -- it is NOT real production monetization data. Output is
-          # directed to a separate ci_validation/ subdirectory so it can never
-          # overwrite or be mistaken for data/monetization/monetization_report.json,
-          # which real customers/dashboards would read as production truth.
-          engine = EnterpriseMonetizationAnalyticsEngine(output_dir='data/monetization/ci_validation')
-          # CI: synthetic tier snapshot
-          tenant_tiers = {'ci-t1':'free','ci-t2':'free','ci-t3':'pro','ci-t4':'enterprise'}
-          now = datetime.now(timezone.utc).isoformat()
-          tenant_activity = {
-              'ci-t3': {'last_active': now, 'api_7d': 100, 'api_14d': 190},
-              'ci-t4': {'last_active': now, 'api_7d': 500, 'api_14d': 950},
-          }
-          funnel = {
-              'visit':1000,'signup_free':180,'api_key_created':160,
-              'first_api_call':140,'preview_consumed':120,'paywall_hit':70,
-              'pricing_view':45,'checkout_start':18,'checkout_complete':10,
-              'subscription_active':8,
-          }
-          report = engine.run_full_pipeline(tenant_tiers, tenant_activity, funnel)
-          print(f'MRR:  \${report.mrr.total_mrr:.2f}')
-          print(f'ARR:  \${report.mrr.arr:.2f}')
-          print(f'Funnel Rate: {report.funnel.overall_rate}%')
-          print(f'Monetization Report: WRITTEN')
-          " 2>&1
-
-      - name: "Phase 4 — Apex Engine Full Health Check"
-        continue-on-error: true
-        run: |
-          echo "=== APEX ENGINE HEALTH CHECK ==="
-          python3 -c "
-          from agent.apex_engine import ApexIntelligenceEngine
-          e = ApexIntelligenceEngine()
-          s = e.get_engine_status()
-          print(f'Engine:          {s[\"engine\"]}')
-          print(f'Engines Online:  {s[\"engines_online\"]}/{s[\"engines_total\"]}')
-          print(f'Status:          {s[\"status\"]}')
-          # Verify all production engines visible
-          prod_engines = ['dossier_quality','tenant_isolation','monetization_analytics']
-          for eng in prod_engines:
-              present = eng in s['engines']
-              print(f'  {eng}: registered={present}')
-          " 2>&1
-
-      - name: "Phase 5 — Output Integrity Verification"
-        continue-on-error: true
-        run: |
-          echo "=== OUTPUT INTEGRITY VERIFICATION ==="
-          python3 -c "
-          import json, os
-          checks = [
-              ('data/quality/ci_quality_summary.json', False),
-              ('data/tenant/tenant_isolation_report.json', True),
-              ('data/monetization/ci_validation/monetization_report.json', True),
-          ]
-          passed = 0
-          for path, required in checks:
-              exists = os.path.exists(path)
-              if exists:
-                  try:
-                      with open(path) as f: json.load(f)
-                      print(f'  PASS (valid JSON): {path}')
-                      passed += 1
-                  except Exception as ex:
-                      print(f'  FAIL (invalid JSON): {path}: {ex}')
-              else:
-                  status = 'SKIP (not required)' if not required else 'FAIL (required)'
-                  print(f'  {status}: {path}')
-                  if required: passed = max(0, passed - 1)
-          print(f'Integrity: {passed}/{len(checks)} outputs valid')
-          " 2>&1
-
-      - name: "Commit Production Hardening Outputs"
-        run: |
-          git config user.name  "SENTINEL-APEX-CI"
-          git config user.email "ci@cyberdudebivash.com"
-          git add data/quality/ data/tenant/ data/monetization/ data/audit/ 2>/dev/null || true
-          if git diff --cached --quiet; then
-            echo "No changes to commit -- all outputs current"
-          else
-            MSG="ci: production hardening outputs [$(date -u +%Y-%m-%dT%H:%M:%SZ)] quality+tenant+monetization [skip ci]"
-            git commit -m "$MSG"
-            # Retry push up to 3 times with safe fetch+rebase.
-            # CRITICAL: always abort rebase on conflict BEFORE continuing to prevent
-            # "<<<<<<< Updated upstream" markers from polluting workflow YAML files
-            # and causing validate_repo.py yaml_parse failures in the final gate.
-            PUSHED=0
-            for attempt in 1 2 3; do
-              if git push origin HEAD; then
-                echo "COMMITTED: Production hardening outputs (attempt $attempt)"
-                PUSHED=1
-                break
-              fi
-              echo "Push attempt $attempt failed -- fetching and rebasing..."
-              git fetch origin
-              if git rebase --autostash origin/main; then
-                echo "Rebase succeeded on attempt $attempt, retrying push..."
-              else
-                echo "Rebase conflict on attempt $attempt -- aborting cleanly"
-                git rebase --abort 2>/dev/null || true
-                # Restore workflow files from origin/main to eliminate conflict markers
-                git checkout origin/main -- .github/ 2>/dev/null || true
-                sleep $((attempt * 5))
-              fi
-            done
-            if [ "$PUSHED" -eq 0 ]; then
-              echo "WARNING: Push failed after 3 attempts (non-critical, outputs retained locally)"
-            fi
-          fi
+          python3 scripts/hardening_smoke.py \
+            --output "$RUNNER_TEMP/hardening-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --quality "$RUN_QUALITY" --tenant "$RUN_TENANT" --monetization "$RUN_MONETIZATION"
+      - name: Retain smoke evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: synthetic-engine-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hardening-evidence-${{ github.run_id }}-${{ github.run_attempt }}/*.json
+          if-no-files-found: error
+          retention-days: 3
