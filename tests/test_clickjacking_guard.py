@@ -77,8 +77,8 @@ def test_cloudflare_rule_covers_static_pages_only():
     rs = rule["ruleset"]
     assert rs["phase"] == "http_response_headers_transform"
     (r,) = rs["rules"]
-    assert 'not (http.request.uri.path in {"/api" "/reports" "/taxii" "/auth"})' in r["expression"]
-    for prefix in ("/api/", "/reports/", "/taxii/", "/auth/"):
+    assert 'not (http.request.uri.path in {"/api" "/reports" "/taxii" "/auth" "/swarm"})' in r["expression"]
+    for prefix in ("/api/", "/reports/", "/taxii/", "/auth/", "/swarm/"):
         assert f'not starts_with(http.request.uri.path, "{prefix}")' in r["expression"]
     h = r["action_parameters"]["headers"]
     assert h["X-Frame-Options"]["value"] in ("DENY", "SAMEORIGIN")
@@ -86,3 +86,26 @@ def test_cloudflare_rule_covers_static_pages_only():
     assert h["Content-Security-Policy"]["value"].startswith("frame-ancestors ")
     assert ";" not in h["Content-Security-Policy"]["value"]
     assert h["X-Content-Type-Options"]["value"] == "nosniff"
+
+
+def _worker_route_prefixes():
+    """Top-level path prefixes a Worker serves on intel.cyberdudebivash.com."""
+    prefixes = set()
+    for toml in REPO.glob("workers/*/wrangler.toml"):
+        for pat in re.findall(r'pattern\s*=\s*"intel\.cyberdudebivash\.com(/[^"]*)"', toml.read_text(encoding="utf-8")):
+            prefixes.add("/" + pat.strip("/").split("/")[0] + "/")
+    return prefixes
+
+
+def test_cloudflare_rule_excludes_every_worker_route():
+    # The rule "set"s headers, so on a Worker-served path it would replace
+    # that Worker's own (often stricter) CSP / X-Frame-Options. 2026-09-28:
+    # /swarm/* was missing -- swarm-live's default-src 'none' CSP and DENY
+    # would have been weakened to frame-ancestors 'self' / SAMEORIGIN.
+    rule = json.loads((REPO / "cloudflare/security_headers_transform_rule.json").read_text(encoding="utf-8"))
+    expr = rule["ruleset"]["rules"][0]["expression"]
+    prefixes = _worker_route_prefixes()
+    assert {"/api/", "/swarm/"} <= prefixes, prefixes
+    for prefix in sorted(prefixes):
+        assert f'not starts_with(http.request.uri.path, "{prefix}")' in expr, f"rule does not exclude Worker route {prefix}"
+        assert f'"{prefix.rstrip("/")}"' in expr, f"rule does not exclude the bare path {prefix.rstrip('/')}"
