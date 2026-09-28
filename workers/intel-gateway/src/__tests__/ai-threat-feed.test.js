@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import worker from "../index.js";
 import {
   routeAiFeed, mergeFeed, redact, validateHubItem, feedItemToAi, offerBody, effectiveCatalog, sourceKey,
-  AI_FEED_FEATURES, AI_FEED_SEED_CATALOG, AI_FEED_CATALOG_KEY, normalizeTier,
+  AI_FEED_FEATURES, AI_FEED_SEED_CATALOG, AI_FEED_CATALOG_KEY, normalizeTier, aiPackagesFor, aiTermsFor,
 } from "../ai-threat-feed.js";
 import { planPrice } from "../cyber-watchdog.js";
 
@@ -374,4 +374,19 @@ test("router: Watchdog session token reads AI feed live/item; refused on ingest 
   assert.equal(ingest.status === 401 || ingest.status === 403, true, `ingest ${ingest.status}`);
   const other = await req("/api/feed.json", { headers: auth });
   assert.equal(other.body.error === "token_audience_mismatch" || other.status === 401, true, JSON.stringify(other.body).slice(0, 200));
+});
+
+test("1.2.0: AI package ecosystem tags qualify an advisory whose prose never says LLM", () => {
+  // Production 2026-09-28: GHSA-62mm-xwmv-crhg (pip:khoj) was on the feed but not in the AI feed.
+  const khoj = { id: "intel--khoj", title: "khoj has an unauthenticated path traversal in /home/ endpoint", description: "Static file serving joins the user path.",
+    severity: "HIGH", source: "GitHub Security Advisories", source_url: "https://github.com/advisories/GHSA-62mm-xwmv-crhg", tags: ["pip:khoj"], published_at: "2026-09-26T01:00:00Z" };
+  const ai = feedItemToAi(khoj);
+  assert.ok(ai, "khoj reaches the AI feed");
+  assert.deepEqual(ai.matched_terms, ["package:pip:khoj"]);
+  assert.deepEqual(aiPackagesFor({ tags: ["npm:@modelcontextprotocol/server-filesystem", "npm:@langchain/core", "go:github.com/mark3labs/mcp-go", "npm:mcp-remote", "pip:LiteLLM"] }),
+    ["package:npm:@modelcontextprotocol/server-filesystem", "package:npm:@langchain/core", "package:go:github.com/mark3labs/mcp-go", "package:npm:mcp-remote", "package:pip:litellm"]);
+  // Negative controls: ordinary packages, look-alike names and non-package tags do not qualify.
+  assert.deepEqual(aiPackagesFor({ tags: ["npm:knowns", "pip:mcpanel", "npm:lodash", "pip:django", "T1190", "composer:contao/core", "npm:airtable"] }), []);
+  assert.deepEqual(aiTermsFor({ title: "Router firmware overflow", tags: ["npm:express"] }), []);
+  assert.equal(feedItemToAi({ ...khoj, tags: ["pip:khoj-unrelated-fork"], title: "Path traversal", description: "" }), null);
 });

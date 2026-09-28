@@ -39,7 +39,7 @@ import {
 import { PREVIEW_POLICY } from "./watchdog-policy.js";
 
 export const WATCHDOG_NAME = "CYBERDUDEBIVASH SENTINEL APEX CYBER WATCHDOG";
-export const WATCHDOG_VERSION = "3.0.0";
+export const WATCHDOG_VERSION = "3.1.0";
 export const WATCHDOG_PLATFORM_VERSION = "201.0";
 export const CLASSIFIER_VERSION = "watchdog-lens-v2";
 export const EVENT_RETENTION = 200;
@@ -355,7 +355,7 @@ export function buildSituation(items) {
   };
 }
 
-function publicItem(item, paid) {
+function publicItem(item, paid, computedPriority) {
   const found = classifyItem(item);
   const summary = clean(String(item.summary || item.description || item.ai_summary || ""), paid ? 500 : 0);
   return {
@@ -371,7 +371,25 @@ function publicItem(item, paid) {
     classification_version: found.classification_version,
     reasons: paid ? found.reasons : found.reasons.slice(0, 2),
     provenance: "sentinel-apex-feed",
+    priority: briefPriority(item, paid, computedPriority),
   };
+}
+
+/**
+ * Evidence-cited triage priority for a brief row: the same engine and the
+ * same projection as match events (computeEventPriority(projectItem())), so
+ * a brief row and the event it later becomes never disagree. FREE sees the
+ * band and score; paid tiers also see which feed fields produced them.
+ */
+function briefPriority(item, paid, computed) {
+  const p = computed || computeEventPriority(projectItem(item));
+  const out = { version: p.version, band: p.band, score: p.score };
+  if (paid) {
+    out.coverage = p.coverage;
+    out.evidence = p.factors.filter((f) => f.known && f.evidence).map((f) => f.evidence);
+    out.floors_applied = p.floors_applied;
+  }
+  return out;
 }
 
 function degradedBody(pub) {
@@ -396,18 +414,29 @@ function degradedBody(pub) {
 // or for a missing / invalid / future timestamp, nothing is shown.
 export const LAST_AUTHORITATIVE_MAX_AGE_SECONDS = 48 * 3600;
 
+// Brief row order. "priority" (default since 3.1.0): evidence-cited priority
+// band, then score, then feed order. Production 2026-09-28: in feed order the
+// free brief showed 8 PHP/Apache Roller CVEs while all 12 CRITICAL items,
+// including CISA-KEV Citrix NetScaler zero-days exploited in the wild, sat
+// below the cap. "feed" keeps the pre-3.1.0 order for any client relying on it.
+export const BRIEF_SORTS = Object.freeze(["priority", "feed"]);
+
 /** Brief rows for a lens / query at a tier's cap: one path for live and last-authoritative. */
-function selectBriefRows(source, { lens, q, cap, paid }) {
-  const rows = [];
-  let matched = 0;
+function selectBriefRows(source, { lens, q, cap, paid, sort = "priority" }) {
+  const hits = [];
   for (const item of source) {
     const found = classifyItem(item);
     if (lens && !found.lenses.includes(lens)) continue;
     if (q && !itemText(item).toLowerCase().includes(q)) continue;
-    matched += 1;
-    if (rows.length < cap) rows.push(publicItem(item, paid));
+    hits.push(item);
   }
-  return { rows, matched };
+  if (sort === "feed") return { rows: hits.slice(0, cap).map((item) => publicItem(item, paid)), matched: hits.length };
+  const ranked = hits.map((item, index) => ({ item, index, p: computeEventPriority(projectItem(item)) }));
+  ranked.sort((a, b) => priorityRank(b.p.band) - priorityRank(a.p.band)
+    || (b.p.score ?? -1) - (a.p.score ?? -1)
+    || a.index - b.index);
+  const rows = ranked.slice(0, cap).map(({ item, p }) => publicItem(item, paid, p));
+  return { rows, matched: hits.length };
 }
 
 /**
@@ -429,6 +458,7 @@ function lastAuthoritativeBlock(feed, pub, select) {
     feed_generated_at: pub.feed_generated_at,
     feed_age_seconds: pub.feed_age_seconds,
     max_age_seconds: LAST_AUTHORITATIVE_MAX_AGE_SECONDS,
+    sort: select.sort || "priority",
     count: rows.length,
     truncated: matched > rows.length,
     items: rows,
@@ -443,11 +473,12 @@ export function buildWatchdogBrief(feed, opts = {}) {
   const lens = opts.lens && ["cybersecurity", "technology", "security_operations"].includes(opts.lens) ? opts.lens : null;
   const q = clean(String(opts.q || ""), 80).toLowerCase();
   const cap = Math.min(quota.brief_items, Math.max(1, Number(opts.limit) || quota.brief_items));
+  const sort = BRIEF_SORTS.includes(opts.sort) ? opts.sort : "priority";
   if (!pub.serve_live) {
-    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid }) } };
+    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort }) } };
   }
   const source = validItems(feed);
-  const { rows, matched } = selectBriefRows(source, { lens, q, cap, paid: quota.paid });
+  const { rows, matched } = selectBriefRows(source, { lens, q, cap, paid: quota.paid, sort });
   return {
     status: 200,
     body: {
@@ -455,6 +486,7 @@ export function buildWatchdogBrief(feed, opts = {}) {
       version: WATCHDOG_VERSION,
       tier,
       lens: lens || "all",
+      sort,
       count: rows.length,
       feed_items_seen: pub.feed_item_count,
       freshness_status: pub.freshness_status,
@@ -1974,7 +2006,8 @@ export async function routeWatchdog(req) {
     const lens = req.searchParams?.get?.("lens") || null;
     const q = req.searchParams?.get?.("q") || "";
     const limit = req.searchParams?.get?.("limit");
-    return buildWatchdogBrief(req.feed, { tier, lens, q, limit, now, nowMs: req.nowMs, subscription_status: req.auth?.subscription_status, error: req.auth?.error });
+    const sort = req.searchParams?.get?.("sort") || undefined;
+    return buildWatchdogBrief(req.feed, { tier, lens, q, limit, sort, now, nowMs: req.nowMs, subscription_status: req.auth?.subscription_status, error: req.auth?.error });
   }
 
   if (path === "/api/watchdog/deploy") {
