@@ -4,7 +4,9 @@
 # PURPOSE:
 #   Generates and publishes the weekly threat intelligence brief every Monday
 #   at 02:30 UTC (08:00 IST). Also sends Telegram notification to subscribers.
-#   The brief is published at /weekly-brief.html and /api/v1/intel/weekly_brief.json
+#   The brief is published at /weekly-brief.html and /api/v1/intel/weekly_brief.json.
+#   Generated runtime output is deployed to gh-pages only; CI never writes it
+#   back to protected main.
 #
 # REVENUE PURPOSE:
 #   This is the primary recurring value delivery mechanism for PRO subscribers.
@@ -141,20 +143,18 @@ jobs:
           fi
 
       # ------------------------------------------------------------------
-      - name: "STEP 6 — Commit and push brief to repository"
+      - name: "STEP 6 — Branch-protection-safe publication preflight"
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add api/v1/intel/weekly_brief.json weekly-brief.html || true
-          if git diff --staged --quiet; then
-            echo "[INFO] No changes to commit — brief unchanged"
-          else
-            WEEK=$(python3 -c "from datetime import datetime; print(f'Week {datetime.utcnow().isocalendar()[1]} {datetime.utcnow().year}')")
-            git commit -m "feat(brief): Weekly Threat Brief — ${WEEK} [skip ci]"
-            git pull --rebase origin main 2>&1
-            git push origin main 2>&1
-            echo "[PASS] Weekly brief committed and pushed"
-          fi
+          # Runtime publication is handled by STEP 7 on the shared gh-pages writer.
+          # Do NOT commit generated runtime state back to protected main from CI.
+          # This keeps repository rules authoritative and prevents GH013 failures.
+          test -s api/v1/intel/weekly_brief.json
+          test -s weekly-brief.html
+          SHA_JSON=$(sha256sum api/v1/intel/weekly_brief.json | awk '{print $1}')
+          SHA_HTML=$(sha256sum weekly-brief.html | awk '{print $1}')
+          echo "[PASS] Generated brief ready for Pages publication"
+          echo "weekly_brief.json sha256=${SHA_JSON}"
+          echo "weekly-brief.html sha256=${SHA_HTML}"
 
       # ------------------------------------------------------------------
       # v184.8 FIX: was on the floating @v4.8.0 tag -- this job holds
