@@ -21,17 +21,13 @@ Applies to all paid tiers: **PRO**, **ENTERPRISE**, and **MSSP / WHITE-LABEL**.
 
 | Tier | Monthly Uptime SLA | Window |
 |------|--------------------|--------|
-| PRO | 99.9% | Rolling 30-day |
-| ENTERPRISE | 99.95% | Rolling 30-day |
-| MSSP / WHITE-LABEL | 99.99% | Rolling 30-day |
+| PRO | 99.5% | Rolling 30-day |
+| ENTERPRISE | 99.9% | Rolling 30-day |
+| MSSP / WHITE-LABEL | 99.9% | Rolling 30-day |
 
-### 2.2 Excluded Downtime
+### 2.2 Credit-Claim Review Conditions
 
-- Scheduled maintenance (announced >=24 hours in advance)
-- Force majeure events
-- Customer-caused outages (misconfigured API keys, abuse traffic)
-- Third-party upstream failures (Cloudflare, GitHub, R2) outside Provider control
-- Emergency security patching (P0 CVEs, <=30 min grace period)
+The automated uptime metric is the raw rolling heartbeat measurement and does not silently subtract downtime classes. During an SLA credit claim, documented scheduled maintenance, force majeure, customer-caused outages, upstream-provider failures, and emergency security work may be reviewed as contractual context. Any adjustment must be documented in the claim record rather than hidden from the live status metric.
 
 ---
 
@@ -63,10 +59,10 @@ Applies to all paid tiers: **PRO**, **ENTERPRISE**, and **MSSP / WHITE-LABEL**.
 
 | Tier | Daily | Per-Minute Burst |
 |------|-------|-----------------|
-| FREE | 100 | 10 |
-| PRO | 5,000 | 100 |
-| ENTERPRISE | Unlimited | 500 |
-| MSSP | Unlimited | 2,000 |
+| FREE | 50 | 30 |
+| PRO | 5,000 | 120 |
+| ENTERPRISE | 50,000 | 600 |
+| MSSP | 50,000 | 1,200 |
 
 ---
 
@@ -81,28 +77,29 @@ Applies to all paid tiers: **PRO**, **ENTERPRISE**, and **MSSP / WHITE-LABEL**.
 | P2 Medium | Single feature degraded, <50% customers impacted |
 | P3 Low | Minor issue, cosmetic, no customer impact |
 
-### 5.2 Response Time Commitments
+### 5.2 Tier Response Commitments
 
-| Severity | Initial Response | Status Update | Resolution |
-|----------|-----------------|---------------|------------|
-| P0 | 15 minutes | Every 30 min | 2 hours |
-| P1 | 1 hour | Every 2 hours | 8 hours |
-| P2 | 4 hours | Every 24 hours | 72 hours |
-| P3 | 2 business days | Weekly | Next release |
+| Tier | Support / Incident Response Commitment |
+|------|----------------------------------------|
+| FREE | Community / best effort |
+| PRO | Email response within 48 hours |
+| ENTERPRISE | Email and chat response within 4 hours |
+| MSSP / WHITE-LABEL | Dedicated response within 1 hour |
 
-MSSP tier: 24x7 response at P0/P1.
+Severity classification is used for triage; the contractual response clock is determined by the subscribed tier above.
 
 ---
 
-## 6. Service Credits
+## 6. P0 Outage Credits
 
-| Monthly Uptime | PRO | ENTERPRISE | MSSP |
-|----------------|-----|-----------|------|
-| 99.0% - 99.9% | 5% | 10% | 15% |
-| 95.0% - 99.0% | 10% | 20% | 25% |
-| < 95.0% | 25% | 50% | 50% |
+| Tier | Contractual P0 outage credit |
+|------|-------------------------------|
+| FREE | None |
+| PRO | 5% per hour |
+| ENTERPRISE | 10% per hour |
+| MSSP / WHITE-LABEL | 15% per hour |
 
-Submit credit claims to support@cyberdudebivash.com within 30 days of the incident. Maximum credit per month: 50% of monthly fee.
+Submit credit claims within 30 days of the incident using the procedure published on `/sla.html`. Credits are reviewed against recorded monitoring evidence and the subscribed tier; no undocumented percentage ladder or cap is inferred by this document.
 
 ---
 
