@@ -137,7 +137,7 @@ import {
 import { applyCorsPolicy, buildPreflightResponse, classifyRoute } from './cors-policy.js';
 // In-isolate counter layer: batches KV writes on the hot request path.
 // See rate-limit-cache.js for the cost rationale and the exact trade-off.
-import { bumpCounter, peekCounter } from './rate-limit-cache.js';
+import { bumpCounter, bumpCounterWriteThrough, peekCounter } from './rate-limit-cache.js';
 // AI Swarm Synthesis (v4.45): pure prompt-building + tier-gate helpers for
 // handleSwarmSynthesis (below, defined right after handleCopilot). Extracted
 // for the same reason as subscription-lifecycle.js/gumroad-lifecycle.js --
@@ -614,14 +614,20 @@ async function checkRateLimit(env, ip, tier) {
   const minute = Math.floor(Date.now() / 60000);
   const key    = `rl:${ip}:${minute}`;
   try {
-    // Counting is batched in-isolate (see rate-limit-cache.js) so this costs
-    // a KV write roughly every FLUSH_EVERY requests instead of every one.
-    // Semantics are unchanged: deny when the window is already at the limit,
-    // otherwise increment and allow. `limit` is passed so the increment that
-    // crosses it writes through immediately and other isolates see the block.
-    const count = await peekCounter(env.RATE_LIMIT_KV, key);
-    if (count >= limit) return { allowed: false, count, limit, remaining: 0 };
-    const bumped = await bumpCounter(env.RATE_LIMIT_KV, key, 61, limit);
+    // P0 2026-09-28: commercial rate enforcement is intentionally
+    // WRITE-THROUGH. The in-isolate batching optimization introduced in #471
+    // allowed a burst distributed across multiple Workers isolates to seed
+    // independent local counters from eventually-consistent KV. Live Phase 8
+    // certification then observed 0/66 throttled requests against a 30/min
+    // FREE contract. Metering/web-plane counters may tolerate bounded drift;
+    // a sold per-tier API ceiling may not silently disappear under horizontal
+    // execution. This restores the pre-#471 read+write path for this one
+    // enforcement counter while leaving the write-saving cache on non-
+    // commercial counters.
+    const bumped = await bumpCounterWriteThrough(env.RATE_LIMIT_KV, key, 61);
+    if (bumped.count > limit) {
+      return { allowed: false, count: bumped.count, limit, remaining: 0 };
+    }
     return {
       allowed: true,
       count: bumped.count,

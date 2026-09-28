@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  bumpCounter, peekCounter, FLUSH_EVERY, MAX_ENTRIES,
+  bumpCounter, bumpCounterWriteThrough, peekCounter, FLUSH_EVERY, MAX_ENTRIES,
   _resetCounterCache, _counterCacheSize,
 } from "../rate-limit-cache.js";
 
@@ -143,4 +143,29 @@ test("FLUSH_EVERY=1 would restore exact write-per-request behaviour", () => {
   // Documents the kill switch: the layer is a no-op at 1.
   assert.ok(FLUSH_EVERY >= 1);
   assert.equal(typeof FLUSH_EVERY, "number");
+});
+
+
+test("COMMERCIAL ENFORCEMENT: write-through counter persists every increment", async () => {
+  _resetCounterCache();
+  const kv = fakeKV();
+  for (let i = 1; i <= 35; i++) {
+    const r = await bumpCounterWriteThrough(kv, "rl:commercial:1", 61);
+    assert.equal(r.count, i);
+    assert.equal(kv._store.get("rl:commercial:1"), String(i));
+  }
+  assert.equal(kv.stats.gets, 35, "commercial enforcement must read shared state every request");
+  assert.equal(kv.stats.puts, 35, "commercial enforcement must persist every request");
+});
+
+test("COMMERCIAL ENFORCEMENT: write-through ignores isolate-local batched state", async () => {
+  _resetCounterCache();
+  const kv = fakeKV();
+  // Seed a separate batched/local entry, then prove the commercial primitive
+  // derives its next value from persisted shared KV rather than that local map.
+  await bumpCounter(kv, "rl:other:1", 61, 1000);
+  await bumpCounter(kv, "rl:other:1", 61, 1000);
+  const r = await bumpCounterWriteThrough(kv, "rl:other:1", 61);
+  assert.equal(r.count, 2, "write-through must advance persisted KV, not reuse local-only count");
+  assert.equal(kv._store.get("rl:other:1"), "2");
 });
