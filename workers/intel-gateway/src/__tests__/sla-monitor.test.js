@@ -110,13 +110,26 @@ test("a batch is capped at 500 pings", async () => {
 
 test("one outage = one incident, extended while it lasts (not one per failed probe)", async () => {
   const env = envWith();
-  const fails = [50, 40, 30, 20, 10].map((m, i) => ({ ok: false, observed_at: iso(m * MIN), probe_id: `f${i}` }));
+  // Use one clock anchor for the whole synthetic outage. Calling Date.now()
+  // once per observation makes the expected 40-minute interval drift by
+  // 1+ ms under CI scheduling and turns a correct production result into a
+  // flaky strict-equality failure.
+  const anchor = Date.now();
+  const fails = [50, 40, 30, 20, 10].map((m, i) => ({
+    ok: false,
+    observed_at: new Date(anchor - m * MIN).toISOString(),
+    probe_id: `f${i}`,
+  }));
   for (const f of fails) await handleSLAPing(pingReq(f), env, "r");
   let inc = incidents(env);
   assert.equal(inc.length, 1);
   assert.equal(inc[0].failed_checks, 5);
   assert.equal(inc[0].duration_ms, 40 * MIN);
-  await handleSLAPing(pingReq({ ok: true, observed_at: iso(0), probe_id: "rec" }), env, "r");
+  await handleSLAPing(
+    pingReq({ ok: true, observed_at: new Date(anchor).toISOString(), probe_id: "rec" }),
+    env,
+    "r",
+  );
   inc = incidents(env);
   assert.equal(inc.length, 1);
 });
