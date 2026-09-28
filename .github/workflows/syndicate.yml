@@ -22,9 +22,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-concurrency:
-  group: sentinel-data-writer
-  cancel-in-progress: false
+# Resource-scoped lock: this workflow reads shared intelligence but writes only its\n# own derived namespace. A global sentinel-data-writer lock can starve/cancel\n# pending jobs because GitHub concurrency retains only one pending run per group.\nconcurrency:\n  group: sentinel-data-writer-syndicate\n  cancel-in-progress: false
 
 jobs:
   syndicate:
