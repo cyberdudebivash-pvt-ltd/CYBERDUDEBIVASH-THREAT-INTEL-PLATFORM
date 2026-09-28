@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "generated_at": "2026-09-28T13:45:20.071110+00:00",
+  "generated_at": "2026-09-28T15:40:56.347899+00:00",
   "generator": "scripts/build_capability_registry.py (one-time build; hand-maintained CLASSIFICATIONS dict thereafter)",
   "scope": "top-level *.html (repo root) -- see CLAUDE.md's P-layer table and scripts/capability_coverage_audit.py for the /api/v1/pXX/* backend route -> handler registry (a distinct, complementary artifact; this file classifies FRONTEND pages, not backend routes)",
   "taxonomy": [
@@ -12,11 +12,11 @@
   ],
   "total_pages": 135,
   "by_category": {
-    "CUSTOMER_UI": 127,
-    "DEPRECATED": 6,
+    "CUSTOMER_UI": 115,
+    "DEPRECATED": 18,
     "ADMIN": 2
   },
-  "customer_ui_orphan_count": 14,
+  "customer_ui_orphan_count": 0,
   "unclassified_count": 0,
   "note": "unclassified_count is the mission-tracked metric (target: 0). A page's presence in this file's `entries` array with a category from `taxonomy` IS its classification -- there is no separate UNCLASSIFIED bucket by construction (see scripts/capability_registry_gate.py, which fails CI if a top-level *.html page exists with no entry here). customer_ui_orphan_count tracks a SEPARATE, non-blocking metric: CUSTOMER_UI pages that are correctly classified but still show static/placeholder data pending a live-API wiring fix -- see each entry's `notes`.",
   "access_navigation_audit_status": "NOT YET DONE for most entries. The mission's requested `access` (public/api_key_required/admin) and `navigation` (which nav menus link to this page) fields were audited and are accurate ONLY for the 9 pages this session touched directly (see the P21-P40 dashboard family and the git log for claude/sentinel-apex-transformation-8x3y26). Populating them accurately for the other 140 pages requires reading each page's own auth-wall markup and cross-referencing every nav/header partial across the site -- exactly the 'Unified Application Shell' audit (mission item 4) this session did not have room for. Recommended as the next P0: a dedicated navigation-shell audit pass, not a guess encoded into this file.",
@@ -107,23 +107,21 @@
     {
       "id": "api-management-center.html",
       "frontend_route": "/api-management-center.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded API usage/success-rate stats, zero fetch. No key/webhook CRUD route exists (see api-key-manager.html for the one page with a real fetch() pattern).",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "Already a redirect to /api-key-manager.html (hardcoded mockup replaced earlier); registry entry corrected 2026-09-28."
     },
     {
       "id": "api-reference-card.html",
       "frontend_route": "/api-reference-card.html",
       "category": "CUSTOMER_UI",
-      "notes": "Hardcoded 'live' advisory badge with pulsing indicator, no fetch. Best fit: /api/health.",
-      "status": "orphan"
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
     },
     {
       "id": "billing-center.html",
       "frontend_route": "/billing-center.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded usage-meter numbers, zero fetch. Partial fit /api/payment/status.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a redirect to /subscription-management.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "billing.html",
@@ -176,9 +174,8 @@
     {
       "id": "customer-dashboard.html",
       "frontend_route": "/customer-dashboard.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Single-tenant demo dashboard, fully hardcoded. Fits /api/v1/intel/apt, /api/v1/intel/feed, /api/health.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a redirect to /soc-operations-center.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "customer-intake.html",
@@ -190,9 +187,8 @@
     {
       "id": "customer-portal.html",
       "frontend_route": "/customer-portal.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded threat/IOC counts and a fake masked API key. Fits /api/v1/intel/feed, /api/v1/detections, /api/health.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "Already a redirect to /api-key-manager.html (hardcoded mockup replaced earlier); registry entry corrected 2026-09-28."
     },
     {
       "id": "customer-success-stories.html",
@@ -246,9 +242,8 @@
     {
       "id": "daily-operations-center.html",
       "frontend_route": "/daily-operations-center.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Multi-tab ops tool, hardcoded across every tab. Fits /api/v1/intel/latest.json, /api/v1/incidents, /api/v1/detections, /api/sla/incidents.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a redirect to /soc-operations-center.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "dashboard.html",
@@ -280,9 +275,8 @@
     {
       "id": "dependency-platform.html",
       "frontend_route": "/dependency-platform.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded 'sticky score' and API-call stats. No obvious existing backend route.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a redirect to /api-key-manager.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "developer-portal.html",
@@ -489,9 +483,8 @@
     {
       "id": "executive-reporting-center.html",
       "frontend_route": "/executive-reporting-center.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded board-report figures ('$9.7M Annualized ROI'). Fits /api/v1/executive/command-center, /api/v1/reports/.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a redirect to /enterprise-cyber-intelligence-os.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "get-api-key.html",
@@ -594,9 +587,8 @@
     {
       "id": "mssp-customer-center.html",
       "frontend_route": "/mssp-customer-center.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded partner/customer arrays. Fits /api/mssp, /api/mssp/feed.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a redirect to /mssp-tenant-dashboard.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "mssp-lead-tracker.html",
@@ -622,9 +614,8 @@
     {
       "id": "mssp-partner-portal.html",
       "frontend_route": "/mssp-partner-portal.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded tenant list. Fits /api/mssp/tenants/{id}/feed, /api/mssp/feed.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a redirect to /mssp-tenant-dashboard.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "mssp-tenant-dashboard.html",
@@ -650,9 +641,8 @@
     {
       "id": "my-exposure-center.html",
       "frontend_route": "/my-exposure-center.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded CVEs/campaigns/recommendations presented as personalized. Fits /api/v1/cve/live, /api/v1/intel/campaigns, /api/v1/assets/intelligence.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a redirect to /cyber-watchdog.html#watches (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "observability.html",
@@ -678,9 +668,8 @@
     {
       "id": "payment-confirmation.html",
       "frontend_route": "/payment-confirmation.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Activation timeline derived only from URL query params, never calls the real payment-status API. Fits /api/payment/status.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a redirect to /payment-status-dashboard.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "payment-status-dashboard.html",
@@ -805,8 +794,8 @@
       "id": "soc-operations-center.html",
       "frontend_route": "/soc-operations-center.html",
       "category": "CUSTOMER_UI",
-      "notes": "Fixed 2026-09-28: rebuilt on /api/v1/intel/latest.json (KPIs, 24h intake, advisory stream, sources, ATT&CK tactics counted by js/soc-ops-model.js), /api/watchdog/brief (priority queue) and /api/watchdog/health (freshness: figures withheld unless FRESH, or STALE <= 48h labelled NOT LIVE). Removed the Math.random() event stream, heatmap and source counts, the fixed IOC/sensor/replay/coverage figures and the invented graph, AI gauges, malware and honeynet panels.",
-      "status": "live"
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
     },
     {
       "id": "soc-workspace.html",
@@ -839,8 +828,8 @@
       "id": "support-center.html",
       "frontend_route": "/support-center.html",
       "category": "CUSTOMER_UI",
-      "notes": "Fixed this session: a real JS syntax error (unescaped raw HTML in a return statement, not wrapped in a template literal) was breaking the entire inline <script>, so nothing on the page worked. Syntax now valid. Still shows a hardcoded ticket list -- no live route for a per-tenant support-ticket API exists yet; tracked as a residual orphan.",
-      "status": "orphan"
+      "status": "live",
+      "notes": "Wired to a live backend API. (fetch() call plus an /api/* path literal in the same <script> block)"
     },
     {
       "id": "telemetry-embedding.html",
@@ -926,9 +915,8 @@
     {
       "id": "value-center.html",
       "frontend_route": "/value-center.html",
-      "category": "CUSTOMER_UI",
-      "notes": "Hardcoded ROI/threat figures with a fake 'LIVE' badge; period selector re-displays the same static numbers. Fits /api/v1/incidents, /api/v1/detections, /api/v1/stats.",
-      "status": "orphan"
+      "category": "DEPRECATED",
+      "notes": "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a redirect to /roi-calculator.html (same pattern as customer-portal.html); kept so existing links still resolve."
     },
     {
       "id": "vendor-assessment-pack.html",

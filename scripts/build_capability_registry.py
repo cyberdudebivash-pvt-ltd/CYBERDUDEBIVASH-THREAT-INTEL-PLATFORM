@@ -38,11 +38,10 @@ CLASSIFICATIONS = {
         "activation is manual. No route wires a real self-serve paid-tier provisioning flow yet "
         "(payment step is decorative -- simulatePaypal() just opens paypal.com); building one is "
         "explicitly out of scope here (CLAUDE.md: payment/billing logic is frozen)."),
-    "support-center.html": ("CUSTOMER_UI", "orphan",
-        "Fixed this session: a real JS syntax error (unescaped raw HTML in a return statement, "
-        "not wrapped in a template literal) was breaking the entire inline <script>, so nothing on "
-        "the page worked. Syntax now valid. Still shows a hardcoded ticket list -- no live route "
-        "for a per-tenant support-ticket API exists yet; tracked as a residual orphan."),
+    "support-center.html": ("CUSTOMER_UI", "live",
+        "Fixed 2026-09-28: showed five invented tickets with live-looking SLA countdowns and 'created' randomly generated ticket IDs "
+        "that were never sent anywhere (no ticketing backend exists). Rebuilt as the real support page: contracted support per "
+        "plan (verbatim from config/commercial-contract.json, test-pinned), real contact addresses, live status from /api/watchdog/health."),
     # -- Genuine CUSTOMER_UI orphans: real customer surfaces showing hardcoded/placeholder data,
     #    not yet wired this session. best-fit route(s) noted for the next pass. --
     "ai-runtime-defense.html": ("CUSTOMER_UI", "live",
@@ -52,12 +51,23 @@ CLASSIFICATIONS = {
     "ai-security-ops-hub.html": ("DEPRECATED", None,
         "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a "
         "redirect to /ai-runtime-defense.html (same pattern as customer-portal.html); kept so existing links still resolve."),
-    "api-management-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded API usage/success-rate stats, zero fetch. No key/webhook CRUD route exists (see api-key-manager.html for the one page with a real fetch() pattern)."),
-    "api-reference-card.html": ("CUSTOMER_UI", "orphan", "Hardcoded 'live' advisory badge with pulsing indicator, no fetch. Best fit: /api/health."),
-    "billing-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded usage-meter numbers, zero fetch. Partial fit /api/payment/status."),
-    "customer-dashboard.html": ("CUSTOMER_UI", "orphan", "Single-tenant demo dashboard, fully hardcoded. Fits /api/v1/intel/apt, /api/v1/intel/feed, /api/health."),
-    "customer-portal.html": ("CUSTOMER_UI", "orphan", "Hardcoded threat/IOC counts and a fake masked API key. Fits /api/v1/intel/feed, /api/v1/detections, /api/health."),
-    "daily-operations-center.html": ("CUSTOMER_UI", "orphan", "Multi-tab ops tool, hardcoded across every tab. Fits /api/v1/intel/latest.json, /api/v1/incidents, /api/v1/detections, /api/sla/incidents."),
+    "api-management-center.html": ("DEPRECATED", None,
+        "Already a redirect to /api-key-manager.html (hardcoded mockup replaced earlier); registry entry corrected 2026-09-28."),
+    "api-reference-card.html": ("CUSTOMER_UI", "live",
+        "Fixed 2026-09-28: hardcoded '77+ Live Advisories', 'v184.0', a pulsing LIVE badge and per-endpoint '200 Live', plus "
+        "unmeasured '<80ms P95' and '55+ Intel Sources'. Count, version and freshness now read from /api/watchdog/health; "
+        "unmeasured facts removed; endpoint status shown as the documented '200 OK'."),
+    "billing-center.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
+        "redirect to /subscription-management.html (same pattern as customer-portal.html); kept so existing links still resolve."),
+    "customer-dashboard.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
+        "redirect to /soc-operations-center.html (same pattern as customer-portal.html); kept so existing links still resolve."),
+    "customer-portal.html": ("DEPRECATED", None,
+        "Already a redirect to /api-key-manager.html (hardcoded mockup replaced earlier); registry entry corrected 2026-09-28."),
+    "daily-operations-center.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
+        "redirect to /soc-operations-center.html (same pattern as customer-portal.html); kept so existing links still resolve."),
     "dashboard.html": ("CUSTOMER_UI", "orphan",
         "Investigated this session, deliberately NOT fixed: its fetch() calls target /auth/login "
         "and /auth/keys (missing /api/ prefix AND /api/auth/keys does not exist as a route at all -- "
@@ -65,21 +75,33 @@ CLASSIFICATIONS = {
         "auth-model mismatch, not a URL typo -- see login.html note. Also references stale element IDs "
         "('login-screen'/'dashboard-screen') that don't match its own DOM ('auth-gate'/'dashboard'). "
         "Needs an auth-model decision before any fix, not a frontend-only patch."),
-    "dependency-platform.html": ("CUSTOMER_UI", "orphan", "Hardcoded 'sticky score' and API-call stats. No obvious existing backend route."),
+    "dependency-platform.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
+        "redirect to /api-key-manager.html (same pattern as customer-portal.html); kept so existing links still resolve."),
     "evidence-threat-map.html": ("DEPRECATED", None,
         "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a "
         "redirect to /enterprise-knowledge-graph.html (same pattern as customer-portal.html); kept so existing links still resolve."),
-    "executive-reporting-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded board-report figures ('$9.7M Annualized ROI'). Fits /api/v1/executive/command-center, /api/v1/reports/."),
+    "executive-reporting-center.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
+        "redirect to /enterprise-cyber-intelligence-os.html (same pattern as customer-portal.html); kept so existing links still resolve."),
     "malware-intel-hub.html": ("CUSTOMER_UI", "live",
         "Fixed 2026-09-27: rebuilt on /api/feed.json (malware-related advisories, counts and feed "
         "time read at load) plus the /api/v1/export/* detection downloads. Removed the Math.random() "
         "'sandbox detonation' stream (invented hashes and 'C2' IPs, one a real public address), the "
         "fixed sample/YARA/family counts and a 'C2 infrastructure registry' naming real ASNs."),
     "mssp-console.html": ("CUSTOMER_UI", "orphan", "1785-line MSSP console, fully hardcoded, zero fetch. Fits /api/mssp, /api/mssp/feed, /api/mssp/tenants/{id}/feed."),
-    "mssp-customer-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded partner/customer arrays. Fits /api/mssp, /api/mssp/feed."),
-    "mssp-partner-portal.html": ("CUSTOMER_UI", "orphan", "Hardcoded tenant list. Fits /api/mssp/tenants/{id}/feed, /api/mssp/feed."),
-    "my-exposure-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded CVEs/campaigns/recommendations presented as personalized. Fits /api/v1/cve/live, /api/v1/intel/campaigns, /api/v1/assets/intelligence."),
-    "payment-confirmation.html": ("CUSTOMER_UI", "orphan", "Activation timeline derived only from URL query params, never calls the real payment-status API. Fits /api/payment/status."),
+    "mssp-customer-center.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
+        "redirect to /mssp-tenant-dashboard.html (same pattern as customer-portal.html); kept so existing links still resolve."),
+    "mssp-partner-portal.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
+        "redirect to /mssp-tenant-dashboard.html (same pattern as customer-portal.html); kept so existing links still resolve."),
+    "my-exposure-center.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
+        "redirect to /cyber-watchdog.html#watches (same pattern as customer-portal.html); kept so existing links still resolve."),
+    "payment-confirmation.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
+        "redirect to /payment-status-dashboard.html (same pattern as customer-portal.html); kept so existing links still resolve."),
     "soc-operations-center.html": ("CUSTOMER_UI", "live",
         "Fixed 2026-09-28: rebuilt on /api/v1/intel/latest.json (KPIs, 24h intake, advisory stream, "
         "sources, ATT&CK tactics counted by js/soc-ops-model.js), /api/watchdog/brief (priority queue) "
@@ -99,7 +121,9 @@ CLASSIFICATIONS = {
     "unified-ops-hub.html": ("DEPRECATED", None,
         "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a "
         "redirect to /enterprise-cyber-intelligence-os.html (same pattern as customer-portal.html); kept so existing links still resolve."),
-    "value-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded ROI/threat figures with a fake 'LIVE' badge; period selector re-displays the same static numbers. Fits /api/v1/incidents, /api/v1/detections, /api/v1/stats."),
+    "value-center.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
+        "redirect to /roi-calculator.html (same pattern as customer-portal.html); kept so existing links still resolve."),
     "login.html": ("CUSTOMER_UI", "orphan",
         "Investigated this session, deliberately NOT fixed: fetch() calls are missing the /api/ "
         "prefix (/auth/login, /auth/signup), but the deeper issue is an auth-MODEL mismatch, not a "
