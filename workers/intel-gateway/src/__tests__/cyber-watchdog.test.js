@@ -493,3 +493,30 @@ test("negative control: a 200 without FRESH must not be written", () => {
   assert.equal(decision.replace, false);
   assert.equal(decision.exitCode, 4);
 });
+
+test("3.1.0: the brief ranks by evidence-cited priority; ?sort=feed keeps feed order", () => {
+  // Production 2026-09-28: in feed order the free brief showed low-impact
+  // CVEs while every CRITICAL / KEV item sat below the cap.
+  const feed = liveFeed([FEED_ITEMS[3], FEED_ITEMS[2], FEED_ITEMS[1], FEED_ITEMS[0]]);
+  const ranked = buildWatchdogBrief(feed, { tier: "FREE", nowMs: NOW_MS, limit: 2 });
+  assert.equal(ranked.body.sort, "priority");
+  assert.deepEqual(ranked.body.items.map((i) => i.id), ["adv-1", "adv-2"], "KEV/CVSS 9.8 item first despite being last in the feed");
+  assert.equal(ranked.body.items[0].priority.band, "CRITICAL");
+  assert.equal(ranked.body.items[0].priority.evidence, undefined, "FREE sees band and score, not the evidence");
+  assert.equal(ranked.body.truncated, true);
+  const legacy = buildWatchdogBrief(feed, { tier: "FREE", nowMs: NOW_MS, limit: 2, sort: "feed" });
+  assert.equal(legacy.body.sort, "feed");
+  assert.deepEqual(legacy.body.items.map((i) => i.id), ["adv-4", "adv-3"]);
+  assert.equal(buildWatchdogBrief(feed, { tier: "FREE", nowMs: NOW_MS, sort: "bogus" }).body.sort, "priority");
+  const paid = buildWatchdogBrief(feed, { tier: "PRO", nowMs: NOW_MS });
+  const top = paid.body.items[0].priority;
+  assert.ok(top.evidence.some((e) => /CISA KEV/.test(e)), "paid tiers see the feed fields behind the band");
+  assert.ok(top.score >= 70 && Array.isArray(top.floors_applied), "CRITICAL on points; floors are listed (none needed here)");
+});
+
+test("3.1.0: the router passes ?sort through to the brief", async () => {
+  const feed = liveFeed([FEED_ITEMS[3], FEED_ITEMS[0]]);
+  const run = (qs) => routeWatchdog({ path: "/api/watchdog/brief", method: "GET", auth: { tier: "FREE" }, feed, nowMs: NOW_MS, searchParams: new URLSearchParams(qs) });
+  assert.equal((await run("")).body.items[0].id, "adv-1");
+  assert.equal((await run("sort=feed")).body.items[0].id, "adv-4");
+});

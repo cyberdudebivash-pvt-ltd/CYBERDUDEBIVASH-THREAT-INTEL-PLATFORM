@@ -10,6 +10,12 @@
 //   - Revenue tracked in ANALYTICS_KV per report generation
 // =============================================================================
 
+// Canonical price reader and the Watchdog evidence-cited priority engine:
+// reused, not re-implemented (report advisories are ranked with the same
+// engine and projection as Watchdog brief rows and match events).
+import { planPrice, projectItem } from "./cyber-watchdog.js";
+import { computeEventPriority, priorityRank } from "./watchdog-priority.js";
+
 // -- Tier & Pricing Config -----------------------------------------------------
 const REPORT_CONFIG = {
   VERSION: "201.0",
@@ -65,7 +71,8 @@ function genReportId() {
 }
 
 // -- MITRE ATT&CK Coverage Analyser -------------------------------------------
-function analyseMitreCoverage(items) {
+const TECHNIQUE_RE = /^T\d{4}(\.\d{3})?$/;
+export function analyseMitreCoverage(items) {
   const tacticMap  = {};
   const techniqueSet = new Set();
 
@@ -74,8 +81,16 @@ function analyseMitreCoverage(items) {
     const ttps    = Array.isArray(item.ttps) ? item.ttps : [];
 
     for (const tactic of tactics) {
-      const t = safeStr(String(tactic || ""), 50);
-      if (t) tacticMap[t] = (tacticMap[t] || 0) + 1;
+      // The feed stores mitre_tactics as {id, name, tactic} objects (plus
+      // some legacy strings). String(object) produced "[object Object]" as a
+      // customer-facing tactic name; read the tactic name and count the
+      // technique id it carries.
+      // A legacy string that is a technique id ("T1190") is a technique, not a tactic.
+      const isObj = tactic !== null && typeof tactic === "object";
+      const raw = safeStr(isObj ? String(tactic.tactic || tactic.name || "") : String(tactic || ""), 50);
+      const tid = safeStr(isObj ? String(tactic.id || "") : raw, 20).toUpperCase();
+      if (TECHNIQUE_RE.test(tid)) techniqueSet.add(tid);
+      if (raw && !TECHNIQUE_RE.test(raw.toUpperCase())) tacticMap[raw] = (tacticMap[raw] || 0) + 1;
     }
     for (const ttp of ttps) {
       const id = typeof ttp === "object" ? (ttp.id || ttp.technique_id || "") : String(ttp || "");
@@ -101,13 +116,35 @@ function analyseMitreCoverage(items) {
 }
 
 // -- CVE Summary Builder -------------------------------------------------------
-function buildCVESummary(items) {
+const CVE_RE = /^CVE-\d{4}-\d{4,}$/i;
+
+/** Every CVE an item names: cve_id plus cve_ids (multi-CVE advisories carry all of them there). */
+export function itemCveIds(item) {
+  const ids = new Set();
+  const add = (v) => { const c = safeStr(typeof v === "string" ? v : "", 30).toUpperCase(); if (CVE_RE.test(c)) ids.add(c); };
+  add(item.cve_id);
+  if (Array.isArray(item.cve_ids)) item.cve_ids.slice(0, 50).forEach(add);
+  return [...ids];
+}
+
+/**
+ * Public exploit evidence from fields the feed actually carries
+ * (exploit_maturity, metasploit_available, poc_github_count, exploit_count).
+ * The old check read item.exploit_available, which the feed never sets, so
+ * every CVE was reported exploit_available: false.
+ */
+function exploitAvailable(item) {
+  if (item.exploit_available === true || item.metasploit_available === true) return true;
+  if (/^(POC|FUNCTIONAL|WEAPONIZED|ACTIVE|HIGH)/i.test(String(item.exploit_maturity || ""))) return true;
+  return Number(item.poc_github_count) > 0 || Number(item.exploit_count) > 0;
+}
+
+export function buildCVESummary(items) {
   const cves = {};
-  let kev_count = 0, critical_count = 0, high_count = 0;
 
   for (const item of items) {
-    const cveId = safeStr(item.cve_id || "", 30);
-    if (cveId) {
+    for (const cveId of itemCveIds(item)) {
+      if (cves[cveId]) continue; // first (highest-priority) advisory naming a CVE describes it
       cves[cveId] = {
         id:          cveId,
         title:       safeStr(item.title || "", 200),
@@ -116,24 +153,31 @@ function buildCVESummary(items) {
         severity:    safeStr(item.severity || "UNKNOWN", 20),
         kev_present: item.kev_present === true,
         actor_tag:   safeStr(item.actor_tag || "UNATTRIBUTED", 60),
-        exploit_available: item.exploit_available === true,
+        exploit_available: exploitAvailable(item),
+        exploit_maturity: safeStr(String(item.exploit_maturity || ""), 30) || null,
         source:      safeStr(item.source || item.feed_source || "", 100),
         processed_at:item.processed_at || item.timestamp || null,
       };
-      if (item.kev_present)                       kev_count++;
-      if ((item.severity || "").toUpperCase() === "CRITICAL") critical_count++;
-      if ((item.severity || "").toUpperCase() === "HIGH")     high_count++;
     }
   }
 
+  // Patch order: CISA KEV first, then CVSS, then EPSS.
   const cveList = Object.values(cves)
-    .sort((a, b) => (b.cvss_score || 0) - (a.cvss_score || 0));
+    .sort((a, b) => (b.kev_present - a.kev_present)
+      || (b.cvss_score || 0) - (a.cvss_score || 0)
+      || (b.epss_score || 0) - (a.epss_score || 0));
+  // Counted per unique CVE (was per advisory, so a CVE reported by two
+  // sources counted twice and a two-CVE advisory counted once).
+  const kev_count = cveList.filter((c) => c.kev_present).length;
+  const critical_count = cveList.filter((c) => c.severity.toUpperCase() === "CRITICAL").length;
+  const high_count = cveList.filter((c) => c.severity.toUpperCase() === "HIGH").length;
 
   return {
     total_cves:       cveList.length,
     kev_count,
     critical_count,
     high_count,
+    exploit_available_count: cveList.filter((c) => c.exploit_available).length,
     top_cves:         cveList.slice(0, 20),
     exploitation_risk: kev_count > 0 ? "CRITICAL -- CISA KEV entries require immediate patching" : "MODERATE",
   };
@@ -178,7 +222,7 @@ function buildActorIntelligence(items) {
 }
 
 // -- IOC Table Builder ---------------------------------------------------------
-function buildIOCTable(items, maxItems = 200) {
+export function buildIOCTable(items, maxItems = 200) {
   const iocs = [];
   const seen = new Set();
 
@@ -216,7 +260,7 @@ function buildIOCTable(items, maxItems = 200) {
 }
 
 // -- Executive Summary Generator -----------------------------------------------
-function buildExecutiveSummary(items, mitre, cve, actors, reportPeriod) {
+export function buildExecutiveSummary(items, mitre, cve, actors, reportPeriod) {
   const totalAdvisories   = items.length;
   const criticalCount     = items.filter(i => (i.severity || "").toUpperCase() === "CRITICAL").length;
   const highCount         = items.filter(i => (i.severity || "").toUpperCase() === "HIGH").length;
@@ -245,7 +289,8 @@ function buildExecutiveSummary(items, mitre, cve, actors, reportPeriod) {
     top_actor:           actors[0] ? `${actors[0].actor_tag} (${actors[0].advisory_count} advisories)` : "UNATTRIBUTED",
     cve_exposure:        cve.total_cves > 0 ? `${cve.total_cves} CVEs identified -- ${cve.kev_count} CISA KEV confirmed` : "No CVEs in scope",
     key_recommendations: [
-      kevCount > 0   ? `CRITICAL: Patch ${kevCount} CISA KEV-confirmed CVE(s) immediately` : null,
+      cve.kev_count > 0 ? `CRITICAL: Patch ${cve.kev_count} CISA KEV-confirmed CVE(s) immediately` : null,
+      kevCount > 0 && cve.kev_count === 0 ? `CRITICAL: Review ${kevCount} advisory(ies) linked to CISA KEV exploitation` : null,
       criticalCount > 0 ? `Deploy detection rules for ${criticalCount} CRITICAL-severity threat(s)` : null,
       mitre.unique_techniques > 10 ? `Review MITRE coverage gaps -- ${mitre.unique_techniques} techniques active in this period` : null,
       avgRisk > 6    ? "Activate incident response workflow -- average risk score exceeds HIGH threshold" : null,
@@ -277,7 +322,9 @@ export async function handlePremiumReport(request, env, auth, rid) {
     return _json({
       error:      "tier_required",
       feature:    "premium_reports",
-      message:    "Premium Threat Intelligence Reports require Pro tier ($29/mo) or individual purchase ($49/report).",
+      // Pro price from the runtime pricing provider (the value Razorpay
+      // charges). This literal said "$29/mo" while Pro is billed $49/mo.
+      message:    "Premium Threat Intelligence Reports require Pro tier ($" + planPrice("PRO").usd_monthly + "/mo) or individual purchase ($49/report).",
       pricing: {
         per_report_usd:     REPORT_CONFIG.PRICE_PER_REPORT_USD,
         per_report_inr:     REPORT_CONFIG.PRICE_PER_REPORT_INR,
@@ -304,7 +351,10 @@ export async function handlePremiumReport(request, env, auth, rid) {
   const reportType  = ["weekly", "monthly", "custom", "cve_focused", "actor_focused"].includes(body.type)
     ? body.type : "weekly";
   const reportTitle = safeStr(body.title || `SENTINEL APEX Threat Intelligence Report -- ${reportType.toUpperCase()}`, 200);
-  const maxItems    = tier === "enterprise" ? REPORT_CONFIG.MAX_ITEMS_ENTERPRISE : REPORT_CONFIG.MAX_ITEMS_PRO;
+  // MSSP ($999/mo) is above Enterprise; it received Pro-sized reports because
+  // only "enterprise" was checked here and at the IOC / advisory caps below.
+  const fullTier    = tier === "enterprise" || tier === "mssp";
+  const maxItems    = fullTier ? REPORT_CONFIG.MAX_ITEMS_ENTERPRISE : REPORT_CONFIG.MAX_ITEMS_PRO;
   const severityFilter = body.severity_filter
     ? (Array.isArray(body.severity_filter) ? body.severity_filter.map(s => safeStr(s, 20).toUpperCase()) : [])
     : [];
@@ -347,7 +397,7 @@ export async function handlePremiumReport(request, env, auth, rid) {
   // real underlying signal instead (title plus at least one of
   // severity/cve_id/iocs) keeps out empty stub items without imposing
   // certification thresholds this endpoint was never designed to need.
-  feedItems = feedItems.filter(i => i.title && (i.severity || i.cve_id || (Array.isArray(i.iocs) && i.iocs.length > 0)));
+  feedItems = feedItems.filter(i => i && i.title && (i.severity || itemCveIds(i).length > 0 || (Array.isArray(i.iocs) && i.iocs.length > 0)));
 
   // Apply filters
   let filtered = feedItems;
@@ -355,13 +405,21 @@ export async function handlePremiumReport(request, env, auth, rid) {
     filtered = filtered.filter(i => severityFilter.includes((i.severity || "").toUpperCase()));
   }
   if (reportType === "cve_focused") {
-    filtered = filtered.filter(i => !!i.cve_id);
+    filtered = filtered.filter(i => itemCveIds(i).length > 0);
   }
   if (reportType === "actor_focused" && body.actor) {
     const actor = safeStr(body.actor, 80).toLowerCase();
     filtered = filtered.filter(i => (i.actor_tag || "").toLowerCase().includes(actor));
   }
-  filtered = filtered.slice(0, maxItems);
+  // Rank by evidence-cited priority (KEV, CVSS, EPSS, severity, activity)
+  // before the tier cap, so a capped report keeps the most urgent advisories
+  // rather than whichever came first in feed order.
+  const priorityOf = new Map(filtered.map((i) => [i, computeEventPriority(projectItem(i))]));
+  filtered = filtered
+    .map((item, index) => ({ item, index, p: priorityOf.get(item) }))
+    .sort((a, b) => priorityRank(b.p.band) - priorityRank(a.p.band) || (b.p.score ?? -1) - (a.p.score ?? -1) || a.index - b.index)
+    .map((r) => r.item)
+    .slice(0, maxItems);
 
   // Determine report period
   const now = new Date();
@@ -375,8 +433,18 @@ export async function handlePremiumReport(request, env, auth, rid) {
   const mitre   = analyseMitreCoverage(filtered);
   const cve     = buildCVESummary(filtered);
   const actors  = buildActorIntelligence(filtered);
-  const iocTable= buildIOCTable(filtered, tier === "enterprise" ? 500 : 100);
+  const iocTable= buildIOCTable(filtered, fullTier ? 500 : 100);
   const execSum = buildExecutiveSummary(filtered, mitre, cve, actors, reportPeriod);
+  // "What to act on first": the five highest-priority advisories, each with
+  // the feed evidence behind its band.
+  execSum.priority_actions = filtered.slice(0, 5).map((item) => {
+    const p = priorityOf.get(item);
+    return {
+      id: item.id, title: safeStr(item.title || "", 200), band: p.band, score: p.score,
+      cve_ids: itemCveIds(item),
+      evidence: p.factors.filter((f) => f.known && f.evidence).map((f) => f.evidence),
+    };
+  });
 
   const reportId = genReportId();
   const report = {
@@ -409,12 +477,14 @@ export async function handlePremiumReport(request, env, auth, rid) {
     ioc_intelligence: iocTable,
 
     // Section 6 -- Raw advisories (limited)
-    advisories: filtered.slice(0, tier === "enterprise" ? 500 : 50).map(item => ({
+    advisories: filtered.slice(0, fullTier ? 500 : 50).map(item => ({
       id:          item.id,
       title:       safeStr(item.title || "", 200),
       severity:    item.severity,
       risk_score:  item.risk_score,
       cve_id:      item.cve_id || null,
+      cve_ids:     itemCveIds(item),
+      priority:    { band: priorityOf.get(item).band, score: priorityOf.get(item).score },
       actor_tag:   item.actor_tag || "UNATTRIBUTED",
       kev_present: item.kev_present || false,
       source:      item.source || item.feed_source,
