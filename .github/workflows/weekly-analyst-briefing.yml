@@ -15,7 +15,13 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-# Resource-scoped lock: this workflow reads shared intelligence but writes only its\n# own derived namespace. A global sentinel-data-writer lock can starve/cancel\n# pending jobs because GitHub concurrency retains only one pending run per group.\nconcurrency:\n  group: sentinel-data-writer-weekly-analyst\n  cancel-in-progress: false
+
+# Resource-scoped lock: this workflow reads shared intelligence but writes only
+# its own derived namespace. A global sentinel-data-writer lock can starve or
+# cancel pending jobs because GitHub concurrency retains only one pending run.
+concurrency:
+  group: sentinel-data-writer-weekly-analyst
+  cancel-in-progress: false
 
 jobs:
   weekly-briefing:
@@ -64,25 +70,32 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python3 scripts/run_weekly_ai_predictions.py
 
-      - name: Commit weekly briefing data
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Validate and stage weekly briefing publication
         run: |
-          git config user.email "bivash@cyberdudebivash.com"
-          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
-          git config user.name "CYBERDUDEBIVASH"
-          git add -f data/weekly_briefings/ 2>/dev/null || true
-          if git diff --staged --quiet; then
-            echo "No weekly briefing changes."
-          else
-            git commit -m " Weekly Threat Briefing: $(date -u +'%Y-W%V') [skip ci]"
-            for i in 1 2 3; do
-              git stash --include-untracked --quiet 2>/dev/null || true
-              git fetch origin main --quiet 2>/dev/null || true
-              git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null || true; git merge origin/main -X ours --no-edit --quiet 2>/dev/null || true; }
-              git stash pop --quiet 2>/dev/null || true
-              if git push origin main; then break; fi
-              echo "::warning::Weekly briefing push attempt ${i}/3 failed, retrying..."
-              sleep $((i * 10))
-            done
+          set -euo pipefail
+          test -d data/weekly_briefings
+          if ! find data/weekly_briefings -type f -size +0c -print -quit | grep -q .; then
+            echo "::error::No non-empty weekly briefing artifacts were generated"
+            exit 1
           fi
+
+          rm -rf .publish
+          mkdir -p .publish/data/weekly_briefings
+          cp -a data/weekly_briefings/. .publish/data/weekly_briefings/
+
+          echo "Publication manifest:"
+          find .publish/data/weekly_briefings -type f -print0 \
+            | sort -z \
+            | xargs -0 sha256sum
+
+      - name: Publish weekly briefing to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4.9.0
+        with:
+          folder: .publish
+          branch: gh-pages
+          clean: false
+          single-commit: false
+          token: ${{ secrets.GH_TOKEN || github.token }}
+          git-config-name: 'github-actions[bot]'
+          git-config-email: 'github-actions[bot]@users.noreply.github.com'
+          commit-message: 'deploy(analyst-briefing): Weekly Analyst Briefing [skip ci]'
