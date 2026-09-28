@@ -207,6 +207,14 @@ REPORTS_INDEX_FILES: list[tuple[str, str]] = [
     ("api/reports/stats.json",        "api/reports/stats.json"),
 ]
 
+# Weekly Threat Brief API artifact. This key is consumed by intel-gateway's
+# /api/v1/intel/* R2-backed static-manifest serving path. It is intentionally
+# NOT part of build_upload_plan(): weekly-threat-brief.yml is the sole writer,
+# preventing duplicate writers/races with sentinel-blogger.
+WEEKLY_BRIEF_FILES: list[tuple[str, str]] = [
+    ("api/v1/intel/weekly_brief.json", "api/v1/intel/weekly_brief.json"),
+]
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -657,6 +665,87 @@ def main_governance_telemetry_only() -> None:
     log.info("Governance-telemetry-only R2 sync complete.")
 
 
+def main_weekly_brief_only() -> None:
+    """
+    Publish the customer-facing Weekly Threat Brief API artifact to the
+    canonical INTEL_R2 data bucket.
+
+    weekly-threat-brief.yml is the sole caller and therefore the sole writer
+    for this key. The production gateway serves /api/v1/intel/* from R2, so
+    a gh-pages deployment alone cannot satisfy the API contract.
+
+    The operation is fail-closed:
+      * the expected artifact must exist and be non-empty;
+      * a provably stale manifest is rejected;
+      * R2 cost budget is enforced before mutation;
+      * the upload must complete successfully.
+    """
+    log.info("=" * 60)
+    log.info(
+        "SENTINEL APEX v%s -- R2 Upload Engine (weekly-brief-only)",
+        PIPELINE_VERSION,
+    )
+    log.info("=" * 60)
+    os.chdir(REPO_ROOT)
+
+    cf_account, _access_key, _secret_key = get_credentials()
+    endpoint = f"https://{cf_account}.r2.cloudflarestorage.com"
+    install_awscli()
+
+    candidates: list[tuple[str, str]] = []
+    for src, dst_key in WEEKLY_BRIEF_FILES:
+        path = REPO_ROOT / src
+        if not path.is_file() or path.stat().st_size <= 0:
+            log.critical("FATAL: weekly brief artifact missing or empty: %s", src)
+            sys.exit(1)
+        stale = stale_manifest_reason(path)
+        if stale:
+            log.critical("FATAL: refusing stale weekly brief publication: %s", stale)
+            emit = f"::error::weekly brief publication blocked: {stale}"
+            print(emit, flush=True)
+            sys.exit(1)
+        candidates.append((src, dst_key))
+
+    plan = R2OperationPlan(label="r2_upload_weekly_brief", bucket=BUCKET_DATA)
+    plan.record_put(len(candidates))
+
+    budgets = R2Budgets.from_env()
+    try:
+        enforce_budget(plan, budgets, is_report_plan=False)
+    except R2BudgetExceeded as exc:
+        log.critical(str(exc))
+        emit_summary(
+            plan,
+            budgets,
+            status="BLOCKED",
+            is_report_plan=False,
+            extra={"reason": str(exc)},
+        )
+        sys.exit(1)
+
+    uploaded = 0
+    for src, dst_key in candidates:
+        if s3_cp(src, BUCKET_DATA, dst_key, endpoint):
+            uploaded += 1
+
+    emit_summary(
+        plan,
+        budgets,
+        status="PASS" if uploaded == len(candidates) else "FAIL",
+        is_report_plan=False,
+        extra={"uploaded": uploaded},
+    )
+    if uploaded != len(candidates):
+        log.critical(
+            "FATAL: weekly brief R2 publication incomplete (%d/%d)",
+            uploaded,
+            len(candidates),
+        )
+        sys.exit(1)
+
+    log.info("Weekly Threat Brief API artifact published to R2.")
+
+
 def main_reports_index_only() -> None:
     """
     Late re-upload of the customer Reports catalog (REPORTS_INDEX_FILES).
@@ -945,6 +1034,8 @@ if __name__ == "__main__":
             main_ai_tracker_only()
         elif "--governance-telemetry-only" in sys.argv:
             main_governance_telemetry_only()
+        elif "--weekly-brief-only" in sys.argv:
+            main_weekly_brief_only()
         elif "--reports-index-only" in sys.argv:
             main_reports_index_only()
         else:
