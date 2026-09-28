@@ -138,6 +138,7 @@ def test_evidence_register_still_marks_customer_social_proof_unverified():
     assert "No replacement quotes were written" in register
 
 
+# Final-head gate: these assertions intentionally cover the production homepage sales surface.
 def test_homepage_does_not_claim_unconfigured_billing_support_or_soc2_certification():
     """Buyer-facing claims must match configured billing, support, and compliance evidence."""
     text = _visible((REPO / "index.html").read_text(encoding="utf-8"))
