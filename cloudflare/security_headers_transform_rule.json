@@ -1,7 +1,7 @@
 {
   "_comment": "CYBERDUDEBIVASH SENTINEL APEX -- security response headers for the static site",
-  "_why": "The static site is served by GitHub Pages behind Cloudflare. GitHub Pages ignores _headers, so the live pages carry only HSTS: no X-Frame-Options / CSP frame-ancestors (clickjacking), X-Content-Type-Options, Referrer-Policy or Permissions-Policy. /api/* already gets these from the Worker (SECURITY_HEADERS in workers/intel-gateway/src/index.js) and is excluded here.",
-  "_apply": "Cloudflare dashboard -> Rules -> Transform Rules -> Modify Response Header -> create this one rule. For API automation, GET and back up the existing http_response_headers_transform entrypoint first; append or update only this rule, preserving every unrelated rule and order. Never PUT this single-rule document over an existing entrypoint. Requires Zone Transform Rules Edit. Verify response headers on live pages after applying.",
+  "_why": "The static site is served by GitHub Pages behind Cloudflare. GitHub Pages ignores _headers, so the live pages carry only HSTS: no X-Frame-Options / CSP frame-ancestors (clickjacking), X-Content-Type-Options, Referrer-Policy or Permissions-Policy. /api/* already gets these from the Worker (SECURITY_HEADERS in workers/intel-gateway/src/index.js) and is excluded here. /swarm/* (sentinel-apex-swarm-live) is excluded too (2026-09-28): that Worker sends a stricter CSP (default-src 'none') and X-Frame-Options DENY, and this rule's 'set' would otherwise replace them with weaker values. Every Worker route prefix on intel.cyberdudebivash.com must be excluded; tests/test_clickjacking_guard.py derives the list from workers/*/wrangler.toml.",
+  "_apply": "Run the 'Apply static-site security headers' workflow (.github/workflows/apply-security-headers.yml): mode=plan shows the change, mode=apply backs up the existing http_response_headers_transform entrypoint, upserts only this rule (matched by description prefix), preserves every other rule and its order, and verifies live headers. Needs CF_API_TOKEN with Zone Transform Rules Edit. Manual dashboard alternative: Rules -> Transform Rules -> Modify Response Header -> create this one rule.",
   "_csp_note": "Only frame-ancestors is set in the header CSP. Browsers enforce every CSP they receive, so a header policy containing only frame-ancestors restricts nothing else, and the pages' existing <meta> CSPs keep governing scripts/styles/connect.",
   "_verify": "curl -sSI https://intel.cyberdudebivash.com/get-api-key.html | grep -iE 'x-frame-options|content-security-policy|x-content-type-options|referrer-policy|permissions-policy'",
   "ruleset": {
@@ -10,8 +10,8 @@
     "phase": "http_response_headers_transform",
     "rules": [
       {
-        "description": "Security headers on static pages (not /api, /reports, /taxii, /auth -- the Worker sets its own)",
-        "expression": "(http.host eq \"intel.cyberdudebivash.com\") and not (http.request.uri.path in {\"/api\" \"/reports\" \"/taxii\" \"/auth\"}) and not starts_with(http.request.uri.path, \"/api/\") and not starts_with(http.request.uri.path, \"/reports/\") and not starts_with(http.request.uri.path, \"/taxii/\") and not starts_with(http.request.uri.path, \"/auth/\")",
+        "description": "Security headers on static pages (not /api, /reports, /taxii, /auth, /swarm -- those Workers set their own)",
+        "expression": "(http.host eq \"intel.cyberdudebivash.com\") and not (http.request.uri.path in {\"/api\" \"/reports\" \"/taxii\" \"/auth\" \"/swarm\"}) and not starts_with(http.request.uri.path, \"/api/\") and not starts_with(http.request.uri.path, \"/reports/\") and not starts_with(http.request.uri.path, \"/taxii/\") and not starts_with(http.request.uri.path, \"/auth/\") and not starts_with(http.request.uri.path, \"/swarm/\")",
         "action": "rewrite",
         "action_parameters": {
           "headers": {
