@@ -5,8 +5,9 @@ import { test } from "node:test";
 
 import {
   analyseMitreCoverage, buildCVESummary, itemCveIds, handlePremiumReport, handleReportList, handleReportCsv,
-  buildReportCsv, periodCoverage,
+  buildReportCsv, periodCoverage, buildReportPrintHtml, handleReportPrint, PRINT_CSP,
 } from "../premium-reports.js";
+import worker from "../index.js";
 import { planPrice } from "../cyber-watchdog.js";
 
 const CITRIX = {
@@ -179,4 +180,53 @@ test("CSV export: owner only, per section, formula-safe", async () => {
   assert.equal((await handleReportCsv(getReq(`/api/reports/${id}/csv`), env, { tier: "PRO", sub: "intruder" }, "rid", id)).status, 404);
   assert.equal((await handleReportCsv(getReq(`/api/reports/${id}/csv`), env, { tier: "FREE" }, "rid", id)).status, 403);
   assert.equal(buildReportCsv({ report_id: "r", advisories: [{ id: "a", title: "-1 day", risk_score: -1 }] }).split("\r\n")[1].split(",")[2], "'-1 day");
+});
+
+test("print-ready report: owner only, every section rendered, escaped, no script, no printed URL", async () => {
+  const hostile = { id: "evil", title: "<script>alert(1)</script><img src=x onerror=alert(2)>", severity: "HIGH", cve_ids: ["CVE-2026-1"], published_at: isoAgo(3600) };
+  const env = envWith([CITRIX, ROLLER, hostile]);
+  const made = await (await handlePremiumReport(post({ title: "Weekly </title><script>x</script>" }), env, { tier: "PRO", sub: "owner" }, "rid")).json();
+  assert.match(made.metadata.print_url, new RegExp("/api/reports/" + made.report_id + "/print$"));
+  const res = await handleReportPrint(getReq(`/api/reports/${made.report_id}/print`), env, { tier: "PRO", sub: "owner" }, "rid", made.report_id);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("Content-Type"), /text\/html/);
+  assert.equal(res.headers.get("Content-Security-Policy"), PRINT_CSP);
+  assert.match(PRINT_CSP, /default-src 'none'/);
+  assert.doesNotMatch(PRINT_CSP, /script-src/, "no script allowed at all");
+  const html = await res.text();
+  assert.doesNotMatch(html, /<script/i, "hostile titles are escaped, and the page itself has no script");
+  assert.doesNotMatch(html, /<img/i);
+  // Stored values were already stripped of < > at generation; the renderer
+  // escapes again for reports stored earlier or altered in R2.
+  const raw = buildReportPrintHtml({ report_title: "<script>alert(1)</script>", advisories: [{ title: "\"><img src=x onerror=alert(2)>", severity: "HIGH" }] });
+  assert.doesNotMatch(raw, /<script|<img/i);
+  assert.match(raw, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(raw, /&quot;&gt;&lt;img src=x onerror=alert\(2\)&gt;/);
+  assert.match(html, /@page \{ size: A4; margin: 0; \}/, "margin 0 suppresses the browser's printed URL header/footer");
+  for (const h of ["1. Executive summary", "2. CVE intelligence", "3. MITRE ATT&amp;CK coverage", "4. Threat actor intelligence", "5. Indicators of compromise", "6. Advisories"]) assert.ok(html.includes(h), h);
+  assert.ok(html.includes("CVE-2026-88771") && html.includes("Initial Access"));
+  assert.match(html, /Generated from LIVE intelligence/);
+  assert.equal((await handleReportPrint(getReq("/x"), env, { tier: "PRO", sub: "intruder" }, "rid", made.report_id)).status, 404);
+  assert.equal((await handleReportPrint(getReq("/x"), env, { tier: "FREE" }, "rid", made.report_id)).status, 403);
+  assert.equal((await handleReportPrint(getReq("/x"), env, { tier: "PRO", sub: "owner" }, "rid", "rpt_zz")).status, 400);
+});
+
+test("print page renders reports stored before freshness, coverage and priority existed", () => {
+  const html = buildReportPrintHtml({ report_id: "rpt_0123456789abcdef", report_title: "Old", executive_summary: { total_advisories: 2 }, advisories: [{ id: "a", title: "Old advisory", severity: "LOW", cve_id: "CVE-2025-1" }] });
+  assert.match(html, /Feed freshness was not recorded/);
+  assert.match(html, /generated before priority ranking/);
+  assert.ok(html.includes("CVE-2025-1"));
+  assert.match(buildReportPrintHtml(null), /<!doctype html>/);
+  const stale = buildReportPrintHtml({ intelligence_freshness: { live: false, label: "LAST AUTHORITATIVE INTELLIGENCE - NOT LIVE", freshness_status: "STALE", feed_generated_at: "2026-09-27T00:00:00Z" } });
+  assert.match(stale, /class="status warn">LAST AUTHORITATIVE INTELLIGENCE - NOT LIVE/);
+});
+
+test("router: /pdf redirects to the print page and keeps the query; bad ids are 400", async () => {
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const fetchPath = (p) => worker.fetch(new Request("https://intel.cyberdudebivash.com" + p), {}, ctx);
+  const res = await fetchPath("/api/reports/rpt_0123456789abcdef/pdf?api_key=k1");
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get("Location"), "/api/reports/rpt_0123456789abcdef/print?api_key=k1");
+  assert.equal((await fetchPath("/api/reports/rpt_zz/pdf")).status, 400);
+  assert.equal((await fetchPath("/api/reports/rpt_0123456789abcdef/print")).status, 403, "anonymous: tier gate");
 });

@@ -718,6 +718,14 @@ const CONTROLS = [
     replace: "  if (false) {",
     tests: [T("premium-reports.test.js")],
   },
+  {
+    // Print-ready report: stored values must be HTML-escaped (no markup injection into a page customers print).
+    id: "report_print_unescaped",
+    file: "workers/intel-gateway/src/premium-reports.js",
+    find: "  return String(v).replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\").replace(/\"/g, \"&quot;\").replace(/'/g, \"&#39;\");",
+    replace: "  return String(v);",
+    tests: [T("premium-reports.test.js")],
+  },
 ];
 
 function runTests(root, files) {
