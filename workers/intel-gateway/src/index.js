@@ -105,7 +105,7 @@ import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handle
 // dark-web-monitor.js's handlers are intentionally NOT imported -- see the
 // _darkWebUnavailable disable note at its route registration below.
 import { routeWatchdog } from './cyber-watchdog.js';
-import { handlePremiumReport, handleReportList, handleReportGet } from './premium-reports.js';
+import { handlePremiumReport, handleReportList, handleReportGet, handleReportCsv } from './premium-reports.js';
 // P0 FIX (2026-09-01): PR #285 (v201.0) called getLiveIndicatorsSummary(),
 // runScheduledIngestion(), and routeExports() below without ever importing
 // them from their actual modules -- every call site threw a ReferenceError
@@ -8309,11 +8309,9 @@ async function handleRequest(request, env, ctx) {
       }, 501);
     }
     if (isCsvRequest) {
-      return jsonResp({
-        error:      "not_yet_available",
-        message:    "CSV export is not yet available for this report. Use the JSON format at GET /api/reports/{id}.",
-        request_id: crypto.randomUUID(),
-      }, 501);
+      // CSV export (2026-09-28): was a 501. Same tier gate and owner check
+      // as GET /api/reports/{id}; ?section=advisories|cves|iocs.
+      return await handleReportCsv(request, env, auth, crypto.randomUUID(), reportId);
     }
     return await handleReportGet(request, env, auth, crypto.randomUUID(), reportId);
   }
