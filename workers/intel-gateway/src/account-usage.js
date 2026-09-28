@@ -21,13 +21,16 @@
 // =============================================================================
 
 // Key issuance and revocation are not self-service: paid keys are issued on
-// purchase (Gumroad / Razorpay webhooks), free keys by /api/keys/free, and
-// rotation or revocation by support. The console says so instead of offering
-// buttons that would 404.
+// purchase (Gumroad / Razorpay webhooks) and rotation or revocation by
+// support. The console says so instead of offering buttons that would 404.
+// free_key_endpoint is DEPRECATED (2026-09-28, null): the Free tier is keyless
+// per commercial-contract.json and /api/keys/free answers 410. The field is
+// kept so existing console clients read "no endpoint" rather than break.
 export const KEY_MANAGEMENT = Object.freeze({
   self_service_create: false,
   self_service_revoke: false,
-  free_key_endpoint: "/api/keys/free",
+  free_key_endpoint: null,
+  free_tier_keyless: true,
   support_contact: "mailto:support@cyberdudebivash.com",
 });
 

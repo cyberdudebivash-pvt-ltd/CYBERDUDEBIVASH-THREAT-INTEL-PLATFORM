@@ -31,6 +31,8 @@ on drift between:
   C63+      no-trial policy: POST /api/leads/trial answers 410 on both Workers,
             and the page sweep (C60) rejects trial offers and the superseded
             FREE 100/day quota and INR 2,499 PRO price
+  C64+      keyless Free tier: when FREE api_keys is 0, POST /api/keys/free
+            and revenue-engine POST /api/apikeys/request-free answer 410
 
 Exit codes:
   0 = ALL PASS
@@ -175,6 +177,20 @@ def check_no_trial_routes() -> None:
     check("\u20b92,499" not in re_src and "https://intel.cyberdudebivash.com/trial\"" not in re_src
           and "https://intel.cyberdudebivash.com/trial\">" not in re_src,
           "revenue-engine email copy quotes no INR 2,499 price and links no /trial page")
+
+
+def check_no_free_key_routes(canon: dict) -> None:
+    """C64+: Free tier is keyless (FREE api_keys == 0): both free-key routes answer 410."""
+    if canon["free"].get("api_keys") != 0:
+        return  # the contract grants free keys; nothing to enforce
+    gw_src = GATEWAY_INDEX_PATH.read_text(encoding="utf-8")
+    gw = re.search(r'path === "/api/keys/free"[^\n]*\{(.*?)\n  \}', gw_src, re.DOTALL)
+    check(gw is not None and "410" in gw.group(1) and "handleFreeKeyRequest(" not in gw.group(1),
+          "intel-gateway POST /api/keys/free answers 410 and never calls handleFreeKeyRequest (FREE api_keys == 0)")
+    re_src = REVENUE_ENGINE_PATH.read_text(encoding="utf-8")
+    rev = re.search(r'path === "/api/apikeys/request-free"[^\n]*\n\s*(return[^\n]*)', re_src)
+    check(rev is not None and "410" in rev.group(1) and "handleFreeKeyRequest(" not in rev.group(1),
+          "revenue-engine POST /api/apikeys/request-free answers 410 and never calls handleFreeKeyRequest (FREE api_keys == 0)")
 
 
 FAILURES: list[str] = []
@@ -498,6 +514,7 @@ def main() -> int:
     # --- C62+/C63+: runtime quota tables and the no-trial route contract ---
     check_runtime_quota_tables(canon)
     check_no_trial_routes()
+    check_no_free_key_routes(canon)
 
     # --- C60+: sweep every buyer-facing HTML page for superseded literals --
     scanned = 0

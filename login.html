@@ -216,7 +216,7 @@ body{min-height:100vh;display:flex;flex-direction:column;background:radial-gradi
     <div class="auth-hero">
       <div class="auth-hero-badge">● SENTINEL APEX v201.0 — LIVE</div>
       <h1>Access Threat Intelligence</h1>
-      <p>Create your free account or sign in to access real-time CVE intelligence, STIX 2.1 feeds, and AI-powered SOC automation.</p>
+      <p>Sign in with your API key to access real-time CVE intelligence, STIX 2.1 feeds, and AI-powered SOC automation. The Free tier needs no account.</p>
     </div>
 
     <!-- SSO -->
@@ -236,7 +236,7 @@ body{min-height:100vh;display:flex;flex-direction:column;background:radial-gradi
 
     <!-- Tabs -->
     <div class="auth-tabs">
-      <button class="auth-tab active" onclick="switchTab('signup')" id="tab-signup">CREATE FREE ACCOUNT</button>
+      <button class="auth-tab active" onclick="switchTab('signup')" id="tab-signup">START FREE</button>
       <button class="auth-tab" onclick="switchTab('login')" id="tab-login">SIGN IN WITH API KEY</button>
     </div>
 
@@ -245,22 +245,18 @@ body{min-height:100vh;display:flex;flex-direction:column;background:radial-gradi
 
       <!-- SIGNUP PANEL -->
       <div class="form-panel active" id="panel-signup">
+        <!-- 2026-09-28: the Free tier is keyless (commercial-contract.json grants
+             FREE zero API keys; POST /api/keys/free answers 410), so there is no
+             free account to create. -->
         <div class="alert info show" id="signup-info">
           <span class="alert-icon">ℹ</span>
-          <div><strong>Free account</strong> — instant API access. No credit card, no password — your API key is emailed to you immediately.</div>
-        </div>
-        <div class="alert success" id="signup-success"><span class="alert-icon">✓</span><div id="signup-success-msg"></div></div>
-        <div class="alert error" id="signup-error"><span class="alert-icon">✕</span><div id="signup-error-msg"></div></div>
-
-        <div class="form-group">
-          <label class="form-label">Work Email</label>
-          <input type="email" class="form-input" id="signup-email" placeholder="jane@company.com" autocomplete="email">
+          <div><strong>The Free tier needs no account or API key.</strong> Call the API without a key: 30 requests/minute and 50/day per network. API keys come with Pro and above.</div>
         </div>
 
-        <button class="btn-primary" id="btn-signup" onclick="doSignup()">
-          <span class="btn-text">⚡ GET FREE API KEY</span>
-          <div class="spinner"></div>
-        </button>
+        <a class="btn-primary" id="btn-signup" href="/api-docs.html" style="display:flex;align-items:center;justify-content:center;text-decoration:none;">
+          <span class="btn-text">READ THE API DOCS &rarr;</span>
+        </a>
+        <a class="btn-alt" href="/upgrade.html?plan=pro" style="display:flex;align-items:center;justify-content:center;text-decoration:none;margin-top:10px;">Get a Pro API key &rarr;</a>
 
         <div class="divider">or continue with</div>
         <button class="btn-alt" onclick="switchTab('login')">Sign in to existing account</button>
@@ -281,7 +277,7 @@ body{min-height:100vh;display:flex;flex-direction:column;background:radial-gradi
         </button>
 
         <div class="divider">don't have a key?</div>
-        <button class="btn-alt" onclick="switchTab('signup')">Create free account</button>
+        <button class="btn-alt" onclick="switchTab('signup')">Start free &mdash; no key needed</button>
       </div>
 
       <!-- SUCCESS PANEL -->
@@ -333,7 +329,7 @@ body{min-height:100vh;display:flex;flex-direction:column;background:radial-gradi
 <script>
 // ============================================================
 // SENTINEL APEX Auth Portal — Production JavaScript v185.0
-// Calls: POST /api/keys/free  |  POST /auth/login  |  GET /auth/sso/:provider/start
+// Calls: POST /auth/login  |  GET /auth/sso/:provider/start
 // ============================================================
 
 const API_BASE = 'https://intel.cyberdudebivash.com';
@@ -355,57 +351,12 @@ function clearAlerts() {
 }
 
 // ── Sign Up ───────────────────────────────────────────────
-// ROOT CAUSE FIX (live-data audit): this previously posted {name,email,
-// password} to /auth/signup, a route that does not exist anywhere in the
-// backend (confirmed live: HTTP 404) -- account creation via this page was
-// 100% broken for every visitor. The platform's real, working, already-live
-// signup path is POST /api/keys/free (no password -- confirmed via
-// /api/auth/register's own 422 response: "Email registration is not
-// available. API keys are issued upon subscription."). Wired to that real
-// endpoint instead of inventing a new one.
-async function doSignup() {
-  clearAlerts();
-  const email = document.getElementById('signup-email').value.trim().toLowerCase();
-
-  if (!email || !email.includes('@')) return showAlert('signup-error', 'signup-error-msg', 'Please enter a valid email address.');
-
-  const btn = document.getElementById('btn-signup');
-  setBtnLoading(btn, true);
-
-  try {
-    const resp = await fetch(API_BASE + '/api/keys/free', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ email }),
-    });
-    const data = await resp.json();
-
-    if (!resp.ok) {
-      showAlert('signup-error', 'signup-error-msg', data.error || 'Signup failed. Please try again.');
-      setBtnLoading(btn, false);
-      return;
-    }
-
-    if (data.status === 'check_email') {
-      // Existing account -- the real key was just re-sent to their inbox.
-      // No key is returned here by design (see handleFreeKeyRequest's own
-      // comment: returning it would let anyone pull back someone else's
-      // live credential just by knowing their email).
-      showAlert('signup-success', 'signup-success-msg', "You already have a free account — we've re-sent your API key to " + email + ".");
-      setBtnLoading(btn, false);
-      return;
-    }
-
-    // Brand-new key issued (data.api_key, data.tier). Immediately exchange
-    // it for a session JWT via the real /auth/login, the same call the
-    // Sign In panel below makes, so signup lands the visitor in an actual
-    // signed-in state instead of just handing back a bare key.
-    await exchangeApiKeyForSession(data.api_key, email, 'signup');
-
-  } catch (err) {
-    showAlert('signup-error', 'signup-error-msg', 'Network error. Please check your connection and try again.');
-    setBtnLoading(btn, false);
-  }
+// DEPRECATED 2026-09-28: there is no free sign-up. The Free tier is keyless
+// (commercial-contract.json FREE "api_keys": 0) and POST /api/keys/free
+// answers 410. The panel now links to the API docs and Pro checkout; this
+// stub stays so the Enter-key handler below has nothing to call into.
+function doSignup() {
+  window.location.href = '/api-docs.html';
 }
 
 // ── Sign In ───────────────────────────────────────────────

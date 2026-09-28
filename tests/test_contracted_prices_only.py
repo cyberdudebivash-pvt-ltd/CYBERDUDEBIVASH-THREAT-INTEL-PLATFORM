@@ -198,3 +198,55 @@ def test_admin_mrr_uses_contracted_prices():
     assert "const mrr = proSeats * {} + entSeats * {};".format(
         TIERS["pro"]["usd_monthly"], TIERS["enterprise"]["usd_monthly"]) in html
     assert "$29/mo" not in html and "$199/mo" not in html
+
+
+# ── No uncontracted discounts (owner decision 2026-09-28) ───────────────────
+
+@pytest.mark.parametrize("page", _root_pages())
+def test_no_student_or_researcher_discount(page):
+    # The contract has no discount and checkout cannot apply one.
+    html = _text(page)
+    assert not re.search(r"student[^<]{0,80}(?:discount|% off)|(?:discount|% off)[^<]{0,80}student", html, re.I), \
+        "page offers an uncontracted student/researcher discount"
+
+
+# ── Keyless Free tier (owner decision 2026-09-28) ───────────────────────────
+# commercial-contract.json grants FREE "api_keys": 0; both free-key routes
+# answer 410 (pinned by verify_commercial_contract.py C64+ and the gateway's
+# commercial-contract-runtime.test.js). No page may request or promise one.
+
+FREE_KEY_ROUTES = ("/api/keys/free", "/api/apikeys/request-free")
+
+
+def test_contract_free_tier_is_keyless():
+    assert TIERS["free"]["api_keys"] == 0
+
+
+@pytest.mark.parametrize("page", _root_pages())
+def test_no_page_requests_a_free_key(page):
+    html = _text(page)
+    for route in FREE_KEY_ROUTES:
+        assert not re.search(r"fetch\([^)]*" + re.escape(route), html), f"page calls the retired {route}"
+
+
+@pytest.mark.parametrize("page", _root_pages())
+def test_no_page_promises_a_free_key(page):
+    visible = re.sub(r"<script\b.*?</script>", "", _text(page), flags=re.S | re.I)
+    assert not re.search(r"free\s+(?:api\s+)?key|free\s+account", visible, re.I), \
+        "page offers a free API key or account; the Free tier is keyless"
+
+
+def test_signup_page_shows_keyless_free_start():
+    html = _text("get-api-key.html")
+    assert 'id="free-keyless-panel"' in html
+    assert "30 requests/minute and 50/day" in html
+    assert "showInstantKey" not in html and "instant-key-box" not in html
+    # Community resolves to the keyless panel, never a key request.
+    assert "document.getElementById('free-keyless-panel').style.display = keyless ? 'block' : 'none';" in html
+
+
+def test_signup_page_quotes_contracted_paid_quotas():
+    html = _text("get-api-key.html")
+    assert "10,000 req/month" not in html and "calls/day/day" not in html
+    assert "5,000 requests/day, 120/min, 10 API keys" in html
+    assert "50,000 API requests/day, 600/min, 50 API keys" in html

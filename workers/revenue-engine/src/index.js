@@ -163,8 +163,12 @@ async function routeRevenueRequest(request, env, ctx, rid, url, path, method) {
       // The handler functions themselves are unchanged -- only reached
       // correctly now. The now-dead duplicate checks inside
       // dispatchCommercialRoutes() have been removed (see that function).
+      // DEPRECATED 2026-09-28: free API keys discontinued (commercial-
+      // contract.json grants FREE "api_keys": 0; the Free tier is keyless).
+      // Route kept, answers 410 Gone; handleFreeKeyRequest() is unrouted, not
+      // deleted. Already-issued free keys are not revoked.
       if (path === "/api/apikeys/request-free" && method === "POST")
-        return await handleFreeKeyRequest(request, env, rid);
+        return json(FREE_KEYS_DISCONTINUED_BODY, 410);
       if (path === "/api/apikeys/validate" && method === "GET")
         return await handleApiKeyValidate(request, env, rid);
       if (path === "/api/apikeys/self-rotate" && method === "POST")
@@ -301,6 +305,17 @@ async function handleLeadCapture(request, env, rid) {
     request_id: rid,
   });
 }
+
+// Mirrors FREE_KEYS_DISCONTINUED_BODY in intel-gateway/src/revenue-enforcement.js
+// (separate Worker bundle, so it cannot import it).
+const FREE_KEYS_DISCONTINUED_BODY = Object.freeze({
+  error:       "free_keys_discontinued",
+  message:     "The Free tier needs no API key: call the API without one (30 requests/minute and 50/day per network). API keys are included with Pro and above.",
+  free_tier:   "https://intel.cyberdudebivash.com/api-docs.html",
+  pricing_url: "https://intel.cyberdudebivash.com/pricing.html",
+  upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html?plan=pro",
+  deprecated:  "2026-09-28",
+});
 
 // Mirrors TRIAL_DISCONTINUED_BODY in intel-gateway/src/revenue-enforcement.js
 // (separate Worker bundle, so it cannot import it).
@@ -1717,6 +1732,7 @@ async function dispatchCommercialRoutes(path, method, request, env, rid) {
 
 // =============================================================================
 // FREE API KEY REQUEST
+// DEPRECATED 2026-09-28: unrouted (see /api/apikeys/request-free above).
 // =============================================================================
 async function handleFreeKeyRequest(request, env, rid) {
   const body = await request.json().catch(() => ({}));

@@ -734,6 +734,22 @@ export const TRIAL_DISCONTINUED_BODY = Object.freeze({
   deprecated:  "2026-09-24",
 });
 
+// Free-tier API keys discontinued 2026-09-28 (owner decision: reconcile to
+// config/commercial-contract.json, which grants FREE "api_keys": 0). The Free
+// tier is keyless: anonymous calls are metered per network by RATE_LIMITS
+// (30/min) and DAILY_QUOTAS (50/day, keyed by IP when there is no key). POST
+// /api/keys/free (this Worker) and POST /api/apikeys/request-free
+// (revenue-engine) answer 410 with this body. Free keys issued before this
+// date are NOT revoked: they keep the FREE limits they were issued with.
+export const FREE_KEYS_DISCONTINUED_BODY = Object.freeze({
+  error:       "free_keys_discontinued",
+  message:     "The Free tier needs no API key: call the API without one (30 requests/minute and 50/day per network). API keys are included with Pro and above.",
+  free_tier:   "https://intel.cyberdudebivash.com/api-docs.html",
+  pricing_url: "https://intel.cyberdudebivash.com/pricing.html",
+  upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html?plan=pro",
+  deprecated:  "2026-09-28",
+});
+
 export async function handleTrialIssuance(request, env, rid) {
   if (request.method !== "POST") {
     return revenueJson({ error: "method_not_allowed" }, 405);

@@ -27,6 +27,7 @@ import worker from "../index.js";
 import {
   REVENUE_CONFIG,
   TRIAL_DISCONTINUED_BODY,
+  FREE_KEYS_DISCONTINUED_BODY,
   buildUpgradeTrigger,
   handleLeadCapture,
 } from "../revenue-enforcement.js";
@@ -170,4 +171,47 @@ test("negative control: the quota assertions above would catch the pre-fix value
     .filter(([k, v]) => v !== CONTRACT.tiers[k.toLowerCase()].requests_per_day)
     .map(([k]) => k);
   assert.deepEqual(drifted, ["FREE", "ENTERPRISE", "MSSP"]);
+});
+
+// --- 4. Free tier is keyless (owner decision 2026-09-28) ---------------------
+
+test("contract grants FREE zero API keys (precondition for the 410 below)", () => {
+  assert.equal(CONTRACT.tiers.free.api_keys, 0);
+  for (const id of ["pro", "enterprise", "mssp"]) assert.ok(CONTRACT.tiers[id].api_keys > 0, id);
+});
+
+test("POST /api/keys/free answers 410 Gone and issues no API key", async () => {
+  const { call, env } = harness();
+  const { res, body } = await call("/api/keys/free", {
+    method: "POST",
+    headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" },
+    body: JSON.stringify({ email: "reader@example.com" }),
+  });
+  assert.equal(res.status, 410);
+  assert.equal(body.error, "free_keys_discontinued");
+  assert.equal(body.upgrade_url, FREE_KEYS_DISCONTINUED_BODY.upgrade_url);
+  assert.match(body.message, /30 requests\/minute and 50\/day/);
+  assert.equal(env.API_KEYS_KV.store.size, 0, "no API key may be written");
+  assert.equal(env.SECURITY_HUB_KV.store.size, 0, "no free_key_email mapping may be written");
+  assert.ok(!("api_key" in body));
+});
+
+test("the 410 quotes the contracted FREE per-minute and per-day limits", () => {
+  const free = CONTRACT.tiers.free;
+  assert.ok(FREE_KEYS_DISCONTINUED_BODY.message.includes(`${free.requests_per_minute} requests/minute`));
+  assert.ok(FREE_KEYS_DISCONTINUED_BODY.message.includes(`${free.requests_per_day}/day`));
+});
+
+test("anonymous callers still get the FREE tier without a key", async () => {
+  const { call } = harness();
+  const { res } = await call("/api/pricing");
+  assert.equal(res.status, 200);
+});
+
+test("revenue-engine POST /api/apikeys/request-free answers 410 and never issues a key", () => {
+  const src = readFileSync(join(HERE, "..", "..", "..", "revenue-engine", "src", "index.js"), "utf-8");
+  const m = src.match(/path === "\/api\/apikeys\/request-free"[^\n]*\n\s*(return[^\n]*)/);
+  assert.ok(m, "route kept (deprecated, not removed)");
+  assert.match(m[1], /FREE_KEYS_DISCONTINUED_BODY, 410/);
+  assert.doesNotMatch(m[1], /handleFreeKeyRequest\(/);
 });
