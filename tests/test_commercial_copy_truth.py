@@ -104,3 +104,35 @@ def test_pricing_structured_data_does_not_publish_unlimited_api_access():
     pricing = _visible((REPO / "pricing.html").read_text(encoding="utf-8"))
     assert "unlimited access, 15-min SLA" not in pricing
     assert "50,000 API calls/day, 1,200 requests/minute" in pricing
+
+
+def test_homepage_does_not_restore_withdrawn_social_proof_or_market_superlatives():
+    """Evidence-register withdrawals must stay withdrawn on the main sales surface."""
+    text = _visible((REPO / "index.html").read_text(encoding="utf-8"))
+
+    forbidden = [
+        (r"join\s+1[,.]?200\+\s+soc\s+analysts", "unverified subscriber/analyst count"),
+        (r"(deployed|used)\s+by\s+500\+\s+security\s+teams", "unverified customer/team count"),
+        (r"what\s+analysts\s+say", "unaudited testimonial section"),
+        (r"mid-market\s+fintech,\s*india", "unaudited customer attribution"),
+        (r"enterprise\s+mssp,\s*global", "unaudited customer attribution"),
+        (r"security\s+consultancy,\s*apac", "unaudited customer attribution"),
+        (r"the\s+only\s+ai-native\s+threat\s+intelligence\s+platform", "unsupported market superlative"),
+        (r"updated\s+every\s+15\s+minutes\s+from\s+50\+\s+sources", "unverified fixed source/cadence claim"),
+        (r"15[-\s]?min(?:ute)?\s+updates", "unverified 15-minute publication cadence"),
+        (r"includes\s+lockbit,\s*blackcat,\s*cl0p,\s*and\s*40\+\s+active\s+groups", "unverified ransomware corpus count"),
+        (r"40\+\s+groups", "unverified ransomware corpus count"),
+        (r"structured\s+profiles\s+for\s+200\+\s+.*?threat\s+actors", "unverified actor corpus count"),
+        (r"200\+\s+actors", "unverified actor corpus count"),
+        (r"updated\s+every\s+<?\s*2\s+hours", "unverified AI-security publication cadence"),
+        (r"real[-\s]?time\s+ioc\s+feed\s+api", "unsupported real-time publication claim"),
+    ]
+    hits = [why for pattern, why in forbidden if re.search(pattern, text, re.I)]
+    assert not hits, "homepage restored withdrawn/unverified claims: " + ", ".join(hits)
+
+
+def test_evidence_register_still_marks_customer_social_proof_unverified():
+    register = (REPO / "config/evidence-register.json").read_text(encoding="utf-8")
+    assert '"claim": "Verified / professional / analyst / team head-counts"' in register
+    assert '"classification": "UNVERIFIED"' in register
+    assert "No replacement quotes were written" in register
