@@ -63,6 +63,11 @@ CLASSIFICATIONS = {
     "customer-dashboard.html": ("DEPRECATED", None,
         "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
         "redirect to /soc-operations-center.html (same pattern as customer-portal.html); kept so existing links still resolve."),
+    "cyber-kits.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release pricing sweep): sold one-time kits (\"$149 one-time\") whose buy links re-priced "
+        "upgrade.html from ?amount= while checkout created the recurring subscription for the mapped tier at its "
+        "contracted price; no one-time checkout or kit delivery exists. Replaced by a redirect to /store.html "
+        "(same pattern as customer-portal.html); upgrade.html ignores ?kit and ?amount."),
     "customer-portal.html": ("DEPRECATED", None,
         "Already a redirect to /api-key-manager.html (hardcoded mockup replaced earlier); registry entry corrected 2026-09-28."),
     "daily-operations-center.html": ("DEPRECATED", None,
