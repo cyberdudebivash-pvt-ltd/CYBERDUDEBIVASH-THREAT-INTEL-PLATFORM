@@ -34,6 +34,11 @@ def test_public_pages_exist():
     assert len(PUBLIC_PAGES) > 50
 
 
+def test_checkout_does_not_invent_customer_counts_or_ratings():
+    text = _visible((REPO / "upgrade.html").read_text(encoding="utf-8"))
+    assert not re.search(r"\d[\d,.]*\+?\s+active teams|avg rating", text, re.I)
+
+
 def test_no_retired_manual_payment_or_overclaim_copy_on_public_pages():
     hits = []
     for page in PUBLIC_PAGES:
