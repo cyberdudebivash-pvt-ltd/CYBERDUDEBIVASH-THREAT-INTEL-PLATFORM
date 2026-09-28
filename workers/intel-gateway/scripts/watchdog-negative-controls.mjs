@@ -379,8 +379,8 @@ const CONTROLS = [
   {
     id: "stale_items_leak_into_live_items_field",
     file: "workers/intel-gateway/src/cyber-watchdog.js",
-    find: "    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid }) } };",
-    replace: "    const la = lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid });\n    return { status: 503, body: { ...degradedBody(pub), tier, items: la ? la.items : [], last_authoritative: la } };",
+    find: "    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort }) } };",
+    replace: "    const la = lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort });\n    return { status: 503, body: { ...degradedBody(pub), tier, items: la ? la.items : [], last_authoritative: la } };",
     tests: [T("cyber-watchdog.test.js")],
   },
   {
@@ -684,6 +684,22 @@ const CONTROLS = [
     file: "workers/intel-gateway/src/ai-threat-feed.js",
     find: "    if (seen.has(it.id) || (key && sources.has(key))) return;",
     replace: "    if (seen.has(it.id)) return;",
+    tests: [T("ai-threat-feed.test.js")],
+  },
+  {
+    // Production 2026-09-28: feed order hid every CRITICAL / KEV item below the free cap.
+    id: "brief_reverts_to_feed_order",
+    file: "workers/intel-gateway/src/cyber-watchdog.js",
+    find: "  const sort = BRIEF_SORTS.includes(opts.sort) ? opts.sort : \"priority\";",
+    replace: "  const sort = BRIEF_SORTS.includes(opts.sort) ? opts.sort : \"feed\";",
+    tests: [T("cyber-watchdog.test.js")],
+  },
+  {
+    // Production 2026-09-28: pip:khoj advisory missed because package tags were ignored.
+    id: "ai_feed_ignores_package_tags",
+    file: "workers/intel-gateway/src/ai-threat-feed.js",
+    find: "  return [...AI_TERMS.filter(([, re]) => re.test(blob)).map(([term]) => term), ...aiPackagesFor(item)];",
+    replace: "  return AI_TERMS.filter(([, re]) => re.test(blob)).map(([term]) => term);",
     tests: [T("ai-threat-feed.test.js")],
   },
 ];

@@ -32,7 +32,7 @@
 import { effectiveTier, planPrice, watchdogPublication, LAST_AUTHORITATIVE_MAX_AGE_SECONDS } from "./cyber-watchdog.js";
 
 export const AI_FEED_NAME = "SENTINEL APEX AI THREAT FEED";
-export const AI_FEED_VERSION = "1.1.0";
+export const AI_FEED_VERSION = "1.2.0";
 export const AI_FEED_SKU = "cdb-aish-feed";
 export const AI_FEED_CATALOG_KEY = "ai_feed:hub_catalog:v1";
 export const AI_FEED_MAX_CATALOG = 500;
@@ -66,6 +66,44 @@ const AI_TERMS = Object.freeze([
   ["open webui", /\bopen[- ]?webui\b/i], ["comfyui", /\bcomfyui\b/i], ["gradio", /\bgradio\b/i],
   ["mlflow", /\bmlflow\b/i], ["generative ai", /\b(generative ai|genai)\b/i], ["model supply chain", /\bmodel (weights|supply[- ]chain|poisoning)\b/i],
 ]);
+
+// Package advisories (GitHub Security Advisories et al.) name the affected
+// package only as an ecosystem tag ("pip:khoj", "npm:@langchain/core"); the
+// prose often never says "LLM". Production 2026-09-28: GHSA-62mm-xwmv-crhg
+// (khoj, a self-hosted LLM assistant) was on the feed but not in this one.
+// Exact package names of AI frameworks, SDKs, inference servers and agent /
+// LLM applications; npm scopes match every package under them.
+const PKG_TAG_RE = /^(pip|pypi|npm|go|golang|maven|nuget|rubygems|crates\.io|cargo|composer|packagist):(.+)$/i;
+const AI_PACKAGES = new Set([
+  "khoj", "langchain", "langchain-core", "langchain-community", "langchain-experimental", "langgraph", "langflow",
+  "llama-index", "llama-index-core", "llamaindex", "litellm", "vllm", "ollama", "transformers", "diffusers",
+  "sentence-transformers", "huggingface-hub", "@huggingface/transformers", "@xenova/transformers", "gradio",
+  "mlflow", "open-webui", "comfyui", "invokeai", "flowise", "flowise-components", "dify", "autogpt", "crewai",
+  "pyautogen", "autogen-agentchat", "ag2", "smolagents", "haystack-ai", "farm-haystack", "semantic-kernel",
+  "chromadb", "qdrant-client", "pymilvus", "weaviate-client", "openai", "anthropic", "google-generativeai",
+  "google-genai", "mistralai", "cohere", "instructor", "guidance", "bentoml", "text-generation", "localai",
+  "anything-llm", "librechat", "lobe-chat", "onnx", "onnxruntime", "keras", "tensorflow", "torch", "pytorch",
+  "deepspeed", "fastmcp", "mcp", "ai", "llamafile", "promptflow", "promptfoo", "guardrails-ai", "nemoguardrails",
+]);
+const AI_NPM_SCOPES = Object.freeze(["@modelcontextprotocol/", "@anthropic-ai/", "@langchain/", "@llamaindex/", "@huggingface/", "@mistralai/", "@google/genai", "@google/generative-ai", "@ai-sdk/", "@openai/"]);
+// An "mcp" segment in the package name: mcp-server-fetch, mark3labs/mcp-go, @x/mcp.
+const MCP_PKG_RE = /(^|[-_./@])mcp([-_./]|$)/i;
+
+/** AI package tags an advisory carries, as "package:<ecosystem>:<name>" terms. */
+export function aiPackagesFor(item) {
+  const tags = item && Array.isArray(item.tags) ? item.tags : [];
+  const out = [];
+  for (const t of tags.slice(0, 64)) {
+    if (typeof t !== "string" || t.length > 200) continue;
+    const m = PKG_TAG_RE.exec(t.trim());
+    if (!m) continue;
+    const name = m[2].trim().toLowerCase();
+    if (AI_PACKAGES.has(name) || AI_NPM_SCOPES.some((s) => name.startsWith(s)) || MCP_PKG_RE.test(name)) {
+      out.push("package:" + m[1].toLowerCase() + ":" + name);
+    }
+  }
+  return [...new Set(out)];
+}
 
 const HUB_ID_RE = /^CDB-AISH-FEED-\d{4}-\d{4}-\d{2}$/;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2}))?$/;
@@ -116,7 +154,7 @@ export function aiTermsFor(item) {
   if (!item || typeof item !== "object") return [];
   const blob = [item.title, item.description, item.summary, item.product, Array.isArray(item.tags) ? item.tags.join(" ") : ""]
     .filter((x) => typeof x === "string").join(" \n ");
-  return AI_TERMS.filter(([, re]) => re.test(blob)).map(([term]) => term);
+  return [...AI_TERMS.filter(([, re]) => re.test(blob)).map(([term]) => term), ...aiPackagesFor(item)];
 }
 export function isAiAdvisory(item) { return aiTermsFor(item).length > 0; }
 
