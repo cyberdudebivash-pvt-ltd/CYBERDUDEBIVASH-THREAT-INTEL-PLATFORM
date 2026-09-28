@@ -136,3 +136,19 @@ def test_evidence_register_still_marks_customer_social_proof_unverified():
     assert '"claim": "Verified / professional / analyst / team head-counts"' in register
     assert '"classification": "UNVERIFIED"' in register
     assert "No replacement quotes were written" in register
+
+
+# Final-head gate: these assertions intentionally cover the production homepage sales surface.
+def test_homepage_does_not_claim_unconfigured_billing_support_or_soc2_certification():
+    """Buyer-facing claims must match configured billing, support, and compliance evidence."""
+    text = _visible((REPO / "index.html").read_text(encoding="utf-8"))
+    forbidden = [
+        (r"stripe\s+billing", "Stripe is coded but unconfigured; live checkout uses Razorpay/Gumroad"),
+        (r"24/7\s+soc\s+support", "continuous staffed SOC support is not evidenced"),
+        (r"soc\s*2\s+ready", "SOC 2 readiness/certification wording exceeds the self-assessment evidence"),
+    ]
+    hits = [why for pattern, why in forbidden if re.search(pattern, text, re.I)]
+    assert not hits, "homepage contains unsupported commercial/compliance claims: " + ", ".join(hits)
+    assert "Razorpay + Gumroad" in text
+    assert "Enterprise Support" in text
+    assert "SOC 2 Roadmap" in text
