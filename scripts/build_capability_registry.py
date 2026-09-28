@@ -63,6 +63,11 @@ CLASSIFICATIONS = {
     "customer-dashboard.html": ("DEPRECATED", None,
         "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
         "redirect to /soc-operations-center.html (same pattern as customer-portal.html); kept so existing links still resolve."),
+    "cyber-kits.html": ("DEPRECATED", None,
+        "2026-09-28 (pre-release pricing sweep): sold one-time kits (\"$149 one-time\") whose buy links re-priced "
+        "upgrade.html from ?amount= while checkout created the recurring subscription for the mapped tier at its "
+        "contracted price; no one-time checkout or kit delivery exists. Replaced by a redirect to /store.html "
+        "(same pattern as customer-portal.html); upgrade.html ignores ?kit and ?amount."),
     "customer-portal.html": ("DEPRECATED", None,
         "Already a redirect to /api-key-manager.html (hardcoded mockup replaced earlier); registry entry corrected 2026-09-28."),
     "daily-operations-center.html": ("DEPRECATED", None,
@@ -124,6 +129,10 @@ CLASSIFICATIONS = {
     "value-center.html": ("DEPRECATED", None,
         "2026-09-28 (pre-release fabrication sweep): hardcoded/invented \"live\" data and zero API calls, replaced by a "
         "redirect to /roi-calculator.html (same pattern as customer-portal.html); kept so existing links still resolve."),
+    "trial-center.html": ("CUSTOMER_UI", "static_content",
+        "Plan overview. 2026-09-28: its only API call was the free-key modal (POST /api/apikeys/request-free); "
+        "the Free tier is keyless (commercial-contract.json FREE api_keys 0) and that route answers 410, so the "
+        "modal was removed and the Community card links to the keyless start on /get-api-key.html."),
     "login.html": ("CUSTOMER_UI", "orphan",
         "Investigated this session, deliberately NOT fixed: fetch() calls are missing the /api/ "
         "prefix (/auth/login, /auth/signup), but the deeper issue is an auth-MODEL mismatch, not a "
@@ -131,9 +140,10 @@ CLASSIFICATIONS = {
         "no password-based account system), and POST /api/auth/register unconditionally returns 422 "
         "'Email registration is not available.' A shallow /api/ prefix fix would still be broken and "
         "would look fixed when it isn't; CLAUDE.md freezes auth-logic changes outright. Needs a product "
-        "decision (build real email/password auth, or redesign this page around API-key issuance via "
-        "the already-working /api/keys/free flow that get-api-key.html correctly uses) before any code "
-        "changes here."),
+        "decision (build real email/password auth, or redesign this page around API-key issuance) before "
+        "any code changes here. 2026-09-28: the Free tier is keyless (commercial-contract.json FREE "
+        "api_keys 0; /api/keys/free answers 410), so the sign-up panel now links to the API docs and Pro "
+        "checkout; sign-in with an API key is unchanged."),
     # -- ADMIN: internal ops tools, not customer-facing --
     "admin.html": ("ADMIN", None, "Password-gated internal admin control panel."),
     "conversion-analytics.html": ("ADMIN", None, "CDB-internal sales-funnel analytics."),

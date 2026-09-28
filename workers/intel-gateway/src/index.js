@@ -97,7 +97,7 @@ import { loadCertificationIndex, persistCertificationRecords, resolveCertificati
 import { routeEnterpriseEndpoint } from './enterprise-endpoints.js';
 import { handleSearch, handleActors, handleCVEs, handleIOCLookup, handleMISPExport as handleMISPExportExt, handleCSVExport, handleCorrelate, handlePredict, handleCampaigns, handleAnomalies, handleIntelGraph, handleIntelRelations, handleIRGuidance, handleExposureAnalysis, buildScopeSet } from './api-extensions.js';
 import { RAZORPAY_TIER_PRICES, getPricingSnapshot } from './pricing.js';
-import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger, handleLeadCapture, handleTrialIssuance, TRIAL_DISCONTINUED_BODY } from './revenue-enforcement.js';
+import { applyTierGateV2, enforceTierGate, buildUpgradeTrigger, handleLeadCapture, handleTrialIssuance, TRIAL_DISCONTINUED_BODY, FREE_KEYS_DISCONTINUED_BODY } from './revenue-enforcement.js';
 import { evaluateDailyQuota, dailyQuotaConfig, utcDateString, dailyQuotaKey, quotaAlertDedupeKey, secondsUntilNextUtcMidnight } from './daily-quota.js';
 import { buildDetectionRegistry, queryDetectionRegistry, toPublicArtifact, DETECTION_REGISTRY_VERSION } from './detection-registry.js';
 import { handleSLAStatus, handleSLAReport, handleSLAIncidents, handleSLAPing, handleSLACertificate } from './sla-monitor.js';
@@ -4531,6 +4531,10 @@ async function provisionApiKey(env, ctx, tier, email, source, metadata, billingC
 }
 
 // POST /api/keys/free  (no auth required -- self-serve free-tier signup)
+// DEPRECATED 2026-09-28: no longer routed -- the route answers 410 with
+// FREE_KEYS_DISCONTINUED_BODY (commercial-contract.json: FREE "api_keys": 0).
+// Kept for one release so the resend path can be restored if needed; remove
+// at the next major P-layer release.
 // get-api-key.html's "community" plan previously only submitted to a
 // Formspree lead form with no automated delivery (API key arrived, if at
 // all, only once a human read the email and provisioned one by hand --
@@ -7686,9 +7690,13 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/payment/razorpay/verify") {
     return await handleRazorpayVerify(request, env, ctx, method);
   }
-  // --- Free-tier self-serve signup (no auth required) --------------------------
+  // --- Free-tier self-serve signup: DISCONTINUED 2026-09-28 -------------------
+  // commercial-contract.json grants FREE zero API keys; the Free tier is
+  // keyless (anonymous, metered per network). Route kept, answers 410 Gone
+  // with the replacement; handleFreeKeyRequest() is unrouted, not deleted.
+  // Already-issued FREE keys are not revoked.
   if (path === "/api/keys/free") {
-    return await handleFreeKeyRequest(request, env, ctx, method);
+    return jsonResp(FREE_KEYS_DISCONTINUED_BODY, 410);
   }
 
   // --- Webhook Endpoints (no auth  -  webhook secret/sig verifies) --------------

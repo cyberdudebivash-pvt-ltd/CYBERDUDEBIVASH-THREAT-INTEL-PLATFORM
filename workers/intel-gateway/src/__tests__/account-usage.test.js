@@ -63,7 +63,9 @@ test("key management is declared not self-service (no buttons that 404)", () => 
   const r = buildAccountUsage({ tier: "PRO", key: KEY, sub: "c" }, quota, today);
   assert.equal(r.key_management.self_service_create, false);
   assert.equal(r.key_management.self_service_revoke, false);
-  assert.equal(r.key_management.free_key_endpoint, "/api/keys/free");
+  // Free tier is keyless (2026-09-28): field kept, deprecated to null.
+  assert.equal(r.key_management.free_key_endpoint, null);
+  assert.equal(r.key_management.free_tier_keyless, true);
   assert.ok(Object.isFrozen(KEY_MANAGEMENT));
 });
 
@@ -77,6 +79,8 @@ test("index.js wires the route: GET only, auth required, no-store, existing engi
   assert.match(block, /readSwarmQuotaSnapshot\(env, auth\.key, auth\.tier\)/);
   assert.match(block, /getUsageSummary\(env, auth\.sub, utcDateString\(\)\)/);
   assert.match(block, /no-store/);
+  // The retired free-key route is kept and answers 410 (deprecated, not removed).
   const free = src.indexOf('path === "/api/keys/free"');
-  assert.ok(free > 0, "the free-key route the console points to must exist");
+  assert.ok(free > 0, "the retired free-key route must still be routed");
+  assert.match(src.slice(free, free + 200), /FREE_KEYS_DISCONTINUED_BODY, 410/);
 });

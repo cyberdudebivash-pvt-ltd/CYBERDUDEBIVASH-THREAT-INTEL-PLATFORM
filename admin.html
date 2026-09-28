@@ -375,8 +375,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <div class="stats-grid">
         <div class="stat-card"><div class="label">MRR (CURRENT)</div><div class="value v-green" id="rev-mrr">$0</div><div class="sub">Monthly recurring</div></div>
         <div class="stat-card"><div class="label">ARR PROJECTION</div><div class="value v-accent" id="rev-arr">$0</div><div class="sub">Annual run rate</div></div>
-        <div class="stat-card"><div class="label">PRO SEATS</div><div class="value v-yellow" id="rev-pro-seats">0</div><div class="sub">x $29/mo</div></div>
-        <div class="stat-card"><div class="label">ENT SEATS</div><div class="value v-purple" id="rev-ent-seats">0</div><div class="sub">x $199/mo</div></div>
+        <div class="stat-card"><div class="label">PRO SEATS</div><div class="value v-yellow" id="rev-pro-seats">0</div><div class="sub">x $49/mo</div></div>
+        <div class="stat-card"><div class="label">ENT SEATS</div><div class="value v-purple" id="rev-ent-seats">0</div><div class="sub">x $499/mo</div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div class="card">
@@ -387,9 +387,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
             <div style="font-size:11px;color:#64748b;margin-top:8px" id="mrr-pct">$0 / $10,000 (0%)</div>
             <div style="margin-top:20px;font-size:12px">
               <div style="margin-bottom:8px;color:#e2e8f0">TO REACH $10K MRR:</div>
-              <div style="color:#64748b">&bull; <span class="v-yellow">345</span> PRO subscribers ($29/mo)</div>
-              <div style="color:#64748b">&bull; <span class="v-purple">50</span> ENTERPRISE ($199/mo)</div>
-              <div style="color:#64748b">&bull; <span class="v-accent">Mix:</span> 200 PRO + 24 ENT</div>
+              <div style="color:#64748b">&bull; <span class="v-yellow">205</span> PRO subscribers ($49/mo)</div>
+              <div style="color:#64748b">&bull; <span class="v-purple">21</span> ENTERPRISE ($499/mo)</div>
+              <div style="color:#64748b">&bull; <span class="v-accent">Mix:</span> 100 PRO + 11 ENT</div>
             </div>
           </div>
         </div>
@@ -415,7 +415,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
             <thead><tr><th>#</th><th>CHANNEL</th><th>TARGET</th><th>PITCH</th><th>STATUS</th></tr></thead>
             <tbody>
               <tr><td>1-3</td><td>LinkedIn Direct</td><td>SOC Analysts / CISO</td><td>Free Community signup &rarr; PRO conversion</td><td><span class="badge badge-yellow">OUTREACH</span></td></tr>
-              <tr><td>4-5</td><td>Telegram Cybersec Groups</td><td>Threat hunters</td><td>Free API key demo</td><td><span class="badge badge-yellow">OUTREACH</span></td></tr>
+              <tr><td>4-5</td><td>Telegram Cybersec Groups</td><td>Threat hunters</td><td>Keyless Free-tier API demo</td><td><span class="badge badge-yellow">OUTREACH</span></td></tr>
               <tr><td>6-7</td><td>Reddit (r/netsec, r/soc)</td><td>Security engineers</td><td>Blog post + tool share</td><td><span class="badge badge-gray">PENDING</span></td></tr>
               <tr><td>8-9</td><td>Blog SEO Traffic</td><td>Inbound leads</td><td>Upgrade CTA in reports</td><td><span class="badge badge-blue">ACTIVE</span></td></tr>
               <tr><td>10</td><td>Direct Enterprise Outreach</td><td>MSSPs / SMB CISOs</td><td>Enterprise demo call</td><td><span class="badge badge-gray">PENDING</span></td></tr>
@@ -738,7 +738,8 @@ function loadLeads() {
 }
 
 function updateRevenue(proSeats, entSeats) {
-  const mrr = proSeats * 29 + entSeats * 199;
+  // Contracted monthly prices (config/commercial-contract.json): PRO $49, ENTERPRISE $499.
+  const mrr = proSeats * 49 + entSeats * 499;
   const arr = mrr * 12;
   document.getElementById('rev-mrr').textContent = '$' + mrr.toLocaleString();
   document.getElementById('rev-arr').textContent = '$' + arr.toLocaleString();

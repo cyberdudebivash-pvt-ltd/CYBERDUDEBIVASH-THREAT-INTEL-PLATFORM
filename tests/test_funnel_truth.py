@@ -90,7 +90,9 @@ def test_t02_community_no_credit_card_retained():
     assert "No credit card" in pricing
     assert "No credit card" in getkey
     assert "No credit card" in upgrade
-    assert "REQUEST FREE ACCESS" in getkey
+    # 2026-09-28: the Free tier is keyless (commercial-contract.json FREE
+    # api_keys 0), so Community shows the keyless start, not a key request.
+    assert 'id="free-keyless-panel"' in getkey and "NO KEY NEEDED" in getkey
     assert "get-api-key.html?plan=community" in upgrade
 
 

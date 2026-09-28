@@ -185,6 +185,19 @@
       </div>
     </div>
 
+    <!-- FREE TIER: keyless (2026-09-28). commercial-contract.json grants FREE
+         zero API keys; /api/keys/free answers 410. Community needs no signup. -->
+    <div class="form-card" id="free-keyless-panel" style="display:none;min-width:0;">
+      <h2>Start free &mdash; no API key needed</h2>
+      <p class="sub">The Free tier is keyless. Call the API without a key: <strong>30 requests/minute and 50/day</strong> per network, community support, best-effort uptime. No signup. No credit card.</p>
+      <pre style="margin:16px 0;padding:14px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;white-space:pre-wrap;word-break:break-all;font-size:12.5px;color:var(--text);"><code>curl https://intel.cyberdudebivash.com/api/v1/intel/latest.json</code></pre>
+      <p class="sub">API keys are included with Pro and above (Pro: 10 keys, 5,000 requests/day).</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;">
+        <a href="/api-docs.html" class="submit-btn" style="text-decoration:none;text-align:center;flex:1;min-width:180px;">READ THE API DOCS &rarr;</a>
+        <a href="#" onclick="selectPlan('pro');return false;" class="submit-btn" style="text-decoration:none;text-align:center;flex:1;min-width:180px;background:transparent;border:1px solid var(--accent);color:var(--accent);">GET A PRO API KEY &rarr;</a>
+      </div>
+    </div>
+
     <!-- FORM CARD -->
     <div class="form-card" id="form-card">
       <h2 id="form-title">Request API Access</h2>
@@ -285,14 +298,6 @@
         <div class="success-icon">⚡</div>
         <h2>Request Received</h2>
         <p id="success-copy">Your API key request has been received. Your key and integration docs will be delivered to your email within <strong>2 hours</strong> (typically under 30 minutes during business hours).</p>
-
-        <!-- INSTANT KEY: free self-serve signup -->
-        <div id="instant-key-box" style="display:none;margin:22px 0;padding:20px;background:var(--bg3);border:1px solid var(--accent);border-radius:12px;text-align:left;">
-          <div style="font-size:11px;font-family:var(--font-mono);color:var(--accent);letter-spacing:1.5px;font-weight:700;margin-bottom:10px;">YOUR API KEY &mdash; READY NOW</div>
-          <code id="instant-key-value" style="display:block;word-break:break-all;background:var(--bg2);padding:12px;border-radius:8px;font-size:13px;color:var(--text);margin-bottom:10px;"></code>
-          <button type="button" onclick="copyInstantKey()" id="instant-key-copy-btn" style="width:100%;padding:10px;background:var(--accent);color:#000;border:none;border-radius:8px;font-family:var(--font-mono);font-size:12px;font-weight:800;letter-spacing:1px;cursor:pointer;">COPY KEY</button>
-          <a href="/docs/quickstart.html" style="display:block;text-align:center;margin-top:10px;font-size:12px;color:var(--accent);">Make your first API call &rarr; Full Quickstart Guide</a>
-        </div>
 
         <!-- PAID PLAN: immediate payment CTA -->
         <div id="paid-cta" style="display:none;margin-top:22px;padding:20px;background:rgba(0,255,198,0.06);border:1px solid rgba(0,255,198,0.25);border-radius:12px;">
@@ -422,16 +427,17 @@
 // ── Plan feature sets ────────────────────────────────────────────────────────
 var PLAN_META = {
   community: {
-    title: 'Request Free API Access',
-    sub: 'Community tier is free forever. Dashboard access with public STIX bundles. No credit card.',
-    submitLabel: 'REQUEST FREE ACCESS →',
+    title: 'Start Free',
+    sub: 'The Free tier needs no API key: 30 requests/minute and 50/day per network. No credit card.',
+    submitLabel: 'NO KEY NEEDED',
     submitClass: 'submit-btn',
     sidebarTitle: 'COMMUNITY \u2014 WHAT YOU GET',
     features: [
+      'Keyless API access \u2014 30/min, 50/day per network',
       'Live threat intelligence dashboard',
-      '77+ advisories, refreshed every 6h',
       'CVE tracking & KEV alerts',
-      'SOC V2 dashboard access'
+      'AI Threat Feed \u2014 5 items',
+      'Community support, best-effort uptime'
     ]
   },
   pro: {
@@ -442,7 +448,7 @@ var PLAN_META = {
     sidebarTitle: 'PRO \u2014 WHAT YOU GET',
     features: [
       'Everything in Community',
-      'REST API \u2014 10,000 req/month',
+      'REST API \u2014 5,000 requests/day, 120/min, 10 API keys',
       'Full IOC exports (IPs, hashes, domains)',
       'Sigma rule downloads (50+ rules)',
       'YARA rule library access',
@@ -459,7 +465,7 @@ var PLAN_META = {
     sidebarTitle: 'ENTERPRISE SOC \u2014 WHAT YOU GET',
     features: [
       'Everything in Pro / SOC',
-      '50,000 API calls/day/day',
+      '50,000 API requests/day, 600/min, 50 API keys',
       'Webhook push alerts (real-time)',
       'Custom feed filters by TLP/severity',
       'SIEM integration (Splunk, QRadar, Elastic)',
@@ -515,6 +521,11 @@ function selectPlan(plan) {
   // Enterprise extras
   var eGroup = document.getElementById('enterprise-contact-group');
   eGroup.style.display = plan === 'enterprise' ? 'block' : 'none';
+
+  // Free tier is keyless: no form to submit, show how to call the API instead.
+  var keyless = plan === 'community';
+  document.getElementById('free-keyless-panel').style.display = keyless ? 'block' : 'none';
+  document.getElementById('form-card').style.display = keyless ? 'none' : 'block';
 }
 
 // Read URL params on load \u2014 pre-fill plan + email if passed from subscribe form
@@ -579,24 +590,6 @@ function handleSubmit(e) {
     }
   }
 
-  function showInstantKey(apiKey) {
-    showSuccess();
-    if (typeof window.apxTrack === 'function') window.apxTrack('api_key_provisioned', { tier: 'free' });
-    var copy = document.getElementById('success-copy');
-    if (copy) copy.innerHTML = 'Your FREE API key is active — shown below. A copy is also on its way to your inbox.';
-    var box = document.getElementById('instant-key-box');
-    var val = document.getElementById('instant-key-value');
-    if (val) val.textContent = apiKey;
-    if (box) box.style.display = 'block';
-    // Instant keys don't wait on email delivery -- correct the static
-    // "check your inbox" / "~1m: email delivered" copy above, which was
-    // written for the manual-provisioning (paid) path only.
-    var step1 = document.getElementById('step1-text');
-    if (step1) step1.innerHTML = 'Your key is active now (shown above) — no email wait required.';
-    var timelineStep2 = document.getElementById('timeline-step2');
-    if (timelineStep2) timelineStep2.innerHTML = '<strong>Key activated</strong><span>Ready to use immediately</span>';
-  }
-
   function mailtoFallback() {
     var subject = '[SENTINEL APEX] API Key Request \u2014 ' + plan.toUpperCase() + ' \u2014 ' + company;
     var body = [
@@ -642,55 +635,11 @@ function handleSubmit(e) {
   }
 
   if (plan === 'community') {
-    // Self-serve: instant key, no manual step. Formspree/mailto only fire
-    // as a fallback if the platform's own endpoint is unreachable, so a
-    // free signup is never silently lost even if this path fails.
-    fetch('https://intel.cyberdudebivash.com/api/keys/free', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email })
-    })
-    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
-    .then(function(res) {
-      if (res.ok && res.d && res.d.api_key) {
-        showInstantKey(res.d.api_key);
-      } else if (res.ok && res.d && res.d.status === 'check_email') {
-        // Repeat signup for an email that already has a key: the backend
-        // deliberately does not hand the key back here (no proof this
-        // request owns that inbox) -- it re-sends to the address on file
-        // instead. This is success, not a failure, so don't fall back to
-        // Formspree.
-        showSuccess();
-        var copy = document.getElementById('success-copy');
-        if (copy) copy.innerHTML = 'If that email already has a free key, we’ve re-sent it to your inbox.';
-      } else {
-        submitViaFormspree();
-      }
-    })
-    .catch(submitViaFormspree);
-  } else {
-    submitViaFormspree();
+    // Free tier is keyless (2026-09-28): nothing to request.
+    selectPlan('community');
+    return;
   }
-}
-
-function copyInstantKey() {
-  var val = document.getElementById('instant-key-value');
-  var btn = document.getElementById('instant-key-copy-btn');
-  if (!val) return;
-  var text = val.textContent;
-  var orig = btn ? btn.textContent : '';
-  var setLabel = function(label) {
-    if (!btn) return;
-    btn.textContent = label;
-    setTimeout(function() { btn.textContent = orig; }, 1500);
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text)
-      .then(function() { setLabel('COPIED'); })
-      .catch(function() { setLabel('COPY FAILED — SELECT KEY'); });
-  } else {
-    setLabel('SELECT KEY TO COPY');
-  }
+  submitViaFormspree();
 }
 
 function resetForm() {
@@ -699,18 +648,12 @@ function resetForm() {
   document.getElementById('plan-selector').style.display = 'flex';
   document.getElementById('submit-btn').disabled = false;
   document.getElementById('api-key-form').reset();
-  // showInstantKey() overwrites #step1-text's innerHTML, which destroys the
-  // nested #confirm-email element it contains -- showSuccess() (the paid/
-  // manual path) needs that element on every call. Restore the original
-  // markup here so a later request in the same page session doesn't throw
-  // on a null #confirm-email. Also reset the flow-specific panels it shows,
-  // so a second request doesn't display stale state from the first.
+  // Restore the success-panel markup and hide the flow-specific panels so a
+  // second request doesn't display stale state from the first.
   var step1 = document.getElementById('step1-text');
   if (step1) step1.innerHTML = 'Check your inbox at <strong id="confirm-email"></strong> — API key delivered within 2 hours';
   var timelineStep2 = document.getElementById('timeline-step2');
   if (timelineStep2) timelineStep2.innerHTML = '<strong>Email delivered</strong><span>API key + docs link sent</span>';
-  var instantBox = document.getElementById('instant-key-box');
-  if (instantBox) instantBox.style.display = 'none';
   var paidCta = document.getElementById('paid-cta');
   if (paidCta) paidCta.style.display = 'none';
   selectPlan('community');

@@ -95,7 +95,7 @@ Full per-route inventory (route, legacy check, canonical check, migration status
 
 ## 5. Trial contract
 
-Fixed in PR #251. Only the **Community** tier is genuinely free/no-payment (`/api/apikeys/request-free`, real, wired, no card). PRO/Enterprise/MSSP "trial" buttons redirect to the real, full-price Razorpay/Gumroad checkout with no reduced charge, no distinct trial period, and no automatic suspension (since `SUBSCRIPTION_EXPIRY_ENABLED=false`). `trial-center.html` now describes this accurately. See PR #251 for the full list of contradictory claims removed.
+Fixed in PR #251. Only the **Community** tier is genuinely free/no-payment (no card). *Update 2026-09-28:* the Community/Free tier is now keyless per `config/commercial-contract.json` (FREE `api_keys: 0`); `/api/apikeys/request-free` and `/api/keys/free` answer 410, and keys issued earlier keep working. PRO/Enterprise/MSSP "trial" buttons redirect to the real, full-price Razorpay/Gumroad checkout with no reduced charge, no distinct trial period, and no automatic suspension (since `SUBSCRIPTION_EXPIRY_ENABLED=false`). `trial-center.html` now describes this accurately. See PR #251 for the full list of contradictory claims removed.
 
 ---
 
