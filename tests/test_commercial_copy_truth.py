@@ -119,6 +119,13 @@ def test_homepage_does_not_restore_withdrawn_social_proof_or_market_superlatives
         (r"security\s+consultancy,\s*apac", "unaudited customer attribution"),
         (r"the\s+only\s+ai-native\s+threat\s+intelligence\s+platform", "unsupported market superlative"),
         (r"updated\s+every\s+15\s+minutes\s+from\s+50\+\s+sources", "unverified fixed source/cadence claim"),
+        (r"15[-\s]?min(?:ute)?\s+updates", "unverified 15-minute publication cadence"),
+        (r"includes\s+lockbit,\s*blackcat,\s*cl0p,\s*and\s*40\+\s+active\s+groups", "unverified ransomware corpus count"),
+        (r"40\+\s+groups", "unverified ransomware corpus count"),
+        (r"structured\s+profiles\s+for\s+200\+\s+.*?threat\s+actors", "unverified actor corpus count"),
+        (r"200\+\s+actors", "unverified actor corpus count"),
+        (r"updated\s+every\s+<?\s*2\s+hours", "unverified AI-security publication cadence"),
+        (r"real[-\s]?time\s+ioc\s+feed\s+api", "unsupported real-time publication claim"),
     ]
     hits = [why for pattern, why in forbidden if re.search(pattern, text, re.I)]
     assert not hits, "homepage restored withdrawn/unverified claims: " + ", ".join(hits)
