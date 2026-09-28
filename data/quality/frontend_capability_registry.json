@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "generated_at": "2026-09-27T00:45:20.190045+00:00",
+  "generated_at": "2026-09-28T13:45:20.071110+00:00",
   "generator": "scripts/build_capability_registry.py (one-time build; hand-maintained CLASSIFICATIONS dict thereafter)",
   "scope": "top-level *.html (repo root) -- see CLAUDE.md's P-layer table and scripts/capability_coverage_audit.py for the /api/v1/pXX/* backend route -> handler registry (a distinct, complementary artifact; this file classifies FRONTEND pages, not backend routes)",
   "taxonomy": [
@@ -16,7 +16,7 @@
     "DEPRECATED": 6,
     "ADMIN": 2
   },
-  "customer_ui_orphan_count": 15,
+  "customer_ui_orphan_count": 14,
   "unclassified_count": 0,
   "note": "unclassified_count is the mission-tracked metric (target: 0). A page's presence in this file's `entries` array with a category from `taxonomy` IS its classification -- there is no separate UNCLASSIFIED bucket by construction (see scripts/capability_registry_gate.py, which fails CI if a top-level *.html page exists with no entry here). customer_ui_orphan_count tracks a SEPARATE, non-blocking metric: CUSTOMER_UI pages that are correctly classified but still show static/placeholder data pending a live-API wiring fix -- see each entry's `notes`.",
   "access_navigation_audit_status": "NOT YET DONE for most entries. The mission's requested `access` (public/api_key_required/admin) and `navigation` (which nav menus link to this page) fields were audited and are accurate ONLY for the 9 pages this session touched directly (see the P21-P40 dashboard family and the git log for claude/sentinel-apex-transformation-8x3y26). Populating them accurately for the other 140 pages requires reading each page's own auth-wall markup and cross-referencing every nav/header partial across the site -- exactly the 'Unified Application Shell' audit (mission item 4) this session did not have room for. Recommended as the next P0: a dedicated navigation-shell audit pass, not a guess encoded into this file.",
@@ -805,8 +805,8 @@
       "id": "soc-operations-center.html",
       "frontend_route": "/soc-operations-center.html",
       "category": "CUSTOMER_UI",
-      "notes": "Hardcoded INTEL_ITEMS array despite an in-code comment claiming 'No fake data -- Real manifest-driven'. Fits /api/v1/incidents, /api/v1/intel/graph, /api/v1/geo/cybermap.",
-      "status": "orphan"
+      "notes": "Fixed 2026-09-28: rebuilt on /api/v1/intel/latest.json (KPIs, 24h intake, advisory stream, sources, ATT&CK tactics counted by js/soc-ops-model.js), /api/watchdog/brief (priority queue) and /api/watchdog/health (freshness: figures withheld unless FRESH, or STALE <= 48h labelled NOT LIVE). Removed the Math.random() event stream, heatmap and source counts, the fixed IOC/sensor/replay/coverage figures and the invented graph, AI gauges, malware and honeynet panels.",
+      "status": "live"
     },
     {
       "id": "soc-workspace.html",
