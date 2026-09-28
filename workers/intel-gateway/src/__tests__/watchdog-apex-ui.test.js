@@ -27,7 +27,9 @@ const S = createRequire(import.meta.url)(path.join(REPO, "js/apex-status-model.j
 const WD = read("cyber-watchdog.html");
 const HOME = homepageSource(REPO);
 const CSS = read("css/apex-design-tokens.css");
-const SURFACE = HOME.slice(HOME.indexOf('<section id="apex-command-surface"'), HOME.indexOf("CDB LIVE CYBER THREAT MAP v3.0"));
+// Ends at the threat panel (the Live Threat Board since 2026-09-28; it was the
+// illustrative "CDB LIVE CYBER THREAT MAP v3.0" canvas before).
+const SURFACE = HOME.slice(HOME.indexOf('<section id="apex-command-surface"'), HOME.indexOf("LIVE THREAT BOARD (replaces the illustrative canvas map"));
 const GREEN = new Set(["ok", "fresh", "active", "delivered", "verified"]);
 
 // ---------------------------------------------------------------------------
@@ -160,7 +162,8 @@ test("claims: no certification is implied; aligned-not-certified wording stays",
 });
 
 test("homepage command surface: real data only, one shared brief request, unknown until proven", () => {
-  assert.ok(SURFACE.length > 1000, "command surface present before the (simulated) threat map");
+  assert.ok(SURFACE.length > 1000, "command surface present before the live threat board");
+  assert.ok(HOME.indexOf("LIVE THREAT BOARD (replaces the illustrative canvas map") > 0, "surface end anchor present");
   for (const id of ["acs-release", "acs-fresh", "acs-count", "acs-critical", "acs-high", "acs-updated"]) {
     const m = SURFACE.match(new RegExp('<dd id="' + id + '"[^>]*>([\\s\\S]*?)</dd>'));
     assert.ok(m, id);

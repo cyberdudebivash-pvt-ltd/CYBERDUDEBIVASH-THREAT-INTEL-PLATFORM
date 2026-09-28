@@ -106,9 +106,10 @@ src = INDEX.read_text(encoding='utf-8') if INDEX.exists() else ""
 lines = src.count('\n')
 
 struct_checks = [
-    ("V173 renderer block START",        'CDB-RENDERER-ENGINE-V173-START' in src),
-    ("V173 renderer block END",          'CDB-RENDERER-ENGINE-V173-END' in src),
-    ("GVOS version 201",                 "201.0.0" in src),
+    # 2026-09-28: the V173 illustrative canvas map (and its GVOS 201.0.0 HUD)
+    # was replaced by the Live Threat Board fed by /api/watchdog/brief.
+    ("Live threat board present",        'id="cdb-live-board"' in src),
+    ("No illustrative threat map",       'ILLUSTRATIVE ANIMATION' not in src and 'CDB-RENDERER-ENGINE-V173-START' not in src),
     ("SOC tab system",                   'id="cdb-tab-bar"' in src),
     ("Threat grid",                      'id="threat-grid"' in src),
     ("Enterprise intel command center",  'id="enterprise-intel-command"' in src),

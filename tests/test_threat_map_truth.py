@@ -1,4 +1,7 @@
-"""Homepage threat maps show no invented attacks, attributions or telemetry.
+"""Homepage threat panel shows no invented attacks, attributions or telemetry.
+
+2026-09-28: the illustrative canvas map was replaced by the Live Threat Board
+(/api/watchdog/brief only); the history below explains what used to be there.
 
 The feed carries no attack source/target geolocation. The canvas threat map
 (index.html) used to present random arcs between hardcoded cities as a "LIVE
@@ -27,50 +30,45 @@ def _block(src: str, start: str, end: str) -> str:
 
 
 PANEL = _block(INDEX, '<div id="cdb-threat-map-panel">', "@keyframes ticker-scroll")
-MAP_JS = _block(INDEX, "var CITIES = [", "/* ── BOOT SCHEDULE")
+BOARD_JS = _block(INDEX, "/* LIVE THREAT BOARD", "</script>")
 
 
-def test_panel_does_not_claim_live_attack_monitoring():
-    for banned in ("LIVE CYBER THREAT MAP", "GLOBAL ATTACK MONITOR", "cdb-map-live-dot",
-                   "COUNTRIES MONITORED</span>", "ACTOR GROUPS TRACKED</span>", "⚡ LIVE:"):
+def test_panel_is_the_live_threat_board_not_an_animation():
+    # 2026-09-28 customer escalation: an "ILLUSTRATIVE ANIMATION" on a live
+    # production platform. The panel now shows only live feed data.
+    assert "LIVE THREAT BOARD" in PANEL
+    assert 'id="cdb-live-board"' in PANEL
+    for banned in ("<canvas", "ILLUSTRATIVE", "SIMULATED", "NOT LIVE ATTACKS", "LIVE CYBER THREAT MAP",
+                   "GLOBAL ATTACK MONITOR", "COUNTRIES MONITORED</span>", "ACTOR GROUPS TRACKED</span>", "⚡ LIVE:"):
         assert banned not in PANEL, banned
-    assert "ILLUSTRATIVE ANIMATION" in PANEL
-    assert "do not represent observed attacks" in PANEL
+    assert "the feed carries no attack geolocation" in PANEL
+
+
+def test_illustrative_map_engine_is_not_shipped():
+    for banned in ("var CITIES = [", "var GROUPS = [", "CDB-RENDERER-ENGINE-V173-START", 'id="cdb-threat-canvas"',
+                   "ILLUSTRATIVE — NOT LIVE ATTACKS", "NO ATTACK GEODATA IN FEED", "nuclearCanvasResurrection"):
+        assert banned not in INDEX, banned
+    # The GPU/RAF governance engines existed only to keep that canvas painted.
+    assert "/js/engines/" not in INDEX
+
+
+def test_board_reads_only_the_freshness_contracted_brief():
+    assert "fetch('/api/watchdog/brief?limit=5'" in BOARD_JS
+    assert BOARD_JS.count("fetch(") == 1, "one data source only"
+    # First render reuses the page's single shared brief request.
+    assert "window.APEX_BRIEF" in BOARD_JS
+    # A stale feed is shown only through last_authoritative, labelled NOT LIVE.
+    assert "last.live === false" in BOARD_JS
+    assert "NOT LIVE" in BOARD_JS
+    # Feed text is set as text, never parsed as markup.
+    assert "innerHTML" not in BOARD_JS and "insertAdjacentHTML" not in BOARD_JS
+    assert "Math.random" not in BOARD_JS
 
 
 def test_ticker_ships_no_invented_attributions():
     ticker = _block(PANEL, 'id="cdb-ticker-text"', "</span>")
     assert not re.search(r"[A-Z]{2}\s*(→|->|&rarr;)\s*[A-Z]{2}", ticker), ticker
     assert "Waiting for the live feed" in ticker
-
-
-def test_cities_are_coordinates_only():
-    rows = re.findall(r"^\s*\[('[^']*'[^\]]*)\]", _block(MAP_JS, "var CITIES = [", "];"), re.M)
-    assert len(rows) >= 10
-    for row in rows:
-        assert len(row.split(",")) == 3, f"city row carries more than name/lat/lon: [{row}]"
-    assert "city[3]" not in MAP_JS and "city[4]" not in MAP_JS
-    assert "threat-source region" not in MAP_JS and "Threat level ' + level" not in MAP_JS
-
-
-def test_arcs_carry_no_actor_names():
-    groups = _block(MAP_JS, "var GROUPS = [", "];")
-    assert "name:" not in groups
-    for banned in ("APT-LAZARUS", "APT-COZY", "APT-FANCY", "grp.name", "a.group", "['LAZ',"):
-        assert banned not in MAP_JS, banned
-
-
-def test_canvas_overlay_has_no_invented_telemetry():
-    for banned in ("AI-CONF", "aiConf", "SATS: 4 ACTIVE", "STORMS: 3 DETECTED",
-                   "CONSTELLATIONS: 4", "LIVE INTEL", "LIVE — GLOBAL THREAT MONITOR",
-                   "label:'DEFCON'", "label:'ESCALATE'", "ctx.fillText(con.name",
-                   "LAZARUS-NEXUS", "BEAR-CLUSTER", "DRAGON-ARRAY", "PANDA-GRID"):
-        assert banned not in MAP_JS, banned
-    assert "ILLUSTRATIVE — NOT LIVE ATTACKS" in MAP_JS
-    assert "NO ATTACK GEODATA IN FEED" in MAP_JS
-    # No country is boxed and labelled as a threat zone.
-    assert "var THREAT_ZONES = [];" in MAP_JS
-    assert not re.search(r"label:'(RU|CN|KP|IR|BY)'", MAP_JS)
 
 
 def test_genesis_attack_map_does_not_guess_flows():

@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 /**
+ * 2026-09-28: the homepage threat panel is now the LIVE THREAT BOARD, built
+ * only from GET /api/watchdog/brief. The illustrative canvas map (and the
+ * GPU/compositor governance it needed) was removed: the feed carries no
+ * attack geolocation, so the animation could not show observed attacks.
+ * Sections 1-4 below now verify the board (live, NOT LIVE and escaping);
+ * the demo video, console-error and lead-modal checks are unchanged. The
+ * history below describes the removed canvas and is kept for context.
+ *
  * SENTINEL APEX — Threat Map / Demo Video Chrome Render Regression Test
  * ====================================================================
  * Real-browser (headless Chromium) verification that the homepage's
@@ -74,40 +82,42 @@ function record(name, pass, detail) {
   console.log(`[${pass ? 'PASS' : 'FAIL'}] ${name}${detail ? ' — ' + detail : ''}`);
 }
 
-// Sampled-grid pixel check -- same concept as js/engines/renderer-recovery-
-// engine.js's own _isBlank() blank-frame scanner (a stride sample, not a
-// full scan), reused here as the definition of "actually painted".
-async function canvasPaintRatio(page) {
-  return page.evaluate(() => {
-    const canvas = document.getElementById('cdb-threat-canvas');
-    if (!canvas) return { found: false, ratio: 0, w: 0, h: 0 };
-    const w = canvas.width, h = canvas.height;
-    if (!w || !h) return { found: true, ratio: 0, w, h };
-    const ctx = canvas.getContext('2d');
-    const data = ctx.getImageData(0, 0, w, h).data;
-    let nonZero = 0, sampleCount = 0;
-    for (let i = 0; i < data.length; i += 400) {
-      sampleCount++;
-      if (data[i] || data[i + 1] || data[i + 2] || data[i + 3]) nonZero++;
-    }
-    return { found: true, ratio: sampleCount ? nonZero / sampleCount : 0, w, h };
-  });
-}
+// Brief fixtures served for /api/watchdog/brief (hermetic: no production API).
+const BRIEF_ITEMS = [
+  { id: 'fx-1', title: 'Citrix confirms two NetScaler RCE zero-days exploited in attacks', severity: 'CRITICAL', source: 'BleepingComputer',
+    observed_at: new Date(Date.now() - 3600e3).toISOString(), priority: { band: 'CRITICAL', score: 70 },
+    corroboration: { reports: 2, sources: ['BleepingComputer', 'SecurityAffairs'], related: [] } },
+  { id: 'fx-2', title: '<img src=x onerror="window.__boardXss=1"> hostile title', severity: 'HIGH', source: 'Fixture',
+    observed_at: new Date(Date.now() - 7200e3).toISOString(), priority: { band: 'HIGH', score: 40 } },
+];
+const LIVE_BRIEF = {
+  status: 200,
+  body: { count: 2, stories: 2, feed_generated_at: new Date(Date.now() - 600e3).toISOString(), items: BRIEF_ITEMS,
+    situation: { feed_items_seen: 3, by_severity: { CRITICAL: 1, HIGH: 1 } } },
+};
+const STALE_BRIEF = {
+  status: 503,
+  body: { error: 'intelligence_degraded', items: [], last_authoritative: { live: false, label: 'LAST AUTHORITATIVE INTELLIGENCE - NOT LIVE',
+    feed_generated_at: new Date(Date.now() - 9 * 3600e3).toISOString(), count: 1, items: BRIEF_ITEMS.slice(0, 1), situation: {} } },
+};
 
-async function governanceState(page) {
+async function boardState(page) {
   return page.evaluate(() => {
     const panel = document.getElementById('cdb-threat-map-panel');
-    const canvas = document.getElementById('cdb-threat-canvas');
-    if (!panel || !canvas) return { found: false };
-    const pcs = getComputedStyle(panel);
-    const ccs = getComputedStyle(canvas);
+    const board = document.getElementById('cdb-live-board');
+    const status = document.getElementById('cdb-board-status');
     return {
-      found: true,
-      panelHeight: pcs.height,
-      canvasWillChange: ccs.willChange,
-      canvasTransform: ccs.transform,
-      canvasBoxShadow: ccs.boxShadow,
-      canvasBorderRadius: ccs.borderRadius,
+      panel: !!panel,
+      board: !!board,
+      canvas: !!document.getElementById('cdb-threat-canvas') || !!(panel && panel.querySelector('canvas')),
+      illustrative: !!(panel && /illustrative|simulated|not live attacks/i.test(panel.textContent || '')),
+      cards: board ? board.querySelectorAll('.cdb-board-card').length : 0,
+      injectedImg: board ? board.querySelectorAll('img').length : -1,
+      xss: !!window.__boardXss,
+      hostileShownAsText: !!(board && (board.textContent || '').includes('<img src=x')),
+      status: status ? status.getAttribute('data-state') + ' ' + status.textContent : null,
+      banner: board && board.querySelector('.cdb-board-banner') ? board.querySelector('.cdb-board-banner').textContent : null,
+      panelWidth: panel ? panel.getBoundingClientRect().width : 0,
     };
   });
 }
@@ -142,8 +152,14 @@ async function main() {
     // Hermetic, same convention as verify_pages_fast_publish_smoke.js:
     // local requests pass through, everything cross-origin (production
     // API, CDN fonts/icons, CORS-proxied news feed) is aborted.
+    let briefFixture = LIVE_BRIEF;
+    let briefRequests = 0;
     await page.route('**/*', (route) => {
       const url = new URL(route.request().url());
+      if (url.hostname === '127.0.0.1' && url.pathname === '/api/watchdog/brief') {
+        briefRequests++;
+        return route.fulfill({ status: briefFixture.status, contentType: 'application/json', body: JSON.stringify(briefFixture.body) });
+      }
       if (url.hostname === '127.0.0.1') return route.continue();
       return route.abort();
     });
@@ -174,89 +190,32 @@ async function main() {
     });
 
     await page.goto(PAGE_URL, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
-    await page.waitForTimeout(3000); // let the RAF boot sequence + first frames settle
+    await page.waitForTimeout(3000); // let the board's first /api/watchdog/brief load settle
 
-    // ── 1. Initial boot: canvas actually paints content ──────────────────
-    const initial = await canvasPaintRatio(page);
-    record('Threat map canvas is present with non-zero pixel dimensions', initial.found && initial.w > 0 && initial.h > 0,
-      JSON.stringify({ w: initial.w, h: initial.h }));
-    record('Threat map canvas paints real content on boot (not blank)', initial.ratio > 0.5,
-      `paint ratio=${initial.ratio.toFixed(3)}`);
+    // ── 1. The live board renders the brief it was served ────────────────
+    const live = await boardState(page);
+    record('Threat panel and live board are present', live.panel && live.board, JSON.stringify({ panel: live.panel, board: live.board }));
+    record('Live board renders one card per brief story', live.cards === BRIEF_ITEMS.length, `cards=${live.cards}`);
+    record('Board status reads LIVE for a fresh brief', /^live LIVE/.test(live.status || ''), `status=${live.status}`);
+    record('Panel has a non-zero rendered width', live.panelWidth > 0, `width=${live.panelWidth}`);
+    record('Page load makes one shared brief request (board reuses window.APEX_BRIEF)', briefRequests === 1, `requests=${briefRequests}`);
 
-    // ── 2. Governed CSS is intact: the exact properties the RC1-RC13
-    //      history traced Chrome's canvas-blanking compositor trap to. ───
-    const gov = await governanceState(page);
-    record('Canvas will-change is governed to auto', gov.canvasWillChange === 'auto', `will-change=${gov.canvasWillChange}`);
-    record('Canvas transform is governed to none', gov.canvasTransform === 'none', `transform=${gov.canvasTransform}`);
-    record('Canvas box-shadow is governed to none', gov.canvasBoxShadow === 'none', `box-shadow=${gov.canvasBoxShadow}`);
-    record('Canvas border-radius is governed to 0', gov.canvasBorderRadius === '0px', `border-radius=${gov.canvasBorderRadius}`);
+    // ── 2. Nothing illustrative or simulated is shipped ──────────────────
+    record('No canvas animation in the threat panel', !live.canvas);
+    record('Panel carries no illustrative / simulated labels', !live.illustrative);
 
-    // ── 3. City hover tooltip interaction (#299 interaction layer). Swept
-    //      entirely inside one page.evaluate() -- synthetic 'mousemove'
-    //      MouseEvents dispatched straight at the canvas, which the
-    //      interaction layer's pointFromEvent() reads via e.clientX/Y the
-    //      same way as a real pointer -- instead of one Node<->browser
-    //      round trip per grid point (hundreds of them), which is what
-    //      made an earlier version of this sweep too slow to be a CI gate. ──
-    const tooltipSweep = await page.evaluate(() => {
-      const canvas = document.getElementById('cdb-threat-canvas');
-      const rect = canvas.getBoundingClientRect();
-      for (let y = 8; y < rect.height; y += 12) {
-        for (let x = 8; x < rect.width; x += 12) {
-          canvas.dispatchEvent(new MouseEvent('mousemove', {
-            clientX: rect.left + x, clientY: rect.top + y, bubbles: true,
-          }));
-          const t = document.querySelector('.cdb-map-tooltip');
-          if (t && t.classList.contains('is-visible')) return { shown: true, x, y };
-        }
-      }
-      return { shown: false };
-    });
-    record('City hover tooltip appears somewhere on the canvas', tooltipSweep.shown,
-      tooltipSweep.shown ? `hit at canvas-relative (${tooltipSweep.x}, ${tooltipSweep.y})` : 'swept the full canvas grid, tooltip never showed');
+    // ── 3. Feed text is rendered as text, never as markup ────────────────
+    record('A hostile advisory title is rendered as text (no injected element)', live.injectedImg === 0 && !live.xss && live.hostileShownAsText,
+      JSON.stringify({ injectedImg: live.injectedImg, xss: live.xss, shownAsText: live.hostileShownAsText }));
 
-    // Dismissal: a synthetic 'mouseleave' dispatched straight on the canvas,
-    // matching the real listener (canvas.addEventListener('mouseleave', ...)
-    // in the §G interaction layer) -- a real page.mouse.move() to an
-    // off-canvas point isn't equivalent here, since the synthetic hover
-    // above never moved Chromium's actual tracked pointer, so a real move
-    // afterward wouldn't reliably cross the canvas boundary the listener
-    // fires on. relatedTarget is set to <body>, outside the tooltip, so the
-    // handler's `tip.contains(e.relatedTarget)` guard doesn't suppress it.
-    await page.evaluate(() => {
-      document.getElementById('cdb-threat-canvas')
-        .dispatchEvent(new MouseEvent('mouseleave', { relatedTarget: document.body, bubbles: true }));
-    });
-    await page.waitForTimeout(500); // past the interaction layer's 250ms dismissal grace window
-    const tooltipHidden = await page.evaluate(() => {
-      const t = document.querySelector('.cdb-map-tooltip');
-      return !(t && t.classList.contains('is-visible'));
-    });
-    record('Tooltip dismisses after the cursor leaves the canvas', tooltipHidden);
-
-    // ── 4. Immersive fullscreen toggle -- the highest-risk new (#299) code
-    //      path: it mutates the PANEL's inline style (position/width/
-    //      height/z-index/border-radius) with !important, the exact
-    //      category of properties RC1-RC13 traced the canvas-blanking
-    //      compositor trap to (there, applied to the canvas itself). ─────
-    const fsBtn = page.locator('#cdb-map-fs-btn');
-    if (await fsBtn.count() > 0) {
-      await fsBtn.click();
-      await page.waitForTimeout(1200);
-      const duringFs = await canvasPaintRatio(page);
-      record('Canvas still paints after entering immersive fullscreen', duringFs.ratio > 0.5,
-        `paint ratio=${duringFs.ratio.toFixed(3)}, dims=${duringFs.w}x${duringFs.h}`);
-
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(1200);
-      const afterFs = await canvasPaintRatio(page);
-      record('Canvas still paints after exiting immersive fullscreen', afterFs.ratio > 0.5, `paint ratio=${afterFs.ratio.toFixed(3)}`);
-
-      const govAfter = await governanceState(page);
-      record('Panel height is fully restored to its governed 340px after exiting fullscreen', govAfter.panelHeight === '340px', `height=${govAfter.panelHeight}`);
-    } else {
-      record('Fullscreen button (#cdb-map-fs-btn) is present in the DOM', false, 'not found -- #299 markup missing or renamed');
-    }
+    // ── 4. A stale feed is shown only as labelled NOT LIVE ───────────────
+    briefFixture = STALE_BRIEF;
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForTimeout(1500);
+    const stale = await boardState(page);
+    record('Stale feed: board shows the NOT LIVE banner', /NOT LIVE/.test(stale.banner || ''), `banner=${stale.banner}`);
+    record('Stale feed: status reads NOT LIVE', /^stale NOT LIVE/.test(stale.status || ''), `status=${stale.status}`);
+    briefFixture = LIVE_BRIEF;
 
     // ── 5. Demo video: click-to-play cover swaps in the real <video>, and
     //      its <source> resolves instead of 404ing (#309's regression

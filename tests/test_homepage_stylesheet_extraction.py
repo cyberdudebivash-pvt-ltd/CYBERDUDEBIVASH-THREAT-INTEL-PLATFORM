@@ -69,7 +69,8 @@ ARCHITECTURE_MARKERS = (
     "_isPro",
     "_hasProAccess",
     "ACCESS GOVERNANCE v184.0",
-    "CDB-RENDERER-ENGINE-V173-START",
+    # 2026-09-28: the V173 illustrative map was replaced by the live board.
+    'id="cdb-live-board"',
 )
 
 
