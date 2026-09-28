@@ -702,6 +702,22 @@ const CONTROLS = [
     replace: "  return AI_TERMS.filter(([, re]) => re.test(blob)).map(([term]) => term);",
     tests: [T("ai-threat-feed.test.js")],
   },
+  {
+    // CSV export: a hostile advisory title must not become a spreadsheet formula.
+    id: "report_csv_formula_injection",
+    file: "workers/intel-gateway/src/premium-reports.js",
+    find: "  if (/^[=+\\-@\\t\\r]/.test(t)) t = \"'\" + t;",
+    replace: "",
+    tests: [T("premium-reports.test.js")],
+  },
+  {
+    // A report must never be generated (stored, counted) from an unreadable or expired feed.
+    id: "report_generated_without_fresh_feed",
+    file: "workers/intel-gateway/src/premium-reports.js",
+    find: "  if (!pub.serve_live && !staleUsable) {",
+    replace: "  if (false) {",
+    tests: [T("premium-reports.test.js")],
+  },
 ];
 
 function runTests(root, files) {
