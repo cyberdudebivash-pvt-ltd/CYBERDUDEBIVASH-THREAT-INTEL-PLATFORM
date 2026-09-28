@@ -80,7 +80,12 @@ CLASSIFICATIONS = {
     "mssp-partner-portal.html": ("CUSTOMER_UI", "orphan", "Hardcoded tenant list. Fits /api/mssp/tenants/{id}/feed, /api/mssp/feed."),
     "my-exposure-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded CVEs/campaigns/recommendations presented as personalized. Fits /api/v1/cve/live, /api/v1/intel/campaigns, /api/v1/assets/intelligence."),
     "payment-confirmation.html": ("CUSTOMER_UI", "orphan", "Activation timeline derived only from URL query params, never calls the real payment-status API. Fits /api/payment/status."),
-    "soc-operations-center.html": ("CUSTOMER_UI", "orphan", "Hardcoded INTEL_ITEMS array despite an in-code comment claiming 'No fake data -- Real manifest-driven'. Fits /api/v1/incidents, /api/v1/intel/graph, /api/v1/geo/cybermap."),
+    "soc-operations-center.html": ("CUSTOMER_UI", "live",
+        "Fixed 2026-09-28: rebuilt on /api/v1/intel/latest.json (KPIs, 24h intake, advisory stream, "
+        "sources, ATT&CK tactics counted by js/soc-ops-model.js), /api/watchdog/brief (priority queue) "
+        "and /api/watchdog/health (freshness: figures withheld unless FRESH, or STALE <= 48h labelled "
+        "NOT LIVE). Removed the Math.random() event stream, heatmap and source counts, the fixed "
+        "IOC/sensor/replay/coverage figures and the invented graph, AI gauges, malware and honeynet panels."),
     "soc-workspace.html": ("DEPRECATED", None,
         "2026-09-27: static mockup with invented/random \"live\" data and zero API calls, replaced by a "
         "redirect to /enterprise-cyber-intelligence-os.html (same pattern as customer-portal.html); kept so existing links still resolve."),
