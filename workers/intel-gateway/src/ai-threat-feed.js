@@ -30,6 +30,7 @@
  *   POST /api/ai-feed/ingest      operator (X-Admin-Key) validated Hub upsert / retract
  */
 import { effectiveTier, planPrice, watchdogPublication, LAST_AUTHORITATIVE_MAX_AGE_SECONDS } from "./cyber-watchdog.js";
+import { sourceKey } from "./watchdog-stories.js";
 
 export const AI_FEED_NAME = "SENTINEL APEX AI THREAT FEED";
 export const AI_FEED_VERSION = "1.2.0";
@@ -223,22 +224,10 @@ export function feedItemToAi(adv) {
   };
 }
 
-// Query parameters that only track the click, never select the page.
-const TRACKING_PARAM = /^(utm_[a-z_]+|fbclid|gclid|mc_cid|mc_eid|ref|ref_src|source)$/i;
-
-/**
- * Source article identity: scheme + lower-case host + path without a
- * trailing slash + the query minus tracking parameters (sorted). The query is
- * kept: cvename.cgi?name=CVE-A and ?name=CVE-B are different pages.
- */
-export function sourceKey(url) {
-  try {
-    const u = new URL(url);
-    const params = [...u.searchParams.entries()].filter(([k]) => !TRACKING_PARAM.test(k)).sort(([a, x], [b, y]) => (a + "=" + x).localeCompare(b + "=" + y));
-    const query = params.length ? "?" + params.map(([k, v]) => k + "=" + v).join("&") : "";
-    return u.protocol + "//" + u.hostname.toLowerCase() + (u.pathname.replace(/\/+$/, "") || "/") + query;
-  } catch { return null; }
-}
+// sourceKey() moved to watchdog-stories.js (one implementation for the AI
+// feed's article dedupe and the Watchdog brief's story grouping); re-exported
+// here unchanged so every existing importer keeps working.
+export { sourceKey };
 
 /**
  * Hub items (validated; invalid ones dropped) + AI items from the live feed,

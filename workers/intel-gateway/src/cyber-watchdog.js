@@ -37,9 +37,10 @@ import {
   normalizeProfile, profileHasValues, profileRef,
 } from "./watchdog-relevance.js";
 import { PREVIEW_POLICY } from "./watchdog-policy.js";
+import { corroboration, groupStories } from "./watchdog-stories.js";
 
 export const WATCHDOG_NAME = "CYBERDUDEBIVASH SENTINEL APEX CYBER WATCHDOG";
-export const WATCHDOG_VERSION = "3.1.0";
+export const WATCHDOG_VERSION = "3.2.0";
 export const WATCHDOG_PLATFORM_VERSION = "201.0";
 export const CLASSIFIER_VERSION = "watchdog-lens-v2";
 export const EVENT_RETENTION = 200;
@@ -420,9 +421,14 @@ export const LAST_AUTHORITATIVE_MAX_AGE_SECONDS = 48 * 3600;
 // including CISA-KEV Citrix NetScaler zero-days exploited in the wild, sat
 // below the cap. "feed" keeps the pre-3.1.0 order for any client relying on it.
 export const BRIEF_SORTS = Object.freeze(["priority", "feed"]);
+// Brief grouping (3.2.0). "story" (default): reports of the same story --
+// shared CVE, same source article, or a KEV product named in the title (see
+// watchdog-stories.js) -- form one row whose corroboration lists every
+// merged report. "none" keeps one row per feed item.
+export const BRIEF_GROUPS = Object.freeze(["story", "none"]);
 
 /** Brief rows for a lens / query at a tier's cap: one path for live and last-authoritative. */
-function selectBriefRows(source, { lens, q, cap, paid, sort = "priority" }) {
+function selectBriefRows(source, { lens, q, cap, paid, sort = "priority", group = "story" }) {
   const hits = [];
   for (const item of source) {
     const found = classifyItem(item);
@@ -430,13 +436,27 @@ function selectBriefRows(source, { lens, q, cap, paid, sort = "priority" }) {
     if (q && !itemText(item).toLowerCase().includes(q)) continue;
     hits.push(item);
   }
-  if (sort === "feed") return { rows: hits.slice(0, cap).map((item) => publicItem(item, paid)), matched: hits.length };
-  const ranked = hits.map((item, index) => ({ item, index, p: computeEventPriority(projectItem(item)) }));
-  ranked.sort((a, b) => priorityRank(b.p.band) - priorityRank(a.p.band)
-    || (b.p.score ?? -1) - (a.p.score ?? -1)
-    || a.index - b.index);
-  const rows = ranked.slice(0, cap).map(({ item, p }) => publicItem(item, paid, p));
-  return { rows, matched: hits.length };
+  let ordered;
+  if (sort === "feed") {
+    ordered = hits.map((item) => ({ item, p: null }));
+  } else {
+    const ranked = hits.map((item, index) => ({ item, index, p: computeEventPriority(projectItem(item)) }));
+    ranked.sort((a, b) => priorityRank(b.p.band) - priorityRank(a.p.band)
+      || (b.p.score ?? -1) - (a.p.score ?? -1)
+      || a.index - b.index);
+    ordered = ranked;
+  }
+  if (group !== "story") {
+    return { rows: ordered.slice(0, cap).map(({ item, p }) => (p ? publicItem(item, paid, p) : publicItem(item, paid))), matched: hits.length, stories: hits.length };
+  }
+  // Stories form in display order, so each is led by its highest-ranked report.
+  const priorityOf = new Map(ordered.map(({ item, p }) => [item, p]));
+  const stories = groupStories(ordered.map(({ item }) => item));
+  const rows = stories.slice(0, cap).map((story) => {
+    const p = priorityOf.get(story.lead);
+    return { ...(p ? publicItem(story.lead, paid, p) : publicItem(story.lead, paid)), corroboration: corroboration(story) };
+  });
+  return { rows, matched: hits.length, stories: stories.length };
 }
 
 /**
@@ -450,7 +470,7 @@ function lastAuthoritativeBlock(feed, pub, select) {
   if (!Number.isFinite(pub.feed_age_seconds) || pub.feed_age_seconds > LAST_AUTHORITATIVE_MAX_AGE_SECONDS) return null;
   const source = validItems(feed);
   if (!source.length) return null;
-  const { rows, matched } = selectBriefRows(source, select);
+  const { rows, matched, stories } = selectBriefRows(source, select);
   return {
     live: false,
     label: "LAST AUTHORITATIVE INTELLIGENCE - NOT LIVE",
@@ -459,8 +479,10 @@ function lastAuthoritativeBlock(feed, pub, select) {
     feed_age_seconds: pub.feed_age_seconds,
     max_age_seconds: LAST_AUTHORITATIVE_MAX_AGE_SECONDS,
     sort: select.sort || "priority",
+    group: select.group || "story",
     count: rows.length,
-    truncated: matched > rows.length,
+    truncated: stories > rows.length,
+    stories,
     items: rows,
     situation: buildSituation(source),
   };
@@ -474,11 +496,12 @@ export function buildWatchdogBrief(feed, opts = {}) {
   const q = clean(String(opts.q || ""), 80).toLowerCase();
   const cap = Math.min(quota.brief_items, Math.max(1, Number(opts.limit) || quota.brief_items));
   const sort = BRIEF_SORTS.includes(opts.sort) ? opts.sort : "priority";
+  const group = BRIEF_GROUPS.includes(opts.group) ? opts.group : "story";
   if (!pub.serve_live) {
-    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort }) } };
+    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort, group }) } };
   }
   const source = validItems(feed);
-  const { rows, matched } = selectBriefRows(source, { lens, q, cap, paid: quota.paid, sort });
+  const { rows, matched, stories } = selectBriefRows(source, { lens, q, cap, paid: quota.paid, sort, group });
   return {
     status: 200,
     body: {
@@ -487,14 +510,16 @@ export function buildWatchdogBrief(feed, opts = {}) {
       tier,
       lens: lens || "all",
       sort,
+      group,
       count: rows.length,
+      stories,
       feed_items_seen: pub.feed_item_count,
       freshness_status: pub.freshness_status,
       feed_generated_at: pub.feed_generated_at,
       feed_age_seconds: pub.feed_age_seconds,
       freshness_threshold_seconds: pub.freshness_threshold_seconds,
       feed_item_count: pub.feed_item_count,
-      truncated: matched > rows.length,
+      truncated: stories > rows.length,
       items: rows,
       situation: buildSituation(source),
       empty: rows.length === 0,
@@ -2007,7 +2032,8 @@ export async function routeWatchdog(req) {
     const q = req.searchParams?.get?.("q") || "";
     const limit = req.searchParams?.get?.("limit");
     const sort = req.searchParams?.get?.("sort") || undefined;
-    return buildWatchdogBrief(req.feed, { tier, lens, q, limit, sort, now, nowMs: req.nowMs, subscription_status: req.auth?.subscription_status, error: req.auth?.error });
+    const group = req.searchParams?.get?.("group") || undefined;
+    return buildWatchdogBrief(req.feed, { tier, lens, q, limit, sort, group, now, nowMs: req.nowMs, subscription_status: req.auth?.subscription_status, error: req.auth?.error });
   }
 
   if (path === "/api/watchdog/deploy") {
