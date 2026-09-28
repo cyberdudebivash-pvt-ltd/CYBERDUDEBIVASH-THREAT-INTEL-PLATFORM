@@ -581,6 +581,7 @@ export async function handlePremiumReport(request, env, auth, rid) {
       report_ttl_days:  REPORT_CONFIG.REPORT_TTL_DAYS,
       pdf_download_url: `https://intel.cyberdudebivash.com/api/reports/${reportId}/pdf`,
       csv_download_url: `https://intel.cyberdudebivash.com/api/reports/${reportId}/csv`,
+      print_url:        `https://intel.cyberdudebivash.com/api/reports/${reportId}/print`,
       json_download_url:`https://intel.cyberdudebivash.com/api/reports/${reportId}`,
       export_formats:   ["json", "csv", "pdf"],
       contact:          "root@cyberdudebivash.in",
@@ -718,6 +719,7 @@ export async function handleReportList(request, env, auth, rid) {
             download_url: `https://intel.cyberdudebivash.com/api/reports/${meta.report_id}`,
             pdf_url:      `https://intel.cyberdudebivash.com/api/reports/${meta.report_id}/pdf`,
             csv_url:      `https://intel.cyberdudebivash.com/api/reports/${meta.report_id}/csv`,
+            print_url:    `https://intel.cyberdudebivash.com/api/reports/${meta.report_id}/print`,
           });
         }
       }
@@ -855,6 +857,197 @@ export async function handleReportCsv(request, env, auth, rid, reportId) {
       "Cache-Control":       "no-store",
       "X-Content-Type-Options": "nosniff",
       "X-Sentinel-Module":   "premium-reports/201.0",
+    },
+  });
+}
+
+
+// -- GET /api/reports/:id/print ------------------------------------------------
+// Print-ready HTML of a stored report: the browser's Print -> Save as PDF
+// produces the PDF, so no render service is needed. /api/reports/:id/pdf
+// redirects here (index.js). The page carries no script and loads nothing
+// external (CSP below); every value is HTML-escaped.
+//
+// @page margin 0 turns off the browser's printed header / footer, which
+// would otherwise print the page URL -- including ?api_key= when a browser
+// opened the report that way -- onto every page of the PDF.
+export const PRINT_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const PRINT_MAX_ROWS = Object.freeze({ cves: 50, iocs: 200, advisories: 200, actors: 20 });
+
+function esc(v) {
+  if (v === null || v === undefined || v === "") return "&mdash;";
+  return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function num(v, digits = 1) {
+  return typeof v === "number" && Number.isFinite(v) ? esc(Number.isInteger(v) ? v : v.toFixed(digits)) : "&mdash;";
+}
+function sevTag(v) {
+  const k = String(v || "").toUpperCase();
+  const cls = ["CRITICAL", "HIGH", "MEDIUM", "LOW"].includes(k) ? k.toLowerCase() : "none";
+  return `<span class="sev sev-${cls}">${esc(k || "N/A")}</span>`;
+}
+function table(cols, rows, empty) {
+  if (!rows.length) return `<p class="empty">${esc(empty)}</p>`;
+  return `<div class="tw"><table><thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+function capNote(total, shown, what) {
+  return total > shown ? `<p class="note">Showing ${shown} of ${total} ${esc(what)}. The complete list is in the JSON and CSV exports.</p>` : "";
+}
+
+/** A stored report as a self-contained, print-ready HTML document. */
+export function buildReportPrintHtml(report) {
+  const r = report && typeof report === "object" ? report : {};
+  const ex = r.executive_summary || {};
+  const cve = r.cve_intelligence || {};
+  const mitre = r.mitre_attack_coverage || {};
+  const actors = (r.actor_intelligence || {}).actors || [];
+  const ioc = r.ioc_intelligence || {};
+  const advisories = Array.isArray(r.advisories) ? r.advisories : [];
+  const fresh = r.intelligence_freshness || null;
+  const cov = r.coverage || null;
+  const tlp = r.classification || "TLP:AMBER";
+
+  const kpi = (label, value) => `<div class="kpi"><div class="kpi-v">${value}</div><div class="kpi-l">${esc(label)}</div></div>`;
+  const freshness = fresh
+    ? (fresh.live ? `<p class="status ok">Generated from LIVE intelligence (feed generated ${esc(fresh.feed_generated_at)}).</p>`
+      : `<p class="status warn">${esc(fresh.label)}: feed generated ${esc(fresh.feed_generated_at)} (${esc(fresh.freshness_status)}).</p>`)
+    : `<p class="status">Feed freshness was not recorded for this report (generated before freshness tracking).</p>`;
+
+  const priority = Array.isArray(ex.priority_actions) ? ex.priority_actions : [];
+  const topCves = Array.isArray(cve.top_cves) ? cve.top_cves : [];
+  const iocRows = Array.isArray(ioc.ioc_table) ? ioc.ioc_table : [];
+  const tactics = Array.isArray(mitre.top_tactics) ? mitre.top_tactics : [];
+  const techniques = Array.isArray(mitre.techniques_list) ? mitre.techniques_list : [];
+
+  const body = `
+<header class="cover">
+  <div class="brand">CYBERDUDEBIVASH&reg; SENTINEL APEX</div>
+  <div class="tlp">${esc(tlp)}</div>
+  <h1>${esc(r.report_title || "Threat Intelligence Report")}</h1>
+  <dl class="meta">
+    <dt>Report ID</dt><dd>${esc(r.report_id)}</dd>
+    <dt>Type</dt><dd>${esc(r.report_type)}</dd>
+    <dt>Period</dt><dd>${esc(r.report_period)}</dd>
+    <dt>Generated</dt><dd>${esc(r.generated_at)}</dd>
+    <dt>Advisories</dt><dd>${num(r.advisories_count)}</dd>
+  </dl>
+  ${freshness}
+  ${cov ? `<p class="note">Coverage: advisories published ${esc(cov.earliest_published)} to ${esc(cov.latest_published)}; ${num(cov.undated_advisories)} undated; ${num(cov.excluded_outside_period)} excluded as outside the period. ${esc(cov.basis)}</p>` : ""}
+</header>
+
+<section>
+  <h2>1. Executive summary</h2>
+  <div class="kpis">
+    ${kpi("Advisories", num(ex.total_advisories))}${kpi("Critical", num(ex.critical_count))}${kpi("High", num(ex.high_count))}${kpi("CISA KEV advisories", num(ex.kev_confirmed))}${kpi("CVEs", num(cve.total_cves))}
+  </div>
+  <p><strong>Threat landscape:</strong> ${esc(ex.threat_landscape)}</p>
+  <p><strong>CVE exposure:</strong> ${esc(ex.cve_exposure)} &nbsp; <strong>ATT&amp;CK:</strong> ${esc(ex.mitre_coverage)} &nbsp; <strong>Top actor:</strong> ${esc(ex.top_actor)}</p>
+  <h3>Recommendations</h3>
+  ${(ex.key_recommendations || []).length ? `<ol>${ex.key_recommendations.map((k) => `<li>${esc(k)}</li>`).join("")}</ol>` : `<p class="empty">None recorded.</p>`}
+  <h3>Act first</h3>
+  ${table(["Priority", "Score", "Advisory", "CVEs", "Evidence"], priority.map((p) => [sevTag(p.band), num(p.score, 0), esc(p.title), (p.cve_ids || []).map((c) => `<span class="id">${esc(c)}</span>`).join(", ") || "&mdash;", esc((p.evidence || []).join("; "))]), "Not recorded for this report (generated before priority ranking).")}
+</section>
+
+<section>
+  <h2>2. CVE intelligence</h2>
+  <p>${num(cve.total_cves)} CVEs &middot; ${num(cve.kev_count)} CISA KEV &middot; ${num(cve.exploit_available_count)} with public exploit evidence &middot; ${esc(cve.exploitation_risk)}</p>
+  ${table(["CVE", "Severity", "CVSS", "EPSS %", "KEV", "Exploit", "Title"], topCves.slice(0, PRINT_MAX_ROWS.cves).map((c) => [`<span class="mono id">${esc(c.id)}</span>`, sevTag(c.severity), num(c.cvss_score), num(c.epss_score, 2), c.kev_present ? "<strong>YES</strong>" : "no", c.exploit_available ? esc(c.exploit_maturity || "yes") : "no", esc(c.title)]), "No CVEs in scope.")}
+  ${capNote(topCves.length, Math.min(topCves.length, PRINT_MAX_ROWS.cves), "CVEs")}
+</section>
+
+<section>
+  <h2>3. MITRE ATT&amp;CK coverage</h2>
+  <p>${num(mitre.unique_techniques)} unique techniques &middot; coverage ${num(mitre.coverage_score_pct, 0)}% (${esc(mitre.coverage_label)})</p>
+  ${table(["Tactic", "Advisories"], tactics.map((t) => [esc(t.tactic), num(t.count)]), "No tactics recorded.")}
+  ${techniques.length ? `<p class="mono small">${techniques.map(esc).join(" &middot; ")}</p>` : ""}
+</section>
+
+<section>
+  <h2>4. Threat actor intelligence</h2>
+  ${table(["Actor", "Advisories", "Max risk", "Campaigns", "IOCs", "TTPs"], actors.slice(0, PRINT_MAX_ROWS.actors).map((a) => [esc(a.actor_tag), num(a.advisory_count), num(a.max_risk, 2), esc((a.campaigns || []).join(", ")), num(a.ioc_count), num(a.ttp_count)]), "No actors recorded.")}
+</section>
+
+<section>
+  <h2>5. Indicators of compromise</h2>
+  ${table(["Indicator", "Type", "Confidence", "Severity", "Actor", "Context"], iocRows.slice(0, PRINT_MAX_ROWS.iocs).map((i) => [`<span class="mono">${esc(i.value)}</span>`, esc(i.type), num(i.confidence, 0), sevTag(i.severity), esc(i.actor_tag), esc(i.context)]), "No indicators in scope.")}
+  ${capNote(iocRows.length, Math.min(iocRows.length, PRINT_MAX_ROWS.iocs), "indicators")}
+</section>
+
+<section>
+  <h2>6. Advisories</h2>
+  ${table(["Priority", "Severity", "Advisory", "CVEs", "KEV", "Source", "Processed"], advisories.slice(0, PRINT_MAX_ROWS.advisories).map((a) => [a.priority ? sevTag(a.priority.band) + " " + num(a.priority.score, 0) : "&mdash;", sevTag(a.severity), esc(a.title), (Array.isArray(a.cve_ids) ? a.cve_ids : (a.cve_id ? [a.cve_id] : [])).map((c) => `<span class="id">${esc(c)}</span>`).join(", ") || "&mdash;", a.kev_present ? "<strong>YES</strong>" : "no", esc(a.source), esc(a.processed_at)]), "No advisories in scope.")}
+  ${capNote(advisories.length, Math.min(advisories.length, PRINT_MAX_ROWS.advisories), "advisories")}
+</section>
+
+<footer>
+  <p>${esc(tlp)}. ${esc((r.metadata || {}).copyright || "CYBERDUDEBIVASH(R) SENTINEL APEX")}</p>
+  <p>Prepared from the Sentinel APEX feed. Scores cite the feed fields they came from; missing evidence is never counted as zero risk.</p>
+</footer>`;
+
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>${esc(r.report_title || "Threat Intelligence Report")} - ${esc(r.report_id)}</title>
+<style>
+@page { size: A4; margin: 0; }
+:root { --ink:#111827; --muted:#4b5563; --line:#d1d5db; --band:#f3f4f6; --accent:#0f3d6e; }
+* { box-sizing: border-box; }
+html { background:#e5e7eb; }
+body { margin:0 auto; max-width:210mm; min-height:297mm; padding:14mm 14mm 16mm; background:#fff; color:var(--ink);
+  font:10pt/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+.screen-hint { font-size:9pt; color:var(--muted); border:1px dashed var(--line); padding:6px 10px; margin-bottom:10px; }
+.cover { border-bottom:3px solid var(--accent); padding-bottom:8px; margin-bottom:10px; }
+.brand { font-weight:800; letter-spacing:.08em; color:var(--accent); font-size:9pt; }
+.tlp { float:right; margin-top:-14px; background:#b45309; color:#fff; font-weight:800; font-size:8.5pt; padding:2px 8px; border-radius:3px; }
+h1 { font-size:17pt; margin:6px 0 8px; }
+h2 { font-size:12.5pt; color:var(--accent); border-bottom:1px solid var(--line); padding-bottom:3px; margin:16px 0 6px; break-after:avoid; }
+h3 { font-size:10.5pt; margin:10px 0 4px; break-after:avoid; }
+dl.meta { display:grid; grid-template-columns:auto 1fr auto 1fr; gap:2px 10px; margin:0 0 6px; font-size:9pt; }
+dl.meta dt { color:var(--muted); } dl.meta dd { margin:0; }
+.status { padding:5px 8px; border-left:4px solid var(--line); background:var(--band); font-size:9pt; }
+.status.ok { border-color:#15803d; } .status.warn { border-color:#b91c1c; background:#fef2f2; font-weight:700; }
+.note { color:var(--muted); font-size:8.5pt; }
+.kpis { display:flex; gap:6px; margin:6px 0 8px; }
+.kpi { flex:1; border:1px solid var(--line); border-radius:4px; padding:5px 7px; }
+.kpi-v { font-size:15pt; font-weight:800; } .kpi-l { font-size:8pt; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+table { width:100%; border-collapse:collapse; font-size:8.5pt; margin:4px 0 6px; }
+thead { display:table-header-group; }
+th { text-align:left; background:var(--band); border-bottom:1px solid var(--line); padding:3px 5px; font-size:8pt; text-transform:uppercase; letter-spacing:.03em; }
+td { border-bottom:1px solid #e5e7eb; padding:3px 5px; vertical-align:top; overflow-wrap:break-word; }
+.tw { overflow-x:auto; }
+.id { white-space:nowrap; }
+tr { break-inside:avoid; }
+.mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; } .small { font-size:8pt; }
+.sev { display:inline-block; font-size:7.5pt; font-weight:800; padding:0 5px; border-radius:3px; border:1px solid currentColor; white-space:nowrap; }
+.sev-critical { color:#b91c1c; } .sev-high { color:#c2410c; } .sev-medium { color:#a16207; } .sev-low { color:#15803d; } .sev-none { color:var(--muted); }
+.empty { color:var(--muted); font-style:italic; }
+footer { margin-top:18px; border-top:1px solid var(--line); padding-top:6px; font-size:8pt; color:var(--muted); }
+@media print { html { background:#fff; } body { max-width:none; min-height:0; } .screen-hint { display:none; } .tw { overflow:visible; } }
+@media (max-width:640px) { body { padding:16px; } dl.meta { grid-template-columns:auto 1fr; } .kpis { flex-wrap:wrap; } .kpi { flex:1 1 40%; } .tlp { float:none; display:inline-block; margin:4px 0 0; } }
+</style></head>
+<body>
+<p class="screen-hint">Print-ready report. Use your browser's Print, then "Save as PDF", to download it as a PDF.</p>
+${body}
+</body></html>`;
+}
+
+export async function handleReportPrint(request, env, auth, rid, reportId) {
+  const tier = (auth.tier || "free").toLowerCase();
+  const safeId = safeStr(reportId || "", 30);
+  if (!safeId || !/^rpt_[a-f0-9]{16}$/.test(safeId)) return _json({ error: "invalid_report_id", request_id: rid }, 400);
+  if (tier === "free") return _json({ error: "tier_required", upgrade_url: "/upgrade.html?plan=pro", request_id: rid }, 403);
+  const loaded = await loadOwnedReport(env, auth, safeId);
+  if (loaded.state === "forbidden") return _json({ error: "not_found", request_id: rid }, 404);
+  if (loaded.state !== "found") return _json({ error: "report_not_found", report_id: safeId, request_id: rid }, 404);
+  return new Response(buildReportPrintHtml(loaded.data), {
+    status: 200,
+    headers: {
+      "Content-Type":            "text/html; charset=utf-8",
+      "Content-Security-Policy": PRINT_CSP,
+      "Cache-Control":           "no-store",
+      "X-Robots-Tag":            "noindex, nofollow",
+      "X-Content-Type-Options":  "nosniff",
+      "X-Sentinel-Module":       "premium-reports/201.0",
     },
   });
 }

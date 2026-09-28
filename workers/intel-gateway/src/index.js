@@ -105,7 +105,7 @@ import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handle
 // dark-web-monitor.js's handlers are intentionally NOT imported -- see the
 // _darkWebUnavailable disable note at its route registration below.
 import { routeWatchdog } from './cyber-watchdog.js';
-import { handlePremiumReport, handleReportList, handleReportGet, handleReportCsv } from './premium-reports.js';
+import { handlePremiumReport, handleReportList, handleReportGet, handleReportCsv, handleReportPrint } from './premium-reports.js';
 // P0 FIX (2026-09-01): PR #285 (v201.0) called getLiveIndicatorsSummary(),
 // runScheduledIngestion(), and routeExports() below without ever importing
 // them from their actual modules -- every call site threw a ReferenceError
@@ -8293,6 +8293,8 @@ async function handleRequest(request, env, ctx) {
     // it silently unreachable.
     const isCsvRequest = rawSegment.endsWith("/csv");
     if (isCsvRequest) rawSegment = rawSegment.slice(0, -"/csv".length);
+    const isPrintRequest = rawSegment.endsWith("/print");
+    if (isPrintRequest) rawSegment = rawSegment.slice(0, -"/print".length);
     let reportId;
     try {
       reportId = decodeURIComponent(rawSegment);
@@ -8302,11 +8304,22 @@ async function handleRequest(request, env, ctx) {
       return jsonResp({ error: "invalid_report_id", request_id: crypto.randomUUID() }, 400);
     }
     if (isPdfRequest) {
-      return jsonResp({
-        error:      "not_yet_available",
-        message:    "PDF export is not yet available for this report. Use the JSON format at GET /api/reports/{id}.",
-        request_id: crypto.randomUUID(),
-      }, 501);
+      // Print-ready report (2026-09-28): was a 501. The PDF is produced by
+      // the browser (Print -> Save as PDF) from /api/reports/{id}/print, so
+      // /pdf redirects there. The query string is carried over so a browser
+      // that authenticated with ?api_key= stays authenticated; header-auth
+      // clients re-send their headers to the same origin.
+      if (!/^rpt_[a-f0-9]{16}$/.test(reportId)) {
+        return jsonResp({ error: "invalid_report_id", request_id: crypto.randomUUID() }, 400);
+      }
+      const target = "/api/reports/" + reportId + "/print" + url.search;
+      return new Response(JSON.stringify({ status: "see_other", print_url: target, message: "Open the print-ready report and use Print -> Save as PDF." }), {
+        status: 303,
+        headers: { "Location": target, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+      });
+    }
+    if (isPrintRequest) {
+      return await handleReportPrint(request, env, auth, crypto.randomUUID(), reportId);
     }
     if (isCsvRequest) {
       // CSV export (2026-09-28): was a 501. Same tier gate and owner check
