@@ -66,3 +66,41 @@ def test_recurring_checkout_never_calls_one_time_orders():
     assert "/api/payment/razorpay/create-order" not in upgrade
     assert "/api/payment/razorpay/verify" not in upgrade
     assert "/api/v2/billing/subscriptions/create" in upgrade
+
+
+def test_api_docs_rate_limits_match_canonical_commercial_contract():
+    """Buyer-facing API quotas must equal the enforced gateway contract."""
+    import json
+
+    contract = json.loads((REPO / "config/commercial-contract.json").read_text(encoding="utf-8"))
+    docs = _visible((REPO / "api-docs.html").read_text(encoding="utf-8"))
+
+    expected = {
+        "Free": ("free", "Public endpoints only"),
+        "Professional": ("pro", "All endpoints"),
+        "Enterprise": ("enterprise", "All endpoints + SIEM"),
+        "MSSP": ("mssp", "All + Multi-tenant"),
+    }
+    for label, (tier_id, endpoint_copy) in expected.items():
+        tier = contract["tiers"][tier_id]
+        daily = f'{tier["requests_per_day"]:,}'
+        per_min = f'{tier["requests_per_minute"]:,}'
+        pattern = (
+            rf"<td>{re.escape(label)}\b.*?</td>"
+            rf"<td>{re.escape(daily)}</td>"
+            rf"<td>{re.escape(per_min)}</td>"
+            rf"<td>{re.escape(endpoint_copy)}</td>"
+            rf"<td>HTTP 429</td>"
+        )
+        assert re.search(pattern, docs, re.I | re.S), (
+            f"{label} API docs quota drift: expected "
+            f"{daily}/day and {per_min}/minute from commercial-contract.json"
+        )
+
+    assert not re.search(r"<td>Unlimited</td>", docs, re.I)
+
+
+def test_pricing_structured_data_does_not_publish_unlimited_api_access():
+    pricing = _visible((REPO / "pricing.html").read_text(encoding="utf-8"))
+    assert "unlimited access, 15-min SLA" not in pricing
+    assert "50,000 API calls/day, 1,200 requests/minute" in pricing
