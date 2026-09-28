@@ -66,3 +66,28 @@ def test_recurring_checkout_never_calls_one_time_orders():
     assert "/api/payment/razorpay/create-order" not in upgrade
     assert "/api/payment/razorpay/verify" not in upgrade
     assert "/api/v2/billing/subscriptions/create" in upgrade
+
+
+def test_homepage_does_not_restore_withdrawn_social_proof_or_market_superlatives():
+    """Evidence-register withdrawals must stay withdrawn on the main sales surface."""
+    text = _visible((REPO / "index.html").read_text(encoding="utf-8"))
+
+    forbidden = [
+        (r"join\s+1[,.]?200\+\s+soc\s+analysts", "unverified subscriber/analyst count"),
+        (r"(deployed|used)\s+by\s+500\+\s+security\s+teams", "unverified customer/team count"),
+        (r"what\s+analysts\s+say", "unaudited testimonial section"),
+        (r"mid-market\s+fintech,\s*india", "unaudited customer attribution"),
+        (r"enterprise\s+mssp,\s*global", "unaudited customer attribution"),
+        (r"security\s+consultancy,\s*apac", "unaudited customer attribution"),
+        (r"the\s+only\s+ai-native\s+threat\s+intelligence\s+platform", "unsupported market superlative"),
+        (r"updated\s+every\s+15\s+minutes\s+from\s+50\+\s+sources", "unverified fixed source/cadence claim"),
+    ]
+    hits = [why for pattern, why in forbidden if re.search(pattern, text, re.I)]
+    assert not hits, "homepage restored withdrawn/unverified claims: " + ", ".join(hits)
+
+
+def test_evidence_register_still_marks_customer_social_proof_unverified():
+    register = (REPO / "config/evidence-register.json").read_text(encoding="utf-8")
+    assert '"claim": "Verified / professional / analyst / team head-counts"' in register
+    assert '"classification": "UNVERIFIED"' in register
+    assert "No replacement quotes were written" in register
