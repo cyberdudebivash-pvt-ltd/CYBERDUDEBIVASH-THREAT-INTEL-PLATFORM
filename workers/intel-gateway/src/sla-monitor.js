@@ -120,8 +120,12 @@ export async function handleSLAStatus(request, env, rid) {
     uptime_pct_30d:   hasData ? parseFloat(displayUptime.toFixed(4)) : null,
     sla_target_enterprise: ENTERPRISE_SLA,
     sla_target_pro:        PRO_SLA,
-    sla_met_enterprise:    hasData ? displayUptime >= ENTERPRISE_SLA : null,
-    sla_met_pro:           hasData ? displayUptime >= PRO_SLA : null,
+    // A historical ratio is not a current SLA verdict while the external
+    // monitor itself is stale. Keep the measured historical uptime visible,
+    // but fail closed on the compliance boolean until monitoring resumes.
+    monitoring_current:    heartbeatFresh,
+    sla_met_enterprise:    hasData && heartbeatFresh ? displayUptime >= ENTERPRISE_SLA : null,
+    sla_met_pro:           hasData && heartbeatFresh ? displayUptime >= PRO_SLA : null,
     total_pings_30d:       total,
     successful_pings_30d:  upPings,
     last_ping_age_seconds: lastPingAge,
@@ -183,7 +187,8 @@ export async function handleSLAReport(request, env, auth, rid) {
     const dayDate  = new Date(dayStart).toISOString().split("T")[0];
     dailyStats.unshift({
       date:       dayDate,
-      uptime_pct: dayTotal > 0 ? parseFloat(((dayUp / dayTotal) * 100).toFixed(2)) : 100,
+      // Missing checks are missing evidence, never a synthetic 100% day.
+      uptime_pct: dayTotal > 0 ? parseFloat(((dayUp / dayTotal) * 100).toFixed(2)) : null,
       pings:      dayTotal,
       incidents:  incidents.filter(i => {
         const iStart = new Date(i.start).getTime();
@@ -196,6 +201,9 @@ export async function handleSLAReport(request, env, auth, rid) {
   const upCount        = recentPings.filter(p => p.ok).length;
   const hasData        = recentPings.length > 0;
   const uptimePct      = hasData ? ((upCount / recentPings.length) * 100) : null;
+  const lastPing       = pings[pings.length - 1];
+  const lastPingAgeS   = lastPing ? Math.round((now - lastPing.ts) / 1000) : null;
+  const monitoringCurrent = lastPingAgeS !== null && lastPingAgeS < HEARTBEAT_STALE_S;
   const recentIncidents = incidents.filter(i => (now - new Date(i.start).getTime()) <= windowMs);
   const totalDownMs    = recentIncidents.reduce((acc, i) => acc + (i.duration_ms || 0), 0);
 
@@ -209,7 +217,11 @@ export async function handleSLAReport(request, env, auth, rid) {
     // fabricated 100%/"MET" when there was zero ping data. See
     // handleSLAStatus's matching fix note above for full rationale.
     actual_uptime_pct:   hasData ? parseFloat(uptimePct.toFixed(4)) : null,
-    sla_status:          !hasData ? "INSUFFICIENT_DATA" : (uptimePct >= ENTERPRISE_SLA ? "MET CHECK" : "BREACHED FAIL"),
+    sla_status:          !hasData ? "INSUFFICIENT_DATA"
+      : !monitoringCurrent ? "MONITORING_DELAYED"
+      : (uptimePct >= ENTERPRISE_SLA ? "MET" : "BREACHED"),
+    monitoring_current:  monitoringCurrent,
+    last_ping_age_seconds: lastPingAgeS,
     total_downtime_min:  parseFloat((totalDownMs / 60000).toFixed(2)),
     allowed_downtime_min: parseFloat(((100 - ENTERPRISE_SLA) / 100 * SLA_WINDOW_DAYS * 24 * 60).toFixed(2)),
     incidents_count:     recentIncidents.length,
@@ -425,6 +437,9 @@ export async function handleSLACertificate(request, env, auth, rid) {
   const upCount      = recentPings.filter(p => p.ok).length;
   const hasData      = recentPings.length > 0;
   const pingUptime   = hasData ? (upCount / recentPings.length) * 100 : null;
+  const lastPing     = pings[pings.length - 1];
+  const lastPingAgeS = lastPing ? Math.round((nowMs - lastPing.ts) / 1000) : null;
+  const monitoringCurrent = lastPingAgeS !== null && lastPingAgeS < HEARTBEAT_STALE_S;
 
   const recentIncidents = incidents.filter(i => (nowMs - new Date(i.start).getTime()) <= windowMs);
   const totalDownMs     = recentIncidents.reduce((acc, i) => acc + (i.duration_ms || 0), 0);
@@ -436,7 +451,9 @@ export async function handleSLACertificate(request, env, auth, rid) {
   const actualUptime = hasData ? Math.min(pingUptime, incidentUptime) : null;
   const slaStatus = !hasData
     ? "INSUFFICIENT_DATA"
-    : (actualUptime >= ENTERPRISE_SLA ? "COMPLIANT" : "BREACHED");
+    : !monitoringCurrent
+      ? "MONITORING_DELAYED"
+      : (actualUptime >= ENTERPRISE_SLA ? "COMPLIANT" : "BREACHED");
 
   return _json(200, {
     certificate: {
@@ -449,9 +466,13 @@ export async function handleSLACertificate(request, env, auth, rid) {
       sla_status:     slaStatus,
       measured_uptime_pct: hasData ? parseFloat(actualUptime.toFixed(4)) : null,
       incidents_in_period: recentIncidents.length,
-      monitoring_basis:    hasData
-        ? `${recentPings.length} health check(s) + ${recentIncidents.length} recorded incident(s) over the period`
-        : "No monitoring data recorded for this period -- compliance cannot be verified.",
+      monitoring_current:  monitoringCurrent,
+      last_ping_age_seconds: lastPingAgeS,
+      monitoring_basis:    !hasData
+        ? "No monitoring data recorded for this period -- compliance cannot be verified."
+        : !monitoringCurrent
+          ? `Historical data exists (${recentPings.length} health check(s)), but the external heartbeat is stale; current compliance cannot be verified.`
+          : `${recentPings.length} health check(s) + ${recentIncidents.length} recorded incident(s) over the period`,
       platform_url:   "https://intel.cyberdudebivash.com",
       support_email:  "bivash@cyberdudebivash.com",
       version:        "201.0 GOD-MODE",

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { handleSLAPing, handleSLAStatus, _failureStreaks } from "../sla-monitor.js";
+import {
+  handleSLAPing,
+  handleSLAStatus,
+  handleSLAReport,
+  handleSLACertificate,
+  _failureStreaks,
+} from "../sla-monitor.js";
 
 // ---------------------------------------------------------------------------
 // 2026-09-26: /api/sla/* had no data source -- nothing ever called
@@ -158,7 +164,9 @@ test("status: a current successful heartbeat -> operational", async () => {
   await handleSLAPing(pingReq({ ok: true, observed_at: iso(8 * MIN), probe_id: "ok1" }), env, "r");
   const d = await status(env);
   assert.equal(d.status, "operational");
+  assert.equal(d.monitoring_current, true);
   assert.equal(d.uptime_pct_30d, 100);
+  assert.equal(d.sla_met_enterprise, true);
 });
 
 test("status: a failed latest heartbeat -> degraded (was operational if recent)", async () => {
@@ -177,8 +185,12 @@ test("status: last heartbeat OK but stale -> monitoring_delayed, not an outage",
   await handleSLAPing(pingReq({ ok: true, observed_at: iso(60 * MIN), probe_id: "old" }), env, "r");
   const d = await status(env);
   assert.equal(d.status, "monitoring_delayed");
+  assert.equal(d.monitoring_current, false);
   assert.equal(d.components["intel-gateway"].status, "monitoring_delayed");
   assert.equal(d.heartbeat_stale_after_seconds, 45 * 60);
+  assert.equal(d.uptime_pct_30d, 100); // historical measurement is still visible
+  assert.equal(d.sla_met_enterprise, null); // but current compliance is not asserted
+  assert.equal(d.sla_met_pro, null);
 });
 
 test("status: last heartbeat FAILED, even if stale -> degraded", async () => {
@@ -196,4 +208,26 @@ test("status: uptime is the more conservative of ping ratio and incident time", 
   // 97/100 pings ok -> 97%; one 20-minute incident over 30 days -> ~99.95%.
   assert.equal(d.uptime_pct_30d, 97);
   assert.equal(d.incidents_30d, 1);
+});
+
+
+test("enterprise SLA report: stale monitor cannot report MET and empty days are null", async () => {
+  const env = envWith();
+  await handleSLAPing(pingReq({ ok: true, observed_at: iso(60 * MIN), probe_id: "stale-report" }), env, "r");
+  const auth = { tier: "ENTERPRISE", key: "k", sub: "acct" };
+  const d = await (await handleSLAReport(new Request("https://x/api/sla/report"), env, auth, "r")).json();
+  assert.equal(d.sla_status, "MONITORING_DELAYED");
+  assert.equal(d.monitoring_current, false);
+  assert.equal(typeof d.last_ping_age_seconds, "number");
+  assert.ok(d.daily_breakdown.some((day) => day.pings === 0 && day.uptime_pct === null));
+});
+
+test("enterprise SLA certificate: stale monitor cannot issue COMPLIANT evidence", async () => {
+  const env = envWith();
+  await handleSLAPing(pingReq({ ok: true, observed_at: iso(60 * MIN), probe_id: "stale-cert" }), env, "r");
+  const auth = { tier: "ENTERPRISE", key: "k", sub: "acct" };
+  const d = await (await handleSLACertificate(new Request("https://x/api/sla/certificate"), env, auth, "r")).json();
+  assert.equal(d.certificate.sla_status, "MONITORING_DELAYED");
+  assert.equal(d.certificate.monitoring_current, false);
+  assert.match(d.certificate.monitoring_basis, /external heartbeat is stale/i);
 });
