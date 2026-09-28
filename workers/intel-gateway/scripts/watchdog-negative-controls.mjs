@@ -742,6 +742,22 @@ const CONTROLS = [
     replace: "  return String(v);",
     tests: [T("premium-reports.test.js")],
   },
+  {
+    // Retention purge: only rpt_<16 hex>.json report keys may ever be deleted.
+    id: "report_purge_deletes_any_key",
+    file: "workers/intel-gateway/src/premium-reports.js",
+    find: "        if (!REPORT_KEY_RE.test(obj.key)) continue;",
+    replace: "",
+    tests: [T("premium-reports.test.js")],
+  },
+  {
+    // Retention: an expired report must not be served.
+    id: "report_served_after_expiry",
+    file: "workers/intel-gateway/src/premium-reports.js",
+    find: "        if (reportExpired(obj.customMetadata?.generated_at, obj.uploaded, Date.now())) {",
+    replace: "        if (false) {",
+    tests: [T("premium-reports.test.js")],
+  },
 ];
 
 function runTests(root, files) {

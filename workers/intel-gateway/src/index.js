@@ -105,7 +105,7 @@ import { handleAlertSubscribe, handleAlertSubscriptions, handleAlertTest, handle
 // dark-web-monitor.js's handlers are intentionally NOT imported -- see the
 // _darkWebUnavailable disable note at its route registration below.
 import { routeWatchdog } from './cyber-watchdog.js';
-import { handlePremiumReport, handleReportList, handleReportGet, handleReportCsv, handleReportPrint } from './premium-reports.js';
+import { handlePremiumReport, handleReportList, handleReportGet, handleReportCsv, handleReportPrint, purgeExpiredReports } from './premium-reports.js';
 // P0 FIX (2026-09-01): PR #285 (v201.0) called getLiveIndicatorsSummary(),
 // runScheduledIngestion(), and routeExports() below without ever importing
 // them from their actual modules -- every call site threw a ReferenceError
@@ -8684,7 +8684,7 @@ async function handleRequest(request, env, ctx) {
       "POST /api/watchdog/destinations/verify (ENT)",
       "POST|DELETE /api/watchdog/session (PRO+)",
       "GET /api/watchdog/deploy (PRO+)",
-      "POST /api/reports/premium (PRO+, $49/report)", "GET /api/reports/list (PRO+)", "GET /api/reports/{id} (PRO+)",
+      "POST /api/reports/premium (PRO+)", "GET /api/reports/list (PRO+)", "GET /api/reports/{id} (PRO+)",
       "GET /api/v1/export/suricata.rules (FREE sample / PRO+ full)",
       "GET /api/v1/export/snort.rules (FREE sample / PRO+ full)",
       "GET /api/v1/export/yara.yar (FREE sample / PRO+ full)",
@@ -9010,6 +9010,9 @@ export default {
     const SIX_HOURLY_INGESTION_CRON = "0 " + "*" + "/6 * * *";
     if (event.cron === SIX_HOURLY_INGESTION_CRON) {
       ctx.waitUntil(runScheduledIngestion(env));
+      // Premium report retention (90 days, 2026-09-28): delete expired reports
+      // in a bounded batch; the counts go to the Worker log.
+      ctx.waitUntil(purgeExpiredReports(env, Date.now()).then((r) => console.log(JSON.stringify({ event: "premium_report_purge", ...r }))));
       return;
     }
     ctx.waitUntil(fetchAndCacheCVEs(env));
