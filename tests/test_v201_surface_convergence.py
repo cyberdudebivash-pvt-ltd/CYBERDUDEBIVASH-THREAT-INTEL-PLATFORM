@@ -20,8 +20,8 @@ def test_dashboard_sections_and_map_hud_are_v201():
         "GENESIS v201.0",
         "BUG HUNTER v201.0",
         "TIP + SOAR COMMAND CENTER v201.0",
-        "label     : 'CDB-SENTINEL v201'",
-        "version   : '201.0.0'",
+        # The map HUD labels ('CDB-SENTINEL v201' / '201.0.0') left with the
+        # illustrative canvas map on 2026-09-28 (now the Live Threat Board).
     ):
         assert label in src, label
     for stale in (

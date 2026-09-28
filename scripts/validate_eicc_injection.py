@@ -17,7 +17,7 @@ checks = [
     ('enterprise onboarding CTA present',           'ENTERPRISE ONBOARDING' in src),
     ('live metrics row present',                    'eicc-metrics-row' in src),
     ('EICC data engine script present',             'eiccEngine' in src),
-    ('V173 renderer intact',                        'CDB-RENDERER-ENGINE-V173-START' in src),
+    ('Live threat board intact (V173 map retired)', 'id="cdb-live-board"' in src),
     ('No duplicate premium section',                src.count('id="premium-intel-products"') == 1),
     ('No duplicate eicc section',                   src.count('enterprise-intel-command') == 1),
     ('SOC tab system intact',                       'cdb-panel-soc' in src),

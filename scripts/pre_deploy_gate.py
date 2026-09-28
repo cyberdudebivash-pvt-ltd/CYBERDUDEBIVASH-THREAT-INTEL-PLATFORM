@@ -111,11 +111,17 @@ gate("Service worker has valid sentinel-apex-vNNN cache version",
      _sw_has_valid_ver,
      "CACHE_VERSION in service-worker.js must contain sentinel-apex-vNNN pattern")
 
-# ── GATE 8: V173 renderer intact ─────────────────────────────────
+# ── GATE 8: homepage threat panel is the live board ──────────────
+# 2026-09-28: the illustrative canvas map (CDB-RENDERER-ENGINE-V173) was
+# replaced by the Live Threat Board, fed only by /api/watchdog/brief (the
+# feed carries no attack geolocation, so the animation showed no observed
+# attacks). This gate previously required the V173 block; it now requires
+# the live board and fails if the illustrative map comes back.
 src = _homepage_source.read_text_for_inspection(INDEX) if INDEX.exists() else ""
-gate("V173 renderer block intact",
-     'CDB-RENDERER-ENGINE-V173-START' in src and 'CDB-RENDERER-ENGINE-V173-END' in src,
-     "V173 renderer block has been removed from index.html")
+gate("Homepage live threat board intact (no illustrative map)",
+     'id="cdb-live-board"' in src and "fetch('/api/watchdog/brief" in src
+     and 'ILLUSTRATIVE ANIMATION' not in src and 'CDB-RENDERER-ENGINE-V173-START' not in src,
+     "index.html must render #cdb-live-board from /api/watchdog/brief and must not ship the illustrative canvas map")
 
 # ── GATE 9: Script tags balanced in index.html ────────────────────
 # Tag-aware, not substring-count: uses html.parser's built-in
