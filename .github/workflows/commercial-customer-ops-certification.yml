@@ -950,17 +950,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: "Report outcome"
+      - name: "Report outcome (fail closed)"
         run: |
-          echo "ADMIN_SECRET_PRESENT=${{ needs.secret-presence-gate.outputs.admin_secret_present }}"
-          echo "static-checks: ${{ needs.static-checks.result }}"
-          echo "authenticated-customer-ops-tests: ${{ needs.authenticated-customer-ops-tests.result }}"
-          echo "expiry-shadow-validation: ${{ needs.expiry-shadow-validation.result }}"
-          echo "lifecycle-state-matrix: ${{ needs.lifecycle-state-matrix.result }}"
-          echo "mssp-tenant-isolation: ${{ needs.mssp-tenant-isolation.result }}"
-          echo "mssp-self-service-tenants: ${{ needs.mssp-self-service-tenants.result }}"
-          echo "watchdog-mssp-live-canaries: ${{ needs.watchdog-mssp-live-canaries.result }}"
-          echo "rate-limit-boundary: ${{ needs.rate-limit-boundary.result }}"
-          if [ "${{ needs.secret-presence-gate.outputs.admin_secret_present }}" != "true" ]; then
-            echo "Authenticated phases: BLOCKED_BY_SECRET (ADMIN_SECRET not configured as a GitHub Actions secret -- see this workflow file's header comment for setup)"
+          set -euo pipefail
+          ADMIN_PRESENT="${{ needs.secret-presence-gate.outputs.admin_secret_present }}"
+          echo "ADMIN_SECRET_PRESENT=$ADMIN_PRESENT"
+
+          FAIL=0
+          check_required() {
+            local name="$1" result="$2"
+            echo "$name: $result"
+            if [ "$result" != "success" ]; then
+              echo "::error::$name did not succeed (result=$result)"
+              FAIL=1
+            fi
+          }
+
+          check_required "secret-presence-gate" "${{ needs.secret-presence-gate.result }}"
+          check_required "static-checks" "${{ needs.static-checks.result }}"
+          check_required "authenticated-customer-ops-tests" "${{ needs.authenticated-customer-ops-tests.result }}"
+          check_required "expiry-shadow-validation" "${{ needs.expiry-shadow-validation.result }}"
+          check_required "lifecycle-state-matrix" "${{ needs.lifecycle-state-matrix.result }}"
+          check_required "mssp-tenant-isolation" "${{ needs.mssp-tenant-isolation.result }}"
+          check_required "mssp-self-service-tenants" "${{ needs.mssp-self-service-tenants.result }}"
+          check_required "watchdog-mssp-live-canaries" "${{ needs.watchdog-mssp-live-canaries.result }}"
+          check_required "rate-limit-boundary" "${{ needs.rate-limit-boundary.result }}"
+
+          if [ "$ADMIN_PRESENT" != "true" ]; then
+            echo "::error::Authenticated certification phases are BLOCKED_BY_SECRET; this run cannot certify production customer operations."
+            FAIL=1
           fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo "CERTIFICATION: FAILED/BLOCKED -- one or more mandatory phases are not successful."
+            exit 1
+          fi
+          echo "CERTIFICATION: PASS -- every mandatory production customer-operations phase succeeded."

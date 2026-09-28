@@ -8,10 +8,15 @@
  *
  * WHY THIS EXISTS
  * ---------------
- * Five hot-path counters -- checkRateLimit, checkDailyQuota,
- * checkWebPlaneRateLimit, checkWebPlaneDailyQuota and the SWARM preflight
- * limiter -- each did KV.get() then KV.put() on EVERY allowed request. So a
- * single authenticated API call cost 1-4 KV writes.
+ * Several hot-path counters historically did KV.get() then KV.put() on every
+ * allowed request. The cache remains appropriate for metering and the
+ * first-party web plane, where bounded approximation is explicit.
+ *
+ * IMPORTANT: the commercial per-tier checkRateLimit() ceiling is NOT batched.
+ * Live certification on 2026-09-28 proved that horizontal Worker execution
+ * can split a burst across isolate-local counters and completely miss the
+ * sold 30/min FREE boundary. That enforcement path therefore uses
+ * bumpCounterWriteThrough() below.
  *
  * Cloudflare KV write allowances make that the platform's binding scale
  * limit, well before CPU or request count:
@@ -86,6 +91,24 @@ function evictIfNeeded(now) {
     counters.delete(k);
     if (counters.size <= MAX_ENTRIES) return;
   }
+}
+
+/**
+ * Increment a KV-backed enforcement counter with a KV read and write on every
+ * request. This deliberately keeps no isolate-local state.
+ *
+ * Workers KV is still eventually consistent, so this is not a globally
+ * linearizable distributed counter. It does, however, restore the original
+ * production behavior and prevents the additional unbounded drift introduced
+ * by isolate-local batching. Use this for customer-contract enforcement; use
+ * bumpCounter() only where bounded metering drift is acceptable.
+ */
+export async function bumpCounterWriteThrough(kv, key, ttlSeconds) {
+  const raw = await kv.get(key);
+  const base = raw ? parseInt(raw, 10) : 0;
+  const count = (Number.isFinite(base) ? base : 0) + 1;
+  await kv.put(key, String(count), { expirationTtl: ttlSeconds });
+  return { count, kvWrote: true };
 }
 
 /**
