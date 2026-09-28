@@ -552,11 +552,20 @@ async function loadBrief(ev) {
   $('status').textContent = data.empty ? data.empty_reason : data.freshness_status + ' · ' + data.feed_item_count + ' advisories on the feed · ' + data.count + ' shown · ' + (S.ageText(data.feed_age_seconds) || '') + (data.truncated ? ' · more available on paid plans' : '');
   renderBriefRows(data.items || [], 'Live brief items');
 }
+// Watchdog 3.2.0: reports of the same story arrive as one row; list the
+// merged reports and the rule that matched each, so nothing is hidden.
+function storyNote(c) {
+  if (!c || !c.related || !c.related.length) return null;
+  const more = c.reports - 1;
+  return h('details', { class: 'ax-sub' },
+    h('summary', { text: '+' + more + ' more report' + (more === 1 ? '' : 's') + ' of this story · ' + (c.sources || []).join(', ') }),
+    h('ul', { style: 'margin:4px 0 0;padding-left:18px' }, c.related.map((r) => h('li', { text: (r.source ? r.source + ': ' : '') + r.title + ' (' + ({ shared_cve: 'shared ' + r.evidence, same_source_article: 'same article', kev_product_in_title: 'names ' + r.evidence.split(' + ')[0] }[r.rule] || r.rule) + ')' }))));
+}
 function renderBriefRows(items, caption) {
   const rows = items.map((item) => h('tr', { dataset: { band: S.severityKey(item.severity) } },
     h('td', {}, sevChip(item.severity)),
     h('td', {}, item.priority ? priorityChip(item.priority) : na()),
-    h('td', {}, h('div', { class: 'ax-title', text: item.title }), item.summary ? h('div', { class: 'ax-sub', text: item.summary }) : null),
+    h('td', {}, h('div', { class: 'ax-title', text: item.title }), item.summary ? h('div', { class: 'ax-sub', text: item.summary }) : null, storyNote(item.corroboration)),
     h('td', { class: 'ax-col-opt' }, (item.lenses || []).length ? (item.lenses || []).map((x) => h('span', { class: 'ax-badge', style: 'margin:0 4px 4px 0', text: x })) : na('Unclassified')),
     h('td', { class: 'ax-col-opt' }, item.source || na()),
     h('td', { class: 'ax-mono' }, S.ageFromIso(item.observed_at) || na())));

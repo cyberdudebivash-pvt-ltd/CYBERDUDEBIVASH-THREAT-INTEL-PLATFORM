@@ -379,8 +379,8 @@ const CONTROLS = [
   {
     id: "stale_items_leak_into_live_items_field",
     file: "workers/intel-gateway/src/cyber-watchdog.js",
-    find: "    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort }) } };",
-    replace: "    const la = lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort });\n    return { status: 503, body: { ...degradedBody(pub), tier, items: la ? la.items : [], last_authoritative: la } };",
+    find: "    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort, group }) } };",
+    replace: "    const la = lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort, group });\n    return { status: 503, body: { ...degradedBody(pub), tier, items: la ? la.items : [], last_authoritative: la } };",
     tests: [T("cyber-watchdog.test.js")],
   },
   {
@@ -701,6 +701,22 @@ const CONTROLS = [
     find: "  return [...AI_TERMS.filter(([, re]) => re.test(blob)).map(([term]) => term), ...aiPackagesFor(item)];",
     replace: "  return AI_TERMS.filter(([, re]) => re.test(blob)).map(([term]) => term);",
     tests: [T("ai-threat-feed.test.js")],
+  },
+  {
+    // Story grouping: a bare vendor name ("Citrix") must never merge two threats.
+    id: "stories_merge_on_bare_vendor",
+    file: "workers/intel-gateway/src/watchdog-stories.js",
+    find: "  return w.length >= 2 ? w : null; // a bare vendor name is too broad to identify a story",
+    replace: "  return w.length ? w : null;",
+    tests: [T("watchdog-stories.test.js")],
+  },
+  {
+    // Story grouping: title evidence needs two specific shared words beyond the product.
+    id: "stories_merge_on_product_alone",
+    file: "workers/intel-gateway/src/watchdog-stories.js",
+    find: "    if (extra.length < 2) return null;",
+    replace: "",
+    tests: [T("watchdog-stories.test.js")],
   },
   {
     // CSV export: a hostile advisory title must not become a spreadsheet formula.
