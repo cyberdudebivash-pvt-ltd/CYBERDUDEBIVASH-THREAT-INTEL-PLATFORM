@@ -1,228 +1,117 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SENTINEL APEX — Support Center</title>
+<meta charset="utf-8">
+<!-- Clickjacking guard; see js/frame-guard.js -->
+<script src="/js/frame-guard.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Support | CYBERDUDEBIVASH SENTINEL APEX</title>
+<meta name="description" content="How to reach Sentinel APEX support, the response time included with each plan, and live platform status.">
+<link rel="stylesheet" href="/css/apex-design-tokens.css">
+<!--
+  2026-09-28 (pre-release fabrication sweep). This page used to show five
+  invented tickets ("TKT-2026-0892 ... C2 detection alert not firing") with
+  live-looking SLA countdowns, and "created" a ticket with a randomly generated ID
+  that was never sent anywhere -- a customer asking for help got a fake
+  ticket number and no support. There is no ticketing backend.
+  It now states the real channels only: the support included with each plan
+  (verbatim from config/commercial-contract.json; tests/test_no_fabricated_
+  intel_pages.py fails if they drift), the real contact addresses, and live
+  platform status from /api/watchdog/health.
+-->
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0a0e1a;--card:#0f1629;--accent:#00d4ff;--danger:#ff3366;--success:#00ff88;--warning:#ffaa00;--text:#e2e8f0;--muted:#64748b;--border:#1e2d4a}
-body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text)}
-.header{background:var(--card);border-bottom:1px solid var(--border);padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between}
-.logo{font-weight:700;color:var(--accent);font-size:1.1rem;display:flex;align-items:center;gap:8px}
-.logo-icon{width:30px;height:30px;background:linear-gradient(135deg,var(--accent),#0066ff);border-radius:7px}
-.content{padding:24px;max-width:1200px;margin:0 auto}
-.page-title{font-size:1.4rem;font-weight:700;margin-bottom:4px}
-.page-sub{color:var(--muted);font-size:13px;margin-bottom:24px}
-.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
-.stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;text-align:center}
-.stat-val{font-size:2rem;font-weight:700}
-.stat-lbl{font-size:12px;color:var(--muted);margin-top:4px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:24px}
-.section-title{font-size:1rem;font-weight:600;margin-bottom:16px}
-.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .2s}
-.btn-primary{background:linear-gradient(135deg,var(--accent),#0066ff);color:#0a0e1a}
-.btn-primary:hover{opacity:.85}
-.btn-outline{background:transparent;border:1px solid var(--accent);color:var(--accent)}
-.btn-outline:hover{background:rgba(0,212,255,.1)}
-.btn-danger{background:transparent;border:1px solid var(--danger);color:var(--danger);font-size:12px;padding:5px 12px}
-.btn-warning{background:transparent;border:1px solid var(--warning);color:var(--warning);font-size:12px;padding:5px 12px}
-/* TICKET FORM */
-.ticket-form{display:none;background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:20px}
-.ticket-form.open{display:block}
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px}
-.form-group{display:flex;flex-direction:column;gap:6px}
-.form-group label{font-size:12px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.05em}
-.form-control{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:13px;font-family:inherit;width:100%;outline:none;transition:border-color .2s}
-.form-control:focus{border-color:var(--accent)}
-textarea.form-control{resize:vertical;min-height:80px}
-select.form-control option{background:#0f1629;color:var(--text)}
-/* TABLE */
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;padding:10px 12px;background:rgba(0,212,255,.05);color:var(--muted);font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)}
-td{padding:10px 12px;border-bottom:1px solid rgba(30,45,74,.4);vertical-align:middle}
-tr:hover td{background:rgba(0,212,255,.02)}
-.badge{display:inline-flex;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700}
-.p1{background:rgba(255,51,102,.18);color:var(--danger)}
-.p2{background:rgba(255,170,0,.18);color:var(--warning)}
-.p3{background:rgba(255,213,0,.15);color:#ffd700}
-.p4{background:rgba(100,116,139,.2);color:var(--muted)}
-.s-open{background:rgba(0,212,255,.12);color:var(--accent)}
-.s-progress{background:rgba(255,170,0,.12);color:var(--warning)}
-.s-resolved{background:rgba(0,255,136,.12);color:var(--success)}
-.s-closed{background:rgba(100,116,139,.15);color:var(--muted)}
-.sla-countdown{font-size:12px;font-weight:700;color:var(--danger);font-variant-numeric:tabular-nums}
-.sla-ok{color:var(--muted)}
-/* SLA MATRIX */
-.sla-matrix table th,.sla-matrix table td{text-align:center}
-.sla-matrix table td:first-child{text-align:left;font-weight:600}
-/* TOAST */
-.toast{position:fixed;bottom:24px;right:24px;background:var(--success);color:#0a0e1a;padding:12px 20px;border-radius:10px;font-weight:600;font-size:14px;z-index:999;transform:translateY(80px);opacity:0;transition:all .3s}
-.toast.show{transform:translateY(0);opacity:1}
-@media(max-width:768px){.stats-row{grid-template-columns:repeat(2,1fr)}.form-row{grid-template-columns:1fr}}
+  body { margin: 0; }
+  .sp-wrap { max-width: 1100px; margin: 0 auto; }
+  .sp-title { font: 800 20px/1.2 var(--ax-font); letter-spacing: 0.06em; margin: 0; }
+  .sp-links a { color: var(--ax-text-secondary); text-decoration: none; font-size: 13px; margin-left: 14px; }
+  .sp-links a:hover { color: var(--ax-text-primary); }
+  .sp-lede { color: var(--ax-text-secondary); max-width: 72ch; margin: 6px 0 18px; }
+  .sp-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); margin-top: 16px; }
+  .sp-contact { display: grid; gap: 10px; }
+  .sp-contact a { color: var(--ax-accent-cyan); font-weight: 650; text-decoration: none; word-break: break-all; }
+  .sp-contact a:hover { text-decoration: underline; }
+  .sp-contact div { color: var(--ax-text-secondary); font-size: 14px; }
+  ol.sp-steps { margin: 0; padding-left: 20px; color: var(--ax-text-secondary); line-height: 1.6; }
+  footer.sp-foot { color: var(--ax-text-muted); font-size: 13px; padding: 28px 0 8px; border-top: 1px solid var(--ax-border-subtle); margin-top: 32px; }
 </style>
 </head>
-<body>
-<div class="header">
-  <div class="logo"><div class="logo-icon"></div>SENTINEL APEX — Support Center</div>
-  <div style="font-size:13px;color:var(--muted)">AcmeCorp Security &nbsp;·&nbsp; Enterprise SLA</div>
-</div>
-<div class="content">
-  <div class="page-title">Enterprise Support Center</div>
-  <div class="page-sub">Track, manage and escalate support tickets with full SLA visibility.</div>
+<body class="ax-app ax-texture">
+<main id="main" class="ax-main sp-wrap">
+  <header class="ax-cmdbar">
+    <div>
+      <h1 class="sp-title">SUPPORT</h1>
+    </div>
+    <nav class="sp-links" aria-label="Related">
+      <a href="/">Home</a><a href="/status.html">Status</a><a href="/api-docs.html">API docs</a><a href="/pricing.html">Plans</a>
+    </nav>
+  </header>
+  <p class="sp-lede">Email is the support channel. There is no ticket portal: write to the address below and you receive a reply from a person, within the response time your plan includes.</p>
 
-  <div class="stats-row">
-    <div class="stat-card"><div class="stat-val" style="color:var(--warning)">7</div><div class="stat-lbl">Open Tickets</div></div>
-    <div class="stat-card"><div class="stat-val" style="color:var(--danger)">1</div><div class="stat-lbl">P1 Critical</div></div>
-    <div class="stat-card"><div class="stat-val" style="color:var(--accent)">2.3hr</div><div class="stat-lbl">Avg Response Time</div></div>
-    <div class="stat-card"><div class="stat-val" style="color:var(--success)">94%</div><div class="stat-lbl">SLA Compliance</div></div>
+  <section class="ax-panel" aria-labelledby="h-status">
+    <div class="ax-panel__head"><h2 class="ax-h-panel" id="h-status">Platform status now</h2><a class="ax-btn ax-btn--ghost ax-btn--sm" href="/status.html">Status page</a></div>
+    <span class="ax-status" id="sp-status"><span class="ax-led" data-state="unknown"></span><span>Checking</span></span>
+    <div class="ax-sub" id="sp-status-note">Checked live from the platform when this page loads.</div>
+  </section>
+
+  <div class="sp-grid">
+    <section class="ax-panel" aria-labelledby="h-contact">
+      <div class="ax-panel__head"><h2 class="ax-h-panel" id="h-contact">Contact</h2></div>
+      <div class="sp-contact">
+        <div><a href="mailto:support@cyberdudebivash.com?subject=Support%20request%20-%20Sentinel%20APEX">support@cyberdudebivash.com</a><br>Technical support: API, feeds, exports, Cyber Watchdog, reports.</div>
+        <div><a href="mailto:billing@cyberdudebivash.com?subject=Billing%20-%20Sentinel%20APEX">billing@cyberdudebivash.com</a><br>Invoices, GST, plan changes, cancellations.</div>
+        <div><a href="mailto:security@cyberdudebivash.com?subject=Security%20report">security@cyberdudebivash.com</a><br>Vulnerability reports about the platform (see <a href="/security.txt">security.txt</a>).</div>
+        <div><a href="/contact-enterprise.html">Enterprise &amp; MSSP enquiries</a><br>New Enterprise or MSSP agreements.</div>
+      </div>
+    </section>
+    <section class="ax-panel" aria-labelledby="h-include">
+      <div class="ax-panel__head"><h2 class="ax-h-panel" id="h-include">What to include</h2></div>
+      <ol class="sp-steps">
+        <li>Your plan and the email address on your subscription (never send an API key).</li>
+        <li>The endpoint or page, the time (with timezone) and the HTTP status you saw.</li>
+        <li>The <code>request_id</code> from the response body, when there is one.</li>
+        <li>What you expected, and what happened instead.</li>
+      </ol>
+    </section>
   </div>
 
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
-      <div class="section-title" style="margin:0">Support Tickets</div>
-      <button class="btn btn-primary" onclick="toggleForm()">+ New Ticket</button>
-    </div>
-
-    <div class="ticket-form" id="ticket-form">
-      <div class="form-row">
-        <div class="form-group" style="grid-column:1/-1">
-          <label>Subject</label>
-          <input class="form-control" type="text" placeholder="Brief description of the issue..." id="ticket-subject">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group" style="grid-column:1/-1">
-          <label>Description</label>
-          <textarea class="form-control" placeholder="Provide detailed information about the issue, steps to reproduce, impact..." id="ticket-desc"></textarea>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Priority</label>
-          <select class="form-control" id="ticket-priority">
-            <option value="P1">P1 — Critical (Service Down)</option>
-            <option value="P2">P2 — High (Major Degradation)</option>
-            <option value="P3" selected>P3 — Medium (Minor Issue)</option>
-            <option value="P4">P4 — Low (Question/Enhancement)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Category</label>
-          <select class="form-control" id="ticket-category">
-            <option>Technical Issue</option>
-            <option>Integration Problem</option>
-            <option>False Positive</option>
-            <option>Billing Question</option>
-            <option>Feature Request</option>
-            <option>Data Quality</option>
-          </select>
-        </div>
-      </div>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-primary" onclick="submitTicket()">Submit Ticket</button>
-        <button class="btn btn-outline" onclick="toggleForm()">Cancel</button>
-      </div>
-    </div>
-
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr><th>Ticket #</th><th>Subject</th><th>Priority</th><th>Status</th><th>Created</th><th>SLA Timer</th><th>Actions</th></tr></thead>
-        <tbody id="tickets-tbody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="card sla-matrix">
-    <div class="section-title">SLA Matrix</div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr><th>Priority</th><th>Severity</th><th>First Response</th><th>Update Frequency</th><th>Resolution Target</th><th>Coverage</th></tr></thead>
+  <section class="ax-panel" aria-labelledby="h-plans" style="margin-top:16px">
+    <div class="ax-panel__head"><h2 class="ax-h-panel" id="h-plans">Support included with each plan</h2><span class="ax-meta">From the commercial contract</span></div>
+    <div class="ax-table-wrap">
+      <table class="ax-table" id="sp-plans">
+        <thead><tr><th>Plan</th><th>Support</th></tr></thead>
         <tbody>
-          <tr><td><span class="badge p1">P1</span></td><td>Critical</td><td style="color:var(--danger)">15 minutes</td><td>Every 30 min</td><td>4 hours</td><td>24/7/365</td></tr>
-          <tr><td><span class="badge p2">P2</span></td><td>High</td><td style="color:var(--warning)">1 hour</td><td>Every 2 hours</td><td>8 hours</td><td>24/7/365</td></tr>
-          <tr><td><span class="badge p3">P3</span></td><td>Medium</td><td>4 hours</td><td>Daily</td><td>3 business days</td><td>Business hours</td></tr>
-          <tr><td><span class="badge p4">P4</span></td><td>Low</td><td>8 hours</td><td>Weekly</td><td>10 business days</td><td>Business hours</td></tr>
+          <tr data-tier="free"><td>Free</td><td>Community forum. Best-effort uptime, no response target, no outage credit.</td></tr>
+          <tr data-tier="pro"><td>Pro</td><td>Email support, 48h response.</td></tr>
+          <tr data-tier="enterprise"><td>Enterprise</td><td>Email and chat support, 4h response.</td></tr>
+          <tr data-tier="mssp"><td>MSSP</td><td>Dedicated CSM, 1h response.</td></tr>
         </tbody>
       </table>
     </div>
-  </div>
-</div>
-<div class="toast" id="toast"></div>
+  </section>
 
+  <footer class="sp-foot">Response times are those in the commercial contract for your plan. This page shows no ticket history: there is no ticketing system, so none is invented.</footer>
+</main>
 <script>
-const tickets=[
-  {id:'TKT-2026-0892',subject:'C2 detection alert not firing in SIEM integration',priority:'P1',status:'In Progress',created:'2026-05-29 07:15',slaRemain:7240,slaMax:14400},
-  {id:'TKT-2026-0891',subject:'API rate limit errors on IOC bulk download',priority:'P2',status:'Open',created:'2026-05-29 05:30',slaRemain:3600,slaMax:3600},
-  {id:'TKT-2026-0887',subject:'False positive on IP 192.168.1.50 in threat feed',priority:'P3',status:'Resolved',created:'2026-05-28 14:00',slaRemain:null},
-  {id:'TKT-2026-0883',subject:'Webhook delivery failure to Splunk endpoint',priority:'P2',status:'In Progress',created:'2026-05-28 09:22',slaRemain:1800,slaMax:3600},
-  {id:'TKT-2026-0879',subject:'Monthly report PDF not generating correctly',priority:'P3',status:'Open',created:'2026-05-27 16:45',slaRemain:null},
-];
-
-const pclass={P1:'p1',P2:'p2',P3:'p3',P4:'p4'};
-const sclass={'Open':'s-open','In Progress':'s-progress','Resolved':'s-resolved','Closed':'s-closed'};
-const tbody=document.getElementById('tickets-tbody');
-
-function renderTickets(){
-  tbody.innerHTML='';
-  tickets.forEach((t,idx)=>{
-    const sla=t.slaRemain!==null
-      ?`<span class="sla-countdown" id="sla-${idx}">${formatTime(t.slaRemain)}</span>`
-      :`<span class="sla-ok">—</span>`;
-    tbody.innerHTML+=`<tr>
-      <td style="font-family:monospace;font-size:12px">${t.id}</td>
-      <td>${t.subject}</td>
-      <td><span class="badge ${pclass[t.priority]}">${t.priority}</span></td>
-      <td><span class="badge ${sclass[t.status]}">${t.status}</span></td>
-      <td style="color:var(--muted);font-size:12px">${t.created}</td>
-      <td>${sla}</td>
-      <td style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-outline" style="font-size:11px;padding:4px 10px" onclick="showToast('Opening ${t.id}...')">View</button>
-        ${t.priority==='P1'||t.priority==='P2'?`<button class="btn btn-danger" onclick="showToast('${t.id} escalated to P1!')">Escalate</button>`:''}
-      </td>
-    </tr>`;
-  });
-}
-
-function formatTime(s){
-  if(s<=0) return `<span style="color:var(--danger)">BREACHED</span>`;
-  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
-}
-
-renderTickets();
-
-// Countdown timer
-setInterval(()=>{
-  tickets.forEach((t,idx)=>{
-    if(t.slaRemain!==null && t.slaRemain>0){
-      t.slaRemain--;
-      const el=document.getElementById(`sla-${idx}`);
-      if(el) el.textContent=formatTime(t.slaRemain);
-    }
-  });
-},1000);
-
-let formOpen=false;
-function toggleForm(){
-  formOpen=!formOpen;
-  document.getElementById('ticket-form').classList.toggle('open',formOpen);
-}
-function submitTicket(){
-  const subj=document.getElementById('ticket-subject').value.trim();
-  if(!subj){showToast('Please enter a subject');return;}
-  const pri=document.getElementById('ticket-priority').value;
-  const newTicket={id:`TKT-2026-${Math.floor(Math.random()*1000+900)}`,subject:subj,priority:pri,status:'Open',created:'2026-05-29 (now)',slaRemain:pri==='P1'?900:pri==='P2'?3600:null,slaMax:pri==='P1'?900:3600};
-  tickets.unshift(newTicket);
-  renderTickets();
-  toggleForm();
-  showToast('Ticket submitted successfully!');
-}
-function showToast(msg){
-  const t=document.getElementById('toast');
-  t.textContent=msg;t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'),2800);
-}
+(function () {
+  'use strict';
+  function led(state, label, note) {
+    var s = document.getElementById('sp-status');
+    var d = document.createElement('span'); d.className = 'ax-led'; d.setAttribute('data-state', state);
+    var t = document.createElement('span'); t.textContent = label;
+    s.replaceChildren(d, t);
+    if (note) document.getElementById('sp-status-note').textContent = note;
+  }
+  fetch('/api/watchdog/health', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (h) {
+      var st = h && h.freshness_status;
+      if (st === 'FRESH') led('fresh', 'Intelligence fresh', 'Feed generated ' + (h.feed_generated_at || 'at an unknown time') + '.');
+      else if (typeof st === 'string') led('degraded', 'Intelligence ' + st.toLowerCase(), 'The feed is not fresh right now (last update ' + (h.feed_generated_at || 'unknown') + ').');
+      else led('unknown', 'Status unknown');
+    })
+    .catch(function () { led('offline', 'Status unavailable', 'The status check could not reach the platform. Include that in your email.'); });
+}());
 </script>
 </body>
 </html>

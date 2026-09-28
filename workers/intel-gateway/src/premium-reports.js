@@ -1,7 +1,9 @@
 // =============================================================================
 // CYBERDUDEBIVASH(R) SENTINEL APEX -- Premium Threat Report Engine v201.0
 // Routes: POST /api/reports/premium  .  GET /api/reports/list  .  GET /api/reports/:id
-// Sellable Asset: $49/report  |  $149/mo unlimited  |  Included in Enterprise
+// Included with Pro and above (plan prices: the runtime pricing provider).
+// 2026-09-28: the "$49/report" and "$149/mo unlimited" offers were removed --
+// neither is in config/commercial-contract.json nor sold through Razorpay.
 // Architecture:
 //   - JSON report generation (structured intelligence package)
 //   - PDF generation metadata (served as downloadable JSON until PDF render service wired)
@@ -19,10 +21,6 @@ import { computeEventPriority, priorityRank } from "./watchdog-priority.js";
 // -- Tier & Pricing Config -----------------------------------------------------
 const REPORT_CONFIG = {
   VERSION: "201.0",
-  PRICE_PER_REPORT_USD:   49,
-  PRICE_PER_REPORT_INR:   3999,
-  MONTHLY_UNLIMITED_USD:  149,
-  MONTHLY_UNLIMITED_INR:  11999,
   MAX_ITEMS_FREE:         0,    // free: no reports
   MAX_ITEMS_PRO:          50,   // pro: up to 50 items per report
   MAX_ITEMS_ENTERPRISE:   500,  // enterprise: full feed
@@ -352,14 +350,22 @@ export async function handlePremiumReport(request, env, auth, rid) {
       feature:    "premium_reports",
       // Pro price from the runtime pricing provider (the value Razorpay
       // charges). This literal said "$29/mo" while Pro is billed $49/mo.
-      message:    "Premium Threat Intelligence Reports require Pro tier ($" + planPrice("PRO").usd_monthly + "/mo) or individual purchase ($49/report).",
+      message:    "Premium Threat Intelligence Reports are included with Pro ($" + planPrice("PRO").usd_monthly + "/mo) and above.",
       pricing: {
-        per_report_usd:     REPORT_CONFIG.PRICE_PER_REPORT_USD,
-        per_report_inr:     REPORT_CONFIG.PRICE_PER_REPORT_INR,
-        monthly_unlimited:  REPORT_CONFIG.MONTHLY_UNLIMITED_USD,
+        // DEPRECATED (2026-09-28): per-report and report-only plans are not
+        // sold. Kept as null so existing clients read "no price" rather than
+        // a price that is never charged. Removal: next premium-reports major.
+        per_report_usd:     null,
+        per_report_inr:     null,
+        monthly_unlimited:  null,
+        included_from:      "PRO",
+        pro_usd_monthly:    planPrice("PRO").usd_monthly,
+        pro_inr_monthly:    planPrice("PRO").inr_monthly,
+        price_source:       "gateway runtime pricing provider (the values Razorpay charges)",
       },
       upgrade_url: "/upgrade.html?plan=pro&feature=reports",
-      store_url:   "/store.html?product=threat-report",
+      // DEPRECATED (2026-09-28): the store has no threat-report product.
+      store_url:   null,
       request_id:  rid,
     }, 403);
   }
@@ -579,6 +585,7 @@ export async function handlePremiumReport(request, env, auth, rid) {
       api_docs_url:     "https://intel.cyberdudebivash.com/api-docs.html",
       pricing_url:      "https://intel.cyberdudebivash.com/pricing.html",
       report_ttl_days:  REPORT_CONFIG.REPORT_TTL_DAYS,
+      expires_at:       new Date(now.getTime() + REPORT_TTL_MS).toISOString(),
       pdf_download_url: `https://intel.cyberdudebivash.com/api/reports/${reportId}/pdf`,
       csv_download_url: `https://intel.cyberdudebivash.com/api/reports/${reportId}/csv`,
       print_url:        `https://intel.cyberdudebivash.com/api/reports/${reportId}/print`,
@@ -709,6 +716,8 @@ export async function handleReportList(request, env, auth, rid) {
         // above in handlePremiumReport). A report with no recorded owner
         // (key_id: "", e.g. any generated before this fix) now matches no
         // one rather than everyone -- fails closed, not open.
+        // 90-day retention: an expired report is no longer listed (the cron purge deletes it).
+        if (reportExpired(meta.generated_at, obj.uploaded, Date.now())) continue;
         if (auth.is_admin || (meta.key_id && auth.sub && meta.key_id === auth.sub)) {
           reports.push({
             report_id:    meta.report_id || obj.key.split("/").pop().replace(".json", ""),
@@ -764,13 +773,83 @@ export async function handleReportGet(request, env, auth, rid, reportId) {
 
   const loaded = await loadOwnedReport(env, auth, safeId);
   if (loaded.state === "forbidden") return _json({ error: "not_found", request_id: rid }, 404);
+  if (loaded.state === "expired") return expiredResponse(safeId, loaded.expired_at, rid);
   if (loaded.state === "found") return _json(loaded.data);
   return _json({ error: "report_not_found", report_id: safeId, request_id: rid }, 404);
 }
 
+// -- Retention (90 days) ------------------------------------------------------
+// 2026-09-28: reports advertised report_ttl_days: 90 but nothing expired or
+// deleted them. Now: an expired report is not served (410) or listed, and
+// purgeExpiredReports() -- run from the Worker's 6-hourly cron -- deletes it.
+// Age comes from the report's generated_at, else R2's upload time; a report
+// whose age cannot be determined is kept, never deleted on a guess.
+export const REPORT_TTL_MS = REPORT_CONFIG.REPORT_TTL_DAYS * 86400000;
+const REPORT_KEY_RE = /^reports\/premium\/rpt_[a-f0-9]{16}\.json$/;
+
+function reportBornMs(generatedAt, uploaded) {
+  const g = Date.parse(typeof generatedAt === "string" ? generatedAt : "");
+  if (Number.isFinite(g)) return g;
+  const u = uploaded instanceof Date ? uploaded.getTime() : Date.parse(uploaded || "");
+  return Number.isFinite(u) ? u : null;
+}
+
+export function reportExpired(generatedAt, uploaded, nowMs) {
+  const born = reportBornMs(generatedAt, uploaded);
+  return born !== null && nowMs - born > REPORT_TTL_MS;
+}
+
+function reportExpiresAt(generatedAt, uploaded) {
+  const born = reportBornMs(generatedAt, uploaded);
+  return born === null ? null : new Date(born + REPORT_TTL_MS).toISOString();
+}
+
+function expiredResponse(safeId, expiredAt, rid) {
+  return _json({
+    error: "report_expired", report_id: safeId, expired_at: expiredAt,
+    message: "Premium reports are retained for " + REPORT_CONFIG.REPORT_TTL_DAYS + " days. Generate a new report with POST /api/reports/premium.",
+    request_id: rid,
+  }, 410);
+}
+
+/**
+ * Deletes expired premium reports. Bounded per run (pages listed, keys
+ * deleted); only keys matching reports/premium/rpt_<16 hex>.json are ever
+ * deleted. Returns counts for the cron log; never throws.
+ */
+export async function purgeExpiredReports(env, nowMs = Date.now(), { maxPages = REPORT_CONFIG.LIST_MAX_PAGES, maxDeletes = 1000 } = {}) {
+  const out = { scanned: 0, expired: 0, deleted: 0, truncated: false, error: null };
+  if (!env?.INTEL_R2) return { ...out, error: "no_r2_binding" };
+  try {
+    const doomed = [];
+    let cursor; let pages = 0;
+    do {
+      const page = await env.INTEL_R2.list({ prefix: REPORT_CONFIG.R2_PREFIX, limit: 1000, include: ["customMetadata"], ...(cursor ? { cursor } : {}) });
+      for (const obj of page.objects || []) {
+        out.scanned++;
+        if (!REPORT_KEY_RE.test(obj.key)) continue;
+        if (!reportExpired(obj.customMetadata?.generated_at, obj.uploaded, nowMs)) continue;
+        out.expired++;
+        if (doomed.length < maxDeletes) doomed.push(obj.key);
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+      pages++;
+    } while (cursor && pages < maxPages);
+    out.truncated = !!cursor || out.expired > doomed.length;
+    for (let i = 0; i < doomed.length; i += 1000) {
+      const batch = doomed.slice(i, i + 1000);
+      await env.INTEL_R2.delete(batch);
+      out.deleted += batch.length;
+    }
+  } catch (e) {
+    out.error = String(e && e.message || e).slice(0, 200);
+  }
+  return out;
+}
+
 /**
  * A stored report the caller owns: { state: "found", data } | { state:
- * "forbidden" } | { state: "missing" }. One ownership check for JSON and
+ * "forbidden" } | { state: "expired", expired_at } | { state: "missing" }. One ownership check for JSON and
  * CSV. Behaviour is unchanged from the inline version it replaces.
  *
  * TENANT-ISOLATION FIX (CodeRabbit, PR #242 pre-merge review): two
@@ -795,6 +874,9 @@ async function loadOwnedReport(env, auth, safeId) {
       if (obj) {
         const ownerId = obj.customMetadata?.key_id || "";
         if (!auth.is_admin && (!ownerId || ownerId !== (auth.sub || ""))) return { state: "forbidden" };
+        if (reportExpired(obj.customMetadata?.generated_at, obj.uploaded, Date.now())) {
+          return { state: "expired", expired_at: reportExpiresAt(obj.customMetadata?.generated_at, obj.uploaded) };
+        }
         return { state: "found", data: await obj.json() };
       }
     }
@@ -848,6 +930,7 @@ export async function handleReportCsv(request, env, auth, rid, reportId) {
   if (!CSV_SECTIONS.includes(section)) return _json({ error: "invalid_section", allowed: CSV_SECTIONS, request_id: rid }, 400);
   const loaded = await loadOwnedReport(env, auth, safeId);
   if (loaded.state === "forbidden") return _json({ error: "not_found", request_id: rid }, 404);
+  if (loaded.state === "expired") return expiredResponse(safeId, loaded.expired_at, rid);
   if (loaded.state !== "found") return _json({ error: "report_not_found", report_id: safeId, request_id: rid }, 404);
   return new Response(buildReportCsv(loaded.data, section), {
     status: 200,
@@ -1038,6 +1121,7 @@ export async function handleReportPrint(request, env, auth, rid, reportId) {
   if (tier === "free") return _json({ error: "tier_required", upgrade_url: "/upgrade.html?plan=pro", request_id: rid }, 403);
   const loaded = await loadOwnedReport(env, auth, safeId);
   if (loaded.state === "forbidden") return _json({ error: "not_found", request_id: rid }, 404);
+  if (loaded.state === "expired") return expiredResponse(safeId, loaded.expired_at, rid);
   if (loaded.state !== "found") return _json({ error: "report_not_found", report_id: safeId, request_id: rid }, 404);
   return new Response(buildReportPrintHtml(loaded.data), {
     status: 200,

@@ -239,7 +239,7 @@ pre{
 <!-- TOPBAR -->
 <nav class="topbar">
   <span class="brand">CYBERDUDEBIVASH&reg;<span class="brand-sub">SENTINEL APEX</span></span>
-  <span class="badge badge-live">● LIVE</span>
+  <span class="badge" id="arc-live">● Checking status</span>
   <div class="topbar-links">
     <a href="https://intel.cyberdudebivash.com/api-docs.html">Full Docs</a>
     <a href="https://intel.cyberdudebivash.com/upgrade.html">Get API Key</a>
@@ -251,9 +251,9 @@ pre{
 <!-- HERO -->
 <div class="hero">
   <h1>API Quick Reference Card</h1>
-  <p>SENTINEL APEX Threat Intelligence Platform &mdash; Production API v184.0 &bull; STIX 2.1 &bull; 77+ Live Advisories</p>
+  <p>SENTINEL APEX Threat Intelligence Platform &mdash; Production API &bull; STIX 2.1</p>
   <div class="hero-meta">
-    <span class="badge badge-live">● 77+ Advisories</span>
+    <span class="badge" id="arc-count-badge">● Advisories: checking</span>
     <span class="badge badge-new">STIX 2.1</span>
     <span class="badge badge-live">● Cloudflare Global Edge</span>
     <span class="badge badge-new">JWT + API Key Auth</span>
@@ -273,11 +273,11 @@ pre{
   <!-- QUICK FACTS -->
   <div class="facts-bar">
     <div class="fact-item">
-      <div class="fact-value">77+</div>
-      <div class="fact-label">Live Advisories</div>
+      <div class="fact-value" id="arc-count">&mdash;</div>
+      <div class="fact-label">Advisories on the live feed</div>
     </div>
     <div class="fact-item">
-      <div class="fact-value">v184.0</div>
+      <div class="fact-value" id="arc-version">&mdash;</div>
       <div class="fact-label">Platform Version</div>
     </div>
     <div class="fact-item">
@@ -286,15 +286,7 @@ pre{
     </div>
     <div class="fact-item">
       <div class="fact-value">99.9%</div>
-      <div class="fact-label">SLA Uptime</div>
-    </div>
-    <div class="fact-item">
-      <div class="fact-value">&lt;80ms</div>
-      <div class="fact-label">P95 Latency</div>
-    </div>
-    <div class="fact-item">
-      <div class="fact-value">55+</div>
-      <div class="fact-label">Intel Sources</div>
+      <div class="fact-label">Uptime commitment (Enterprise / MSSP; Pro 99.5%)</div>
     </div>
     <div class="fact-item">
       <div class="fact-value">Global</div>
@@ -342,15 +334,15 @@ pre{
               <td>Platform health, version, pipeline status, advisory count</td>
               <td>&mdash;</td>
               <td><span class="tier-pill t-free">Free</span></td>
-              <td><span class="status-dot dot-live"></span>200 Live</td>
+              <td>200 OK</td>
             </tr>
             <tr>
               <td><span class="method m-get">GET</span></td>
               <td><code class="ep-path">/api/feed.json</code></td>
-              <td>Full intelligence feed JSON — 77+ advisories, all fields</td>
+              <td>Full intelligence feed JSON — every advisory on the live feed, all fields</td>
               <td>&mdash;</td>
               <td><span class="tier-pill t-free">Free</span></td>
-              <td><span class="status-dot dot-live"></span>200 Live</td>
+              <td>200 OK</td>
             </tr>
             <tr>
               <td><span class="method m-get">GET</span></td>
@@ -358,7 +350,7 @@ pre{
               <td>Most recent threat advisories (R2 blob, cached at edge)</td>
               <td>&mdash;</td>
               <td><span class="tier-pill t-free">Free</span></td>
-              <td><span class="status-dot dot-live"></span>200 Live</td>
+              <td>200 OK</td>
             </tr>
             <tr>
               <td><span class="method m-get">GET</span></td>
@@ -366,7 +358,7 @@ pre{
               <td>Top 10 threats ranked by severity score</td>
               <td>&mdash;</td>
               <td><span class="tier-pill t-free">Free</span></td>
-              <td><span class="status-dot dot-live"></span>200 Live</td>
+              <td>200 OK</td>
             </tr>
             <tr>
               <td><span class="method m-get">GET</span></td>
@@ -374,7 +366,7 @@ pre{
               <td>Full APEX enriched feed &mdash; complete enrichment, STIX refs, IOC links</td>
               <td>&mdash;</td>
               <td><span class="tier-pill t-free">Free</span></td>
-              <td><span class="status-dot dot-live"></span>200 Live</td>
+              <td>200 OK</td>
             </tr>
             <!-- AUTH REQUIRED -->
             <tr><td colspan="6" style="background:rgba(245,158,11,.05);color:var(--yellow);font-size:11px;font-weight:700;letter-spacing:.06em;padding:8px 12px">AUTHENTICATED &mdash; API KEY OR JWT BEARER REQUIRED</td></tr>
@@ -1078,6 +1070,25 @@ function copyCode(btn, id) {
     setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
   });
 }
+</script>
+<script>
+/* 2026-09-28 (pre-release fabrication sweep): the advisory count ("77+"),
+   platform version ("v184.0") and a pulsing "LIVE" badge were hardcoded, and
+   "<80ms P95" / "55+ Intel Sources" were never measured (removed). The count,
+   version and freshness are now read from /api/watchdog/health at load. */
+(function () {
+  function set(id, text) { var e = document.getElementById(id); if (e) e.textContent = text; }
+  fetch('/api/watchdog/health', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (h) {
+      var fresh = h && h.freshness_status === 'FRESH';
+      var b = document.getElementById('arc-live');
+      if (b) { b.textContent = fresh ? '● LIVE' : '● ' + ((h && h.freshness_status) || 'STATUS UNKNOWN'); if (fresh) b.className = 'badge badge-live'; }
+      if (h && Number.isFinite(h.feed_item_count)) { set('arc-count', String(h.feed_item_count)); set('arc-count-badge', '● ' + h.feed_item_count + ' advisories'); }
+      if (h && typeof h.platform_version === 'string') set('arc-version', 'v' + h.platform_version);
+    })
+    .catch(function () { set('arc-live', '● Status unavailable'); });
+}());
 </script>
 </body>
 </html>

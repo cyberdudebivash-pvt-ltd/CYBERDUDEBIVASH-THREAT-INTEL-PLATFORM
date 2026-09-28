@@ -34,6 +34,7 @@ CLEANED_PAGES = {
     "malware-intel-hub.html": "/api/feed.json",
     "ai-runtime-defense.html": "/api/feed.json",
     "soc-operations-center.html": "/api/v1/intel/latest.json",
+    "support-center.html": "/api/watchdog/health",
 }
 
 SHARED_VIEW = REPO / "js" / "feed-topic-view.js"
@@ -163,3 +164,63 @@ def test_soc_ops_model_has_no_fabrication():
     js = (REPO / "js" / "soc-ops-model.js").read_text(encoding="utf-8")
     for banned in ("Math.random", "setInterval", "innerHTML", "fetch("):
         assert banned not in js, banned
+
+
+# 2026-09-28 pre-release sweep: hardcoded mockups replaced by redirects to
+# their live equivalents (page -> target, query string preserved).
+REDIRECTS = {
+    "billing-center.html": "/subscription-management.html",
+    "customer-dashboard.html": "/soc-operations-center.html",
+    "daily-operations-center.html": "/soc-operations-center.html",
+    "dependency-platform.html": "/api-key-manager.html",
+    "executive-reporting-center.html": "/enterprise-cyber-intelligence-os.html",
+    "mssp-customer-center.html": "/mssp-tenant-dashboard.html",
+    "mssp-partner-portal.html": "/mssp-tenant-dashboard.html",
+    "my-exposure-center.html": "/cyber-watchdog.html#watches",
+    "payment-confirmation.html": "/payment-status-dashboard.html",
+    "value-center.html": "/roi-calculator.html",
+    "api-management-center.html": "/api-key-manager.html",
+    "customer-portal.html": "/api-key-manager.html",
+}
+
+
+@pytest.mark.parametrize("page", sorted(REDIRECTS))
+def test_mockup_is_a_redirect_to_a_live_page(page):
+    html = _text(page)
+    target = REDIRECTS[page]
+    path, _, frag = target.partition("#")
+    assert f'http-equiv="refresh" content="0; url={target}"' in html
+    assert f"window.location.replace('{path}' + qs" in html
+    if frag:
+        assert f"+ '#{frag}')" in html
+    assert "Math.random" not in html and len(html) < 4000, "a redirect page carries no mockup content"
+    registry = json.loads((REPO / "data/quality/frontend_capability_registry.json").read_text(encoding="utf-8"))
+    by_id = {e["id"]: e for e in registry["entries"]}
+    assert by_id[page]["category"] == "DEPRECATED"
+    target_entry = by_id[path.lstrip("/")]
+    # A redirect never lands on another mockup or redirect: the target is live
+    # (or, for roi-calculator.html, legitimately static -- values the customer enters).
+    assert target_entry["category"] == "CUSTOMER_UI", target_entry
+    assert target_entry["status"] in ("live", "static_content"), target_entry
+
+
+def test_support_center_invents_no_tickets_and_matches_the_contract():
+    html = _visible("support-center.html")
+    for banned in ("TKT-", "Math.random", "slaRemain", "Open ticket", "innerHTML"):
+        assert banned not in html, banned
+    contract = json.loads((REPO / "config/commercial-contract.json").read_text(encoding="utf-8"))
+    for tier, spec in contract["tiers"].items():
+        row = re.search(r'<tr data-tier="%s"><td>[^<]+</td><td>([^<]+)</td></tr>' % tier, html)
+        assert row, tier
+        assert row.group(1) == spec["support"], f"{tier}: page says {row.group(1)!r}, contract says {spec['support']!r}"
+    assert "mailto:support@cyberdudebivash.com" in html
+
+
+def test_api_reference_card_claims_are_live_or_removed():
+    html = _text("api-reference-card.html")
+    body = re.sub(r"<script>.*?</script>", "", html, flags=re.S)
+    for banned in ("77+", "200 Live", "&lt;80ms", "55+", "Production API v184.0"):
+        assert banned not in body, banned
+    assert "fetch('/api/watchdog/health'" in html
+    assert 'id="arc-count"' in html and 'id="arc-version"' in html
+    assert "Uptime commitment (Enterprise / MSSP; Pro 99.5%)" in html

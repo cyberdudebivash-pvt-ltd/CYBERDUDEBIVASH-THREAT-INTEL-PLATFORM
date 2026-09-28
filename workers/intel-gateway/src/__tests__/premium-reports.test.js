@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   analyseMitreCoverage, buildCVESummary, itemCveIds, handlePremiumReport, handleReportList, handleReportCsv,
   buildReportCsv, periodCoverage, buildReportPrintHtml, handleReportPrint, PRINT_CSP,
+  handleReportGet, purgeExpiredReports, reportExpired, REPORT_TTL_MS,
 } from "../premium-reports.js";
 import worker from "../index.js";
 import { planPrice } from "../cyber-watchdog.js";
@@ -72,7 +73,7 @@ function envWith(items, { generatedAt = isoAgo(600), feed, pageSize = 1000 } = {
         const page = keys.slice(start, start + size);
         const truncated = start + size < keys.length;
         return {
-          objects: page.map((k) => ({ key: k, size: 1, uploaded: new Date(), customMetadata: store.get(k).meta })),
+          objects: page.map((k) => ({ key: k, size: 1, uploaded: store.get(k).uploaded || new Date(), customMetadata: store.get(k).meta })),
           truncated, cursor: truncated ? String(start + size) : undefined,
         };
       },
@@ -87,6 +88,13 @@ test("free tier upsell quotes the Pro price Razorpay charges", async () => {
   const body = await res.json();
   assert.match(body.message, new RegExp("\\$" + planPrice("PRO").usd_monthly + "/mo"));
   assert.doesNotMatch(body.message, /\$29/);
+  // 2026-09-28: no uncontracted offers (per-report / report-only plans, dead store link).
+  assert.doesNotMatch(JSON.stringify(body), /\$49\/report|\$149|store\.html/);
+  assert.equal(body.pricing.per_report_usd, null);
+  assert.equal(body.pricing.monthly_unlimited, null);
+  assert.equal(body.pricing.included_from, "PRO");
+  assert.equal(body.pricing.pro_usd_monthly, planPrice("PRO").usd_monthly);
+  assert.equal(body.store_url, null);
 });
 
 test("reports rank advisories by priority, carry cve_ids and act-first guidance; MSSP gets full-tier caps", async () => {
@@ -229,4 +237,51 @@ test("router: /pdf redirects to the print page and keeps the query; bad ids are 
   assert.equal(res.headers.get("Location"), "/api/reports/rpt_0123456789abcdef/print?api_key=k1");
   assert.equal((await fetchPath("/api/reports/rpt_zz/pdf")).status, 400);
   assert.equal((await fetchPath("/api/reports/rpt_0123456789abcdef/print")).status, 403, "anonymous: tier gate");
+});
+
+test("90-day retention: expired reports are 410 on every read route and drop out of the list", async () => {
+  const env = envWith([CITRIX]);
+  const owner = { tier: "PRO", sub: "owner" };
+  const fresh = await (await handlePremiumReport(post(), env, owner, "rid")).json();
+  const old = await (await handlePremiumReport(post(), env, owner, "rid")).json();
+  assert.ok(Date.parse(fresh.metadata.expires_at) - Date.parse(fresh.generated_at) === REPORT_TTL_MS);
+  // Age the second report past 90 days.
+  const key = `reports/premium/${old.report_id}.json`;
+  env.store.get(key).meta.generated_at = new Date(Date.now() - REPORT_TTL_MS - 3600e3).toISOString();
+  for (const h of [handleReportGet, handleReportCsv, handleReportPrint]) {
+    const res = await h(getReq(`/api/reports/${old.report_id}`), env, owner, "rid", old.report_id);
+    assert.equal(res.status, 410, h.name);
+    const b = await res.json();
+    assert.equal(b.error, "report_expired");
+    assert.ok(b.expired_at);
+  }
+  assert.equal((await handleReportGet(getReq("/x"), env, owner, "rid", fresh.report_id)).status, 200);
+  assert.equal((await handleReportGet(getReq("/x"), env, { tier: "PRO", sub: "intruder" }, "rid", old.report_id)).status, 404, "ownership still checked first");
+  const list = await (await handleReportList(getReq("/api/reports/list"), env, owner, "rid")).json();
+  assert.deepEqual(list.reports.map((r) => r.report_id), [fresh.report_id]);
+});
+
+test("purge deletes only expired, well-formed report keys, in bounded batches; unknown age is kept", async () => {
+  const env = envWith([], { pageSize: 2 });
+  const now = Date.now();
+  const put = (id, gen, uploaded) => env.store.set(`reports/premium/${id}.json`, { body: "{}", meta: gen === undefined ? {} : { generated_at: gen }, uploaded });
+  put("rpt_aaaaaaaaaaaaaaaa", new Date(now - REPORT_TTL_MS - 1).toISOString());
+  put("rpt_bbbbbbbbbbbbbbbb", new Date(now - REPORT_TTL_MS - 5).toISOString());
+  put("rpt_cccccccccccccccc", new Date(now - 1000).toISOString());
+  put("rpt_dddddddddddddddd", "not-a-date");
+  env.store.set("reports/premium/notes.txt", { body: "x", meta: { generated_at: new Date(0).toISOString() } });
+  const deleted = [];
+  env.INTEL_R2.delete = async (keys) => { for (const k of [].concat(keys)) { deleted.push(k); env.store.delete(k); } };
+  const r = await purgeExpiredReports(env, now, { maxDeletes: 1 });
+  assert.equal(r.expired, 2);
+  assert.equal(r.deleted, 1, "bounded per run");
+  assert.equal(r.truncated, true);
+  const r2 = await purgeExpiredReports(env, now);
+  assert.equal(r2.deleted, 1);
+  assert.deepEqual(deleted.sort(), ["reports/premium/rpt_aaaaaaaaaaaaaaaa.json", "reports/premium/rpt_bbbbbbbbbbbbbbbb.json"]);
+  assert.ok(env.store.has("reports/premium/rpt_cccccccccccccccc.json"));
+  assert.ok(env.store.has("reports/premium/rpt_dddddddddddddddd.json"), "unparseable generated_at falls back to the (recent) upload time");
+  assert.ok(env.store.has("reports/premium/notes.txt"), "only rpt_<16 hex>.json keys are deleted");
+  assert.equal(reportExpired(undefined, undefined, now), false);
+  assert.deepEqual(await purgeExpiredReports({}, now), { scanned: 0, expired: 0, deleted: 0, truncated: false, error: "no_r2_binding" });
 });
