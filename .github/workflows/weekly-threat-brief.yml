@@ -5,8 +5,9 @@
 #   Generates and publishes the weekly threat intelligence brief every Monday
 #   at 02:30 UTC (08:00 IST). Also sends Telegram notification to subscribers.
 #   The brief is published at /weekly-brief.html and /api/v1/intel/weekly_brief.json.
-#   Generated runtime output is deployed to gh-pages only; CI never writes it
-#   back to protected main.
+#   HTML is deployed to gh-pages. The API JSON is published to the canonical
+#   INTEL_R2 data bucket consumed by intel-gateway. CI never writes generated
+#   runtime output back to protected main.
 #
 # REVENUE PURPOSE:
 #   This is the primary recurring value delivery mechanism for PRO subscribers.
@@ -145,23 +146,29 @@ jobs:
       # ------------------------------------------------------------------
       - name: "STEP 6 — Branch-protection-safe publication preflight"
         run: |
-          # Runtime publication is handled by STEP 7 on the shared gh-pages writer.
-          # Do NOT commit generated runtime state back to protected main from CI.
-          # This keeps repository rules authoritative and prevents GH013 failures.
+          # Generated runtime state is published to R2/Pages, never protected main.
           test -s api/v1/intel/weekly_brief.json
           test -s weekly-brief.html
           SHA_JSON=$(sha256sum api/v1/intel/weekly_brief.json | awk '{print $1}')
           SHA_HTML=$(sha256sum weekly-brief.html | awk '{print $1}')
-          echo "[PASS] Generated brief ready for Pages publication"
+          echo "[PASS] Generated brief ready for R2 + Pages publication"
           echo "weekly_brief.json sha256=${SHA_JSON}"
           echo "weekly-brief.html sha256=${SHA_HTML}"
+
+      # ------------------------------------------------------------------
+      - name: "STEP 7 — Publish Weekly Brief API JSON to canonical R2"
+        env:
+          CF_ACCOUNT_ID:         ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_upload.py --weekly-brief-only
 
       # ------------------------------------------------------------------
       # v184.8 FIX: was on the floating @v4.8.0 tag -- this job holds
       # pages:write and pushes to gh-pages, so a re-pointed tag would deploy
       # arbitrary content to the live Pages site with this token. Pinned to
       # the commit SHA @v4.8.0 currently resolves to.
-      - name: "STEP 7 — Deploy brief to GitHub Pages"
+      - name: "STEP 8 — Deploy brief HTML to GitHub Pages"
         uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4.9.0
         with:
           folder: .
@@ -174,11 +181,20 @@ jobs:
           commit-message: 'deploy(brief): Weekly Threat Brief [skip ci]'
 
       # ------------------------------------------------------------------
-      - name: "STEP 8 — Summary"
+      - name: "STEP 9 — Verify live Weekly Brief API"
+        env:
+          WEEKLY_BRIEF_VERIFY_ATTEMPTS: '8'
+          WEEKLY_BRIEF_VERIFY_SLEEP_SECONDS: '5'
+          WEEKLY_BRIEF_VERIFY_TIMEOUT_SECONDS: '10'
+        run: python3 scripts/verify_weekly_brief_live.py
+
+      # ------------------------------------------------------------------
+      - name: "STEP 10 — Summary"
         run: |
           echo "======================================================"
           echo "  WEEKLY THREAT BRIEF — COMPLETE"
           echo "======================================================"
-          echo "  URL: https://intel.cyberdudebivash.com/weekly-brief.html"
-          echo "  API: https://intel.cyberdudebivash.com/api/v1/intel/weekly_brief.json"
+          echo "  HTML: https://intel.cyberdudebivash.com/weekly-brief.html"
+          echo "  API : https://intel.cyberdudebivash.com/api/v1/intel/weekly_brief.json"
+          echo "  DATA: canonical INTEL_R2 publication verified live"
           echo "======================================================"
