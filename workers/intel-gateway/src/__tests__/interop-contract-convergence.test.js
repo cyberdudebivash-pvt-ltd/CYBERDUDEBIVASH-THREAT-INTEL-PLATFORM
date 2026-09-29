@@ -8,14 +8,14 @@ const items = [{ id:"intel-1", title:"Authorized malware finding", severity:"HIG
 test("legacy MISP URL uses canonical enterprise entitlement resource", async () => {
   const calls=[];
   const resolveEntitlement=(ctx,env,resource,auth,legacyAllowed)=>{ calls.push({resource,legacyAllowed}); return {allowed:false}; };
-  const res=await routeEnterpriseEndpoint("/api/export/misp",req,{},{},"ENTERPRISE",items,"req-misp",{tier:"ENTERPRISE"},resolveEntitlement);
+  const res=await routeEnterpriseEndpoint("/api/export/misp",req,{},{},"enterprise",items,"req-misp",{tier:"enterprise"},resolveEntitlement);
   assert.equal(res.status,403);
   assert.deepEqual(calls.map(x=>x.resource),["misp_export"]);
 });
 
 test("canonical and legacy MISP URLs return the same payload contract", async () => {
   const allow=(ctx,env,resource,auth,legacyAllowed)=>({allowed:legacyAllowed});
-  const args=[req,{},{},"ENTERPRISE",items,"req-misp",{tier:"ENTERPRISE"},allow];
+  const args=[req,{},{},"enterprise",items,"req-misp",{tier:"enterprise"},allow];
   const canonical=await routeEnterpriseEndpoint("/api/misp/export",...args);
   const legacy=await routeEnterpriseEndpoint("/api/export/misp",...args);
   assert.equal(canonical.status,200); assert.equal(legacy.status,200);
@@ -26,7 +26,7 @@ test("canonical and legacy MISP URLs return the same payload contract", async ()
 test("FREE cannot use either MISP route", async () => {
   const allow=(ctx,env,resource,auth,legacyAllowed)=>({allowed:legacyAllowed});
   for (const path of ["/api/misp/export","/api/export/misp"]) {
-    const res=await routeEnterpriseEndpoint(path,req,{},{},"FREE",items,"req-free",{tier:"FREE"},allow);
+    const res=await routeEnterpriseEndpoint(path,req,{},{},"free",items,"req-free",{tier:"free"},allow);
     assert.equal(res.status,403);
   }
 });
