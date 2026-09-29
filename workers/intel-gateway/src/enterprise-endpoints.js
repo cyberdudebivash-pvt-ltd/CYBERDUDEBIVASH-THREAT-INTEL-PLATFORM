@@ -1186,6 +1186,11 @@ export async function handleMSSPFeed(req, env, ctx, tier, items, tenant_id, req_
  * @returns {Response|null}   - Response or null if no match
  */
 export async function routeEnterpriseEndpoint(pathname, req, env, ctx, tier, items, req_id, auth, resolveEntitlement) {
+  // Canonical interoperability aliases. Keep legacy customer URLs operational,
+  // but route them through one entitlement/protocol implementation.
+  const canonicalPath = pathname === "/api/export/misp" ? "/api/misp/export" : pathname;
+  pathname = canonicalPath;
+
   // TAXII 2.1
   if (pathname === "/api/taxii" || pathname === "/api/taxii/") {
     return handleTaxiiDiscovery(req, env, ctx, tier, req_id, auth, resolveEntitlement);
