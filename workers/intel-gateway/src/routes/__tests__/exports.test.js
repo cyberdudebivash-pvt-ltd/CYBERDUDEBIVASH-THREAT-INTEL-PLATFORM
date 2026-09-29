@@ -244,3 +244,24 @@ test("routeExports proceeds normally when resolveEntitlement is not supplied (in
   const res = await routeExports("/api/v1/export/suricata.rules", REQ, env, CTX, "PRO", manyItems(5), "req-19", {});
   assert.equal(res.status, 200);
 });
+
+
+test("documented IOC CSV alias converges on the production CSV exporter", async () => {
+  const env = { INTEL_R2: fakeR2WithIndicators(liveIndicatorFixtures()) };
+  const res = await routeExports("/api/v1/iocs/feed/csv", REQ, env, CTX, "PRO", manyItems(2), "req-alias-csv", {});
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("Content-Type"), "text/csv; charset=utf-8");
+  const lines = (await res.text()).trim().split("\n");
+  assert.equal(lines[0], "indicator,type,severity,risk_score,source,confidence,first_seen,last_seen,tags,cve_ids");
+});
+
+test("documented IOC STIX alias converges on the validated STIX 2.1 exporter", async () => {
+  const env = { INTEL_R2: fakeR2WithIndicators([]) };
+  const res = await routeExports("/api/v1/iocs/feed/stix", REQ, env, CTX, "PRO", manyItems(2), "req-alias-stix", {}, fakeBuildStixPattern);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("Content-Type"), "application/stix+json;version=2.1");
+  const bundle = JSON.parse(await res.text());
+  assert.equal(bundle.type, "bundle");
+  assert.equal(bundle.spec_version, "2.1");
+  assert.ok(bundle.objects.every(o => o.type === "indicator" && o.spec_version === "2.1" && o.pattern_type === "stix"));
+});
