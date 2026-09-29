@@ -138,6 +138,7 @@ import { applyCorsPolicy, buildPreflightResponse, classifyRoute } from './cors-p
 // In-isolate counter layer: batches KV writes on the hot request path.
 // See rate-limit-cache.js for the cost rationale and the exact trade-off.
 import { bumpCounter, bumpCounterWriteThrough, peekCounter } from './rate-limit-cache.js';
+import { strongConsistencyEnabled, putStrongAuthState, getStrongAuthState, incrementStrongRate, authStateDenies } from './strong-consistency-authority.js';
 // AI Swarm Synthesis (v4.45): pure prompt-building + tier-gate helpers for
 // handleSwarmSynthesis (below, defined right after handleCopilot). Extracted
 // for the same reason as subscription-lifecycle.js/gumroad-lifecycle.js --
@@ -614,16 +615,19 @@ async function checkRateLimit(env, ip, tier) {
   const minute = Math.floor(Date.now() / 60000);
   const key    = `rl:${ip}:${minute}`;
   try {
-    // P0 2026-09-28: commercial rate enforcement is intentionally
-    // WRITE-THROUGH. The in-isolate batching optimization introduced in #471
-    // allowed a burst distributed across multiple Workers isolates to seed
-    // independent local counters from eventually-consistent KV. Live Phase 8
-    // certification then observed 0/66 throttled requests against a 30/min
-    // FREE contract. Metering/web-plane counters may tolerate bounded drift;
-    // a sold per-tier API ceiling may not silently disappear under horizontal
-    // execution. This restores the pre-#471 read+write path for this one
-    // enforcement counter while leaving the write-saving cache on non-
-    // commercial counters.
+    if (strongConsistencyEnabled(env)) {
+      // P0 #596 strong-consistency mode: one serialized Durable Object
+      // instance per IP+minute window. This is globally authoritative for
+      // that window and removes Workers-KV propagation races. Disabled by
+      // default in wrangler.toml so no additional DO traffic/cost is incurred
+      // until an operator explicitly approves activation.
+      const resetAt = (minute + 1) * 60000;
+      return await incrementStrongRate(env, key, limit, resetAt);
+    }
+
+    // Default/no-new-spend path: KV write-through is still only eventually
+    // consistent globally. Keep it as the backward-compatible fallback, but
+    // do not describe it as a linearizable global counter.
     const bumped = await bumpCounterWriteThrough(env.RATE_LIMIT_KV, key, 61);
     if (bumped.count > limit) {
       return { allowed: false, count: bumped.count, limit, remaining: 0 };
@@ -664,6 +668,24 @@ async function checkSwarmPreflightRateLimit(env, ip) {
 
 const TIERS = { FREE: "FREE", PRO: "PRO", ENTERPRISE: "ENTERPRISE", MSSP: "MSSP" };
 
+async function strongAuthStates(env, keyIdentity = null, customerIdentity = null) {
+  if (!strongConsistencyEnabled(env)) {
+    return { enabled: false, denied: false, keyState: null, customerState: null };
+  }
+  try {
+    const [keyState, customerState] = await Promise.all([
+      keyIdentity ? getStrongAuthState(env, keyIdentity) : Promise.resolve(null),
+      customerIdentity ? getStrongAuthState(env, customerIdentity) : Promise.resolve(null),
+    ]);
+    const denied = authStateDenies(keyState) || authStateDenies(customerState);
+    return { enabled: true, denied, keyState, customerState };
+  } catch (_) {
+    // When explicitly enabled, the strong authority is the security source of
+    // truth. Never silently fall back to eventually-consistent KV on outage.
+    return { enabled: true, denied: true, unavailable: true, keyState: null, customerState: null };
+  }
+}
+
 const PREMIUM_INTEL_PATHS = new Set([
   "/api/v1/intel/apex.json",
   "/api/v1/intel/ai_summary.json",
@@ -697,6 +719,13 @@ async function resolveAuth(request, env) {
   if (raw.split(".").length === 3 && env.CDB_JWT_SECRET) {
     const payload = await verifyJWT(raw, env.CDB_JWT_SECRET);
     if (!payload) return { tier: TIERS.FREE, key: null, sub: null, error: "invalid_token" };
+    const strongJwt = await strongAuthStates(env, null, `customer:${payload.sub}`);
+    if (strongJwt.unavailable) {
+      return { tier: TIERS.FREE, key: null, sub: null, error: "auth_service_unavailable" };
+    }
+    if (strongJwt.denied) {
+      return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
+    }
     try {
       const revoked = await env.SECURITY_HUB_KV.get(`jwt_revoked:${raw.slice(-24)}`);
       if (revoked) return { tier: TIERS.FREE, key: null, sub: null, error: "token_revoked" };
@@ -710,12 +739,16 @@ async function resolveAuth(request, env) {
       // way: applySubscriptionStatusChange() writes jwt_deny:{customer_id}
       // (TTL-bounded to JWT_EXPIRY_SEC, deleted again on reactivation) the
       // moment a key transitions into a deny state, checked here by sub.
-      const denied = await env.SECURITY_HUB_KV.get(`jwt_deny:${payload.sub}`);
-      if (denied) return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
+      if (!strongJwt.customerState) {
+        const denied = await env.SECURITY_HUB_KV.get(`jwt_deny:${payload.sub}`);
+        if (denied) return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
+      }
     } catch (_) {}
     try {
-      const billingDenied = await env.API_KEYS_KV?.get(`jwt_deny:${payload.sub}`);
-      if (billingDenied) return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
+      if (!strongJwt.customerState) {
+        const billingDenied = await env.API_KEYS_KV?.get(`jwt_deny:${payload.sub}`);
+        if (billingDenied) return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
+      }
     } catch (_) {
       return { tier: TIERS.FREE, key: null, sub: null, error: "auth_service_unavailable" };
     }
@@ -787,13 +820,26 @@ async function resolveAuth(request, env) {
     }
     try {
       if (record) {
-        // v185.5 (Mission Phase 1): subscription_status is optional on the
-        // record -- absent means "active" (every key provisioned before
-        // this change), so this is purely additive. An explicit but
-        // unrecognized status string fails closed rather than falling
-        // through as if unset, per Phase 1's own "unknown state must fail
-        // closed" requirement. See evaluateKeyRecordAccess()'s own comment.
-        const access = evaluateKeyRecordAccess(record);
+        const strongKey = await strongAuthStates(
+          env,
+          `key:${raw}`,
+          record.customer_id ? `customer:${record.customer_id}` : null,
+        );
+        if (strongKey.unavailable) {
+          return { tier: TIERS.FREE, key: null, sub: null, error: "auth_service_unavailable" };
+        }
+        if (strongKey.denied) {
+          return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
+        }
+        // Once a customer has a strong authority state, it is authoritative
+        // for subscription status. This prevents an eventually-consistent KV
+        // cache from re-denying an explicitly reactivated customer or
+        // re-allowing a suspended one. expires_at remains sourced from the KV
+        // key record and is still enforced independently.
+        const effectiveRecord = strongKey.customerState
+          ? { ...record, subscription_status: strongKey.customerState.status }
+          : record;
+        const access = evaluateKeyRecordAccess(effectiveRecord);
         if (!access.allowed) {
           return { tier: TIERS.FREE, key: null, sub: null, error: access.error };
         }
@@ -2546,11 +2592,27 @@ async function handleLogin(request, env, ctx, ip) {
     auditLog(ctx, env, { action: "login_failed", ip, reason: "invalid_key" });
     return jsonResp({ error: "Invalid API key" }, 401);
   }
+  const strongLogin = await strongAuthStates(
+    env,
+    `key:${rawKey}`,
+    record.customer_id ? `customer:${record.customer_id}` : null,
+  );
+  if (strongLogin.unavailable) {
+    return jsonResp({ error: "Authentication authority unavailable" }, 503);
+  }
+  if (strongLogin.denied) {
+    auditLog(ctx, env, { action: "login_failed", ip, reason: "strong_authority_denied" });
+    return jsonResp({ error: "API key is not active", code: "subscription_status_denied" }, 401);
+  }
+
   // v185.5 CodeRabbit fix: was only checking expires_at, bypassing the new
   // subscription_status states entirely -- a cancelled/refunded/suspended
   // key could still be exchanged for a fresh 24h JWT here. Reuses
   // evaluateKeyRecordAccess(), same as resolveAuth()'s API-key path.
-  const loginAccess = evaluateKeyRecordAccess(record);
+  const loginRecord = strongLogin.customerState
+    ? { ...record, subscription_status: strongLogin.customerState.status }
+    : record;
+  const loginAccess = evaluateKeyRecordAccess(loginRecord);
   if (!loginAccess.allowed) {
     auditLog(ctx, env, { action: "login_failed", ip, reason: loginAccess.error });
     return jsonResp({ error: "API key is not active", code: loginAccess.error }, 401);
@@ -3174,6 +3236,15 @@ export async function handleAdmin(request, env, ctx, path, method) {
       ...(tier === "MSSP" && managed_tenants === undefined ? { managed_tenants: [], tenant_auth_version: TENANT_AUTH_VERSION } : {}),
     };
     const opts = expires_in_days ? { expirationTtl: expires_in_days * 86400 } : undefined;
+    if (strongConsistencyEnabled(env)) {
+      try {
+        await putStrongAuthState(env, `key:${apiKey}`, {
+          status: "active", version: Date.now(), updatedAt: Date.now(),
+        });
+      } catch (_) {
+        return jsonResp({ error: "Strong consistency authority unavailable; key was not created" }, 503);
+      }
+    }
     await env.API_KEYS_KV.put(apiKey, JSON.stringify(record), opts);
     auditLog(ctx, env, { action: "api_key_created", customer_id, tier });
     return jsonResp({ ...record, message: "API key created" }, 201);
@@ -3200,6 +3271,9 @@ export async function handleAdmin(request, env, ctx, path, method) {
     if (!result.ok) {
       if (result.error === "invalid_status") {
         return jsonResp({ error: `Invalid subscription_status. Valid: ${[...SUBSCRIPTION_STATUS_VALID_STATES].join(", ")}` }, 400);
+      }
+      if (result.error === "strong_consistency_unavailable") {
+        return jsonResp({ error: "Strong consistency authority unavailable; status was not changed" }, 503);
       }
       return jsonResp({ error: "Key not found" }, 404);
     }
@@ -3239,6 +3313,18 @@ export async function handleAdmin(request, env, ctx, path, method) {
     // old key's exact remaining time -- rotation is a re-provision, not a
     // clock-preserving swap. This is a no-op today regardless since
     // SUBSCRIPTION_EXPIRY_ENABLED=false means expires_at is null either way.
+    if (strongConsistencyEnabled(env)) {
+      try {
+        // Revoke first in the strong authority so there is never an overlap
+        // window if new-key provisioning later fails. A failed provisioning
+        // attempt can be retried; silently leaving both keys live cannot.
+        await putStrongAuthState(env, `key:${oldKey}`, {
+          status: "revoked", version: Date.now(), updatedAt: Date.now(),
+        });
+      } catch (_) {
+        return jsonResp({ error: "Strong consistency authority unavailable; old key was not revoked" }, 503);
+      }
+    }
     const newKey = await provisionApiKey(
       env, ctx, existing.tier, existing.customer_id, "admin_rotation",
       { ...(existing.payment_metadata || {}), rotated_from: oldKey.slice(0, 12) + "...", rotation_reason: "admin_rotate" },
@@ -3264,6 +3350,15 @@ export async function handleAdmin(request, env, ctx, path, method) {
   const delMatch = path.match(/^\/api\/admin\/keys\/(.+)$/);
   if (delMatch && method === "DELETE") {
     const key = delMatch[1];
+    if (strongConsistencyEnabled(env)) {
+      try {
+        await putStrongAuthState(env, `key:${key}`, {
+          status: "revoked", version: Date.now(), updatedAt: Date.now(),
+        });
+      } catch (_) {
+        return jsonResp({ error: "Strong consistency authority unavailable; key was not revoked" }, 503);
+      }
+    }
     await env.API_KEYS_KV.delete(key);
     auditLog(ctx, env, { action: "api_key_revoked", key_prefix: key.slice(0, 12) });
     return jsonResp({ message: "API key revoked", key_prefix: key.slice(0, 12) });
@@ -4362,6 +4457,22 @@ async function applySubscriptionStatusChange(env, ctx, key, subscription_status,
   if (!existing) return { ok: false, error: "not_found" };
 
   const ts = now();
+  const sub = existing.customer_id || key.slice(0, 8);
+  if (strongConsistencyEnabled(env)) {
+    try {
+      const authorityState = {
+        status: subscription_status,
+        version: Date.now(),
+        updatedAt: Date.now(),
+      };
+      // Subscription lifecycle is customer-wide (same identity used by
+      // JWT sub and billing). One strongly-consistent object is therefore the
+      // atomic authority; key-specific authority is reserved for revoke/rotate.
+      await putStrongAuthState(env, `customer:${sub}`, authorityState);
+    } catch (_) {
+      return { ok: false, error: "strong_consistency_unavailable" };
+    }
+  }
   const updated = { ...existing, subscription_status };
   if (subscription_status === "cancelled") updated.cancel_at = ts;
   if (subscription_status === "suspended") updated.suspended_at = ts;
@@ -4379,7 +4490,6 @@ async function applySubscriptionStatusChange(env, ctx, key, subscription_status,
   // customer, not just future API-key/login attempts -- see resolveAuth()'s
   // jwt_deny comment. customer_id is what a JWT payload carries as `sub`,
   // which is why this is keyed by customer_id rather than the raw key.
-  const sub = existing.customer_id || key.slice(0, 8);
   if (SUBSCRIPTION_STATUS_DENY_STATES.has(subscription_status)) {
     await env.SECURITY_HUB_KV.put(`jwt_deny:${sub}`, "1", { expirationTtl: JWT_EXPIRY_SEC });
   } else if (subscription_status === "active") {
@@ -4458,6 +4568,11 @@ async function provisionApiKey(env, ctx, tier, email, source, metadata, billingC
     ...(validTier === "MSSP" && managedTenants === undefined ? { managed_tenants: [], tenant_auth_version: TENANT_AUTH_VERSION } : {}),
     ...(Array.isArray(managedTenants) && tenantAuthVersion === TENANT_AUTH_VERSION ? { tenant_auth_version: TENANT_AUTH_VERSION } : {}),
   };
+  if (strongConsistencyEnabled(env)) {
+    await putStrongAuthState(env, `key:${apiKey}`, {
+      status: "active", version: Date.now(), updatedAt: Date.now(),
+    });
+  }
   await env.API_KEYS_KV.put(apiKey, JSON.stringify(record));
   auditLog(ctx, env, {
     action: "key_auto_provisioned", email, tier: validTier, source,
