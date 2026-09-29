@@ -3169,12 +3169,17 @@ export async function handleAdmin(request, env, ctx, path, method) {
     if (body.confirm !== "RUN_STRONG_CONSISTENCY_CANARY") {
       return jsonResp({ error: "Explicit canary confirmation required" }, 400);
     }
+    const scope = body.scope === undefined ? "auth" : body.scope;
+    if (scope !== "auth" && scope !== "full") {
+      return jsonResp({ error: "Invalid canary scope", valid_scopes: ["auth", "full"] }, 400);
+    }
     try {
-      const result = await runStrongConsistencyCanary(env);
+      const result = await runStrongConsistencyCanary(env, scope);
       auditLog(ctx, env, {
         action: "strong_consistency_canary",
         result: "pass",
-        first_denied_request: result.first_denied_request,
+        scope,
+        first_denied_request: result.first_denied_request || null,
       });
       return jsonResp({
         status: "ok",
