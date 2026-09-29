@@ -281,9 +281,10 @@ function buildTaxiiExport(items, liveIndicators, tier, buildStixPatternFn) {
 // @returns {Promise<Response|null>}
 // -----------------------------------------------------------------------------
 export async function routeExports(pathname, req, env, ctx, tier, items, req_id, auth, buildStixPatternFn, resolveEntitlement) {
-  if (!pathname.startsWith('/api/v1/export/')) return null;
+  const alias = pathname === '/api/v1/iocs/feed/csv' ? '/api/v1/export/splunk.csv' : pathname === '/api/v1/iocs/feed/stix' ? '/api/v1/export/taxii.json' : pathname;
+  if (!alias.startsWith('/api/v1/export/')) return null;
 
-  const resource = 'export_' + pathname.replace('/api/v1/export/', '').replace(/\.[a-z0-9]+$/i, '');
+  const resource = 'export_' + alias.replace('/api/v1/export/', '').replace(/\.[a-z0-9]+$/i, '');
   const adHocAllowed = true; // export routes are open to FREE (sample) + PRO/ENTERPRISE (full) -- never a hard 403
   const allowed = resolveEntitlement ? resolveEntitlement(ctx, env, resource, auth, adHocAllowed).allowed : adHocAllowed;
   if (!allowed) {
@@ -301,7 +302,7 @@ export async function routeExports(pathname, req, env, ctx, tier, items, req_id,
     'Cache-Control': paid ? 'private, max-age=300' : 'public, max-age=120',
   };
 
-  if (pathname === '/api/v1/export/suricata.rules') {
+  if (alias === '/api/v1/export/suricata.rules') {
     const { body, count, total } = buildSuricataExport(items, liveIndicators, tier);
     return new Response(body, {
       status: 200,
@@ -313,7 +314,7 @@ export async function routeExports(pathname, req, env, ctx, tier, items, req_id,
     });
   }
 
-  if (pathname === '/api/v1/export/snort.rules') {
+  if (alias === '/api/v1/export/snort.rules') {
     const { body, count, total } = buildSnortExport(liveIndicators, tier);
     return new Response(body, {
       status: 200,
@@ -325,7 +326,7 @@ export async function routeExports(pathname, req, env, ctx, tier, items, req_id,
     });
   }
 
-  if (pathname === '/api/v1/export/yara.yar') {
+  if (alias === '/api/v1/export/yara.yar') {
     const { body, count, total } = buildYaraExport(items, tier);
     return new Response(body, {
       status: 200,
@@ -337,7 +338,7 @@ export async function routeExports(pathname, req, env, ctx, tier, items, req_id,
     });
   }
 
-  if (pathname === '/api/v1/export/splunk.csv') {
+  if (alias === '/api/v1/export/splunk.csv') {
     const { body, count, total } = buildSplunkExport(items, liveIndicators, tier);
     return new Response(body, {
       status: 200,
@@ -350,7 +351,7 @@ export async function routeExports(pathname, req, env, ctx, tier, items, req_id,
     });
   }
 
-  if (pathname === '/api/v1/export/taxii.json') {
+  if (alias === '/api/v1/export/taxii.json') {
     const { bundle, count, total } = buildTaxiiExport(items, liveIndicators, tier, buildStixPatternFn);
     return new Response(JSON.stringify(bundle), {
       status: 200,
