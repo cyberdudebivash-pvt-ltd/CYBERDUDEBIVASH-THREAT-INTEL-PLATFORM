@@ -67,6 +67,33 @@ export function decideProvisioningClaim(existingClaim, now = Date.now()) {
   return { alreadyClaimed: false, newClaim: { claimedAt: now } };
 }
 
+export function decideStrongRateIncrement(existing, limit, resetAt, now = Date.now()) {
+  const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 1;
+  const safeResetAt = Number.isFinite(resetAt) && resetAt > now ? resetAt : now + 60000;
+  const current = existing && Number.isFinite(existing.count) && existing.resetAt > now
+    ? existing.count
+    : 0;
+  const count = current + 1;
+  return {
+    state: { count, resetAt: safeResetAt },
+    allowed: count <= safeLimit,
+    count,
+    limit: safeLimit,
+    remaining: Math.max(0, safeLimit - count),
+  };
+}
+
+export function normalizeStrongAuthState(input, now = Date.now()) {
+  const status = String(input?.status || "").toLowerCase();
+  const valid = new Set(["active", "past_due", "cancelled", "expired", "refunded", "suspended", "revoked"]);
+  if (!valid.has(status)) throw new Error("invalid_auth_state");
+  return {
+    status,
+    version: Number.isInteger(input?.version) && input.version >= 0 ? input.version : now,
+    updatedAt: Number.isFinite(input?.updatedAt) ? input.updatedAt : now,
+  };
+}
+
 /**
  * Durable Object class. Exported from index.js and bound in wrangler.toml
  * as GUMROAD_PROVISIONING_LOCK (see header comment) -- instantiated once
@@ -80,14 +107,58 @@ export class GumroadProvisioningLock {
   }
 
   async fetch(request) {
-    let saleId;
+    let body;
     try {
-      ({ saleId } = await request.json());
+      body = await request.json();
     } catch (_err) {
       return new Response(JSON.stringify({ error: "invalid_request" }), {
         status: 400, headers: { "Content-Type": "application/json" },
       });
     }
+
+    // Additive strong-consistency actions. The existing Durable Object
+    // binding/class is reused; no new namespace, migration or billing SKU is
+    // introduced. Callers must still opt in via their own feature flag.
+    if (body?.action === "auth_state_put") {
+      try {
+        const value = normalizeStrongAuthState(body.state);
+        await this.state.storage.put("auth_state", value);
+        return new Response(JSON.stringify({ ok: true, state: value }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      } catch (_err) {
+        return new Response(JSON.stringify({ error: "invalid_auth_state" }), {
+          status: 400, headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    if (body?.action === "auth_state_get") {
+      const value = await this.state.storage.get("auth_state");
+      return new Response(JSON.stringify({ ok: true, state: value || null }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (body?.action === "rate_increment") {
+      const existing = await this.state.storage.get("rate_state");
+      const decision = decideStrongRateIncrement(existing, body.limit, body.resetAt);
+      await this.state.storage.put("rate_state", decision.state);
+      return new Response(JSON.stringify({
+        ok: true,
+        allowed: decision.allowed,
+        count: decision.count,
+        limit: decision.limit,
+        remaining: decision.remaining,
+        resetAt: decision.state.resetAt,
+      }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // Legacy Gumroad idempotency contract remains byte-for-byte compatible:
+    // no action field + saleId continues to mean "claim this sale once".
+    const saleId = body?.saleId;
     if (!saleId) {
       return new Response(JSON.stringify({ error: "saleId_required" }), {
         status: 400, headers: { "Content-Type": "application/json" },
