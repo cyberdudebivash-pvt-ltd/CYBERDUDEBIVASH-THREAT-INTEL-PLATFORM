@@ -297,9 +297,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "::warning::Cloudflare KV/R2 backup failed. Check CF_API_TOKEN and R2 credentials."
+          echo "::warning::Cloudflare KV/R2 backup job failed. Inspect the failed step and exit code; do not assume a credential fault."
           python3 scripts/pipeline_alert.py --status failure \
-            --message "Cloudflare KV/R2 backup (automated-backup.yml cf-data-backup) FAILED. Check CF_API_TOKEN and R2 credentials."
+            --message "Cloudflare KV/R2 backup control (automated-backup.yml cf-data-backup) FAILED. This does not by itself mean the live threat-intel platform is stale. Inspect the failed step and exit code; exit 124 means the KV export exceeded its safety window, not a credential failure."
 
   # ── Backup Integrity Verify ───────────────────────────────────────────────
   verify-backup:
