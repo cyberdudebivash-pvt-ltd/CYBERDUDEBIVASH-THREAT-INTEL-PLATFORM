@@ -20,7 +20,16 @@ test("canonical and legacy MISP URLs return the same payload contract", async ()
   const legacy=await routeEnterpriseEndpoint("/api/export/misp",...args);
   assert.equal(canonical.status,200); assert.equal(legacy.status,200);
   assert.equal(canonical.headers.get("Content-Type"),legacy.headers.get("Content-Type"));
-  assert.deepEqual(await canonical.json(),await legacy.json());
+  const canonicalBody=await canonical.json();
+  const legacyBody=await legacy.json();
+  // exported_at is request-time provenance, so two sequential calls may
+  // legitimately differ by milliseconds. Compare the stable customer
+  // contract while independently validating each generated timestamp.
+  for (const body of [canonicalBody,legacyBody]) {
+    assert.match(body?._meta?.exported_at || "", /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/);
+    delete body._meta.exported_at;
+  }
+  assert.deepEqual(canonicalBody,legacyBody);
 });
 
 test("FREE cannot use either MISP route", async () => {
