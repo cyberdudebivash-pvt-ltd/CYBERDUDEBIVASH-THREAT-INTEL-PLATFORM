@@ -8,6 +8,8 @@ import {
   getStrongAuthState,
   incrementStrongRate,
   authStateDenies,
+  strongConsistencyCanaryEnabled,
+  runStrongConsistencyCanary,
 } from "../strong-consistency-authority.js";
 
 function state() {
@@ -38,9 +40,10 @@ function authorityNamespace() {
   };
 }
 
-function env(enabled = true) {
+function env(enabled = true, canaryEnabled = false) {
   return {
     AUTH_STRONG_CONSISTENCY_ENABLED: enabled ? "true" : "false",
+    AUTH_STRONG_CONSISTENCY_CANARY_ENABLED: canaryEnabled ? "true" : "false",
     GUMROAD_PROVISIONING_LOCK: authorityNamespace(),
   };
 }
@@ -108,4 +111,26 @@ test("different rate identities do not share counters", async () => {
   assert.equal(b.allowed, true);
   assert.equal(a.count, 1);
   assert.equal(b.count, 1);
+});
+
+
+test("strong consistency canary remains disabled unless explicitly enabled", async () => {
+  const e = env(false, false);
+  assert.equal(strongConsistencyCanaryEnabled(e), false);
+  const result = await runStrongConsistencyCanary(e);
+  assert.equal(result.ok, false);
+  assert.equal(result.disabled, true);
+});
+
+test("explicit canary validates auth read-after-write and exact request 31 denial", async () => {
+  const e = env(false, true);
+  assert.equal(strongConsistencyEnabled(e), false);
+  assert.equal(strongConsistencyCanaryEnabled(e), true);
+  const result = await runStrongConsistencyCanary(e);
+  assert.equal(result.ok, true);
+  assert.equal(result.auth_suspend_read_after_write, true);
+  assert.equal(result.auth_reactivate_read_after_write, true);
+  assert.equal(result.first_denied_request, 31);
+  assert.equal(result.final_count, 31);
+  assert.equal(result.canary_identities_reused, true);
 });
