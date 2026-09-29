@@ -33,7 +33,7 @@ a{color:inherit;text-decoration:none}
   background:rgba(124,58,237,0.12)}
 .nav-chip.back{background:rgba(255,255,255,0.04);color:var(--text-dim)}
 .topbar-spacer{flex:1}
-.live-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--text-muted);
   display:inline-block;animation:pulse-dot 1.4s infinite;margin-right:5px}
 @keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
 
@@ -357,8 +357,8 @@ a{color:inherit;text-decoration:none}
     <a href="/ai-threat-tracker.html#api-docs" class="nav-chip">API DOCS</a>
   </div>
   <div class="topbar-spacer"></div>
-  <span style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">
-    <span class="live-dot"></span>LIVE INTEL
+  <span style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono)" id="tracker-connection">
+    <span class="live-dot" id="tracker-connection-dot"></span><span id="tracker-connection-text">AI DATA CHECKING</span>
   </span>
 </nav>
 
@@ -397,7 +397,7 @@ a{color:inherit;text-decoration:none}
 
 <!-- HERO -->
 <section class="hero">
-  <div class="hero-badge"><span class="live-dot"></span>ENGINE ALPHA · ENGINE BETA · ENGINE GAMMA</div>
+  <div class="hero-badge"><span class="live-dot" id="hero-connection-dot"></span>ENGINE ALPHA · ENGINE BETA · ENGINE GAMMA</div>
   <h1 class="hero-title">🧠 AI Cyber Brain Command Center</h1>
   <div class="hero-sub">ANOMALY DETECTION · CAMPAIGN CORRELATION · PREDICTIVE INTELLIGENCE · v201.0</div>
   <div class="hero-stats">
@@ -651,7 +651,7 @@ a{color:inherit;text-decoration:none}
       <li class="locked">Predictive API access</li>
       <li class="locked">Executive brief</li>
     </ul>
-    <button class="btn btn-ghost">GET STARTED FREE</button>
+    <a class="btn btn-ghost" href="/threats.html">EXPLORE FREE INTELLIGENCE</a>
   </div>
   <div class="pricing-card featured">
     <div class="price-tier">PRO · SOC</div>
@@ -669,7 +669,7 @@ a{color:inherit;text-decoration:none}
       <li class="locked">Real-time SIEM push</li>
       <li class="locked">MSSP automation</li>
     </ul>
-    <button class="btn btn-primary">UPGRADE TO PRO ↗</button>
+    <a class="btn btn-primary" href="/upgrade.html?plan=pro">UPGRADE TO PRO ↗</a>
   </div>
   <div class="pricing-card">
     <div class="price-tier">ENTERPRISE SOC</div>
@@ -687,7 +687,7 @@ a{color:inherit;text-decoration:none}
       <li>Trust Center + SLA Dashboard</li>
       <li>Compliance Center</li>
     </ul>
-    <button class="btn btn-outline">CONTACT ENTERPRISE SALES ↗</button>
+    <a class="btn btn-outline" href="/contact-enterprise.html">CONTACT ENTERPRISE SALES ↗</a>
   </div>
 </div>
 
@@ -854,15 +854,17 @@ function renderHeroStats(d) {
 // ── GRI RING ─────────────────────────────────────────────────────────────────
 function renderGRI(d) {
   const exec = d.executive_summary || {};
-  const gri  = exec.global_risk_index || 0;
-  const posture = exec.threat_posture || 'MODERATE';
+  const griKnown = exec.global_risk_index !== null && exec.global_risk_index !== undefined &&
+    exec.global_risk_index !== '' && Number.isFinite(Number(exec.global_risk_index));
+  const gri = griKnown ? Number(exec.global_risk_index) : null;
+  const posture = exec.threat_posture || 'UNVERIFIED';
   const postureColor = {CRITICAL:'#ef4444',HIGH:'#f59e0b',ELEVATED:'#3b82f6',MODERATE:'#22c55e'}[posture]||'#94a3b8';
 
-  const el = $('gri-val'); if (el) { el.textContent = gri.toFixed(1); el.style.color = postureColor; }
+  const el = $('gri-val'); if (el) { el.textContent = griKnown ? gri.toFixed(1) : '—'; el.style.color = postureColor; }
   const ring = $('gri-ring');
   if (ring) {
     const circ = 364.4;
-    const offset = circ - (gri / 100) * circ;
+    const offset = griKnown ? circ - (gri / 100) * circ : circ;
     ring.style.stroke = postureColor;
     setTimeout(() => { ring.style.strokeDashoffset = offset; ring.style.transition = 'stroke-dashoffset 1.2s ease'; }, 100);
   }
@@ -870,10 +872,10 @@ function renderGRI(d) {
   if (pp) pp.innerHTML = `<div class="posture-pill" style="background:rgba(255,255,255,.04);border-color:${postureColor}30;color:${postureColor}">● ${posture}</div>`;
   const gm = $('gri-metrics');
   if (gm) gm.innerHTML = [
-    ['KEV Confirmed', exec.kev_confirmed || 0],
-    ['Critical Items', exec.critical_count || 0],
-    ['Zero-Day Candidates', exec.zero_day_candidates || 0],
-    ['Active Campaigns', exec.active_campaigns || 0],
+    ['KEV Confirmed', exec.kev_confirmed ?? '—'],
+    ['Critical Items', exec.critical_count ?? '—'],
+    ['Zero-Day Candidates', exec.zero_day_candidates ?? '—'],
+    ['Active Campaigns', exec.active_campaigns ?? '—'],
   ].map(([k,v]) => `<div class="metric-row"><span class="metric-key">${k}</span><span class="metric-val" style="color:${postureColor}">${v}</span></div>`).join('');
 }
 
@@ -1302,6 +1304,18 @@ function toggleEvidence(id, btn) {
   btn.classList.toggle('open', !isOpen);
 }
 
+// ── CONNECTION STATE ──────────────────────────────────────────────────────────
+function setConnectionState(state) {
+  const text = $('tracker-connection-text');
+  const topDot = $('tracker-connection-dot');
+  const heroDot = $('hero-connection-dot');
+  const ok = state === 'connected';
+  if (text) text.textContent = ok ? 'AI DATA CONNECTED' : state === 'failed' ? 'AI DATA UNAVAILABLE' : 'AI DATA CHECKING';
+  [topDot, heroDot].forEach(dot => {
+    if (dot) dot.style.background = ok ? 'var(--ok)' : state === 'failed' ? 'var(--danger)' : 'var(--text-muted)';
+  });
+}
+
 // ── MAIN LOAD ─────────────────────────────────────────────────────────────────
 async function loadTracker() {
   try {
@@ -1327,8 +1341,10 @@ async function loadTracker() {
     }
 
     renderAll();
+    setConnectionState('connected');
   } catch (err) {
     console.error('[SENTINEL APEX] Failed to load tracker:', err);
+    setConnectionState('failed');
     // Show cached/stub data so no SYNTHESIZING states are visible
     showFallback();
   }
