@@ -28,6 +28,27 @@ name: "SENTINEL APEX -- Commercial Customer Operations Certification v201.0"
 # workflow -- only the boolean presence flag ever leaves the secret context.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/intel-gateway/src/**'
+      - 'workers/revenue-engine/src/**'
+      - 'deploy/cyber-watchdog/**'
+      - 'scripts/verify_customer_core_flow.py'
+      - 'scripts/verify_commercial_contract.py'
+      - 'scripts/verify_public_claims.py'
+      - 'scripts/entitlement_resource_drift_gate.py'
+      - 'config/**'
+      - 'pricing.html'
+      - 'upgrade.html'
+      - 'get-api-key.html'
+      - 'cyber-watchdog.html'
+      - 'ai-threat-tracker.html'
+      - 'sla.html'
+      - 'contact-enterprise.html'
+      - '.github/workflows/commercial-customer-ops-certification.yml'
+  schedule:
+    - cron: "17 2 * * *"
   workflow_dispatch:
     inputs:
       reason:
@@ -59,11 +80,15 @@ jobs:
     timeout-minutes: 2
     outputs:
       admin_secret_present: ${{ steps.check.outputs.present }}
+      watchdog_sink_present: ${{ steps.check.outputs.watchdog_sink_present }}
     steps:
-      - name: "Check ADMIN_SECRET presence (value never printed)"
+      - name: "Check required certification secret presence (values never printed)"
         id: check
         env:
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          CDB_WATCHDOG_SINK_URL: ${{ secrets.CDB_WATCHDOG_SINK_URL }}
+          CDB_WATCHDOG_SINK_INSPECT_URL: ${{ secrets.CDB_WATCHDOG_SINK_INSPECT_URL }}
+          CDB_WATCHDOG_SINK_TOKEN: ${{ secrets.CDB_WATCHDOG_SINK_TOKEN }}
         run: |
           set +x
           if [ -n "$ADMIN_SECRET" ]; then
@@ -72,6 +97,13 @@ jobs:
           else
             echo "ADMIN_SECRET_PRESENT=false"
             echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$CDB_WATCHDOG_SINK_URL" ] && [ -n "$CDB_WATCHDOG_SINK_INSPECT_URL" ] && [ -n "$CDB_WATCHDOG_SINK_TOKEN" ]; then
+            echo "WATCHDOG_SINK_PRESENT=true"
+            echo "watchdog_sink_present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "WATCHDOG_SINK_PRESENT=false"
+            echo "watchdog_sink_present=false" >> "$GITHUB_OUTPUT"
           fi
 
   # ---------------------------------------------------------------------
@@ -767,6 +799,7 @@ jobs:
           BASE="$WORKER_BASE"
           export CDB_WATCHDOG_BASE="$BASE"
           FAIL=0
+          BLOCKED=0
           RESULTS=()
           KEYS=()
           cleanup() {
@@ -780,7 +813,13 @@ jobs:
             local body="{\"customer_id\":\"ci-canary-$1-$(date +%s)\",\"tier\":\"$2\",\"label\":\"CI canary $1\",\"expires_in_days\":1}"
             curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" -d "$body" | jq -r '.key // empty'
           }
-          record() { RESULTS+=("$1: $2"); echo "$1: $2"; [ "$3" = "fail" ] && FAIL=1; return 0; }
+          record() {
+            RESULTS+=("$1: $2")
+            echo "$1: $2"
+            [ "${3:-}" = "fail" ] && FAIL=1
+            [ "${3:-}" = "blocked" ] && BLOCKED=1
+            return 0
+          }
           canary() {
             local name="$1" mode="$2" out rc
             out=$(node deploy/cyber-watchdog/canary.mjs "$mode" 2>/dev/null); rc=$?
@@ -846,7 +885,8 @@ jobs:
           printf '%s\n' "${RESULTS[@]}"
           cleanup; KEYS=()
           [ "$FAIL" -ne 0 ] && { echo "One or more live canaries FAILED."; exit 1; }
-          echo "Live canaries: no failures (blocked items listed above are not passes)."
+          [ "$BLOCKED" -ne 0 ] && { echo "One or more mandatory live canaries are BLOCKED; production customer certification cannot pass."; exit 1; }
+          echo "Live canaries: PASS -- every mandatory canary completed successfully."
 
   # ---------------------------------------------------------------------
   # P0 customer-facing core-flow contract: prove every capability we quote
@@ -974,7 +1014,9 @@ jobs:
         run: |
           set -euo pipefail
           ADMIN_PRESENT="${{ needs.secret-presence-gate.outputs.admin_secret_present }}"
+          WATCHDOG_SINK_PRESENT="${{ needs.secret-presence-gate.outputs.watchdog_sink_present }}"
           echo "ADMIN_SECRET_PRESENT=$ADMIN_PRESENT"
+          echo "WATCHDOG_SINK_PRESENT=$WATCHDOG_SINK_PRESENT"
 
           FAIL=0
           check_required() {
@@ -999,6 +1041,10 @@ jobs:
 
           if [ "$ADMIN_PRESENT" != "true" ]; then
             echo "::error::Authenticated certification phases are BLOCKED_BY_SECRET; this run cannot certify production customer operations."
+            FAIL=1
+          fi
+          if [ "$WATCHDOG_SINK_PRESENT" != "true" ]; then
+            echo "::error::Enterprise signed-webhook certification is BLOCKED_BY_SINK; configure the owner-controlled CDB_WATCHDOG_SINK_* secrets before global customer release."
             FAIL=1
           fi
 
