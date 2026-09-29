@@ -57,6 +57,9 @@ on:
       - 'scripts/r2_reports_purge.py'
       - 'scripts/r2_lifecycle_manager.py'
       - 'config/r2_lifecycle_policy.json'
+      - 'config/cloudflare_pre_revenue_guard.json'
+      - 'workers/intel-gateway/wrangler.toml'
+      - 'tests/test_cloudflare_pre_revenue_guard.py'
       - 'scripts/r2_state_sync.py'
       - 'scripts/backup_r2.py'
       - 'scripts/backup_kv_to_r2.py'
@@ -123,6 +126,9 @@ jobs:
 
       - name: "GATE N -- R2 native lifecycle policy drift gate (7-day ephemeral retention, no sentinel-apex-data age rules)"
         run: python -m pytest tests/test_r2_lifecycle_manager.py -v --tb=short
+
+      - name: "GATE O -- pre-revenue Cloudflare plan/usage expansion guard"
+        run: python -m pytest tests/test_cloudflare_pre_revenue_guard.py -v --tb=short
 
       - name: "r2_state_sync.py -- bounded state round-trip + retry ceiling"
         run: python -m pytest tests/test_r2_state_sync.py -v --tb=short
