@@ -965,7 +965,7 @@ jobs:
 
   summary:
     name: "Certification Summary"
-    needs: [secret-presence-gate, static-checks, authenticated-customer-ops-tests, expiry-shadow-validation, lifecycle-state-matrix, mssp-tenant-isolation, mssp-self-service-tenants, watchdog-mssp-live-canaries, rate-limit-boundary]
+    needs: [secret-presence-gate, static-checks, authenticated-customer-ops-tests, expiry-shadow-validation, lifecycle-state-matrix, mssp-tenant-isolation, mssp-self-service-tenants, watchdog-mssp-live-canaries, customer-core-flow-contract, rate-limit-boundary]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -994,6 +994,7 @@ jobs:
           check_required "mssp-tenant-isolation" "${{ needs.mssp-tenant-isolation.result }}"
           check_required "mssp-self-service-tenants" "${{ needs.mssp-self-service-tenants.result }}"
           check_required "watchdog-mssp-live-canaries" "${{ needs.watchdog-mssp-live-canaries.result }}"
+          check_required "customer-core-flow-contract" "${{ needs.customer-core-flow-contract.result }}"
           check_required "rate-limit-boundary" "${{ needs.rate-limit-boundary.result }}"
 
           if [ "$ADMIN_PRESENT" != "true" ]; then
