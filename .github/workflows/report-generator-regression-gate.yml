@@ -154,7 +154,11 @@ jobs:
           cache: 'pip'
 
       - name: Install test dependencies
-        run: pip install pytest pyyaml --quiet
+        run: pip install pytest pyyaml requests==2.34.2 --quiet
+
+      - name: Run malware evidence-review regression tests (P0 #590)
+        run: |
+          python -m pytest tests/test_malware_review_workspace.py -v --tb=short
 
       - name: Run manifest-format regression tests
         run: |
