@@ -52,8 +52,8 @@ jobs:
         id: healing
         timeout-minutes: 10
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "[HEAL] Starting self-healing pass at $(date -u +%Y-%m-%dT%H:%M:%SZ)..."
@@ -96,8 +96,8 @@ jobs:
         if: steps.healing.outputs.status == 'degraded' || steps.healing.outputs.status == 'failed'
         timeout-minutes: 2
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
         run: |
           STATUS="${{ steps.healing.outputs.status }}"
           SEVERITY="P1"
