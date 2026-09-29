@@ -85,6 +85,13 @@ ENTITLEMENT_ENFORCEMENT_RESOURCES = "cve_detail_full"
 # all customer webhook traffic without a code rollback.
 WATCHDOG_WEBHOOK_DELIVERY_ENABLED = "true"
 
+# P0 #596 strong-consistency authority. OFF by default to preserve the
+# no-new-spend/no-surprise-runtime-cost mandate. When enabled, commercial
+# rate enforcement and auth deny-state checks use the already-existing
+# GUMROAD_PROVISIONING_LOCK Durable Object binding for serialized state.
+# Enable only after reviewing Durable Object request volume and live canaries.
+AUTH_STRONG_CONSISTENCY_ENABLED = "false"
+
 # -- KV Namespaces --
 # Deployed KV IDs -- verified live on intel.cyberdudebivash.com (v142.3.1)
 # To add new namespace: npx wrangler kv namespace create "<NAME>"
@@ -312,6 +319,7 @@ ENTITLEMENT_ENFORCEMENT_RESOURCES = "cve_detail_full"
 # challenges; absent or any other value disables them. Set "false" to stop
 # all customer webhook traffic without a code rollback.
 WATCHDOG_WEBHOOK_DELIVERY_ENABLED = "true"
+AUTH_STRONG_CONSISTENCY_ENABLED = "false"
 
 [[env.production.kv_namespaces]]
 binding = "API_KEYS_KV"
