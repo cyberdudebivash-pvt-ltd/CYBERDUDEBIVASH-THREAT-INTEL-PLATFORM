@@ -634,11 +634,7 @@ jobs:
           for attempt in 1 2 3 4 5 6; do
             sleep 10
             HEALTH=$(curl -sf --max-time 15 "https://intel.cyberdudebivash.com/api/health/live" 2>/dev/null || echo '{}')
-            LIVE_SHA=$(printf '%s' "$HEALTH" | python3 -c 'import json,sys; 
-try:
- d=json.load(sys.stdin); print(d.get("deploy_commit_sha",""))
-except Exception:
- print("")')
+            LIVE_SHA=$(printf '%s' "$HEALTH" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("deploy_commit_sha",""))' 2>/dev/null || true)
             echo "  provenance probe ${attempt}/6 -> live_sha=${LIVE_SHA:-missing}"
             if [ "$LIVE_SHA" = "$GITHUB_SHA" ]; then
               MATCHED=1
