@@ -8,7 +8,7 @@
 # FIX (P0, 2026-09-10, operational-readiness audit): this script has always
 # only ever print()'d to the job log -- no urllib/requests import, no
 # network call anywhere -- despite storage-governance.yml's "Anomaly alert
-# if detected" step injecting real TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID
+# if detected" step injecting real TELEGRAM_OPS_BOT_TOKEN/TELEGRAM_OPS_CHAT_ID
 # secrets into its environment. That's worse than an honest gap: the
 # secrets being present creates false confidence a real alert fires when
 # it structurally could not. Wired to the same send_telegram() this
@@ -48,8 +48,8 @@ if total > 0:
         print(line)
         lines.append(f"[{severity}] {a.get('type', '')} {a.get('endpoint', '')}")
 
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    token = os.environ.get("TELEGRAM_OPS_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_OPS_CHAT_ID", "").strip()
     if token and chat_id:
         repo = os.environ.get("GITHUB_REPOSITORY", "")
         run_id = os.environ.get("GITHUB_RUN_ID", "")
