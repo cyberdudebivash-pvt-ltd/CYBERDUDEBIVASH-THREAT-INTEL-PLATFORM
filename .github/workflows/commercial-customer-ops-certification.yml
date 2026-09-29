@@ -849,6 +849,26 @@ jobs:
           echo "Live canaries: no failures (blocked items listed above are not passes)."
 
   # ---------------------------------------------------------------------
+  # P0 customer-facing core-flow contract: prove every capability we quote
+  # to SOC/MSSP customers is still wired into the production implementation.
+  # This is deliberately fail-closed. It validates implementation contracts
+  # without requiring third-party customer credentials or sending data to a
+  # real customer's SIEM.
+  # ---------------------------------------------------------------------
+  customer-core-flow-contract:
+    name: "P0 - Customer Core Flow Contract"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 3
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: "Verify customer-facing SOC/MSSP capability contract"
+        run: python3 scripts/verify_customer_core_flow.py
+
+  # ---------------------------------------------------------------------
   # Phase 8 (partial, deliberately conservative): live boundary check for
   # the FREE tier only (limit 30/min, the cheapest tier to verify). This
   # job does NOT flood-test PRO(120)/ENTERPRISE(600)/MSSP(1200) live --
