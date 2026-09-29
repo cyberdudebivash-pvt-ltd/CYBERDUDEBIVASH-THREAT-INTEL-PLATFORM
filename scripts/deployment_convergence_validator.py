@@ -692,7 +692,11 @@ def phase4_convergence_confirmation(feed: List[dict], manifest: dict) -> PhaseRe
     )
 
 
-_HIST_REPORT_ID_RE = re.compile(r"(intel--[a-f0-9]+)\.html?$", re.IGNORECASE)
+# Production report slugs can contain decimal IDs, CVE suffixes, underscores
+# and hyphens. Capture the complete basename so a publication-gated 404 is
+# classified against the authoritative publication-status endpoint instead
+# of being misreported as a permanent CDN/deployment failure.
+_HIST_REPORT_ID_RE = re.compile(r"/(intel--[^/?#]+?)\.html?(?:[?#].*)?$", re.IGNORECASE)
 
 
 def query_publication_status(report_id: str) -> Optional[dict]:
