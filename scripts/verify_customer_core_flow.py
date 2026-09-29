@@ -38,7 +38,7 @@ CHECKS = {
     "Detection content Sigma/YARA/KQL": [
         ("workers/intel-gateway/src/enterprise-endpoints.js", r"sigma"),
         ("workers/intel-gateway/src/enterprise-endpoints.js", r"yara"),
-        ("workers/intel-gateway/src/enterprise-endpoints.js", r"kql"),
+        ("workers/intel-gateway/src/enterprise-endpoints.js", r"kql|sentinel"),
     ],
     "CVSS/EPSS/KEV enrichment pipeline": [
         (".github/workflows/sentinel-blogger.yml", r"CVSS/EPSS"),
