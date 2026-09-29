@@ -8170,7 +8170,7 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/actors")                       return await handleActors(request, env, auth, crypto.randomUUID());
   if (path === "/api/cves")                         return await handleCVEs(request, env, auth, crypto.randomUUID());
   if (path === "/api/ioc/lookup")                    return await handleIOCLookup(request, env, auth, crypto.randomUUID());
-  if (path === "/api/export/misp")                  return await handleMISPExportExt(request, env, auth, crypto.randomUUID());
+  // /api/export/misp is a backwards-compatible alias for the canonical\n  // /api/misp/export contract. It is intentionally dispatched through the\n  // enterprise router below so both URLs share the same entitlement and payload logic.
   if (path === "/api/export/csv")                   return await handleCSVExport(request, env, auth, crypto.randomUUID());
   if (path === "/api/intel/correlate")              return await handleCorrelate(request, env, auth, crypto.randomUUID());
   if (path === "/api/v1/predict")                   return await handlePredict(request, env, auth, crypto.randomUUID());
@@ -8199,7 +8199,7 @@ async function handleRequest(request, env, ctx) {
   }
 
   // --- enterprise-endpoints.js routes (previously unreachable  -  now wired via routeEnterpriseEndpoint) ---
-  if (path.startsWith("/api/taxii") || path.startsWith("/api/misp/export") ||
+  if (path.startsWith("/api/taxii") || path.startsWith("/api/misp/export") || path === "/api/export/misp" ||
       path.startsWith("/api/sigma") || path.startsWith("/api/yara") ||
       path.startsWith("/api/scoring") || path.startsWith("/api/siem") ||
       path === "/api/stream" || path.startsWith("/api/mssp")) {
