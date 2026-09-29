@@ -56,6 +56,13 @@ def test_pre_revenue_cost_mode_keeps_strong_consistency_disabled_everywhere():
     assert all(v == "false" for v in values), values
 
 
+def test_pre_revenue_cost_mode_keeps_strong_rate_consistency_disabled_everywhere():
+    text = WRANGLER.read_text(encoding="utf-8")
+    values = re.findall(r'^RATE_STRONG_CONSISTENCY_ENABLED\s*=\s*"([^"]+)"', text, re.M)
+    assert values, "strong rate-consistency flag missing"
+    assert all(v == "false" for v in values), values
+
+
 def test_pre_revenue_cost_mode_keeps_strong_consistency_canary_disabled_everywhere():
     text = WRANGLER.read_text(encoding="utf-8")
     values = re.findall(r'^AUTH_STRONG_CONSISTENCY_CANARY_ENABLED\s*=\s*"([^"]+)"', text, re.M)
