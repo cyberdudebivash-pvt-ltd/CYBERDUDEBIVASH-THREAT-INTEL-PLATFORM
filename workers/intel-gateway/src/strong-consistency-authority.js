@@ -81,13 +81,15 @@ export function strongConsistencyCanaryEnabled(env) {
 // Admin-only, explicitly invoked production canary. It does nothing unless
 // the dedicated canary flag is enabled. It reuses two fixed logical identities
 // so repeated canaries do not create unbounded Durable Object instances.
-export async function runStrongConsistencyCanary(env) {
+export async function runStrongConsistencyCanary(env, scope = "auth") {
   if (!strongConsistencyCanaryEnabled(env)) {
     return { ok: false, disabled: true, error: "strong_consistency_canary_disabled" };
   }
+  if (scope !== "auth" && scope !== "full") {
+    throw new Error("strong_consistency_canary_invalid_scope");
+  }
 
   const authIdentity = "canary:auth";
-  const rateIdentity = "canary:rate";
   const now = Date.now();
 
   await putStrongAuthState(env, authIdentity, {
@@ -110,24 +112,38 @@ export async function runStrongConsistencyCanary(env) {
     throw new Error("canary_auth_reactivation_read_after_write_failed");
   }
 
-  const resetAt = now + 60000;
-  let firstDenied = 0;
-  let final = null;
-  for (let i = 1; i <= 31; i += 1) {
-    final = await incrementStrongRate(env, rateIdentity, 30, resetAt);
-    if (!final.allowed && firstDenied === 0) firstDenied = i;
-  }
-  if (firstDenied !== 31 || final?.count !== 31) {
-    throw new Error("canary_rate_boundary_failed");
-  }
-
-  return {
+  const result = {
     ok: true,
+    scope,
     auth_suspend_read_after_write: true,
     auth_reactivate_read_after_write: true,
-    rate_limit: 30,
-    first_denied_request: firstDenied,
-    final_count: final.count,
+    rate_checked: false,
     canary_identities_reused: true,
   };
+
+  // The default auth-only canary is intentionally minimal: four Durable
+  // Object operations total (put/get suspended, put/get active). Exact rate
+  // accounting has a materially larger request profile and is checked only
+  // when an operator explicitly asks for scope=full.
+  if (scope === "full") {
+    const rateIdentity = "canary:rate";
+    const resetAt = now + 60000;
+    let firstDenied = 0;
+    let final = null;
+    for (let i = 1; i <= 31; i += 1) {
+      final = await incrementStrongRate(env, rateIdentity, 30, resetAt);
+      if (!final.allowed && firstDenied === 0) firstDenied = i;
+    }
+    if (firstDenied !== 31 || final?.count !== 31) {
+      throw new Error("canary_rate_boundary_failed");
+    }
+    Object.assign(result, {
+      rate_checked: true,
+      rate_limit: 30,
+      first_denied_request: firstDenied,
+      final_count: final.count,
+    });
+  }
+
+  return result;
 }
