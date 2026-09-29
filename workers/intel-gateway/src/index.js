@@ -139,6 +139,7 @@ import { applyCorsPolicy, buildPreflightResponse, classifyRoute } from './cors-p
 // See rate-limit-cache.js for the cost rationale and the exact trade-off.
 import { bumpCounter, bumpCounterWriteThrough, peekCounter } from './rate-limit-cache.js';
 import { strongConsistencyEnabled, putStrongAuthState, getStrongAuthState, incrementStrongRate, authStateDenies } from './strong-consistency-authority.js';
+import { DEPLOY_COMMIT_SHA, DEPLOY_RUN_ID } from './build-info.js';
 // AI Swarm Synthesis (v4.45): pure prompt-building + tier-gate helpers for
 // handleSwarmSynthesis (below, defined right after handleCopilot). Extracted
 // for the same reason as subscription-lifecycle.js/gumroad-lifecycle.js --
@@ -6927,7 +6928,14 @@ async function handleRequest(request, env, ctx) {
   // /api/health now reports as 503) can never block shipping the fix for it.
   if (path === "/api/health/live") {
     return jsonResp(
-      { status: "alive", service: "sentinel-apex", version: PLATFORM_VERSION, generated_at: now() },
+      {
+        status: "alive",
+        service: "sentinel-apex",
+        version: PLATFORM_VERSION,
+        deploy_commit_sha: DEPLOY_COMMIT_SHA,
+        deploy_run_id: DEPLOY_RUN_ID,
+        generated_at: now(),
+      },
       200,
       { "Cache-Control": "no-store" },
     );
