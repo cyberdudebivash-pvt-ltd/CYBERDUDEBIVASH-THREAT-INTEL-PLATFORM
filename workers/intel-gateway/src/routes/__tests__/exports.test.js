@@ -257,7 +257,8 @@ test("documented IOC CSV alias converges on the production CSV exporter", async 
 
 test("documented IOC STIX alias converges on the validated STIX 2.1 exporter", async () => {
   const env = { INTEL_R2: fakeR2WithIndicators([]) };
-  const res = await routeExports("/api/v1/iocs/feed/stix", REQ, env, CTX, "PRO", manyItems(2), "req-alias-stix", {}, fakeBuildStixPattern);
+  const aliasPattern = (item) => "[vulnerability:name = '" + item.cve_ids[0] + "']";
+  const res = await routeExports("/api/v1/iocs/feed/stix", REQ, env, CTX, "PRO", manyItems(2), "req-alias-stix", {}, aliasPattern);
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("Content-Type"), "application/stix+json;version=2.1");
   const bundle = JSON.parse(await res.text());
