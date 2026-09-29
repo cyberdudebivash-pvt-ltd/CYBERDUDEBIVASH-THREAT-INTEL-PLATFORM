@@ -11,8 +11,10 @@ Implements P0/P1/P2/P3 severity alerting via Telegram:
   P3 -- LOW: Advisory: canary bake, deploy initiated, routine checks
 
 Alert channels:
-  - Telegram (primary)
+  - Private operator Telegram (optional)
   - JSON alert log (always written)
+
+Security boundary: public subscriber Telegram credentials are never consumed.
 
 Usage:
   python3 scripts/enterprise_alert_manager.py alert --severity P0 --title "API DOWN" --detail "..."
@@ -83,8 +85,8 @@ def save_alert(alert: dict):
 def get_telegram_config() -> dict:
     """Read Telegram bot config from env or secrets."""
     return {
-        "bot_token": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
-        "chat_id": os.environ.get("TELEGRAM_CHAT_ID", ""),
+        "bot_token": os.environ.get("TELEGRAM_OPS_BOT_TOKEN", ""),
+        "chat_id": os.environ.get("TELEGRAM_OPS_CHAT_ID", ""),
     }
 
 
@@ -168,7 +170,7 @@ def fire_alert(severity: str, title: str, detail: str, alert_type: str = "CUSTOM
         else:
             print(f"[ALERT] Telegram notification failed (non-critical)")
     else:
-        print(f"[ALERT] Telegram not configured (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID missing)")
+        print(f"[ALERT] Private ops Telegram not configured (TELEGRAM_OPS_BOT_TOKEN/TELEGRAM_OPS_CHAT_ID missing)")
 
     return alert
 
