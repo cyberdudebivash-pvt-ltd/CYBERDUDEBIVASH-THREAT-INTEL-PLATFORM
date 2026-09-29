@@ -569,7 +569,7 @@ def main() -> int:
     ai_tracker_path = REPO_ROOT / "ai-threat-tracker.html"
     if ai_tracker_path.exists():
         ai_src = ai_tracker_path.read_text(encoding="utf-8", errors="ignore")
-        ai_compact = re.sub(r"\\s+", "", ai_src)
+        ai_compact = re.sub(r"\s+", "", ai_src)
         check("99.99% UPTIME" not in ai_src,
               "ai-threat-tracker.html does not hardcode a 99.99% uptime metric")
         check("18 anomalies, 22 campaigns, 12 sector forecasts" not in ai_src,
