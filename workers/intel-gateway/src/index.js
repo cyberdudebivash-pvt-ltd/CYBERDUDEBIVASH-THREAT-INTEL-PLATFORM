@@ -138,7 +138,7 @@ import { applyCorsPolicy, buildPreflightResponse, classifyRoute } from './cors-p
 // In-isolate counter layer: batches KV writes on the hot request path.
 // See rate-limit-cache.js for the cost rationale and the exact trade-off.
 import { bumpCounter, bumpCounterWriteThrough, peekCounter } from './rate-limit-cache.js';
-import { strongConsistencyEnabled, putStrongAuthState, getStrongAuthState, incrementStrongRate, authStateDenies } from './strong-consistency-authority.js';
+import { strongConsistencyEnabled, putStrongAuthState, getStrongAuthState, incrementStrongRate, authStateDenies, strongConsistencyCanaryEnabled, runStrongConsistencyCanary } from './strong-consistency-authority.js';
 import { DEPLOY_COMMIT_SHA, DEPLOY_RUN_ID } from './build-info.js';
 // AI Swarm Synthesis (v4.45): pure prompt-building + tier-gate helpers for
 // handleSwarmSynthesis (below, defined right after handleCopilot). Extracted
@@ -3154,6 +3154,40 @@ export async function handleAdmin(request, env, ctx, path, method) {
     return jsonResp({ error: "Forbidden: invalid admin credentials" }, 403);
   }
   await clearAuthFailures(env, adminIp);
+
+  // POST /api/admin/strong-consistency/canary
+  // Dormant by default. Even valid admin credentials cannot execute Durable
+  // Object canary traffic unless AUTH_STRONG_CONSISTENCY_CANARY_ENABLED=true.
+  // This preserves the pre-revenue Cloudflare cost guard while allowing an
+  // explicitly-approved production proof later without a code redeploy.
+  if (path === "/api/admin/strong-consistency/canary" && method === "POST") {
+    if (!strongConsistencyCanaryEnabled(env)) {
+      return jsonResp({ error: "Strong consistency canary is disabled" }, 503);
+    }
+    let body = {};
+    try { body = await request.json(); } catch (_) {}
+    if (body.confirm !== "RUN_STRONG_CONSISTENCY_CANARY") {
+      return jsonResp({ error: "Explicit canary confirmation required" }, 400);
+    }
+    try {
+      const result = await runStrongConsistencyCanary(env);
+      auditLog(ctx, env, {
+        action: "strong_consistency_canary",
+        result: "pass",
+        first_denied_request: result.first_denied_request,
+      });
+      return jsonResp({
+        status: "ok",
+        ...result,
+        global_enforcement_enabled: strongConsistencyEnabled(env),
+        generated_at: now(),
+      }, 200, { "Cache-Control": "no-store" });
+    } catch (e) {
+      console.error(`[strong-consistency-canary] failed: ${e && e.message ? e.message : e}`);
+      auditLog(ctx, env, { action: "strong_consistency_canary", result: "fail" });
+      return jsonResp({ error: "Strong consistency canary failed" }, 500, { "Cache-Control": "no-store" });
+    }
+  }
 
   // GET /api/admin/health
   if (path === "/api/admin/health" && method === "GET") {
