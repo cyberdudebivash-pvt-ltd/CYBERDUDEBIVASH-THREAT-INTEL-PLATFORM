@@ -12,7 +12,7 @@ Actions:
   1. Validate and sanitize input
   2. Store lead to data/leads.json (atomic write via safe_io)
   3. Log to data/logs/enterprise_leads.jsonl
-  4. Optional: send Telegram notification if TELEGRAM_BOT_TOKEN set
+  4. Optional: send private operator Telegram notification if TELEGRAM_OPS_BOT_TOKEN set
   5. Optional: trigger GUMROAD_ACCESS_TOKEN demo provisioning
 
 Lead scoring:
@@ -208,8 +208,8 @@ def _lead_id(email: str) -> str:
 # ---------------------------------------------------------------------------
 def _send_telegram_notification(lead: Dict) -> bool:
     """Send enterprise lead notification via Telegram if configured."""
-    token   = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    token   = os.getenv("TELEGRAM_OPS_BOT_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_OPS_CHAT_ID", "")
     if not token or not chat_id:
         return False
 
