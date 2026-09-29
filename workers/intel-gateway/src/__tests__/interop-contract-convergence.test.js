@@ -28,6 +28,11 @@ test("canonical and legacy MISP URLs return the same payload contract", async ()
   for (const body of [canonicalBody,legacyBody]) {
     assert.match(body?._meta?.exported_at || "", /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/);
     delete body._meta.exported_at;
+    for (const wrapped of body.response || []) {
+      const event=wrapped?.Event;
+      assert.match(String(event?.timestamp || ""), /^\\d+$/);
+      delete event.timestamp;
+    }
   }
   assert.deepEqual(canonicalBody,legacyBody);
 });
