@@ -668,21 +668,21 @@ async function checkSwarmPreflightRateLimit(env, ip) {
 
 const TIERS = { FREE: "FREE", PRO: "PRO", ENTERPRISE: "ENTERPRISE", MSSP: "MSSP" };
 
-async function strongAuthDecision(env, identities) {
-  if (!strongConsistencyEnabled(env)) return { denied: false, state: null };
+async function strongAuthStates(env, keyIdentity = null, customerIdentity = null) {
+  if (!strongConsistencyEnabled(env)) {
+    return { enabled: false, denied: false, keyState: null, customerState: null };
+  }
   try {
-    for (const identity of identities.filter(Boolean)) {
-      const state = await getStrongAuthState(env, identity);
-      if (authStateDenies(state)) {
-        return { denied: true, state };
-      }
-    }
-    return { denied: false, state: null };
+    const [keyState, customerState] = await Promise.all([
+      keyIdentity ? getStrongAuthState(env, keyIdentity) : Promise.resolve(null),
+      customerIdentity ? getStrongAuthState(env, customerIdentity) : Promise.resolve(null),
+    ]);
+    const denied = authStateDenies(keyState) || authStateDenies(customerState);
+    return { enabled: true, denied, keyState, customerState };
   } catch (_) {
-    // When the operator explicitly enables the strong authority, an authority
-    // outage must not silently downgrade security back to eventually
-    // consistent KV. Authentication fails closed instead.
-    return { denied: true, unavailable: true, state: null };
+    // When explicitly enabled, the strong authority is the security source of
+    // truth. Never silently fall back to eventually-consistent KV on outage.
+    return { enabled: true, denied: true, unavailable: true, keyState: null, customerState: null };
   }
 }
 
@@ -719,7 +719,7 @@ async function resolveAuth(request, env) {
   if (raw.split(".").length === 3 && env.CDB_JWT_SECRET) {
     const payload = await verifyJWT(raw, env.CDB_JWT_SECRET);
     if (!payload) return { tier: TIERS.FREE, key: null, sub: null, error: "invalid_token" };
-    const strongJwt = await strongAuthDecision(env, [`customer:${payload.sub}`]);
+    const strongJwt = await strongAuthStates(env, null, `customer:${payload.sub}`);
     if (strongJwt.unavailable) {
       return { tier: TIERS.FREE, key: null, sub: null, error: "auth_service_unavailable" };
     }
@@ -739,12 +739,16 @@ async function resolveAuth(request, env) {
       // way: applySubscriptionStatusChange() writes jwt_deny:{customer_id}
       // (TTL-bounded to JWT_EXPIRY_SEC, deleted again on reactivation) the
       // moment a key transitions into a deny state, checked here by sub.
-      const denied = await env.SECURITY_HUB_KV.get(`jwt_deny:${payload.sub}`);
-      if (denied) return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
+      if (!strongJwt.customerState) {
+        const denied = await env.SECURITY_HUB_KV.get(`jwt_deny:${payload.sub}`);
+        if (denied) return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
+      }
     } catch (_) {}
     try {
-      const billingDenied = await env.API_KEYS_KV?.get(`jwt_deny:${payload.sub}`);
-      if (billingDenied) return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
+      if (!strongJwt.customerState) {
+        const billingDenied = await env.API_KEYS_KV?.get(`jwt_deny:${payload.sub}`);
+        if (billingDenied) return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
+      }
     } catch (_) {
       return { tier: TIERS.FREE, key: null, sub: null, error: "auth_service_unavailable" };
     }
@@ -816,23 +820,26 @@ async function resolveAuth(request, env) {
     }
     try {
       if (record) {
-        const strongKey = await strongAuthDecision(env, [
+        const strongKey = await strongAuthStates(
+          env,
           `key:${raw}`,
           record.customer_id ? `customer:${record.customer_id}` : null,
-        ]);
+        );
         if (strongKey.unavailable) {
           return { tier: TIERS.FREE, key: null, sub: null, error: "auth_service_unavailable" };
         }
         if (strongKey.denied) {
           return { tier: TIERS.FREE, key: null, sub: null, error: "subscription_status_denied" };
         }
-        // v185.5 (Mission Phase 1): subscription_status is optional on the
-        // record -- absent means "active" (every key provisioned before
-        // this change), so this is purely additive. An explicit but
-        // unrecognized status string fails closed rather than falling
-        // through as if unset, per Phase 1's own "unknown state must fail
-        // closed" requirement. See evaluateKeyRecordAccess()'s own comment.
-        const access = evaluateKeyRecordAccess(record);
+        // Once a customer has a strong authority state, it is authoritative
+        // for subscription status. This prevents an eventually-consistent KV
+        // cache from re-denying an explicitly reactivated customer or
+        // re-allowing a suspended one. expires_at remains sourced from the KV
+        // key record and is still enforced independently.
+        const effectiveRecord = strongKey.customerState
+          ? { ...record, subscription_status: strongKey.customerState.status }
+          : record;
+        const access = evaluateKeyRecordAccess(effectiveRecord);
         if (!access.allowed) {
           return { tier: TIERS.FREE, key: null, sub: null, error: access.error };
         }
@@ -2585,10 +2592,11 @@ async function handleLogin(request, env, ctx, ip) {
     auditLog(ctx, env, { action: "login_failed", ip, reason: "invalid_key" });
     return jsonResp({ error: "Invalid API key" }, 401);
   }
-  const strongLogin = await strongAuthDecision(env, [
+  const strongLogin = await strongAuthStates(
+    env,
     `key:${rawKey}`,
     record.customer_id ? `customer:${record.customer_id}` : null,
-  ]);
+  );
   if (strongLogin.unavailable) {
     return jsonResp({ error: "Authentication authority unavailable" }, 503);
   }
@@ -2601,7 +2609,10 @@ async function handleLogin(request, env, ctx, ip) {
   // subscription_status states entirely -- a cancelled/refunded/suspended
   // key could still be exchanged for a fresh 24h JWT here. Reuses
   // evaluateKeyRecordAccess(), same as resolveAuth()'s API-key path.
-  const loginAccess = evaluateKeyRecordAccess(record);
+  const loginRecord = strongLogin.customerState
+    ? { ...record, subscription_status: strongLogin.customerState.status }
+    : record;
+  const loginAccess = evaluateKeyRecordAccess(loginRecord);
   if (!loginAccess.allowed) {
     auditLog(ctx, env, { action: "login_failed", ip, reason: loginAccess.error });
     return jsonResp({ error: "API key is not active", code: loginAccess.error }, 401);
@@ -3302,6 +3313,18 @@ export async function handleAdmin(request, env, ctx, path, method) {
     // old key's exact remaining time -- rotation is a re-provision, not a
     // clock-preserving swap. This is a no-op today regardless since
     // SUBSCRIPTION_EXPIRY_ENABLED=false means expires_at is null either way.
+    if (strongConsistencyEnabled(env)) {
+      try {
+        // Revoke first in the strong authority so there is never an overlap
+        // window if new-key provisioning later fails. A failed provisioning
+        // attempt can be retried; silently leaving both keys live cannot.
+        await putStrongAuthState(env, `key:${oldKey}`, {
+          status: "revoked", version: Date.now(), updatedAt: Date.now(),
+        });
+      } catch (_) {
+        return jsonResp({ error: "Strong consistency authority unavailable; old key was not revoked" }, 503);
+      }
+    }
     const newKey = await provisionApiKey(
       env, ctx, existing.tier, existing.customer_id, "admin_rotation",
       { ...(existing.payment_metadata || {}), rotated_from: oldKey.slice(0, 12) + "...", rotation_reason: "admin_rotate" },
@@ -3313,15 +3336,6 @@ export async function handleAdmin(request, env, ctx, path, method) {
       existing.managed_tenants === undefined ? null : (Array.isArray(existing.managed_tenants) ? existing.managed_tenants : []),
       existing.tenant_auth_version === TENANT_AUTH_VERSION ? TENANT_AUTH_VERSION : undefined
     );
-    if (strongConsistencyEnabled(env)) {
-      try {
-        await putStrongAuthState(env, `key:${oldKey}`, {
-          status: "revoked", version: Date.now(), updatedAt: Date.now(),
-        });
-      } catch (_) {
-        return jsonResp({ error: "Strong consistency authority unavailable; old key was not revoked" }, 503);
-      }
-    }
     await env.API_KEYS_KV.delete(oldKey);
     auditLog(ctx, env, { action: "api_key_rotated", old_key_prefix: oldKey.slice(0, 12), new_key_prefix: newKey.slice(0, 12), customer_id: existing.customer_id, tier: existing.tier, managed_tenants_carried: Array.isArray(existing.managed_tenants), tenant_auth_version: existing.tenant_auth_version === TENANT_AUTH_VERSION ? TENANT_AUTH_VERSION : null });
     return jsonResp({
@@ -4451,10 +4465,10 @@ async function applySubscriptionStatusChange(env, ctx, key, subscription_status,
         version: Date.now(),
         updatedAt: Date.now(),
       };
-      await Promise.all([
-        putStrongAuthState(env, `key:${key}`, authorityState),
-        putStrongAuthState(env, `customer:${sub}`, authorityState),
-      ]);
+      // Subscription lifecycle is customer-wide (same identity used by
+      // JWT sub and billing). One strongly-consistent object is therefore the
+      // atomic authority; key-specific authority is reserved for revoke/rotate.
+      await putStrongAuthState(env, `customer:${sub}`, authorityState);
     } catch (_) {
       return { ok: false, error: "strong_consistency_unavailable" };
     }
