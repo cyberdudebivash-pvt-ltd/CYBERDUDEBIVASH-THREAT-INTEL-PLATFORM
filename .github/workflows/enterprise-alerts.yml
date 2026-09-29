@@ -45,8 +45,8 @@ jobs:
       - name: "Run enterprise alert check"
         timeout-minutes: 5
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
         run: |
           echo "[ALERT MONITOR] Running platform health check at $(date -u +%Y-%m-%dT%H:%M:%SZ)..."
           python3 scripts/enterprise_alert_manager.py check 2>&1 | tee /tmp/alert_output.txt
@@ -56,8 +56,8 @@ jobs:
       - name: "SLA snapshot alert"
         timeout-minutes: 3
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
         run: |
           echo "[ALERT MONITOR] Running SLA evaluation..."
           python3 scripts/sla_engine.py --tier enterprise 2>&1 | tail -10 || true
