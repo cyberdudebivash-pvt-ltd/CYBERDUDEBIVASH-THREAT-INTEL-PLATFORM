@@ -47,6 +47,7 @@ log = logging.getLogger("sentinel.verify_public_claims")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EVIDENCE_REGISTER_PATH = REPO_ROOT / "config" / "evidence-register.json"
+CLAIM_MATRIX_PATH = REPO_ROOT / "p0-revenue-os" / "config" / "claim_matrix.json"
 EXCLUDED_DIRS = {"blog", "threat", "reports", "node_modules", ".git", "dist", "data"}
 
 # How far back inside the SAME text node we look for a negation cue.
@@ -115,6 +116,35 @@ def build_forbidden_patterns(withdrawn: list[dict]) -> list[tuple[str, re.Patter
     return patterns
 
 
+CLAIM_MATRIX_VARIANTS = {
+    "ISO27001": ["ISO/IEC 27001 certified", "ISO 27001 certified"],
+    "SOC2": ["SOC 2 Type II certified"],
+    "DARKWEB_LIVE": ["Live dark web monitoring"],
+    # "plug-and-play" is the unsafe packaging claim regardless of whether
+    # vendor names are separated by HTML tags or punctuation.
+    "SIEM_PLUG_PLAY": ["Splunk / Sentinel / QRadar plug-and-play", "plug-and-play"],
+    "COUNTRIES_PROTECTED": ["50+ countries protected"],
+    "FASTER_TRIAGE_PCT": ["72% faster threat triage", "72% faster"],
+    "NAMED_CUSTOMERS": ["Named enterprise customer logos"],
+}
+
+
+def build_claim_matrix_patterns(matrix: dict) -> list[tuple[str, re.Pattern]]:
+    patterns: list[tuple[str, re.Pattern]] = []
+    for entry in matrix.get("claims", []):
+        status = str(entry.get("status", "")).lower()
+        if not status.startswith("forbidden"):
+            continue
+        variants = CLAIM_MATRIX_VARIANTS.get(entry.get("id"), [entry.get("text", "")])
+        for variant in variants:
+            if not variant:
+                continue
+            escaped = re.escape(variant)
+            escaped = re.sub(r"\\ ", r"\\s+", escaped)
+            patterns.append((f"{entry.get('id')}:{variant}", re.compile(escaped, re.IGNORECASE)))
+    return patterns
+
+
 def main() -> int:
     if not EVIDENCE_REGISTER_PATH.exists():
         log.error("Evidence register missing: %s", EVIDENCE_REGISTER_PATH)
@@ -125,6 +155,14 @@ def main() -> int:
 
     forbidden_patterns = build_forbidden_patterns(withdrawn)
     log.info("Loaded %d forbidden claim variant(s) from evidence-register.json.", len(forbidden_patterns))
+
+    if not CLAIM_MATRIX_PATH.exists():
+        log.error("Claim matrix missing: %s", CLAIM_MATRIX_PATH)
+        return 1
+    claim_matrix = load_json(CLAIM_MATRIX_PATH)
+    matrix_patterns = build_claim_matrix_patterns(claim_matrix)
+    check(len(matrix_patterns) > 0, "claim_matrix.json yields forbidden customer-claim patterns")
+    log.info("Loaded %d forbidden claim-matrix pattern(s).", len(matrix_patterns))
 
     scanned = 0
     for rel, path in iter_buyer_html_files():
@@ -141,7 +179,21 @@ def main() -> int:
                 if violation_found:
                     break
             check(not violation_found, f"{rel} does not publish withdrawn claim '{variant}' unnegated")
-    log.info("Swept %d buyer-facing HTML page(s) for withdrawn customer-proof claims.", scanned)
+
+        for label, pattern in matrix_patterns:
+            violation_found = False
+            for node in nodes:
+                for m in pattern.finditer(node):
+                    if not is_negated_in_node(node, m.start(), m.end()):
+                        violation_found = True
+                        break
+                if violation_found:
+                    break
+            check(not violation_found, f"{rel} does not publish claim-matrix prohibition '{label}' unnegated")
+    log.info(
+        "Swept %d buyer-facing HTML page(s) for withdrawn and claim-matrix-prohibited customer claims.",
+        scanned,
+    )
 
     # --- Sanity checks: retained/labelled claims must still carry their
     # required framing, so this gate cannot be satisfied by over-purging. ---

@@ -737,12 +737,12 @@ a{color:inherit;text-decoration:none}
 </div><!-- /main -->
 
 <footer class="footer">
-  🧠 SENTINEL APEX AI THREAT TRACKER v201.0 · Phase 1–5 Enterprise AI Ascension Doctrine<br>
+  SENTINEL APEX AI THREAT TRACKER v201.0 · Evidence-backed runtime view<br>
   © 2026 CYBERDUDEBIVASH® SENTINEL APEX ·
   <a href="/trust-center.html">Trust Center</a> ·
   <a href="/status.html">Status</a> ·
   <a href="/ai-threat-tracker.html#api-docs">API Docs</a> ·
-  TLP:AMBER For Authorized Recipients
+  Public interface
 </footer>
 
 <script>
@@ -757,6 +757,24 @@ let BRIEF   = null;
 const $  = (id) => document.getElementById(id);
 const qs = (sel, ctx=document) => ctx.querySelector(sel);
 
+// External threat-intelligence fields are untrusted input. Every value that
+// enters an HTML template must pass through these helpers; numeric values are
+// clamped before they affect CSS dimensions or scores.
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  })[ch]);
+}
+function safeDomId(value, prefix='id') {
+  const token = String(value ?? 'unknown').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
+  return `${prefix}-${token || 'unknown'}`;
+}
+function finiteNumber(value, fallback=null, min=-Infinity, max=Infinity) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
 function scoreClass(s) {
   if (s >= 9) return 'score-10 danger';
   if (s >= 7.5) return 'score-8 warn';
@@ -764,8 +782,10 @@ function scoreClass(s) {
   return 'score-ok ok';
 }
 function severityBadge(sev) {
+  const normalized = String(sev || 'UNKNOWN').toUpperCase();
   const map = {CRITICAL:'crit',HIGH:'high',MEDIUM:'med',LOW:'low'};
-  return `<span class="badge ${map[sev]||'med'}">${sev}</span>`;
+  const allowed = Object.prototype.hasOwnProperty.call(map, normalized) ? normalized : 'UNKNOWN';
+  return `<span class="badge ${map[allowed]||'med'}">${escapeHtml(allowed)}</span>`;
 }
 function animCount(el, target, decimals=0, suffix='') {
   const start = performance.now();
@@ -854,11 +874,12 @@ function renderHeroStats(d) {
 // ── GRI RING ─────────────────────────────────────────────────────────────────
 function renderGRI(d) {
   const exec = d.executive_summary || {};
-  const griKnown = exec.global_risk_index !== null && exec.global_risk_index !== undefined &&
-    exec.global_risk_index !== '' && Number.isFinite(Number(exec.global_risk_index));
-  const gri = griKnown ? Number(exec.global_risk_index) : null;
-  const posture = exec.threat_posture || 'UNVERIFIED';
-  const postureColor = {CRITICAL:'#ef4444',HIGH:'#f59e0b',ELEVATED:'#3b82f6',MODERATE:'#22c55e'}[posture]||'#94a3b8';
+  const gri = finiteNumber(exec.global_risk_index, null, 0, 100);
+  const griKnown = gri !== null;
+  const postureRaw = String(exec.threat_posture || 'UNVERIFIED').toUpperCase();
+  const postureMap = {CRITICAL:'#ef4444',HIGH:'#f59e0b',ELEVATED:'#3b82f6',MODERATE:'#22c55e'};
+  const posture = Object.prototype.hasOwnProperty.call(postureMap, postureRaw) ? postureRaw : 'UNVERIFIED';
+  const postureColor = postureMap[posture] || '#94a3b8';
 
   const el = $('gri-val'); if (el) { el.textContent = griKnown ? gri.toFixed(1) : '—'; el.style.color = postureColor; }
   const ring = $('gri-ring');
@@ -869,14 +890,14 @@ function renderGRI(d) {
     setTimeout(() => { ring.style.strokeDashoffset = offset; ring.style.transition = 'stroke-dashoffset 1.2s ease'; }, 100);
   }
   const pp = $('gri-posture');
-  if (pp) pp.innerHTML = `<div class="posture-pill" style="background:rgba(255,255,255,.04);border-color:${postureColor}30;color:${postureColor}">● ${posture}</div>`;
+  if (pp) pp.innerHTML = `<div class="posture-pill" style="background:rgba(255,255,255,.04);border-color:${postureColor}30;color:${postureColor}">● ${escapeHtml(posture)}</div>`;
   const gm = $('gri-metrics');
   if (gm) gm.innerHTML = [
     ['KEV Confirmed', exec.kev_confirmed ?? '—'],
     ['Critical Items', exec.critical_count ?? '—'],
     ['Zero-Day Candidates', exec.zero_day_candidates ?? '—'],
     ['Active Campaigns', exec.active_campaigns ?? '—'],
-  ].map(([k,v]) => `<div class="metric-row"><span class="metric-key">${k}</span><span class="metric-val" style="color:${postureColor}">${v}</span></div>`).join('');
+  ].map(([k,v]) => `<div class="metric-row"><span class="metric-key">${escapeHtml(k)}</span><span class="metric-val" style="color:${postureColor}">${escapeHtml(v)}</span></div>`).join('');
 }
 
 // ── EXECUTIVE NARRATIVE ───────────────────────────────────────────────────────
@@ -884,12 +905,13 @@ function renderExecSummary(d) {
   const exec = d.executive_summary || {};
   const nn = $('exec-narrative'); if (nn) nn.textContent = exec.narrative || '—';
   const pa = $('priority-actions');
-  if (pa && exec.priority_actions) {
+  if (pa && Array.isArray(exec.priority_actions)) {
     pa.innerHTML = exec.priority_actions.map(a => {
-      const cls = a.label.includes('P1') ? '' : a.label.includes('P2') ? 'p2' : 'p3';
+      const label = String(a?.label || 'P3');
+      const cls = label.includes('P1') ? '' : label.includes('P2') ? 'p2' : 'p3';
       return `<div class="soc-rec ${cls}">
-        <div class="soc-priority ${cls||'p1'}">${a.label.split('—')[0].trim()}</div>
-        <div class="soc-action">${a.action}</div>
+        <div class="soc-priority ${cls||'p1'}">${escapeHtml(label.split('—')[0].trim())}</div>
+        <div class="soc-action">${escapeHtml(a?.action || '—')}</div>
       </div>`;
     }).join('');
   }
@@ -897,63 +919,68 @@ function renderExecSummary(d) {
 
 // ── EXECUTIVE BRIEF (Phase 3) ─────────────────────────────────────────────────
 function renderExecBrief(brief) {
-  if (!brief) return;
+  if (!brief || typeof brief !== 'object') return;
   const bs = brief.boardroom_summary || {};
   const km = bs.key_metrics || {};
   const em = $('exec-brief-metrics');
   if (em) {
+    const ransomCount = finiteNumber(brief.ransomware_escalation?.active_ransomware_campaigns, null, 0);
+    const escalation = finiteNumber(brief.predicted_escalation?.escalation_probability_30d, null, 0, 100);
     const metrics = [
-      ['Global Risk Index', km.global_risk_index||'—', 'danger'],
-      ['Business Exposure', brief.business_impact?.financial_exposure||'—', 'warn'],
-      ['Sectors At Risk', km.sectors_at_risk||'—', 'warn'],
-      ['Active Campaigns', km.active_campaigns||'—', ''],
-      ['Ransomware Active', (brief.ransomware_escalation?.active_ransomware_campaigns||0) + ' chains', 'danger'],
-      ['30d Escalation Risk', (brief.predicted_escalation?.escalation_probability_30d||'—') + '%', 'danger'],
+      ['Global Risk Index', km.global_risk_index ?? '—', 'danger'],
+      ['Business Exposure', brief.business_impact?.financial_exposure ?? '—', 'warn'],
+      ['Sectors At Risk', km.sectors_at_risk ?? '—', 'warn'],
+      ['Active Campaigns', km.active_campaigns ?? '—', ''],
+      ['Ransomware Active', ransomCount === null ? '—' : `${ransomCount} chains`, 'danger'],
+      ['30d Escalation Risk', escalation === null ? '—' : `${escalation}%`, 'danger'],
     ];
     em.innerHTML = metrics.map(([label, val, cls]) =>
       `<div class="exec-metric">
-        <div class="exec-metric-val ${cls}">${val}</div>
-        <div class="exec-metric-label">${label}</div>
+        <div class="exec-metric-val ${cls}">${escapeHtml(val)}</div>
+        <div class="exec-metric-label">${escapeHtml(label)}</div>
       </div>`
     ).join('');
   }
-  // Ransomware section
+
   const rs = $('ransomware-section');
   const ransom = brief.ransomware_escalation || {};
-  if (rs && ransom.active_ransomware_campaigns > 0) {
-    rs.innerHTML = `
+  if (rs) {
+    const count = finiteNumber(ransom.active_ransomware_campaigns, 0, 0);
+    rs.innerHTML = count > 0 ? `
       <div class="ransom-alert">
         <div class="ransom-header">
           <span class="badge crit">⚠ RANSOMWARE ESCALATION</span>
-          <span style="font-size:11px;color:var(--text-dim)">${ransom.escalation_analysis||''}</span>
+          <span style="font-size:11px;color:var(--text-dim)">${escapeHtml(ransom.escalation_analysis || '')}</span>
         </div>
         <div class="ransom-actions">
-          ${(ransom.recommended_actions||[]).map(a => `<div class="ransom-action">${a}</div>`).join('')}
+          ${(Array.isArray(ransom.recommended_actions) ? ransom.recommended_actions : [])
+            .map(a => `<div class="ransom-action">${escapeHtml(a)}</div>`).join('')}
         </div>
-      </div>`;
+      </div>` : '';
   }
-  // SOC Recommendations
+
   const sr = $('soc-recs');
   if (sr) {
-    sr.innerHTML = `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:10px">SOC TACTICAL RECOMMENDATIONS</div>`;
-    (brief.soc_tactical_recommendations||[]).forEach(rec => {
-      const p = rec.priority.toLowerCase().includes('p1') ? '' : rec.priority.toLowerCase().includes('p2') ? 'p2' : 'p3';
-      sr.innerHTML += `<div class="soc-rec ${p}">
-        <div class="soc-priority ${p||'p1'}">${rec.priority.split('—')[0].trim()}</div>
+    const recs = Array.isArray(brief.soc_tactical_recommendations) ? brief.soc_tactical_recommendations : [];
+    const rows = recs.map(rec => {
+      const priority = String(rec?.priority || 'P3');
+      const p = priority.toLowerCase().includes('p1') ? '' : priority.toLowerCase().includes('p2') ? 'p2' : 'p3';
+      return `<div class="soc-rec ${p}">
+        <div class="soc-priority ${p||'p1'}">${escapeHtml(priority.split('—')[0].trim())}</div>
         <div class="soc-action">
-          <b>${rec.action}</b><br>
-          <span style="color:var(--text-muted);font-size:10px">${rec.rationale} · Deadline: ${rec.deadline} · Owner: ${rec.owner}</span>
+          <b>${escapeHtml(rec?.action || '—')}</b><br>
+          <span style="color:var(--text-muted);font-size:10px">${escapeHtml(rec?.rationale || '—')} · Deadline: ${escapeHtml(rec?.deadline || '—')} · Owner: ${escapeHtml(rec?.owner || '—')}</span>
         </div>
       </div>`;
-    });
+    }).join('');
+    sr.innerHTML = `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:10px">SOC TACTICAL RECOMMENDATIONS</div>${rows}`;
   }
 }
-
 // ── CONFIDENCE METER ──────────────────────────────────────────────────────────
 function renderConfidenceMeter(d) {
   const cm = d.confidence_meter || {};
-  const overallKnown = cm.overall !== null && cm.overall !== undefined && cm.overall !== '' && Number.isFinite(Number(cm.overall));
-  const overall = overallKnown ? Number(cm.overall) : null;
+  const overall = finiteNumber(cm.overall, null, 0, 100);
+  const overallKnown = overall !== null;
   const co = $('conf-overall'); if (co) co.textContent = overallKnown ? `${overall}%` : '—';
   const cg = $('conf-grade');
   if (cg) {
@@ -961,166 +988,185 @@ function renderConfidenceMeter(d) {
       cg.textContent = 'Grade — · Confidence unverified';
     } else {
       const band = overall >= 90 ? 'EXCELLENT' : overall >= 80 ? 'HIGH' : 'MODERATE';
-      cg.textContent = `Grade ${cm.grade} — ${band} Confidence`;
+      cg.textContent = `Grade ${String(cm.grade)} — ${band} Confidence`;
     }
   }
   const cs = $('conf-signals');
   if (cs) {
-    cs.innerHTML = (cm.signals||[]).map(sig => {
-      const pct = sig.score || 0;
+    const signals = Array.isArray(cm.signals) ? cm.signals : [];
+    cs.innerHTML = signals.map(sig => {
+      const pct = finiteNumber(sig?.score, 0, 0, 100);
       const color = pct >= 90 ? 'var(--ok)' : pct >= 75 ? 'var(--ai)' : 'var(--warn)';
       return `<div class="conf-signal">
-        <div class="conf-sig-name">${sig.name}</div>
+        <div class="conf-sig-name">${escapeHtml(sig?.name || 'Unnamed signal')}</div>
         <div class="conf-sig-bar"><div class="conf-sig-fill" style="width:${pct}%;background:${color}"></div></div>
         <div class="conf-sig-score" style="color:${color}">${pct}%</div>
-        <div class="conf-sig-source">${sig.source||'—'}</div>
+        <div class="conf-sig-source">${escapeHtml(sig?.source || '—')}</div>
       </div>`;
     }).join('');
   }
 }
-
 // ── ANOMALY RADAR (Phase 1 Explainability) ────────────────────────────────────
 function renderAnomalyRadar(d) {
   const alpha = d.engine_alpha || {};
-  const anomalies = alpha.anomalies || [];
-  const ac = $('alpha-count'); if (ac) ac.textContent = `${anomalies.length} ANOMALIES · ${alpha.zero_day_candidates||0} ZERO-DAY`;
+  const anomalies = Array.isArray(alpha.anomalies) ? alpha.anomalies : [];
+  const zeroDays = finiteNumber(alpha.zero_day_candidates, 0, 0);
+  const ac = $('alpha-count'); if (ac) ac.textContent = `${anomalies.length} ANOMALIES · ${zeroDays} ZERO-DAY`;
   const al = $('anomaly-list'); if (!al) return;
 
   let html = '';
-  anomalies.forEach((a, idx) => {
-    const lvlKey = a.anomaly_level?.includes('ZERO') ? 'zero' : a.anomaly_level?.includes('HIGH') ? 'high' : 'elevated';
-    const sc = scoreClass(a.risk_score);
-    const kevBadge = a.kev_confirmed ? '<span class="badge kev">KEV</span>' : '';
-    const zeroBadge = a.anomaly_level?.includes('ZERO') ? '<span class="badge zero">ZERO-DAY</span>' : '';
+  anomalies.forEach((raw, idx) => {
+    const a = raw && typeof raw === 'object' ? raw : {};
+    const level = String(a.anomaly_level || 'NORMAL').toUpperCase();
+    const lvlKey = level.includes('ZERO') ? 'zero' : level.includes('HIGH') ? 'high' : 'elevated';
+    const risk = finiteNumber(a.risk_score, null, 0, 10);
+    const sc = scoreClass(risk ?? 0);
+    const kevBadge = a.kev_confirmed === true ? '<span class="badge kev">KEV</span>' : '';
+    const zeroBadge = level.includes('ZERO') ? '<span class="badge zero">ZERO-DAY</span>' : '';
     const paywall = idx >= 3 ? 'style="display:none" class="anomaly-paywall"' : '';
+    const evidenceId = safeDomId(a.id ?? idx, 'ev');
 
-    // Build ATT&CK chips
-    const techChips = (a.attack_techniques||[]).map(t =>
-      `<span class="attack-chip" title="${t.rationale}">${t.id} ${t.name} <span style="opacity:.6">[${t.tactic}]</span></span>`
+    const techs = Array.isArray(a.attack_techniques) ? a.attack_techniques : [];
+    const techChips = techs.map(t =>
+      `<span class="attack-chip" title="${escapeHtml(t?.rationale || '')}">${escapeHtml(t?.id || '—')} ${escapeHtml(t?.name || '')} <span style="opacity:.6">[${escapeHtml(t?.tactic || '—')}]</span></span>`
     ).join('');
 
-    // Build IOC chips
-    const iocChips = (a.what_evidence?.ioc_relationships||[]).map(ioc =>
-      `<span class="ioc-chip">${ioc}</span>`
+    const iocRelationships = Array.isArray(a.what_evidence?.ioc_relationships) ? a.what_evidence.ioc_relationships : [];
+    const iocChips = iocRelationships.map(ioc =>
+      `<span class="ioc-chip">${escapeHtml(ioc)}</span>`
     ).join('');
 
-    // Confidence derivation bars
     const cd = a.confidence_derivation || {};
-    const breakdown = cd.signal_breakdown || {};
-    const barsHtml = Object.entries(breakdown).map(([k,v]) =>
-      `<div class="conf-bar-wrap">
-        <div class="conf-bar-label"><span>${k.replace(/_/g,' ')}</span><span>${v}</span></div>
-        <div class="conf-bar-track"><div class="conf-bar-fill" style="width:${Math.min(v*4,100)}%"></div></div>
-      </div>`
-    ).join('');
-
-    // Confidence evolution timeline
-    const cev = (a.confidence_evolution||[]).map(pt => {
-      const h = Math.max(4, Math.round(pt.confidence * 0.3));
-      return `<div class="cev-bar" style="height:${h}px" title="${pt.timestamp}: ${pt.confidence}% (${pt.trigger})"></div>`;
+    const breakdown = cd.signal_breakdown && typeof cd.signal_breakdown === 'object' ? cd.signal_breakdown : {};
+    const barsHtml = Object.entries(breakdown).map(([k,v]) => {
+      const n = finiteNumber(v, 0, 0, 25);
+      const width = Math.min(n * 4, 100);
+      return `<div class="conf-bar-wrap">
+        <div class="conf-bar-label"><span>${escapeHtml(String(k).replace(/_/g,' '))}</span><span>${n}</span></div>
+        <div class="conf-bar-track"><div class="conf-bar-fill" style="width:${width}%"></div></div>
+      </div>`;
     }).join('');
 
-    // Behavioral signals
-    const behavSigs = (a.what_evidence?.telemetry?.behavioral_signals||[]).map(s =>
-      `<span class="tag">${s.replace(/_/g,' ')}</span>`
+    const evolution = Array.isArray(a.confidence_evolution) ? a.confidence_evolution : [];
+    const cev = evolution.map(pt => {
+      const confidence = finiteNumber(pt?.confidence, 0, 0, 100);
+      const h = Math.max(4, Math.round(confidence * 0.3));
+      const title = `${pt?.timestamp || 'time unavailable'}: ${confidence}% (${pt?.trigger || 'unspecified'})`;
+      return `<div class="cev-bar" style="height:${h}px" title="${escapeHtml(title)}"></div>`;
+    }).join('');
+
+    const behavioral = Array.isArray(a.what_evidence?.telemetry?.behavioral_signals)
+      ? a.what_evidence.telemetry.behavioral_signals : [];
+    const behavSigs = behavioral.map(sig =>
+      `<span class="tag">${escapeHtml(String(sig).replace(/_/g,' '))}</span>`
     ).join('');
+
+    const iocCount = finiteNumber(a.what_evidence?.ioc_count, iocRelationships.length, 0);
+    const finalConfidence = finiteNumber(cd.final_confidence, null, 0, 100);
 
     html += `
       <div class="anomaly-item ${lvlKey}" ${paywall}>
         <div class="anomaly-header">
           <div>
-            <div class="anomaly-title">${a.title||'Unknown'}</div>
+            <div class="anomaly-title">${escapeHtml(a.title || 'Unknown')}</div>
             <div class="anomaly-meta">
-              ${severityBadge(a.severity||'MEDIUM')}
+              ${severityBadge(a.severity || 'MEDIUM')}
               ${kevBadge}${zeroBadge}
-              <span class="anomaly-actor">${a.actor||'UNKNOWN'}</span>
-              <span class="badge ai" style="font-size:8px">${a.anomaly_level||'NORMAL'}</span>
+              <span class="anomaly-actor">${escapeHtml(a.actor || 'UNKNOWN')}</span>
+              <span class="badge ai" style="font-size:8px">${escapeHtml(level)}</span>
             </div>
           </div>
-          <div class="${sc} anomaly-score">${(a.risk_score||0).toFixed(1)}</div>
+          <div class="${sc} anomaly-score">${risk === null ? '—' : risk.toFixed(1)}</div>
         </div>
 
-        <!-- Evidence Drawer Toggle -->
-        <button class="evidence-toggle" onclick="toggleEvidence('ev-${a.id}',this)">
-          <span>🔍 WHY DETECTED · HOW SCORED · WHAT EVIDENCE · WHICH TELEMETRY</span>
+        <button class="evidence-toggle" onclick="toggleEvidence('${evidenceId}',this)">
+          <span>WHY DETECTED · HOW SCORED · WHAT EVIDENCE · WHICH TELEMETRY</span>
           <span class="arrow">▼</span>
         </button>
-        <div class="evidence-drawer" id="ev-${a.id}">
+        <div class="evidence-drawer" id="${evidenceId}">
           <div class="ev-row">
             <div class="ev-label">WHY FLAGGED</div>
-            <div class="ev-content">${a.why_flagged||'—'}</div>
+            <div class="ev-content">${escapeHtml(a.why_flagged || '—')}</div>
           </div>
           <div class="ev-row">
             <div class="ev-label">HOW DETECTED</div>
-            <div class="ev-content mono">${a.how_detected||'—'}</div>
+            <div class="ev-content mono">${escapeHtml(a.how_detected || '—')}</div>
           </div>
           <div class="ev-row">
             <div class="ev-label">ATT&CK TECHNIQUES · KILL CHAIN</div>
-            <div>${techChips||'—'}</div>
+            <div>${techChips || '—'}</div>
           </div>
           <div class="ev-row">
-            <div class="ev-label">IOC RELATIONSHIPS · ${a.what_evidence?.ioc_count||0} IOCs</div>
-            <div>${iocChips||'—'}</div>
+            <div class="ev-label">IOC RELATIONSHIPS · ${iocCount} IOCs</div>
+            <div>${iocChips || '—'}</div>
           </div>
           <div class="ev-row">
             <div class="ev-label">BEHAVIORAL SIGNALS · WHICH TELEMETRY</div>
-            <div>${behavSigs||'—'}</div>
+            <div>${behavSigs || '—'}</div>
           </div>
           <div class="ev-row">
-            <div class="ev-label">CONFIDENCE DERIVATION · ${cd.confidence_grade||'—'} GRADE · ${(cd.final_confidence||0).toFixed(1)}% · ${cd.derivation_method||''}</div>
+            <div class="ev-label">CONFIDENCE DERIVATION · ${escapeHtml(cd.confidence_grade || '—')} GRADE · ${finalConfidence === null ? '—' : finalConfidence.toFixed(1) + '%'} · ${escapeHtml(cd.derivation_method || '')}</div>
             ${barsHtml}
           </div>
           <div class="ev-row">
-            <div class="ev-label">CONFIDENCE EVOLUTION (7-POINT TIMELINE)</div>
+            <div class="ev-label">CONFIDENCE EVOLUTION</div>
             <div class="conf-evolution">${cev}</div>
           </div>
           <div class="ev-row">
             <div class="ev-label">SOURCE ATTRIBUTION</div>
-            <div class="ev-content mono">Feed: ${a.source_attribution?.primary_feed||'—'} · Run: ${a.source_attribution?.pipeline_run_id||'—'} · Generator: ${a.source_attribution?.generator||'—'}</div>
+            <div class="ev-content mono">Feed: ${escapeHtml(a.source_attribution?.primary_feed || '—')} · Run: ${escapeHtml(a.source_attribution?.pipeline_run_id || '—')} · Generator: ${escapeHtml(a.source_attribution?.generator || '—')}</div>
           </div>
           <div class="ev-row">
             <div class="ev-label">ESCALATION RECOMMENDATION</div>
-            <div class="ev-content" style="color:var(--warn)">${a.escalation_recommendation||'—'}</div>
+            <div class="ev-content" style="color:var(--warn)">${escapeHtml(a.escalation_recommendation || '—')}</div>
           </div>
         </div>
       </div>`;
   });
 
-  // Paywall after item 3
-  html += `
-    <div style="position:relative;margin-top:8px">
-      <div style="opacity:.35;pointer-events:none;filter:blur(3px)">
-        <div class="anomaly-item high"><div class="anomaly-title">Additional anomalies require Pro tier...</div></div>
-        <div class="anomaly-item elevated"><div class="anomaly-title">Engine Alpha has detected ${anomalies.length - 3} more anomalies...</div></div>
-      </div>
-      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px">
-        <span class="badge crit">🔒 ${anomalies.length - 3} MORE ANOMALIES — PRO TIER</span>
-        <a href="#pricing"><button class="btn btn-primary" style="max-width:200px;font-size:11px">UNLOCK ALL ANOMALIES $49/mo ↗</button></a>
-      </div>
-    </div>`;
+  const remaining = Math.max(anomalies.length - 3, 0);
+  if (remaining > 0) {
+    html += `
+      <div style="position:relative;margin-top:8px">
+        <div style="opacity:.35;pointer-events:none;filter:blur(3px)">
+          <div class="anomaly-item high"><div class="anomaly-title">Additional anomalies require Pro tier...</div></div>
+          <div class="anomaly-item elevated"><div class="anomaly-title">Engine Alpha has ${remaining} additional anomalies.</div></div>
+        </div>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px">
+          <span class="badge crit">LOCKED · ${remaining} MORE ANOMALIES · PRO TIER</span>
+          <a class="btn btn-primary" href="/upgrade.html?plan=pro" style="max-width:220px;font-size:11px">UNLOCK PRO ACCESS</a>
+        </div>
+      </div>`;
+  }
 
-  al.innerHTML = html;
+  al.innerHTML = html || '<div class="loading-state">No anomaly telemetry available</div>';
 }
 
 // ── ESCALATION TRACKER ────────────────────────────────────────────────────────
 function renderEscalationTracker(d) {
-  const escalations = d.escalation_tracker || [];
+  const escalations = Array.isArray(d.escalation_tracker) ? d.escalation_tracker : [];
   const el = $('escalation-list'); if (!el) return;
-  el.innerHTML = escalations.map(esc => {
-    const p = esc.priority?.toLowerCase() || 'p3';
-    const techs = (esc.evidence_summary?.attack_techniques||[]).map(t => `<span class="esc-tech">${t}</span>`).join('');
-    const iocs  = (esc.evidence_summary?.ioc_relationships||esc.evidence_summary?.sectors_at_risk||[]).map(x =>
-      `<span class="esc-tech" style="color:var(--info)">${x}</span>`).join('');
+  el.innerHTML = escalations.map(raw => {
+    const esc = raw && typeof raw === 'object' ? raw : {};
+    const priority = String(esc.priority || 'P3').toUpperCase();
+    const p = priority.includes('P1') ? 'p1' : priority.includes('P2') ? 'p2' : 'p3';
+    const techs = (Array.isArray(esc.evidence_summary?.attack_techniques) ? esc.evidence_summary.attack_techniques : [])
+      .map(t => `<span class="esc-tech">${escapeHtml(t)}</span>`).join('');
+    const related = Array.isArray(esc.evidence_summary?.ioc_relationships)
+      ? esc.evidence_summary.ioc_relationships
+      : Array.isArray(esc.evidence_summary?.sectors_at_risk) ? esc.evidence_summary.sectors_at_risk : [];
+    const iocs = related.map(x => `<span class="esc-tech" style="color:var(--info)">${escapeHtml(x)}</span>`).join('');
+    const risk = finiteNumber(esc.risk_score, null, 0, 10);
     return `
       <div class="esc-item ${p}">
-        <div class="esc-priority ${p}">${esc.id||'ESC'}</div>
+        <div class="esc-priority ${p}">${escapeHtml(esc.id || 'ESC')}</div>
         <div class="esc-content">
-          <div class="esc-title">${esc.title||'—'} <span class="badge ${esc.priority==='P1'?'crit':'high'}">${esc.priority}</span></div>
-          <div class="esc-reason">${esc.escalation_reason||'—'}</div>
+          <div class="esc-title">${escapeHtml(esc.title || '—')} <span class="badge ${p === 'p1' ? 'crit' : 'high'}">${escapeHtml(priority)}</span></div>
+          <div class="esc-reason">${escapeHtml(esc.escalation_reason || '—')}</div>
           <div class="esc-evidence">${techs}${iocs}</div>
-          <div class="esc-action">→ ${esc.recommended_action||'—'}</div>
+          <div class="esc-action">→ ${escapeHtml(esc.recommended_action || '—')}</div>
         </div>
-        <div style="font-family:var(--font-mono);font-size:18px;font-weight:900;color:${esc.priority==='P1'?'var(--danger)':'var(--warn)'};min-width:36px;text-align:right">${(esc.risk_score||0).toFixed(1)}</div>
+        <div style="font-family:var(--font-mono);font-size:18px;font-weight:900;color:${p === 'p1' ? 'var(--danger)' : 'var(--warn)'};min-width:36px;text-align:right">${risk === null ? '—' : risk.toFixed(1)}</div>
       </div>`;
   }).join('') || '<div class="loading-state">No escalations</div>';
 }
@@ -1128,67 +1174,84 @@ function renderEscalationTracker(d) {
 // ── CAMPAIGN LIST (Phase 1 Explainability) ────────────────────────────────────
 function renderCampaigns(d) {
   const beta = d.engine_beta || {};
-  const campaigns = beta.campaigns || [];
-  const bc = $('beta-count'); if (bc) bc.textContent = `${campaigns.length} CAMPAIGNS · ${beta.actors_identified||0} ACTORS`;
+  const campaigns = Array.isArray(beta.campaigns) ? beta.campaigns : [];
+  const actors = finiteNumber(beta.actors_identified, 0, 0);
+  const bc = $('beta-count'); if (bc) bc.textContent = `${campaigns.length} CAMPAIGNS · ${actors} ACTORS`;
   const cl = $('campaign-list'); if (!cl) return;
 
   let html = '';
-  campaigns.slice(0, 8).forEach((c, idx) => {
-    const corr = Math.round((c.correlation_score||0) * 100);
-    const sectorTags = (c.sectors_targeted||[]).map(s => `<span class="tag">${s}</span>`).join('');
-    const techChips  = (c.what_evidence?.attack_techniques||[]).map(t =>
-      `<span class="attack-chip" title="${t.rationale}">${t.id}</span>`).join('');
+  campaigns.slice(0, 8).forEach((raw, idx) => {
+    const c = raw && typeof raw === 'object' ? raw : {};
+    const corrRaw = finiteNumber(c.correlation_score, 0, 0, 1);
+    const corr = Math.round(corrRaw * 100);
+    const evidenceId = safeDomId(c.id ?? idx, 'cev');
+    const sectorTags = (Array.isArray(c.sectors_targeted) ? c.sectors_targeted : [])
+      .map(v => `<span class="tag">${escapeHtml(v)}</span>`).join('');
+    const techniques = Array.isArray(c.what_evidence?.attack_techniques) ? c.what_evidence.attack_techniques : [];
+    const techChips = techniques.map(t =>
+      `<span class="attack-chip" title="${escapeHtml(t?.rationale || '')}">${escapeHtml(t?.id || '—')}</span>`
+    ).join('');
+    const avgEpss = finiteNumber(c.avg_epss, null, 0, 1);
+    const avgRisk = finiteNumber(c.avg_risk, null, 0, 10);
+    const clusterSize = finiteNumber(c.cluster_size, 0, 0);
+    const kevCount = finiteNumber(c.kev_confirmed_count, 0, 0);
+    const iocCount = finiteNumber(c.ioc_count, 0, 0);
+    const escalationStatus = String(c.escalation_status || 'P3').toUpperCase();
+    const stages = (Array.isArray(c.what_evidence?.kill_chain_stages) ? c.what_evidence.kill_chain_stages : [])
+      .map(escapeHtml).join(' → ');
+    const coActors = (Array.isArray(c.actor_overlap_analysis?.co_occurring_actors) ? c.actor_overlap_analysis.co_occurring_actors : [])
+      .map(escapeHtml).join(', ') || 'none detected';
 
     html += `
       <div class="campaign-item">
         <div class="camp-header">
           <div>
-            <div class="camp-actor">${c.actor||'UNKNOWN'}</div>
-            <div class="camp-type">${c.threat_type||'Unknown'}</div>
+            <div class="camp-actor">${escapeHtml(c.actor || 'UNKNOWN')}</div>
+            <div class="camp-type">${escapeHtml(c.threat_type || 'Unknown')}</div>
           </div>
           <div style="text-align:right">
-            ${severityBadge(c.severity_max||'MEDIUM')}
-            <span class="badge ${c.escalation_status?.includes('P1')?'crit':'high'}" style="display:block;margin-top:4px">${c.escalation_status||'P3'}</span>
+            ${severityBadge(c.severity_max || 'MEDIUM')}
+            <span class="badge ${escalationStatus.includes('P1') ? 'crit' : 'high'}" style="display:block;margin-top:4px">${escapeHtml(escalationStatus)}</span>
           </div>
         </div>
         <div class="corr-bar"><div class="corr-fill" style="width:${corr}%"></div></div>
         <div class="camp-stats">
-          <div class="camp-stat">Cluster <b>${c.cluster_size||0}</b></div>
-          <div class="camp-stat">KEV <b>${c.kev_confirmed_count||0}</b></div>
-          <div class="camp-stat">Avg Risk <b>${c.avg_risk||0}</b></div>
-          <div class="camp-stat">EPSS <b>${(c.avg_epss||0).toFixed(3)}</b></div>
+          <div class="camp-stat">Cluster <b>${clusterSize}</b></div>
+          <div class="camp-stat">KEV <b>${kevCount}</b></div>
+          <div class="camp-stat">Avg Risk <b>${avgRisk === null ? '—' : avgRisk}</b></div>
+          <div class="camp-stat">EPSS <b>${avgEpss === null ? '—' : avgEpss.toFixed(3)}</b></div>
           <div class="camp-stat">Corr <b>${corr}%</b></div>
-          <div class="camp-stat">IOCs <b>${c.ioc_count||0}</b></div>
+          <div class="camp-stat">IOCs <b>${iocCount}</b></div>
         </div>
         <div style="margin-bottom:8px">${sectorTags}</div>
 
-        <button class="evidence-toggle" onclick="toggleEvidence('cev-${c.id}',this)">
-          <span>🔍 WHY CORRELATED · HOW CLUSTERED · ACTOR OVERLAP · ATT&CK RATIONALE</span>
+        <button class="evidence-toggle" onclick="toggleEvidence('${evidenceId}',this)">
+          <span>WHY CORRELATED · HOW CLUSTERED · ACTOR OVERLAP · ATT&CK RATIONALE</span>
           <span class="arrow">▼</span>
         </button>
-        <div class="evidence-drawer" id="cev-${c.id}">
+        <div class="evidence-drawer" id="${evidenceId}">
           <div class="ev-row">
             <div class="ev-label">WHY CORRELATED</div>
-            <div class="ev-content">${c.why_correlated||'—'}</div>
+            <div class="ev-content">${escapeHtml(c.why_correlated || '—')}</div>
           </div>
           <div class="ev-row">
-            <div class="ev-label">HOW CLUSTERED · DBSCAN PARAMS</div>
-            <div class="ev-content mono">${c.how_clustered||'—'}</div>
+            <div class="ev-label">HOW CLUSTERED</div>
+            <div class="ev-content mono">${escapeHtml(c.how_clustered || '—')}</div>
           </div>
           <div class="ev-row">
             <div class="ev-label">ATT&CK TECHNIQUES · KILL CHAIN</div>
-            <div>${techChips} <span style="font-size:9px;color:var(--text-muted);margin-left:4px">[${(c.what_evidence?.kill_chain_stages||[]).join(' → ')}]</span></div>
+            <div>${techChips || '—'} <span style="font-size:9px;color:var(--text-muted);margin-left:4px">[${stages || '—'}]</span></div>
           </div>
           <div class="ev-row">
             <div class="ev-label">ACTOR OVERLAP ANALYSIS</div>
-            <div class="ev-content mono">${c.actor_overlap_analysis?.overlap_evidence||'—'}<br>
-              Co-occurring actors: ${(c.actor_overlap_analysis?.co_occurring_actors||[]).join(', ')||'none detected'}<br>
-              Attribution confidence: ${c.actor_overlap_analysis?.attribution_confidence||'—'}
+            <div class="ev-content mono">${escapeHtml(c.actor_overlap_analysis?.overlap_evidence || '—')}<br>
+              Co-occurring actors: ${coActors}<br>
+              Attribution confidence: ${escapeHtml(c.actor_overlap_analysis?.attribution_confidence || '—')}
             </div>
           </div>
           <div class="ev-row">
             <div class="ev-label">SOC RECOMMENDATION</div>
-            <div class="ev-content" style="color:var(--warn)">${c.soc_recommendation||'—'}</div>
+            <div class="ev-content" style="color:var(--warn)">${escapeHtml(c.soc_recommendation || '—')}</div>
           </div>
         </div>
       </div>`;
@@ -1196,106 +1259,127 @@ function renderCampaigns(d) {
 
   if (campaigns.length > 8) {
     html += `<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:11px">
-      + ${campaigns.length - 8} more campaigns · <a href="#pricing" style="color:var(--ai)">Upgrade to Pro for full campaign intelligence ↗</a>
+      + ${campaigns.length - 8} more campaigns · <a href="/upgrade.html?plan=pro" style="color:var(--ai)">Upgrade to Pro for full campaign intelligence ↗</a>
     </div>`;
   }
-  cl.innerHTML = html;
+  cl.innerHTML = html || '<div class="loading-state">No campaign telemetry available</div>';
 }
 
 // ── SECTOR HEATMAP (Phase 1) ──────────────────────────────────────────────────
 function renderHeatmap(d) {
   const gamma = d.engine_gamma || {};
-  const forecasts = gamma.sector_forecasts || [];
+  const forecasts = Array.isArray(gamma.sector_forecasts) ? gamma.sector_forecasts : [];
   const hg = $('heatmap-grid'); if (!hg) return;
   hg.innerHTML = forecasts.map(sf => {
-    const p = sf.exploit_probability_30d || 0;
+    const p = finiteNumber(sf?.exploit_probability_30d, 0, 0, 100);
     const bgCls = p >= 80 ? 'crit-bg' : p >= 60 ? 'high-bg' : p >= 40 ? 'med-bg' : 'low-bg';
-    const pCls  = p >= 80 ? 'danger' : p >= 60 ? 'warn' : 'info';
-    return `<div class="hm-cell ${bgCls}" title="${sf.why_predicted||''}">
-      <div class="hm-sector">${sf.sector}</div>
+    const pCls = p >= 80 ? 'danger' : p >= 60 ? 'warn' : 'info';
+    return `<div class="hm-cell ${bgCls}" title="${escapeHtml(sf?.why_predicted || '')}">
+      <div class="hm-sector">${escapeHtml(sf?.sector || 'Unknown sector')}</div>
       <div class="hm-prob ${pCls}">${p.toFixed(1)}%</div>
-      <div class="hm-trend">${sf.trend||''} · ${sf.risk_level||'—'}</div>
+      <div class="hm-trend">${escapeHtml(sf?.trend || '—')} · ${escapeHtml(sf?.risk_level || '—')}</div>
     </div>`;
-  }).join('');
+  }).join('') || '<div class="loading-state">No sector forecast telemetry available</div>';
 }
 
 // ── FORECAST CANVAS ───────────────────────────────────────────────────────────
 function renderForecastCanvas(d) {
   const gamma = d.engine_gamma || {};
-  const timeline = gamma.forecast_timeline_30d || [];
-  const sub = $('forecast-sub');
-  if (sub) sub.textContent = `${gamma.top_sector||'—'} sector · ${gamma.top_sector_probability||'—'}% peak probability · Engine Gamma`;
+  const rawTimeline = Array.isArray(gamma.forecast_timeline_30d) ? gamma.forecast_timeline_30d : [];
+  const timeline = rawTimeline.map(point => ({
+    predicted_risk: finiteNumber(point?.predicted_risk, null, 0, 100),
+    ci_upper: finiteNumber(point?.ci_upper, null, 0, 100),
+    ci_lower: finiteNumber(point?.ci_lower, null, 0, 100),
+    key_event: point?.key_event && typeof point.key_event === 'object' ? point.key_event : null,
+  })).filter(point => point.predicted_risk !== null && point.ci_upper !== null && point.ci_lower !== null);
 
-  const canvas = $('forecast-canvas'); if (!canvas || !timeline.length) return;
-  const dpr = window.devicePixelRatio || 1;
-  const W = canvas.offsetWidth || 700, H = 220;
+  const sub = $('forecast-sub');
+  if (sub) {
+    const probability = finiteNumber(gamma.top_sector_probability, null, 0, 100);
+    sub.textContent = `${gamma.top_sector || '—'} sector · ${probability === null ? '—' : probability + '%'} peak probability · Engine Gamma`;
+  }
+
+  const canvas = $('forecast-canvas');
+  if (!canvas || timeline.length < 2) return;
+  const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
+  const W = Math.max(canvas.offsetWidth || 700, 240), H = 220;
   canvas.width = W * dpr; canvas.height = H * dpr;
   canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
-  const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.scale(dpr, dpr);
 
   const pad = {t:20,r:20,b:35,l:45};
   const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
   const vals = timeline.map(p => p.predicted_risk);
-  const uppers= timeline.map(p => p.ci_upper);
-  const lowers= timeline.map(p => p.ci_lower);
-  const yMax = Math.min(Math.max(...uppers) + 5, 100), yMin = 0;
+  const uppers = timeline.map(p => p.ci_upper);
+  const lowers = timeline.map(p => p.ci_lower);
+  const yMax = Math.max(20, Math.min(Math.max(...uppers) + 5, 100)), yMin = 0;
   const xScale = i => pad.l + (i / (timeline.length - 1)) * cw;
-  const yScale = v => pad.t + ch - ((v - yMin) / (yMax - yMin)) * ch;
+  const yScale = value => {
+    const v = finiteNumber(value, 0, yMin, yMax);
+    return pad.t + ch - ((v - yMin) / Math.max(yMax - yMin, 1)) * ch;
+  };
 
-  // Background
-  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.roundRect(0,0,W,H,8); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  if (typeof ctx.roundRect === 'function') {
+    ctx.beginPath(); ctx.roundRect(0,0,W,H,8); ctx.fill();
+  } else {
+    ctx.fillRect(0,0,W,H);
+  }
 
-  // Grid lines
   ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
-  for (let y = 0; y <= 100; y += 20) {
+  for (let y = 0; y <= yMax; y += 20) {
     const yy = yScale(y);
     ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(W - pad.r, yy); ctx.stroke();
     ctx.fillStyle = 'rgba(148,163,184,0.5)'; ctx.font = '9px JetBrains Mono,monospace';
     ctx.textAlign = 'right'; ctx.fillText(y + '%', pad.l - 6, yy + 3);
   }
 
-  // Confidence band
   ctx.beginPath();
-  timeline.forEach((p, i) => { if (i === 0) ctx.moveTo(xScale(i), yScale(uppers[i])); else ctx.lineTo(xScale(i), yScale(uppers[i])); });
+  timeline.forEach((point, i) => {
+    if (i === 0) ctx.moveTo(xScale(i), yScale(uppers[i]));
+    else ctx.lineTo(xScale(i), yScale(uppers[i]));
+  });
   for (let i = timeline.length - 1; i >= 0; i--) ctx.lineTo(xScale(i), yScale(lowers[i]));
   ctx.closePath();
   ctx.fillStyle = 'rgba(124,58,237,0.12)'; ctx.fill();
 
-  // Prediction line
   ctx.beginPath(); ctx.strokeStyle = '#a78bfa'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
-  timeline.forEach((p, i) => { if (i === 0) ctx.moveTo(xScale(i), yScale(vals[i])); else ctx.lineTo(xScale(i), yScale(vals[i])); });
+  timeline.forEach((point, i) => {
+    if (i === 0) ctx.moveTo(xScale(i), yScale(vals[i]));
+    else ctx.lineTo(xScale(i), yScale(vals[i]));
+  });
   ctx.stroke();
 
-  // Key events
-  timeline.forEach((p, i) => {
-    if (p.key_event) {
+  timeline.forEach((point, i) => {
+    if (point.key_event) {
       const x = xScale(i), y = yScale(vals[i]);
       ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI*2);
       ctx.fillStyle = '#f59e0b'; ctx.fill();
       ctx.fillStyle = 'rgba(251,191,36,0.8)'; ctx.font = '8px Inter,sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(p.key_event.label, x, y - 12);
+      ctx.fillText(String(point.key_event.label || '').slice(0, 64), x, y - 12);
     }
   });
 
-  // X axis labels
   ctx.fillStyle = 'rgba(148,163,184,0.7)'; ctx.font = '9px JetBrains Mono,monospace'; ctx.textAlign = 'center';
-  [0,7,14,21,30].forEach(d => {
-    if (d < timeline.length) ctx.fillText('D+' + d, xScale(d), H - pad.b + 16);
-  });
+  const marks = [0, Math.floor((timeline.length - 1) / 4), Math.floor((timeline.length - 1) / 2), Math.floor((timeline.length - 1) * 3 / 4), timeline.length - 1];
+  [...new Set(marks)].forEach(i => ctx.fillText('D+' + i, xScale(i), H - pad.b + 16));
 }
 
 // ── FORECAST PREVIEW (paywalled blur) ────────────────────────────────────────
 function renderForecastPreview(d) {
   const fp = $('forecast-preview'); if (!fp) return;
   const gamma = d.engine_gamma || {};
-  fp.innerHTML = (gamma.sector_forecasts||[]).slice(0,4).map(sf =>
-    `<div style="padding:8px;border:1px solid var(--border);border-radius:var(--r);margin-bottom:6px;display:flex;justify-content:space-between">
-      <span style="font-size:11px;font-weight:600">${sf.sector}</span>
-      <span style="font-family:var(--font-mono);color:var(--ai)">${sf.exploit_probability_30d.toFixed(1)}%</span>
-    </div>`
-  ).join('');
+  const forecasts = Array.isArray(gamma.sector_forecasts) ? gamma.sector_forecasts : [];
+  fp.innerHTML = forecasts.slice(0,4).map(sf => {
+    const probability = finiteNumber(sf?.exploit_probability_30d, null, 0, 100);
+    return `<div style="padding:8px;border:1px solid var(--border);border-radius:var(--r);margin-bottom:6px;display:flex;justify-content:space-between">
+      <span style="font-size:11px;font-weight:600">${escapeHtml(sf?.sector || 'Unknown sector')}</span>
+      <span style="font-family:var(--font-mono);color:var(--ai)">${probability === null ? '—' : probability.toFixed(1) + '%'}</span>
+    </div>`;
+  }).join('') || '<div class="loading-state">No forecast preview available</div>';
 }
-
 // ── EVIDENCE DRAWER TOGGLE ────────────────────────────────────────────────────
 function toggleEvidence(id, btn) {
   const drawer = document.getElementById(id); if (!drawer) return;
@@ -1345,7 +1429,7 @@ async function loadTracker() {
   } catch (err) {
     console.error('[SENTINEL APEX] Failed to load tracker:', err);
     setConnectionState('failed');
-    // Show cached/stub data so no SYNTHESIZING states are visible
+    // Fail closed: show an explicit unavailable state; never synthesize telemetry.
     showFallback();
   }
 }
