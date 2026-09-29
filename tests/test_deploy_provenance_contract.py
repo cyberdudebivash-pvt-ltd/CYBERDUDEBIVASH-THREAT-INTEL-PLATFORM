@@ -17,6 +17,8 @@ def test_repository_build_info_defaults_never_claim_production_commit():
     src = BUILD_INFO.read_text(encoding="utf-8")
     assert 'DEPLOY_COMMIT_SHA = "development"' in src
     assert 'DEPLOY_RUN_ID = "local"' in src
+    assert len(BUILD_INFO.read_bytes()) >= 1024
+    assert src.rstrip().endswith("});")
 
 
 def test_deploy_workflow_injects_full_github_sha_before_worker_validation():
@@ -28,6 +30,8 @@ def test_deploy_workflow_injects_full_github_sha_before_worker_validation():
     assert '^[0-9a-f]{40}$' in src
     assert 'export const DEPLOY_COMMIT_SHA = "$SHA";' in src
     assert 'export const DEPLOY_RUN_ID = "$RUN_ID";' in src
+    assert 'export const DEPLOY_PROVENANCE = Object.freeze({' in src
+    assert 'source: "github-actions-production-deploy"' in src
 
 
 def test_post_deploy_provenance_assertion_is_hard_fail_not_informational():
