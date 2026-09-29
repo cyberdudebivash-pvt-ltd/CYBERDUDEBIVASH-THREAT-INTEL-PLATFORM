@@ -24,6 +24,7 @@ import urllib.request
 import urllib.error
 import urllib.parse
 import concurrent.futures
+import random
 
 try:
     import boto3
@@ -48,6 +49,11 @@ KV_NAMESPACES = {
 }
 
 SKIP_TRANSIENT_IN = {"RATE_LIMIT_KV"}
+
+MAX_WORKERS = max(1, int(os.environ.get("KV_BACKUP_WORKERS", "32")))
+MAX_RETRIES = max(0, int(os.environ.get("KV_BACKUP_MAX_RETRIES", "5")))
+RETRY_BASE_SECONDS = max(0.05, float(os.environ.get("KV_BACKUP_RETRY_BASE_SECONDS", "0.5")))
+RETRYABLE_HTTP = {408, 425, 429, 500, 502, 503, 504}
 
 
 def cf_get(path, params=None):
@@ -96,15 +102,29 @@ def list_kv_keys(ns_id, prefix=None):
 
 
 def get_kv_value(ns_id, key):
+    """Fetch one KV value with bounded retry/backoff for transient CF failures."""
     url = f"{CF_API_BASE}/accounts/{CF_ACCOUNT_ID}/storage/kv/namespaces/{ns_id}/values/{urllib.parse.quote(key, safe='')}"
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {CF_API_TOKEN}"})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return resp.read().decode("utf-8")
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            if e.code not in RETRYABLE_HTTP or attempt >= MAX_RETRIES:
+                raise
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            try:
+                delay = float(retry_after) if retry_after else RETRY_BASE_SECONDS * (2 ** attempt)
+            except (TypeError, ValueError):
+                delay = RETRY_BASE_SECONDS * (2 ** attempt)
+            time.sleep(min(30.0, delay) + random.uniform(0, 0.25))
+        except (urllib.error.URLError, TimeoutError):
+            if attempt >= MAX_RETRIES:
+                raise
+            time.sleep(min(30.0, RETRY_BASE_SECONDS * (2 ** attempt)) + random.uniform(0, 0.25))
+    raise RuntimeError("unreachable")
 
 
 def backup_namespace(ns_name, ns_id, skip_transient):
@@ -136,7 +156,7 @@ def backup_namespace(ns_name, ns_id, skip_transient):
     # deliberately conservative (10 workers) rather than maximizing
     # throughput, since Cloudflare's API applies its own rate limits and a
     # burst of 429s would just move the failure mode rather than fix it.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         future_to_key = {pool.submit(get_kv_value, ns_id, key): key for key in keys}
         for future in concurrent.futures.as_completed(future_to_key):
             key = future_to_key[future]
