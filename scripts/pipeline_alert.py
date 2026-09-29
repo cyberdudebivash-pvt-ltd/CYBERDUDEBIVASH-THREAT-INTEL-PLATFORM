@@ -10,8 +10,12 @@ Usage:
   python3 scripts/pipeline_alert.py --status success --items 42 --version 141.0.0
 
 Env:
-  TELEGRAM_BOT_TOKEN  - Bot token from @BotFather
-  TELEGRAM_CHAT_ID    - Chat/channel to post into
+  TELEGRAM_OPS_BOT_TOKEN  - Bot token for the PRIVATE operator destination
+  TELEGRAM_OPS_CHAT_ID    - PRIVATE operator chat/channel ID
+
+Security boundary:
+  This module MUST NOT use TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID. Those
+  variables are reserved for public subscriber intelligence delivery.
   GITHUB_REPOSITORY   - Auto-set by GitHub Actions
   GITHUB_RUN_ID       - Auto-set by GitHub Actions
 """
@@ -102,11 +106,14 @@ def main():
     parser.add_argument("--version", default="",    help="Platform version string")
     args = parser.parse_args()
 
-    token   = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    token   = os.environ.get("TELEGRAM_OPS_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_OPS_CHAT_ID", "").strip()
 
     if not token or not chat_id:
-        log.warning("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — skipping alert.")
+        log.warning(
+            "Private ops Telegram is not configured "
+            "(TELEGRAM_OPS_BOT_TOKEN/TELEGRAM_OPS_CHAT_ID) — internal alert logged only."
+        )
         sys.exit(0)
 
     if args.status == "failure":
