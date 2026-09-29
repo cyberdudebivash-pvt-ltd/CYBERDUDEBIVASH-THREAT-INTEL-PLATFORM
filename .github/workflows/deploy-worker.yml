@@ -623,18 +623,33 @@ jobs:
           echo "FATAL: Both deploy attempts failed"
           exit 1
 
-      - name: "[OK] Post-deploy smoke test (version assertion)"
-        continue-on-error: true
+      - name: "[OK] Post-deploy smoke test (version + exact commit assertion)"
         run: |
+          set -euo pipefail
           echo "=== SENTINEL APEX Post-Deploy Smoke Test ==="
-          echo "Waiting 20s for global Cloudflare propagation..."
-          sleep 20
+          echo "Waiting for the exact deployed commit to converge on the public route..."
 
-          # Version comes from the liveness endpoint (no data dependency).
-          # jwt_configured is no longer in the PUBLIC /api/health response
-          # (secret-presence flag); post-deploy-validation.yml GATE D checks it
-          # with ADMIN_SECRET. This step stays informational (continue-on-error).
-          HEALTH=$(curl -sf --max-time 15 "https://intel.cyberdudebivash.com/api/health/live" 2>/dev/null || echo '{}')
+          HEALTH='{}'
+          MATCHED=0
+          for attempt in 1 2 3 4 5 6; do
+            sleep 10
+            HEALTH=$(curl -sf --max-time 15 "https://intel.cyberdudebivash.com/api/health/live" 2>/dev/null || echo '{}')
+            LIVE_SHA=$(printf '%s' "$HEALTH" | python3 -c 'import json,sys; 
+try:
+ d=json.load(sys.stdin); print(d.get("deploy_commit_sha",""))
+except Exception:
+ print("")')
+            echo "  provenance probe ${attempt}/6 -> live_sha=${LIVE_SHA:-missing}"
+            if [ "$LIVE_SHA" = "$GITHUB_SHA" ]; then
+              MATCHED=1
+              break
+            fi
+          done
+          if [ "$MATCHED" -ne 1 ]; then
+            echo "FATAL: public route did not converge to GITHUB_SHA=$GITHUB_SHA"
+            echo "Last liveness response: $HEALTH"
+            exit 1
+          fi
           echo "Liveness response: ${HEALTH}"
 
           python3 -c "
@@ -644,8 +659,8 @@ jobs:
           try:
               d = json.loads(raw)
           except Exception:
-              print('NOTE: Could not parse health response -- worker still propagating')
-              sys.exit(0)
+              print('FATAL: Could not parse live liveness response')
+              sys.exit(1)
           gateway = d.get('gateway', 'unknown')
           print(f'Gateway     : {gateway}')
           checks  = d.get('checks', {})
@@ -685,7 +700,7 @@ jobs:
               print('OK: CDB_JWT_SECRET is configured')
           else:
               print('NOTE: jwt_configured is verified by post-deploy-validation.yml GATE D (authenticated)')
-          " 2>&1 || echo "Smoke test skipped -- worker still propagating"
+          "
 
           echo ""
           echo "--- Security header check ---"
