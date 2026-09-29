@@ -33,6 +33,8 @@ on drift between:
             FREE 100/day quota and INR 2,499 PRO price
   C64+      keyless Free tier: when FREE api_keys is 0, POST /api/keys/free
             and revenue-engine POST /api/apikeys/request-free answer 410
+  C65+      AI tracker customer-trust contract: no fabricated uptime/count/
+            confidence/version fallbacks and quota copy matches canonical limits
 
 Exit codes:
   0 = ALL PASS
@@ -557,6 +559,41 @@ def main() -> int:
         for claim in absolute_quota_claims:
             if claim.lower() in lower:
                 check(False, f"{rel} does not contain forbidden claim '{claim}'")
+
+    # --- C65+: AI tracker customer-trust / no-fabrication contract ----------
+    # This page is directly customer-facing and previously published fixed
+    # telemetry ("99.99% UPTIME", fixed anomaly/campaign counts), stale v148
+    # fallbacks, and an "Enterprise unlimited" quota even though the gateway
+    # enforces finite limits. Pin the page to evidence-backed rendering and
+    # the canonical commercial contract so those claims cannot regress.
+    ai_tracker_path = REPO_ROOT / "ai-threat-tracker.html"
+    if ai_tracker_path.exists():
+        ai_src = ai_tracker_path.read_text(encoding="utf-8", errors="ignore")
+        ai_compact = re.sub(r"\s+", "", ai_src)
+        check("99.99% UPTIME" not in ai_src,
+              "ai-threat-tracker.html does not hardcode a 99.99% uptime metric")
+        check("18 anomalies, 22 campaigns, 12 sector forecasts" not in ai_src,
+              "ai-threat-tracker.html does not hardcode AI telemetry counts")
+        check("Enterprise unlimited" not in ai_src,
+              "ai-threat-tracker.html does not claim unlimited Enterprise requests")
+        check("overall||89" not in ai_compact,
+              "ai-threat-tracker.html does not invent 89% confidence when telemetry is absent")
+        check("pipeline_version||'148.0.0'" not in ai_compact,
+              "ai-threat-tracker.html does not fall back to stale v148 runtime identity")
+        check("feed_freshness_hours||'<1'" not in ai_compact,
+              "ai-threat-tracker.html does not invent <1h feed freshness")
+        expected_rate_copy = (
+            f"FREE {canon['free']['requests_per_minute']} req/min ({canon['free']['requests_per_day']}/day) · "
+            f"PRO {canon['pro']['requests_per_minute']} req/min ({canon['pro']['requests_per_day']:,}/day) · "
+            f"ENTERPRISE {canon['enterprise']['requests_per_minute']} req/min ({canon['enterprise']['requests_per_day']:,}/day) · "
+            f"MSSP {canon['mssp']['requests_per_minute']:,} req/min ({canon['mssp']['requests_per_day']:,}/day)"
+        )
+        check(expected_rate_copy in ai_src,
+              "ai-threat-tracker.html rate-limit copy matches canonical per-minute/per-day limits")
+        check('id="es-system"' in ai_src and "HEALTH UNVERIFIED" in ai_src,
+              "ai-threat-tracker.html system-health state is runtime-bound and fail-closed")
+    else:
+        check(False, "ai-threat-tracker.html exists for commercial integrity validation")
 
     print()
     print(f"verify_commercial_contract.py: {CHECK_COUNT} checks, {len(FAILURES)} failed.")

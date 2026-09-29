@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>🧠 AI Threat Tracker — SENTINEL APEX v148</title>
+<title>AI Threat Tracker — SENTINEL APEX v201.0</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -33,7 +33,7 @@ a{color:inherit;text-decoration:none}
   background:rgba(124,58,237,0.12)}
 .nav-chip.back{background:rgba(255,255,255,0.04);color:var(--text-dim)}
 .topbar-spacer{flex:1}
-.live-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--text-muted);
   display:inline-block;animation:pulse-dot 1.4s infinite;margin-right:5px}
 @keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
 
@@ -357,8 +357,8 @@ a{color:inherit;text-decoration:none}
     <a href="/ai-threat-tracker.html#api-docs" class="nav-chip">API DOCS</a>
   </div>
   <div class="topbar-spacer"></div>
-  <span style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">
-    <span class="live-dot"></span>LIVE INTEL
+  <span style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono)" id="tracker-connection">
+    <span class="live-dot" id="tracker-connection-dot"></span><span id="tracker-connection-text">AI DATA CHECKING</span>
   </span>
 </nav>
 
@@ -397,7 +397,7 @@ a{color:inherit;text-decoration:none}
 
 <!-- HERO -->
 <section class="hero">
-  <div class="hero-badge"><span class="live-dot"></span>ENGINE ALPHA · ENGINE BETA · ENGINE GAMMA</div>
+  <div class="hero-badge"><span class="live-dot" id="hero-connection-dot"></span>ENGINE ALPHA · ENGINE BETA · ENGINE GAMMA</div>
   <h1 class="hero-title">🧠 AI Cyber Brain Command Center</h1>
   <div class="hero-sub">ANOMALY DETECTION · CAMPAIGN CORRELATION · PREDICTIVE INTELLIGENCE · v201.0</div>
   <div class="hero-stats">
@@ -414,7 +414,7 @@ a{color:inherit;text-decoration:none}
   <div class="engine-pill"><span class="edot alpha"></span><span class="ename">ENGINE ALPHA</span><span class="estat" id="es-alpha">— ANOMALY DETECTION</span></div>
   <div class="engine-pill"><span class="edot beta"></span><span class="ename">ENGINE BETA</span><span class="estat" id="es-beta">— CAMPAIGN CORRELATION</span></div>
   <div class="engine-pill"><span class="edot gamma"></span><span class="ename">ENGINE GAMMA</span><span class="estat" id="es-gamma">— PREDICTIVE INTELLIGENCE</span></div>
-  <div class="engine-pill"><span class="edot sys"></span><span class="ename">SYSTEM HEALTH</span><span class="estat ok" style="color:var(--ok)">99.99% UPTIME</span></div>
+  <div class="engine-pill"><span class="edot sys" id="ed-system"></span><span class="ename">SYSTEM HEALTH</span><span class="estat" id="es-system">— HEALTH UNVERIFIED</span></div>
 </div>
 
 <div class="main">
@@ -543,7 +543,7 @@ a{color:inherit;text-decoration:none}
 <div class="card full" style="margin-bottom:28px">
   <div class="card-header">
     <div class="card-title">📈 30-DAY AI PREDICTIVE RISK CURVE</div>
-    <div class="card-sub" id="forecast-sub">Gradient Boost proxy + sinusoidal seasonality + 95% confidence band</div>
+    <div class="card-sub" id="forecast-sub">Model-generated forecast from the current tracker payload; shown only when available.</div>
   </div>
   <canvas id="forecast-canvas"></canvas>
   <div style="display:flex;gap:16px;margin-top:8px;font-size:10px;color:var(--text-muted)">
@@ -588,7 +588,7 @@ a{color:inherit;text-decoration:none}
     <span class="api-method get">GET</span>
     <span class="api-path">/api/ai/tracker.json</span>
     <span class="api-tier badge ok-bg">FREE</span>
-    <div class="api-desc">Full AI brain payload — 18 anomalies, 22 campaigns, 12 sector forecasts, executive summary, confidence meter. Refreshed every 30 min.</div>
+    <div class="api-desc">Current AI tracker payload — anomaly, campaign, sector-forecast, executive-summary and confidence data are reported from the live API response; counts and freshness are never hardcoded.</div>
   </div>
   <div class="api-endpoint">
     <span class="api-method get">GET</span>
@@ -628,7 +628,7 @@ a{color:inherit;text-decoration:none}
   </div>
   <div style="margin-top:16px;padding:12px;background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.2);border-radius:var(--r);font-size:10px;color:var(--text-dim)">
     <b style="color:var(--ai)">Authentication:</b> Bearer JWT token — obtain via <span style="font-family:var(--font-mono);color:var(--ai)">POST /api/auth/token</span> with your API key.
-    Rate limits: Free 100 req/hr · Pro 2,000 req/hr · Enterprise unlimited.
+    Rate limits: FREE 30 req/min (50/day) · PRO 120 req/min (5,000/day) · ENTERPRISE 600 req/min (50,000/day) · MSSP 1,200 req/min (50,000/day).
     All endpoints return <span style="font-family:var(--font-mono)">Content-Type: application/json</span> with CORS enabled.
   </div>
 </div>
@@ -651,14 +651,14 @@ a{color:inherit;text-decoration:none}
       <li class="locked">Predictive API access</li>
       <li class="locked">Executive brief</li>
     </ul>
-    <button class="btn btn-ghost">GET STARTED FREE</button>
+    <a class="btn btn-ghost" href="/threats.html">EXPLORE FREE INTELLIGENCE</a>
   </div>
   <div class="pricing-card featured">
     <div class="price-tier">PRO · SOC</div>
     <div class="price-val">$49<span style="font-size:14px;color:var(--text-muted)">/mo</span></div>
     <div class="price-desc">Full campaign intelligence · SMB/SOC revenue</div>
     <ul class="feature-list">
-      <li>Full AI Anomaly Radar (18+)</li>
+      <li>Full AI Anomaly Radar</li>
       <li>Campaign deep-dive intelligence</li>
       <li>AI kill-chain analysis</li>
       <li>ATT&CK technique mapping</li>
@@ -669,7 +669,7 @@ a{color:inherit;text-decoration:none}
       <li class="locked">Real-time SIEM push</li>
       <li class="locked">MSSP automation</li>
     </ul>
-    <button class="btn btn-primary">UPGRADE TO PRO ↗</button>
+    <a class="btn btn-primary" href="/upgrade.html?plan=pro">UPGRADE TO PRO ↗</a>
   </div>
   <div class="pricing-card">
     <div class="price-tier">ENTERPRISE SOC</div>
@@ -687,7 +687,7 @@ a{color:inherit;text-decoration:none}
       <li>Trust Center + SLA Dashboard</li>
       <li>Compliance Center</li>
     </ul>
-    <button class="btn btn-outline">CONTACT ENTERPRISE SALES ↗</button>
+    <a class="btn btn-outline" href="/contact-enterprise.html">CONTACT ENTERPRISE SALES ↗</a>
   </div>
 </div>
 
@@ -709,7 +709,7 @@ a{color:inherit;text-decoration:none}
     <a href="/status.html" class="trust-card">
       <div class="trust-icon">📊</div>
       <div class="trust-title">STATUS & SLA</div>
-      <div class="trust-desc">99.99% uptime SLA, real-time platform health, historical uptime telemetry, API health center</div>
+      <div class="trust-desc">Live platform health, contractual SLA evidence, historical uptime telemetry, and API health center</div>
     </a>
     <a href="/ai-threat-tracker.html#api-docs" class="trust-card">
       <div class="trust-icon">🔌</div>
@@ -799,16 +799,35 @@ function renderHealthBanner(h) {
   setEngine('hv-gamma', 'hd-gamma', gammaOk,
     `${(engines.gamma||{}).uptime_pct||'—'}% · ${(engines.gamma||{}).inference_time_ms||'—'}ms`);
   const feed = (h.feed_telemetry||{});
-  const hf = $('hv-feed'); if (hf) hf.textContent = `${feed.feed_freshness_hours||'<1'}h ago · ${feed.feed_item_count||'—'} items`;
+  const hf = $('hv-feed');
+  if (hf) {
+    const freshness = Number.isFinite(Number(feed.feed_freshness_hours)) ? `${Number(feed.feed_freshness_hours).toFixed(1)}h ago` : '—';
+    const itemCount = Number.isFinite(Number(feed.feed_item_count)) ? `${Number(feed.feed_item_count)} items` : '—';
+    hf.textContent = `${freshness} · ${itemCount}`;
+  }
   const hi = $('hv-infer'); if (hi) {
     const exec = (h.ai_execution_trace||{});
     hi.textContent = (exec.total_inference_ms||'—') + 'ms total';
   }
-  const hg = $('hv-gentime'); if (hg) hg.textContent = `v${h.pipeline_version||'148.0.0'} · ${(h.generated_at||'').substring(0,10)}`;
+  const hg = $('hv-gentime');
+  if (hg) {
+    const version = h.pipeline_version ? `v${h.pipeline_version}` : 'v—';
+    const generated = h.generated_at ? String(h.generated_at).substring(0,10) : 'date —';
+    hg.textContent = `${version} · ${generated}`;
+  }
   // Engine status pills
-  const ea = $('es-alpha'); if (ea) ea.textContent = `${(engines.alpha||{}).anomalies_detected||'—'} ANOMALIES DETECTED`;
-  const eb = $('es-beta');  if (eb) eb.textContent = `${(engines.beta||{}).campaigns_tracked||'—'} CAMPAIGNS TRACKED`;
-  const eg = $('es-gamma'); if (eg) eg.textContent = `${(engines.gamma||{}).sectors_analyzed||'—'} SECTORS ANALYZED`;
+  const ea = $('es-alpha'); if (ea) ea.textContent = `${(engines.alpha||{}).anomalies_detected ?? '—'} ANOMALIES DETECTED`;
+  const eb = $('es-beta');  if (eb) eb.textContent = `${(engines.beta||{}).campaigns_tracked ?? '—'} CAMPAIGNS TRACKED`;
+  const eg = $('es-gamma'); if (eg) eg.textContent = `${(engines.gamma||{}).sectors_analyzed ?? '—'} SECTORS ANALYZED`;
+  const system = $('es-system');
+  const systemDot = $('ed-system');
+  if (system) {
+    const systemOk = alphaOk && betaOk && gammaOk;
+    const anyKnown = ['alpha','beta','gamma'].some(k => Boolean((engines[k]||{}).status));
+    system.textContent = !anyKnown ? '— HEALTH UNVERIFIED' : (systemOk ? 'OPERATIONAL' : 'DEGRADED');
+    system.style.color = !anyKnown ? 'var(--text-muted)' : (systemOk ? 'var(--ok)' : 'var(--warn)');
+    if (systemDot) systemDot.style.background = !anyKnown ? 'var(--text-muted)' : (systemOk ? 'var(--ok)' : 'var(--warn)');
+  }
 }
 
 // ── HERO STATS ───────────────────────────────────────────────────────────────
@@ -816,25 +835,36 @@ function renderHeroStats(d) {
   const alpha = d.engine_alpha || {};
   const exec  = d.executive_summary || {};
   const conf  = d.confidence_meter || {};
-  animCount($('hs-anomalies'), alpha.anomalies_detected || 0);
-  animCount($('hs-campaigns'), (d.engine_beta||{}).campaigns_tracked || 0);
-  animCount($('hs-kev'), exec.kev_confirmed || 0);
-  animCount($('hs-conf'), conf.overall || 89, 0, '%');
-  animCount($('hs-gri'), exec.global_risk_index || 0, 1);
+  const renderMetric = (id, value, decimals=0, suffix='') => {
+    const el = $(id);
+    if (!el) return;
+    if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value))) {
+      el.textContent = '—';
+      return;
+    }
+    animCount(el, Number(value), decimals, suffix);
+  };
+  renderMetric('hs-anomalies', alpha.anomalies_detected);
+  renderMetric('hs-campaigns', (d.engine_beta||{}).campaigns_tracked);
+  renderMetric('hs-kev', exec.kev_confirmed);
+  renderMetric('hs-conf', conf.overall, 0, '%');
+  renderMetric('hs-gri', exec.global_risk_index, 1);
 }
 
 // ── GRI RING ─────────────────────────────────────────────────────────────────
 function renderGRI(d) {
   const exec = d.executive_summary || {};
-  const gri  = exec.global_risk_index || 0;
-  const posture = exec.threat_posture || 'MODERATE';
+  const griKnown = exec.global_risk_index !== null && exec.global_risk_index !== undefined &&
+    exec.global_risk_index !== '' && Number.isFinite(Number(exec.global_risk_index));
+  const gri = griKnown ? Number(exec.global_risk_index) : null;
+  const posture = exec.threat_posture || 'UNVERIFIED';
   const postureColor = {CRITICAL:'#ef4444',HIGH:'#f59e0b',ELEVATED:'#3b82f6',MODERATE:'#22c55e'}[posture]||'#94a3b8';
 
-  const el = $('gri-val'); if (el) { el.textContent = gri.toFixed(1); el.style.color = postureColor; }
+  const el = $('gri-val'); if (el) { el.textContent = griKnown ? gri.toFixed(1) : '—'; el.style.color = postureColor; }
   const ring = $('gri-ring');
   if (ring) {
     const circ = 364.4;
-    const offset = circ - (gri / 100) * circ;
+    const offset = griKnown ? circ - (gri / 100) * circ : circ;
     ring.style.stroke = postureColor;
     setTimeout(() => { ring.style.strokeDashoffset = offset; ring.style.transition = 'stroke-dashoffset 1.2s ease'; }, 100);
   }
@@ -842,10 +872,10 @@ function renderGRI(d) {
   if (pp) pp.innerHTML = `<div class="posture-pill" style="background:rgba(255,255,255,.04);border-color:${postureColor}30;color:${postureColor}">● ${posture}</div>`;
   const gm = $('gri-metrics');
   if (gm) gm.innerHTML = [
-    ['KEV Confirmed', exec.kev_confirmed || 0],
-    ['Critical Items', exec.critical_count || 0],
-    ['Zero-Day Candidates', exec.zero_day_candidates || 0],
-    ['Active Campaigns', exec.active_campaigns || 0],
+    ['KEV Confirmed', exec.kev_confirmed ?? '—'],
+    ['Critical Items', exec.critical_count ?? '—'],
+    ['Zero-Day Candidates', exec.zero_day_candidates ?? '—'],
+    ['Active Campaigns', exec.active_campaigns ?? '—'],
   ].map(([k,v]) => `<div class="metric-row"><span class="metric-key">${k}</span><span class="metric-val" style="color:${postureColor}">${v}</span></div>`).join('');
 }
 
@@ -922,8 +952,18 @@ function renderExecBrief(brief) {
 // ── CONFIDENCE METER ──────────────────────────────────────────────────────────
 function renderConfidenceMeter(d) {
   const cm = d.confidence_meter || {};
-  const co = $('conf-overall'); if (co) co.textContent = (cm.overall||89) + '%';
-  const cg = $('conf-grade'); if (cg) cg.textContent = `Grade ${cm.grade||'A'} — ${cm.overall>=90?'EXCELLENT':cm.overall>=80?'HIGH':'MODERATE'} Confidence`;
+  const overallKnown = cm.overall !== null && cm.overall !== undefined && cm.overall !== '' && Number.isFinite(Number(cm.overall));
+  const overall = overallKnown ? Number(cm.overall) : null;
+  const co = $('conf-overall'); if (co) co.textContent = overallKnown ? `${overall}%` : '—';
+  const cg = $('conf-grade');
+  if (cg) {
+    if (!overallKnown || !cm.grade) {
+      cg.textContent = 'Grade — · Confidence unverified';
+    } else {
+      const band = overall >= 90 ? 'EXCELLENT' : overall >= 80 ? 'HIGH' : 'MODERATE';
+      cg.textContent = `Grade ${cm.grade} — ${band} Confidence`;
+    }
+  }
   const cs = $('conf-signals');
   if (cs) {
     cs.innerHTML = (cm.signals||[]).map(sig => {
@@ -1264,6 +1304,18 @@ function toggleEvidence(id, btn) {
   btn.classList.toggle('open', !isOpen);
 }
 
+// ── CONNECTION STATE ──────────────────────────────────────────────────────────
+function setConnectionState(state) {
+  const text = $('tracker-connection-text');
+  const topDot = $('tracker-connection-dot');
+  const heroDot = $('hero-connection-dot');
+  const ok = state === 'connected';
+  if (text) text.textContent = ok ? 'AI DATA CONNECTED' : state === 'failed' ? 'AI DATA UNAVAILABLE' : 'AI DATA CHECKING';
+  [topDot, heroDot].forEach(dot => {
+    if (dot) dot.style.background = ok ? 'var(--ok)' : state === 'failed' ? 'var(--danger)' : 'var(--text-muted)';
+  });
+}
+
 // ── MAIN LOAD ─────────────────────────────────────────────────────────────────
 async function loadTracker() {
   try {
@@ -1289,8 +1341,10 @@ async function loadTracker() {
     }
 
     renderAll();
+    setConnectionState('connected');
   } catch (err) {
     console.error('[SENTINEL APEX] Failed to load tracker:', err);
+    setConnectionState('failed');
     // Show cached/stub data so no SYNTHESIZING states are visible
     showFallback();
   }
