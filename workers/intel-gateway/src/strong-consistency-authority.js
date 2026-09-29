@@ -14,6 +14,16 @@ export function strongConsistencyEnabled(env) {
   return env?.AUTH_STRONG_CONSISTENCY_ENABLED === "true";
 }
 
+// Rate accounting is deliberately controlled independently from lifecycle
+// authorization. Paid-customer revocation needs strong read-after-write
+// semantics, while routing every anonymous/free request through a Durable
+// Object has a materially different usage profile. Keeping these switches
+// separate lets production enable only the consistency primitive whose
+// cost envelope has been explicitly reviewed.
+export function strongRateConsistencyEnabled(env) {
+  return env?.RATE_STRONG_CONSISTENCY_ENABLED === "true";
+}
+
 async function sha256Hex(value) {
   const bytes = new TextEncoder().encode(String(value));
   const digest = await crypto.subtle.digest("SHA-256", bytes);

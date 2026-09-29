@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { GumroadProvisioningLock } from "../gumroad-provisioning-lock.js";
 import {
   strongConsistencyEnabled,
+  strongRateConsistencyEnabled,
   putStrongAuthState,
   getStrongAuthState,
   incrementStrongRate,
@@ -52,6 +53,12 @@ test("strongConsistencyEnabled requires exact true", () => {
   assert.equal(strongConsistencyEnabled(env(true)), true);
   assert.equal(strongConsistencyEnabled(env(false)), false);
   assert.equal(strongConsistencyEnabled({ AUTH_STRONG_CONSISTENCY_ENABLED: "TRUE" }), false);
+});
+
+test("strongRateConsistencyEnabled is independent and exact", () => {
+  assert.equal(strongRateConsistencyEnabled({ RATE_STRONG_CONSISTENCY_ENABLED: "true" }), true);
+  assert.equal(strongRateConsistencyEnabled({ RATE_STRONG_CONSISTENCY_ENABLED: "false", AUTH_STRONG_CONSISTENCY_ENABLED: "true" }), false);
+  assert.equal(strongRateConsistencyEnabled({ RATE_STRONG_CONSISTENCY_ENABLED: "TRUE" }), false);
 });
 
 test("auth authority is read-after-write consistent for the same identity", async () => {

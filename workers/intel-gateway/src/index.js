@@ -138,7 +138,7 @@ import { applyCorsPolicy, buildPreflightResponse, classifyRoute } from './cors-p
 // In-isolate counter layer: batches KV writes on the hot request path.
 // See rate-limit-cache.js for the cost rationale and the exact trade-off.
 import { bumpCounter, bumpCounterWriteThrough, peekCounter } from './rate-limit-cache.js';
-import { strongConsistencyEnabled, putStrongAuthState, getStrongAuthState, incrementStrongRate, authStateDenies, strongConsistencyCanaryEnabled, runStrongConsistencyCanary } from './strong-consistency-authority.js';
+import { strongConsistencyEnabled, strongRateConsistencyEnabled, putStrongAuthState, getStrongAuthState, incrementStrongRate, authStateDenies, strongConsistencyCanaryEnabled, runStrongConsistencyCanary } from './strong-consistency-authority.js';
 import { DEPLOY_COMMIT_SHA, DEPLOY_RUN_ID } from './build-info.js';
 // AI Swarm Synthesis (v4.45): pure prompt-building + tier-gate helpers for
 // handleSwarmSynthesis (below, defined right after handleCopilot). Extracted
@@ -616,7 +616,7 @@ async function checkRateLimit(env, ip, tier) {
   const minute = Math.floor(Date.now() / 60000);
   const key    = `rl:${ip}:${minute}`;
   try {
-    if (strongConsistencyEnabled(env)) {
+    if (strongRateConsistencyEnabled(env)) {
       // P0 #596 strong-consistency mode: one serialized Durable Object
       // instance per IP+minute window. This is globally authoritative for
       // that window and removes Workers-KV propagation races. Disabled by
