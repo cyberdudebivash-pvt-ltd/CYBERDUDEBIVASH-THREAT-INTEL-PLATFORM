@@ -124,8 +124,8 @@ jobs:
         # aren't configured, matching that script's own established
         # skip-gracefully convention.
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
         run: |
           echo "::error::Full backup FAILED. Platform data at risk. Investigate immediately."
           python3 scripts/pipeline_alert.py --status failure \
@@ -297,8 +297,8 @@ jobs:
         # ::warning:: only, visible solely inside the Actions UI -- same
         # fix as "Notify on failure" above, reusing pipeline_alert.py.
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
         run: |
           echo "::warning::Cloudflare KV/R2 backup job failed. Inspect the failed step and exit code; do not assume a credential fault."
           python3 scripts/pipeline_alert.py --status failure \
@@ -361,8 +361,8 @@ jobs:
         # a different step. Passed through env: instead, matching that
         # established pattern.
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
           BACKUP_ID_INPUT: ${{ github.event.inputs.backup_id }}
         run: |
           python3 scripts/pipeline_alert.py --status failure \

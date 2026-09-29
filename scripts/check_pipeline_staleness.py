@@ -9,8 +9,10 @@ critical pipelines haven't succeeded within their expected cadence.
 
 Env vars:
   GITHUB_TOKEN / GH_TOKEN  - GitHub token for API access
-  TG_BOT_TOKEN             - Telegram bot token (optional - skip alert if missing)
-  TG_CHAT_ID               - Telegram chat ID (optional)
+  TELEGRAM_OPS_BOT_TOKEN   - Private operator Telegram bot token (optional)
+  TELEGRAM_OPS_CHAT_ID     - Private operator chat ID (optional)
+
+Public subscriber TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID are intentionally ignored.
   REPO                     - GitHub repo (default: cyberdudebivash/cyberdudebivash-threat-intel-platform)
   STALENESS_THRESHOLD_HOURS - Override default per-workflow threshold (optional)
 """
@@ -23,8 +25,8 @@ import datetime
 
 REPO = os.environ.get("REPO", "cyberdudebivash/cyberdudebivash-threat-intel-platform")
 GH_TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN", "")
-TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
-TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "")
+TG_BOT_TOKEN = os.environ.get("TELEGRAM_OPS_BOT_TOKEN", "")
+TG_CHAT_ID = os.environ.get("TELEGRAM_OPS_CHAT_ID", "")
 OVERRIDE_THRESHOLD = os.environ.get("STALENESS_THRESHOLD_HOURS", "")
 
 # v185.0 P0 FIX (2026-09-10): sentinel-blogger and status-monitor's
@@ -167,7 +169,7 @@ def age_hours(iso_ts):
 
 def send_telegram(msg):
     if not TG_BOT_TOKEN or not TG_CHAT_ID:
-        print("  Telegram not configured - skipping alert")
+        print("  Private ops Telegram not configured - alert logged only")
         return
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
     body = json.dumps({"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "HTML"}).encode("utf-8")

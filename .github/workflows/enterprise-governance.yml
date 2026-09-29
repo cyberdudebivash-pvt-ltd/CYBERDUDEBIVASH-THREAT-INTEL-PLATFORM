@@ -714,10 +714,10 @@ jobs:
       - name: "Governance Hard-Fail Alert"
         if: failure()
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID:   ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
         run: |
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+          if [ -z "$TELEGRAM_OPS_BOT_TOKEN" ] || [ -z "$TELEGRAM_OPS_CHAT_ID" ]; then
             echo "[ALERT] Telegram secrets not configured — skipping notification"
             exit 0
           fi
@@ -735,8 +735,8 @@ jobs:
           MSG="${MSG}Action required — review governance report immediately.%0A"
           MSG="${MSG}https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           curl -s -X POST \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}&text=${MSG}&parse_mode=HTML" \
+            "https://api.telegram.org/bot${TELEGRAM_OPS_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_OPS_CHAT_ID}&text=${MSG}&parse_mode=HTML" \
             > /dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────
