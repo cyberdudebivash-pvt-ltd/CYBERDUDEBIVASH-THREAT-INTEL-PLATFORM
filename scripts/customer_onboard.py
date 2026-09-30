@@ -101,6 +101,27 @@ def gen_sub_id() -> str:
 def normalize_country(code: str) -> str:
     return code.upper().strip()
 
+def validate_provision_request(email: str, tier: str, days: int, payment_ref: str) -> None:
+    """Fail closed before any live credential or customer state is created."""
+    email = email.strip().lower()
+    tier = tier.upper().strip()
+    if not email or "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise ValueError("a valid customer email is required")
+    if tier not in TIER_PRICING_INR:
+        raise ValueError(f"unsupported tier: {tier}")
+    if days <= 0 or days > 3660:
+        raise ValueError("subscription days must be between 1 and 3660")
+    if tier not in {"FREE", "TRIAL"} and not payment_ref.strip():
+        raise ValueError("paid tiers require an explicit verified payment reference")
+
+def find_existing_customer(email: str, ref_id: str) -> dict | None:
+    data = load_json(CUSTOMERS_PATH, {"customers": []})
+    email_norm = email.strip().lower()
+    for record in data.get("customers", []):
+        if str(record.get("email", "")).strip().lower() == email_norm or record.get("reference_id") == ref_id:
+            return record
+    return None
+
 # ─── CUSTOMER REGISTRY ────────────────────────────────────────────────────────
 def register_customer(
     customer_id: str,
@@ -290,13 +311,17 @@ def generate_welcome_package(
       curl -H "Authorization: Bearer {key_record['key']}" \\
            https://intel.cyberdudebivash.com/api/feed
 
-    DATA RESIDENCY & COMPLIANCE
+    JURISDICTION & PRIVACY REFERENCE
     ─────────────────────────────────────────────────────────────────────
-    AWS Region   : {juri[1]}
-    Framework    : {juri[2]}
-    DPA Version  : {customer_record['dpa_version']}
-    Supervisory  : {juri[3]}
-    DPA Request  : privacy@cyberdudebivash.com
+    Customer Jurisdiction : {juri[0]}
+    Applicable Framework  : {juri[2]}
+    DPA Version           : {customer_record['dpa_version']}
+    Supervisory Reference : {juri[3]}
+    DPA Request           : privacy@cyberdudebivash.com
+
+    IMPORTANT: This package does not make or imply a contractual data-residency
+    guarantee. Any customer-specific residency commitment must be stated in the
+    executed contract/DPA and backed by the deployed infrastructure configuration.
 
     SUPPORT CONTACTS
     ─────────────────────────────────────────────────────────────────────
@@ -317,8 +342,16 @@ def cmd_provision(args):
     tier     = args.tier.upper()
     country  = normalize_country(args.country)
     ref_id   = args.ref or f"SA-{today_str().replace('-','')}-{secrets.token_hex(2).upper()}"
-    pay_ref  = args.payment_ref or "MANUAL-" + secrets.token_hex(3).upper()
+    pay_ref  = args.payment_ref.strip()
     days     = args.days
+
+    validate_provision_request(args.email, tier, days, pay_ref)
+    existing = find_existing_customer(args.email, ref_id)
+    if existing:
+        raise ValueError(
+            f"customer/reference already provisioned: {existing.get('customer_id')} "
+            f"(ref={existing.get('reference_id')}); refusing duplicate live credential issuance"
+        )
 
     print(f"\n  SENTINEL APEX — Customer Provisioning")
     print(f"  ══════════════════════════════════════")
@@ -329,85 +362,84 @@ def cmd_provision(args):
     print(f"  Ref ID   : {ref_id}")
     print()
 
-    # Step 1: Generate API key
-    print("  [1/5] Generating API key...")
-    key_record = _gk.generate_key(
-        tier=tier,
-        customer_email=args.email,
-        reference_id=ref_id,
-        days=days,
-        customer_name=args.name,
-        company=args.company,
-        notes=f"Onboarded via customer_onboard.py | country={country}",
-    )
-    key_hash_prefix = key_record["key_hash"][:16]
-    print(f"         Key: {key_record['key'][:20]}...")
+    key_record = None
+    committed = False
+    try:
+        # Step 1: issue the credential through the live production authority.
+        print("  [1/5] Generating API key...")
+        key_record = _gk.generate_key(
+            tier=tier,
+            customer_email=args.email,
+            reference_id=ref_id,
+            days=days,
+            customer_name=args.name,
+            company=args.company,
+            notes=f"Onboarded via customer_onboard.py | country={country}",
+        )
+        key_hash_prefix = key_record["key_hash"][:16]
+        print(f"         Key: {key_record['key'][:20]}...")
 
-    # Step 2: Register customer
-    print("  [2/5] Registering customer...")
-    customer_id = gen_customer_id()
-    customer_record = register_customer(
-        customer_id=customer_id,
-        name=args.name,
-        email=args.email,
-        company=args.company,
-        country=country,
-        tier=tier,
-        ref_id=ref_id,
-        key_hash_prefix=key_hash_prefix,
-    )
-    print(f"         Customer ID: {customer_id}")
+        # Steps 2-5 are the local commercial/audit commit. If any fail,
+        # compensate by revoking the already-issued live credential.
+        print("  [2/5] Registering customer...")
+        customer_id = gen_customer_id()
+        customer_record = register_customer(
+            customer_id=customer_id, name=args.name, email=args.email,
+            company=args.company, country=country, tier=tier,
+            ref_id=ref_id, key_hash_prefix=key_hash_prefix,
+        )
+        print(f"         Customer ID: {customer_id}")
 
-    # Step 3: Create subscription
-    print("  [3/5] Creating subscription record...")
-    sub_id = gen_sub_id()
-    sub_record = register_subscription(
-        sub_id=sub_id,
-        customer_id=customer_id,
-        email=args.email,
-        tier=tier,
-        days=days,
-        ref_id=ref_id,
-        payment_ref=pay_ref,
-        key_hash_prefix=key_hash_prefix,
-    )
-    print(f"         Sub ID: {sub_id}")
+        print("  [3/5] Creating subscription record...")
+        sub_id = gen_sub_id()
+        sub_record = register_subscription(
+            sub_id=sub_id, customer_id=customer_id, email=args.email,
+            tier=tier, days=days, ref_id=ref_id, payment_ref=pay_ref,
+            key_hash_prefix=key_hash_prefix,
+        )
+        print(f"         Sub ID: {sub_id}")
 
-    # Step 4: Payment audit
-    print("  [4/5] Writing payment audit entry...")
-    write_payment_audit(
-        event="CUSTOMER_ONBOARDED",
-        customer_id=customer_id,
-        email=args.email,
-        tier=tier,
-        ref_id=ref_id,
-        payment_ref=pay_ref,
-        amount_inr=TIER_PRICING_INR.get(tier, 0),
-        country=country,
-    )
+        print("  [4/5] Writing payment audit entry...")
+        write_payment_audit(
+            event="CUSTOMER_ONBOARDED", customer_id=customer_id,
+            email=args.email, tier=tier, ref_id=ref_id,
+            payment_ref=pay_ref, amount_inr=TIER_PRICING_INR.get(tier, 0),
+            country=country,
+        )
 
-    # Step 5: Welcome package
-    print("  [5/5] Generating welcome package...")
-    pkg = generate_welcome_package(key_record, customer_record, sub_record)
+        print("  [5/5] Generating welcome package...")
+        pkg = generate_welcome_package(key_record, customer_record, sub_record)
+        os.makedirs(WELCOME_PKG_DIR, exist_ok=True)
+        pkg_file = os.path.join(WELCOME_PKG_DIR, f"{customer_id}_{args.email.split('@')[0]}.txt")
+        with open(pkg_file, "w", encoding="utf-8") as handle:
+            handle.write(pkg)
 
-    os.makedirs(WELCOME_PKG_DIR, exist_ok=True)
-    pkg_file = os.path.join(WELCOME_PKG_DIR, f"{customer_id}_{args.email.split('@')[0]}.txt")
-    with open(pkg_file, "w", encoding="utf-8") as f:
-        f.write(pkg)
-    print(f"         Saved: {pkg_file}")
+        committed = True
+        print(f"         Saved: {pkg_file}")
+        print()
+        print(pkg)
+        print()
+        print("  ✓ Onboarding complete.")
+        print("  ✓ Live credential provisioned in production API authority.")
+        print(f"  ✓ Customer ID: {customer_id} | Subscription: {sub_id}")
+        print(f"  ✓ Audit reference: {ref_id}")
+        print()
+        print(f"  NEXT: deliver the credential to {args.email} using an approved secure channel.")
 
-    print()
-    print(pkg)
-    print()
-    print(f"  ✓ Onboarding complete.")
-    print(f"  ✓ Key stored in: data/keys/active_keys.json (hash only)")
-    print(f"  ✓ Customer in:   data/customers/registry.json")
-    print(f"  ✓ Subscription:  data/subscriptions/active.json")
-    print(f"  ✓ Audit entry:   data/payment_audit.jsonl")
-    print(f"  ✓ Welcome pkg:   {pkg_file}")
-    print()
-    print(f"  NEXT: Email the API key to {args.email}")
-    print(f"        Use: templates/email/03_api_key_delivered.txt")
+    except Exception as exc:
+        if key_record and not committed:
+            try:
+                _gk.revoke_key(
+                    key_record["key"],
+                    reason=f"automatic_compensation: onboarding_commit_failed:{type(exc).__name__}",
+                )
+            except Exception as revoke_exc:
+                raise RuntimeError(
+                    "CRITICAL: onboarding failed after live credential issuance and automatic "
+                    "revocation also failed; immediately revoke the credential in the production "
+                    f"authority. onboarding_error={exc!r}; revocation_error={revoke_exc!r}"
+                ) from exc
+        raise
 
 
 # ─── LIST COMMAND ────────────────────────────────────────────────────────────
@@ -462,7 +494,7 @@ def main():
     prov.add_argument("--days",        type=int, default=30, help="Subscription length in days (default: 30)")
     prov.add_argument("--ref",         default="", help="Reference ID (auto-generated if omitted)")
     prov.add_argument("--payment-ref", default="", dest="payment_ref",
-                      help="Payment reference (Stripe PI, Gumroad TX, UPI Ref, etc.)")
+                      help="Verified payment reference. Required for paid tiers; never auto-generated.")
 
     sub.add_parser("list",    help="List all registered customers")
     sub.add_parser("revenue", help="Revenue and subscription summary")
