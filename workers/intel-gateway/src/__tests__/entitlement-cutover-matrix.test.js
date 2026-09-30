@@ -27,8 +27,8 @@ test("commercial entitlement matrix is explicit for cutover candidates", () => {
 });
 
 test("unknown or malformed tiers never inherit paid access", () => {
-  for (const tier of ["", "UNKNOWN", "premium", "enterprise-plus", null, undefined]) {
-    for (const resource of ["sla_report", "siem", "taxii_access", "report_full", "alerts"]) {
+  for (const tier of ["", "UNKNOWN", "premium", "enterprise-plus", " PRO ", null, undefined, 1, true, {}, ["PRO"], { toUpperCase: () => "ENTERPRISE" }]) {
+    for (const resource of ["ioc_full", "stix_bundle", "ai_full", "report_full", "sla_report", "sla_incidents", "sla_certificate", "siem", "alerts", "api_keys", "ioc_confidence_detail", "stix_export_full", "ai_predict", "ai_campaigns", "ai_anomalies", "intel_graph", "intel_graph_full", "intel_relations", "detection_rules", "actor_attribution", "taxii_access", "taxii_kev", "misp_export", "brand_protection", "vendor_risk", "vendor_risk_bulk", "geopolitical_risk", "nlq", "incident_response", "incident_delete", "intel_manifest_full", "cve_detail_full"]) {
       assert.equal(enforceTierGate(resource, tier).allowed, false, resource + " tier=" + String(tier));
     }
   }
