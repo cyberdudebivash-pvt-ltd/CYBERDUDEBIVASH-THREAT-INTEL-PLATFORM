@@ -156,6 +156,11 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest pyyaml requests==2.34.2 --quiet
 
+      - name: Scan malware customer release Python surfaces
+        run: |
+          python -m pip install bandit==1.7.8 --quiet
+          python -m bandit core/malware/review_workspace.py core/malware/package_verifier.py core/malware/benchmark_contract.py core/malware/analysis_interchange.py core/malware/customer_release.py scripts/malware_customer_release.py --severity-level medium --confidence-level medium
+
       - name: Run malware evidence-review regression tests (P0 #590/#593)
         run: |
           python -m unittest discover -s tests -p test_malware_customer_release.py -v
