@@ -124,8 +124,15 @@ export const REVENUE_CONFIG = {
 // Call this BEFORE returning any gated response.
 // Returns { allowed: bool, reason: string, upgrade: object|null }
 // 
+// Unknown and non-string tiers receive only anonymous FREE permissions.
+// Keep lowercase canonical names compatible; never coerce objects into paid tiers.
+function normalizeRevenueTier(tier) {
+  const value = typeof tier === "string" ? tier.toUpperCase() : "FREE";
+  return Object.hasOwn(REVENUE_CONFIG.TIERS, value) ? value : "FREE";
+}
+
 export function enforceTierGate(resource, tier) {
-  const t    = (tier || "FREE").toUpperCase();
+  const t    = normalizeRevenueTier(tier);
   const cfg  = REVENUE_CONFIG.LIMITS[t] || REVENUE_CONFIG.LIMITS.FREE;
   const isFree = t === "FREE";
   const isPro  = t === "PRO";
@@ -502,7 +509,7 @@ export function enforceTierGate(resource, tier) {
 export async function trackUsageAndEnforce(env, keyId, tier) {
   if (!env?.SECURITY_HUB_KV || !keyId) return { allowed: true, count: 0 };
 
-  const t      = (tier || "FREE").toUpperCase();
+  const t      = normalizeRevenueTier(tier);
   const limit  = REVENUE_CONFIG.LIMITS[t]?.api_calls_day ?? REVENUE_CONFIG.LIMITS.FREE.api_calls_day;
 
   const day    = new Date().toISOString().slice(0, 10);
@@ -546,7 +553,7 @@ export async function trackUsageAndEnforce(env, keyId, tier) {
 // Generates consistent upgrade trigger objects for API responses
 // 
 export function buildUpgradeTrigger(context, currentTier) {
-  const t = (currentTier || "FREE").toUpperCase();
+  const t = normalizeRevenueTier(currentTier);
   const targetTier = t === "FREE" ? "pro" : "enterprise";
   const url = t === "FREE"
     ? REVENUE_CONFIG.UPGRADE_URLS.free_to_pro
@@ -873,7 +880,7 @@ export async function handleTrialIssuance(request, env, rid) {
 // Harder enforcement: blocks more fields, injects stronger upgrade triggers
 // 
 export function applyTierGateV2(item, tier, usageState) {
-  const t      = (tier || "FREE").toUpperCase();
+  const t      = normalizeRevenueTier(tier);
   const isFree = t === "FREE";
   const isPro  = t === "PRO";
   const isEnt  = t === "ENTERPRISE" || t === "MSSP";
@@ -1009,7 +1016,7 @@ function _ttpDensityFromVisibleTtps(item) {
 
 // Minimal computeApexAIGated  mirrors existing but enforces AI gate
 function computeApexAIGated(item, tier) {
-  const isFree = !tier || String(tier).toUpperCase() === "FREE";
+  const isFree = normalizeRevenueTier(tier) === "FREE";
   const base = {
     predictive_risk: typeof item.risk_score === "number" ? Math.min(10, item.risk_score) : 0,
     // 50 is the canonical unknown-confidence default (0-100 scale) -- see
