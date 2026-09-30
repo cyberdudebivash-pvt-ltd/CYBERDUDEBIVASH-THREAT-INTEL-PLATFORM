@@ -224,6 +224,9 @@ def iter_buyer_html_files():
 # Partner-facing and sales documents (markdown) that quote MSSP terms to
 # buyers. Swept for superseded prices like the buyer HTML pages.
 BUYER_FACING_DOCS = [
+    # The public repository's landing page: it quoted MSSP $1,999, FREE
+    # 100/day and "Unlimited" Enterprise/MSSP calls until 2026-09-30.
+    "README.md",
     "MSSP_PARTNER_PROGRAM.md",
     "MSSP_OPERATIONAL_RUNBOOK.md",
     "mssp-onboarding-kit/MSSP_DEMO_SCRIPT.md",
@@ -256,6 +259,75 @@ def check_mssp_tenant_claims(canon):
             m = pattern.search(text)
             check(m is None, f"{rel} makes no MSSP {label} claim without a contract allowance"
                   + (f" (found '{m.group(0)}')" if m else ""))
+
+
+# Table rows end with this mark, so the last cell of one row never reads
+# as the start of the next ("API keys ... 100" + "Seats ..." is not "100 Seats").
+ROW_END = " \u00b6 "
+
+
+def visible_text(html: str) -> str:
+    """Tag-stripped text, so a claim split across table cells or stat
+    widgets reads as one line: "API requests/day 100 5,000 Unlimited"."""
+    t = re.sub(r"<!--.*?-->", " ", html, flags=re.S)
+    t = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ", t, flags=re.S | re.I)
+    t = re.sub(r"</tr\s*>", ROW_END, t, flags=re.I)
+    t = re.sub(r"<[^>]+>", " ", t)
+    for entity, char in (("&nbsp;", " "), ("&middot;", "·"), ("&mdash;", "—"), ("&amp;", "&")):
+        t = t.replace(entity, char)
+    return re.sub(r"\s+", " ", t)
+
+
+def markdown_text(md: str) -> str:
+    """Markdown with table pipes removed, one row per claim line: a row such
+    as "API calls/day | 100 | Unlimited" reads as one phrase."""
+    lines = [line.replace("|", " ") + ROW_END if line.lstrip().startswith("|") else line
+             for line in md.splitlines()]
+    return re.sub(r"\s+", " ", " ".join(lines))
+
+
+# 2026-09-30 claim classes the literal sweep above did not cover. Each was
+# live on a buyer page while the contract said otherwise.
+SEAT_CLAIM = re.compile(r"(?<![\d,.])(\d+)\s+(?:named\s+)?(?:seats?|named\s+users?)\b", re.I)
+# The contract's highest uptime commitment is 99.9%; 99.95%/99.99% SLA or
+# uptime figures were published for MSSP/Enterprise. A figure attributed to
+# a third party ("99.99% Cloudflare Uptime") is not our commitment.
+UPTIME_ABOVE_CONTRACT = re.compile(r"\b99\.9[5-9]\d*\s*%", re.I)
+# MSSP incident response is "1h dedicated"; "15-min SLA" was published.
+SUB_HOUR_RESPONSE = re.compile(r"\b15[- ]?min(?:ute)?s?\s+(?:SLA|response)\b", re.I)
+UNLIMITED_QUOTA = [
+    re.compile(r"\bunlimited\s+(?:api\s+)?(?:calls|requests|queries)\b", re.I),
+    re.compile(r"(?:calls|requests|req)\s*/\s*day\s+(?:[\d,]+\s+){0,4}unlimited\b", re.I),
+    re.compile(r"\bquota:?\s*unlimited\b", re.I),
+]
+
+
+def check_contract_claim_classes(canon: dict) -> None:
+    seats = {t["seats"] for t in canon.values()}
+    targets = []
+    for rel, path in iter_buyer_html_files():
+        raw = path.read_text(encoding="utf-8", errors="ignore")
+        targets.append((rel, raw, visible_text(raw)))
+    for d in BUYER_FACING_DOCS:
+        if (REPO_ROOT / d).exists():
+            raw = (REPO_ROOT / d).read_text(encoding="utf-8", errors="ignore")
+            targets.append((Path(d), raw, markdown_text(raw)))
+    for rel, raw, text in targets:
+        bad_seats = sorted({m.group(0) for m in SEAT_CLAIM.finditer(text) if int(m.group(1)) not in seats})
+        check(not bad_seats, f"{rel} quotes only contract seat counts {sorted(seats)}"
+              + (f" (found {bad_seats})" if bad_seats else ""))
+        above = [m.group(0) for m in UPTIME_ABOVE_CONTRACT.finditer(text)
+                 if "cloudflare" not in text[m.end():m.end() + 30].lower()]
+        check(not above, f"{rel} promises no uptime above the contract's 99.9%"
+              + (f" (found {above})" if above else ""))
+        # Raw source too: this copy has shipped inside a JS string
+        # (get-api-key.html's plan modal), which visible_text() drops.
+        fast = SUB_HOUR_RESPONSE.search(text) or SUB_HOUR_RESPONSE.search(raw)
+        check(fast is None, f"{rel} promises no sub-hour response (MSSP contract: 1h dedicated)"
+              + (f" (found '{fast.group(0)}')" if fast else ""))
+        unl = next((m.group(0) for p in UNLIMITED_QUOTA for m in p.finditer(text)), None)
+        check(unl is None, f"{rel} publishes no unlimited API quota"
+              + (f" (found '{unl}')" if unl else ""))
 
 
 def main() -> int:
@@ -534,6 +606,7 @@ def main() -> int:
         for label, pattern in FORBIDDEN_PRICE_PATTERNS:
             check(not pattern.search(text), f"{rel} does not contain {label}")
     check_mssp_tenant_claims(canon)
+    check_contract_claim_classes(canon)
 
     # --- Forbidden quota claims ---------------------------------------------
     # commercial-contract.json's _forbidden_claims also lists compliance-

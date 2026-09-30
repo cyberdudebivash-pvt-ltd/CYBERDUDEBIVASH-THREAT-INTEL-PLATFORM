@@ -166,33 +166,33 @@ footer a{color:var(--muted);text-decoration:none;margin:0 12px;}
   <div class="grid-2">
     <div class="card">
       <h3>🔐 API Authentication &amp; Key Management</h3>
-      <p>All API access is protected by HMAC-SHA256 signed API keys with configurable scopes and rate limits. Keys are bcrypt-hashed (cost 12) at rest and never logged in plain text. Enterprise accounts support IP allowlisting and zero-downtime key rotation.</p>
+      <p>API keys are 160-bit random tokens checked against the key store on every request; Bearer sessions are HS256-signed JWTs. Access scopes follow the plan. Keys are held in Cloudflare Workers KV without platform-side hashing and appear in audit logs only as a 12-character prefix, so treat every key as a secret and rotate it if exposed.</p>
       <ul class="check-list">
-        <li>HMAC-SHA256 signed API keys</li>
-        <li>bcrypt cost-12 key storage at rest</li>
-        <li>Per-key scope restrictions (read / export / admin)</li>
-        <li>IP allowlisting for Enterprise tier (CIDR ranges)</li>
-        <li>Key rotation with 24h grace period (zero downtime)</li>
-        <li>Rate limiting: 100 / 5,000 / unlimited by tier</li>
+        <li>160-bit random API keys; HS256-signed session JWTs</li>
+        <li>Keys stored in Cloudflare Workers KV (not hashed by the platform)</li>
+        <li>Plan-based access scopes (no per-key custom scopes)</li>
+        <li>IP allowlisting: not currently offered</li>
+        <li>Key rotation issues a new key and revokes the old one immediately (no overlap window)</li>
+        <li>Rate limiting: 30 / 120 / 600 / 1,200 requests per minute and 50 / 5,000 / 50,000 / 50,000 per day (FREE / PRO / Enterprise / MSSP), HTTP 429 at the cap</li>
       </ul>
     </div>
     <div class="card">
       <h3>🛡️ Transport &amp; Data Security</h3>
-      <p>All API endpoints and dashboard routes are served exclusively over TLS 1.3 (TLS 1.2 deprecated Q4 2025). HSTS headers enforce HTTPS. Content Security Policy prevents XSS. Data at rest is encrypted using AES-256.</p>
+      <p>Pages and API are served over HTTPS only, terminated at Cloudflare's edge, and HSTS makes browsers refuse plain HTTP. Data at rest in Workers KV and R2 is encrypted by Cloudflare. Report pages served by the gateway carry a Content Security Policy; the static site does not send one yet.</p>
       <ul class="check-list">
-        <li>TLS 1.3 minimum (TLS 1.2 deprecated 2025-Q4)</li>
-        <li>HSTS enforced (max-age=31536000; includeSubDomains)</li>
-        <li>Content Security Policy Level 3</li>
-        <li>AES-256 encryption at rest</li>
-        <li>Subresource Integrity on all CDN assets</li>
-        <li>X-Frame-Options DENY · X-Content-Type-Options nosniff</li>
+        <li>HTTPS only; minimum TLS version follows the Cloudflare zone setting</li>
+        <li>HSTS (max-age=63072000; includeSubDomains; preload)</li>
+        <li>X-Frame-Options DENY and X-Content-Type-Options nosniff on gateway responses (/api/*, /reports/*)</li>
+        <li>Frame-busting guard on pages that handle keys, sessions or payments</li>
+        <li>Data at rest encrypted by Cloudflare (Workers KV, R2)</li>
+        <li>Content Security Policy on gateway-served report pages; not yet on the static site or Subresource Integrity</li>
       </ul>
     </div>
     <div class="card">
       <h3>📡 Feed Data Integrity</h3>
-      <p>Every published feed item carries a SHA-256 content hash and a schema validation timestamp. The IOC Quality Governor v1.1 runs artifact rejection, confidence validation, and ATT&amp;CK precision checks before any item is published.</p>
+      <p>Every published feed item carries a validation status and timestamp. The IOC quality governor runs artifact rejection, confidence validation, and ATT&amp;CK precision checks before any item is published.</p>
       <ul class="check-list">
-        <li>SHA-256 per-item content hash</li>
+        <li>Per-item validation status and timestamp</li>
         <li>IOC artifact gate (code-file / version string rejection)</li>
         <li>Confidence inflation prevention</li>
         <li>ATT&amp;CK tactic/technique ID format validation (v15)</li>
@@ -201,15 +201,15 @@ footer a{color:var(--muted);text-decoration:none;margin:0 12px;}
       </ul>
     </div>
     <div class="card">
-      <h3>🔒 Access Control &amp; MFA</h3>
-      <p>Role-based access controls govern what each API key and user session can access. MSSP tenants are fully isolated — no cross-tenant data access is architecturally possible. MFA is enforced on all admin accounts. SSO (SAML 2.0 / OIDC) is on the Q3 2026 roadmap.</p>
+      <h3>🔒 Access Control</h3>
+      <p>Plan-based scopes govern what each API key and session can access. Each MSSP key manages only its own client tenants, and a revoked tenant loses access at once. Admin routes require a separate admin secret; multi-factor authentication and SSO are not currently offered.</p>
       <ul class="check-list">
-        <li>RBAC with role-scoped API keys</li>
-        <li>MSSP tenant hard isolation (no cross-tenant reads)</li>
-        <li>MFA enforced for admin and MSSP-admin roles</li>
-        <li>Admin elevated session tokens (15-min TTL)</li>
-        <li>Audit log for all privileged actions (90-day retention)</li>
-        <li>SSO (SAML 2.0 / OIDC) — roadmap Q3 2026</li>
+        <li>Plan-based scopes on every API key and session</li>
+        <li>MSSP tenants bound to their MSSP key; revocation is immediate</li>
+        <li>Admin routes behind a separate admin secret</li>
+        <li>Audit log of admin and key lifecycle actions (30-day retention)</li>
+        <li>Multi-factor authentication: not currently offered</li>
+        <li>SSO (SAML 2.0 / OIDC): not currently offered</li>
       </ul>
     </div>
   </div>
@@ -249,12 +249,12 @@ footer a{color:var(--muted);text-decoration:none;margin:0 12px;}
       <tr><td>Threat advisory feed</td><td>7 days</td><td>90 days</td><td>12 months</td><td>On plan downgrade or request</td></tr>
       <tr><td>IOC data (IPs, hashes, domains)</td><td>7 days</td><td>90 days</td><td>12 months</td><td>On plan downgrade or request</td></tr>
       <tr><td>API call logs</td><td>7 days</td><td>90 days</td><td>90 days</td><td>Automatic rolling deletion</td></tr>
-      <tr><td>Audit logs (privileged actions)</td><td>—</td><td>30 days</td><td>90 days</td><td>On account deletion</td></tr>
+      <tr><td>Audit logs (privileged actions)</td><td>—</td><td>30 days</td><td>30 days</td><td>On account deletion</td></tr>
       <tr><td>Billing / invoice records</td><td>—</td><td>7 years</td><td>7 years</td><td>Per applicable tax law</td></tr>
       <tr><td>Email / account data</td><td>Until deletion request</td><td>Until deletion request</td><td>Until deletion request</td><td>Within 30 days of account deletion</td></tr>
     </tbody>
   </table>
-  <p style="font-size:12px;color:var(--muted);margin-bottom:60px;">Sub-processors: Cloudflare (CDN/DDoS), AWS (compute/storage — ap-south-1, Mumbai), SendGrid (email), Razorpay/PayPal (payments). Data processing agreement (DPA) available on request for Enterprise accounts — contact enterprise@cyberdudebivash.com.</p>
+  <p style="font-size:12px;color:var(--muted);margin-bottom:60px;">Sub-processors: Cloudflare (CDN/DDoS, Workers, KV, R2), GitHub (Pages hosting, CI/CD), AWS (compute/storage — ap-south-1, Mumbai), SendGrid and Resend (transactional email), Formspree (contact forms), Razorpay and Gumroad (payments). Data processing agreement (DPA) available on request for Enterprise accounts — contact enterprise@cyberdudebivash.com.</p>
 
   <!-- TLP CLASSIFICATION -->
   <div class="section-label">TLP CLASSIFICATION</div>
@@ -362,7 +362,7 @@ footer a{color:var(--muted);text-decoration:none;margin:0 12px;}
     <div class="csf-card">
       <div class="csf-fn" style="color:#10b981;">PR</div>
       <div class="csf-label">PROTECT</div>
-      <p>TLS 1.3 · AES-256 at rest · RBAC · MFA (admin) · bcrypt API key storage · CSP Level 3 · HSTS · IP allowlisting · rate limiting per key.</p>
+      <p>HTTPS at Cloudflare's edge · HSTS on the static site · data at rest encrypted by Cloudflare (Workers KV, R2) · plan-based access scopes · admin routes behind a separate admin secret · per-IP per-minute and per-key daily rate limits.</p>
     </div>
     <div class="csf-card">
       <div class="csf-fn" style="color:#f59e0b;">DE</div>
@@ -389,16 +389,16 @@ footer a{color:var(--muted);text-decoration:none;margin:0 12px;}
       <tr><th>Control</th><th>Implementation</th><th>Notes</th></tr>
     </thead>
     <tbody>
-      <tr><td>Authentication</td><td>HMAC-SHA256 signed API key (X-API-Key header)</td><td>Required on all non-public endpoints</td></tr>
-      <tr><td>Key Storage</td><td>bcrypt cost-12 hash; plaintext never persisted</td><td>Key shown once at creation; cannot be retrieved</td></tr>
-      <tr><td>Rate Limiting</td><td>Per-key sliding window (60s buckets)</td><td>Free: 50/day · Pro: 5K/day · Enterprise: 50K/day</td></tr>
-      <tr><td>IP Allowlisting</td><td>Per-key IP CIDR restriction (optional)</td><td>Enterprise &amp; MSSP tier; supports IPv4 and IPv6 CIDR</td></tr>
-      <tr><td>Request Signing</td><td>HMAC-SHA256 request body signature</td><td>Optional for REST; required for Webhook HMAC delivery</td></tr>
-      <tr><td>Response Integrity</td><td>ETag + SHA-256 content hash in response headers</td><td>Client-verifiable per-response hash</td></tr>
-      <tr><td>TLS Version</td><td>TLS 1.3 minimum enforced (TLS 1.2 deprecated)</td><td>Perfect Forward Secrecy via ECDHE</td></tr>
-      <tr><td>CORS Policy</td><td>Origin allowlist configurable per API key</td><td>Configurable by Enterprise tenant; default: deny all</td></tr>
-      <tr><td>Audit Logging</td><td>Key hash, endpoint, HTTP method, timestamp, response code</td><td>Retained 90 days; exported on request (Enterprise)</td></tr>
-      <tr><td>Key Scopes</td><td>read · export · admin · webhook · mssp-admin</td><td>Principle of least privilege; separate keys per scope</td></tr>
+      <tr><td>Authentication</td><td>160-bit random API key (X-API-Key or Authorization: Bearer) checked against the key store; HS256-signed session JWTs</td><td>Required on all non-public endpoints</td></tr>
+      <tr><td>Key Storage</td><td>Key records in Cloudflare Workers KV, not hashed by the platform</td><td>Treat every key as a secret; rotation issues a new key and revokes the old one immediately</td></tr>
+      <tr><td>Rate Limiting</td><td>Per-IP fixed 60-second window at the plan's per-minute limit; daily quota per API key (per IP when anonymous)</td><td>Free: 30/min, 50/day · Pro: 120/min, 5K/day · Enterprise: 600/min, 50K/day · MSSP: 1,200/min, 50K/day; HTTP 429 with Retry-After</td></tr>
+      <tr><td>IP Allowlisting</td><td>Not currently offered</td><td>&mdash;</td></tr>
+      <tr><td>Request Signing</td><td>Outbound webhooks carry an HMAC-SHA256 signature (X-Sentinel-Signature) when a webhook secret is set</td><td>REST requests are not signed; keys travel over HTTPS only</td></tr>
+      <tr><td>Response Integrity</td><td>ETag on files served from R2</td><td>No signed per-response content hash</td></tr>
+      <tr><td>TLS</td><td>HTTPS terminated at Cloudflare's edge; HSTS on the static site</td><td>Minimum TLS version follows the Cloudflare zone setting</td></tr>
+      <tr><td>CORS Policy</td><td>Origin allowlist fixed in the gateway</td><td>Not configurable per key</td></tr>
+      <tr><td>Audit Logging</td><td>Admin and key lifecycle events: action, 12-character key prefix, timestamp</td><td>Retained 30 days</td></tr>
+      <tr><td>Key Scopes</td><td>Plan-based scopes (e.g. read:intel, read:stix, export:misp)</td><td>Scopes follow the key's plan; no per-key custom scopes</td></tr>
     </tbody>
   </table>
 

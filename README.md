@@ -1,9 +1,9 @@
-# CYBERDUDEBIVASH® SENTINEL APEX v200.0
+# CYBERDUDEBIVASH® SENTINEL APEX v201.0
 
 **AI-Powered Global Threat Intelligence Platform** — Real-time IOC feeds, STIX 2.1 exports, MITRE ATT&CK mapping, and enterprise SOC automation.
 
-[![Platform Status](https://img.shields.io/badge/Platform-OPERATIONAL-00d4aa?style=flat-square)](https://intel.cyberdudebivash.com)
-[![Version](https://img.shields.io/badge/Version-v200.0-blueviolet?style=flat-square)](https://intel.cyberdudebivash.com)
+[![Platform Status](https://img.shields.io/badge/Status-live%20status%20page-00d4aa?style=flat-square)](https://intel.cyberdudebivash.com/status.html)
+[![Version](https://img.shields.io/badge/Version-v201.0-blueviolet?style=flat-square)](https://intel.cyberdudebivash.com)
 [![Stability](https://img.shields.io/badge/Stability-GOD--MODE-gold?style=flat-square)](https://intel.cyberdudebivash.com)
 [![API](https://img.shields.io/badge/API-STIX%202.1-0078d7?style=flat-square)](https://intel.cyberdudebivash.com/api-docs.html)
 [![GSTIN](https://img.shields.io/badge/GSTIN-21ARKPN8270G1ZP-lightgrey?style=flat-square)](https://intel.cyberdudebivash.com/trust-center.html)
@@ -25,12 +25,14 @@
 
 ## Platform Metrics
 
+Counts change with every publication, so they are read from the running platform rather than written here.
+
 | Metric | Value |
 |---|---|
-| Active Advisories | 77+ |
-| Intel Feeds | 74 |
-| Total Reports Generated | 2,600+ |
-| API Uptime | 99.9% |
+| Active advisories | Live: `advisory_count` in [`/api/health`](https://intel.cyberdudebivash.com/api/health) |
+| Feed freshness | Live: `intelligence.generated_at` / `age_seconds` in `/api/health` (public contract: at most 6 hours old) |
+| Intelligence sources | Live: `feed_source_count` in [`/api/metrics`](https://intel.cyberdudebivash.com/api/metrics) |
+| Measured uptime | Live: [`/api/sla/status`](https://intel.cyberdudebivash.com/api/sla/status) (`null` until enough samples exist); commitments in [sla.html](https://intel.cyberdudebivash.com/sla.html) |
 | STIX 2.1 Bundles | Full export |
 | MITRE ATT&CK Coverage | Multi-tactic mapping |
 | IOC Validation | Real-time, cross-feed dedup |
@@ -42,7 +44,7 @@
 
 SENTINEL APEX is a production-grade Cyber Threat Intelligence (CTI) platform that:
 
-- **Aggregates** threat intelligence from 74+ curated global sources (CISA KEV, NVD, MITRE, threat actor feeds, dark web monitors)
+- **Aggregates** threat intelligence from curated public sources (CISA KEV, NVD, MITRE ATT&CK, vendor and research advisories); the live source count is `feed_source_count` in `/api/metrics`
 - **Enriches** every advisory with AI-powered apex_ai blocks: SOC priority, kill chain, actor fingerprint, behavioral tags, campaign IDs
 - **Exports** in STIX 2.1 and TAXII 2.1 — plug-and-play with SIEM/SOAR (Splunk, Elastic, Microsoft Sentinel, CrowdStrike)
 - **Delivers** a zero-latency dashboard with EMBEDDED_INTEL for instant render — no API round-trip on load
@@ -59,14 +61,17 @@ curl https://intel.cyberdudebivash.com/api/preview/
 # Response (truncated)
 {
   "status": "ok",
-  "gateway": "SENTINEL-APEX/184.0",
-  "request_id": "req_...",
   "preview": {
     "items": [...],
-    "total_preview": 10,
-    "total_in_feed": 77,
-    "generated_at": "2026-06-22T...",
-    "note": "Free tier — 10 items. PRO tier unlocks full feed."
+    "total_preview": 25,
+    "feed_total": 54,
+    "preview_limit": 25,
+    "limit": 25,
+    "offset": 0,
+    "has_more": false,
+    "version": "201.0",
+    "_tier": "FREE",
+    "_upgrade_url": "https://intel.cyberdudebivash.com/upgrade.html"
   }
 }
 ```
@@ -90,16 +95,21 @@ curl -H "Authorization: Bearer $SENTINEL_API_KEY" \
 
 | Feature | Free | PRO / SOC | Enterprise | MSSP |
 |---|:---:|:---:|:---:|:---:|
-| Advisory access | 10 items | 167 items | Unlimited | Unlimited |
+| API requests / minute | 30 | 120 | 600 | 1,200 |
+| API requests / day | 50 | 5,000 | 50,000 | 50,000 |
+| API keys | — (public endpoints, no key) | 10 | 50 | 100 |
+| Seats | 1 | 1 | 10 | 25 |
 | IOC visibility | — | Full | Full | Full |
 | STIX 2.1 export | — | ✓ | ✓ | ✓ |
 | AI enrichment | — | Partial | Full | Full |
-| API calls/day | 100 | 5,000 | Unlimited | Unlimited |
 | Kill chain detail | — | ✓ | ✓ | ✓ |
 | Actor fingerprint | — | ✓ | ✓ | ✓ |
-| SLA | — | — | 99.9% / 4h | 99.95% / 15min |
+| Uptime commitment | Best effort | 99.5% | 99.9% | 99.9% |
+| Incident response | Community | 48h email | 4h email/chat | 1h dedicated |
 | White-label | — | — | — | ✓ |
-| **Price (USD/mo)** | Free | $49 | $499 | $1,999 |
+| **Price (USD/mo)** | Free | $49 | $499 | $999 |
+
+Annual: PRO $490, Enterprise $4,990, MSSP $9,990. No free trial; the FREE tier is the evaluation path. The gateway enforces both limits and answers HTTP 429 with `Retry-After` at either cap. Canonical terms: [`config/commercial-contract.json`](config/commercial-contract.json) and [sla.html](https://intel.cyberdudebivash.com/sla.html).
 
 [View full pricing →](https://intel.cyberdudebivash.com/pricing.html)
 
@@ -109,13 +119,13 @@ curl -H "Authorization: Bearer $SENTINEL_API_KEY" \
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                 SENTINEL APEX v184.0                        │
+│                 SENTINEL APEX v201.0                        │
 │                                                             │
-│  74+ Intel Feeds ──► APEX AI Engine ──► STIX 2.1 Bundles  │
+│  Curated sources ──► APEX AI Engine ──► STIX 2.1 Bundles  │
 │                            │                               │
 │                            ▼                               │
 │                    Cloudflare Worker                        │
-│                   (SENTINEL-APEX/184.0)                    │
+│                   (SENTINEL-APEX/201.0)                    │
 │                            │                               │
 │          ┌─────────────────┼─────────────────┐            │
 │          ▼                 ▼                 ▼             │
@@ -160,13 +170,15 @@ Every advisory in the platform carries a fully-populated `apex_ai` block:
 
 ---
 
-## Compliance & Certifications
+## Licensing, Privacy & SLA
+
+No independent compliance attestation (SOC 2, ISO 27001 and similar) is held; see the Trust Center for readiness status.
 
 - **Data licensing:** CC BY-NC 4.0 (non-commercial) / commercial subscription required
 - **Privacy:** EU GDPR · UK GDPR · UAE PDPL · CCPA compliant
 - **GSTIN:** 21ARKPN8270G1ZP (CYBERDUDEBIVASH Pvt. Ltd., India)
 - **Export controls:** OFAC / OFSI / EU sanctions compliant
-- **SLA:** 99.9% uptime guarantee (Enterprise), 99.95% (MSSP)
+- **SLA:** 99.5% uptime (PRO), 99.9% (Enterprise and MSSP); credits and measurement terms in sla.html
 
 [View Trust Center →](https://intel.cyberdudebivash.com/trust-center.html)
 [View SLA →](https://intel.cyberdudebivash.com/sla.html)
@@ -203,9 +215,7 @@ The platform runs on a 33-stage GOD-MODE CI/CD pipeline:
 | Validation | 3.4–3.9 | Schema validation, manifest sanity |
 | API | 3.91–3.94 | Contract tests, embedded intel injection |
 | Deploy | 4–5.4 | R2 upload, GitHub Pages deploy, KV cache bust |
-| QA | 5.5–5.9 | Regression immunity, monetization gate (46/46) |
-
-**Stability grade:** GOD-MODE · Regression immunity: 11/10
+| QA | 5.5–5.9 | Regression immunity, monetization gate |
 
 ---
 
