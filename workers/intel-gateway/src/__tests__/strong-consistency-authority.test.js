@@ -129,15 +129,26 @@ test("strong consistency canary remains disabled unless explicitly enabled", asy
   assert.equal(result.disabled, true);
 });
 
-test("explicit canary validates auth read-after-write and exact request 31 denial", async () => {
+test("explicit canary defaults to minimal auth-only proof", async () => {
   const e = env(false, true);
   assert.equal(strongConsistencyEnabled(e), false);
   assert.equal(strongConsistencyCanaryEnabled(e), true);
   const result = await runStrongConsistencyCanary(e);
   assert.equal(result.ok, true);
+  assert.equal(result.scope, "auth");
   assert.equal(result.auth_suspend_read_after_write, true);
   assert.equal(result.auth_reactivate_read_after_write, true);
+  assert.equal(result.rate_checked, false);
+  assert.equal(result.first_denied_request, undefined);
+  assert.equal(result.canary_identities_reused, true);
+});
+
+test("full canary additionally validates exact request 31 rate denial", async () => {
+  const e = env(false, true);
+  const result = await runStrongConsistencyCanary(e, "full");
+  assert.equal(result.ok, true);
+  assert.equal(result.scope, "full");
+  assert.equal(result.rate_checked, true);
   assert.equal(result.first_denied_request, 31);
   assert.equal(result.final_count, 31);
-  assert.equal(result.canary_identities_reused, true);
 });
