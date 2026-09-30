@@ -615,6 +615,10 @@ async function checkRateLimit(env, ip, tier) {
   const limit  = RATE_LIMITS[tier] || RATE_LIMITS.FREE;
   const minute = Math.floor(Date.now() / 60000);
   const key    = `rl:${ip}:${minute}`;
+  // End of this fixed 60s window (epoch ms), from the same `minute` as the
+  // key. The 429 response's X-RateLimit-Reset reads it; before 2026-09-30 it
+  // read an undefined `resetAtMs`, so every limit hit became an HTTP 500.
+  const resetAtMs = (minute + 1) * 60000;
   try {
     if (strongRateConsistencyEnabled(env)) {
       // P0 #596 strong-consistency mode: one serialized Durable Object
@@ -622,8 +626,7 @@ async function checkRateLimit(env, ip, tier) {
       // that window and removes Workers-KV propagation races. Disabled by
       // default in wrangler.toml so no additional DO traffic/cost is incurred
       // until an operator explicitly approves activation.
-      const resetAt = (minute + 1) * 60000;
-      return await incrementStrongRate(env, key, limit, resetAt);
+      return { ...(await incrementStrongRate(env, key, limit, resetAtMs)), resetAtMs };
     }
 
     // Default/no-new-spend path: KV write-through is still only eventually
@@ -631,16 +634,17 @@ async function checkRateLimit(env, ip, tier) {
     // do not describe it as a linearizable global counter.
     const bumped = await bumpCounterWriteThrough(env.RATE_LIMIT_KV, key, 61);
     if (bumped.count > limit) {
-      return { allowed: false, count: bumped.count, limit, remaining: 0 };
+      return { allowed: false, count: bumped.count, limit, remaining: 0, resetAtMs };
     }
     return {
       allowed: true,
       count: bumped.count,
       limit,
       remaining: Math.max(0, limit - bumped.count),
+      resetAtMs,
     };
   } catch (_) {
-    return { allowed: true, count: 0, limit, remaining: limit };
+    return { allowed: true, count: 0, limit, remaining: limit, resetAtMs };
   }
 }
 
@@ -6605,7 +6609,7 @@ async function handleRequest(request, env, ctx) {
           "Retry-After": "60",
           "X-RateLimit-Limit": String(rl.limit),
           "X-RateLimit-Remaining": "0",
-          "X-RateLimit-Reset": String(Math.floor(resetAtMs / 1000)),
+          "X-RateLimit-Reset": String(Math.floor(rl.resetAtMs / 1000)),
         }
       );
     }
