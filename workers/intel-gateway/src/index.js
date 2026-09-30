@@ -3341,6 +3341,18 @@ export async function handleAdmin(request, env, ctx, path, method) {
     const oldKey = rotateMatch[1];
     const existing = await env.API_KEYS_KV.get(oldKey, "json");
     if (!existing) return jsonResp({ error: "Key not found" }, 404);
+    // Rotation must consult the same authoritative deny state as customer
+    // authentication. KV may still contain an active record after suspension.
+    const rotationAuthority = await strongAuthStates(
+      env, `key:${oldKey}`,
+      existing.customer_id ? `customer:${existing.customer_id}` : null
+    );
+    if (rotationAuthority.unavailable) {
+      return jsonResp({ error: "Strong consistency authority unavailable; key was not rotated" }, 503);
+    }
+    if (rotationAuthority.denied) {
+      return jsonResp({ error: "Cannot rotate a denied key or customer; reactivate through the lifecycle status endpoint first" }, 409);
+    }
     if (existing.subscription_status && SUBSCRIPTION_STATUS_DENY_STATES.has(existing.subscription_status)) {
       return jsonResp({
         error: `Cannot rotate a key in '${existing.subscription_status}' status -- reactivate it first via `
