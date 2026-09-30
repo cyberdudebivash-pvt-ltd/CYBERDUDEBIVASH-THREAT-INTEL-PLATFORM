@@ -101,6 +101,27 @@ def gen_sub_id() -> str:
 def normalize_country(code: str) -> str:
     return code.upper().strip()
 
+def validate_provision_request(email: str, tier: str, days: int, payment_ref: str) -> None:
+    """Fail closed before any live credential or customer state is created."""
+    email = email.strip().lower()
+    tier = tier.upper().strip()
+    if not email or "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise ValueError("a valid customer email is required")
+    if tier not in TIER_PRICING_INR:
+        raise ValueError(f"unsupported tier: {tier}")
+    if days <= 0 or days > 3660:
+        raise ValueError("subscription days must be between 1 and 3660")
+    if tier not in {"FREE", "TRIAL"} and not payment_ref.strip():
+        raise ValueError("paid tiers require an explicit verified payment reference")
+
+def find_existing_customer(email: str, ref_id: str) -> dict | None:
+    data = load_json(CUSTOMERS_PATH, {"customers": []})
+    email_norm = email.strip().lower()
+    for record in data.get("customers", []):
+        if str(record.get("email", "")).strip().lower() == email_norm or record.get("reference_id") == ref_id:
+            return record
+    return None
+
 # ─── CUSTOMER REGISTRY ────────────────────────────────────────────────────────
 def register_customer(
     customer_id: str,
@@ -290,13 +311,17 @@ def generate_welcome_package(
       curl -H "Authorization: Bearer {key_record['key']}" \\
            https://intel.cyberdudebivash.com/api/feed
 
-    DATA RESIDENCY & COMPLIANCE
+    JURISDICTION & PRIVACY REFERENCE
     ─────────────────────────────────────────────────────────────────────
-    AWS Region   : {juri[1]}
-    Framework    : {juri[2]}
-    DPA Version  : {customer_record['dpa_version']}
-    Supervisory  : {juri[3]}
-    DPA Request  : privacy@cyberdudebivash.com
+    Customer Jurisdiction : {juri[0]}
+    Applicable Framework  : {juri[2]}
+    DPA Version           : {customer_record['dpa_version']}
+    Supervisory Reference : {juri[3]}
+    DPA Request           : privacy@cyberdudebivash.com
+
+    IMPORTANT: This package does not make or imply a contractual data-residency
+    guarantee. Any customer-specific residency commitment must be stated in the
+    executed contract/DPA and backed by the deployed infrastructure configuration.
 
     SUPPORT CONTACTS
     ─────────────────────────────────────────────────────────────────────
@@ -317,8 +342,16 @@ def cmd_provision(args):
     tier     = args.tier.upper()
     country  = normalize_country(args.country)
     ref_id   = args.ref or f"SA-{today_str().replace('-','')}-{secrets.token_hex(2).upper()}"
-    pay_ref  = args.payment_ref or "MANUAL-" + secrets.token_hex(3).upper()
+    pay_ref  = args.payment_ref.strip()
     days     = args.days
+
+    validate_provision_request(args.email, tier, days, pay_ref)
+    existing = find_existing_customer(args.email, ref_id)
+    if existing:
+        raise ValueError(
+            f"customer/reference already provisioned: {existing.get('customer_id')} "
+            f"(ref={existing.get('reference_id')}); refusing duplicate live credential issuance"
+        )
 
     print(f"\n  SENTINEL APEX — Customer Provisioning")
     print(f"  ══════════════════════════════════════")
@@ -462,7 +495,7 @@ def main():
     prov.add_argument("--days",        type=int, default=30, help="Subscription length in days (default: 30)")
     prov.add_argument("--ref",         default="", help="Reference ID (auto-generated if omitted)")
     prov.add_argument("--payment-ref", default="", dest="payment_ref",
-                      help="Payment reference (Stripe PI, Gumroad TX, UPI Ref, etc.)")
+                      help="Verified payment reference. Required for paid tiers; never auto-generated.")
 
     sub.add_parser("list",    help="List all registered customers")
     sub.add_parser("revenue", help="Revenue and subscription summary")
