@@ -6586,7 +6586,12 @@ async function handleRequest(request, env, ctx) {
   // `!firstPartyRead` keeps the commercial plane's two gates exactly as they
   // were for every request that is not an anonymous first-party dashboard
   // read -- the condition below is unchanged apart from that one conjunct.
-  if (!firstPartyRead && path !== "/api/health" && path !== "/api/health/" && path !== "/api/health/live") {
+  // `!operatorPlane`: a request carrying the valid operator secret for its
+  // route is operator control-plane traffic, not anonymous API consumption
+  // (see isAuthenticatedOperatorRequest). Wrong or missing secrets are still
+  // metered here.
+  const operatorPlane = isAuthenticatedOperatorRequest(request, env, path);
+  if (!firstPartyRead && !operatorPlane && path !== "/api/health" && path !== "/api/health/" && path !== "/api/health/live") {
     const rl = await checkRateLimit(env, ip, auth.tier);
     if (!rl.allowed) {
       auditLog(ctx, env, { action: "rate_limited", ip, path, method, tier: auth.tier });
@@ -9042,6 +9047,39 @@ function watchdogDeps(env, ctx) {
 function isWatchdogOperator(request, env) {
   const k = (request.headers.get("X-Admin-Key") || "").trim();
   return !!env.ADMIN_SECRET && !!k && timingSafeEqual(k, env.ADMIN_SECRET);
+}
+
+// Operator control plane (P0 2026-09-30). These routes are called by the
+// operator or the platform's own pipelines with an operator secret, never a
+// customer credential, so resolveAuth() leaves them FREE and anonymous. They
+// are dispatched after the commercial gate, which metered them against the
+// per-IP minute bucket every tier from that IP shares and the IP's FREE
+// daily quota: a rotation, revocation or refund from a busy IP could be
+// refused (live: "MSSP rotation preserves membership: FAIL (rotation
+// returned no key)"). Each rule mirrors the secret check the route's own
+// handler performs; the handler stays the only authorization decision. This
+// predicate only selects the metering plane: a missing or wrong secret is
+// metered exactly as before, and handleAdmin's brute-force lockout still
+// applies to every /api/admin call.
+function isAuthenticatedOperatorRequest(request, env, path) {
+  if (path === "/api/admin/cache/bust" || path === "/api/admin/cache/bust-prefix"
+      || path === "/api/sla/ping" || path === "/api/alerts/dispatch") {
+    // handleAdmin cache-bust, handleSLAPing, handleAlertDispatch
+    const secret = request.headers.get("X-Admin-Secret") || "";
+    return !!env.WORKER_ADMIN_SECRET && timingSafeEqual(secret, env.WORKER_ADMIN_SECRET);
+  }
+  if (path.startsWith("/api/admin/")) {
+    // handleAdmin: X-Admin-Key or Authorization: Bearer, against ADMIN_SECRET
+    const adminKey = (
+      request.headers.get("X-Admin-Key") ||
+      (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "")
+    ).trim();
+    return !!env.ADMIN_SECRET && timingSafeEqual(adminKey, env.ADMIN_SECRET);
+  }
+  if (path === "/api/watchdog/ops" || path === "/api/ai-feed/ingest") {
+    return isWatchdogOperator(request, env);
+  }
+  return false;
 }
 
 // Autonomous Watchdog evaluation, driven by the existing 15-minute cron.
