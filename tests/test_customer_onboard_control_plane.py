@@ -75,3 +75,69 @@ def test_welcome_package_does_not_claim_aws_residency():
     package = customer_onboard.generate_welcome_package(key, customer, sub)
     assert "AWS Region" not in package
     assert "data-residency guarantee" in package
+
+
+def _args(**overrides):
+    values = {
+        "name": "Buyer",
+        "email": "buyer@example.com",
+        "company": "Example",
+        "country": "IN",
+        "tier": "pro",
+        "days": 30,
+        "ref": "SA-TEST-1",
+        "payment_ref": "PAY-1",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_post_key_failure_compensates_by_revoking_live_credential(monkeypatch):
+    key = {
+        "key": "SA-PRO-SECRET",
+        "key_hash": "b" * 64,
+        "tier": "PRO",
+        "api_calls_per_day": 5000,
+        "expires_at": "2026-10-30T00:00:00+00:00",
+    }
+    revoked = []
+    monkeypatch.setattr(customer_onboard, "find_existing_customer", lambda *a: None)
+    monkeypatch.setattr(customer_onboard._gk, "generate_key", lambda **kw: key)
+    monkeypatch.setattr(
+        customer_onboard._gk, "revoke_key",
+        lambda plaintext, reason="": revoked.append((plaintext, reason)) or True,
+    )
+    monkeypatch.setattr(
+        customer_onboard, "register_customer",
+        lambda **kw: (_ for _ in ()).throw(OSError("registry unavailable")),
+    )
+
+    with pytest.raises(OSError, match="registry unavailable"):
+        customer_onboard.cmd_provision(_args())
+
+    assert revoked
+    assert revoked[0][0] == "SA-PRO-SECRET"
+    assert "automatic_compensation" in revoked[0][1]
+
+
+def test_compensation_failure_escalates_critical_state(monkeypatch):
+    key = {
+        "key": "SA-PRO-SECRET",
+        "key_hash": "b" * 64,
+        "tier": "PRO",
+        "api_calls_per_day": 5000,
+        "expires_at": "2026-10-30T00:00:00+00:00",
+    }
+    monkeypatch.setattr(customer_onboard, "find_existing_customer", lambda *a: None)
+    monkeypatch.setattr(customer_onboard._gk, "generate_key", lambda **kw: key)
+    monkeypatch.setattr(
+        customer_onboard, "register_customer",
+        lambda **kw: (_ for _ in ()).throw(OSError("registry unavailable")),
+    )
+    monkeypatch.setattr(
+        customer_onboard._gk, "revoke_key",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("authority unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="CRITICAL: onboarding failed"):
+        customer_onboard.cmd_provision(_args())
