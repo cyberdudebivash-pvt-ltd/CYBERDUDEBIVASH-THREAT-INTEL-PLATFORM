@@ -164,6 +164,7 @@ import { routeAiFeed, AI_FEED_CATALOG_KEY } from './ai-threat-feed.js';
 import { getUsageSummary } from './usage-meter.js';
 import { buildAccountUsage } from './account-usage.js';
 import { buildReportsSitemapXml, MAX_SITEMAP_URLS } from './reports-sitemap.js';
+import { dispatchFreshnessGuard } from './freshness-guard-dispatch.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -9242,5 +9243,13 @@ export default {
     ctx.waitUntil(fetchAndCacheCVEs(env));
     // Cyber Watchdog autonomous evaluation (same 15-minute trigger).
     ctx.waitUntil(runWatchdogSchedule(env));
+    // Freshness self-heal trigger (DORMANT until FRESHNESS_GUARD_DISPATCH_ENABLED
+    // is "true" and its token secret is set -- founder approval required, see
+    // freshness-guard-dispatch.js). Never throws; logs outcome only, no token.
+    ctx.waitUntil(dispatchFreshnessGuard(env, event.scheduledTime).then((r) => {
+      if (r.status !== "disabled" && r.status !== "not_this_tick") {
+        console.log(JSON.stringify({ event: "freshness_guard_dispatch", ...r }));
+      }
+    }));
   },
 };
