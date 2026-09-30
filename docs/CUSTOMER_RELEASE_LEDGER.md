@@ -7,7 +7,7 @@ stay as point-in-time records; this file carries current status. Update it in
 the same PR as the change that moves a row. Historic evidence is never reused
 as current certification.
 
-Last updated: 2026-09-30T17:42Z, branch `claude/charming-thompson-ptma8e`.
+Last updated: 2026-09-30T18:25Z, branch `claude/charming-thompson-ptma8e`.
 
 ## Decision
 
@@ -28,10 +28,10 @@ certification workflow must run on the exact deployed SHA.
 
 | Component | Value | Evidence |
 | --- | --- | --- |
-| `main` | `022ecae4f4af29915423012d576f330194bfb90d` | three Dependabot action bumps after `f59387a`; no gateway source change |
-| Deployed gateway | `f59387a735e34b75bdaf9a8523c75040fe2eae29`, deploy run 36688506844 | `GET /api/health/live` at 16:59Z and 17:42Z |
-| Live health | 200, `fresh`, generated 2026-09-30T15:33:57Z, 54 advisories | `GET /api/health` at 17:42Z |
-| Branch commits | `5efa55206`, `5f8a3cb4f`, `89a25865a`, `8f37c95ea` (+ this ledger) | `git log` |
+| `main` | `1b8098c96` | Dependabot action bumps after `f59387a` (#633–#635); no gateway source change; this branch merges cleanly |
+| Deployed gateway | `f59387a735e34b75bdaf9a8523c75040fe2eae29`, deploy run 36688506844 | `GET /api/health/live` at 16:59Z, 17:42Z and 18:23Z |
+| Live health | 200, `ok`, generated 2026-09-30T15:33:57Z, 54 advisories | `GET /api/health` at 18:23Z |
+| Branch commits | `5efa55206`, `5f8a3cb4f`, `89a25865a`, `8f37c95ea`, `a3f8d851c` (ledger), `b6d40c13b` (R09) | `git log` |
 
 The feed turns stale at **2026-09-30T21:33:57Z** unless a publisher run lands
 before then (see F3). Dispatching `sentinel-blogger.yml` manually is an
@@ -177,10 +177,75 @@ be refused. Must be fixed before `RATE_STRONG_CONSISTENCY_ENABLED` is
 activated. Proposed: exempt only signature-verified deliveries, keep invalid
 ones metered.
 
-### F10 — Commercial claim drift beyond the contract gate (C07, R09) — IN PROGRESS
+### F10 — Commercial claim drift beyond the contract gate (C07, R09) — FIXED on branch (`b6d40c13b`)
 
-See the R09 row. `verify_commercial_contract.py` passes (4,621 checks) while
-buyer surfaces it does not cover contradict the contract.
+`verify_commercial_contract.py` passed (4,621 checks) while README.md and ~30
+deployed pages contradicted the contract. Corrected, each against
+`config/commercial-contract.json` or `sla.html`'s tier table:
+
+- Quotas: "Unlimited" Enterprise/MSSP, FREE 100/day, hourly limits
+  (60/2,000/20,000 req/hr), 500/2,000 req/min → 30/120/600/1,200 per minute,
+  50/5,000/50,000/50,000 per day.
+- Uptime/response: 99.95%/99.99%, "15-min SLA", "dedicated support" on
+  Enterprise, PRO p95 <500ms → 99.5/99.9/99.9, 48h/4h/1h, PRO <800ms.
+- Seats: 5 → 1/1/10/25. MSSP "Unlimited client seats" → 25 seats.
+- `security-compliance.html`: bcrypt-hashed / HMAC-signed keys, per-key IP
+  CIDR allowlisting, per-key scopes and CORS, admin MFA, TLS 1.3 minimum, CSP
+  Level 3, SRI, 90-day audit retention. Checked against `index.js`, the static
+  header rule and live headers (static pages: HSTS only; gateway: HSTS,
+  nosniff, X-Frame-Options DENY, CSP on report HTML); replaced with what is
+  implemented.
+- `user-test-kit.html` (live) told buyers to send ₹4,100 to a UPI handle or
+  paypal.me and submit a form for manual key delivery: the retired manual
+  channel, outside the Razorpay/Gumroad mandate. Now Razorpay or Gumroad with
+  automatic activation. Sub-processor lists name Razorpay and Gumroad (not
+  PayPal) and the email providers the code calls (SendGrid, Resend).
+- Social proof on `demo.html`, `enterprise.html`, `mssp.html`,
+  `global-deployment.html`, `threats.html`: testimonials, "1,200+ SOC teams",
+  "80+/50+ countries", "99.97% uptime", "45K+ reports" → checkable floors from
+  `config/platform-evidence.json` and the SLA commitments.
+
+Gates: the contract gate gains README.md and four claim classes (seats,
+uptime above 99.9%, sub-hour response, unlimited quota), row-aware; the
+public-claims gate catches claims split across elements; new
+`tests/test_commercial_claims_convergence.py` (13) pins the plan tables to
+the contract and the security copy to `index.js`. Both gates and the suite
+now run on pull requests. Negative controls on the pre-fix pages: contract
+gate 15 failures; suite 12/13 failing (the 13th pins `sla.html`, already
+correct).
+
+### F11 — Public internal revenue dashboard shows invented subscribers (R12) — REPORTED, OWNER DECISION
+
+`dashboard/revenue_acceleration.html` is live (HTTP 200), linked from no page,
+not in `robots.txt`, and renders hard-coded plan subscriber counts
+(92/71/142/71), a "Pro Subscribers 71" goal and a `SUBSCRIBERS_DEMO` table of
+invented subscriber emails with MRR. `build_dist_artifact.py` copies
+`dashboard/` wholesale; `HTML_EXCLUDE_PREFIXES` covers root files only, which
+is how earlier internal dashboards were withdrawn (v200.1/v200.2). Options:
+per-file exclusion for `dashboard/` in the build (MEDIUM: deploy builder), or
+wire the page to real data. Not changed here beyond one quota label.
+
+### F12 — Remaining product claims with no contract source (R09, R12, R20) — OWNER DECISION
+
+Not contract terms, so not changed without an owner source:
+
+- Data retention disagrees across pages: `trust-center.html` 7d/90d/1y/3y;
+  `security-compliance.html` 7d/90d/12mo; `get-api-key.html` Enterprise
+  "Historical data access (90 days)".
+- Incident notification channels (`trust-center.html` "Slack + Email +
+  Webhook" for MSSP): no Slack integration verified.
+- `sla.html` card says "<500ms … All paid tiers" while its tier table says
+  PRO <800ms (pages now follow the table).
+- AWS (ap-south-1) in the `security-compliance.html` sub-processor list: no
+  code reference found; kept (over-disclosure is the safe side) until
+  confirmed.
+- `eula.html` "unlimited Authorized Users" vs 1/1/10/25 seats;
+  `services.html` "UNLIMITED INCIDENTS"; `global-deployment.html` "99.99%"
+  attributed to Cloudflare; "compliant" statements in `README.md`/privacy.
+- Undeployed pages with superseded plans (not in `dist/`, HTTP 404):
+  `sales/apex-datasheet.html` (TEAM $149, 60/500/1,000 req/min),
+  `api-economy/developer-portal.html` (Starter $49 500/day, Enterprise $999,
+  invented usage metrics), `landing/index.html`. Fix before any is deployed.
 
 ## R01–R35 status
 
@@ -194,10 +259,10 @@ buyer surfaces it does not cover contradict the contract.
 | R06 | Verify; new latent risk | F9 |
 | R07 | Partial live evidence | Cert 36690549981: MSSP isolation and self-service phases PASS |
 | R08 | Partial | SAST run 36744969006 on `022ecae4` success; ESLint no-undef sweep of all Worker source (F1). Dependency scan not re-run here |
-| R09 | In progress | F10 |
+| R09 | Fixed on branch; deploy pending | F10 (`b6d40c13b`); remaining non-contract claims F12 |
 | R10 | Gap reported | F4 (post-deploy validation not chained since 2026-09-24); deploy-worker exact-SHA smoke still runs |
 | R11 | Open (#593) | Human review pending; unchanged |
-| R12 | Verify | README static metrics are part of F10 |
+| R12 | Partial | README metrics now point to live endpoints (F10); internal revenue dashboard F11 |
 | R13 | Verify | Not examined |
 | R14 | Verify | Not examined |
 | R15 | Gap | F3, F7 |
@@ -205,7 +270,7 @@ buyer surfaces it does not cover contradict the contract.
 | R17 | Verify | Not examined |
 | R18 | Partial | Autonomous scheduler canary PASS (36690549981); Enterprise webhook canary needs `CDB_WATCHDOG_SINK_*` secrets |
 | R19 | Open (#419/#420/#422) | Not examined |
-| R20 | Gap | Seat counts drift across pages (F10); no runtime seat concept exists, only API keys |
+| R20 | Copy fixed on branch; runtime gap | Seat counts now 1/1/10/25 everywhere deployed (F10); `eula.html` open (F12); no runtime seat concept exists, only API keys |
 | R21 | Unchanged | `ENTITLEMENT_ENFORCEMENT_RESOURCES = cve_detail_full` |
 | R22 | Operator | Prepared Cloudflare header rule not applied (2026-09-28 review) |
 | R23 | Gap, owner decision | F6 |
@@ -213,7 +278,7 @@ buyer surfaces it does not cover contradict the contract.
 | R25 | Partial | Worker bundle 1684.41 → 1687.50 KiB (+0.18%), gzip 400.54 → 401.37 KiB |
 | R26 | Verify | Not examined |
 | R27 | Owner decision | F8 |
-| R28 | Gap | Rate/quota numbers in API docs pages are part of F10 |
+| R28 | Fixed on branch | API docs, reference card, developer portal and header semantics match the gateway (F10) |
 | R29 | Gaps reported | F3, F4, F5 |
 | R30–R34 | Verify | Not examined |
 | R35 | This ledger | — |
@@ -226,6 +291,11 @@ buyer surfaces it does not cover contradict the contract.
 | F2 `5f8a3cb4f` | Operator actions not throttled by anonymous budgets | `index.js`, new test | timingSafeEqual, isWatchdogOperator, checkRateLimit, checkDailyQuota | code path; 3 live cert failures; local reproduction | LOW | revert |
 | Diagnostics `89a25865a` | Certification shows what the limiter and rotation answered | commercial certification workflow | existing jobs | "0 = never seen" / "no key" hid F1 | LOW (stricter: 5xx now fails) | revert |
 | F3 `8f37c95ea` | Reliable freshness self-heal trigger | new module, `index.js` cron branch, `wrangler.toml`, guard policy + test | intel_freshness_guard.py decision logic, existing cron | guard 5/48 runs/day; 07:51→15:33 gap | LOW (dormant) | revert or flag `"false"` |
+| F10 `b6d40c13b` | Buyer copy equals enforced terms | README.md, 30 pages, 2 gates, evidence register, new suite, regression-gate workflow | commercial-contract.json, platform-evidence.json, both gates extended in place | pages vs contract; code and live headers for security copy | LOW (static copy; CI additions only) | revert |
+
+Blast radius (F10): no route, Worker, schema, auth or payment code; pages
+only change copy; `config/frontend_checksums.json` regenerated for
+`index.html`; CI gains one pytest file, one gate step and four path filters.
 
 Blast radius (F1–F3): routes — the 429 response of every commercial-plane
 route (was 500) and metering of the five operator routes; dashboards — none
@@ -246,12 +316,17 @@ none; `/api/v1/p*` shapes — unchanged; data schema — none (fewer
   WORLDWIDE_RELEASE, 0 blockers; `ci_stats_extract.py p33` valid.
 - Workflow-related pytest files: 506 passed; 3 pre-existing failures (F5).
 - wrangler 4.142.0 `deploy --dry-run --env production`: bundle builds.
+- R09 (`b6d40c13b`): PR python suites 1,839 passed; 27 other page-reading
+  suites 502 passed / 1 skipped; gateway suite 1,638/1,638; billing negative
+  controls 101/101; `verify_commercial_contract.py` 5,366/0;
+  `verify_public_claims.py` 13,577/0; frontend integrity PASS; regression
+  41/41; P33 WORLDWIDE_RELEASE, 0 blockers.
 
 ## Reuse report
 
 | Metric | Result |
 | --- | --- |
-| Existing engines reused | checkRateLimit, bumpCounterWriteThrough, incrementStrongRate, checkDailyQuota, buildUpgradeTrigger, timingSafeEqual, isWatchdogOperator, intel_freshness_guard.py |
+| Existing engines reused | checkRateLimit, bumpCounterWriteThrough, incrementStrongRate, checkDailyQuota, buildUpgradeTrigger, timingSafeEqual, isWatchdogOperator, intel_freshness_guard.py; R09: verify_commercial_contract.py and verify_public_claims.py extended in place, driven by commercial-contract.json / evidence-register.json / platform-evidence.json |
 | Existing routes extended | none added; commercial gate condition extended |
 | Existing dashboards extended | none |
 | New engines | 1: `freshness-guard-dispatch.js` (no GitHub-dispatch path existed in the Worker) |
