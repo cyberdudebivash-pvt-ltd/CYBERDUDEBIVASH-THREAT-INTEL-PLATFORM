@@ -164,6 +164,7 @@ import { routeAiFeed, AI_FEED_CATALOG_KEY } from './ai-threat-feed.js';
 import { getUsageSummary } from './usage-meter.js';
 import { buildAccountUsage } from './account-usage.js';
 import { buildReportsSitemapXml, MAX_SITEMAP_URLS } from './reports-sitemap.js';
+import { dispatchFreshnessGuard } from './freshness-guard-dispatch.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -615,6 +616,10 @@ async function checkRateLimit(env, ip, tier) {
   const limit  = RATE_LIMITS[tier] || RATE_LIMITS.FREE;
   const minute = Math.floor(Date.now() / 60000);
   const key    = `rl:${ip}:${minute}`;
+  // End of this fixed 60s window (epoch ms), from the same `minute` as the
+  // key. The 429 response's X-RateLimit-Reset reads it; before 2026-09-30 it
+  // read an undefined `resetAtMs`, so every limit hit became an HTTP 500.
+  const resetAtMs = (minute + 1) * 60000;
   try {
     if (strongRateConsistencyEnabled(env)) {
       // P0 #596 strong-consistency mode: one serialized Durable Object
@@ -622,8 +627,7 @@ async function checkRateLimit(env, ip, tier) {
       // that window and removes Workers-KV propagation races. Disabled by
       // default in wrangler.toml so no additional DO traffic/cost is incurred
       // until an operator explicitly approves activation.
-      const resetAt = (minute + 1) * 60000;
-      return await incrementStrongRate(env, key, limit, resetAt);
+      return { ...(await incrementStrongRate(env, key, limit, resetAtMs)), resetAtMs };
     }
 
     // Default/no-new-spend path: KV write-through is still only eventually
@@ -631,16 +635,17 @@ async function checkRateLimit(env, ip, tier) {
     // do not describe it as a linearizable global counter.
     const bumped = await bumpCounterWriteThrough(env.RATE_LIMIT_KV, key, 61);
     if (bumped.count > limit) {
-      return { allowed: false, count: bumped.count, limit, remaining: 0 };
+      return { allowed: false, count: bumped.count, limit, remaining: 0, resetAtMs };
     }
     return {
       allowed: true,
       count: bumped.count,
       limit,
       remaining: Math.max(0, limit - bumped.count),
+      resetAtMs,
     };
   } catch (_) {
-    return { allowed: true, count: 0, limit, remaining: limit };
+    return { allowed: true, count: 0, limit, remaining: limit, resetAtMs };
   }
 }
 
@@ -6582,7 +6587,17 @@ async function handleRequest(request, env, ctx) {
   // `!firstPartyRead` keeps the commercial plane's two gates exactly as they
   // were for every request that is not an anonymous first-party dashboard
   // read -- the condition below is unchanged apart from that one conjunct.
-  if (!firstPartyRead && path !== "/api/health" && path !== "/api/health/" && path !== "/api/health/live") {
+  // `!operatorPlane`: a request carrying the valid operator secret for its
+  // route is operator control-plane traffic, not anonymous API consumption
+  // (see isAuthenticatedOperatorRequest). Wrong or missing secrets are still
+  // metered here.
+  const operatorPlane = isAuthenticatedOperatorRequest(request, env, path);
+  // `!paymentWebhook`: a Razorpay or Gumroad delivery that passes its route's
+  // own verification is provider traffic, not anonymous API consumption (see
+  // isVerifiedPaymentWebhook). Unverified deliveries are still metered here.
+  const paymentWebhook = !operatorPlane && path.startsWith("/api/webhooks/")
+    && await isVerifiedPaymentWebhook(request, env, path);
+  if (!firstPartyRead && !operatorPlane && !paymentWebhook && path !== "/api/health" && path !== "/api/health/" && path !== "/api/health/live") {
     const rl = await checkRateLimit(env, ip, auth.tier);
     if (!rl.allowed) {
       auditLog(ctx, env, { action: "rate_limited", ip, path, method, tier: auth.tier });
@@ -6605,7 +6620,7 @@ async function handleRequest(request, env, ctx) {
           "Retry-After": "60",
           "X-RateLimit-Limit": String(rl.limit),
           "X-RateLimit-Remaining": "0",
-          "X-RateLimit-Reset": String(Math.floor(resetAtMs / 1000)),
+          "X-RateLimit-Reset": String(Math.floor(rl.resetAtMs / 1000)),
         }
       );
     }
@@ -9040,6 +9055,101 @@ function isWatchdogOperator(request, env) {
   return !!env.ADMIN_SECRET && !!k && timingSafeEqual(k, env.ADMIN_SECRET);
 }
 
+// Operator control plane (P0 2026-09-30). These routes are called by the
+// operator or the platform's own pipelines with an operator secret, never a
+// customer credential, so resolveAuth() leaves them FREE and anonymous. They
+// are dispatched after the commercial gate, which metered them against the
+// per-IP minute bucket every tier from that IP shares and the IP's FREE
+// daily quota: a rotation, revocation or refund from a busy IP could be
+// refused (live: "MSSP rotation preserves membership: FAIL (rotation
+// returned no key)"). Each rule mirrors the secret check the route's own
+// handler performs; the handler stays the only authorization decision. This
+// predicate only selects the metering plane: a missing or wrong secret is
+// metered exactly as before, and handleAdmin's brute-force lockout still
+// applies to every /api/admin call.
+function isAuthenticatedOperatorRequest(request, env, path) {
+  if (path === "/api/admin/cache/bust" || path === "/api/admin/cache/bust-prefix"
+      || path === "/api/sla/ping" || path === "/api/alerts/dispatch") {
+    // handleAdmin cache-bust, handleSLAPing, handleAlertDispatch
+    const secret = request.headers.get("X-Admin-Secret") || "";
+    return !!env.WORKER_ADMIN_SECRET && timingSafeEqual(secret, env.WORKER_ADMIN_SECRET);
+  }
+  if (path.startsWith("/api/admin/")) {
+    // handleAdmin: X-Admin-Key or Authorization: Bearer, against ADMIN_SECRET
+    const adminKey = (
+      request.headers.get("X-Admin-Key") ||
+      (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "")
+    ).trim();
+    return !!env.ADMIN_SECRET && timingSafeEqual(adminKey, env.ADMIN_SECRET);
+  }
+  if (path === "/api/watchdog/ops" || path === "/api/ai-feed/ingest") {
+    return isWatchdogOperator(request, env);
+  }
+  return false;
+}
+
+// Payment-provider webhooks (F9, 2026-10-01). Razorpay and Gumroad deliver
+// to /api/webhooks/* with a signature or a shared secret, never a customer
+// credential, so resolveAuth() leaves them FREE and anonymous and the
+// commercial gate metered them: 30/min and 50/day per provider egress IP.
+// The next delivery after either cap got 429, so a paid order or sale was
+// not provisioned until the provider retried. A delivery that passes its
+// route handler's own check (same secret, same comparison) is selected out
+// of anonymous metering here; the handler still verifies it again and stays
+// the only authorization decision. Anything unverified, and any Razorpay body
+// over WEBHOOK_VERIFY_MAX_BYTES, is metered exactly as before.
+const WEBHOOK_VERIFY_MAX_BYTES = 64 * 1024;
+
+async function isVerifiedPaymentWebhook(request, env, path) {
+  if (request.method !== "POST") return false;
+  if (path === "/api/webhooks/gumroad") {
+    // handleWebhookGumroad: ?secret= against GUMROAD_WEBHOOK_SECRET
+    const token = new URL(request.url).searchParams.get("secret") || "";
+    return !!env.GUMROAD_WEBHOOK_SECRET && !!token && timingSafeEqual(token, env.GUMROAD_WEBHOOK_SECRET);
+  }
+  if (path === "/api/webhooks/razorpay") {
+    // handleWebhookRazorpay: X-Razorpay-Signature, HMAC-SHA256 of the raw body
+    const sig = request.headers.get("X-Razorpay-Signature") || "";
+    if (!env.RAZORPAY_WEBHOOK_SECRET || !sig) return false;
+    try {
+      const body = await readBodyCapped(request.clone(), WEBHOOK_VERIFY_MAX_BYTES);
+      return body !== null && await verifyRazorpayHmac(body, sig, env.RAZORPAY_WEBHOOK_SECRET);
+    } catch (_) {
+      return false; // unreadable here: metered as before, never a 500
+    }
+  }
+  return false;
+}
+
+// The request's body as text, or null once it passes maxBytes. Called on a
+// clone, so the original request keeps its body for the route handler.
+async function readBodyCapped(request, maxBytes) {
+  if (Number(request.headers.get("Content-Length")) > maxBytes) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      // Not awaited: a cancelled clone branch settles only once the
+      // original branch is cancelled too, which may never happen.
+      reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 // Autonomous Watchdog evaluation, driven by the existing 15-minute cron.
 // With no paid watch enabled this costs one scheduler DO read and nothing
 // else: no R2 read, no write. Never LISTs R2. (Line comments only in this
@@ -9200,5 +9310,13 @@ export default {
     ctx.waitUntil(fetchAndCacheCVEs(env));
     // Cyber Watchdog autonomous evaluation (same 15-minute trigger).
     ctx.waitUntil(runWatchdogSchedule(env));
+    // Freshness self-heal trigger (DORMANT until FRESHNESS_GUARD_DISPATCH_ENABLED
+    // is "true" and its token secret is set -- founder approval required, see
+    // freshness-guard-dispatch.js). Never throws; logs outcome only, no token.
+    ctx.waitUntil(dispatchFreshnessGuard(env, event.scheduledTime).then((r) => {
+      if (r.status !== "disabled" && r.status !== "not_this_tick") {
+        console.log(JSON.stringify({ event: "freshness_guard_dispatch", ...r }));
+      }
+    }));
   },
 };

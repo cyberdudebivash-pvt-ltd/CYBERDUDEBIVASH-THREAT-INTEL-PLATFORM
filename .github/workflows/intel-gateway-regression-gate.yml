@@ -96,6 +96,12 @@ on:
       - 'mssp-onboarding-kit/**'
       - 'config/commercial-contract.json'
       - 'VERSION'
+      # README.md tier table, social-proof register, measured evidence
+      # floors and the customer key page (commercial claims suite).
+      - 'README.md'
+      - 'config/evidence-register.json'
+      - 'config/platform-evidence.json'
+      - 'customer/**'
   pull_request:
     branches: [main]
     paths:
@@ -157,6 +163,12 @@ on:
       - 'mssp-onboarding-kit/**'
       - 'config/commercial-contract.json'
       - 'VERSION'
+      # README.md tier table, social-proof register, measured evidence
+      # floors and the customer key page (commercial claims suite).
+      - 'README.md'
+      - 'config/evidence-register.json'
+      - 'config/platform-evidence.json'
+      - 'customer/**'
   workflow_dispatch: {}
 
 permissions:
@@ -330,7 +342,10 @@ jobs:
             tests/test_evidence_chain_truth.py
             # Freshness guard decision table (publisher re-dispatch).
             tests/test_intel_freshness_guard.py
-            # Workflow concurrency scoping: derived writers use resource-specific\n            # locks; R2/core-feed writers retain the global serialization lock.\n            tests/test_workflow_concurrency_scoping.py\n            # Severity from a vector-verified CVSS score, EPSS from FIRST.org,
+            # Workflow concurrency scoping: derived writers use resource-specific
+            # locks; R2/core-feed writers retain the global serialization lock.
+            tests/test_workflow_concurrency_scoping.py
+            # Severity from a vector-verified CVSS score, EPSS from FIRST.org,
             # and every EPSS renderer on one scale. No network.
             tests/test_severity_epss_truth.py
             # A source article older than INTEL_MAX_SOURCE_AGE_DAYS is not new
@@ -416,6 +431,15 @@ jobs:
             # Homepage REPORTS tab loads the catalog: the engine's global
             # cdbSwitchTab calls window.cdbOpenReportsPanel. Local files + node.
             tests/test_reports_tab_wiring.py
+            # Plan tables on README.md, trust-center, SLA, compliance, API and
+            # security pages equal config/commercial-contract.json; payment goes
+            # only through Razorpay/Gumroad; evidence floors stay under the
+            # measured values. Local files only.
+            tests/test_commercial_claims_convergence.py
+            # Report archive floor: a skip at ARCHIVE_MIN_REPORTS exits 0 with
+            # a warning instead of failing sentinel-blogger and skipping its
+            # post-deploy gates. Temp git repos; no network.
+            tests/test_report_archive_floor.py
           )
           python3 -m pytest "${SUITES[@]}" -q
           # Refuse to pass having run nothing. pytest.ini forces --verbose, so
@@ -465,3 +489,10 @@ jobs:
 
       - name: "Customer-visible release label gate"
         run: python3 scripts/customer_release_label.py
+
+      # Withdrawn social proof (config/evidence-register.json), including
+      # claims split across elements. It ran only after merge, on a path list
+      # without most buyer pages, plus nightly, so a PR could reintroduce
+      # "80+ countries" or a testimonial on demo.html unseen.
+      - name: "Unsupported social-proof gate"
+        run: python3 scripts/verify_public_claims.py

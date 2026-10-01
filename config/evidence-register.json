@@ -28,7 +28,7 @@
     },
     {
       "claim": "Verified / professional / analyst / team head-counts",
-      "variants": ["500+ verified users", "500+ teams", "180+ teams", "1,000+ security professionals", "2,400+ security professionals", "4,800+ security professionals", "4,800+ analysts", "340+ analysts", "210+ analysts"],
+      "variants": ["500+ verified users", "500+ teams", "180+ teams", "1,000+ security professionals", "2,400+ security professionals", "4,800+ security professionals", "4,800+ analysts", "340+ analysts", "210+ analysts", "1,200+ SOC teams"],
       "appeared_on": ["testimonials.html", "compare.html", "demo.html", "about.html", "login.html", "index.html", "enterprise-pricing.html", "landing/index.html"],
       "classification": "UNVERIFIED",
       "source": null,
@@ -63,7 +63,7 @@
     },
     {
       "claim": "Anonymous but specifically-attributed testimonials",
-      "variants": ["Head of Threat Intelligence, Global Financial Services Group · 48,000 employees", "Director of Security Services — MSSP Partner (8 MSSP clients)", "ENTERPRISE SOC · FORTUNE 500"],
+      "variants": ["Head of Threat Intelligence, Global Financial Services Group · 48,000 employees", "Director of Security Services — MSSP Partner (8 MSSP clients)", "ENTERPRISE SOC · FORTUNE 500", "THREAT ANALYST · ENTERPRISE MSSP", "SOC DIRECTOR · GLOBAL MSSP", "CTO · BOUTIQUE MSSP", "PRINCIPAL DIRECTOR · MDR PROVIDER", "Top-10 Global MSSP", "Healthcare Enterprise — 15,000+ Endpoints", "Global MSSP — Financial Sector"],
       "appeared_on": ["testimonials.html", "pricing.html", "case-studies.html"],
       "classification": "UNVERIFIED",
       "source": null,
@@ -90,6 +90,24 @@
       "source": null,
       "finding": "No Fortune 500 customer record, contract or authorisation was located.",
       "action": "Removed."
+    },
+    {
+      "claim": "Customer-base \"trusted by\" claims",
+      "variants": ["Trusted by SOC teams", "Trusted By Security Teams", "Trusted by Security Operations", "trusted by enterprise SOC teams"],
+      "appeared_on": ["demo.html", "enterprise.html", "mssp.html", "threats.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-09-30: headings and prose asserting adoption by SOC teams, MSSPs and CISOs while the platform had no paying customer and no authorised customer reference. The demo.html variant sat next to a 1,200+ SOC Teams / 80+ Countries stat block split across elements, which the per-text-node scan could not see.",
+      "action": "Replaced with checkable evidence (config/platform-evidence.json, config/commercial-contract.json, sla.html)."
+    },
+    {
+      "claim": "Measured uptime figure without a measurement",
+      "variants": ["99.97% API uptime"],
+      "appeared_on": ["demo.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-09-30: a 99.97% API uptime stat and sandbox sample were shown while /api/metrics reported api_uptime_30d_pct as null and the only external prober ran about five times a day. Commitments (sla.html) are retained; a measured figure needs a measurement.",
+      "action": "Removed; demo.html cites the sla.html commitment and labels it as a commitment, not a measurement."
     }
   ],
 

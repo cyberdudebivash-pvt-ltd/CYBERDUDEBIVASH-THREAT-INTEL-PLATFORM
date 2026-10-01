@@ -3705,12 +3705,14 @@ jobs:
       #     actually wired below (`vars.ARCHIVE_DRY_RUN || '0'`, and the
       #     script itself treats "0" as LIVE, only "1" as dry-run). Corrected:
       #     LIVE by default unless ARCHIVE_DRY_RUN=1 is set explicitly.
-      #   - Hard-stops if reports would fall below ARCHIVE_MIN_REPORTS (500).
+      #   - Never archives below ARCHIVE_MIN_REPORTS (500): it skips with a
+      #     ::warning:: annotation and exit 0, so a skip cannot fail the job
+      #     and skip the post-deploy gates below (2026-10-01).
       #   - Verifies clean: false is set before executing any git rm operations
       #     -- so even in "live" mode, no git rm actually runs while Pages
       #     deploy (STAGE 5) uses clean: true, as it currently does.
       #   - Exit 2 = Pages still uses clean:true → non-blocking warning only.
-      #   - Exit 1 = safety constraint violated → treated as hard fail.
+      #   - Exit 1 = git error while untracking -> treated as hard fail.
       #
       # ENVIRONMENT VARIABLES (optional, all have safe defaults):
       #   REPORT_RETENTION_DAYS  -- days to keep in working tree (default: 90)
@@ -3730,7 +3732,7 @@ jobs:
         run: |
           python3 scripts/report_archive_manager.py || EXIT_CODE=$?
           if [ "${EXIT_CODE:-0}" = "1" ]; then
-            echo "::error::STAGE 5.4.5b: report_archive_manager safety constraint violated — check ARCHIVE_MIN_REPORTS and working-tree report count"
+            echo "::error::STAGE 5.4.5b: report_archive_manager hard stop (git error while untracking), see the [CDB-ARCHIVE] log above"
             exit 1
           fi
           if [ "${EXIT_CODE:-0}" = "2" ]; then

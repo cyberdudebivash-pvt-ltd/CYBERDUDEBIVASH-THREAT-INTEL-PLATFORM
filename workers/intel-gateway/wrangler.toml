@@ -94,6 +94,14 @@ AUTH_STRONG_CONSISTENCY_ENABLED = "false"
 RATE_STRONG_CONSISTENCY_ENABLED = "false"
 AUTH_STRONG_CONSISTENCY_CANARY_ENABLED = "false"
 
+# R01 freshness self-heal trigger (src/freshness-guard-dispatch.js). OFF under
+# config/cloudflare_pre_revenue_guard.json: turning it on is a new recurring
+# workload (48 GitHub API calls/day from the EXISTING 15-minute cron, no new
+# trigger or binding) and needs explicit founder approval plus the
+# FRESHNESS_GUARD_DISPATCH_TOKEN secret. Pinned "false" by
+# tests/test_cloudflare_pre_revenue_guard.py until that approval.
+FRESHNESS_GUARD_DISPATCH_ENABLED = "false"
+
 # -- KV Namespaces --
 # Deployed KV IDs -- verified live on intel.cyberdudebivash.com (v142.3.1)
 # To add new namespace: npx wrangler kv namespace create "<NAME>"
@@ -234,6 +242,11 @@ new_sqlite_classes = ["WatchdogScheduler"]
 # -- Secrets (set via wrangler CLI -- NEVER commit to source control) --
 # npx wrangler secret put ADMIN_SECRET             -> cache bust + admin key management
 # npx wrangler secret put GITHUB_TOKEN             -> emergency GitHub fallback reads
+# npx wrangler secret put FRESHNESS_GUARD_DISPATCH_TOKEN -> ONLY after founder approval of R01
+#                                                     (FRESHNESS_GUARD_DISPATCH_ENABLED). Fine-grained
+#                                                     PAT: this repository only, Actions read/write,
+#                                                     nothing else; expiry <= 90 days. Sent only to
+#                                                     api.github.com, never logged.
 # npx wrangler secret put CDB_JWT_SECRET           -> JWT HS256 signing key (REQUIRED for auth)
 #                                                     Minimum 32 random characters. Generate:
 #                                                     openssl rand -hex 32
@@ -324,6 +337,7 @@ WATCHDOG_WEBHOOK_DELIVERY_ENABLED = "true"
 AUTH_STRONG_CONSISTENCY_ENABLED = "false"
 RATE_STRONG_CONSISTENCY_ENABLED = "false"
 AUTH_STRONG_CONSISTENCY_CANARY_ENABLED = "false"
+FRESHNESS_GUARD_DISPATCH_ENABLED = "false"
 
 [[env.production.kv_namespaces]]
 binding = "API_KEYS_KV"

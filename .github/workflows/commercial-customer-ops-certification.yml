@@ -849,9 +849,16 @@ jobs:
           if [ -z "$A" ]; then
             record "MSSP rotation preserves membership" "FAIL (no active tenant before rotation)" fail
           else
-            NEW=$(curl -sS -X POST "$BASE/api/admin/keys/$MSSP/rotate" -H "X-Admin-Key: $ADMIN_SECRET" | jq -r '.new_key // empty')
+            # Status and reason are kept so a failure says why (it used to
+            # say only "no key"). The body never contains the new key when
+            # there is none; the old key is masked above and scrubbed here.
+            ROT=$(curl -sS -w "\n%{http_code}" -X POST "$BASE/api/admin/keys/$MSSP/rotate" -H "X-Admin-Key: $ADMIN_SECRET")
+            ROT_STATUS=$(echo "$ROT" | tail -n 1)
+            NEW=$(echo "$ROT" | sed '$d' | jq -r '.new_key // empty' 2>/dev/null)
             if [ -z "$NEW" ]; then
-              record "MSSP rotation preserves membership" "FAIL (rotation returned no key)" fail
+              ROT_REASON=$(echo "$ROT" | sed '$d' | jq -r '[.error, .reason] | map(select(. != null)) | join(": ")' 2>/dev/null | head -c 160)
+              ROT_REASON="${ROT_REASON//$MSSP/[key]}"
+              record "MSSP rotation preserves membership" "FAIL (rotation returned no key: HTTP $ROT_STATUS $ROT_REASON)" fail
             else
               echo "::add-mask::$NEW"; KEYS+=("$NEW")
               sleep 2
@@ -959,17 +966,26 @@ jobs:
           # boundary case from an actual limiter regression without
           # masking a real failure -- if the retry also fails to see a
           # 429 in the 31-33 range, that's reported as a real FAIL.
+          # Every status is recorded, not only the first 429: until
+          # 2026-09-30 the limiter's deny branch threw (undefined resetAtMs)
+          # and answered 500, which this check could not see. A 5xx during
+          # the burst is now its own FAIL.
+          SERVER_ERRORS=0
           burst() {
             FIRST_429=0
             RETRY_AFTER_SEEN=""
+            STATUSES=""
             for i in $(seq 1 33); do
               RESP=$(curl -sS --max-time 15 -D - -o /dev/null "$BASE/api/sla/status")
               ST=$(echo "$RESP" | awk 'NR==1{print $2}')
+              STATUSES="$STATUSES ${ST:-none}"
+              case "$ST" in 5??) SERVER_ERRORS=$((SERVER_ERRORS + 1)) ;; esac
               if [ "$ST" = "429" ] && [ "$FIRST_429" -eq 0 ]; then
                 FIRST_429=$i
                 RETRY_AFTER_SEEN=$(echo "$RESP" | grep -i '^retry-after:' | tr -d '\r' || true)
               fi
             done
+            echo "burst statuses (status x count): $(echo $STATUSES | tr ' ' '\n' | sort | uniq -c | awk '{printf "%sx%s ", $2, $1}')"
           }
 
           burst
@@ -990,6 +1006,11 @@ jobs:
             echo "PASS: Retry-After header present on 429 ($RETRY_AFTER_SEEN)"
           else
             echo "FAIL: no Retry-After header seen on the 429 response"
+            FAIL=1
+          fi
+
+          if [ "$SERVER_ERRORS" -ne 0 ]; then
+            echo "FAIL: $SERVER_ERRORS request(s) answered 5xx during the burst -- the limiter must deny with 429, never a server error"
             FAIL=1
           fi
 

@@ -70,6 +70,24 @@ def test_pre_revenue_cost_mode_keeps_strong_consistency_canary_disabled_everywhe
     assert all(v == "false" for v in values), values
 
 
+def test_pre_revenue_cost_mode_keeps_freshness_guard_dispatch_disabled_everywhere():
+    # R01 self-heal trigger ships dormant: a new recurring workload needs
+    # explicit founder approval before this may become "true".
+    text = WRANGLER.read_text(encoding="utf-8")
+    values = re.findall(r'^FRESHNESS_GUARD_DISPATCH_ENABLED\s*=\s*"([^"]+)"', text, re.M)
+    assert len(values) == 2, values  # [vars] and [env.production.vars]
+    assert all(v == "false" for v in values), values
+
+
+def test_dormant_recurring_workloads_are_declared_in_the_policy():
+    policy = json.loads(POLICY.read_text(encoding="utf-8"))
+    pending = {w["flag"]: w for w in policy.get("dormant_recurring_workloads_pending_approval", [])}
+    assert "FRESHNESS_GUARD_DISPATCH_ENABLED" in pending
+    entry = pending["FRESHNESS_GUARD_DISPATCH_ENABLED"]
+    assert "founder approval" in entry["approval_required"].lower()
+    assert entry["usage_when_enabled"]
+
+
 def test_no_unapproved_durable_object_bindings_are_added():
     text = WRANGLER.read_text(encoding="utf-8")
     policy = json.loads(POLICY.read_text(encoding="utf-8"))

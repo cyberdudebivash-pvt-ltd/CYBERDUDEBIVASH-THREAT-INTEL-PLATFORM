@@ -104,6 +104,28 @@ def is_negated_in_node(node: str, match_start: int, match_end: int) -> bool:
     return any(cue in before for cue in NEGATION_CUES) or any(cue in after for cue in NEGATION_CUES)
 
 
+def cross_node_match(nodes: list[str], pattern: re.Pattern) -> str | None:
+    """A claim split across elements, e.g. a stat widget rendering
+    <div>80+</div><div>Countries</div>, never appears inside one text node,
+    so the per-node scan cannot see it (2026-09-30: demo.html published
+    "1,200+ SOC Teams / 80+ Countries" that way while "80+ countries" was
+    already withdrawn). Join the visible nodes with single spaces and return
+    any match that spans a node boundary. Such a match gets no negation
+    allowance: an honest disclaimer is written as prose inside one node,
+    which the per-node pass already handles."""
+    parts = [re.sub(r"\s+", " ", n).strip() for n in nodes]
+    parts = [p for p in parts if p]
+    spans, pos = [], 0
+    for p in parts:
+        spans.append((pos, pos + len(p)))
+        pos += len(p) + 1
+    joined = " ".join(parts)
+    for m in pattern.finditer(joined):
+        if not any(start <= m.start() and m.end() <= end for start, end in spans):
+            return m.group(0)
+    return None
+
+
 def build_forbidden_patterns(withdrawn: list[dict]) -> list[tuple[str, re.Pattern]]:
     patterns: list[tuple[str, re.Pattern]] = []
     for entry in withdrawn:
@@ -179,6 +201,9 @@ def main() -> int:
                 if violation_found:
                     break
             check(not violation_found, f"{rel} does not publish withdrawn claim '{variant}' unnegated")
+            split = cross_node_match(nodes, pattern)
+            check(split is None, f"{rel} does not publish withdrawn claim '{variant}' split across elements"
+                  + (f" (found '{split}')" if split else ""))
 
         for label, pattern in matrix_patterns:
             violation_found = False

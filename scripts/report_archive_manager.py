@@ -26,7 +26,8 @@ SAFETY GUARANTEES:
   - Dry-run mode (--dry-run): preview all changes without modifying any files
   - Never deletes files from gh-pages — only removes from main branch tracking
   - Generates archive_manifest.json before making any changes
-  - Hard stops if report count would drop below MIN_REPORT_THRESHOLD
+  - Never archives below MIN_REPORT_THRESHOLD: the run is skipped with a
+    ::warning:: annotation and exit 0 (nothing untracked)
   - All operations logged to data/archive/report_archive_audit.jsonl
   - Atomic git operations — all-or-nothing on the git rm --cached batch
 
@@ -62,8 +63,9 @@ ENVIRONMENT:
   ARCHIVE_MIN_REPORTS    -- minimum reports to retain in working tree (default: 500)
 
 EXIT CODES:
-  0 = Archive completed (or dry-run preview shown)
-  1 = Hard stop — safety constraint violated (insufficient reports, git error)
+  0 = Archive completed, dry-run preview shown, or skipped at the
+      MIN_REPORT_THRESHOLD floor (nothing untracked)
+  1 = Hard stop — git error while untracking
   2 = Pages deploy still uses clean: true — UNSAFE to archive (run with --dry-run only)
 
 (c) 2026 CyberDudeBivash Pvt. Ltd. All Rights Reserved. CONFIDENTIAL.
@@ -346,14 +348,21 @@ def run_archive(retention_days: int, dry_run: bool) -> int:
         log.info("Nothing to archive — all reports within retention window.")
         return 0
 
-    # Safety check 2: minimum report threshold
+    # Safety check 2: minimum report threshold. The floor holds: nothing is
+    # untracked. That is the guard working, not a pipeline failure, so it is
+    # announced and exits 0. 2026-10-01: it fired on every run once August
+    # turned ARCHIVE at the month boundary (HOT 22, ARCHIVE 22,433), and its
+    # former exit 1 failed sentinel-blogger's job, skipping every later step
+    # on the default success() condition (post-deploy smoke tests, deployment
+    # canary, production release gates) while the deploy itself still ran.
     if len(hot) < MIN_REPORT_THRESHOLD:
-        log.error(
-            "ABORT: HOT tier would have only %d reports after archive (minimum: %d).\n"
-            "  Increase --days or lower ARCHIVE_MIN_REPORTS.",
-            len(hot), MIN_REPORT_THRESHOLD
+        summary = (
+            f"Report archive skipped: HOT tier would have only {len(hot)} reports "
+            f"(minimum {MIN_REPORT_THRESHOLD}); nothing untracked."
         )
-        return 1
+        log.warning("%s Increase --days or lower ARCHIVE_MIN_REPORTS to archive.", summary)
+        print(f"::warning title=STAGE 5.4.5b report archive::{summary}", flush=True)
+        return 0
 
     # Year/month breakdown
     log.info("Reports to archive by year:")

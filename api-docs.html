@@ -286,7 +286,7 @@ Invoke-RestMethod "$Base/feed/sigma" -Headers $Hdrs | Out-File sentinel_rules.ya
       <tr><td>Enterprise <span class="tier-badge tier-ent">ENT</span></td><td>50,000</td><td>600</td><td>All endpoints + SIEM</td><td>HTTP 429</td></tr>
       <tr><td>MSSP <span class="tier-badge tier-mssp">MSSP</span></td><td>50,000</td><td>1,200</td><td>All + Multi-tenant</td><td>HTTP 429</td></tr>
     </table>
-    <p>Rate limit headers are included in every response: <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code>, <code>X-RateLimit-Reset</code>.</p>
+    <p>When a limit is exceeded the gateway answers HTTP 429 with <code>Retry-After</code>, <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code> and <code>X-RateLimit-Reset</code> (end of the 60-second window, epoch seconds). Daily-quota denials carry <code>X-DailyLimit-*</code> headers instead. Successful responses do not carry rate-limit headers.</p>
 
     <h2 id="errors">Error Codes</h2>
     <table>

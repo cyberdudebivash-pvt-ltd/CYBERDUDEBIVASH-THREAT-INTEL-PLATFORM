@@ -149,9 +149,9 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
         <div style="margin-top:12px;color:var(--muted);font-size:13px">43.8h/year max downtime</div>
       </div>
       <div class="card" style="text-align:center">
-        <div class="card-stat" style="color:var(--accent)">&lt;2h</div>
+        <div class="card-stat" style="color:var(--accent)">4h</div>
         <div class="card-label">Feed Freshness SLA</div>
-        <div style="margin-top:12px;color:var(--muted);font-size:13px">Max time between syncs · Avg &lt;47min</div>
+        <div style="margin-top:12px;color:var(--muted);font-size:13px">Enterprise &amp; MSSP update interval (sla.html)</div>
       </div>
       <div class="card" style="text-align:center">
         <div class="card-stat" style="color:var(--accent)">&lt;200ms</div>
@@ -177,28 +177,28 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
             <td>Best effort</td>
             <td><span class="ok-pill">99.5%</span></td>
             <td><span class="ok-pill">99.9%</span></td>
-            <td><span class="ok-pill">99.95%</span></td>
+            <td><span class="ok-pill">99.9%</span></td>
           </tr>
           <tr>
             <td>Feed Freshness</td>
-            <td>Best effort</td>
-            <td>&lt;4h</td>
-            <td><span class="ok-pill">&lt;2h</span></td>
-            <td><span class="ok-pill">&lt;1h</span></td>
+            <td>Daily</td>
+            <td>Daily</td>
+            <td><span class="ok-pill">Every 4 hours</span></td>
+            <td><span class="ok-pill">Every 4 hours</span></td>
           </tr>
           <tr>
             <td>API Response P95</td>
-            <td>&lt;500ms</td>
-            <td>&lt;300ms</td>
-            <td><span class="ok-pill">&lt;200ms</span></td>
-            <td><span class="ok-pill">&lt;150ms</span></td>
+            <td>Best effort</td>
+            <td>&lt;800ms target</td>
+            <td><span class="ok-pill">&lt;500ms target</span></td>
+            <td><span class="ok-pill">&lt;500ms target</span></td>
           </tr>
           <tr>
             <td>Support SLA</td>
             <td>Community</td>
             <td>48h email</td>
-            <td>8h business</td>
-            <td><span class="ok-pill">4h dedicated</span></td>
+            <td>4h email/chat</td>
+            <td><span class="ok-pill">1h dedicated</span></td>
           </tr>
           <tr>
             <td>Incident Notification</td>
@@ -216,10 +216,10 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
           </tr>
           <tr>
             <td>Rate Limit</td>
-            <td>60 req/hr</td>
-            <td>500 req/hr</td>
-            <td>2,000 req/hr</td>
-            <td><span class="ok-pill">10,000 req/hr</span></td>
+            <td>30 req/min</td>
+            <td>120 req/min</td>
+            <td>600 req/min</td>
+            <td><span class="ok-pill">1,200 req/min</span></td>
           </tr>
         </tbody>
       </table>
@@ -348,7 +348,7 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
       </div>
       <div class="card">
         <h3>&#127759; Rate Limiting</h3>
-        <p>Dual-layer rate limiting: per-API-key (tier-based) + per-IP global cap (200 req/hr). Cloudflare IP reputation filtering. Abuse pattern detection with automatic ban. DDoS mitigation via Cloudflare WAF.</p>
+        <p>Two limits, both answered with HTTP 429 and Retry-After: a per-IP 60-second window at the plan's per-minute limit (30 / 120 / 600 / 1,200) and a daily quota per API key, or per IP for anonymous calls (50 / 5,000 / 50,000 / 50,000). Five failed credential attempts lock the source IP out for 15 minutes. DDoS mitigation at Cloudflare's edge.</p>
       </div>
       <div class="card">
         <h3>&#128229; Data in Transit</h3>
@@ -511,7 +511,7 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
         <div class="compliance-icon">&#127756;</div>
         <div class="compliance-content">
           <h3>Sub-Processor Transparency</h3>
-          <p>Complete sub-processor list disclosed to Enterprise customers: Cloudflare (Workers/KV/R2 — data processing), GitHub (CI/CD — code only), Formspree (lead capture — contact data), Razorpay (payments — PCI DSS Level 1). No data sold to third parties.</p>
+          <p>Complete sub-processor list disclosed to Enterprise customers: Cloudflare (Workers/KV/R2 — data processing), GitHub (CI/CD — code only), Formspree (lead capture — contact data), SendGrid and Resend (transactional email), Razorpay (payments — PCI DSS Level 1), Gumroad (payments). No data sold to third parties.</p>
           <div class="compliance-status"><span class="status-ok">&#9989; Full disclosure on request</span></div>
         </div>
       </div>
