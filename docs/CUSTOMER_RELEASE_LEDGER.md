@@ -7,7 +7,7 @@ stay as point-in-time records; this file carries current status. Update it in
 the same PR as the change that moves a row. Historic evidence is never reused
 as current certification.
 
-Last updated: 2026-09-30T18:25Z, branch `claude/charming-thompson-ptma8e`.
+Last updated: 2026-10-01T06:05Z, branch `claude/charming-thompson-ptma8e`.
 
 ## Decision
 
@@ -23,19 +23,25 @@ certification workflow must run on the exact deployed SHA.
 | MSSP | HOLD | MSSP rotation canary failing live (F2 fix pending deploy) |
 | Malware review package | HOLD | #593: independent human review pending |
 | Swarm live operations | HOLD | #419/#420/#422 not re-verified this session |
+| Publisher post-deploy validation | DEGRADED since 2026-10-01T04:37Z | Every `sentinel-blogger` run fails at STAGE 5.4.5b and skips 8 post-deploy gates (F13). Fix on branch; it takes effect only once merged to `main` |
 
 ## Provenance at this update
 
 | Component | Value | Evidence |
 | --- | --- | --- |
 | `main` | `1b8098c96` | Dependabot action bumps after `f59387a` (#633–#635); no gateway source change; this branch merges cleanly |
-| Deployed gateway | `f59387a735e34b75bdaf9a8523c75040fe2eae29`, deploy run 36688506844 | `GET /api/health/live` at 16:59Z, 17:42Z and 18:23Z |
-| Live health | 200, `ok`, generated 2026-09-30T15:33:57Z, 54 advisories | `GET /api/health` at 18:23Z |
-| Branch commits | `5efa55206`, `5f8a3cb4f`, `89a25865a`, `8f37c95ea`, `a3f8d851c` (ledger), `b6d40c13b` (R09) | `git log` |
+| Deployed gateway | `f59387a735e34b75bdaf9a8523c75040fe2eae29`, deploy run 36688506844 | `GET /api/health/live` 2026-09-30 16:59Z–18:23Z and 2026-10-01 05:50Z |
+| Live health | 200, `ok`, generated 2026-10-01T05:15:14Z, 57 advisories | `GET /api/health` at 2026-10-01T05:50Z |
+| Branch commits | `5efa55206`, `5f8a3cb4f`, `89a25865a`, `8f37c95ea`, `a3f8d851c` (ledger), `b6d40c13b` (R09), `481319176` (ledger), `d1c8f3e65` (F9), `02128ebd7` (F13) | `git log` |
 
-The feed turns stale at **2026-09-30T21:33:57Z** unless a publisher run lands
-before then (see F3). Dispatching `sentinel-blogger.yml` manually is an
-operator decision; this session did not trigger production pipelines.
+Overnight 2026-09-30/10-01, from `generated_at` values the publisher's own
+freshness gate logged (no probe sampled either window; this session
+triggered no production pipeline):
+
+| Window (UTC) | Feed | Evidence |
+| --- | --- | --- |
+| 21:33:57 → ~21:45 (≈11 min) | over the 6h contract | guard run 36774781090 (20:44:53Z) dispatched publisher 36774798831; new generation 21:44:52Z |
+| 03:44:52 → ~05:15 (≈1h30m) | over the 6h contract | guard's last run 00:29:47Z (36796464941); SLA heartbeat's last 02:23:40Z; next generation 05:15:14Z (scheduled run 36815948964) |
 
 ## Findings and changes this session
 
@@ -121,6 +127,10 @@ operator decision; this session did not trigger production pipelines.
    `dispatched` line on the next :00/:30 tick and a guard run with actor = the
    PAT owner. Rollback: set the flag back to `"false"` (or delete the secret).
 
+Overnight evidence for F3 (2026-10-01): the guard ran at 20:44Z and 00:29Z
+only, the heartbeat at 19:58Z, 23:36Z and 02:23Z only; the second stale
+window above fell where neither ran.
+
 ### F4 — All four `workflow_run` chains reference workflow names that no longer exist (R10, R29) — REPORTED
 
 | Workflow | References | Actual name | Last `workflow_run` trigger |
@@ -167,15 +177,26 @@ F3 activated the guard dispatches at 4h age and the publisher takes 40–80 min.
 `seller_legal` is an individual ("BIVASHA KUMAR NAYAK") trading as
 CYBERDUDEBIVASH(R). Invoices and terms must name the actual seller.
 
-### F9 — Payment webhooks metered as anonymous FREE traffic (R05, R06) — NEXT TRANCHE
+### F9 — Payment webhooks metered as anonymous FREE traffic (R05, R06) — FIXED on branch (`d1c8f3e65`)
 
 `/api/webhooks/razorpay` and `/api/webhooks/gumroad` are routed after the
-commercial gate with no customer credential, so each provider IP gets 30/min
-and 50/day. Latent while the KV counter under-counts; with exact counters (the
-#596 rate authority) the 51st delivery of a UTC day from one provider IP would
-be refused. Must be fixed before `RATE_STRONG_CONSISTENCY_ENABLED` is
-activated. Proposed: exempt only signature-verified deliveries, keep invalid
-ones metered.
+commercial gate with no customer credential, so each provider IP got 30/min
+and 50/day. With exact counters (the #596 rate authority) the 51st delivery of
+a UTC day from one provider IP would be refused; a provider disables an
+endpoint that keeps failing.
+
+- Fix: `isVerifiedPaymentWebhook()` exempts a POST that passes its route
+  handler's own check (Gumroad `?secret=` with `timingSafeEqual`; Razorpay
+  `verifyRazorpayHmac()` over a cloned body capped at 64 KiB). Unverified,
+  oversized, non-POST or unreadable deliveries are metered as before; the
+  handlers still verify everything. Runs only for `/api/webhooks/*`.
+- Tests: `payment-webhook-metering.test.js` (7; 3 failed before: a signed
+  order and a Gumroad sale from a busy provider IP were refused with 429).
+  Mutations caught: no HMAC check, no Gumroad compare, no size cap, no method
+  check, every webhook exempt. Found by the oversized-body test: a cancelled
+  clone branch settles only when the original is cancelled too, so the capped
+  reader does not await its cancel.
+- Precondition for activating `RATE_STRONG_CONSISTENCY_ENABLED`: met on branch.
 
 ### F10 — Commercial claim drift beyond the contract gate (C07, R09) — FIXED on branch (`b6d40c13b`)
 
@@ -247,6 +268,36 @@ Not contract terms, so not changed without an owner source:
   `api-economy/developer-portal.html` (Starter $49 500/day, Enterprise $999,
   invented usage metrics), `landing/index.html`. Fix before any is deployed.
 
+### F13 — Archive floor fails every publisher run and skips its post-deploy gates (R10, R15, R29) — FIXED on branch (`02128ebd7`)
+
+- Run 36815948964 (2026-10-01 04:37Z): STAGE 5.4.5b logged "HOT 22, ARCHIVE
+  22,433 ... ABORT: HOT tier would have only 22 reports (minimum: 500)".
+  `report_archive_manager.py` classifies by (year, month), so at the month
+  boundary all of August turned ARCHIVE; the R2-first publisher commits only a
+  handful of reports a month, so this recurs every run, every month.
+- The abort returned 1, the step failed the job, and the 8 steps left on the
+  default `success()` condition were skipped: Post-Deploy Smoke Tests,
+  Manifest Integrity, Runtime Stability, Enterprise Monetization Framework,
+  Deployment Canary, Report URL Canary, Manifest URL Repair, Production
+  Release Gates. Build and deploy carry `!cancelled()` and ran: the feed
+  published at 05:15:14Z without its post-deploy validation. All 8 ran in the
+  last green run (36774798831).
+- Fix: at the floor nothing is untracked, a `::warning::` annotation says so,
+  exit 0. A git error still returns 1. Tests: `test_report_archive_floor.py`
+  (4, pinned to the incident's clock and counts; 2 failed before).
+- Not changed, owner decision: the step runs after STAGE 4's commit, so its
+  `git rm --cached` is never committed (run 36774798831 untracked 7,359
+  reports; `main` still tracks them). Either retire the step or move it
+  before STAGE 4, which would untrack thousands of reports from `main` and
+  change `config/platform-evidence.json` counts.
+
+### F14 — P36/P37 certification reports are 35 days old (R30–R34) — REPORTED
+
+Both publisher runs logged `r2_resync: skipped stale
+data/quality/p36_certification_report.json` and `p37` (`generated_at`
+2026-08-26, ~859h old, limit 6h): the pipeline does not regenerate them, so
+they are not current certification evidence.
+
 ## R01–R35 status
 
 | ID | Status | Evidence / next step |
@@ -255,17 +306,17 @@ Not contract terms, so not changed without an owner source:
 | R02 | Open (#596) | Intermittent under KV; strong authority dormant by FinOps policy. F2 removes a confounder for admin lifecycle calls |
 | R03 | Defect fixed on branch; live proof pending | F1; next certification phase 8 histogram |
 | R04 | Probable cause fixed on branch | F2; next certification rotation status |
-| R05 | Not verified | Needs authorized Razorpay/Gumroad test mode |
-| R06 | Verify; new latent risk | F9 |
+| R05 | Not verified live | Needs authorized Razorpay/Gumroad test mode; webhook metering fixed on branch (F9) |
+| R06 | Latent risk fixed on branch | F9 (`d1c8f3e65`) |
 | R07 | Partial live evidence | Cert 36690549981: MSSP isolation and self-service phases PASS |
 | R08 | Partial | SAST run 36744969006 on `022ecae4` success; ESLint no-undef sweep of all Worker source (F1). Dependency scan not re-run here |
 | R09 | Fixed on branch; deploy pending | F10 (`b6d40c13b`); remaining non-contract claims F12 |
-| R10 | Gap reported | F4 (post-deploy validation not chained since 2026-09-24); deploy-worker exact-SHA smoke still runs |
+| R10 | Gap reported; publisher gap fixed on branch | F4 (post-deploy validation not chained since 2026-09-24); F13 (publisher's own post-deploy gates skipped since 2026-10-01 04:37Z); deploy-worker exact-SHA smoke still runs |
 | R11 | Open (#593) | Human review pending; unchanged |
 | R12 | Partial | README metrics now point to live endpoints (F10); internal revenue dashboard F11 |
 | R13 | Verify | Not examined |
 | R14 | Verify | Not examined |
-| R15 | Gap | F3, F7 |
+| R15 | Gap | F3, F7; two over-contract windows overnight 2026-10-01 (see provenance) |
 | R16 | Verify | Not examined |
 | R17 | Verify | Not examined |
 | R18 | Partial | Autonomous scheduler canary PASS (36690549981); Enterprise webhook canary needs `CDB_WATCHDOG_SINK_*` secrets |
@@ -279,8 +330,8 @@ Not contract terms, so not changed without an owner source:
 | R26 | Verify | Not examined |
 | R27 | Owner decision | F8 |
 | R28 | Fixed on branch | API docs, reference card, developer portal and header semantics match the gateway (F10) |
-| R29 | Gaps reported | F3, F4, F5 |
-| R30–R34 | Verify | Not examined |
+| R29 | Gaps reported; F13 fixed on branch | F3, F4, F5, F13 |
+| R30–R34 | Verify | F14: P36/P37 certification reports stale |
 | R35 | This ledger | — |
 
 ## Proof Before Change (this session)
@@ -291,6 +342,8 @@ Not contract terms, so not changed without an owner source:
 | F2 `5f8a3cb4f` | Operator actions not throttled by anonymous budgets | `index.js`, new test | timingSafeEqual, isWatchdogOperator, checkRateLimit, checkDailyQuota | code path; 3 live cert failures; local reproduction | LOW | revert |
 | Diagnostics `89a25865a` | Certification shows what the limiter and rotation answered | commercial certification workflow | existing jobs | "0 = never seen" / "no key" hid F1 | LOW (stricter: 5xx now fails) | revert |
 | F3 `8f37c95ea` | Reliable freshness self-heal trigger | new module, `index.js` cron branch, `wrangler.toml`, guard policy + test | intel_freshness_guard.py decision logic, existing cron | guard 5/48 runs/day; 07:51→15:33 gap | LOW (dormant) | revert or flag `"false"` |
+| F9 `d1c8f3e65` | Provider deliveries never refused by anonymous budgets | `index.js`, new test | verifyRazorpayHmac, timingSafeEqual, F2 gate pattern | route order + resolveAuth; 3 tests 429 before | LOW (two routes; handlers unchanged) | revert |
+| F13 `02128ebd7` | A protective no-op cannot fail the publisher job | `report_archive_manager.py`, `sentinel-blogger.yml` (comments, one message), new test, regression gate | the script's floor and git helpers | run 36815948964 log and skipped steps vs 36774798831 | LOW (one return path) | revert |
 | F10 `b6d40c13b` | Buyer copy equals enforced terms | README.md, 30 pages, 2 gates, evidence register, new suite, regression-gate workflow | commercial-contract.json, platform-evidence.json, both gates extended in place | pages vs contract; code and live headers for security copy | LOW (static copy; CI additions only) | revert |
 
 Blast radius (F10): no route, Worker, schema, auth or payment code; pages
@@ -316,6 +369,14 @@ none; `/api/v1/p*` shapes — unchanged; data schema — none (fewer
   WORLDWIDE_RELEASE, 0 blockers; `ci_stats_extract.py p33` valid.
 - Workflow-related pytest files: 506 passed; 3 pre-existing failures (F5).
 - wrangler 4.142.0 `deploy --dry-run --env production`: bundle builds.
+- F9 (`d1c8f3e65`): gateway suite 1,645/1,645; watchdog (98 caught), dashboard
+  31/31 and billing 101/101 negative controls; worker_js_integrity 75/75;
+  ESLint no-undef 0 in `index.js`; wrangler dry-run 1,687.50 → 1,689.20 KiB
+  (+0.10%), gzip 401.37 → 401.83 KiB, both measured this session.
+- F13 (`02128ebd7`): PR python suites 1,843 passed; workflow-reading suites
+  529 passed (1 pre-existing F5 failure, identical on HEAD); ci_preflight 9/9;
+  python governance 0/482; validate_repo 9/9; regression 41/41; P33
+  WORLDWIDE_RELEASE, 0 blockers.
 - R09 (`b6d40c13b`): PR python suites 1,839 passed; 27 other page-reading
   suites 502 passed / 1 skipped; gateway suite 1,638/1,638; billing negative
   controls 101/101; `verify_commercial_contract.py` 5,366/0;
@@ -326,7 +387,7 @@ none; `/api/v1/p*` shapes — unchanged; data schema — none (fewer
 
 | Metric | Result |
 | --- | --- |
-| Existing engines reused | checkRateLimit, bumpCounterWriteThrough, incrementStrongRate, checkDailyQuota, buildUpgradeTrigger, timingSafeEqual, isWatchdogOperator, intel_freshness_guard.py; R09: verify_commercial_contract.py and verify_public_claims.py extended in place, driven by commercial-contract.json / evidence-register.json / platform-evidence.json |
+| Existing engines reused | checkRateLimit, bumpCounterWriteThrough, incrementStrongRate, checkDailyQuota, buildUpgradeTrigger, timingSafeEqual, isWatchdogOperator, intel_freshness_guard.py; R09: verify_commercial_contract.py and verify_public_claims.py extended in place, driven by commercial-contract.json / evidence-register.json / platform-evidence.json; F9: verifyRazorpayHmac, timingSafeEqual; F13: report_archive_manager.py floor (behaviour kept, exit status corrected) |
 | Existing routes extended | none added; commercial gate condition extended |
 | Existing dashboards extended | none |
 | New engines | 1: `freshness-guard-dispatch.js` (no GitHub-dispatch path existed in the Worker) |
