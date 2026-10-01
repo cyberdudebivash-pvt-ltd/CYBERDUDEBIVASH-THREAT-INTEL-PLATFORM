@@ -277,7 +277,7 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
         <div class="compliance-icon">&#127988;</div>
         <div class="compliance-content">
           <h3>DPDPA 2023 — Digital Personal Data Protection Act</h3>
-          <p>Platform designed with data minimization principles. API keys stored hashed (PBKDF2-SHA256). No PII stored beyond account email. Consent-based data collection. Full India jurisdiction compliance posture.</p>
+          <p>Platform designed with data minimization principles. API keys are 160-bit random values held in Workers KV, encrypted at rest by Cloudflare. No PII stored beyond account email. Consent-based data collection. Full India jurisdiction compliance posture.</p>
           <div class="compliance-status"><span class="status-ok">&#9989; DPDPA AWARE — Compliant Design</span></div>
         </div>
       </div>
@@ -293,7 +293,7 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
         <div class="compliance-icon">&#128737;</div>
         <div class="compliance-content">
           <h3>JWT Authentication &amp; API Key Governance</h3>
-          <p>HS256 JWT tokens with configurable expiry. API key CRUD with scoped access (tier gating). JWT revocation list. PBKDF2-SHA256 password hashing. Rate-limit enforcement per key. IP-based abuse detection and ban.</p>
+          <p>HS256 JWT sessions with a 24-hour expiry. API key issue, rotation and revocation with plan-based access. Logout and suspension revoke issued JWTs. No password login: access is by API key. Daily request quota per key. An IP is locked out for 15 minutes after 5 failed key attempts.</p>
           <div class="compliance-status"><span class="status-ok">&#9989; PRODUCTION ACTIVE</span></div>
         </div>
       </div>
@@ -340,7 +340,7 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
       </div>
       <div class="card">
         <h3>&#128274; API Key Security</h3>
-        <p>Keys stored hashed (PBKDF2-SHA256 + 64-byte salt). Never stored in plaintext. Key rotation support. Scope-limited access per tier. Automatic revocation on abuse detection (&gt;50 auth failures).</p>
+        <p>Keys are 160-bit random values stored in Workers KV (not hashed by the platform; encrypted at rest by Cloudflare) and appear in audit logs only as a 12-character prefix. Rotation and revocation reach every Cloudflare location within about a minute. Access is scoped by plan tier. An IP is locked out for 15 minutes after 5 failed key attempts.</p>
       </div>
       <div class="card">
         <h3>&#9000; JWT Token Management</h3>
@@ -488,14 +488,14 @@ footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-t
         <div style="margin-top:12px;font-size:13px;color:var(--muted)">Threat intelligence contains no personally identifiable information</div>
       </div>
       <div class="card" style="text-align:center">
-        <div class="card-stat" style="color:var(--accent)">SHA-256</div>
-        <div class="card-label">API Key Storage</div>
-        <div style="margin-top:12px;font-size:13px;color:var(--muted)">Keys stored hashed only — never plaintext in any system</div>
+        <div class="card-stat" style="color:var(--accent)">160-bit</div>
+        <div class="card-label">API Key Strength</div>
+        <div style="margin-top:12px;font-size:13px;color:var(--muted)">Random keys held in Workers KV, encrypted at rest by Cloudflare; treat each key as a secret</div>
       </div>
       <div class="card" style="text-align:center">
-        <div class="card-stat green">Mumbai</div>
-        <div class="card-label">Data Residency</div>
-        <div style="margin-top:12px;font-size:13px;color:var(--muted)">AWS ap-south-1 — India data residency for all customer data</div>
+        <div class="card-stat green">Cloudflare</div>
+        <div class="card-label">Data Location</div>
+        <div style="margin-top:12px;font-size:13px;color:var(--muted)">Workers KV and R2 with no regional residency option; see the privacy policy</div>
       </div>
     </div>
     <div class="grid grid-2">

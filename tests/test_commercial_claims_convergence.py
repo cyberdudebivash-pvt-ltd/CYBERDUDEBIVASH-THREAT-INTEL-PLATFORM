@@ -166,14 +166,38 @@ def test_deployed_pages_quote_only_contract_rate_figures():
     assert not hits, "\n".join(hits)
 
 
+# Instant-revocation wording. While AUTH_STRONG_CONSISTENCY_ENABLED is off,
+# rotation, revocation and status changes are KV writes, and a location that
+# cached the old record keeps honoring it until its read cache expires: live
+# certification run 36827638315 (2026-10-01, c14dbae11) saw a cancelled key
+# answered 200 and a reactivated key 401, 1-2 s after each write.
+INSTANT_REVOCATION_CLAIMS = ("revokes the old one immediately", "no overlap window", "revokable instantly",
+                             "revocable instantly", "revoked instantly", "instant revocation",
+                             "immediate revocation", "revoked immediately", "immediately revoked")
+
+
+def _assert_revocation_copy_matches_consistency_mode(index_js, security_text):
+    assert "old_key_revoked: true" in index_js
+    flags = re.findall(r'^AUTH_STRONG_CONSISTENCY_ENABLED\s*=\s*"(\w+)"',
+                       _read("workers/intel-gateway/wrangler.toml"), re.M)
+    assert len(flags) == 2, f"expected the flag in both wrangler blocks, found {flags}"
+    if set(flags) == {"true"}:
+        return
+    assert "within about a minute" in security_text
+    hits = []
+    for page in DEPLOYED_PAGES:
+        low = _visible(page.read_text(encoding="utf-8", errors="replace")).lower()
+        hits += [f"{page.relative_to(REPO)}: {c}" for c in INSTANT_REVOCATION_CLAIMS if c in low]
+    assert not hits, hits
+
+
 def test_security_page_describes_the_key_handling_the_gateway_implements():
     index_js = _read("workers/intel-gateway/src/index.js")
     text = _visible(_read("security-compliance.html"))
-    # Keys: 20 random bytes (160 bits), stored as the raw record, rotation
-    # revokes the old key at once.
+    # Keys: 20 random bytes (160 bits), stored as the raw record.
     assert "new Uint8Array(20)" in index_js and "160-bit random" in text
-    assert "old_key_revoked: true" in index_js and "revokes the old one immediately" in text
     assert "IP allowlisting: not currently offered" in text
+    _assert_revocation_copy_matches_consistency_mode(index_js, text)
     # Audit entries live AUDIT_TTL seconds (30 days) for every plan.
     assert re.search(r"const AUDIT_TTL\s*=\s*86400 \* 30;", index_js)
     assert "90-day" not in text and _row(_read("security-compliance.html"), "Audit logs (privileged actions)")[1:3] == ["30 days", "30 days"]

@@ -68,6 +68,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:14px 3
 .qa-q{color:var(--text);font-weight:600;width:40%;}
 .qa-a{color:rgba(255,255,255,0.75);}
 .badge-yes{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:9px;font-weight:700;letter-spacing:1px;padding:3px 9px;border-radius:20px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:var(--green);}
+.badge-no{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:9px;font-weight:700;letter-spacing:1px;padding:3px 9px;border-radius:20px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444;}
 .badge-partial{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:9px;font-weight:700;letter-spacing:1px;padding:3px 9px;border-radius:20px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);color:var(--amber);}
 
 /* ── INFO CARDS ── */
@@ -227,7 +228,7 @@ footer a:hover{color:var(--accent);}
   <div class="pack-section section-anchor" id="sec-security-qa">
     <div class="section-label">Section 02</div>
     <div class="section-title">Security Questionnaire — Pre-filled Responses</div>
-    <div class="section-desc">Standard CAIQ / SIG Lite / NIST-aligned security questions with responses. Copy directly into your vendor assessment form.</div>
+    <div class="section-desc">Standard CAIQ / SIG Lite / NIST-aligned security questions, answered from the controls the platform implements today (reviewed 2026-10-01). Confirm any answer you rely on with security@cyberdudebivash.com.</div>
 
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px;">
       <table class="qa-table" style="background:transparent;">
@@ -238,86 +239,86 @@ footer a:hover{color:var(--accent);}
 
         <tr>
           <td class="qa-q">Does the platform support role-based access control (RBAC)?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>Enterprise and MSSP tiers include RBAC with Admin, Analyst, Read-Only, and MSSP-Tenant roles. API key scopes enforce least-privilege access per credential.</td>
+          <td class="qa-a"><span class="badge-partial">⚡ PLAN-BASED</span><br>Access is scoped by plan (FREE, PRO, Enterprise, MSSP) for each API key and session token, and each MSSP key manages only its own client tenants. There are no user accounts or custom roles today.</td>
         </tr>
         <tr>
           <td class="qa-q">Is multi-factor authentication (MFA) supported?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>TOTP-based MFA available for all user accounts. Enterprise accounts can enforce MFA organization-wide via admin panel.</td>
+          <td class="qa-a"><span class="badge-no">✗ NO</span><br>Not currently offered. There are no password-based user accounts: access is by API key, or by a 24-hour session token issued for a key. Admin routes require a separate admin secret.</td>
         </tr>
         <tr>
           <td class="qa-q">Are API keys scoped and revocable?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>All API keys carry a scope bitmap (read/write/admin), expiry date, and IP allowlist. Keys revocable instantly from the API Key Manager dashboard.</td>
+          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>Keys are scoped by plan; there are no per-key custom scopes and no IP allowlisting. Keys can be rotated or revoked at any time, and the change reaches every Cloudflare location within about a minute.</td>
         </tr>
         <tr>
           <td class="qa-q">Is SSO / SAML 2.0 supported for Enterprise accounts?</td>
-          <td class="qa-a"><span class="badge-partial">⚡ ROADMAP</span><br>SAML 2.0 SSO integration is on the Enterprise roadmap for Q3 2026. Contact enterprise team for early-access participation.</td>
+          <td class="qa-a"><span class="badge-no">✗ NO</span><br>SSO (SAML 2.0 / OIDC) is not currently offered, and no delivery date is committed.</td>
         </tr>
 
         <tr><td class="qa-q" style="background:rgba(0,212,170,0.03);padding:8px 14px;font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--accent);" colspan="2">DATA SECURITY &amp; ENCRYPTION</td></tr>
 
         <tr>
           <td class="qa-q">Is data encrypted in transit?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>All traffic uses TLS 1.2+ (TLS 1.3 preferred). HTTP is permanently redirected to HTTPS. HSTS enforced with preload.</td>
+          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>HTTPS only, terminated at Cloudflare's edge, with HSTS (max-age=63072000; includeSubDomains; preload). The minimum TLS version follows the Cloudflare zone setting.</td>
         </tr>
         <tr>
           <td class="qa-q">Is data encrypted at rest?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>AES-256 encryption at rest for all stored intelligence data, API keys (hashed with bcrypt), and customer metadata.</td>
+          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>Data in Workers KV and R2 is encrypted at rest by Cloudflare. API keys are kept as raw key records in Workers KV (not hashed by the platform), so treat every key as a secret.</td>
         </tr>
         <tr>
           <td class="qa-q">Does the platform store customer-uploaded data?</td>
-          <td class="qa-a"><span class="badge-yes">✓ LIMITED</span><br>SENTINEL APEX is primarily a read/API platform. Customer data stored is limited to: account credentials, API key hashes, billing metadata, and optional webhook configurations. No customer threat data is stored unless explicitly submitted for enrichment.</td>
+          <td class="qa-a"><span class="badge-yes">✓ LIMITED</span><br>SENTINEL APEX is primarily a read/API platform. Customer data stored is limited to: customer email (as the customer ID), API key records (plan and status), payment-provider order references, and optional webhook configurations. No customer threat data is stored unless explicitly submitted.</td>
         </tr>
         <tr>
           <td class="qa-q">What is the key management practice?</td>
-          <td class="qa-a">API keys are stored as bcrypt hashes (cost factor 12). No plaintext secrets are persisted post-generation. Customer environment secrets (SIEM webhook URLs) are stored encrypted using AES-256-GCM with envelope key rotation quarterly.</td>
+          <td class="qa-a">API keys are 160-bit random values stored as raw records in Workers KV, encrypted at rest by Cloudflare, and shown in audit logs only as a 12-character prefix. Webhook configurations are stored in Workers KV with the same at-rest encryption; the platform adds no envelope encryption or scheduled key rotation.</td>
         </tr>
 
         <tr><td class="qa-q" style="background:rgba(0,212,170,0.03);padding:8px 14px;font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--accent);" colspan="2">VULNERABILITY MANAGEMENT</td></tr>
 
         <tr>
           <td class="qa-q">Is there a vulnerability disclosure / responsible disclosure policy?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>Responsible disclosure contact: <strong>security@cyberdudebivash.in</strong>. CVSS-based triage. Critical vulnerabilities patched within 48 hours per SLA.</td>
+          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>Report to <strong>security@cyberdudebivash.com</strong> (security.txt, RFC 9116). We acknowledge within 2 business days and give a triage outcome within 7 business days; see the disclosure policy on security-compliance.html. No bug bounty.</td>
         </tr>
         <tr>
           <td class="qa-q">Is dependency scanning performed in CI/CD?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>GitHub Actions pipeline includes OWASP dependency-check, pip-audit, and Trivy container scan on every commit. Failures block deployment.</td>
+          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>Pull requests run secret scanning (TruffleHog, GitGuardian) and a SAST gate (Bandit, Semgrep, Safety and pip-audit for Python dependencies); Dependabot raises GitHub Actions updates. Findings are reported on the pull request.</td>
         </tr>
         <tr>
           <td class="qa-q">Is there a penetration testing schedule?</td>
-          <td class="qa-a"><span class="badge-partial">⚡ ANNUAL</span><br>Annual penetration testing planned. Most recent internal security audit: Q1 2026. Enterprise customers may request audit reports under NDA.</td>
+          <td class="qa-a"><span class="badge-no">✗ NONE</span><br>No third-party penetration test report is available.</td>
         </tr>
 
         <tr><td class="qa-q" style="background:rgba(0,212,170,0.03);padding:8px 14px;font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--accent);" colspan="2">INCIDENT RESPONSE</td></tr>
 
         <tr>
           <td class="qa-q">What is the incident notification SLA for Enterprise customers?</td>
-          <td class="qa-a"><span class="badge-yes">✓ 4 HOURS</span><br>Security incidents affecting customer data: notification within 4 business hours. P0 outages: notification within 1 hour via status page and email. See Section 04 for full SLA table.</td>
+          <td class="qa-a"><span class="badge-partial">⚡ PARTIAL</span><br>Contracted incident response: 48h email (PRO), 4h email/chat (Enterprise), 1h dedicated (MSSP), per sla.html. A separate notification commitment for security incidents affecting customer data is not yet published; ask security@cyberdudebivash.com.</td>
         </tr>
         <tr>
           <td class="qa-q">Is there a documented incident response plan?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>NIST SP 800-61 aligned IRP covering: identification, containment, eradication, recovery, and post-incident analysis. Available under NDA for Enterprise accounts.</td>
+          <td class="qa-a"><span class="badge-partial">⚡ PARTIAL</span><br>Production incidents are investigated and recorded as written root-cause reports in the public repository (docs/incidents/). A formal incident response plan document is not published.</td>
         </tr>
 
         <tr><td class="qa-q" style="background:rgba(0,212,170,0.03);padding:8px 14px;font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--accent);" colspan="2">LOGGING &amp; MONITORING</td></tr>
 
         <tr>
           <td class="qa-q">Are API access logs available to customers?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>Enterprise API access logs (timestamps, endpoint, response code, source IP) available via the customer dashboard and API. Retained for 90 days.</td>
+          <td class="qa-a"><span class="badge-no">✗ NO</span><br>Per-request access logs are not exposed to customers. Admin actions, key-lifecycle events and authenticated requests are written to an audit log kept for 30 days and available to the operator.</td>
         </tr>
         <tr>
           <td class="qa-q">Is there centralized log aggregation and anomaly detection?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>All platform events are aggregated with automated anomaly detection. Alerting on: abnormal API volume, auth failures, geographic anomalies, and dependency failures.</td>
+          <td class="qa-a"><span class="badge-partial">⚡ PARTIAL</span><br>Audit events and authentication failures are recorded, and an IP is locked out for 15 minutes after 5 failed key attempts. There is no automated anomaly detection or geographic alerting.</td>
         </tr>
 
         <tr><td class="qa-q" style="background:rgba(0,212,170,0.03);padding:8px 14px;font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--accent);" colspan="2">SUPPLY CHAIN &amp; THIRD PARTIES</td></tr>
 
         <tr>
           <td class="qa-q">What third-party services process customer data?</td>
-          <td class="qa-a">Minimal third-party data exposure. Payment processing: third-party payment gateway (customer billing data only, PCI-scoped). Analytics: privacy-respecting first-party analytics only. No customer intelligence data is shared with third parties.</td>
+          <td class="qa-a">Sub-processors are listed on security-compliance.html (hosting, email, contact forms, and payments through Razorpay and Gumroad). Card data is handled by Razorpay or Gumroad and never reaches the platform. No customer intelligence data is shared with third parties.</td>
         </tr>
         <tr>
           <td class="qa-q">Are third-party threat intelligence sources vetted?</td>
-          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>All 74 integrated feeds are evaluated for: source reputation, language/quality filtering, false-positive rate, and TLP compliance. Feeds are reviewed quarterly and low-quality sources removed (e.g., NCSC-NL Dutch-language feed removed v185.0).</td>
+          <td class="qa-a"><span class="badge-yes">✓ YES</span><br>Sources are registered in the source fabric and health-probed on every publisher run; stale or failing sources are flagged by the stale-source guard, and published items pass IOC artifact rejection and confidence checks before release.</td>
         </tr>
 
         </tbody>
@@ -393,15 +394,15 @@ footer a:hover{color:var(--accent);}
           </tr>
           <tr>
             <td style="font-weight:600;">Feed Freshness (IOC Update Cadence)</td>
-            <td style="color:var(--muted);">Daily</td>
-            <td>Every 6 hours</td>
-            <td><strong style="color:var(--green);">Hourly</strong></td>
-            <td><strong style="color:var(--green);">Hourly</strong></td>
+            <td style="color:var(--muted);">See sla.html</td>
+            <td>See sla.html</td>
+            <td>See sla.html</td>
+            <td>See sla.html</td>
           </tr>
           <tr>
             <td style="font-weight:600;">API Response Time (P95)</td>
             <td style="color:var(--muted);">—</td>
-            <td>&lt; 2 seconds</td>
+            <td>&lt; 800ms</td>
             <td><strong style="color:var(--green);">&lt; 500ms</strong></td>
             <td><strong style="color:var(--green);">&lt; 500ms</strong></td>
           </tr>
@@ -430,8 +431,8 @@ footer a:hover{color:var(--accent);}
             <td style="font-weight:600;">Support Response</td>
             <td style="color:var(--muted);">Community forum</td>
             <td>Email, 48h</td>
-            <td><strong style="color:var(--green);">Dedicated CSM + 4h SLA</strong></td>
-            <td><strong style="color:var(--green);">Dedicated MSSP Success Manager</strong></td>
+            <td><strong style="color:var(--green);">Email and chat, 4h</strong></td>
+            <td><strong style="color:var(--green);">Dedicated CSM, 1h</strong></td>
           </tr>
           <tr>
             <td style="font-weight:600;">Critical CVE Patch Notification</td>
@@ -450,14 +451,14 @@ footer a:hover{color:var(--accent);}
           <tr>
             <td style="font-weight:600;">Uptime Credit</td>
             <td style="color:var(--muted);">None</td>
-            <td>10% per %downtime</td>
-            <td><strong style="color:var(--green);">25% per % below SLA</strong></td>
-            <td><strong style="color:var(--green);">25% per % below SLA</strong></td>
+            <td>5% per hour of P0 outage</td>
+            <td><strong style="color:var(--green);">10% per hour of P0 outage</strong></td>
+            <td><strong style="color:var(--green);">15% per hour of P0 outage</strong></td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p style="font-size:13px;color:var(--muted);">SLA credits are applied as account credits to the next billing cycle. Custom SLA addendum available for Enterprise contracts above $50K ARR.</p>
+    <p style="font-size:13px;color:var(--muted);">SLA credits are applied as account credits to the next billing cycle. sla.html is the binding statement of uptime, latency, freshness, incident response and outage credits; where this table differs, sla.html applies.</p>
   </div>
 
   <!-- ── 05. ARCHITECTURE ── -->
@@ -470,7 +471,7 @@ footer a:hover{color:var(--accent);}
 SENTINEL APEX — Data Flow Architecture v201.0
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  INGESTION LAYER (74 Feeds, hourly)                                 │
+│  INGESTION LAYER (registered sources, each publisher run)           │
 │  CISA KEV · MITRE ATT&CK · NVD/NVD-CVE · AlienVault OTX           │
 │  Abuse.ch · GreyNoise · Shodan · NCSC UK · MS MSRC · 65 more      │
 └────────────────────────────┬────────────────────────────────────────┘
@@ -489,7 +490,7 @@ SENTINEL APEX — Data Flow Architecture v201.0
 ┌───────────────────┐  ┌──────────────────────┐  ┌───────────────────┐
 │  REST API         │  │  STIX 2.1 / TAXII 2.1│  │  Webhook Push     │
 │  JSON responses   │  │  Enterprise endpoint  │  │  SIEM / SOAR      │
-│  JWT-auth per key │  │  Collection-based     │  │  Splunk/QRadar/   │
+│  API key or JWT   │  │  Collection-based     │  │  Splunk/QRadar/   │
 │                   │  │  pull by Enterprise   │  │  Sentinel/Elastic │
 └───────────────────┘  └──────────────────────┘  └───────────────────┘
          │                        │                        │
@@ -501,8 +502,8 @@ SENTINEL APEX — Data Flow Architecture v201.0
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:16px;">
         <div style="font-size:12px;color:var(--muted);line-height:1.7;"><strong style="color:var(--text);">No customer data flows upstream.</strong> The enrichment engine processes only public threat intelligence. Customer API keys, webhook URLs, and account data never leave the platform boundary.</div>
-        <div style="font-size:12px;color:var(--muted);line-height:1.7;"><strong style="color:var(--text);">Air-gapped deployment</strong> is available for government/classified environments under a private instance agreement. Contact enterprise team.</div>
-        <div style="font-size:12px;color:var(--muted);line-height:1.7;"><strong style="color:var(--text);">CI/CD pipeline</strong> runs 45+ stages: dependency scan, SAST, unit tests, integration tests, and canary deploy. Mean deployment time: 20 minutes.</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.7;"><strong style="color:var(--text);">Deployment:</strong> delivered as SaaS only. Private, on-premises and air-gapped instances are not offered; isolated networks can import STIX 2.1 objects pulled over TAXII 2.1.</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.7;"><strong style="color:var(--text);">CI/CD pipeline</strong> runs 45+ stages, including integrity gates, regression tests and post-deploy canaries; pull requests also run secret scanning and SAST.</div>
       </div>
     </div>
   </div>
@@ -520,19 +521,20 @@ SENTINEL APEX — Data Flow Architecture v201.0
         </div>
         <div>
           <p style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:10px;">Auth Method</p>
-          <div class="code-block" style="margin:0;">Authorization: Bearer &lt;API_KEY&gt;</div>
+          <div class="code-block" style="margin:0;">X-API-Key: &lt;API_KEY&gt;  (or Authorization: Bearer &lt;API_KEY or session token&gt;)</div>
         </div>
       </div>
       <p style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:12px;">Key Endpoints</p>
       <div class="code-block">
-GET /api/v1/advisories        — Latest advisories (paginated, filterable by CVSS/TLP/vendor)
-GET /api/v1/iocs              — IOC feed (type, value, confidence, TLP, first/last seen)
-GET /api/v1/cves              — CVE feed with CVSS + EPSS + KEV flag
-GET /api/v1/rules/sigma       — Sigma detection rules (YAML)
-GET /api/v1/rules/kql         — KQL rules for Microsoft Sentinel
-GET /api/v1/stix              — STIX 2.1 bundle (Enterprise+)
-GET /api/v1/weekly-brief      — Latest weekly threat brief JSON
-POST /api/v1/webhooks         — Register SIEM/SOAR webhook endpoint
+GET /api/v1/intel/latest.json   — Latest advisories (masked fields for FREE)
+GET /api/feed.json               — Same feed, single file
+GET /api/v1/ioc/enriched         — Full IOC values (PRO and above)
+GET /api/v1/ioc/lookup?value=…   — Look up one indicator
+GET /api/v1/cve/live             — CVE feed with CVSS, EPSS and KEV flag
+GET /api/v1/intel/detection_rules_manifest.json — Detection rule manifest
+GET /taxii/                      — TAXII 2.1 discovery
+GET /taxii/collections/{id}/objects/ — STIX 2.1 objects (PRO and above)
+GET /api/sla/report              — SLA compliance report (Enterprise, MSSP)
       </div>
       <p style="font-size:13px;color:var(--muted);margin-top:12px;">Full API reference: <a href="/api-docs.html">api-docs.html</a> &nbsp;·&nbsp; Postman collection: <a href="/api-reference-card.html">api-reference-card.html</a></p>
     </div>
@@ -541,7 +543,7 @@ POST /api/v1/webhooks         — Register SIEM/SOAR webhook endpoint
   <!-- ── 07. DATA HANDLING ── -->
   <div class="pack-section section-anchor" id="sec-data-handling">
     <div class="section-label">Section 07</div>
-    <div class="section-title">Data Handling &amp; Residency</div>
+    <div class="section-title">Data Handling &amp; Location</div>
     <div class="section-desc">Where data lives and how it is protected.</div>
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
       <table class="qa-table">
@@ -549,38 +551,38 @@ POST /api/v1/webhooks         — Register SIEM/SOAR webhook endpoint
         <tbody>
           <tr>
             <td style="font-weight:600;">Threat intelligence (advisories, IOCs, CVEs)</td>
-            <td>Platform servers (India / cloud)</td>
-            <td>AES-256 at rest, TLS 1.3 in transit</td>
+            <td>Cloudflare R2 and Workers KV</td>
+            <td>Encrypted at rest by Cloudflare; HTTPS in transit</td>
             <td>Indefinite (public data)</td>
           </tr>
           <tr>
             <td style="font-weight:600;">Customer account data (email, org name)</td>
-            <td>Platform database</td>
-            <td>AES-256 at rest</td>
+            <td>Cloudflare Workers KV</td>
+            <td>Encrypted at rest by Cloudflare</td>
             <td>Duration of subscription + 90 days</td>
           </tr>
           <tr>
-            <td style="font-weight:600;">API keys (hashed)</td>
-            <td>Platform database</td>
-            <td>bcrypt (cost 12), never stored plaintext</td>
+            <td style="font-weight:600;">API key records</td>
+            <td>Cloudflare Workers KV</td>
+            <td>Encrypted at rest by Cloudflare; not hashed by the platform</td>
             <td>Until revoked by customer</td>
           </tr>
           <tr>
-            <td style="font-weight:600;">API access logs</td>
-            <td>Log aggregation</td>
-            <td>TLS in transit, AES-256 at rest</td>
-            <td>90 days (Enterprise: 12 months)</td>
+            <td style="font-weight:600;">Audit log (admin, key lifecycle, authenticated requests)</td>
+            <td>Cloudflare Workers KV</td>
+            <td>Encrypted at rest by Cloudflare</td>
+            <td>30 days</td>
           </tr>
           <tr>
             <td style="font-weight:600;">Webhook configurations</td>
-            <td>Platform database</td>
-            <td>AES-256-GCM encrypted</td>
+            <td>Cloudflare Workers KV</td>
+            <td>Encrypted at rest by Cloudflare</td>
             <td>Until removed by customer</td>
           </tr>
           <tr>
             <td style="font-weight:600;">Payment / billing data</td>
-            <td>Third-party payment processor only</td>
-            <td>PCI-DSS scoped to payment processor</td>
+            <td>Razorpay or Gumroad only</td>
+            <td>Handled by the payment provider</td>
             <td>Per payment processor policy</td>
           </tr>
         </tbody>
@@ -604,13 +606,13 @@ DATE: [INSERT DATE]
 SECTION: THREAT INTELLIGENCE COVERAGE
 ─────────────────────────────────────────────────────────────────
 Q: How many threat intelligence sources does the platform integrate?
-A: 74 curated threat feeds including CISA KEV, MITRE ATT&CK v15,
-   NVD, AlienVault OTX, Abuse.ch, GreyNoise, Shodan, NCSC UK,
-   and 65 additional vendor and community sources.
+A: Registered public and vendor sources including CISA KEV,
+   MITRE ATT&CK v15, NVD, AlienVault OTX and Abuse.ch, each
+   health-probed on every publisher run.
 
 Q: What is the IOC-to-detection latency?
-A: &lt; 6 hours from raw feed ingestion to published Sigma/KQL
-   detection rule. Industry average: 14+ days.
+A: Detection rules are generated in the same publisher run that
+   ingests the advisory; publisher runs land several times a day.
 
 Q: What threat intelligence standards are supported?
 A: STIX 2.1 (export), TAXII 2.1 (pull endpoint, Enterprise+),
@@ -627,8 +629,8 @@ A: REST API and webhook push supports any SIEM: Microsoft Sentinel
    endpoint supports any TAXII-compatible TIP.
 
 Q: Is there an API for programmatic access?
-A: Yes. REST API with JWT auth, JSON responses, paginated endpoints
-   for advisories, IOCs, CVEs, detection rules, and weekly briefs.
+A: Yes. REST API with API-key or session-token (JWT) auth and JSON
+   responses for advisories, IOCs, CVEs and detection rules.
    Rate limits: 5,000 req/day (PRO) to 50,000 req/day (Enterprise, MSSP).
 
 ─────────────────────────────────────────────────────────────────
@@ -649,15 +651,15 @@ A: Yes. Annual billing gives 2 months free (about 17%) on all paid tiers.
 SECTION: SUPPORT &amp; SUCCESS
 ─────────────────────────────────────────────────────────────────
 Q: What support is included with Enterprise?
-A: Dedicated Customer Success Manager, 4-hour SLA for P1 issues,
-   1-hour notification for P0 outages, onboarding within 48 hours,
-   quarterly business reviews, and SIEM integration assistance.
+A: Email and chat support with a 4-hour response (sla.html),
+   99.9% uptime commitment with P0 outage credits, and SIEM
+   integration assistance. A dedicated CSM is part of MSSP.
 
 ─────────────────────────────────────────────────────────────────
 VENDOR CONTACT FOR PROCUREMENT
 ─────────────────────────────────────────────────────────────────
 Enterprise Team:    enterprise@cyberdudebivash.com
-Security Review:    security@cyberdudebivash.in
+Security Review:    security@cyberdudebivash.com
 Phone / WhatsApp:   +91 8179881447
 Enterprise Portal:  https://intel.cyberdudebivash.com/enterprise.html
       </div>
@@ -699,7 +701,7 @@ Enterprise Portal:  https://intel.cyberdudebivash.com/enterprise.html
       </div>
       <div class="info-card cyan">
         <div class="ic-label">Security &amp; Compliance</div>
-        <div class="ic-val" style="font-size:15px;">security@cyberdudebivash.in</div>
+        <div class="ic-val" style="font-size:15px;">security@cyberdudebivash.com</div>
         <div class="ic-desc">Security questionnaire review, audit report requests (NDA required), CISO-to-CISO briefings.</div>
       </div>
       <div class="info-card cyan">

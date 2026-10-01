@@ -108,6 +108,105 @@
       "source": null,
       "finding": "2026-09-30: a 99.97% API uptime stat and sandbox sample were shown while /api/metrics reported api_uptime_30d_pct as null and the only external prober ran about five times a day. Commitments (sla.html) are retained; a measured figure needs a measurement.",
       "action": "Removed; demo.html cites the sla.html commitment and labels it as a commitment, not a measurement."
+    },
+    {
+      "claim": "API keys or passwords stored hashed",
+      "variants": ["bcrypt", "PBKDF2", "stored hashed", "hashed password"],
+      "appeared_on": ["enterprise-procurement-pack.html", "reference-architecture.html", "trust-center.html", "compliance.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: keys are 160-bit random values (provisionApiKey: new Uint8Array(20)) stored as the raw API_KEYS_KV key and read back with API_KEYS_KV.get(raw); nothing hashes them, and no password login exists (auth is an API key or a session JWT). The procurement questionnaire told buyers to copy 'bcrypt hashes (cost factor 12)' into vendor assessments.",
+      "action": "Replaced with the implemented storage, as security-compliance.html already states it: raw key records in Workers KV, encrypted at rest by Cloudflare, shown in audit logs only as a 12-character prefix."
+    },
+    {
+      "claim": "User accounts with MFA and role-based access",
+      "variants": ["TOTP-based MFA", "enforce MFA organization-wide", "Analyst, Read-Only", "RBAC + MFA"],
+      "appeared_on": ["enterprise-procurement-pack.html", "reference-architecture.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: the gateway has no user accounts, MFA or role model; access is an API key or a session JWT carrying the plan tier, and admin routes use a separate admin secret. security-compliance.html already lists MFA and SSO as not currently offered.",
+      "action": "Replaced with plan-based scopes and the statement that MFA, SSO and roles are not currently offered."
+    },
+    {
+      "claim": "Per-key scopes and IP allowlisting",
+      "variants": ["scope bitmap", "IP CIDR allowlisting"],
+      "appeared_on": ["enterprise-procurement-pack.html", "reference-architecture.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: key records carry tier, customer_id, status and optional expiry; no per-key scope or IP list exists or is checked in resolveAuth().",
+      "action": "Replaced with plan-based scopes; IP allowlisting stated as not currently offered."
+    },
+    {
+      "claim": "Envelope-encrypted customer secrets with scheduled key rotation",
+      "variants": ["envelope key rotation"],
+      "appeared_on": ["enterprise-procurement-pack.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: webhook configurations are stored as Workers KV records; Cloudflare encrypts KV at rest, and the platform adds no envelope encryption or key rotation.",
+      "action": "Replaced with the storage as implemented."
+    },
+    {
+      "claim": "Instant key revocation",
+      "variants": ["revocable instantly", "revoked instantly", "revokes the old one immediately"],
+      "appeared_on": ["enterprise-procurement-pack.html", "security-compliance.html", "get-api-key.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: with AUTH_STRONG_CONSISTENCY_ENABLED off, revocation and status changes are Workers KV writes; live certification run 36827638315 saw a cancelled key answered 200 and a reactivated key 401 within 2 s of each write.",
+      "action": "Replaced with 'effective everywhere within about a minute' until the strong authority is enabled (tests/test_commercial_claims_convergence.py ties the wording to the flag)."
+    },
+    {
+      "claim": "AWS infrastructure",
+      "variants": ["AWS ap-south-1", "S3 for STIX bundle storage"],
+      "appeared_on": ["reference-architecture.html", "trust-center.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: the gateway runs on Cloudflare Workers with KV, R2 and Durable Objects (workers/intel-gateway/wrangler.toml) and the site on GitHub Pages; the AWS_* credentials in workflows are R2 S3-API keys (endpoint_url=CF_R2_ENDPOINT). No AWS compute or S3 bucket is used.",
+      "action": "Replaced with the Cloudflare and GitHub components actually deployed."
+    },
+    {
+      "claim": "Private, on-premises and air-gapped deployments",
+      "variants": ["Air-gapped deployment option", "Air-gapped deployment is available", "fully air-gapped on-premises deployment", "Private Cloudflare Worker instance", "Dedicated R2 storage bucket", "Docker / Kubernetes deployment"],
+      "appeared_on": ["enterprise-procurement-pack.html", "global-deployment.html", "mssp.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: the platform is one shared Cloudflare Worker plus the GitHub Pages site; the repository has no installable package, container image or per-tenant deployment. contact-enterprise.html already says a fully air-gapped deployment is not part of the published offering.",
+      "action": "Removed from offer copy; pages say the service is delivered as SaaS and that on-premises SIEMs consume the STIX 2.1/TAXII 2.1 and export interfaces."
+    },
+    {
+      "claim": "Regional data residency options",
+      "variants": ["APAC residency", "EU residency", "US residency", "India data residency"],
+      "appeared_on": ["global-deployment.html", "trust-center.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: the KV and R2 bindings in wrangler.toml set no jurisdiction, so stored data has no regional restriction; responses come from the nearest Cloudflare location.",
+      "action": "Replaced with the storage as implemented: no regional residency option is offered."
+    },
+    {
+      "claim": "Security controls not implemented by the gateway",
+      "variants": ["HMAC-SHA256 request signing", "CSP Level 3", "90-day audit log retention"],
+      "appeared_on": ["reference-architecture.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: REST requests are not signed (outbound webhooks are, X-Sentinel-Signature); the static site sends no CSP and gateway report pages a standard one; audit entries live AUDIT_TTL = 30 days. Same findings as the security-compliance.html correction of 2026-09-30.",
+      "action": "Replaced with the controls as implemented."
+    },
+    {
+      "claim": "Security contact on another domain",
+      "variants": ["security@cyberdudebivash.in"],
+      "appeared_on": ["enterprise-procurement-pack.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: security.txt (RFC 9116) names security@cyberdudebivash.com; the procurement pack sent vulnerability reports and audit requests to a .in address.",
+      "action": "Replaced with the security.txt contact."
+    },
+    {
+      "claim": "Fixed feed refresh cadence and alert timing",
+      "variants": ["every 6–8 hours", "every 6-8 hours", "Intel Refresh Cycle", "within 15 minutes of detection"],
+      "appeared_on": ["pricing.html", "executive-briefing.html", "reference-architecture.html", "global-deployment.html", "api/index.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01: the publisher runs on a GitHub Actions schedule ('17 */4 * * *'). GitHub delivered 3-4 of the 6 daily runs, 3 minutes to 3.5 hours late, and the single pending slot in the shared sentinel-data-writer group cancelled others before they started. Gaps between publishes reached about 8.5 hours, and the feed was past its 6-hour freshness threshold on 2026-09-30 21:34-21:45Z and 2026-10-01 03:45-05:15Z. Alerts run on the same scheduler.",
+      "action": "Replaced with 'several runs a day' and a 'Daily' minimum. sla.html's tier freshness terms are a contract matter left to the owner (ledger F3)."
     }
   ],
 

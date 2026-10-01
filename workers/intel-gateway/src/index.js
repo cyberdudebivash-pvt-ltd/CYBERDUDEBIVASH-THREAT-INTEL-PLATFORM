@@ -3399,7 +3399,13 @@ export async function handleAdmin(request, env, ctx, path, method) {
       new_key: newKey, tier: existing.tier, customer_id: existing.customer_id,
       old_key_prefix: oldKey.slice(0, 12), old_key_revoked: true,
       managed_tenants_carried: Array.isArray(existing.managed_tenants) ? existing.managed_tenants : null,
-      message: "Key rotated -- old key immediately revoked, no overlap window",
+      // Without the strong authority the old key is only deleted from KV,
+      // and a location that cached its record keeps accepting it until that
+      // read cache expires (live certification 2026-10-01: stale state was
+      // served 1-2 s after a write). Say so instead of promising no overlap.
+      message: strongConsistencyEnabled(env)
+        ? "Key rotated -- old key immediately revoked, no overlap window"
+        : "Key rotated -- old key deleted; Cloudflare locations that cached it can accept it for up to about a minute",
     }, 201);
   }
 

@@ -172,7 +172,7 @@ footer a{color:var(--muted);text-decoration:none;margin:0 12px;}
         <li>Keys stored in Cloudflare Workers KV (not hashed by the platform)</li>
         <li>Plan-based access scopes (no per-key custom scopes)</li>
         <li>IP allowlisting: not currently offered</li>
-        <li>Key rotation issues a new key and revokes the old one immediately (no overlap window)</li>
+        <li>Rotation, revocation and suspension take effect in the key store at once and reach every Cloudflare location within about a minute (Workers KV propagation)</li>
         <li>Rate limiting: 30 / 120 / 600 / 1,200 requests per minute and 50 / 5,000 / 50,000 / 50,000 per day (FREE / PRO / Enterprise / MSSP), HTTP 429 at the cap</li>
       </ul>
     </div>
@@ -390,7 +390,7 @@ footer a{color:var(--muted);text-decoration:none;margin:0 12px;}
     </thead>
     <tbody>
       <tr><td>Authentication</td><td>160-bit random API key (X-API-Key or Authorization: Bearer) checked against the key store; HS256-signed session JWTs</td><td>Required on all non-public endpoints</td></tr>
-      <tr><td>Key Storage</td><td>Key records in Cloudflare Workers KV, not hashed by the platform</td><td>Treat every key as a secret; rotation issues a new key and revokes the old one immediately</td></tr>
+      <tr><td>Key Storage</td><td>Key records in Cloudflare Workers KV, not hashed by the platform</td><td>Treat every key as a secret; after rotation the old key can keep working at some Cloudflare locations for up to about a minute</td></tr>
       <tr><td>Rate Limiting</td><td>Per-IP fixed 60-second window at the plan's per-minute limit; daily quota per API key (per IP when anonymous)</td><td>Free: 30/min, 50/day · Pro: 120/min, 5K/day · Enterprise: 600/min, 50K/day · MSSP: 1,200/min, 50K/day; HTTP 429 with Retry-After</td></tr>
       <tr><td>IP Allowlisting</td><td>Not currently offered</td><td>&mdash;</td></tr>
       <tr><td>Request Signing</td><td>Outbound webhooks carry an HMAC-SHA256 signature (X-Sentinel-Signature) when a webhook secret is set</td><td>REST requests are not signed; keys travel over HTTPS only</td></tr>
