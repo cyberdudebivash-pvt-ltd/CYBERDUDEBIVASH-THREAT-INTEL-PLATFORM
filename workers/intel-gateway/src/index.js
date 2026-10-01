@@ -165,6 +165,7 @@ import { getUsageSummary } from './usage-meter.js';
 import { buildAccountUsage } from './account-usage.js';
 import { buildReportsSitemapXml, MAX_SITEMAP_URLS } from './reports-sitemap.js';
 import { dispatchFreshnessGuard } from './freshness-guard-dispatch.js';
+import { checkoutProviderAvailability } from './checkout-providers.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -7915,7 +7916,11 @@ async function handleRequest(request, env, ctx) {
   // what Razorpay actually charges today; not yet the final business-approved
   // commercial pricing (that decision is tracked separately, not inferred here).
   if (path === "/api/pricing") {
-    return jsonResp(getPricingSnapshot());
+    // Additive (checkout P0, 2026-10-01): which automated checkouts
+    // upgrade.html may offer -- Gumroad only while its provisioning webhook
+    // and key delivery are configured (F21). The pricing snapshot itself is
+    // unchanged.
+    return jsonResp({ ...getPricingSnapshot(), checkout: checkoutProviderAvailability(env) });
   }
 
   // --- God Mode: Brand Protection --------------------------------------------

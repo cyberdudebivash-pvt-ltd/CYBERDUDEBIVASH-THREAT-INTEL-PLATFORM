@@ -11,7 +11,8 @@ with it.
 | Area | Decision | Enforced by |
 |---|---|---|
 | Refunds | 7-day conditional money-back guarantee on a customer's first purchase, merchant-approved. No automatic or self-service refunds. No partial or pro-rata refunds after the guarantee period. | `workers/revenue-engine/src/billing-routes.js` |
-| Manual payments | Public UPI / NEFT / crypto payment proof is retired. Enterprise bank transfer only against an approved quote/PO (separate accounts-receivable workflow, not built here). | Gateway `POST /api/payment/manual-notify` and revenue-engine `POST /api/payments/submit` answer **410** |
+| Manual payments | Public UPI / NEFT / crypto payment proof is retired: no self-service proof, upload or UTR submission anywhere. Enterprise bank transfer against an approved quote/PO. Assisted payments (owner decision 2026-10-01, below) are arranged by contact only. | Gateway `POST /api/payment/manual-notify` and revenue-engine `POST /api/payments/submit` answer **410** |
+| Checkout order (2026-10-01) | Razorpay is the primary automated checkout. Gumroad is the secondary automated checkout, offered only while a Gumroad sale is provisioned and its key delivered automatically. Assisted payments are one low-prominence contact note, never a checkout path. | `upgrade.html`; gateway `GET /api/pricing` `checkout` block (`checkout-providers.js`) |
 | Checkout | PRO, Enterprise and MSSP are recurring and sold only as Razorpay Subscriptions. One-time Orders only for explicit one-time SKUs (none on sale). | `upgrade.html` (no fallback); gateway `create-order` answers **409 subscription_required** for recurring tiers |
 | GST | Invoices only from operator-supplied, CA-confirmed configuration. CGST+SGST when the supplier state equals the place of supply, otherwise IGST. | `workers/revenue-engine/src/gst.js`, `billing-ledger.js` |
 
@@ -234,7 +235,8 @@ was provisioned after this change.
 
 ## Enterprise quote -> PO -> invoice -> bank transfer (2026-09-25)
 
-The only bank-transfer path. Public manual payment proof stays retired.
+The bank-transfer path with a GST invoice and reconciliation. Public manual
+payment proof stays retired.
 Module: `workers/revenue-engine/src/enterprise-po.js`, table `enterprise_quotes`.
 
 ```
@@ -365,3 +367,23 @@ is set.
   authentication and APEX mesh admission check that marker on every JWT
   request. The marker outlives the maximum JWT lifetime and is cleared only
   by a genuine new paid activation.
+
+## Assisted payments (owner decision, 2026-10-01)
+
+The checkout page carries exactly one note, below both automated checkouts:
+
+> Need an alternative payment method? Assisted payments via crypto, Paytm,
+> PayPal, UPI, Amazon Pay or bank NEFT may be arranged by contacting
+> contact@cyberdudebivash.in or bivash@cyberdudebivash.com. Access is
+> provisioned only after payment verification.
+
+- It is not a checkout: no form, upload, UTR field, QR code, wallet address,
+  UPI ID or bank detail is published, and nothing on the site provisions
+  access from an assisted request.
+- Access for an assisted payment is granted by an operator after verifying
+  the payment, through the admin key API or the quote/PO workflow above. The
+  retired self-service endpoints keep answering 410.
+- The retirement rationale above still applies to the operator: forged
+  screenshots, reused references and GST/refund records that do not
+  reconcile. Verify against the bank or provider statement before granting
+  access.

@@ -207,6 +207,15 @@
       "source": null,
       "finding": "2026-10-01: the publisher runs on a GitHub Actions schedule ('17 */4 * * *'). GitHub delivered 3-4 of the 6 daily runs, 3 minutes to 3.5 hours late, and the single pending slot in the shared sentinel-data-writer group cancelled others before they started. Gaps between publishes reached about 8.5 hours, and the feed was past its 6-hour freshness threshold on 2026-09-30 21:34-21:45Z and 2026-10-01 03:45-05:15Z. Alerts run on the same scheduler.",
       "action": "Replaced with 'several runs a day' and a 'Daily' minimum. sla.html's tier freshness terms are a contract matter left to the owner (ledger F3)."
+    },
+    {
+      "claim": "Instant checkout, access, provisioning or emailed key delivery",
+      "variants": ["instant checkout", "instant automated checkout", "self-serve instant checkout", "instant access", "instant PRO access", "instant paid access", "provisioned instantly", "instant provisioning", "billed instantly", "delivered to your email within seconds", "Key within 2 hrs", "delivered to your email within 2 hours", "assisted activation"],
+      "appeared_on": ["get-api-key.html", "pricing.html", "trial-center.html", "compare.html", "alternative-to-mandiant.html", "alternative-to-recorded-future.html", "api-reference-card.html", "demo.html", "enterprise-homepage.html", "enterprise-pricing.html", "enterprise-procurement-pack.html", "enterprise-use-cases.html", "executive-briefing.html", "index.html", "lead-capture.html", "platform-capabilities.html", "reference-architecture.html", "roi-calculator.html", "services.html", "store.html", "upgrade.html", "docs/faq.html", "landing/index.html"],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-01 checkout P0: a paid plan is activated asynchronously by Razorpay's signed subscription.activated webhook (latency unmeasured, nothing bounds it); the revenue engine's welcome email is queued without a send time and is never sent (F22); Gumroad provisioning was unconfigured in production (F21). get-api-key.html took paid-plan requests promising a key by email within 2 hours, with WhatsApp 'assisted activation': a manual path presented as self-service.",
+      "action": "Replaced with 'automated' / 'self-serve checkout' and 'activated after payment confirmation'; the key is shown on the checkout page. Paid-plan requests on get-api-key.html continue to checkout."
     }
   ],
 

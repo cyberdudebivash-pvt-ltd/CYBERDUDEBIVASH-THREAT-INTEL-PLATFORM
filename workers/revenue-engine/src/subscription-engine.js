@@ -60,6 +60,10 @@ const PENDING_CHECKOUT_TTL_SECONDS = 30 * 60;
 // the email to its tier. Literal: index.js imports this module, so its
 // SUB_STATUS binding is not initialised while this module evaluates.
 const LIVE_SUB_STATUSES = Object.freeze(["active", "trial", "past_due", "expiring", "renewed"]);
+// Provider-link statuses of a checkout whose payment Razorpay has already
+// taken (authenticated: paid, activation pending; active: provisioned). A
+// retry of that same checkout must not open a second payment.
+const PAID_CHECKOUT_LINK_STATUSES = Object.freeze(["authenticated", "active"]);
 
 async function sha256Hex(value) {
   const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
@@ -384,7 +388,8 @@ export async function handleBillingSubscriptionCreate(request, env, ctx, rid) {
   // of being billed a second time. (2) A retried or double-submitted
   // checkout (same email, tier, cycle and buyer details) within
   // PENDING_CHECKOUT_TTL_SECONDS reuses the subscription it already created
-  // while that one is still unpaid, instead of creating a second one.
+  // while that one is still unpaid, instead of creating a second one; (3)
+  // once that one is paid, the retry is refused (409 checkout_in_progress).
   // KV is not transactional, so two truly simultaneous requests can still
   // both create one; only one checkout modal is ever opened per page (the
   // client state machine), and an unpaid Razorpay subscription never bills.
@@ -409,6 +414,17 @@ export async function handleBillingSubscriptionCreate(request, env, ctx, rid) {
         tier, billing_cycle: cycle, status: "created", prefill: { email }, reused: true,
       });
     }
+    // 2026-10-01: Razorpay already took the payment for this checkout and
+    // activation is in flight (or done). Creating another subscription here
+    // let a buyer who reloaded the page, or opened a second tab, pay twice.
+    if (pendingLink && PAID_CHECKOUT_LINK_STATUSES.includes(pendingLink.status)) {
+      await trackEvent(env, "subscription_checkout_in_progress", { tier, billing_cycle: cycle, rid });
+      return json({
+        error: "checkout_in_progress",
+        message: "A payment for this checkout has already been received and is being activated. No new payment was started. Please do not pay again.",
+        billing_center_url: "/billing.html",
+      }, 409);
+    }
   }
 
   try {
@@ -425,8 +441,17 @@ export async function handleBillingSubscriptionCreate(request, env, ctx, rid) {
       }),
     });
     if (!resp.ok) {
+      // Razorpay's error body stays server-side: it named internal
+      // configuration (Plan / account state) to any browser.
       const errText = await resp.text().catch(() => "");
-      return json({ error: "Razorpay subscription creation failed", detail: errText }, 502);
+      let reason = "";
+      try {
+        const e = JSON.parse(errText).error || {};
+        reason = [e.code, e.field, e.description].filter(Boolean).join(" | ").slice(0, 200);
+      } catch (_) {}
+      console.error(`[subscription-create] Razorpay ${resp.status}${reason ? `: ${reason}` : ""}`);
+      await trackEvent(env, "subscription_checkout_provider_error", { tier, billing_cycle: cycle, provider_status: resp.status, rid });
+      return json({ error: "Razorpay subscription creation failed", message: "Checkout could not be started. No payment was taken." }, 502);
     }
     const sub = await resp.json();
 

@@ -180,7 +180,12 @@ def test_t12_gumroad_pro_ent_permalinks_and_30day_cta():
     src = _read(UPGRADE)
     assert "https://cyberdudebivash.gumroad.com/l/pxyfcb" in src
     assert "https://cyberdudebivash.gumroad.com/l/cdedlo" in src
-    assert "GET 30-DAY PRO ACCESS — $49" in src
+    # Checkout P0 (2026-10-01): one secondary button, "Continue with Gumroad",
+    # replaces the per-plan "GET 30-DAY PRO ACCESS — $49". The Gumroad
+    # products are still one-time access grants and must be labelled so.
+    assert ">Continue with Gumroad</a>" in src
+    assert "'30-day access grant, does not auto-renew'" in src
+    assert "'12-month access grant, does not auto-renew'" in src
     assert "usd:49" in src
     assert "usd:499" in src
 

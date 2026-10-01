@@ -94,8 +94,61 @@ test("a paid (no longer 'created') subscription is never handed out again", asyn
     env.REVENUE_CRM_KV.store.set(`razorpay_sub:${a.subscription_id}`, JSON.stringify({ ...link, status: "authenticated" }));
     const b = await (await handleBillingSubscriptionCreate(post(buyer), env, ctx, "rid")).json();
     assert.notEqual(b.subscription_id, a.subscription_id);
-    assert.equal(calls.length, 2);
+    assert.equal(b.subscription_id, undefined, "no subscription of any kind is handed out");
+    assert.equal(calls.length, 1);
   });
+});
+
+// 2026-10-01 checkout P0: until the paid checkout is provisioned, a retry
+// (page reload, second tab) used to create a second subscription that the
+// buyer could pay again.
+test("a retry after Razorpay took the payment is refused, not billed twice", async () => {
+  for (const status of ["authenticated", "active"]) {
+    const env = makeEnv();
+    await withRazorpay(async (calls) => {
+      const buyer = { email: "buyer@example.com", tier: "PRO", billing_cycle: "monthly", billing_state: "27" };
+      const a = await (await handleBillingSubscriptionCreate(post(buyer), env, ctx, "rid")).json();
+      const key = `razorpay_sub:${a.subscription_id}`;
+      env.REVENUE_CRM_KV.store.set(key, JSON.stringify({ ...JSON.parse(env.REVENUE_CRM_KV.store.get(key)), status }));
+      const res = await handleBillingSubscriptionCreate(post(buyer), env, ctx, "rid");
+      assert.equal(res.status, 409, status);
+      const body = await res.json();
+      assert.equal(body.error, "checkout_in_progress");
+      assert.match(body.message, /No new payment was started/);
+      assert.equal(body.subscription_id, undefined);
+      assert.equal(body.key_id, undefined);
+      assert.equal(calls.length, 1, `${status}: no second Razorpay subscription`);
+      // A different checkout (other buyer details) is not blocked by it.
+      assert.equal((await handleBillingSubscriptionCreate(post({ ...buyer, billing_state: "29" }), env, ctx, "rid")).status, 200);
+    });
+  }
+});
+
+test("a Razorpay error body never reaches the browser", async () => {
+  const env = makeEnv();
+  const real = globalThis.fetch;
+  const providerBody = JSON.stringify({ error: { code: "BAD_REQUEST_ERROR", field: "plan_id", description: "TEST_ONLY internal plan detail" } });
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string" ? input : input.url;
+    const plan = planResponse(url);
+    if (plan) return plan;
+    return new Response(providerBody, { status: 400 });
+  };
+  const errors = [];
+  const realError = console.error;
+  console.error = (...a) => errors.push(a.join(" "));
+  try {
+    const res = await handleBillingSubscriptionCreate(post({ email: "buyer@example.com", tier: "PRO" }), env, ctx, "rid");
+    assert.equal(res.status, 502);
+    const text = await res.text();
+    assert.doesNotMatch(text, /TEST_ONLY internal plan detail|BAD_REQUEST_ERROR|plan_id/);
+    assert.match(JSON.parse(text).message, /No payment was taken/);
+    assert.equal(JSON.parse(text).subscription_id, undefined);
+    assert.ok(errors.some((e) => /Razorpay 400: BAD_REQUEST_ERROR \| plan_id/.test(e)), "kept in the server log");
+  } finally {
+    globalThis.fetch = real;
+    console.error = realError;
+  }
 });
 
 test("an email with a live subscription on the same tier is sent to the Billing Center, not billed twice", async () => {

@@ -275,8 +275,9 @@ def validate_pricing_html() -> None:
     else:
         ok(f"{fname}: No broken plan=team links")
 
-    # Payment methods strip
-    if b"PAYMENT-GATEWAY.html" in data or b"iambivash.bn-5@okaxis" in data or b"GPay" in data:
+    # Payment methods strip (2026-10-01: lists payment rails per checkout,
+    # "Razorpay (primary): UPI AutoPay ...", instead of wallet brand badges)
+    if b"PAYMENT-GATEWAY.html" in data or b"iambivash.bn-5@okaxis" in data or b"GPay" in data or b"UPI AutoPay" in data:
         ok(f"{fname}: Payment methods strip present")
     else:
         warn(f"{fname}: Payment methods strip not detected -- consider adding")

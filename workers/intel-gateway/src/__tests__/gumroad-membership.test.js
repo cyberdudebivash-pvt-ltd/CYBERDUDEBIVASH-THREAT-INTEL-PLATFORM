@@ -201,3 +201,22 @@ test("a refund for an unknown sale is flagged, not ignored", async () => {
   const { body } = await h.ping({ ...FIRST, sale_id: "s_legacy", subscription_id: "", refunded: "true" });
   assert.equal(body.status, "noted_no_mapping");
 });
+
+// Checkout P0 (2026-10-01): a malformed ping is refused before it can touch
+// access -- no key minted, no entitlement changed, nothing claimed.
+test("malformed pings are refused with 400 and change nothing", async () => {
+  const { ping, keys, env } = harness();
+  const cases = [
+    ["sale without sale_id", { ...FIRST, sale_id: "" }],
+    ["sale without email", { ...FIRST, email: "" }],
+    ["cancellation without subscription_id", { cancelled: "true", ended: "true", sale_id: "s_9" }],
+    ["refund without sale_id", { refunded: "true", subscription_id: "sub_G1" }],
+  ];
+  for (const [label, fields] of cases) {
+    const { res, body } = await ping(fields);
+    assert.equal(res.status, 400, label);
+    assert.match(body.error, /^Invalid Gumroad/, label);
+  }
+  assert.deepEqual(keys(), [], "no API key was minted");
+  assert.equal([...env.SECURITY_HUB_KV.store.keys()].some((k) => k.startsWith("gumroad_sale")), false, "no sale claimed");
+});
