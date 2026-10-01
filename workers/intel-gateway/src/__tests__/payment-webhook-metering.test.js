@@ -213,3 +213,112 @@ test("only POST deliveries to the two webhook routes are exempt", async (t) => {
   await Promise.allSettled(waits);
   assert.equal(get.status, 429);
 });
+
+// ---------------------------------------------------------------------------
+// Adversarial audit (2026-10-01, post-merge of #636). The exemption must be
+// granted ONLY to a delivery the real handler accepts: each case is sent from
+// a fresh IP (the handler's own verdict) and from a saturated IP (the gate's
+// verdict). Exempt implies accepted, always; accepted implies exempt for every
+// body within the 64 KiB verification cap.
+// ---------------------------------------------------------------------------
+
+function freshIp(n) { return `198.18.${Math.floor(n / 250)}.${(n % 250) + 1}`; }
+
+async function verdicts(hx, n, send) {
+  const handler = await send(freshIp(n));
+  const ip = freshIp(n + 1000);
+  saturateMinuteBucket(hx, ip);
+  const gate = await send(ip);
+  return { accepted: handler.status !== 401, exempt: gate.status !== 429, handler, gate };
+}
+
+function rawRazorpay(hx, ip, bytes, signature) {
+  return post(hx, "/api/webhooks/razorpay", {
+    headers: { "cf-connecting-ip": ip, "content-type": "application/json", "x-razorpay-signature": signature },
+    body: bytes,
+  });
+}
+
+const enc = new TextEncoder();
+const hmacHex = (bytesOrString, secret = RZP_SECRET) => createHmac("sha256", secret).update(bytesOrString).digest("hex");
+
+test("audit: Razorpay exemption tracks the handler's own verdict, byte for byte", async (t) => {
+  t.after(freezeClock());
+  const hx = h();
+  const event = JSON.stringify({ event: "payment.authorized", payload: {} });
+  const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...enc.encode(event)]);
+  // Invalid UTF-8 (a lone 0xC3) inside a JSON string value.
+  const invalid = new Uint8Array([...enc.encode('{"event":"payment.authorized","note":"'), 0xc3, ...enc.encode('"}')]);
+  const invalidDecoded = new TextDecoder().decode(invalid);
+  const atCap = (() => { const pad = 64 * 1024 - enc.encode('{"event":"payment.authorized","p":""}').length; return enc.encode(`{"event":"payment.authorized","p":"${"x".repeat(pad)}"}`); })();
+  assert.equal(atCap.byteLength, 64 * 1024);
+  const overCap = enc.encode(`{"event":"payment.authorized","p":"${"x".repeat(64 * 1024)}"}`);
+
+  const cases = [
+    // [label, body bytes, signature, expect handler accepts, expect exempt]
+    ["valid body and signature", enc.encode(event), hmacHex(event), true, true],
+    ["BOM-prefixed, signed over raw bytes incl. BOM", bom, hmacHex(bom), false, false],
+    ["BOM-prefixed, signed over the decoded text", bom, hmacHex(event), true, true],
+    ["invalid UTF-8, signed over raw bytes", invalid, hmacHex(invalid), false, false],
+    ["invalid UTF-8, signed over the replacement-decoded text", invalid, hmacHex(invalidDecoded), true, true],
+    ["exactly 64 KiB, valid signature", atCap, hmacHex(atCap), true, true],
+    ["64 KiB + 34 bytes, valid signature (over the cap: metered)", overCap, hmacHex(overCap), true, false],
+    ["signature in upper-case hex", enc.encode(event), hmacHex(event).toUpperCase(), true, true],
+    ["truncated signature", enc.encode(event), hmacHex(event).slice(0, 62), false, false],
+    ["signature with a trailing byte", enc.encode(event), hmacHex(event) + "00", false, false],
+    ["empty body, signature over empty string", new Uint8Array(0), hmacHex(""), true, true],
+  ];
+  let n = 0;
+  for (const [label, bytes, sig, expectAccepted, expectExempt] of cases) {
+    const v = await verdicts(hx, n++, (ip) => rawRazorpay(hx, ip, bytes, sig));
+    assert.equal(v.accepted, expectAccepted, `${label}: handler verdict (HTTP ${v.handler.status} ${JSON.stringify(v.handler.body)})`);
+    assert.equal(v.exempt, expectExempt, `${label}: gate verdict (HTTP ${v.gate.status})`);
+    assert.ok(!v.exempt || v.accepted, `${label}: exempt but the handler rejects it`);
+    if (v.exempt) assert.equal(v.gate.status, v.handler.status, `${label}: exempt request answered like the handler`);
+  }
+});
+
+test("audit: Gumroad exemption reads the same query value the handler reads", async (t) => {
+  t.after(freezeClock());
+  const hx = h();
+  const form = new URLSearchParams({ subscription_id: "sub_F9_AUDIT", cancelled: "true" }).toString();
+  const send = (qs, body = form) => (ip) => post(hx, "/api/webhooks/gumroad" + qs, {
+    headers: { "cf-connecting-ip": ip, "content-type": "application/x-www-form-urlencoded" }, body,
+  });
+  const cases = [
+    ["valid secret", "?secret=" + encodeURIComponent(GUM_SECRET), true],
+    ["percent-encoded valid secret", "?secret=" + [...GUM_SECRET].map((c) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0")).join(""), true],
+    ["wrong secret first, valid second (first value wins in both)", "?secret=nope&secret=" + GUM_SECRET, false],
+    ["valid secret first, wrong second", "?secret=" + GUM_SECRET + "&secret=nope", true],
+    ["wrong-case parameter name", "?Secret=" + GUM_SECRET, false],
+    ["valid secret plus a NUL byte", "?secret=" + GUM_SECRET + "%00", false],
+    ["valid secret as a prefix only", "?secret=" + GUM_SECRET.slice(0, -1), false],
+    ["secret moved into the POST body", "", false],
+  ];
+  let n = 100;
+  for (const [label, qs, expected] of cases) {
+    const body = label === "secret moved into the POST body" ? form + "&secret=" + encodeURIComponent(GUM_SECRET) : form;
+    const v = await verdicts(hx, n++, send(qs, body));
+    assert.equal(v.accepted, expected, `${label}: handler verdict (HTTP ${v.handler.status})`);
+    assert.equal(v.exempt, expected, `${label}: gate verdict (HTTP ${v.gate.status})`);
+  }
+});
+
+test("audit: replayed deliveries stay idempotent while exempt", async (t) => {
+  t.after(freezeClock());
+  const hx = h();
+  const ip = "203.0.113.60";
+  saturateMinuteBucket(hx, ip);
+  const raw = razorpayOrder("pay_F9_REPLAY");
+  const first = await razorpay(hx, ip, raw);
+  const second = await razorpay(hx, ip, raw);
+  assert.equal(first.body.status, "provisioned");
+  assert.equal(second.status, 200);
+  assert.equal(second.body.status, "already_provisioned", "a replayed signed order must not mint a second key");
+  const sale = gumroadSale("sale_F9_REPLAY");
+  const g1 = await gumroad(hx, ip, sale);
+  const g2 = await gumroad(hx, ip, sale);
+  assert.equal(g1.body.status, "provisioned");
+  assert.equal(g2.body.status, "already_provisioned", "a replayed Gumroad sale must not mint a second key");
+  assert.equal(hx.env.RATE_LIMIT_KV.map.get(bucketKey(ip)), "45", "verified replays spend no anonymous budget");
+});

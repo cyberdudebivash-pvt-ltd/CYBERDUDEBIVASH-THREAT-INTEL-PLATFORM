@@ -887,12 +887,23 @@ export function applyTierGateV2(item, tier, usageState) {
 
   const gated = { ...item };
 
-  //  IOC enforcement 
-  if (isFree && Array.isArray(item.iocs) && item.iocs.length > 0) {
+  //  IOC enforcement
+  // F15 (2026-10-01): `iocs_by_type` carries the same values grouped by type
+  // and used to pass through, so anonymous /api/feed.json and
+  // /api/v1/intel/latest.json returned IOC values. Both carriers are emptied
+  // for FREE; the type keys stay so the shape is unchanged.
+  const byType = item.iocs_by_type && typeof item.iocs_by_type === "object" && !Array.isArray(item.iocs_by_type)
+    ? item.iocs_by_type : null;
+  const byTypeCount = byType
+    ? Object.values(byType).reduce((n, v) => n + (Array.isArray(v) ? v.length : 0), 0) : 0;
+  const flatCount = Array.isArray(item.iocs) ? item.iocs.length : 0;
+  if (isFree && (flatCount > 0 || byTypeCount > 0)) {
     const gate = enforceTierGate("ioc_full", t);
+    const withheld = flatCount || byTypeCount;
     gated.iocs       = [];
-    gated.ioc_count  = item.iocs.length;
-    gated.ioc_paywall = { ...gate, count: item.iocs.length };
+    if (byType) gated.iocs_by_type = Object.fromEntries(Object.keys(byType).map((k) => [k, []]));
+    gated.ioc_count  = withheld;
+    gated.ioc_paywall = { ...gate, count: withheld };
   }
 
   //  STIX enforcement 

@@ -232,6 +232,24 @@ HTML_EXCLUDE_PREFIXES = {
     "customer-health-platform", "customer-ops-center",
     "customer-success-center", "monetization-ops", "mssp-console",
     "lead-intelligence", "customer-intelligence", "revenue-intelligence",
+    # 2026-10-01: same class, both live and both rendering invented business
+    # data as fact, neither labelled as sample data:
+    #   - conversion-analytics.html ("Revenue Operations ... Admin"): fixed
+    #     MRR figures ($9,200 / $8,700 / $2,690), "21 active customers",
+    #     renewal and expansion rates.
+    #   - demo-conversion-center.html: a "LIVE" sales pipeline of invented
+    #     named contacts at invented companies with ARR up to $180,000.
+    # Neither is linked from any shipped page.
+    "conversion-analytics", "demo-conversion-center",
+}
+
+# Files inside INCLUDE_DIRS that must not ship. HTML_EXCLUDE_PREFIXES only
+# covers root pages, and dashboard/ is copied wholesale.
+INCLUDE_DIR_FILE_EXCLUDES = {
+    # 2026-10-01: internal revenue tool, live and unlinked, rendering a table
+    # of invented subscriber emails with MRR, hard-coded per-plan subscriber
+    # counts and a "Pro Subscribers 71" goal as if they were real.
+    "dashboard": ("revenue_acceleration.html",),
 }
 
 
@@ -466,6 +484,19 @@ def is_excluded_html(fname: str) -> bool:
     return False
 
 
+def prune_include_dir_excludes(dirname: str, dst: Path) -> int:
+    """Delete the INCLUDE_DIR_FILE_EXCLUDES entries for dirname from its
+    copied tree under dist/. Returns the number of files removed."""
+    removed = 0
+    for name in INCLUDE_DIR_FILE_EXCLUDES.get(dirname, ()):
+        target = dst / name
+        if target.is_file():
+            target.unlink()
+            removed += 1
+            log.info("  EXCLUDED (internal, not customer-facing): %s/%s", dirname, name)
+    return removed
+
+
 def copy_item(src: Path, dst: Path) -> int:
     """Copy src to dst (file or directory tree). Returns count of files copied."""
     copied = 0
@@ -660,6 +691,7 @@ def main() -> int:
             total_files += forced
         else:
             n = copy_item(src, dst)
+            n -= prune_include_dir_excludes(dirname, dst)
             total_files += n
             log.info("  Copied %s/ → dist/%s/  (%d files)", dirname, dirname, n)
 
