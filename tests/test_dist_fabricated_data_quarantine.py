@@ -76,3 +76,43 @@ def test_no_shipped_page_renders_invented_records():
 def test_negative_control_each_quarantined_page_trips_the_guard():
     for rel in QUARANTINED:
         assert record_hits(REPO / rel), f"{rel} no longer matches the guard; the guard may have gone blind"
+
+
+# The v157.0 dashboard route validator still listed revenue_acceleration.html,
+# so the prune above failed STAGE 5.4.6 and skipped the Pages deploy and every
+# post-deploy gate (sentinel-blogger run 36833320633, 2026-10-01T08:53Z).
+
+def test_build_sequence_copy_prune_validate_passes(tmp_path):
+    """The production order: copy dashboard/, prune, then validate routes."""
+    dst = tmp_path / "dashboard"
+    bda.copy_item(REPO / "dashboard", dst)
+    bda.prune_include_dir_excludes("dashboard", dst)
+    assert not (dst / "revenue_acceleration.html").exists()
+    assert bda.missing_dashboard_routes(REPO, tmp_path) == []
+
+
+def test_negative_control_validator_still_fails_a_missing_nav_route(tmp_path):
+    dst = tmp_path / "dashboard"
+    bda.copy_item(REPO / "dashboard", dst)
+    bda.prune_include_dir_excludes("dashboard", dst)
+    (dst / "revenue_dashboard.html").unlink()
+    assert bda.missing_dashboard_routes(REPO, tmp_path) == ["dashboard/revenue_dashboard.html"]
+
+
+def test_excluded_by_design_matches_only_the_exclusion_list():
+    for dirname, names in bda.INCLUDE_DIR_FILE_EXCLUDES.items():
+        for name in names:
+            assert bda.is_excluded_by_design(f"{dirname}/{name}")
+    for route in bda.NAV_DASHBOARD_ROUTES:
+        if route != "dashboard/revenue_acceleration.html":
+            assert not bda.is_excluded_by_design(route), route
+
+
+def test_no_shipped_page_links_to_a_quarantined_page():
+    """A link to a page that no longer ships is a production 404."""
+    names = [Path(rel).name for rel in QUARANTINED]
+    link = re.compile(r"""(?:href|src)\s*=\s*["'][^"']*?(%s)""" % "|".join(map(re.escape, names)), re.I)
+    hits = {str(p.relative_to(REPO)): link.findall(p.read_text(encoding="utf-8", errors="ignore"))
+            for p in shipped_pages()}
+    assert not {k: v for k, v in hits.items() if v}, hits
+    assert link.search('<a href="/dashboard/revenue_acceleration.html">'), "link pattern went blind"

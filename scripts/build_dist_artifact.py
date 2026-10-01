@@ -497,6 +497,49 @@ def prune_include_dir_excludes(dirname: str, dst: Path) -> int:
     return removed
 
 
+def is_excluded_by_design(route: str) -> bool:
+    """True for a "dir/file" route listed in INCLUDE_DIR_FILE_EXCLUDES."""
+    dirname, _, name = route.partition("/")
+    return name in INCLUDE_DIR_FILE_EXCLUDES.get(dirname, ())
+
+
+# Dashboard pages linked from site navigation (v157.0 route validator).
+NAV_DASHBOARD_ROUTES = [
+    "dashboard/enterprise_dashboard.html",      # ENTERPRISE DASHBOARD button
+    "dashboard/enterprise_dashboard_v2.html",   # SOC V2 button
+    "dashboard/orchestration_hub.html",         # ORCHESTRATION button
+    "dashboard/social_distribution.html",       # SOCIAL button
+    "dashboard/revenue_acceleration.html",      # excluded by design since 2026-10-01 (no nav link)
+    "dashboard/revenue_dashboard.html",         # REVENUE button
+    "dashboard/web3_dashboard.html",            # WEB3 INTEL button
+    "dashboard/analyst_dashboard.html",
+    "dashboard/agents_control_panel.html",
+    "dashboard/threat_graph_dashboard.html",
+]
+
+
+def missing_dashboard_routes(repo_root: Path, dist_dir: Path) -> List[str]:
+    """NAV_DASHBOARD_ROUTES present in the repo but absent from dist_dir.
+
+    A route excluded by design (INCLUDE_DIR_FILE_EXCLUDES) is pruned on
+    purpose and is not a missing route. 2026-10-01: without this check the
+    revenue_acceleration.html quarantine failed STAGE 5.4.6 and skipped the
+    Pages deploy (sentinel-blogger run 36833320633).
+    """
+    missing: List[str] = []
+    for route in NAV_DASHBOARD_ROUTES:
+        if not (repo_root / route).exists():
+            log.warning("  WARN: Source not in repo (skipped): %s", route)
+        elif is_excluded_by_design(route):
+            log.info("  EXCLUDED by design (not validated): %s", route)
+        elif not (dist_dir / route).exists():
+            missing.append(route)
+            log.error("  MISSING in dist/: %s", route)
+        else:
+            log.info("  OK: %s", route)
+    return missing
+
+
 def copy_item(src: Path, dst: Path) -> int:
     """Copy src to dst (file or directory tree). Returns count of files copied."""
     copied = 0
@@ -966,30 +1009,7 @@ def main() -> int:
     # INCLUDE_DIRS above — this gate ensures it can never silently regress.
     log.info("")
     log.info("Validating dashboard/ nav routes in dist/ (v157.0 — HARD FAIL)...")
-    NAV_DASHBOARD_ROUTES = [
-        "dashboard/enterprise_dashboard.html",      # ENTERPRISE DASHBOARD button
-        "dashboard/enterprise_dashboard_v2.html",   # SOC V2 button
-        "dashboard/orchestration_hub.html",         # ORCHESTRATION button
-        "dashboard/social_distribution.html",       # SOCIAL button
-        "dashboard/revenue_acceleration.html",      # REVENUE+ button
-        "dashboard/revenue_dashboard.html",         # REVENUE button
-        "dashboard/web3_dashboard.html",            # WEB3 INTEL button
-        "dashboard/analyst_dashboard.html",
-        "dashboard/agents_control_panel.html",
-        "dashboard/threat_graph_dashboard.html",
-    ]
-    missing_dashboard: List[str] = []
-    for route in NAV_DASHBOARD_ROUTES:
-        src_path  = REPO_ROOT / route
-        dist_path = DIST_DIR  / route
-        if not src_path.exists():
-            log.warning("  WARN: Source not in repo (skipped): %s", route)
-            continue
-        if not dist_path.exists():
-            missing_dashboard.append(route)
-            log.error("  MISSING in dist/: %s", route)
-        else:
-            log.info("  OK: %s", route)
+    missing_dashboard = missing_dashboard_routes(REPO_ROOT, DIST_DIR)
 
     if missing_dashboard:
         log.error("")
@@ -1003,7 +1023,7 @@ def main() -> int:
         log.error("  ACTION: Add 'dashboard' to INCLUDE_DIRS and re-run the build.")
         return 1
 
-    checked = len([r for r in NAV_DASHBOARD_ROUTES if (REPO_ROOT / r).exists()])
+    checked = len([r for r in NAV_DASHBOARD_ROUTES if (REPO_ROOT / r).exists() and not is_excluded_by_design(r)])
     log.info("  dashboard/ route validation: %d routes checked — ALL PRESENT in dist/", checked)
 
     # ── 5.2. Validate PAYMENT-GATEWAY.html in dist/ (v158.0 HARD FAIL) ──────
