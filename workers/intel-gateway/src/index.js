@@ -6592,7 +6592,12 @@ async function handleRequest(request, env, ctx) {
   // (see isAuthenticatedOperatorRequest). Wrong or missing secrets are still
   // metered here.
   const operatorPlane = isAuthenticatedOperatorRequest(request, env, path);
-  if (!firstPartyRead && !operatorPlane && path !== "/api/health" && path !== "/api/health/" && path !== "/api/health/live") {
+  // `!paymentWebhook`: a Razorpay or Gumroad delivery that passes its route's
+  // own verification is provider traffic, not anonymous API consumption (see
+  // isVerifiedPaymentWebhook). Unverified deliveries are still metered here.
+  const paymentWebhook = !operatorPlane && path.startsWith("/api/webhooks/")
+    && await isVerifiedPaymentWebhook(request, env, path);
+  if (!firstPartyRead && !operatorPlane && !paymentWebhook && path !== "/api/health" && path !== "/api/health/" && path !== "/api/health/live") {
     const rl = await checkRateLimit(env, ip, auth.tier);
     if (!rl.allowed) {
       auditLog(ctx, env, { action: "rate_limited", ip, path, method, tier: auth.tier });
@@ -9081,6 +9086,68 @@ function isAuthenticatedOperatorRequest(request, env, path) {
     return isWatchdogOperator(request, env);
   }
   return false;
+}
+
+// Payment-provider webhooks (F9, 2026-10-01). Razorpay and Gumroad deliver
+// to /api/webhooks/* with a signature or a shared secret, never a customer
+// credential, so resolveAuth() leaves them FREE and anonymous and the
+// commercial gate metered them: 30/min and 50/day per provider egress IP.
+// The next delivery after either cap got 429, so a paid order or sale was
+// not provisioned until the provider retried. A delivery that passes its
+// route handler's own check (same secret, same comparison) is selected out
+// of anonymous metering here; the handler still verifies it again and stays
+// the only authorization decision. Anything unverified, and any Razorpay body
+// over WEBHOOK_VERIFY_MAX_BYTES, is metered exactly as before.
+const WEBHOOK_VERIFY_MAX_BYTES = 64 * 1024;
+
+async function isVerifiedPaymentWebhook(request, env, path) {
+  if (request.method !== "POST") return false;
+  if (path === "/api/webhooks/gumroad") {
+    // handleWebhookGumroad: ?secret= against GUMROAD_WEBHOOK_SECRET
+    const token = new URL(request.url).searchParams.get("secret") || "";
+    return !!env.GUMROAD_WEBHOOK_SECRET && !!token && timingSafeEqual(token, env.GUMROAD_WEBHOOK_SECRET);
+  }
+  if (path === "/api/webhooks/razorpay") {
+    // handleWebhookRazorpay: X-Razorpay-Signature, HMAC-SHA256 of the raw body
+    const sig = request.headers.get("X-Razorpay-Signature") || "";
+    if (!env.RAZORPAY_WEBHOOK_SECRET || !sig) return false;
+    try {
+      const body = await readBodyCapped(request.clone(), WEBHOOK_VERIFY_MAX_BYTES);
+      return body !== null && await verifyRazorpayHmac(body, sig, env.RAZORPAY_WEBHOOK_SECRET);
+    } catch (_) {
+      return false; // unreadable here: metered as before, never a 500
+    }
+  }
+  return false;
+}
+
+// The request's body as text, or null once it passes maxBytes. Called on a
+// clone, so the original request keeps its body for the route handler.
+async function readBodyCapped(request, maxBytes) {
+  if (Number(request.headers.get("Content-Length")) > maxBytes) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      // Not awaited: a cancelled clone branch settles only once the
+      // original branch is cancelled too, which may never happen.
+      reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 // Autonomous Watchdog evaluation, driven by the existing 15-minute cron.
