@@ -32,7 +32,7 @@ certification workflow must run on the exact deployed SHA.
 | `main` | `1b8098c96` | Dependabot action bumps after `f59387a` (#633–#635); no gateway source change; this branch merges cleanly |
 | Deployed gateway | `f59387a735e34b75bdaf9a8523c75040fe2eae29`, deploy run 36688506844 | `GET /api/health/live` 2026-09-30 16:59Z–18:23Z and 2026-10-01 05:50Z |
 | Live health | 200, `ok`, generated 2026-10-01T05:15:14Z, 57 advisories | `GET /api/health` at 2026-10-01T05:50Z |
-| Branch commits | `5efa55206`, `5f8a3cb4f`, `89a25865a`, `8f37c95ea`, `a3f8d851c` (ledger), `b6d40c13b` (R09), `481319176` (ledger), `d1c8f3e65` (F9), `02128ebd7` (F13) | `git log` |
+| Branch commits | `5efa55206`, `5f8a3cb4f`, `89a25865a`, `8f37c95ea`, `a3f8d851c` (ledger), `b6d40c13b` (R09), `481319176` (ledger), `d1c8f3e65` (F9), `02128ebd7` (F13), `a3db019db` (ledger), `494446a09` (F5); PR #636 | `git log` |
 
 Overnight 2026-09-30/10-01, from `generated_at` values the publisher's own
 freshness gate logged (no probe sampled either window; this session
@@ -147,13 +147,20 @@ match current responses (for example `checks.jwt_configured` left the public
 `/api/health` view). Owner decision; a name-drift test should land with any
 revival.
 
-### F5 — Failing tests that CI never runs (R29) — REPORTED
+### F5 — Failing tests that CI never runs (R29) — concurrency part FIXED on branch (`494446a09`)
 
-- `tests/test_workflow_concurrency_scoping.py` is in the
-  `intel-gateway-regression-gate.yml` suite list, but inside one bash comment
-  line that contains literal `\n` sequences, so it is never executed. It fails
-  today (`arsenal.yml: missing top-level concurrency.group`).
-- `tests/test_deploy_provenance_contract.py` and
+- Root cause: PR #563 (`d1842a138`, 2026-09-28) wrote its YAML edits with
+  literal `\n` sequences. Each replacement became one line starting with `#`,
+  so seven derived-writer workflows (arsenal, convergence, bughunter-recon,
+  bughunter-resilient, omnishield, precognition-engine, syndicate) lost their
+  concurrency block entirely and have run with no concurrency control since;
+  and `tests/test_workflow_concurrency_scoping.py` sat inside a comment in the
+  regression gate's suite list, so it never ran (it failed on `main`). #570
+  had already repaired `weekly-analyst-briefing.yml` the same way.
+- Fix: the seven blocks restored in #570's wording with #563's groups (each
+  replaced line asserted byte-for-byte first); the suite line restored. The
+  test passes 2/2 and now runs in the PR gate.
+- Still reported: `tests/test_deploy_provenance_contract.py` and
   `tests/test_weekly_threat_brief_branch_protection.py` are in no workflow and
   fail on `main`.
 
@@ -291,12 +298,16 @@ Not contract terms, so not changed without an owner source:
   before STAGE 4, which would untrack thousands of reports from `main` and
   change `config/platform-evidence.json` counts.
 
-### F14 — P36/P37 certification reports are 35 days old (R30–R34) — REPORTED
+### F14 — Committed certification reports are 1–5 weeks old (R30–R34) — REPORTED
 
 Both publisher runs logged `r2_resync: skipped stale
-data/quality/p36_certification_report.json` and `p37` (`generated_at`
-2026-08-26, ~859h old, limit 6h): the pipeline does not regenerate them, so
-they are not current certification evidence.
+data/quality/p36_certification_report.json` and `p37` (~859h old, limit 6h).
+On `main`, `data/quality/p26`–`p32` and `p34`–`p38` certification reports all
+carry `generated_at` 2026-08-26 (last written by conflict-recovery commit
+`39407bc53`) and `p33` 2026-09-24. The publisher's P34–P38 stages run each time,
+but their output is not what is committed. None of these files is current
+certification evidence; the P33 result cited in this ledger is recomputed
+locally on each run, not read from the committed report.
 
 ## R01–R35 status
 
@@ -330,8 +341,8 @@ they are not current certification evidence.
 | R26 | Verify | Not examined |
 | R27 | Owner decision | F8 |
 | R28 | Fixed on branch | API docs, reference card, developer portal and header semantics match the gateway (F10) |
-| R29 | Gaps reported; F13 fixed on branch | F3, F4, F5, F13 |
-| R30–R34 | Verify | F14: P36/P37 certification reports stale |
+| R29 | Gaps reported; F5 (concurrency) and F13 fixed on branch | F3, F4, F5, F13 |
+| R30–R34 | Verify | F14: committed P26–P38 certification reports are 1–5 weeks old |
 | R35 | This ledger | — |
 
 ## Proof Before Change (this session)
@@ -344,6 +355,7 @@ they are not current certification evidence.
 | F3 `8f37c95ea` | Reliable freshness self-heal trigger | new module, `index.js` cron branch, `wrangler.toml`, guard policy + test | intel_freshness_guard.py decision logic, existing cron | guard 5/48 runs/day; 07:51→15:33 gap | LOW (dormant) | revert or flag `"false"` |
 | F9 `d1c8f3e65` | Provider deliveries never refused by anonymous budgets | `index.js`, new test | verifyRazorpayHmac, timingSafeEqual, F2 gate pattern | route order + resolveAuth; 3 tests 429 before | LOW (two routes; handlers unchanged) | revert |
 | F13 `02128ebd7` | A protective no-op cannot fail the publisher job | `report_archive_manager.py`, `sentinel-blogger.yml` (comments, one message), new test, regression gate | the script's floor and git helpers | run 36815948964 log and skipped steps vs 36774798831 | LOW (one return path) | revert |
+| F5 `494446a09` | Derived writers serialize with themselves, not the core publisher, as #563 was reviewed to do | 7 workflows, regression gate suite line | #563's groups, #570's wording | `git show d1842a138`; no `concurrency` key after YAML parse; test failed on `main` | LOW (adds per-workflow queuing; no step changes) | revert |
 | F10 `b6d40c13b` | Buyer copy equals enforced terms | README.md, 30 pages, 2 gates, evidence register, new suite, regression-gate workflow | commercial-contract.json, platform-evidence.json, both gates extended in place | pages vs contract; code and live headers for security copy | LOW (static copy; CI additions only) | revert |
 
 Blast radius (F10): no route, Worker, schema, auth or payment code; pages
@@ -377,6 +389,9 @@ none; `/api/v1/p*` shapes — unchanged; data schema — none (fewer
   529 passed (1 pre-existing F5 failure, identical on HEAD); ci_preflight 9/9;
   python governance 0/482; validate_repo 9/9; regression 41/41; P33
   WORLDWIDE_RELEASE, 0 blockers.
+- F5 (`494446a09`): `test_workflow_concurrency_scoping` 2/2 (1 failed on
+  `main`); PR python suites 1,845 passed; workflow-hygiene gate 28 passed; all
+  13 test files that read `.github/workflows` pass (197).
 - R09 (`b6d40c13b`): PR python suites 1,839 passed; 27 other page-reading
   suites 502 passed / 1 skipped; gateway suite 1,638/1,638; billing negative
   controls 101/101; `verify_commercial_contract.py` 5,366/0;
