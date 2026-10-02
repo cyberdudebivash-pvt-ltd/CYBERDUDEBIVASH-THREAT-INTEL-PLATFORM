@@ -103,74 +103,15 @@ on:
       - 'config/evidence-register.json'
       - 'config/platform-evidence.json'
       - 'customer/**'
+  # Required-check readiness (2026-10-02): no path filter on pull requests.
+  # A required status check that a path filter skips never reports, so a
+  # pull request touching none of these paths (docs only, for example) would
+  # wait for it forever. Every pull request to main therefore runs both jobs
+  # below; their job names are the check names a ruleset requires (see
+  # tests/test_regression_gate_required_check_readiness.py). Pushes to main
+  # keep the path filter above.
   pull_request:
     branches: [main]
-    paths:
-      - 'workers/intel-gateway/src/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - '.github/workflows/intel-gateway-regression-gate.yml'
-      - '.github/workflows/deploy-revenue-engine.yml'
-      # Cyber Watchdog: the gateway suite also imports the canary library and
-      # reads these pages (publication-truth, watchdog-canary tests).
-      - 'workers/intel-gateway/scripts/watchdog-negative-controls.mjs'
-      # AI Threat Feed seed catalog (ai-threat-feed.test.js parity).
-      - 'config/ai-threat-feed-catalog.json'
-      # Customer dashboard data contract: the suite and its negative controls
-      # read these runtime files.
-      - 'workers/intel-gateway/scripts/dashboard-negative-controls.mjs'
-      # Commercial policy v1 billing (refunds, GST invoices, subscriptions-
-      # only checkout): the controls mutate revenue-engine + gateway code.
-      - 'workers/revenue-engine/scripts/billing-negative-controls.mjs'
-      - 'workers/revenue-engine/src/**'
-      - 'revenue-crm/schema.sql'
-      - 'js/sentinel-live-feeds.js'
-      - 'js/apex-dashboard-snapshot.js'
-      - 'service-worker.js'
-      - 'deploy/cyber-watchdog/**'
-      - 'deploy/billing-canary/**'
-      - 'index.html'
-      - 'cyber-watchdog.html'
-      # SENTINEL APEX UI system: watchdog-apex-ui.test.js and its negative
-      # controls read these.
-      - 'css/apex-design-tokens.css'
-      - 'css/homepage-design-system.css'
-      - 'js/homepage-dashboard-engine.js'
-      - 'scripts/homepage_source.py'
-      - 'security.txt'
-      - '.well-known/**'
-      - 'scripts/security_txt_validator.py'
-      - '*.html'
-      - 'blog/**'
-      - 'sitemap*.xml'
-      - 'favicon.ico'
-      - 'dashboard/**'
-      - '.github/workflows/sla-heartbeat.yml'
-      - 'scripts/build_dist_artifact.py'
-      - 'js/apex-status-model.js'
-      - 'js/card_renderer.js'
-      # ATT&CK reference: dashboard-contract.test.js checks the generated
-      # technique->tactic table against it.
-      - 'data/attck/**'
-      # MSSP tenant self-service: the suite checks these docs against the
-      # live routes, and a negative control mutates revenue-engine rotation.
-      - 'MSSP_PARTNER_PROGRAM.md'
-      - 'mssp.html'
-      - 'docs/MSSP_TENANT_IDENTITY_V185.md'
-      - 'workers/revenue-engine/src/**'
-      # Customer-visible release labels and MSSP commercial copy (checked
-      # below by customer_release_label.py and verify_commercial_contract.py).
-      - '*.html'
-      - 'MSSP_OPERATIONAL_RUNBOOK.md'
-      - 'mssp-onboarding-kit/**'
-      - 'config/commercial-contract.json'
-      - 'VERSION'
-      # README.md tier table, social-proof register, measured evidence
-      # floors and the customer key page (commercial claims suite).
-      - 'README.md'
-      - 'config/evidence-register.json'
-      - 'config/platform-evidence.json'
-      - 'customer/**'
   workflow_dispatch: {}
 
 permissions:
@@ -465,6 +406,12 @@ jobs:
             tests/test_premium_feed_baseline_guard.py
             tests/test_premium_baseline_r2_state_wiring.py
             tests/test_tiered_feed_metadata_truth.py
+            # Required-check readiness (2026-10-02): both gates report on every
+            # pull request with stable, unskippable check names; the
+            # certification's canary step records a failing canary's reason
+            # (F28). Local files (+ bash and jq).
+            tests/test_regression_gate_required_check_readiness.py
+            tests/test_certification_canary_step_records_failures.py
           )
           python3 -m pytest "${SUITES[@]}" -q
           # Refuse to pass having run nothing. pytest.ini forces --verbose, so
