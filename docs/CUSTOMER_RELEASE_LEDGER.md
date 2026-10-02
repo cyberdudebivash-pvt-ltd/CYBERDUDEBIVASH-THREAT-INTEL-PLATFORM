@@ -7,9 +7,9 @@ stay as point-in-time records; this file carries current status. Update it in
 the same PR as the change that moves a row. Historic evidence is never reused
 as current certification.
 
-Last updated: 2026-10-02T03:40Z, branch `claude/charming-thompson-ptma8e` (payment release
-closure P0: payment-to-entitlement fixes, F21/F22/F24, SAST classifier;
-not yet merged or deployed).
+Last updated: 2026-10-02T07:00Z, branch `claude/charming-thompson-ptma8e` (payment release
+closure P0 merged as #641 → `acc38a24d` and deployed; post-merge
+verification; follow-up for the regression gate it left red).
 
 ## Decision
 
@@ -27,11 +27,12 @@ not yet merged or deployed).
 - The revenue engine never sends the paid-key welcome email (F22). The
   sender is fixed but stays off until the owner decides whether paid keys
   are emailed (payment release closure P0).
-- Payment release closure P0 (2026-10-02, PR pending) fixes three P0
-  payment-to-entitlement defects found in this pass (P0-1 legacy Razorpay
-  webhook provisioned any captured payment; P0-2 the daily check locked
-  out paying Razorpay subscribers; P0-3 a failed Gumroad provisioning was
-  never retried). None is deployed yet.
+- Payment release closure P0 (#641 → `acc38a24d`, deployed 04:03Z) fixes
+  three P0 payment-to-entitlement defects found in this pass (P0-1 legacy
+  Razorpay webhook provisioned any captured payment; P0-2 the daily check
+  locked out paying Razorpay subscribers; P0-3 a failed Gumroad
+  provisioning was never retried). Proven by tests and negative controls;
+  no live payment has exercised them.
 - Lifecycle state changes are only eventually consistent (F17).
 - The per-minute limiter does not fire (F18).
 - The feed breached its freshness threshold twice overnight (F3).
@@ -67,11 +68,11 @@ entitlement: no live payment was run.
 | Checkout: Razorpay the one primary path, Gumroad offered only when it can activate access, assisted note only, inline failures (checkout P0) | yes | 95 browser checks, 12 static, 3 gateway, 2 revenue; 10/10 page mutations and 2 billing controls caught | `aa97c8366` (Pages run 36914356330) | PASS | — | 127/127 live browser checks (320–1280 px), 30/30 static; Checkout P0 → Post-merge verification |
 | A paid checkout's retry cannot open a second payment (checkout P0) | yes | 2 tests + control | `aa97c8366` (revenue run 36914355894) | NOT TESTED live (needs a paid checkout) | provider test mode or explicit authorization | tests and the negative control ran in CI on the merged head |
 | Payment → entitlement → key, live | yes | cross-worker certified in tests | yes | NOT TESTED | provider test mode or explicit authorization | no real charge was made |
-| Key delivery email (Razorpay) | sender fixed, off by default (F22) | 6 tests, 2 controls | no (PR pending) | NOT TESTED (would send real email) | owner decision + `SENDGRID_API_KEY` (F22) | before: `queueEmail` without `send_at` was never selected by `runDailyOutreach` |
-| Legacy Razorpay Orders provision only this gateway's Orders at the exact price (P0-1) | yes | 7 tests, 4 controls | no (PR pending) | NOT TESTED live | — | payment release closure P0 |
-| Razorpay renewals: no lockout after the daily check, renewal grace, Plan binding, claim release, one key per subscription (P0-2, P1-1..4) | yes | 14 tests, 8 controls | no (PR pending) | NOT TESTED live | provider test mode | payment release closure P0 |
-| Gumroad provisioning failure retried with one key (P0-3) | yes | 5 tests, 2 controls | no (PR pending) | NOT TESTED live | F21 secret | payment release closure P0 |
-| SAST classifier without full-history checkout | yes | 33 tests + 16 subtests, mutations caught | n/a (CI) | measured on this PR's CI run | — | payment release closure P0 → SAST classifier |
+| Key delivery email (Razorpay) | sender fixed, off by default (F22) | 6 tests, 2 controls | `acc38a24d` | NOT TESTED (would send real email) | owner decision + `SENDGRID_API_KEY` (F22) | before: `queueEmail` without `send_at` was never selected by `runDailyOutreach` |
+| Legacy Razorpay Orders provision only this gateway's Orders at the exact price (P0-1) | yes | 7 tests, 4 controls | `acc38a24d` | NOT TESTED live | — | payment release closure P0 |
+| Razorpay renewals: no lockout after the daily check, renewal grace, Plan binding, claim release, one key per subscription (P0-2, P1-1..4) | yes | 14 tests, 8 controls | `acc38a24d` | NOT TESTED live | provider test mode | payment release closure P0 |
+| Gumroad provisioning failure retried with one key (P0-3) | yes | 5 tests, 2 controls | `acc38a24d` | NOT TESTED live | F21 secret | payment release closure P0 |
+| SAST classifier without full-history checkout | yes | 33 tests + 16 subtests, mutations caught | `acc38a24d` (CI) | PASS: classify step 1 s on PR run 1134 (2 commits fetched in 1 s), 0 s on push run 1135; was 207 s of checkout | — | payment release closure P0 → SAST classifier |
 
 | SKU / capability | Status | Blocking evidence |
 | --- | --- | --- |
@@ -87,14 +88,14 @@ entitlement: no live payment was run.
 
 | Component | Value | Evidence |
 | --- | --- | --- |
-| `main` | `5911a9722` | #636 → `c14dbae11` (tree = reviewed head `82d9b7b5c`); #637 → `d80c72643` (tree = `ce348b2a2`); #638 → `8b2d82862` (tree `fa08a0feb`); #639 squash-merged 19:26Z → `aa97c8366` (tree `6cfc4fa5f` = reviewed head `baaf2ffee`); #640 (ledger only) → `5911a9722`, which deploys no Worker |
-| Deployed gateway | `aa97c83660c1e43b0116a8f4edee8890383d07a8`, deploy run 36914355832 (19:29Z; gates, full unit suite, exact-commit smoke) | `GET /api/health/live` 19:29Z: `deploy_commit_sha` |
-| Deployed revenue engine | `aa97c8366`, deploy run 36914355894 (19:28Z; lifecycle gate, deploy, smoke) | run log |
+| `main` | `acc38a24d` | #636 → `c14dbae11` (tree = reviewed head `82d9b7b5c`); #637 → `d80c72643` (tree = `ce348b2a2`); #638 → `8b2d82862` (tree `fa08a0feb`); #639 squash-merged 19:26Z → `aa97c8366` (tree `6cfc4fa5f` = reviewed head `baaf2ffee`); #640 (ledger only) → `5911a9722`, which deploys no Worker; #641 squash-merged 04:01:40Z by the repository owner → `acc38a24d` (tree `150d41a13` = reviewed head `5c6c6a8ad`) |
+| Deployed gateway | `acc38a24d95c7cf804463ea566c76419a4d92f79`, deploy run 36962733324 (04:03Z) | `GET /api/health/live` 06:47Z: `deploy_commit_sha`, `deploy_run_id` 36962733324 |
+| Deployed revenue engine | `acc38a24d`, deploy run 36962733371 (04:03Z; deploy gate 198/198, version `5592ba55`) | run log |
 | Pages | `aa97c8366`, pages-fast-publish run 36914356330 (19:36Z; all pre-deploy browser gates incl. the rewritten checkout test) | `gh-pages` copies of the five checked pages are byte-equal to `aa97c8366` |
 | Live health | 200 `ok`, freshness FRESH; feed generated 2026-10-01T21:36:32Z (age 4h13m, limit 6h), 61 items. At 19:38Z: generated 16:01:55Z (age 3h37m), 63 items | `GET /api/health`, `/api/watchdog/health` 2026-10-02T01:50Z and 2026-10-01T19:38Z |
 | Re-check 2026-10-02T01:50Z | gateway still `aa97c8366`; `/api/pricing` `checkout` block unchanged; live `upgrade.html` still the #639 page | read-only GETs |
 | Re-check 2026-10-02T03:17Z | gateway still `aa97c8366` | `GET /api/health/live` |
-| Open PR | payment release closure P0 (this change) | — |
+| Open PR | follow-up to #641: two watchdog negative controls re-anchored (this change) | — |
 
 Overnight 2026-09-30/10-01, from `generated_at` values the publisher's own
 freshness gate logged (no probe sampled either window; this session
@@ -519,7 +520,7 @@ sentinel-blogger 36859743101 success (13:24Z) with STAGE 5.4.6, 5.4.6b,
 167, 168, 176, 178, 186) all success. Live at 18:16Z: the three quarantined
 pages answer 404.
 
-### F21 — Gumroad purchases are not provisioned in production (R05) — OPERATOR-BLOCKED (P0); recovery defect P0-3 fixed on branch
+### F21 — Gumroad purchases are not provisioned in production (R05) — OPERATOR-BLOCKED (P0); recovery defect P0-3 fixed and deployed (#641)
 
 `POST /api/webhooks/gumroad` answers 500 "Webhook secret not configured"
 (11:33Z, still at 19:30Z). Gumroad provisioning is webhook-only. Until #639,
@@ -542,7 +543,7 @@ from the Gumroad sales export (each needs a key provisioned through the admin
 API or a replayed ping). Until then, consider whether the Gumroad buttons
 should stay up; removing a mandated provider is the owner's call.
 
-### F22 — The paid-key welcome email is never sent (R05) — sender FIXED on branch, off by default; OWNER DECISION
+### F22 — The paid-key welcome email is never sent (R05) — sender FIXED and deployed (#641), off by default; OWNER DECISION
 
 Razorpay activation calls `provisionCustomer()` (revenue engine), which
 queues `welcome_provisioned` (the API key) with `queueEmail()` and no
@@ -557,7 +558,7 @@ enabling it sends customer email and could flush 30 days of queued messages):
 set `send_at` at queue time for transactional templates only, send them on
 activation rather than at the 09:00 cron, and confirm the provider key.
 
-### F24 — The revenue engine's deploy never shows the commercial readiness verdict (R10, R29) — step FIXED on branch; secret check OPERATOR
+### F24 — The revenue engine's deploy never shows the commercial readiness verdict (R10, R29) — step FIXED (#641); live run shows the repository secret rejected (HTTP 401); OPERATOR
 
 `deploy-revenue-engine.yml` "Commercial readiness report" printed "NOTE:
 readiness endpoint not reachable yet" on 2026-09-28 (run 36460344094) and
@@ -579,6 +580,23 @@ prices are $49 / $499 / $999. The route answers 401 anonymously (probed
 2026-10-01) and the page that reads it never renders the block (it expects an
 array and gets an object), so no buyer page shows it. Fix: derive the block
 from `config/commercial-contract.json` or remove it, in a P33 bug-fix PR.
+
+### F25 — The publisher cannot persist its committed state to `main` (R10, R15) — REPORTED, OWNER
+
+`safe_git_commit.py` in `sentinel-blogger` commits the run's STIX bundles,
+reports, `index.html` and `data/cache/feed_state.json`. Its push to `main`
+has been rejected on every run checked (2026-10-01 06:50Z and 15:25Z,
+2026-10-02 03:13Z and 06:04Z): `GH013: Repository rule violations found
+for refs/heads/main`. Ruleset 21556637 ("SENTINEL APEX Production Main
+Protection", created 2026-08-26 11:39Z) requires a pull request and linear
+history. The last publisher commit on `main` is 2026-08-26 10:30Z. The
+step logs an error but does not fail the job, and each run starts from
+`main`'s 26 August state. Customer feeds are served from R2 and the
+Worker, and stayed fresh (`public_feed_freshness_gate` PASS, 06:22Z), so
+the visible impact is limited to state the publisher reads back from git.
+That impact was not measured. This is an owner decision: give the
+publisher's token a ruleset bypass, or stop committing pipeline state to
+`main`. No code change was made.
 
 ## Checkout P0: Razorpay primary, Gumroad secondary, assisted note only (2026-10-01) — MERGED (#639 → `aa97c8366`), DEPLOYED, LIVE PASS (presentation and gating); payment E2E BLOCKED
 
@@ -742,7 +760,7 @@ not committed.
 - Payment release closure P0: merge and deploy (both Workers); the owner
   may confirm `RENEWAL_GRACE_HOURS` (default 96).
 
-## Payment release closure P0 (2026-10-02) — on branch, PR pending; NOT DEPLOYED
+## Payment release closure P0 (2026-10-02) — MERGED (#641 → `acc38a24d`), DEPLOYED; live payment E2E BLOCKED
 
 Base: `main` `5911a9722`. The deployed gateway is still `aa97c8366` (`/api/health/live`
 03:17Z). This section covers F21/F22/F24 (Task 1), payment-to-entitlement
@@ -778,7 +796,7 @@ still shows `provisionCustomer`'s 30/365-day date.
 | --- | --- | --- | --- | --- | --- |
 | F21 | `POST /api/webhooks/gumroad` answers 500 "Webhook secret not configured"; Gumroad sales are never provisioned | the four access products are still purchasable by direct URL: a buyer pays and gets no key | CREDENTIAL (secret, ping URL) + PRODUCT (keep or unpublish the four products; reconcile past sales) | the #639 gate keeps Gumroad off the checkout; P0-3 means a transient failure no longer strands a sale once the secret is set | set `GUMROAD_WEBHOOK_SECRET` and the ping URL; decide on the four products; reconcile sales since 2026-09-25 |
 | F22 | the paid-key welcome email is queued without `send_at` and never sent | a Razorpay buyer who loses the checkout tab has no copy of the key | PRODUCT (email a raw API key or not) + CREDENTIAL (`SENDGRID_API_KEY`); sender was ENGINEERING | sender fixed but **off** unless `KEY_EMAIL_DELIVERY_ENABLED="true"`: sent once at activation, one retry, then `failed`; `sent` only on provider success; older queued keys never flushed; readiness warning | decide whether paid keys are emailed; if yes, set the flag and the SendGrid key |
-| F24 | the revenue deploy's readiness step printed "not reachable" instead of the verdict | a BLOCKED readiness verdict (e.g. F21) never reaches the deploy log | ENGINEERING (step) + CREDENTIAL (repository secret probably differs from the Worker's) | the step prints the verdict or the HTTP status, says when the secret was rejected or an edge block answered, retries 5xx and no-response 3 times, never prints the secret; still informational | confirm the repository `REVENUE_ADMIN_SECRET` equals the Worker's; the next revenue deploy shows the real status |
+| F24 | the revenue deploy's readiness step printed "not reachable" instead of the verdict | a BLOCKED readiness verdict (e.g. F21) never reaches the deploy log | ENGINEERING (step) + CREDENTIAL (repository secret probably differs from the Worker's) | the step prints the verdict or the HTTP status, says when the secret was rejected or an edge block answered, retries 5xx and no-response 3 times, never prints the secret; still informational | set the repository `REVENUE_ADMIN_SECRET` to the Worker's value: deploy run 36962733371 (04:03Z) printed "HTTP 401: the revenue engine rejected the REVENUE_ADMIN_SECRET repository secret" |
 
 ### Payment to entitlement: deterministic proof
 
@@ -827,6 +845,40 @@ dependency manifest → the dependency scanner; mixed → code scanners;
 deletion and rename in or out of `agent/`; unusual paths; unreachable
 remote, missing commit, malformed SHAs → failure; and the real gate script
 fails on every non-success classification.
+
+### Post-merge verification (2026-10-02)
+
+- **Merge.** #641 was squash-merged at 04:01:40Z by the repository owner
+  as `acc38a24d`, whose tree equals the reviewed head `5c6c6a8ad`. 16 of
+  17 checks on that head were green, `SAST Gate (required)` included. One
+  was red since 03:30Z: `workers/intel-gateway -- full unit suite`. Its
+  Cyber Watchdog negative-control step reported 2 of 98 controls as
+  `MUTATION_ANCHOR_MISSING`: `razorpay_verify_mssp_parity_broken` and
+  `gumroad_mssp_parity_broken`. #641 rewrote the two `provisionApiKey`
+  calls those controls mutate, and my local validation had not run that
+  harness. Every later step in the job was skipped. The follow-up PR
+  re-anchors both controls with the same mutation and the same test.
+  Locally: 98/98 caught, dashboard controls 31/31, rollback artifact builds.
+- **Main after the merge.**
+  - deploy-worker 36962733324 succeeded; deploy-revenue-engine
+    36962733371 succeeded (deploy gate 198/198).
+  - SAST 1135 succeeded; the regression gate failed for the anchor reason
+    above.
+  - Commercial certification 36962733292 failed only on the Enterprise
+    signed-webhook canary, which is BLOCKED (`OPERATOR_WEBHOOK_SINK_REQUIRED`).
+    Every other live canary and phase passed against `acc38a24d`: PRO,
+    MSSP self-service, MSSP rotation, autonomous scheduler, authenticated
+    customer ops, lifecycle matrix, expiry boundary, MSSP isolation and
+    the FREE rate-limit boundary.
+- **Live (read-only or rejected input, 06:47–06:48Z).**
+  - `/api/health/live` reports `acc38a24d`.
+  - `/api/pricing` `checkout`: Razorpay primary; Gumroad
+    `available: false` (`automated_provisioning_not_configured`).
+  - Billing canary, public mode: 14/15. The only failure is F21.
+- **Scheduled publisher.** Run 36969320297 (05:31Z) failed at STAGE 5:
+  its `gh-pages` push lost a ref race ("cannot lock ref ... expected").
+  Its push to `main` was also rejected by the ruleset, as on every run
+  since 26 Aug (F25). Neither is caused by #641.
 
 ### Commercial truth recheck (Task 4)
 
@@ -885,12 +937,12 @@ anonymous; HSTS on the site and the API.
 | R02 | Open (#596), FinOps | F17: FAIL 07:01Z / PASS 08:56Z on the same matrix; copy now says "within about a minute" |
 | R03 | 500→429 deployed; limiter never reaches the cap | F1, F18 (`200x33` live on two SHAs); product + FinOps decision |
 | R04 | Fixed, live PASS | F2: MSSP rotation canary PASS in cert 36839516753 |
-| R05 | Gumroad FAIL (P0, operator; not offered on the live checkout since #639); Razorpay webhook configured; key email off pending owner decision (F22); P0-1..3 fixed on branch | F21, F22, Checkout P0, payment release closure P0; signed deliveries and a live payment need provider test mode (credential) |
+| R05 | Gumroad FAIL (P0, operator; not offered on the live checkout since #639); Razorpay webhook configured; key email off pending owner decision (F22); P0-1..3 fixed and deployed (#641) | F21, F22, Checkout P0, payment release closure P0; signed deliveries and a live payment need provider test mode (credential) |
 | R06 | Latent risk fixed on branch | F9 (`d1c8f3e65`) |
 | R07 | Partial live evidence | Cert 36690549981: MSSP isolation and self-service phases PASS |
 | R08 | Partial | SAST run 36744969006 on `022ecae4` success; ESLint no-undef sweep of all Worker source (F1). Dependency scan not re-run here. The required SAST gate's classifier no longer times out on checkout (payment release closure P0) |
 | R09 | F10, F19 and checkout copy live (#639) | F10, F19, Checkout P0 (instant / EMI / GST / recurring-billing claims); F12, F23 open |
-| R10 | F13 live PASS; F20 resolved | F4 (post-deploy validation not chained since 2026-09-24); F13 proven on runs 36826966415 and 36859743101; F24 (revenue deploy readiness report silent; step fixed on branch) |
+| R10 | F13 live PASS; F20 resolved | F4 (post-deploy validation not chained since 2026-09-24); F13 proven on runs 36826966415 and 36859743101; F24 (step fixed in #641; it now shows HTTP 401, a repository secret mismatch); F25 (publisher push to `main` rejected since 2026-08-26) |
 | R11 | Open (#593) | Human review pending; unchanged |
 | R12 | Partial | F10; F11 quarantined, live 404 (18:16Z); F15 live PASS; F16 open |
 | R13 | Verify | Not examined |
