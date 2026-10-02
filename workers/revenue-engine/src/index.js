@@ -8,7 +8,7 @@
 // Phase 2 (foundational pass): Razorpay Subscriptions -- subscription
 // creation, webhook lifecycle, entitlement sync. See subscription-engine.js
 // for scope notes (refunds/upgrades/downgrades/checkout-cutover deferred).
-import { handleBillingSubscriptionCreate, handleBillingSubscriptionStatus, handleBillingWebhook, patchApiKeyEntitlement, patchInternalSub, tryTransition, PLAN_ID_ENV_KEYS } from "./subscription-engine.js";
+import { handleBillingSubscriptionCreate, handleBillingSubscriptionStatus, handleBillingWebhook, patchApiKeyEntitlement, patchInternalSub, tryTransition, PLAN_ID_ENV_KEYS, keyAccessUntil } from "./subscription-engine.js";
 import { handleRefundRequest, handleRefundList, handleRefundApprove, handleRefundReject, handleInvoiceList, handleInvoiceView, handleInvoiceHolds, handleInvoiceIssue, handleSubscriptionCancel, handleCreditNoteList, handleCreditNoteView, handleCreditNotesPending, handleCreditNoteIssue, handleBillingAccount } from "./billing-routes.js";
 import { handleCommercialReadiness, buildCommercialReadiness } from "./commercial-readiness.js";
 import { handleQuoteCreate, handleQuoteList, handleQuoteView, handleQuoteAccept, handleQuoteCancel, handleQuoteInvoice, handleQuoteReconcile, handleQuoteProvision } from "./enterprise-po.js";
@@ -910,9 +910,14 @@ async function runDailyOutreach(env) {
       }
     }
     for (const { key, msg } of toSend.slice(0, 50)) {
-      await sendEmailViaProvider(env, msg);
-      msg.status = "sent";
-      msg.sent_at = now;
+      const outcome = await sendEmailViaProvider(env, msg);
+      // F22 (2026-10-02): "sent" only when the provider accepted it (a
+      // missing key or a provider error was recorded as sent). All three
+      // outcomes are terminal, so configuring a provider later can never
+      // flush old messages.
+      msg.status = outcome === "sent" ? "sent" : outcome === "no_provider" ? "skipped_no_provider" : "failed";
+      msg.processed_at = now;
+      if (outcome === "sent") msg.sent_at = now;
       await env.EMAIL_QUEUE_KV?.put(key, JSON.stringify(msg), { expirationTtl: 86400 * 7 });
     }
   } catch {}
@@ -1191,23 +1196,44 @@ async function outreachQueueDirect(env, email, sequenceName, vars) {
   }
 }
 
+/** @returns {Promise<"sent"|"failed"|"no_provider">} never throws */
 async function sendEmailViaProvider(env, msg) {
-  if (!env?.SENDGRID_API_KEY) return; // Skip if no key
-  const tpl = getCommercialEmailTemplate(msg.template, msg.vars);
+  if (!env?.SENDGRID_API_KEY) return "no_provider"; // Skip if no key
+  try {
+    const tpl = getCommercialEmailTemplate(msg.template, msg.vars);
+    const resp = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${env.SENDGRID_API_KEY}`,
+        "Content-Type":  "application/json",
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: msg.to }], dynamic_template_data: msg.vars }],
+        from:    { email: "intel@cyberdudebivash.com", name: "CYBERDUDEBIVASH Sentinel APEX" },
+        subject: tpl.subject,
+        content: [{ type: "text/html", value: tpl.html }],
+      }),
+    });
+    return resp.ok ? "sent" : "failed";
+  } catch (_) {
+    return "failed";
+  }
+}
 
-  await fetch("https://api.sendgrid.com/v3/mail/send", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${env.SENDGRID_API_KEY}`,
-      "Content-Type":  "application/json",
-    },
-    body: JSON.stringify({
-      personalizations: [{ to: [{ email: msg.to }], dynamic_template_data: msg.vars }],
-      from:    { email: "intel@cyberdudebivash.com", name: "CYBERDUDEBIVASH Sentinel APEX" },
-      subject: tpl.subject,
-      content: [{ type: "text/html", value: tpl.html }],
-    }),
-  }).catch(() => {});
+/**
+ * F22 (2026-10-02): one immediate attempt at a queued transactional message.
+ * Marks it sent only when the provider accepted it; otherwise it stays
+ * queued for the daily run. Never throws (provisioning must not fail on it).
+ */
+async function deliverQueuedEmailNow(env, msgId) {
+  try {
+    const key = `email:${msgId}`;
+    const msg = await env.EMAIL_QUEUE_KV?.get(key, { type: "json" });
+    if (!msg || msg.status !== "queued") return;
+    if (await sendEmailViaProvider(env, msg) !== "sent") return;
+    const at = new Date().toISOString();
+    await env.EMAIL_QUEUE_KV.put(key, JSON.stringify({ ...msg, status: "sent", sent_at: at, processed_at: at }), { expirationTtl: 86400 * 7 });
+  } catch (_) { /* stays queued */ }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2125,7 +2151,15 @@ async function provisionCustomer(env, { email, tier, billing_cycle, payment_id, 
       ? `https://intel.cyberdudebivash.com/customer/api-keys.html?email=${encodeURIComponent(email)}&token=${portalToken}`
       : "https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html",
   };
-  await queueEmail(env, { to:email, template:"welcome_provisioned", vars:welcomeVars });
+  // F22 (2026-10-02): this message was queued with no send_at, which
+  // runDailyOutreach() never selects, so it was never sent. Emailing paid
+  // keys is the owner's decision: with KEY_EMAIL_DELIVERY_ENABLED unset the
+  // stored message is exactly as before (queued, never sent); with "true" it
+  // is due now and one immediate attempt is made (the daily run retries once).
+  const keyEmailOn = env.KEY_EMAIL_DELIVERY_ENABLED === "true";
+  const welcomeMsgId = await queueEmail(env, { to:email, template:"welcome_provisioned", vars:welcomeVars,
+    ...(keyEmailOn ? { send_at: new Date().toISOString() } : {}) });
+  if (keyEmailOn) await deliverQueuedEmailNow(env, welcomeMsgId);
 
   stage = "mrr_update";
   // 5. Update revenue MRR counter
@@ -2407,7 +2441,20 @@ async function handleSubExpireCheck(request, env, rid) {
       await queueEmail(env, { to:rec.email, template:"renewal_reminder_3d", vars:{ tier:rec.tier, days:3, renew_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html?renew="+rec.id } });
       reminded++;
     }
-    if (daysLeft <= 0 && rec.status === SUB_STATUS.ACTIVE) {
+    // Razorpay-managed subscriptions (P0 2026-10-02): Razorpay's own events
+    // move the paid period (subscription.charged) or end it (halted,
+    // cancelled, completed). Expiring one here at current_period_end raced
+    // the renewal webhook: a charge recorded after this 09:00 run found the
+    // subscription EXPIRED, which is terminal, so the customer went on
+    // paying with no access. Such a subscription is expired here only when
+    // the period AND the renewal grace have passed with no Razorpay event
+    // (a webhook outage), the same moment its gateway key lapses. Every
+    // other subscription expires at current_period_end, as before.
+    const providerManaged = rec.billing_provider === "razorpay" || !!rec.provider_sub_id;
+    const expiresAt = providerManaged
+      ? Date.parse(keyAccessUntil(env, rec.current_period_end) || rec.current_period_end)
+      : Date.parse(rec.current_period_end);
+    if (now.getTime() >= expiresAt && rec.status === SUB_STATUS.ACTIVE) {
       // Phase 2: tryTransition (subscription-engine.js) validates ACTIVE ->
       // EXPIRED against the evidence-based transition graph before applying
       // it, and patchInternalSub keeps sub:{id}/sub:email:{email}/
@@ -2711,4 +2758,6 @@ export {
   json, sanitizeEmail, genId, TIERS, SUB_STATUS,
   provisionCustomer, trackEvent, isAdmin, automationTrigger, slackNotify, timingSafeEqual,
   handlePaymentSubmit, sanitizeScreenshotUrl, gatewayTenantFields,
+  // 2026-10-02: the two daily jobs, exported for their tests (cron unchanged).
+  runDailyOutreach, handleSubExpireCheck,
 };

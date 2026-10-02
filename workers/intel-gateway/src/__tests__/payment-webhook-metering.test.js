@@ -74,7 +74,7 @@ const sign = (raw, secret = RZP_SECRET) => createHmac("sha256", secret).update(r
 function razorpayOrder(id) {
   return JSON.stringify({ event: "payment.captured", payload: { payment: { entity: {
     id, amount: 410000, currency: "INR", status: "captured", order_id: "order_" + id, invoice_id: null,
-    email: "buyer@example.com", notes: { tier: "PRO", email: "buyer@example.com", billing: "monthly" },
+    email: "buyer@example.com", notes: { platform: "SENTINEL-APEX", tier: "PRO", email: "buyer@example.com", billing: "monthly" },
   } } } });
 }
 

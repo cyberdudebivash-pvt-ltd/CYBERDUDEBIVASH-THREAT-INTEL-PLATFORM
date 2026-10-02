@@ -265,5 +265,222 @@ class TestChangeClassificationLogicIsCorrect(unittest.TestCase):
         self.assertEqual(outputs.get("semgrep_relevant"), "true")
 
 
+
+# ---------------------------------------------------------------------------
+# CI reliability (2026-10-02): the classifier no longer clones the repository
+# history. Over 37 PR runs its full-history checkout took a median 207 s of a
+# 211 s job, max 299 s, and the 5-minute job timeout cancelled it twice (runs
+# 1125 and 1133 attempt 1), failing the required gate closed with no finding.
+# The step now fetches only the PR's base and head commits and their trees.
+# These tests run the REAL step from an empty directory against a local bare
+# "origin", so the fetch path itself is exercised, not only the diff.
+# ---------------------------------------------------------------------------
+def _git(cwd, *args, check=True):
+    return subprocess.run(["git", *args], cwd=cwd, check=check, capture_output=True, text=True)
+
+
+def _commit_all(repo, message):
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", message)
+    return _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+class _OriginFixture:
+    """A source repo (base commit, head commit) published as a bare remote
+    that, like GitHub, serves partial and by-SHA fetches."""
+
+    def __init__(self, tmp, base_files, head_changes):
+        self.root = pathlib.Path(tmp)
+        src = self.root / "src"
+        src.mkdir()
+        _git(src, "init", "-q")
+        _git(src, "config", "user.email", "test@test")
+        _git(src, "config", "user.name", "test")
+        for rel, content in {"README.md": "base\n", **base_files}.items():
+            path = src / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        self.base_sha = _commit_all(src, "base")
+        for rel, content in head_changes.items():
+            path = src / rel
+            if content is None:
+                path.unlink()
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+        self.head_sha = _commit_all(src, "head") if head_changes else self.base_sha
+        self.bare = self.root / "origin.git"
+        _git(self.root, "clone", "-q", "--bare", str(src), str(self.bare))
+        _git(self.bare, "config", "uploadpack.allowFilter", "true")
+        _git(self.bare, "config", "uploadpack.allowAnySHA1InWant", "true")
+        self.url = self.bare.resolve().as_uri()
+
+
+class TestClassifierFetchesOnlyTheTwoCommits(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        jobs = _jobs()
+        cls.changes_job = jobs["changes"]
+        cls.script = next(s for s in jobs["changes"]["steps"] if s.get("id") == "classify")["run"]
+
+    def _run(self, base_files, head_changes, *, repo_url=None, base_sha=None, head_sha=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            origin = _OriginFixture(tmp, base_files, head_changes)
+            work = pathlib.Path(tmp) / "work"
+            work.mkdir()
+            output_file = pathlib.Path(tmp) / "github_output.txt"
+            output_file.write_text("", encoding="utf-8")
+            env = {
+                "PATH": "/usr/bin:/bin:/usr/local/bin",
+                "EVENT_NAME": "pull_request",
+                "PR_BASE_SHA": origin.base_sha if base_sha is None else base_sha,
+                "PR_HEAD_SHA": origin.head_sha if head_sha is None else head_sha,
+                "REPO_URL": origin.url if repo_url is None else repo_url,
+                "GITHUB_OUTPUT": str(output_file),
+                "CLASSIFY_RETRY_SLEEP_SECONDS": "0",
+            }
+            result = subprocess.run(["bash", "-e", "-c", self.script], cwd=work, env=env,
+                                    capture_output=True, text=True)
+            outputs = dict(line.split("=", 1) for line in output_file.read_text(encoding="utf-8").splitlines() if "=" in line)
+            objects = ""
+            shallow = (work / ".git" / "shallow").exists()
+            if (work / ".git").exists():
+                objects = _git(work, "cat-file", "--batch-all-objects", "--batch-check=%(objecttype)", check=False).stdout
+            return result, outputs, objects, shallow
+
+    def _assert_classified(self, result, outputs, python, dependency, semgrep):
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(outputs.get("python_relevant"), python)
+        self.assertEqual(outputs.get("dependency_relevant"), dependency)
+        self.assertEqual(outputs.get("semgrep_relevant"), semgrep)
+
+    def test_docs_only_change_legitimately_skips_every_code_scanner(self):
+        result, outputs, _, _ = self._run({"docs/guide.md": "a\n"}, {"docs/guide.md": "b\n", "docs/new.md": "c\n"})
+        self._assert_classified(result, outputs, "false", "false", "false")
+        self.assertIn("Fetched 2 commit(s)", result.stdout)
+
+    def test_python_change_requires_bandit_and_semgrep(self):
+        result, outputs, _, _ = self._run({}, {"agent/core.py": "x = 1\n"})
+        self._assert_classified(result, outputs, "true", "false", "true")
+
+    def test_dependency_manifest_change_requires_the_dependency_scanner(self):
+        for manifest in ("requirements.txt", "api/requirements.txt", "platform/services/feed/requirements.txt"):
+            with self.subTest(manifest=manifest):
+                result, outputs, _, _ = self._run({}, {manifest: "requests==2.32.3\n"})
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(outputs.get("dependency_relevant"), "true")
+
+    def test_mixed_docs_and_code_change_requires_the_code_scanners(self):
+        result, outputs, _, _ = self._run({}, {"docs/a.md": "a\n", "README.md": "changed\n", "api/handler.py": "y = 2\n"})
+        self._assert_classified(result, outputs, "true", "false", "true")
+
+    def test_deleting_scanned_code_is_a_change(self):
+        result, outputs, _, _ = self._run({"agent/legacy.py": "old\n"}, {"agent/legacy.py": None})
+        self._assert_classified(result, outputs, "true", "false", "true")
+
+    def test_moving_a_file_into_scanned_code_is_a_change(self):
+        result, outputs, _, _ = self._run({"docs/tool.py": "z = 3\n"}, {"docs/tool.py": None, "agent/tool.py": "z = 3\n"})
+        self._assert_classified(result, outputs, "true", "false", "true")
+
+    def test_moving_a_file_out_of_scanned_code_is_a_change(self):
+        """With rename detection git would list only docs/tool.py; --no-renames
+        lists both sides, so the scanned tree's side is never dropped."""
+        result, outputs, _, _ = self._run({"agent/tool.py": "z = 3\n"}, {"agent/tool.py": None, "docs/tool.py": "z = 3\n"})
+        self._assert_classified(result, outputs, "true", "false", "true")
+
+    def test_unusual_path_names_still_match(self):
+        """git quotes non-ASCII and special paths by default ("agent/na\\303\\257ve.py"),
+        which `^agent/` would not match; the step reads -z output instead."""
+        result, outputs, _, _ = self._run({}, {"agent/naïve module.py": "q = 4\n"})
+        self._assert_classified(result, outputs, "true", "false", "true")
+
+    def test_fetch_is_shallow_and_carries_no_file_contents(self):
+        result, outputs, objects, shallow = self._run({"docs/big.md": "x" * 4096 + "\n"}, {"agent/core.py": "x = 1\n"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(shallow, "the fetch must not bring history (expected a shallow repository)")
+        kinds = set(objects.split())
+        self.assertNotIn("blob", kinds, "the fetch must not bring file contents: only commits and trees are needed")
+        self.assertEqual(kinds, {"commit", "tree"})
+
+    def test_unreachable_remote_fails_closed(self):
+        result, outputs, _, _ = self._run({}, {"agent/core.py": "x = 1\n"}, repo_url="file:///nonexistent/origin.git")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("::error::", result.stdout)
+        self.assertEqual(outputs, {}, "no classification may be published when the commits could not be fetched")
+
+    def test_commit_missing_from_the_remote_fails_closed(self):
+        result, outputs, _, _ = self._run({}, {"agent/core.py": "x = 1\n"}, base_sha="0" * 40)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(outputs, {})
+
+    def test_malformed_or_missing_sha_fails_closed_before_any_fetch(self):
+        for bad in ("", "main", "abc123", "G" * 40):
+            with self.subTest(sha=bad):
+                result, outputs, objects, _ = self._run({}, {"agent/core.py": "x = 1\n"}, head_sha=bad)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(outputs, {})
+                self.assertIn("not a full commit SHA", result.stdout)
+
+    def test_the_job_no_longer_clones_history(self):
+        steps = self.changes_job["steps"]
+        self.assertFalse(any("actions/checkout" in str(s.get("uses", "")) for s in steps),
+                         "the classifier must not check out the repository: two trees are all it reads")
+        self.assertNotIn("fetch-depth", self.script)
+        self.assertNotIn("--unshallow", self.script)
+        self.assertIn("--depth=1", self.script)
+        self.assertIn("--filter=blob:none", self.script)
+
+
+class TestSastGateFailsClosed(unittest.TestCase):
+    """Executes the REAL gate step with the needs results GitHub would pass."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.script = _jobs()[GATE_JOB_ID]["steps"][0]["run"]
+
+    def _gate(self, **overrides):
+        env = {
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "CHANGES": "success", "TRUFFLE": "success", "HYGIENE": "success",
+            "BANDIT": "skipped", "SAFETY": "skipped", "SEMGREP": "skipped",
+            "PYTHON_RELEVANT": "false", "DEPENDENCY_RELEVANT": "false", "SEMGREP_RELEVANT": "false",
+            "EVENT_NAME": "pull_request", "FULL_SCAN": "",
+        }
+        env.update(overrides)
+        return subprocess.run(["bash", "-e", "-c", self.script], env=env, capture_output=True, text=True)
+
+    def test_docs_only_pr_with_scanners_skipped_passes(self):
+        result = self._gate()
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_classification_failure_fails_the_gate(self):
+        for outcome in ("failure", "cancelled", "skipped", ""):
+            with self.subTest(changes=outcome):
+                # A failed classifier publishes no outputs, so GitHub passes empty strings.
+                result = self._gate(CHANGES=outcome, PYTHON_RELEVANT="", DEPENDENCY_RELEVANT="", SEMGREP_RELEVANT="")
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("Mandatory job 'Classify Changed Surfaces' did not succeed", result.stdout)
+
+    def test_applicable_code_scanner_cannot_be_skipped(self):
+        cases = [
+            dict(PYTHON_RELEVANT="true", SEMGREP_RELEVANT="true", SEMGREP="success"),  # Bandit skipped
+            dict(DEPENDENCY_RELEVANT="true"),                                          # Safety skipped
+            dict(SEMGREP_RELEVANT="true"),                                              # Semgrep skipped
+        ]
+        for case in cases:
+            with self.subTest(**case):
+                self.assertEqual(self._gate(**case).returncode, 1)
+
+    def test_applicable_scanners_that_succeeded_pass(self):
+        result = self._gate(PYTHON_RELEVANT="true", SEMGREP_RELEVANT="true", DEPENDENCY_RELEVANT="true",
+                            BANDIT="success", SEMGREP="success", SAFETY="success")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_secret_scan_and_hygiene_stay_mandatory(self):
+        for key in ("TRUFFLE", "HYGIENE"):
+            with self.subTest(job=key):
+                self.assertEqual(self._gate(**{key: "failure"}).returncode, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

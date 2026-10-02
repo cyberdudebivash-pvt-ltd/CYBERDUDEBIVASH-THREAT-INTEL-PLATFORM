@@ -77,6 +77,6 @@ test("a payment arriving with a subscription entity is ignored too", async () =>
 test("a one-time order payment is still provisioned (unchanged path)", async () => {
   const { body } = await deliver({ event: "payment.captured", payload: { payment: { entity: {
     id: "pay_ONE1", amount: 410000, currency: "INR", status: "captured", order_id: "order_O1", invoice_id: null,
-    email: "buyer@example.com", notes: { tier: "PRO", email: "buyer@example.com", billing: "monthly" } } } } });
+    email: "buyer@example.com", notes: { platform: "SENTINEL-APEX", tier: "PRO", email: "buyer@example.com", billing: "monthly" } } } } });
   assert.equal(body.status, "provisioned");
 });

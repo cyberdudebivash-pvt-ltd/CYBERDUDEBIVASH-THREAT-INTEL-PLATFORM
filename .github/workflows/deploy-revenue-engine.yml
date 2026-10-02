@@ -96,7 +96,7 @@ jobs:
         # subscription-lifecycle.test.js trust-boundary gate.
         run: |
           cd ${WORKER_DIR}
-          node --test src/__tests__/subscription-domain.test.js src/__tests__/subscription-engine.test.js src/__tests__/revenue-engine-health.test.js src/__tests__/automation-trigger.test.js src/__tests__/payment-submit.test.js src/__tests__/cors.test.js src/__tests__/manual-payment-retirement.test.js src/__tests__/mssp-tenant-fields.test.js src/__tests__/billing-policy.test.js src/__tests__/billing-credit-notes.test.js src/__tests__/billing-export-po.test.js src/__tests__/billing-go-live.test.js src/__tests__/billing-center.test.js src/__tests__/cross-worker-revocation.test.js src/__tests__/commercial-readiness.test.js src/__tests__/pricing-fail-closed.test.js
+          node --test src/__tests__/subscription-domain.test.js src/__tests__/subscription-engine.test.js src/__tests__/revenue-engine-health.test.js src/__tests__/automation-trigger.test.js src/__tests__/payment-submit.test.js src/__tests__/cors.test.js src/__tests__/manual-payment-retirement.test.js src/__tests__/mssp-tenant-fields.test.js src/__tests__/billing-policy.test.js src/__tests__/billing-credit-notes.test.js src/__tests__/billing-export-po.test.js src/__tests__/billing-go-live.test.js src/__tests__/billing-center.test.js src/__tests__/cross-worker-revocation.test.js src/__tests__/commercial-readiness.test.js src/__tests__/pricing-fail-closed.test.js src/__tests__/subscription-webhook-hardening.test.js src/__tests__/renewal-and-key-email.test.js
 
       - name: "esbuild bundle pre-flight (HARD GATE)"
         # This is the exact check that would have caught the duplicate
@@ -279,25 +279,54 @@ jobs:
       # blocker and warning ids, operator queue size -- never secret values).
       # Informational: runs only when the REVENUE_ADMIN_SECRET repository
       # secret exists, never fails the deploy.
+      #
+      # F24 (2026-10-02): this step printed "readiness endpoint not reachable
+      # yet" on every deploy (runs 36460344094, 36914355894) while the route
+      # answered 401 without the secret: `curl -sf` dropped the status, so a
+      # rejected secret, a network error and an edge block all read the same.
+      # It now records the HTTP status, retries only 5xx / no response, and
+      # names the cause. Still informational and never prints the secret.
       - name: "Commercial readiness report"
         continue-on-error: true
         env:
           REVENUE_ADMIN_SECRET: ${{ secrets.REVENUE_ADMIN_SECRET }}
         run: |
-          if [ -z "$REVENUE_ADMIN_SECRET" ]; then
+          if [ -z "${REVENUE_ADMIN_SECRET:-}" ]; then
             echo "REVENUE_ADMIN_SECRET repository secret not set -- skipping readiness report."
+            echo "::warning title=Commercial readiness not reported::The REVENUE_ADMIN_SECRET repository secret is not set, so this deploy cannot show the commercial readiness verdict."
             exit 0
           fi
-          curl -sf --max-time 15 -H "X-Admin-Secret: ${REVENUE_ADMIN_SECRET}" \
-            "https://revenue.intel.cyberdudebivash.com/api/v2/billing/admin/readiness" 2>/dev/null \
-            | python3 -c "
+          URL="https://revenue.intel.cyberdudebivash.com/api/v2/billing/admin/readiness"
+          BODY=$(mktemp)
+          code=000
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o "$BODY" -w '%{http_code}' --max-time 15 \
+                     -H "X-Admin-Secret: ${REVENUE_ADMIN_SECRET}" "$URL" 2> /dev/null) || code=000
+            case "$code" in
+              5??|000) [ "$attempt" -lt 3 ] && sleep $((attempt * ${READINESS_RETRY_SLEEP_SECONDS:-10})) ;;
+              *) break ;;
+            esac
+          done
+          echo "Readiness endpoint: HTTP $code (attempt $attempt of 3)"
+          python3 - "$code" "$BODY" "$URL" <<'PY'
           import json, sys
+          code, path, url = sys.argv[1], sys.argv[2], sys.argv[3]
           try:
-              d = json.load(sys.stdin)
+              body = json.load(open(path, encoding="utf-8"))
           except Exception:
-              print('NOTE: readiness endpoint not reachable yet'); sys.exit(0)
-          q = d.get('queue') or {}
-          print('verdict:', d.get('verdict'), '| blockers:', d.get('blockers'), '| warnings:', d.get('warnings'), '| operator queue:', q.get('attention'))
-          if d.get('verdict') != 'READY':
-              print('::warning title=Commercial readiness: ' + str(d.get('verdict')) + '::Blockers: ' + ', '.join(d.get('blockers') or []))
-          " || echo "Readiness report skipped"
+              body = None
+          title = "::warning title=Commercial readiness not reported::"
+          if code == "200" and isinstance(body, dict) and "verdict" in body:
+              q = body.get("queue") or {}
+              print("verdict:", body.get("verdict"), "| blockers:", body.get("blockers"), "| warnings:", body.get("warnings"), "| operator queue:", q.get("attention"))
+              if body.get("verdict") != "READY":
+                  print("::warning title=Commercial readiness: " + str(body.get("verdict")) + "::Blockers: " + ", ".join(body.get("blockers") or []))
+          elif code in ("401", "403") and isinstance(body, dict) and body.get("error") == "unauthorized":
+              print(title + f"HTTP {code}: the revenue engine rejected the REVENUE_ADMIN_SECRET repository secret. It does not match the Worker's REVENUE_ADMIN_SECRET; set both to the same value (the billing canary's admin mode needs it too).")
+          elif code in ("401", "403"):
+              print(title + f"HTTP {code} did not come from the revenue engine (no JSON error body): the request was blocked before the Worker, for example by an edge or WAF rule.")
+          elif code == "000":
+              print(title + f"No HTTP response from {url} after 3 attempts (network error or timeout).")
+          else:
+              print(title + f"HTTP {code} from the readiness endpoint.")
+          PY

@@ -45,7 +45,10 @@ function kv() {
 function readyEnv(extra = {}) {
   return {
     REVENUE_ADMIN_SECRET: ADMIN, CRM_DB: createD1(), REVENUE_CRM_KV: kv(), API_KEYS_KV: kv(),
-    ...SECRETS, ...PLANS, GST_INVOICE_CONFIG: GST([{ arn: "AD2104260012345", financial_year: "26-27" }]), ...extra,
+    ...SECRETS, ...PLANS, GST_INVOICE_CONFIG: GST([{ arn: "AD2104260012345", financial_year: "26-27" }]),
+    // F22 (2026-10-02): a fully configured deployment has decided key email.
+    KEY_EMAIL_DELIVERY_ENABLED: "true", SENDGRID_API_KEY: "SG.TEST_ONLY_readiness",
+    ...extra,
   };
 }
 const byId = (r, id) => r.checks.find((c) => c.id === id);
@@ -83,6 +86,17 @@ test("GST, LUT, account binding and alerts are warnings, not blockers (invoices 
   const noLut = await buildCommercialReadiness(readyEnv({ GST_INVOICE_CONFIG: GST() }), NOW);
   assert.deepEqual(noLut.warnings, ["export_lut_current_fy"]);
   assert.match(byId(noLut, "export_lut_current_fy").detail, /26-27/);
+});
+
+test("F22: undecided key email is a warning, never a blocker, and never shows the provider key", async () => {
+  const off = await buildCommercialReadiness(readyEnv({ KEY_EMAIL_DELIVERY_ENABLED: undefined }), NOW);
+  assert.equal(off.verdict, "READY");
+  assert.deepEqual(off.warnings, ["key_email_delivery"]);
+  assert.match(byId(off, "key_email_delivery").detail, /not emailed/);
+  const noProvider = await buildCommercialReadiness(readyEnv({ SENDGRID_API_KEY: undefined }), NOW);
+  assert.deepEqual(noProvider.warnings, ["key_email_delivery"]);
+  assert.match(byId(noProvider, "key_email_delivery").fix, /SENDGRID_API_KEY/);
+  assert.equal(JSON.stringify(off).includes("SG.TEST_ONLY_readiness"), false);
 });
 
 test("within 30 days of 1 April, a missing next-year LUT is flagged", async () => {

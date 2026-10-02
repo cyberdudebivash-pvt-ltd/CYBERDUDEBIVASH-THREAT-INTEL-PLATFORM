@@ -42,6 +42,7 @@ on:
       - 'scripts/**'
       - 'tests/**'
       - '.github/workflows/intel-gateway-regression-gate.yml'
+      - '.github/workflows/deploy-revenue-engine.yml'
       # Cyber Watchdog: the gateway suite also imports the canary library and
       # reads these pages (publication-truth, watchdog-canary tests).
       - 'workers/intel-gateway/scripts/watchdog-negative-controls.mjs'
@@ -109,6 +110,7 @@ on:
       - 'scripts/**'
       - 'tests/**'
       - '.github/workflows/intel-gateway-regression-gate.yml'
+      - '.github/workflows/deploy-revenue-engine.yml'
       # Cyber Watchdog: the gateway suite also imports the canary library and
       # reads these pages (publication-truth, watchdog-canary tests).
       - 'workers/intel-gateway/scripts/watchdog-negative-controls.mjs'
@@ -452,6 +454,10 @@ jobs:
             tests/test_checkout_experience.py
             tests/test_funnel_truth.py
             tests/test_gumroad_and_razorpay.py
+            # F24 (2026-10-02): the revenue engine deploy's readiness report
+            # names a rejected secret, an edge block or no response instead
+            # of "not reachable". Runs the real step with a stub curl.
+            tests/test_revenue_readiness_report_step.py
           )
           python3 -m pytest "${SUITES[@]}" -q
           # Refuse to pass having run nothing. pytest.ini forces --verbose, so

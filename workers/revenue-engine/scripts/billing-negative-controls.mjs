@@ -29,6 +29,10 @@ const COPY = [
   "workers/revenue-engine/src",
   "workers/intel-gateway/package.json",
   "workers/intel-gateway/src",
+  // mssp-tenants.test.js checks the published MSSP docs against the live routes.
+  "MSSP_PARTNER_PROGRAM.md",
+  "mssp.html",
+  "docs/MSSP_TENANT_IDENTITY_V185.md",
 ];
 const SUITES = [
   // S28 billing canary, certified against both Workers in-process.
@@ -37,11 +41,19 @@ const SUITES = [
     "src/__tests__/billing-credit-notes.test.js", "src/__tests__/billing-export-po.test.js",
     "src/__tests__/billing-go-live.test.js", "src/__tests__/billing-center.test.js",
     "src/__tests__/cross-worker-revocation.test.js", "src/__tests__/commercial-readiness.test.js",
-    "src/__tests__/pricing-fail-closed.test.js"]],
+    "src/__tests__/pricing-fail-closed.test.js",
+    // P0 2026-10-02: payment-to-entitlement hardening.
+    "src/__tests__/subscription-webhook-hardening.test.js", "src/__tests__/renewal-and-key-email.test.js"]],
   ["workers/intel-gateway", ["--test", "src/__tests__/razorpay-create-order-taxid.test.js",
     "src/__tests__/razorpay-webhook-subscription-guard.test.js", "src/__tests__/manual-notify-retirement.test.js",
     "src/__tests__/gumroad-membership.test.js", "src/__tests__/gumroad-lifecycle.test.js",
-    "src/__tests__/gumroad-products.test.js"]],
+    "src/__tests__/gumroad-products.test.js",
+    // P0 2026-10-02: legacy Order authority and Gumroad recovery, plus the
+    // webhook-authenticity, sale-lock and MSSP activation suites, which no
+    // control exercised before.
+    "src/__tests__/legacy-order-authority.test.js", "src/__tests__/gumroad-provisioning-recovery.test.js",
+    "src/__tests__/payment-webhook-metering.test.js", "src/__tests__/gumroad-provisioning-lock.test.js",
+    "src/__tests__/mssp-tenants.test.js"]],
 ];
 
 const BR = "workers/revenue-engine/src/billing-routes.js";
@@ -51,6 +63,8 @@ const SE = "workers/revenue-engine/src/subscription-engine.js";
 const GW = "workers/intel-gateway/src/index.js";
 const GL = "workers/intel-gateway/src/gumroad-lifecycle.js";
 const EP = "workers/revenue-engine/src/enterprise-po.js";
+const RI = "workers/revenue-engine/src/index.js";
+const LA = "workers/intel-gateway/src/legacy-order-authority.js";
 
 // [name, file, find, replace] -- `find` must occur exactly once.
 const CONTROLS = [
@@ -305,6 +319,62 @@ const CONTROLS = [
     "  if (isExport(q) && firc.length < 4) {", "  if (false) {"],
   ["invoiced quote cancelled (invoice orphaned)", EP,
     "[\"sent\", \"accepted\"], \"cancelled\"", "[\"sent\", \"accepted\", \"invoiced\"], \"cancelled\""],
+  // P0 2026-10-02: payment-to-entitlement closure.
+  ["legacy webhook provisions any captured payment (no Order authority)", GW,
+    "      { ...payEntity, notes: { ...orderNotes, ...(payEntity.notes || {}) } }, RAZORPAY_TIER_PRICES);\n    if (!authority.ok) {",
+    "      { ...payEntity, notes: { ...orderNotes, ...(payEntity.notes || {}) } }, RAZORPAY_TIER_PRICES);\n    if (false) {"],
+  ["legacy verify trusts the browser's billing cycle", GW,
+    "    order_id: razorpay_order_id, payment_id: razorpay_payment_id,\n  }, authority.billing);",
+    "    order_id: razorpay_order_id, payment_id: razorpay_payment_id,\n  }, body.billing === \"annual\" ? \"annual\" : \"monthly\");"],
+  ["legacy Order amount not checked", LA,
+    "  if (!Number.isInteger(p.amount) || p.amount !== price[billing]) return { ok: false, reason: \"amount_mismatch\" };",
+    "  if (false) return { ok: false, reason: \"amount_mismatch\" };"],
+  ["legacy payment not created by the platform accepted", LA,
+    "  if (notes.platform !== LEGACY_ORDER_PLATFORM) return { ok: false, reason: \"not_created_by_this_platform\" };",
+    "  if (false) return { ok: false, reason: \"not_created_by_this_platform\" };"],
+  ["activation without a link ignores the Plan (notes set the tier)", SE,
+    "        if (!planTier || (notes.tier && String(notes.tier).toUpperCase() !== planTier.tier)) {",
+    "        if (planTier && notes.tier && String(notes.tier).toUpperCase() !== planTier.tier) {"],
+  ["activation ignores a Plan mismatch with the server link", SE,
+    "        if (link.plan_id && subPlanId && link.plan_id !== subPlanId) {", "        if (false) {"],
+  ["event claim kept when the link read fails (read outside the try)", SE,
+    "  let link = null, email = \"\", tier = \"\", cycle = \"monthly\";\n  try {\n  link  = providerId ? await getProviderLink(env, providerId) : null;",
+    "  let link = providerId ? await getProviderLink(env, providerId) : null, email = \"\", tier = \"\", cycle = \"monthly\";\n  try {"],
+  ["activation retry mints a second key", SE,
+    "      let result = provisionedKey ? await env.REVENUE_CRM_KV.get(provisionedKey, \"json\") : null;", "      let result = null;"],
+  ["activation key ignores Razorpay's paid period", SE,
+    "      await patchApiKeyEntitlement(env, result.api_key, { expires_at: keyAccessUntil(env, activePeriodEnd) || activePeriodEnd });", ""],
+  ["renewal grace removed (key lapses at period end)", SE,
+    "  return new Date(t + renewalGraceHours(env) * 3600e3).toISOString();", "  return new Date(t).toISOString();"],
+  ["Razorpay subscription webhook signature not verified", SE,
+    "  const valid = await verifyRazorpayHmac(rawBody, sig, secret);", "  const valid = true;"],
+  ["daily check expires Razorpay subscriptions at period end", RI,
+    "    const providerManaged = rec.billing_provider === \"razorpay\" || !!rec.provider_sub_id;", "    const providerManaged = false;"],
+  ["key email sent with the owner flag off", RI,
+    "  const keyEmailOn = env.KEY_EMAIL_DELIVERY_ENABLED === \"true\";\n  const welcomeMsgId", "  const keyEmailOn = true;\n  const welcomeMsgId"],
+  ["failed or skipped email recorded as sent", RI,
+    "      msg.status = outcome === \"sent\" ? \"sent\" : outcome === \"no_provider\" ? \"skipped_no_provider\" : \"failed\";",
+    "      msg.status = \"sent\";"],
+  ["Gumroad claim never released after a failure", GW,
+    "        method: \"POST\", body: JSON.stringify({ action: \"claim_release\", saleId: sale_id }),",
+    "        method: \"POST\", body: JSON.stringify({ saleId: sale_id }),"],
+  ["Gumroad retry mints a second key", GW,
+    "  const apiKey = (await env.SECURITY_HUB_KV.get(`gumroad_sale_key_map:${sale_id}`))\n    || await provisionApiKey(env, ctx, tier, email, \"gumroad_webhook\", {",
+    "  const apiKey = await provisionApiKey(env, ctx, tier, email, \"gumroad_webhook\", {"],
+  ["Gumroad webhook secret not checked", GW,
+    "  if (!urlToken || !timingSafeEqual(urlToken, env.GUMROAD_WEBHOOK_SECRET)) {", "  if (false) {"],
+  ["legacy Razorpay webhook signature not verified", GW,
+    "  if (!valid) {\n    auditLog(ctx, env, { action: \"webhook_sig_fail\", source: \"razorpay\" });",
+    "  if (false) {\n    auditLog(ctx, env, { action: \"webhook_sig_fail\", source: \"razorpay\" });"],
+  ["refund.created does not revoke (access lasts until refund.processed)", BR,
+    "    if (payment.provider_sub_id) await revokeEntitlementForSubscription(payment.provider_sub_id, \"refunded\");",
+    "    if (payment.provider_sub_id && processed) await revokeEntitlementForSubscription(payment.provider_sub_id, \"refunded\");"],
+  ["refund.failed revokes the paid access", BR,
+    "    if (event === \"refund.failed\") {\n      const req",
+    "    if (event === \"refund.failed\") {\n      if (payment.provider_sub_id) await revokeEntitlementForSubscription(payment.provider_sub_id, \"refunded\");\n      const req"],
+  ["a replayed renewal extends access again (expiry relative, not Razorpay's period)", SE,
+    "      await patchApiKeyEntitlement(env, link.api_key, { expires_at: keyAccessUntil(env, periodEnd) || periodEnd });\n      await putProviderLink(env, providerId, { ...link, status: \"active\", current_period_end: periodEnd",
+    "      await patchApiKeyEntitlement(env, link.api_key, { expires_at: new Date(Math.max(Date.now(), Date.parse(JSON.parse(await env.API_KEYS_KV.get(link.api_key) || \"{}\").expires_at || 0)) + 30 * 86400000).toISOString() });\n      await putProviderLink(env, providerId, { ...link, status: \"active\", current_period_end: periodEnd"],
 ];
 
 function stage() {

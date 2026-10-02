@@ -107,6 +107,45 @@ function unixToIso(sec) {
   return sec ? new Date(sec * 1000).toISOString() : null;
 }
 
+// Renewal grace (P0 2026-10-02). intel-gateway refuses a key as soon as its
+// expires_at passes (subscription-lifecycle.js, no grace of its own), but a
+// renewal is recorded only when Razorpay's subscription.charged webhook
+// arrives, after the charge at current_end; and while Razorpay retries a
+// failed charge (cards: T+1, T+2, T+3, then halted) the commercial policy
+// keeps access ("subscription.pending (retrying): allowed",
+// docs/COMMERCIAL_POLICY_V1.md). The KEY therefore stays valid for
+// RENEWAL_GRACE_HOURS after the paid period ends. The paid period itself
+// (current_period_end on the subscription and the provider link) is
+// unchanged, and halted / cancelled / refunded still deny at once
+// (denyGatewayAccess). Default 96 h = the card retry window plus one day.
+export const RENEWAL_GRACE_HOURS_DEFAULT = 96;
+const RENEWAL_GRACE_HOURS_MAX = 336;
+
+export function renewalGraceHours(env) {
+  const raw = env?.RENEWAL_GRACE_HOURS;
+  if (raw === undefined || raw === null || raw === "") return RENEWAL_GRACE_HOURS_DEFAULT;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 && n <= RENEWAL_GRACE_HOURS_MAX ? n : RENEWAL_GRACE_HOURS_DEFAULT;
+}
+
+/** The key's expires_at for a paid period ending at periodEndIso, or null. */
+export function keyAccessUntil(env, periodEndIso) {
+  const t = Date.parse(periodEndIso || "");
+  if (!Number.isFinite(t)) return null;
+  return new Date(t + renewalGraceHours(env) * 3600e3).toISOString();
+}
+
+/** The tier and cycle a configured Razorpay Plan sells, or null. */
+export function planTierFor(env, planId) {
+  if (!planId) return null;
+  for (const [tier, cycles] of Object.entries(PLAN_ID_ENV_KEYS)) {
+    for (const [cycle, envKey] of Object.entries(cycles)) {
+      if (env?.[envKey] && env[envKey] === planId) return { tier, cycle };
+    }
+  }
+  return null;
+}
+
 // ── REVENUE_CRM_KV access helpers ───────────────────────────────────────────
 // Same get -> merge -> put convention already used throughout index.js
 // (provisionCustomer, handleSubUpdate, handleSubExpireCheck all follow this
@@ -216,7 +255,7 @@ export async function restoreGatewayAccess(env, link, periodEnd) {
   if (!env.API_KEYS_KV || !link || !link.api_key) return false;
   const rec = await env.API_KEYS_KV.get(link.api_key, "json").catch(() => null);
   if (!rec || rec.subscription_status === "refunded" || rec.subscription_status === "cancelled") return false;
-  await patchApiKeyEntitlement(env, link.api_key, { subscription_status: "active", expires_at: periodEnd });
+  await patchApiKeyEntitlement(env, link.api_key, { subscription_status: "active", expires_at: keyAccessUntil(env, periodEnd) || periodEnd });
   const customerId = link.internal_customer_id || rec.customer_id || null;
   if (customerId) await env.API_KEYS_KV.delete(`jwt_deny:${customerId}`);
   return true;
@@ -608,12 +647,15 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
   // audit/replay record instead of adding a second storage mechanism.
   await markProcessed(env, idempKey, { event, providerId, ts: Date.now(), payload });
 
-  const link  = providerId ? await getProviderLink(env, providerId) : null;
-  const email = sanitizeEmail(link?.email || notes.email);
-  const tier  = (link?.tier || notes.tier || "").toUpperCase();
-  const cycle = link?.billing_cycle || notes.billing_cycle || "monthly";
-
+  // Read inside the try (P0 2026-10-02): a store error here used to escape
+  // with the event already claimed, so every Razorpay retry was answered
+  // already_processed for a year and the payment never activated.
+  let link = null, email = "", tier = "", cycle = "monthly";
   try {
+  link  = providerId ? await getProviderLink(env, providerId) : null;
+  email = sanitizeEmail(link?.email || notes.email);
+  tier  = (link?.tier || notes.tier || "").toUpperCase();
+  cycle = link?.billing_cycle || notes.billing_cycle || "monthly";
   // Refunds and disputes (billing-routes.js): reconcile the ledger, the
   // refund request and the entitlement.
   if (event.startsWith("refund.") || event.startsWith("payment.dispute.")) {
@@ -674,25 +716,69 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
         // (idempKey is already claimed above, before this switch runs.)
         return json({ status: "already_active", razorpay_subscription_id: providerId });
       }
+      // Plan binding (P0 2026-10-02). The tier used to come from the link or,
+      // with no link, from the subscription's notes, and the subscription's
+      // Plan was never compared: a subscription on another Plan in the same
+      // account (cheaper, or a test Plan) with notes.tier "MSSP" activated
+      // MSSP. Now a subscription this server checked out must still be on
+      // the Plan it was created with; one it did not (dashboard-created) must
+      // be on a configured Plan, which alone sets tier and cycle.
+      const subPlanId = subEntity?.plan_id || null;
+      if (link) {
+        if (link.plan_id && subPlanId && link.plan_id !== subPlanId) {
+          await trackEvent(env, "subscription_billing_anomaly", { reason: "plan_mismatch", razorpay_subscription_id: providerId, rid });
+          break;
+        }
+      } else {
+        const planTier = planTierFor(env, subPlanId);
+        if (!planTier || (notes.tier && String(notes.tier).toUpperCase() !== planTier.tier)) {
+          await trackEvent(env, "subscription_billing_anomaly", {
+            reason: planTier ? "notes_tier_mismatch" : "unknown_plan", razorpay_subscription_id: providerId, rid,
+          });
+          break;
+        }
+        tier = planTier.tier;
+        cycle = planTier.cycle;
+      }
       if (!email || !TIERS[tier]) {
         await trackEvent(env, "subscription_activation_failed", { reason: "missing_or_invalid_email_or_tier", razorpay_subscription_id: providerId, rid });
         break;
       }
-      const result = await provisionCustomer(env, {
-        email, tier, billing_cycle: cycle,
-        payment_id: null, payment_method: "razorpay_subscription",
-        amount_paid: null, currency: "INR", trial: false,
-      });
+      // Retry-safe (P0 2026-10-02): provisionCustomer() writes a live key
+      // before its later stages, and a failure after it released the claim,
+      // so Razorpay's retry minted a SECOND live key. The result is recorded
+      // per subscription as soon as it exists, and a retry reuses it.
+      const provisionedKey = providerId ? `rzp_sub_provisioned:${providerId}` : null;
+      let result = provisionedKey ? await env.REVENUE_CRM_KV.get(provisionedKey, "json") : null;
+      if (!result) {
+        result = await provisionCustomer(env, {
+          email, tier, billing_cycle: cycle,
+          payment_id: null, payment_method: "razorpay_subscription",
+          amount_paid: null, currency: "INR", trial: false,
+        });
+        if (provisionedKey) {
+          await env.REVENUE_CRM_KV.put(provisionedKey, JSON.stringify({
+            customer_id: result.customer_id, sub_id: result.sub_id, api_key: result.api_key, period_end: result.period_end,
+          }), { expirationTtl: 86400 * 400 });
+        }
+      }
       if (env.API_KEYS_KV && result.customer_id) {
         await env.API_KEYS_KV.delete(`jwt_deny:${result.customer_id}`);
       }
+      // The key lasts for Razorpay's paid period plus the renewal grace, not
+      // provisionCustomer()'s now + 30 / 365 days (a 31-day month ended a
+      // day early; February ran two days long).
+      const activePeriodEnd = unixToIso(subEntity?.current_end) || result.period_end;
+      await patchApiKeyEntitlement(env, result.api_key, { expires_at: keyAccessUntil(env, activePeriodEnd) || activePeriodEnd });
       await putProviderLink(env, providerId, {
         ...(link || {}), email, tier, billing_cycle: cycle, status: "active",
         internal_sub_id: result.sub_id, internal_customer_id: result.customer_id,
         api_key: result.api_key,
-        current_period_end: unixToIso(subEntity?.current_end) || result.period_end,
+        current_period_end: activePeriodEnd,
       });
-      await patchInternalSub(env, result.sub_id, { provider_sub_id: providerId, billing_provider: "razorpay" });
+      // The internal subscription follows Razorpay's period too (the daily
+      // expiry check reads it), not provisionCustomer()'s now + 30 / 365 days.
+      await patchInternalSub(env, result.sub_id, { provider_sub_id: providerId, billing_provider: "razorpay", current_period_end: activePeriodEnd });
       await trackEvent(env, "subscription_activated", { email, tier, razorpay_subscription_id: providerId, rid });
       break;
     }
@@ -733,7 +819,7 @@ export async function handleBillingWebhook(request, env, ctx, rid) {
         // door, so neither runs.
         break;
       }
-      await patchApiKeyEntitlement(env, link.api_key, { expires_at: periodEnd });
+      await patchApiKeyEntitlement(env, link.api_key, { expires_at: keyAccessUntil(env, periodEnd) || periodEnd });
       await putProviderLink(env, providerId, { ...link, status: "active", current_period_end: periodEnd, renewal_count: (link.renewal_count || 0) + 1 });
       await trackEvent(env, "subscription_renewed", { email: link.email, tier: link.tier, razorpay_subscription_id: providerId, rid });
       break;

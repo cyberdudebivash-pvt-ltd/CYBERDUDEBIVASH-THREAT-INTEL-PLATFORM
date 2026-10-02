@@ -291,10 +291,11 @@ Bearer JWT issued before the event (TTL 25 h, longer than a JWT's 24 h life).
 |---|---|---|---|---|
 | `subscription.activated` | active (deny marker cleared) | allowed | allowed | allowed |
 | `subscription.charged` (renewal) | unchanged, expiry extended | allowed | allowed | allowed |
-| `subscription.pending` (retrying) | unchanged (grace) | allowed | allowed | allowed |
+| `subscription.pending` (retrying) | unchanged (renewal grace, below) | allowed | allowed | allowed |
 | `subscription.halted` | `suspended` | denied | denied | refused |
 | `subscription.cancelled` / `.completed` | `cancelled` | denied | denied | refused |
 | `refund.created` / `refund.processed` | `refunded` (never relabelled) | denied | denied | refused |
+| `refund.failed` | unchanged; the refund request returns to `approved` for an operator retry | allowed | allowed | allowed |
 | `subscription.charged` / `.activated` after a halt, with a **captured** payment | `active`, deny marker cleared, same key | allowed | denied (log in again) | allowed |
 
 **Halt recovery** (owner decision 2026-09-25): a halted subscription whose
@@ -304,6 +305,71 @@ without a captured payment, or any charge or activation after a refund or
 cancellation, never restores access (fail-safe). Certified by `workers/revenue-engine/src/__tests__/cross-worker-revocation.test.js`,
 which runs both real Workers against one shared store, and by the mutation
 controls in `billing-negative-controls.mjs` (regression gate).
+
+## Payment-to-entitlement hardening (P0, 2026-10-02)
+
+**Renewal grace.** A Razorpay subscription key is valid until Razorpay's
+`current_end` plus `RENEWAL_GRACE_HOURS` (revenue engine; default **96**,
+bounded 0 to 336). Razorpay retries a failed card renewal on days 1, 2 and 3
+before it halts the subscription; 96 hours covers that and one more day for
+the webhook. `subscription.charged` extends the key the same way.
+`halted`, `cancelled`, `completed` and refunds still deny at once, inside
+the grace or not. The daily expiry check (09:00 UTC) expires a
+Razorpay-managed subscription only after its period **plus the grace**.
+Before, it expired every active subscription at period end; `expired` is
+terminal, so a renewal that arrived after 09:00 could no longer restore
+access to a paying customer. Subscriptions not managed by Razorpay (assisted
+or PO) still expire at period end. The grace length is an owner-confirmable
+parameter.
+
+**The Plan decides the tier.** On `subscription.activated`, tier and cycle
+come from this server's checkout link for that subscription, and Razorpay's
+`plan_id` must be the Plan the link was created with. With no link, only a
+Plan ID configured as `RAZORPAY_PLAN_ID_{TIER}_{CYCLE}` grants anything, and
+the subscription's notes cannot raise the tier above that Plan's. A Plan
+mismatch or an unknown Plan provisions nothing and is recorded as an
+anomaly.
+
+**Activation length.** The activation key lasts for Razorpay's paid period
+(`current_end`) plus the grace, not a fixed 30 or 365 days from the webhook.
+
+**Webhook failure recovery.** The event-id claim is released whenever
+processing fails, including a store error before processing starts, and the
+webhook answers 500 so Razorpay retries. A retry after an activation that
+failed part-way reuses the key the first attempt minted
+(`rzp_sub_provisioned:<subscription id>`): one key per subscription.
+
+**Legacy one-time Orders (gateway).** `POST /api/payment/razorpay/verify`
+and the gateway's `POST /api/webhooks/razorpay` provision only an Order this
+gateway created (`notes.platform` = `SENTINEL-APEX`). The Order must name a
+known tier and cycle, be in INR at exactly that tier and cycle's contract
+price, and carry the buyer's email. Tier, cycle and email come from the
+Order, never from the browser. Anything else provisions nothing: the webhook
+answers `ignored_not_activatable` and verify answers 400
+`ORDER_NOT_ELIGIBLE`. Before, the webhook minted a PRO key for **any**
+captured payment on the Razorpay account, including payment links and pages
+(email defaulted to `unknown@razorpay`). `create-order` still refuses the
+recurring tiers, so new one-time Orders are not sold.
+
+**Gumroad provisioning failure.** If anything fails after a sale is claimed,
+the gateway releases the claim, records `gumroad_failed:<sale_id>`, alerts
+the operator and answers 500 so Gumroad retries. The retry reuses a key
+already minted for that sale. Before, the claim was kept, so every retry was
+answered `already_provisioned` and the buyer never got a key.
+
+**Paid-key email (F22, owner decision pending).** The welcome email that
+carries a new paid API key is queued at activation but **not sent** unless
+the owner sets `KEY_EMAIL_DELIVERY_ENABLED` to `"true"` on the revenue engine
+(with `SENDGRID_API_KEY`). When enabled, the email is sent once at
+activation, retried once by the daily run, then marked `failed`. Without a
+provider key it is marked `skipped_no_provider`. A message is marked `sent`
+only when the provider accepted it, and keys queued before the flag was set
+are never sent. Until then the buyer sees the key only on the checkout page
+(reloading that tab resumes; the customer portal shows masked keys only), so
+a buyer who loses the tab needs checkout support. Gumroad keys are emailed by
+the gateway (`RESEND_API_KEY`), which is why Gumroad is offered only while
+that email is configured. Readiness shows a `key_email_delivery` warning,
+never a blocker.
 
 ## Commercial readiness and operator queue (S13/S22/S23, 2026-09-25)
 
@@ -345,6 +411,8 @@ is set.
    `{"apply": true}`).
 7. `node deploy/billing-canary/canary.mjs public` PASS, then
    `... canary.mjs live` PASS (readiness READY).
+8. Optional: `RENEWAL_GRACE_HOURS` (default 96) and, by owner decision only,
+   `KEY_EMAIL_DELIVERY_ENABLED="true"` with `SENDGRID_API_KEY` (see above).
 
 ## Known gaps (not in this change)
 
