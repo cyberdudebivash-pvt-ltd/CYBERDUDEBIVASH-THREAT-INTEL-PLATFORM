@@ -7,7 +7,8 @@ stay as point-in-time records; this file carries current status. Update it in
 the same PR as the change that moves a row. Historic evidence is never reused
 as current certification.
 
-Last updated: 2026-10-01T19:00Z, branch `claude/charming-thompson-ptma8e` (checkout P0).
+Last updated: 2026-10-02T01:55Z, branch `claude/charming-thompson-ptma8e` (checkout P0 post-merge
+verification: evidence 2026-10-01 19:28–19:38Z, re-checked 2026-10-02 01:50Z).
 
 ## Decision
 
@@ -19,8 +20,9 @@ Last updated: 2026-10-01T19:00Z, branch `claude/charming-thompson-ptma8e` (check
   checkout, webhook activation and key display are proven by tests and by
   configuration probes only; a live run needs provider test mode or explicit
   authorization (checkout P0).
-- Gumroad purchases are not provisioned in production (F21). The checkout
-  PR stops offering Gumroad until they are; the owner secret is still needed.
+- Gumroad purchases are not provisioned in production (F21). Since the
+  checkout deploy (#639, live 19:36Z) the checkout no longer offers
+  Gumroad; the owner secret is still needed to offer it again.
 - The revenue engine never sends the paid-key welcome email (F22).
 - Lifecycle state changes are only eventually consistent (F17).
 - The per-minute limiter does not fire (F18).
@@ -29,7 +31,13 @@ Last updated: 2026-10-01T19:00Z, branch `claude/charming-thompson-ptma8e` (check
 Pages deploys again: #638 merged as `8b2d82862`, publisher run 36859743101
 passed STAGE 5.4.6 and ran STAGE 5 and every post-deploy gate (F20 resolved).
 
-### Release evidence matrix (2026-10-01, deployed `8b2d82862`; checkout P0 not yet merged)
+Checkout P0 is live: #639 merged as `aa97c8366`, and the gateway, the revenue
+engine and Pages deployed it. The live checks pass (127/127 browser checks at six
+widths, 30/30 static checks, billing canary 14/15 with F21 the only failure).
+That verifies the checkout's presentation and gating. It does not verify payment to
+entitlement: no live payment was run.
+
+### Release evidence matrix (2026-10-01, deployed `aa97c8366`)
 
 | Control | Implemented | Tested | Deployed | Live verified | Blocker | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -38,7 +46,7 @@ passed STAGE 5.4.6 and ran STAGE 5 and every post-deploy gate (F20 resolved).
 | Operator calls not metered (F2) | yes | 7 tests | yes | PASS | — | cert 36839516753: "MSSP rotation preserves membership: PASS" |
 | Verified webhooks not metered (F9) | yes | 10 tests | yes | NOT TESTED with signed deliveries | credential (provider test mode) | — |
 | Razorpay webhook configured | yes | — | yes | PASS | — | 11:33Z unsigned POST → 401 "Signature mismatch" |
-| Gumroad webhook configured | code yes | — | secret missing | FAIL (P0) | operator secret (F21) | 11:33Z and 12:17Z (billing canary, public mode) → 500 "Webhook secret not configured"; live `upgrade.html` still sells 4 Gumroad products until the checkout PR deploys |
+| Gumroad webhook configured | code yes | — | secret missing | FAIL (P0) | operator secret (F21) | 11:33Z, 12:17Z and 19:30Z (billing canary, public mode) → 500 "Webhook secret not configured". Since 19:36Z the live checkout does not offer Gumroad: `/api/pricing` reports `available: false` and the button is hidden at every width |
 | Lifecycle deny/reactivate/rotate takes effect immediately | KV only; strong authority dormant | cert matrix | yes | INTERMITTENT: FAIL 07:01Z, PASS 08:56Z | FinOps (#596 auth authority) | F17 |
 | Expiry boundary, tier entitlements, MSSP isolation and self-service | yes | cert | yes | PASS | — | cert 36839516753 |
 | Enterprise signed-webhook canary | yes | cert | yes | BLOCKED | operator (`CDB_WATCHDOG_SINK_*`) | `OPERATOR_WEBHOOK_SINK_REQUIRED` |
@@ -48,15 +56,15 @@ passed STAGE 5.4.6 and ran STAGE 5 and every post-deploy gate (F20 resolved).
 | Buyer security/compliance copy matches implementation (F17, F19) | yes | gates + tests | `8b2d82862` | PASS | — | 18:16Z procurement pack: no bcrypt / scope-bitmap / request-signing claims, security contact decodes to the .com address; 18:58Z security page says "about a minute" |
 | No fixed refresh cadence outside sla.html (Phase 6) | yes | gates | `8b2d82862` | PASS | — | 18:58Z executive-briefing and pricing carry no fixed cadence |
 | Invented business data off the site (Phase 7) | yes | 9 tests | `8b2d82862` | PASS | — | 18:16Z: all three pages 404 |
-| Checkout: Razorpay the one primary path, Gumroad offered only when it can activate access, assisted note only, inline failures (checkout P0) | yes, in this PR | 95 browser checks, 12 static, 3 gateway, 2 revenue; 10/10 page mutations and 2 billing controls caught | no | NOT YET (live page is the old one) | merge + Pages deploy | Checkout P0 section |
-| A paid checkout's retry cannot open a second payment (checkout P0) | yes, in this PR | 2 tests + control | no | NOT YET | merge + revenue-engine deploy | Checkout P0 section |
+| Checkout: Razorpay the one primary path, Gumroad offered only when it can activate access, assisted note only, inline failures (checkout P0) | yes | 95 browser checks, 12 static, 3 gateway, 2 revenue; 10/10 page mutations and 2 billing controls caught | `aa97c8366` (Pages run 36914356330) | PASS | — | 127/127 live browser checks (320–1280 px), 30/30 static; Checkout P0 → Post-merge verification |
+| A paid checkout's retry cannot open a second payment (checkout P0) | yes | 2 tests + control | `aa97c8366` (revenue run 36914355894) | NOT TESTED live (needs a paid checkout) | provider test mode or explicit authorization | tests and the negative control ran in CI on the merged head |
 | Payment → entitlement → key, live | yes | cross-worker certified in tests | yes | NOT TESTED | provider test mode or explicit authorization | no real charge was made |
 | Key delivery email (Razorpay) | queued only | — | yes | FAIL by inspection | code fix + owner decision (F22) | `queueEmail` without `send_at` is never selected by `runDailyOutreach` |
 
 | SKU / capability | Status | Blocking evidence |
 | --- | --- | --- |
 | FREE API | HOLD | Per-minute limit not enforced live (F18) |
-| PRO | HOLD | Lifecycle immediacy intermittent (F17); Gumroad checkout unprovisioned (F21; hidden once the checkout PR deploys); payment E2E not tested; key email never sent (F22) |
+| PRO | HOLD | Lifecycle immediacy intermittent (F17); Gumroad checkout unprovisioned (F21; not offered on the live checkout since #639); payment E2E not tested; key email never sent (F22) |
 | ENTERPRISE | HOLD | As PRO; signed-webhook canary BLOCKED; 4-hour freshness term unsupported (F7) |
 | MSSP | HOLD | As ENTERPRISE (rotation canary now PASS) |
 | Malware review package | HOLD | #593: independent human review pending |
@@ -67,10 +75,13 @@ passed STAGE 5.4.6 and ran STAGE 5 and every post-deploy gate (F20 resolved).
 
 | Component | Value | Evidence |
 | --- | --- | --- |
-| `main` | `8b2d82862` | #636 → `c14dbae11` (tree = reviewed head `82d9b7b5c`); #637 → `d80c72643` (tree = `ce348b2a2`); #638 squash-merged 12:07:53Z → `8b2d82862` (tree `fa08a0feb`) |
-| Deployed gateway | `8b2d8286205f848a05d24e09ba2c37e005304b9e`, deploy run 36859743117 | `GET /api/health/live` 18:16Z: `deploy_commit_sha` |
-| Live health | 200 `ok`, freshness FRESH; feed generated 16:01:55Z (age 2h14m, limit 6h), 63 items | `GET /api/health`, `/api/watchdog/health` 18:16Z |
-| Open PR | checkout P0 (this branch) | — |
+| `main` | `aa97c8366` | #636 → `c14dbae11` (tree = reviewed head `82d9b7b5c`); #637 → `d80c72643` (tree = `ce348b2a2`); #638 → `8b2d82862` (tree `fa08a0feb`); #639 squash-merged 19:26Z → `aa97c8366` (tree `6cfc4fa5f` = reviewed head `baaf2ffee`) |
+| Deployed gateway | `aa97c83660c1e43b0116a8f4edee8890383d07a8`, deploy run 36914355832 (19:29Z; gates, full unit suite, exact-commit smoke) | `GET /api/health/live` 19:29Z: `deploy_commit_sha` |
+| Deployed revenue engine | `aa97c8366`, deploy run 36914355894 (19:28Z; lifecycle gate, deploy, smoke) | run log |
+| Pages | `aa97c8366`, pages-fast-publish run 36914356330 (19:36Z; all pre-deploy browser gates incl. the rewritten checkout test) | `gh-pages` copies of the five checked pages are byte-equal to `aa97c8366` |
+| Live health | 200 `ok`, freshness FRESH; feed generated 2026-10-01T21:36:32Z (age 4h13m, limit 6h), 61 items. At 19:38Z: generated 16:01:55Z (age 3h37m), 63 items | `GET /api/health`, `/api/watchdog/health` 2026-10-02T01:50Z and 2026-10-01T19:38Z |
+| Re-check 2026-10-02T01:50Z | gateway still `aa97c8366`; `/api/pricing` `checkout` block unchanged; live `upgrade.html` still the #639 page | read-only GETs |
+| Open PR | none (this ledger update) | — |
 
 Overnight 2026-09-30/10-01, from `generated_at` values the publisher's own
 freshness gate logged (no probe sampled either window; this session
@@ -498,9 +509,17 @@ pages answer 404.
 ### F21 — Gumroad purchases are not provisioned in production (R05) — OPERATOR-BLOCKED (P0)
 
 `POST /api/webhooks/gumroad` answers 500 "Webhook secret not configured"
-(11:33Z). Gumroad provisioning is webhook-only, and `upgrade.html` links four
-Gumroad products, so a Gumroad buyer is charged and receives no key. Razorpay's
-webhook is configured (401 on a bad signature).
+(11:33Z, still at 19:30Z). Gumroad provisioning is webhook-only. Until #639,
+`upgrade.html` linked four Gumroad products, so a Gumroad buyer was charged
+and received no key. Razorpay's webhook is configured (401 on a bad signature).
+
+Since #639 (live 19:36Z) the checkout hides Gumroad while the gateway reports it
+cannot provision, and no shipped page links the four access products. They
+are still purchasable by direct URL (`/l/pxyfcb`, `/l/xtnzu`, `/l/cdedlo`,
+`/l/vxoczs` answer 200 at 19:33Z). The storefront's server-rendered list
+shows nine other products, none of them access grants; Gumroad delivers
+those itself. Until the secret is set, the owner may unpublish the four
+access products on Gumroad so an old link cannot take a payment.
 
 Runbook (owner): `cd workers/intel-gateway && npx wrangler secret put
 GUMROAD_WEBHOOK_SECRET --env production`; set the Gumroad ping URL to
@@ -525,6 +544,20 @@ enabling it sends customer email and could flush 30 days of queued messages):
 set `send_at` at queue time for transactional templates only, send them on
 activation rather than at the 09:00 cron, and confirm the provider key.
 
+### F24 — The revenue engine's deploy never shows the commercial readiness verdict (R10, R29) — REPORTED
+
+`deploy-revenue-engine.yml` "Commercial readiness report" printed "NOTE:
+readiness endpoint not reachable yet" on 2026-09-28 (run 36460344094) and
+again on 2026-10-01 (run 36914355894). The repository secret is set (masked
+in the log), and `GET /api/v2/billing/admin/readiness` exists on both hosts
+(401 without the secret, 19:31Z). So the call is most likely refused (the
+repository `REVENUE_ADMIN_SECRET` differs from the Worker's), and the step
+cannot say so: `curl -sf` drops the status, a non-JSON body prints the
+"not reachable" note, and the step exits 0. The deploy is not gated by this
+step, but a BLOCKED verdict (for example F21) never reaches the deploy log.
+Fix (operator check plus a small workflow change): confirm the two secrets
+match, and print the HTTP status instead of the generic note.
+
 ### F23 — Authenticated `/api/v1/p33/metrics` returns uncontracted tier prices (R09) — REPORTED, P2
 
 `handleP33Metrics()` returns `marketplace_tiers` of $499 / $1,999 / $4,999 /
@@ -534,7 +567,7 @@ prices are $49 / $499 / $999. The route answers 401 anonymously (probed
 array and gets an object), so no buyer page shows it. Fix: derive the block
 from `config/commercial-contract.json` or remove it, in a P33 bug-fix PR.
 
-## Checkout P0: Razorpay primary, Gumroad secondary, assisted note only (2026-10-01) — IN PR, NOT DEPLOYED
+## Checkout P0: Razorpay primary, Gumroad secondary, assisted note only (2026-10-01) — MERGED (#639 → `aa97c8366`), DEPLOYED, LIVE PASS (presentation and gating); payment E2E BLOCKED
 
 Owner instruction: Razorpay is the primary checkout, Gumroad the secondary;
 assisted payments are one low-prominence note with two contact addresses;
@@ -635,11 +668,56 @@ Gumroad (secondary):
 | Refund revokes, dispute suspends, cancel vs end, renewal extends once | `gumroad-membership` tests | PASS (tests) |
 | Duplicate / replayed sale | sale claim + Durable Object lock tests | PASS (tests) |
 | Malformed ping (no sale_id, email or subscription_id) → 400, nothing changes | new `gumroad-membership` test + control | PASS (tests) |
-| Offered on the checkout only when provisioning and delivery are configured | 3 gateway tests; browser checks (available / unavailable / unreachable / 404) | PASS (local); live after deploy |
+| Offered on the checkout only when provisioning and delivery are configured | 3 gateway tests; browser checks (available / unavailable / unreachable / 404) | PASS (local); live PASS: hidden since 19:36Z (`available: false`, `automated_provisioning_not_configured`) |
 
 Screenshots (desktop 1280; mobile 320/360/390/430/768; pending, active,
 503 inline): produced by `render-test/verify_upgrade_checkout.js` with
 `CHECKOUT_SCREENSHOT_DIR`; not committed.
+
+### Post-merge verification (Phase 12, 2026-10-01)
+
+#639 was squash-merged at 19:26Z as `aa97c8366`, tree `6cfc4fa5f` = reviewed
+head `baaf2ffee`. Every check on that head passed first:
+- Python suites 1,913, including the three checkout suites
+- gateway 1,660/1,660
+- billing canary 7/7
+- billing negative controls 104/104, including the three new ones
+- SAST gate, TruffleHog and GitGuardian
+
+Nothing below made a payment or changed production state. The canary's POSTs
+are rejected-input probes (unknown tier, bad signature, retired routes). The
+browser probe aborted and listed every non-GET request the page attempted.
+
+| Check (live, read-only) | Result | Evidence |
+| --- | --- | --- |
+| Gateway runs the merge | PASS | deploy-worker 36914355832 (gates, full suite, exact-commit smoke); `/api/health/live` `deploy_commit_sha` = `aa97c8366` from 19:29:12Z |
+| Revenue engine runs the merge | PASS (deploy) | deploy-revenue-engine 36914355894: lifecycle gate, deploy and smoke success at 19:28Z |
+| Pages serves the merge | PASS | pages-fast-publish 36914356330 success at 19:36Z, including the pre-deploy checkout render test on dist and the post-deploy freshness gate; `gh-pages` `9fb3a5532` ("Deploying ... @aa97c83660"); `upgrade.html`, `pricing.html`, `get-api-key.html`, `trial-center.html` and `index.html` byte-equal to the merge |
+| Served page equals the merged source | PASS | 19:37Z: identical once Cloudflare's edge rewrites are undone (email obfuscation, its email-decode script, the Web Analytics beacon) |
+| `/api/pricing` checkout block | PASS | `razorpay`: primary, INR, subscription. `gumroad`: secondary, USD, `available: false`, `automated_provisioning_not_configured`. No other fields and no configuration values |
+| Browser at 320/360/390/430/768/1280 px | PASS, 127/127 (19:38Z) | see the list below the table |
+| Nothing payment-related fires on load | PASS | four requests, all aborted, none to a billing or payment endpoint: two Formspree page-view beacons (`apex-track.js`, unchanged, sends no email or payment id), Razorpay's script telemetry (`lumberjack.razorpay.com`), Cloudflare RUM |
+| Buyer copy on other pages | PASS | `pricing.html` shows "Razorpay (primary)" and the assisted-payment FAQ; no "within 2 hours" or "assisted activation" on `get-api-key.html`; no "no automated recurring billing" on `trial-center.html` |
+| Billing canary, public mode | 14/15 (19:30Z) | the one failure is F21 (Gumroad webhook 500). Passing: unknown tier 400; Razorpay bad signature 401, wrong type 415; manual payment 410 on both Workers; admin routes 401/403 |
+| A paid checkout's retry gets 409; provider error text stays server-side | NOT TESTED live | needs a paid checkout or a provider error; covered by tests and negative controls on the merged head |
+| A real payment end to end | BLOCKED | provider test mode or explicit authorization |
+
+The 127 browser checks cover:
+- **Primary checkout:** Razorpay is the one primary CTA, 61 px tall and
+  keyboard-reachable; PRO is preselected from `?plan=pro`; the charge reads
+  ₹4,100.
+- **Gumroad:** hidden, with the "temporarily unavailable" note.
+- **Assisted note:** verbatim, two mailto links, no controls, below both
+  checkouts.
+- **No manual payment:** no file input, UTR, QR, IFSC or UPI URI.
+- **Page health:** Cloudflare-obfuscated addresses decode; no dialog or page
+  error.
+- **Layout:** no horizontal overflow at any width. The same probe on the old
+  live page at 19:17Z measured 82, 42 and 12 px of overflow at 320, 360 and
+  390 px, and 69 of 121 checks failed.
+
+The probe also took screenshots of the live page at 390 and 1280 px; they are
+not committed.
 
 ### Blockers (not code)
 
@@ -655,7 +733,7 @@ Screenshots (desktop 1280; mobile 320/360/390/430/768; pending, active,
 | --- | --- | --- |
 | Pricing and plan terms | PASS | Contract gate 5,366/0; F10 live; F19 corrections in PR #638 |
 | Checkout: Razorpay (INR) | configured; payment NOT TESTED | webhook rejects bad signature (401); verify validates input (400). A real charge needs explicit authorization or provider test mode |
-| Checkout: Gumroad (USD) | **FAIL, P0** | F21: webhook secret unset, 4 products on sale |
+| Checkout: Gumroad (USD) | **FAIL, P0** | F21: webhook secret unset; not offered on the checkout since #639, access products still purchasable by direct URL |
 | Provisioning | PASS via admin API | cert "Authenticated Customer Ops"; payment-triggered provisioning NOT TESTED live |
 | Key delivery email | NOT TESTED | would send real email |
 | First use, tier entitlements | PASS | cert; F15 FREE masking live PASS |
@@ -685,12 +763,12 @@ anonymous; HSTS on the site and the API.
 | R02 | Open (#596), FinOps | F17: FAIL 07:01Z / PASS 08:56Z on the same matrix; copy now says "within about a minute" |
 | R03 | 500→429 deployed; limiter never reaches the cap | F1, F18 (`200x33` live on two SHAs); product + FinOps decision |
 | R04 | Fixed, live PASS | F2: MSSP rotation canary PASS in cert 36839516753 |
-| R05 | Gumroad FAIL (P0, operator; hidden by the checkout PR until configured); Razorpay webhook configured; key email never sent (F22) | F21, F22, Checkout P0; signed deliveries and a live payment need provider test mode (credential) |
+| R05 | Gumroad FAIL (P0, operator; not offered on the live checkout since #639); Razorpay webhook configured; key email never sent (F22) | F21, F22, Checkout P0; signed deliveries and a live payment need provider test mode (credential) |
 | R06 | Latent risk fixed on branch | F9 (`d1c8f3e65`) |
 | R07 | Partial live evidence | Cert 36690549981: MSSP isolation and self-service phases PASS |
 | R08 | Partial | SAST run 36744969006 on `022ecae4` success; ESLint no-undef sweep of all Worker source (F1). Dependency scan not re-run here |
-| R09 | F10, F19 live; checkout copy in the checkout PR | F10, F19, Checkout P0 (instant / EMI / GST / recurring-billing claims); F12, F23 open |
-| R10 | F13 live PASS; F20 resolved | F4 (post-deploy validation not chained since 2026-09-24); F13 proven on runs 36826966415 and 36859743101 |
+| R09 | F10, F19 and checkout copy live (#639) | F10, F19, Checkout P0 (instant / EMI / GST / recurring-billing claims); F12, F23 open |
+| R10 | F13 live PASS; F20 resolved | F4 (post-deploy validation not chained since 2026-09-24); F13 proven on runs 36826966415 and 36859743101; F24 (revenue deploy readiness report silent) |
 | R11 | Open (#593) | Human review pending; unchanged |
 | R12 | Partial | F10; F11 quarantined, live 404 (18:16Z); F15 live PASS; F16 open |
 | R13 | Verify | Not examined |
@@ -730,7 +808,7 @@ anonymous; HSTS on the site and the API.
 | F20 `dd4eba3d3` (#638) | Pages deploys again with the quarantine | `build_dist_artifact.py`, test | INCLUDE_DIR_FILE_EXCLUDES, copy_item, prune | run 36833320633; local exit 1 → 0 | LOW (one validator branch) | revert with Phase 7 |
 | F17/F19 `1227296b6` | Buyer security copy states implemented controls only | 9 pages, evidence register, convergence test, `index.js` (one string), rotation test | evidence register + verify_public_claims, sla.html, contract | per-claim code/config/live checks | LOW (copy + one response string) | revert |
 | Phase 6 `1d94967ce` | No cadence promise the scheduler cannot keep | 6 pages, evidence register | evidence register + gate | scheduled-run delivery and breach windows | LOW (copy) | revert |
-| Checkout P0 (this PR) | One automated primary checkout, a gated secondary, an assisted note, truthful copy, no double payment | `upgrade.html`; revenue `subscription-engine.js`; gateway `index.js` (one route line, one import) + new `checkout-providers.js`; 24 pages' copy; evidence register; policy doc; tests, render test, 3 negative controls, regression-gate suite list | resolveCheckoutPlan, checkout state machine, js/checkout.js (validateTaxId, bindPaymentFailedHandler), S5 pending reuse, S19 Plan price check, getPricingSnapshot, gumroad-products catalog, verify_public_claims | audit above; F21 live 500; F22 by inspection | MEDIUM (customer checkout page; one revenue branch; additive API field) | revert the squash commit; Pages and both Workers redeploy from main |
+| Checkout P0 (#639, `aa97c8366`) | One automated primary checkout, a gated secondary, an assisted note, truthful copy, no double payment | `upgrade.html`; revenue `subscription-engine.js`; gateway `index.js` (one route line, one import) + new `checkout-providers.js`; 24 pages' copy; evidence register; policy doc; tests, render test, 3 negative controls, regression-gate suite list | resolveCheckoutPlan, checkout state machine, js/checkout.js (validateTaxId, bindPaymentFailedHandler), S5 pending reuse, S19 Plan price check, getPricingSnapshot, gumroad-products catalog, verify_public_claims | audit above; F21 live 500; F22 by inspection | MEDIUM (customer checkout page; one revenue branch; additive API field) | revert the squash commit; Pages and both Workers redeploy from main |
 
 Blast radius (checkout P0): files as listed; imports: `index.js` imports
 `checkout-providers.js` (after the last import); routes: `GET /api/pricing`
@@ -808,12 +886,23 @@ none; `/api/v1/p*` shapes — unchanged; data schema — none (fewer
   pricing, release-label, version, capability-registry, pre-deploy, worker
   JS integrity 76/76 and entitlement-drift gates PASS; regression 41/41;
   P33 WORLDWIDE_RELEASE, 0 blockers; `ci_stats_extract.py p33` valid.
+- Checkout P0, CI on `baaf2ffee` (2026-10-01):
+  - regression-gate Python suites 1,913 passed;
+  - gateway 1,660/1,660, raw and after encoding sanitization;
+  - billing canary 7/7 and billing negative controls 104/104.
+- Checkout P0, after the merge (2026-10-01):
+  - deploy-worker, deploy-revenue-engine and pages-fast-publish succeeded on
+    `aa97c8366`;
+  - Phase 12 live: static 30/30, browser 127/127, billing canary 14/15 (the
+    failure is F21).
 - Live probes 2026-10-01 (read-only or rejected-input only, no transactions):
   `/api/health/live` provenance; F15 sweep; webhook configuration (unsigned
   POSTs); payment verify input validation; 35-request limiter boundary (same
   shape as certification phase 8); quick-start endpoint existence; billing
-  canary public mode 12:17Z (14/15, the failure is F21); #638 post-merge
-  checks 18:16–18:58Z.
+  canary public mode 12:17Z and 19:30Z (14/15 both times, the failure is
+  F21); #638 post-merge checks 18:16–18:58Z; #639 post-merge checks
+  19:29–19:38Z (no POST from the browser probe; every non-GET request the page
+  attempted was aborted and listed).
 
 ## Reuse report
 
