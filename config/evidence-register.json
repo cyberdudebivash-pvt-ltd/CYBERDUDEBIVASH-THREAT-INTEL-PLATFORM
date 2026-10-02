@@ -216,6 +216,49 @@
       "source": null,
       "finding": "2026-10-01 checkout P0: a paid plan is activated asynchronously by Razorpay's signed subscription.activated webhook (latency unmeasured, nothing bounds it); the revenue engine's welcome email is queued without a send time and is never sent (F22); Gumroad provisioning was unconfigured in production (F21). get-api-key.html took paid-plan requests promising a key by email within 2 hours, with WhatsApp 'assisted activation': a manual path presented as self-service.",
       "action": "Replaced with 'automated' / 'self-serve checkout' and 'activated after payment confirmation'; the key is shown on the checkout page. Paid-plan requests on get-api-key.html continue to checkout."
+    },
+    {
+      "claim": "Gumroad offered unconditionally, or an API key delivered by email",
+      "variants": [
+        "Razorpay or Gumroad, key issued",
+        "Razorpay and Gumroad checkouts activate",
+        "Razorpay and Gumroad checkout are fully automated",
+        "checkout via Razorpay or Gumroad",
+        "net banking) or Gumroad",
+        "Automated checkout via Razorpay (primary) or Gumroad",
+        "30-day access grant via Gumroad (pxyfcb)",
+        "30-day access grant via Gumroad (cdedlo)",
+        "provisioned and emailed",
+        "the key is emailed",
+        "Your API key is emailed",
+        "Your API key is being emailed",
+        "API key was delivered with subject line",
+        "API key has been sent to your email",
+        "new key emailed",
+        "Welcome email sent to",
+        "delivered by email (Gumroad)"
+      ],
+      "appeared_on": [
+        "pricing.html",
+        "upgrade.html",
+        "welcome.html",
+        "docs/faq.html",
+        "docs/quickstart.html",
+        "enterprise-pricing.html",
+        "mssp-tenant-dashboard.html",
+        "alternative-to-mandiant.html",
+        "alternative-to-recorded-future.html",
+        "api-key-manager.html",
+        "compare.html",
+        "lead-capture.html",
+        "mssp-partner-onboarding.html",
+        "trial-center.html",
+        "user-test-kit.html"
+      ],
+      "classification": "UNVERIFIED",
+      "source": null,
+      "finding": "2026-10-02 payment release closure: production Gumroad provisioning is not configured (F21: the webhook answers 500, secret not configured) and the checkout hides Gumroad while it cannot provision, yet pages and the structured data in pricing.html offered it unconditionally. Owner decision F22: a raw API key is never emailed; pages promised a key by email.",
+      "action": "Gumroad is described as offered only when the checkout page offers it. Keys are shown once on the Razorpay checkout page or revealed once by an emailed one-time link (POST /api/keys/redeem); emails never contain a key."
     }
   ],
 
