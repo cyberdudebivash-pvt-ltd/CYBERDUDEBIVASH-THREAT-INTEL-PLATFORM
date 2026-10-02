@@ -337,6 +337,17 @@ def _stamp(item: Dict, richness: float) -> Dict:
 
 
 # ── Merge live + baseline ─────────────────────────────────────────────────────────
+def _merge_cutoff_ts() -> float:
+    """Prior items published before this instant are outside MERGE_WINDOW_H."""
+    return datetime.now(timezone.utc).timestamp() - (MERGE_WINDOW_H * 3600)
+
+
+def _in_merge_window(item: Dict, cutoff_ts: float) -> bool:
+    """True when _merge() may keep this prior item (published inside the window)."""
+    pub_ts = _parse_ts(str(item.get("published_at") or item.get("timestamp") or ""))
+    return pub_ts >= cutoff_ts
+
+
 def _merge(live_items: List[Dict], baseline_items: List[Dict]) -> List[Dict]:
     """
     Merge live feed with prior baseline. Live items always supersede baseline.
@@ -351,15 +362,14 @@ def _merge(live_items: List[Dict], baseline_items: List[Dict]) -> List[Dict]:
 
     merged = list(live_items)
     live_keys = set(live_by_key.keys())
-    cutoff_ts = datetime.now(timezone.utc).timestamp() - (MERGE_WINDOW_H * 3600)
+    cutoff_ts = _merge_cutoff_ts()
 
     for b_item in baseline_items:
         k = _item_key(b_item)
         if k in live_keys:
             continue  # live version supersedes
         # Only retain recent baseline items
-        pub_ts = _parse_ts(str(b_item.get("published_at") or b_item.get("timestamp") or ""))
-        if pub_ts >= cutoff_ts:
+        if _in_merge_window(b_item, cutoff_ts):
             merged.append(b_item)
 
     return merged
@@ -439,6 +449,17 @@ def main() -> int:
         except Exception as exc:
             log.warning("Could not load existing baseline (will rebuild): %s", exc)
 
+    # F26 (2026-10-02): the shrinkage guard below compares against the prior
+    # items the merge can keep. _merge() drops prior items older than
+    # MERGE_WINDOW_H by design; counting them made the guard refuse every
+    # update once the prior aged out, freezing this baseline (and the premium
+    # feeds built from it) at its 2026-08-26 copy.
+    cutoff_ts = _merge_cutoff_ts()
+    prior_in_window = sum(1 for b in baseline_items if _in_merge_window(b, cutoff_ts))
+    if prior_baseline_count:
+        log.info("Prior items inside the %dh merge window: %d of %d",
+                 MERGE_WINDOW_H, prior_in_window, prior_baseline_count)
+
     # Merge
     merged = _merge(live_items, baseline_items)
     log.info("Merged pool: %d items (live %d + baseline-only retained %d)",
@@ -482,17 +503,22 @@ def main() -> int:
         log.error("SAFETY: No items passed quality gate — baseline NOT updated")
         return 1
 
-    # Shrinkage guard
-    if prior_baseline_count > 0:
-        shrink_ratio = len(passed) / prior_baseline_count
+    # Shrinkage guard: against the prior items the merge can keep (F26 above)
+    if prior_in_window > 0:
+        shrink_ratio = len(passed) / prior_in_window
         if shrink_ratio < SHRINKAGE_FLOOR:
             log.error(
-                "SHRINKAGE GUARD: new baseline (%d) is %.0f%% of prior (%d) — "
+                "SHRINKAGE GUARD: new baseline (%d) is %.0f%% of the prior's %d in-window items — "
                 "below %.0f%% floor. Baseline NOT updated. Prior retained.",
-                len(passed), shrink_ratio * 100, prior_baseline_count, SHRINKAGE_FLOOR * 100,
+                len(passed), shrink_ratio * 100, prior_in_window, SHRINKAGE_FLOOR * 100,
             )
             return 1
-        log.info("Shrinkage check: %.0f%% of prior baseline — OK", shrink_ratio * 100)
+        log.info("Shrinkage check: %.0f%% of the prior's in-window items — OK", shrink_ratio * 100)
+    elif prior_baseline_count > 0:
+        log.warning(
+            "Prior baseline (%d items) is entirely older than the %dh merge window — "
+            "rebuilding it from the live feed.", prior_baseline_count, MERGE_WINDOW_H,
+        )
 
     # Sort
     passed = _sort_premium(passed)
@@ -545,6 +571,7 @@ def main() -> int:
         "version":            BASELINE_VERSION,
         "live_items":         len(live_items),
         "prior_baseline":     prior_baseline_count,
+        "prior_in_window":    prior_in_window,
         "merged_pool":        len(merged) + dups_removed,
         "dups_removed":       dups_removed,
         "passed_gate":        len(passed),

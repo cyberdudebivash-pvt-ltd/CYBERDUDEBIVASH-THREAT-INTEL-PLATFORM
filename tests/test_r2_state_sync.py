@@ -102,7 +102,7 @@ class TestStateFilesManifest(unittest.TestCase):
     entry doesn't silently pass just because the generic tests adapted to
     the shorter list."""
 
-    def test_exactly_twenty_two_files_migrated(self):
+    def test_exactly_twenty_three_files_migrated(self):
         """P0 R2 COST AUDIT FIX: was 9 -- data/cache/r2_report_publish_state.json
         (scripts/r2_report_publisher.py's own cross-run incremental-publish
         state) was added after a post-merge forensic audit of PR #369 found
@@ -161,8 +161,24 @@ class TestStateFilesManifest(unittest.TestCase):
         since both new download/upload steps use --only to scope to just
         their own files) at 840 Class A + 240 Class B per month = 0.084% /
         0.0024% of the respective allowances. Any future increase must be
-        justified the same way before this number is changed."""
-        self.assertEqual(len(rs.STATE_FILES), 22)
+        justified the same way before this number is changed.
+
+        Was 22 -- F26 (2026-10-02): api/feed.baseline.json, the premium
+        baseline behind the four Enterprise/MSSP premium feeds, was persisted
+        only by STAGE 4's rejected git push, so every publisher run read the
+        26 August copy back and the premium feeds served August items. One
+        owner-only entry (broad sweeps skip it), downloaded and uploaded with
+        --only around sentinel-blogger.yml's STAGE 3.1.19. Computed from the
+        observed run count (at most 14 publisher runs/day): worst case 1,680
+        Class A + 1,260 Class B per month = 0.168% / 0.0126% of R2's
+        allowances; no LIST."""
+        self.assertEqual(len(rs.STATE_FILES), 23)
+
+    def test_premium_baseline_is_owner_only_under_the_private_prefix(self):
+        """F26: the key stays under premium/ (served by no route) and no
+        broad sweep may download or re-publish it."""
+        self.assertIn(("api/feed.baseline.json", "premium/state/feed.baseline.json"), rs.STATE_FILES)
+        self.assertIn("api/feed.baseline.json", rs.BROAD_SWEEP_EXCLUDED_PATHS)
 
     def test_p0_runtime_intelligence_plane_is_r2_persisted(self):
         """The 5 customer dashboard aggregate files plus the 2 sub-files with

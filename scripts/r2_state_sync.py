@@ -340,6 +340,25 @@ STATE_FILES: list[tuple[str, str]] = [
     ("data/sovereign/sovereign_output.json", "data/sovereign/sovereign_output.json"),
     ("data/genesis/genesis_output.json",     "data/genesis/genesis_output.json"),
     ("data/genesis/detection_pack.json",     "data/genesis/detection_pack.json"),
+    # F26 (2026-10-02): api/feed.baseline.json, the premium baseline that
+    # scripts/generate_tiered_feeds.py turns into the four Enterprise/MSSP
+    # premium feeds (/api/v1/premium/feed/*), the detection pack and the
+    # trial preview. Same root cause as the entries above: only STAGE 4's
+    # git push persisted it, refused since 2026-08-26, so every publisher
+    # run read the 26 August copy back. Its key sits under the private
+    # premium/ prefix: no gateway route serves premium/state/
+    # (/api/v1/premium/feed/ maps a fixed tier allowlist to premium/feeds/).
+    # Owner-only (BROAD_SWEEP_EXCLUDED_PATHS below): sentinel-blogger.yml
+    # downloads it explicitly before STAGE 3.1.19 and uploads it after a
+    # successful run of that stage, so no broad sweep can re-publish a stale
+    # copy. COST (computed from the observed run count, not measured): at
+    # most 14 publisher runs/day (2026-09-29); per run one download (a HEAD
+    # plus up to 2 ranged GETs while the object is above the AWS CLI's 8 MB
+    # multipart threshold, 11.2 MB today) and at most one upload (up to 4
+    # multipart calls above that threshold, 1 PUT below). Worst case 1,680
+    # Class A + 1,260 Class B per month = 0.168% / 0.0126% of R2's
+    # allowances. No LIST. Storage: one object, overwritten in place.
+    ("api/feed.baseline.json",               "premium/state/feed.baseline.json"),
 ]
 
 # Local relative paths that must NEVER be added to STATE_FILES/STATE_DIRS --
@@ -390,6 +409,8 @@ BROAD_SWEEP_EXCLUDED_PATHS = frozenset({
     "data/sovereign/sovereign_output.json",
     "data/genesis/genesis_output.json",
     "data/genesis/detection_pack.json",
+    # F26 (2026-10-02): owned by sentinel-blogger.yml's STAGE 3.1.19 steps.
+    "api/feed.baseline.json",
 })
 _not_tracked = BROAD_SWEEP_EXCLUDED_PATHS - {local_rel for local_rel, _ in STATE_FILES}
 assert not _not_tracked, f"BROAD_SWEEP_EXCLUDED_PATHS entries missing from STATE_FILES: {_not_tracked}"

@@ -7,10 +7,10 @@ stay as point-in-time records; this file carries current status. Update it in
 the same PR as the change that moves a row. Historic evidence is never reused
 as current certification.
 
-Last updated: 2026-10-02T12:00Z, branch `claude/charming-thompson-ptma8e`
-(payment and commercial release blocker closure: F22 one-time key link,
-F21 audit and copy, operator runbook, F25 measured, F26 and F27 found;
-not yet merged).
+Last updated: 2026-10-02T12:45Z, branch `claude/charming-thompson-ptma8e`.
+The payment and commercial release blocker closure merged as #643 →
+`b516e7bb2` and is deployed. This change adds its post-merge verification
+and the F26 fix, which is not yet merged.
 
 ## Decision
 
@@ -29,9 +29,9 @@ not yet merged).
   ([runbook §1](PAYMENT_RELEASE_OPERATOR_RUNBOOK.md#1-f21-gumroad-production-safety)).
 - F22 is decided: on 2026-10-02 the owner ruled that a raw API key is
   never emailed. This pass implements it: an email carries only a
-  one-time link that reveals the key once, at the gateway. It is not
-  deployed until this PR merges. The Razorpay activation notice stays off
-  until the owner sets `KEY_EMAIL_DELIVERY_ENABLED` and `SENDGRID_API_KEY`.
+  one-time link that reveals the key once, at the gateway. Merged as #643
+  and deployed at 12:23Z. The Razorpay activation notice stays off until the
+  owner sets `KEY_EMAIL_DELIVERY_ENABLED` and `SENDGRID_API_KEY`.
 - Payment release closure P0 (#641 → `acc38a24d`, deployed 04:03Z) fixes
   three P0 payment-to-entitlement defects found in this pass (P0-1 legacy
   Razorpay webhook provisioned any captured payment; P0-2 the daily check
@@ -80,9 +80,9 @@ entitlement: no live payment was run.
 | A paid checkout's retry cannot open a second payment (checkout P0) | yes | 2 tests + control | `aa97c8366` (revenue run 36914355894) | NOT TESTED live (needs a paid checkout) | provider test mode or explicit authorization | tests and the negative control ran in CI on the merged head |
 | Payment → entitlement → key, live | yes | cross-worker certified in tests | yes | NOT TESTED | provider test mode or explicit authorization | no real charge was made |
 | Key delivery email (Razorpay) | sender fixed, off by default (F22) | 6 tests, 2 controls | `acc38a24d` | NOT TESTED (would send real email) | owner flag + `SENDGRID_API_KEY` (F22) | before: `queueEmail` without `send_at` was never selected by `runDailyOutreach`. Superseded by the next row: the notice now carries a one-time link, never the key |
-| No raw API key in any email; one-time key link (F22, owner decision 2026-10-02) | yes (this PR) | 12 tests; 9 controls | not yet | NOT TESTED | merge and deploy | Payment and commercial release blocker closure |
-| Gumroad not offered while it cannot provision (F21) | yes | withdrawn-claim gate (17 variants) | Pages after merge | PASS on the checkout (`available: false`, 06:48Z); the four access products still answer 200 by direct link (08:33Z) | owner: unpublish, or set the secret | [runbook §1](PAYMENT_RELEASE_OPERATOR_RUNBOOK.md#1-f21-gumroad-production-safety) |
-| Premium feeds current (F26) | no | — | — | FAIL: the 05:58Z run uploaded all four from items dated 2026-08-19 to 08-26 | engineering (F26); owner (F25) | F26 |
+| No raw API key in any email; one-time key link (F22, owner decision 2026-10-02) | yes | 12 tests; 9 controls | `b516e7bb2` (gateway run 37006160812, revenue run 37006160913) | PASS for every refusal path (12:23Z); a live redemption NOT TESTED (needs an issued link) | — | Post-merge verification (#643) |
+| Gumroad not offered while it cannot provision (F21) | yes | withdrawn-claim gate (17 variants) | `b516e7bb2` (Pages run 37006160911) | PASS: 12:26Z, none of the 17 variants on any of the 15 pages; checkout `available: false`. The four access products still answer 200 by direct link (08:33Z) | owner: unpublish, or set the secret | [runbook §1](PAYMENT_RELEASE_OPERATOR_RUNBOOK.md#1-f21-gumroad-production-safety) |
+| Premium feeds current (F26) | yes (this PR) | 10 tests; 3 workflow mutations caught | publisher, first run after merge | FAIL until then: the 05:58Z run uploaded all four from items dated 2026-08-19 to 08-26 | merge, then the next publisher run | F26 |
 | Required status checks on `main` | no | — | — | FAIL: ruleset 21556637 has no required-status-checks rule | repository admin | Payment and commercial release blocker closure |
 | Legacy Razorpay Orders provision only this gateway's Orders at the exact price (P0-1) | yes | 7 tests, 4 controls | `acc38a24d` | NOT TESTED live | — | payment release closure P0 |
 | Razorpay renewals: no lockout after the daily check, renewal grace, Plan binding, claim release, one key per subscription (P0-2, P1-1..4) | yes | 14 tests, 8 controls | `acc38a24d` | NOT TESTED live | provider test mode | payment release closure P0 |
@@ -103,14 +103,14 @@ entitlement: no live payment was run.
 
 | Component | Value | Evidence |
 | --- | --- | --- |
-| `main` | `fcb252bd7` | #636 → `c14dbae11` (tree = reviewed head `82d9b7b5c`); #637 → `d80c72643` (tree = `ce348b2a2`); #638 → `8b2d82862` (tree `fa08a0feb`); #639 squash-merged 19:26Z → `aa97c8366` (tree `6cfc4fa5f` = reviewed head `baaf2ffee`); #640 (ledger only) → `5911a9722`, which deploys no Worker; #641 squash-merged 04:01:40Z by the repository owner → `acc38a24d` (tree `150d41a13` = reviewed head `5c6c6a8ad`); #642 squash-merged 07:02:33Z → `fcb252bd7` (tree `fe9f549e2` = reviewed head `2d4f922ae`; regression gate on `main` green, run 36976506794), which deploys no Worker |
-| Deployed gateway | `acc38a24d95c7cf804463ea566c76419a4d92f79`, deploy run 36962733324 (04:03Z) | `GET /api/health/live` 06:47Z: `deploy_commit_sha`, `deploy_run_id` 36962733324 |
-| Deployed revenue engine | `acc38a24d`, deploy run 36962733371 (04:03Z; deploy gate 198/198, version `5592ba55`) | run log |
-| Pages | `aa97c8366`, pages-fast-publish run 36914356330 (19:36Z; all pre-deploy browser gates incl. the rewritten checkout test) | `gh-pages` copies of the five checked pages are byte-equal to `aa97c8366` |
+| `main` | `b516e7bb2` | #636 → `c14dbae11` (tree = reviewed head `82d9b7b5c`); #637 → `d80c72643` (tree = `ce348b2a2`); #638 → `8b2d82862` (tree `fa08a0feb`); #639 squash-merged 19:26Z → `aa97c8366` (tree `6cfc4fa5f` = reviewed head `baaf2ffee`); #640 (ledger only) → `5911a9722`, which deploys no Worker; #641 squash-merged 04:01:40Z by the repository owner → `acc38a24d` (tree `150d41a13` = reviewed head `5c6c6a8ad`); #642 squash-merged 07:02:33Z → `fcb252bd7` (tree `fe9f549e2` = reviewed head `2d4f922ae`; regression gate on `main` green, run 36976506794), which deploys no Worker; #643 squash-merged 12:21:02Z → `b516e7bb2` (tree `f1df2be36` = reviewed head `578fdaa49`) |
+| Deployed gateway | `b516e7bb2bd0b1c1d0c8ba6c7f939830ac9ce3d6`, deploy run 37006160812 (12:23Z) | `GET /api/health/live` 12:23Z: `deploy_commit_sha`, `deploy_run_id` 37006160812 |
+| Deployed revenue engine | `b516e7bb2`, deploy run 37006160913 (12:22Z) | run conclusion success |
+| Pages | `b516e7bb2`, pages-fast-publish run 37006160911 (all pre-deploy browser gates) | live pages checked 12:26Z (Post-merge verification (#643)) |
 | Live health | 200 `ok`, freshness FRESH; feed generated 2026-10-01T21:36:32Z (age 4h13m, limit 6h), 61 items. At 19:38Z: generated 16:01:55Z (age 3h37m), 63 items | `GET /api/health`, `/api/watchdog/health` 2026-10-02T01:50Z and 2026-10-01T19:38Z |
 | Re-check 2026-10-02T01:50Z | gateway still `aa97c8366`; `/api/pricing` `checkout` block unchanged; live `upgrade.html` still the #639 page | read-only GETs |
 | Re-check 2026-10-02T03:17Z | gateway still `aa97c8366` | `GET /api/health/live` |
-| Open PR | payment and commercial release blocker closure (this change) | — |
+| Open PR | F26 premium baseline fix and #643 post-merge verification (this change) | — |
 
 Overnight 2026-09-30/10-01, from `generated_at` values the publisher's own
 freshness gate logged (no probe sampled either window; this session
@@ -535,7 +535,7 @@ sentinel-blogger 36859743101 success (13:24Z) with STAGE 5.4.6, 5.4.6b,
 167, 168, 176, 178, 186) all success. Live at 18:16Z: the three quarantined
 pages answer 404.
 
-### F21 — Gumroad purchases are not provisioned in production (R05) — OPERATOR-BLOCKED (P0); recovery defect P0-3 fixed and deployed (#641); unconditional Gumroad copy removed (this PR)
+### F21 — Gumroad purchases are not provisioned in production (R05) — OPERATOR-BLOCKED (P0); recovery defect P0-3 fixed and deployed (#641); unconditional Gumroad copy removed (#643, live 12:26Z)
 
 `POST /api/webhooks/gumroad` answers 500 "Webhook secret not configured"
 (11:33Z, still at 19:30Z). Gumroad provisioning is webhook-only. Until #639,
@@ -573,7 +573,7 @@ Audit 2026-10-02 ([runbook §1](PAYMENT_RELEASE_OPERATOR_RUNBOOK.md#1-f21-gumroa
 - Historical sales need the owner's Gumroad sales export. No transaction
   was created or replayed.
 
-### F22 — The paid-key welcome email is never sent (R05) — sender FIXED and deployed (#641), off by default; OWNER DECIDED 2026-10-02 (never email a raw key); one-time key link IMPLEMENTED (this PR), not yet deployed
+### F22 — The paid-key welcome email is never sent (R05) — sender FIXED and deployed (#641), off by default; OWNER DECIDED 2026-10-02 (never email a raw key); one-time key link MERGED (#643 → `b516e7bb2`) and DEPLOYED 12:23Z
 
 Razorpay activation calls `provisionCustomer()` (revenue engine), which
 queues `welcome_provisioned` (the API key) with `queueEmail()` and no
@@ -677,7 +677,7 @@ Item 2 changes STAGE 4, which CLAUDE.md marks "never modify", so it
 needs the owner's confirmation and is not made here. Main branch
 protection stays as it is.
 
-### F26 — Enterprise and MSSP premium feeds serve August intel (R12, R15) — MEASURED 2026-10-02, P1; fix not yet made
+### F26 — Enterprise and MSSP premium feeds serve August intel (R12, R15) — MEASURED 2026-10-02, P1; FIX in PR (this change), not yet merged
 
 Where the feeds come from:
 
@@ -712,9 +712,60 @@ Root cause:
    update can pass.
 
 `/api/feed.baseline.json` and `/api/feed.trial.json` answer 404 on the
-public host, so no premium content is exposed. The fix (guard
-denominator, regression test, and R2 persistence of the baseline) is a
-separate PR.
+public host, so no premium content is exposed.
+
+Fix (this PR, not yet merged):
+
+- **`premium_feed_baseline.py`.** The guard compares against the prior items
+  the merge can keep (shared `_merge_cutoff_ts` and `_in_merge_window`). A
+  prior entirely outside the window is rebuilt from the live feed, with a
+  warning. An in-window loss below the floor is still refused. The report
+  gains `prior_in_window`.
+- **`r2_state_sync.py`.** `api/feed.baseline.json` becomes an owner-only
+  state file at `premium/state/feed.baseline.json`. No route serves that
+  prefix, and broad sweeps skip it. Worst case 1,680 Class A and 1,260
+  Class B operations a month (0.168% and 0.0126% of R2's allowances).
+- **`sentinel-blogger.yml`.**
+  - STAGE 3.1.18d downloads the baseline with `--only` before STAGE 3.1.19.
+  - STAGE 3.1.19 reports `updated=true` only when it wrote a new baseline.
+  - STAGE 3.1.19b uploads only when the download succeeded and the
+    baseline was updated.
+  - All three steps are non-blocking; STAGE 4 is unchanged.
+- **`generate_tiered_feeds.py`.** `feed.standard.json` claimed "all 176
+  quality-gated items" while it held 985. It no longer states a number;
+  `_meta.item_count` carries the count.
+- **Tests:**
+  - guard, 4 tests: 2 fail on the old code, and the 2 guard-preservation
+    controls pass on both;
+  - workflow wiring, 5 tests: 3 workflow mutations caught;
+  - metadata, 1 test: fails on the old code;
+  - R2 state-file pin: 22 → 23, with the FinOps justification.
+
+Expected on the first publisher run after the merge (which the merge itself
+triggers):
+
+1. STAGE 3.1.18d finds no R2 copy and keeps the checkout's copy.
+2. STAGE 3.1.19 logs that the 985-item prior is entirely outside the window
+   and writes a baseline from the live feed.
+3. STAGE 3.1.19b uploads it.
+4. STAGE 3.1.20 builds the premium feeds from it.
+
+### F28 — The certification canary step loses a failing canary's result (R10, R18) — REPORTED, P2; fix proposed
+
+`commercial-customer-ops-certification.yml`, Phases 8-15, runs under
+`bash -e`. Its `canary()` helper does
+`out=$(node deploy/cyber-watchdog/canary.mjs "$mode" 2>/dev/null); rc=$?`.
+Under `-e`, a non-zero exit from the canary aborts the script at that
+assignment. The `case` that records FAIL, or OPERATOR_WEBHOOK_SINK_REQUIRED,
+never runs, and neither does the summary.
+
+Observed in runs 37006162439 and 37006645392: the job ended with exit code
+1, with nothing after "ENTERPRISE denied MSSP tenant management: PASS". The
+canary-key cleanup still ran, through the step's EXIT trap.
+
+The run still fails closed, as it should, but the reason is lost. Fix:
+capture the exit code without tripping `-e`, for example
+`out=$(...) && rc=0 || rc=$?`.
 
 ### F27 — The daily full secret scan never completes (R08) — REPORTED, P2
 
@@ -1028,7 +1079,7 @@ Testimonials and case-study pages state that no customer evidence is
 published. `payment-status-dashboard.html` (admin-only) still shows
 approve buttons that now answer 410; left as is (deprecation, not deletion).
 
-## Payment and commercial release blocker closure (2026-10-02) — this PR, not yet merged
+## Payment and commercial release blocker closure (2026-10-02) — MERGED (#643 → `b516e7bb2`), DEPLOYED; provider E2E BLOCKED
 
 - Base: `main` `fcb252bd7`.
 - Deployed Workers: `acc38a24d`.
@@ -1120,17 +1171,17 @@ now covers that wording.
   - queued variables shipped to the email provider;
   - activation notice queues the raw key.
 
-### Controls at this PR's head (before merge)
+### Controls after the #643 deploy (2026-10-02T12:45Z)
 
 | Control | Status | Evidence | Blocker |
 | --- | --- | --- | --- |
 | Razorpay checkout | PASS | Presentation and gating live since #639 (127/127 browser checks); bad signature → 401 | — |
 | Razorpay payment authority | PASS | Server Plan and price, Plan binding, Order authority; tests and controls (payment release closure P0); live unsigned webhook → 401 | — |
 | Razorpay entitlement | BLOCKED | Cross-worker tests: tier, cycle, expiry, one key per subscription. No live payment | Authorized provider test credentials |
-| Gumroad availability | FAIL | Checkout hides it (`available: false`), but ten live pages still offer it until this PR deploys, and the four products answer 200 by direct link | This PR (pages); owner (products) |
+| Gumroad availability | PASS | No platform page or response offers Gumroad: checkout `available: false`; 12:26Z, none of the 17 withdrawn variants on the 15 pages. The four products still sell by direct link on Gumroad's own store | Owner: unpublish, or set the secret ([runbook §1](PAYMENT_RELEASE_OPERATOR_RUNBOOK.md#1-f21-gumroad-production-safety)) |
 | Gumroad provisioning | BLOCKED | Webhook answers 500 "Webhook secret not configured" | Operator secret `GUMROAD_WEBHOOK_SECRET`, ping URL, `RESEND_API_KEY` |
 | Gumroad refund/revocation | BLOCKED | Tests: refunded, disputed and ended revoke | F21 secret, then a Gumroad test sale |
-| Secure credential delivery | NOT TESTED | 12 tests, 9 controls; not deployed | Merge and deploy |
+| Secure credential delivery | PASS | Deployed `b516e7bb2`. Live refusals 12:23Z: GET 405, text/plain 415, malformed 400, unknown token 410, query-string token 400, admin re-issue without auth 403, all `no-store`. A live redemption needs an issued link (CI proves it: 12 tests, 9 controls) | — |
 | `REVENUE_ADMIN_SECRET` alignment | BLOCKED | Deploy run 36962733371: HTTP 401 | Operator secret ([runbook §3](PAYMENT_RELEASE_OPERATOR_RUNBOOK.md#3-f24-revenue_admin_secret)) |
 | Enterprise certification canary | BLOCKED | `OPERATOR_WEBHOOK_SINK_REQUIRED` (runs 36962733292, 36984546750) | Operator secrets `CDB_WATCHDOG_SINK_URL`, `CDB_WATCHDOG_SINK_INSPECT_URL`, `CDB_WATCHDOG_SINK_TOKEN` |
 | Publisher runtime state | FAIL | F25: every push refused since 2026-08-26; F26: premium feeds built from August items | Owner (STAGE 4); engineering (F26) |
@@ -1139,7 +1190,7 @@ now covers that wording.
 | Provider E2E transaction | BLOCKED | Procedure in [runbook §5](PAYMENT_RELEASE_OPERATOR_RUNBOOK.md#5-provider-e2e-test-procedure). No real charge made | Authorized provider test credentials |
 | Customer access after verified payment | BLOCKED | Cross-worker tests only | Authorized provider test credentials |
 | Customer revocation after refund | BLOCKED | Cross-worker refund tests and controls only | Authorized provider test credentials |
-| Production certification | FAIL | Run 36984546750 (08:31Z): Enterprise canary BLOCKED; lifecycle matrix FAIL (F17) | Operator secrets; F17 (FinOps) |
+| Production certification | FAIL | Run 37006645392 on deployed `b516e7bb2` (12:26Z): every non-canary phase passed, lifecycle matrix included. The PRO canary refused a STALE feed (F3); the Enterprise canary is BLOCKED (no sink). Earlier run 36984546750 (08:31Z): lifecycle matrix FAIL (F17) | Fresh feed (F3); operator secrets; F17 (FinOps) |
 
 ### Required status checks on `main` — BLOCKED — REPOSITORY ADMIN ACTION REQUIRED
 
@@ -1185,6 +1236,58 @@ check is queued, in progress, failed or cancelled.
 - **Live, 11:56Z:** the feed was generated at 06:04:31Z, 5 h 52 min old
   against the 6 h limit. No publisher run had started since 05:31Z (F3).
 
+### Post-merge verification (#643, 2026-10-02)
+
+- **Merge.** #643 was squash-merged at 12:21:02Z as `b516e7bb2`, whose tree
+  equals the reviewed head `578fdaa49`. Before the merge, all 15 checks on
+  that head were complete. Each was green, or skipped where the SAST gate
+  verified it did not apply (Bandit, Safety and Semgrep: no Python or
+  dependency change).
+- **Deploys.**
+  - deploy-worker 37006160812: succeeded.
+  - deploy-revenue-engine 37006160913: succeeded.
+  - pages-fast-publish 37006160911: succeeded, with every pre-deploy browser
+    gate.
+  - `/api/health/live` reported `b516e7bb2` at 12:23Z.
+- **Live F22 (12:23Z, rejected input only).** Every answer was `no-store`:
+  - `GET /api/keys/redeem`: 405;
+  - `text/plain` body: 415;
+  - malformed token: 400;
+  - unknown well-formed token: 410;
+  - token only in the query string: 400;
+  - `POST /api/admin/keys/{key}/redemption` without credentials: 403.
+- **Live F21 (12:26Z).** None of the 17 withdrawn variants appears on any of
+  the 15 pages the register lists. `customer/api-keys.html` serves the
+  redemption card.
+- **Billing canary, public mode (12:23Z).** 14/15. The only failure is F21:
+  `gumroad_webhook_requires_secret` returns 500.
+- **Certification.**
+  - The push-triggered run 37006162439 started its live phases at 12:21:14Z,
+    before the gateway deploy finished (12:23:02Z). It therefore tested the
+    previous deploy.
+  - Its canary job stopped at 12:22:04Z without a result line, inside the
+    deploy window.
+  - Run 37006645392 was dispatched on `main` at 12:26Z to certify the
+    deployed `b516e7bb2`. It failed.
+    - Every phase except the live canaries passed: lifecycle matrix, JWT
+      and rotation (F17 passed this time), expiry boundary, MSSP isolation,
+      MSSP self-service, FREE rate-limit boundary, authenticated customer
+      ops, customer core flow and static checks.
+    - The canary job stopped in the PRO canary. That canary exits 1 with
+      `NO_GO_FEED_NOT_FRESH` when the feed is not FRESH
+      (`deploy/cyber-watchdog/canary.mjs` lines 56-57).
+      `/api/watchdog/health` reported STALE at 12:30Z (6 h 25 min old,
+      F3).
+    - The run log does not show that reason (F28). The cause comes from the
+      canary's code and the live health read, not from #643: the PRO canary
+      passed at 08:33Z on the previous deploy, while the feed was fresh.
+- **Regression gate on `main`:** push run 37006160789, success.
+- **Feed freshness.** `/api/health` answered 503 at 12:27Z. The feed was
+  generated at 06:04:31Z, 6 h 22 min earlier against a 6 h limit. No
+  publisher run had started since 05:31Z: the 08:17 and 12:17 schedules did
+  not start. This is F3's third breach. The publisher run that this change's
+  merge triggers is the next one expected.
+
 ## Paying-customer lifecycle (Phase 8, 2026-10-01, deployed `d80c72643`)
 
 | Stage | Result | Evidence / blocker |
@@ -1221,7 +1324,7 @@ anonymous; HSTS on the site and the API.
 | R02 | Open (#596), FinOps | F17: FAIL 07:01Z / PASS 08:56Z on the same matrix; copy now says "within about a minute" |
 | R03 | 500→429 deployed; limiter never reaches the cap | F1, F18 (`200x33` live on two SHAs); product + FinOps decision |
 | R04 | Fixed, live PASS | F2: MSSP rotation canary PASS in cert 36839516753 |
-| R05 | Gumroad FAIL (P0, operator; not offered on the live checkout since #639; unconditional copy removed in this PR); Razorpay webhook configured; F22 decided (no key by email) and implemented in this PR; P0-1..3 fixed and deployed (#641) | F21, F22, Checkout P0, payment release closure P0; signed deliveries and a live payment need provider test mode (credential) |
+| R05 | Gumroad FAIL (P0, operator; not offered on the live checkout since #639; unconditional copy removed, #643); Razorpay webhook configured; F22 decided (no key by email), deployed (#643); P0-1..3 fixed and deployed (#641) | F21, F22, Checkout P0, payment release closure P0; signed deliveries and a live payment need provider test mode (credential) |
 | R06 | Latent risk fixed on branch | F9 (`d1c8f3e65`) |
 | R07 | Partial live evidence | Cert 36690549981: MSSP isolation and self-service phases PASS |
 | R08 | Partial | SAST run 36744969006 on `022ecae4` success; ESLint no-undef sweep of all Worker source (F1). Dependency scan not re-run here. The required SAST gate's classifier no longer times out on checkout (payment release closure P0). The daily full TruffleHog scan has not completed since 2026-09-30 (F27) |
@@ -1269,6 +1372,28 @@ anonymous; HSTS on the site and the API.
 | Checkout P0 (#639, `aa97c8366`) | One automated primary checkout, a gated secondary, an assisted note, truthful copy, no double payment | `upgrade.html`; revenue `subscription-engine.js`; gateway `index.js` (one route line, one import) + new `checkout-providers.js`; 24 pages' copy; evidence register; policy doc; tests, render test, 3 negative controls, regression-gate suite list | resolveCheckoutPlan, checkout state machine, js/checkout.js (validateTaxId, bindPaymentFailedHandler), S5 pending reuse, S19 Plan price check, getPricingSnapshot, gumroad-products catalog, verify_public_claims | audit above; F21 live 500; F22 by inspection | MEDIUM (customer checkout page; one revenue branch; additive API field) | revert the squash commit; Pages and both Workers redeploy from main |
 | Payment release closure P0 (2026-10-02) | A verified payment gives exactly its entitlement, once, and keeps it through renewal; failures recover; CI's required SAST gate stops timing out | gateway `index.js` (one import, verify / legacy webhook / Gumroad sale), new `legacy-order-authority.js`, `gumroad-provisioning-lock.js` (additive action); revenue `subscription-engine.js`, `index.js`, `commercial-readiness.js`; 3 workflows; tests; harness; policy doc | verifyRazorpayHmac, RAZORPAY_TIER_PRICES, provisionApiKey, GumroadProvisioningLock, provisionCustomer, patchApiKeyEntitlement, PLAN_ID_ENV_KEYS, evaluateKeyRecordAccess, queueEmail, sendEmailViaProvider, the SAST gate script | failing tests on the pre-fix code for P0-1..3 and P1-1..4; 37-run SAST timing; F24 run logs | MEDIUM (payment paths of both Workers; no route, schema, auth or price change) | revert the squash commit; both Workers redeploy from main |
 | Payment and commercial release blocker closure (2026-10-02) | No API key in any email (owner decision); Gumroad never advertised while it cannot provision; an owner runbook for every operator-blocked control | gateway `index.js` (one import, one route line, redeem handler, activation email, admin re-issue route) and new `key-redemption.js`; revenue `index.js` (templates, callers, `issueActivationLink`, SendGrid request) and `commercial-readiness.js`; `customer/api-keys.html`; 15 pages' copy; evidence register; policy doc; runbook; ledger; 2 test files; harness; revenue deploy-gate list | evaluateKeyRecordAccess, strongAuthStates, GumroadProvisioningLock claim, readBodyCapped, auditLog, the admin auth and lockout, sendActivationEmail, queueEmail, sendEmailViaProvider, verify_public_claims.py and the evidence register | owner decision F22 (2026-10-02); F21 live 500 and product pages at 200; ten pages offering Gumroad unconditionally | MEDIUM (two new routes; customer email content; no entitlement, schema, auth or price change) | revert the squash commit; both Workers and Pages redeploy from main |
+| F26 premium baseline (2026-10-02) | The premium feeds are built from current intel, and the baseline survives between runs without git | `premium_feed_baseline.py` (guard denominator, two shared helpers, one report field), `generate_tiered_feeds.py` (one description), `r2_state_sync.py` (one owner-only entry), `sentinel-blogger.yml` (two non-blocking steps, one step id and output), regression-gate suite list, 3 new test files, the R2 state-file count pin | `_merge` and its window (shared, not re-implemented), `r2_state_sync.py` owner-only mechanism (`STATE_FILES`, `BROAD_SWEEP_EXCLUDED_PATHS`, `--only`), `r2_upload.s3_get`/`s3_cp` | runs 36956080062 and 36969320297 (guard refused 985 → 77 and 42); baseline items dated 2026-08-19..26; 2 tests fail on the old code | MEDIUM (premium feed content changes from 985 August items to the current window; publisher workflow gains two non-blocking steps; STAGE 4 untouched) | revert the squash commit; the next publisher run reads the checkout's copy again; delete `premium/state/feed.baseline.json` in R2 only if a corrupt copy must be discarded |
+
+Blast radius (F26 premium baseline):
+
+- **Files:** as listed.
+- **Imports:** none added. The tests import the scripts as modules.
+- **Routes:** none changed. `/api/v1/premium/feed/*` serves the same R2
+  keys, now built from the current baseline.
+- **Dashboards:** none.
+- **CI:** the regression gate gains 3 Python suites. The R2 FinOps gate
+  runs `test_r2_state_sync.py` (count pin 22 → 23).
+- **Certification reports:** none.
+- **`/api/v1/p*`:** unchanged.
+- **Data schema:**
+  - one new R2 object, `premium/state/feed.baseline.json`, in the existing
+    `sentinel-apex-data` bucket;
+  - no KV or D1 change;
+  - `data/baseline_report.json` gains the additive field `prior_in_window`.
+- **Workflows:**
+  - `sentinel-blogger.yml`: STAGE 3.1.18d and 3.1.19b are added, and STAGE
+    3.1.19 gains an id and one output line;
+  - `intel-gateway-regression-gate.yml`: suite list only.
 
 Blast radius (payment and commercial release blocker closure):
 
@@ -1448,6 +1573,21 @@ none; `/api/v1/p*` shapes — unchanged; data schema — none (fewer
     - gateway 1,695.09 → 1,703.28 KiB (+0.48%), gzip 403.27 → 405.50 KiB;
     - revenue engine 256.44 → 258.57 KiB (+0.83%), gzip 59.70 → 60.40 KiB.
 
+- F26 premium baseline (local, 2026-10-02, on `b516e7bb2` plus this change):
+  - **New tests:**
+    - guard: 4/4; on the old code 2 fail and the 2 guard-preservation
+      controls pass;
+    - wiring: 5/5; 3 workflow mutations caught (upload without the download
+      condition, `updated=true` on failure, download without `--only`);
+    - metadata: 1/1; fails on the old code.
+  - **Related suites:** every test file that reads the publisher workflow,
+    the state sync, the baseline or the gate list, 581 passed across 39
+    files. `test_r2_state_sync.py` 53/53.
+  - **Gates:**
+    - public-repo workflow hygiene: 46 passed and 16 subtests;
+    - regression 41/41;
+    - `test_severity_epss_truth.py` 17/17.
+
 ## Reuse report
 
 | Metric | Result |
@@ -1456,7 +1596,7 @@ none; `/api/v1/p*` shapes — unchanged; data schema — none (fewer
 | Existing routes extended | none added; commercial gate condition extended; checkout P0: `GET /api/pricing` gains an additive `checkout` field; F22: two new routes (`POST /api/keys/redeem`, `POST /api/admin/keys/{key}/redemption`), neither duplicating an existing route |
 | Existing dashboards extended | none |
 | New engines | 4: `freshness-guard-dispatch.js` (no GitHub-dispatch path existed in the Worker); `checkout-providers.js` (pure, 20 lines: no availability signal existed for the checkout); `legacy-order-authority.js` (pure: no Order-eligibility check existed; it reads the existing `RAZORPAY_TIER_PRICES`); `key-redemption.js` (pure: no one-time credential delivery existed; it calls the gateway's own access decision and the existing lock). The revenue engine's `issueActivationLink` mirrors its record, as that Worker mirrors other gateway code; a cross-worker test pins the two |
-| Duplicate engines / routes | 0 / 0 |
+| Duplicate engines / routes | 0 / 0 (F26 shares `_merge`'s window through `_in_merge_window` instead of copying it, and reuses the owner-only R2 state mechanism) |
 | Backward compatibility | PASS (response shapes unchanged; 500 → documented 429) |
 | Certification chain | PASS (P33 WORLDWIDE_RELEASE) |
 | Regression suite | 41/41 PASS |

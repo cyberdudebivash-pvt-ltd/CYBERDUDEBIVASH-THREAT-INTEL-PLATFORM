@@ -218,7 +218,7 @@ def main() -> int:
     products = [
         (PREMIUM_STAGING_DIR / "feed.gold.json",      gold_items,     "ENTERPRISE",    "Gold-tier verified threat intelligence — all premium enrichments included", True),
         (PREMIUM_STAGING_DIR / "feed.silver.json",    silver_items,   "PROFESSIONAL",  "Professional threat intelligence — GOLD + SILVER certified items", True),
-        (PREMIUM_STAGING_DIR / "feed.standard.json",  standard_items, "STANDARD",      "Full certified intelligence feed — all 176 quality-gated items", True),
+        (PREMIUM_STAGING_DIR / "feed.standard.json",  standard_items, "STANDARD",      "Full certified intelligence feed — every quality-gated item in the premium baseline", True),
         (API_DIR / "feed.trial.json",                 trial_items,    "TRIAL",         "Trial preview — top 10 intelligence items (redacted). Upgrade for full access.", False),
         (PREMIUM_STAGING_DIR / "feed.executive.json", exec_items,     "EXECUTIVE",     "Executive intelligence brief — CRITICAL + HIGH severity items only", True),
     ]
