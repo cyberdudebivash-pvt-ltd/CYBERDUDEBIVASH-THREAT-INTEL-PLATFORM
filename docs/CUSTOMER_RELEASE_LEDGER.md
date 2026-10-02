@@ -7,14 +7,13 @@ stay as point-in-time records; this file carries current status. Update it in
 the same PR as the change that moves a row. Historic evidence is never reused
 as current certification.
 
-Last updated: 2026-10-02T18:15Z, branch `claude/charming-thompson-ptma8e`.
+Last updated: 2026-10-02T18:45Z, branch `claude/charming-thompson-ptma8e`.
 
-- #643 → `b516e7bb2`, #644 → `b41c38225` and #645 → `61babc473` are
-  merged.
-- The deployed Workers are `b516e7bb2`; #644 and #645 changed no Worker.
-- F26 is fixed and verified on two publisher runs.
-- F28 is fixed and verified in CI.
-- The feed recovered at 13:29Z. This change is the post-merge record.
+- #643 → `b516e7bb2`, #644 → `b41c38225`, #645 → `61babc473` and #646 →
+  `f042ab542` are merged. The deployed Workers are `b516e7bb2`.
+- This change is a zero-cost F3 mitigation. The Freshness Guard also runs
+  when any of 13 frequently delivered workflows completes on `main`.
+- The durable F3 fix (R01) still awaits owner approval.
 
 ## Decision
 
@@ -49,6 +48,9 @@ Last updated: 2026-10-02T18:15Z, branch `claude/charming-thompson-ptma8e`.
 - The feed breached its freshness threshold twice overnight (F3), and again
   on 2026-10-02 from 12:04:31Z to about 13:29:40Z. `/api/health` answered
   503 at 12:27Z.
+- This change makes the Freshness Guard run about 12 times as often, at no
+  cost (F3 mitigation). It is not yet proven live. The durable fix (R01)
+  still needs owner approval.
 - F26 is fixed. The Enterprise and MSSP premium feeds were rebuilt every run
   from items published 2026-08-19 to 08-26. Since #644 they come from the
   current baseline (publisher runs at 13:10Z and 15:11Z).
@@ -80,7 +82,7 @@ entitlement: no live payment was run.
 | Enterprise signed-webhook canary | yes | cert | yes | BLOCKED | operator (`CDB_WATCHDOG_SINK_*`) | `OPERATOR_WEBHOOK_SINK_REQUIRED` |
 | Publisher post-deploy gates run (F13) | yes | 4 tests | `8b2d82862` | PASS on c14dbae11 and 8b2d82862 | — | runs 36826966415, 36859743101 (steps 153–186 success, 13:24Z) |
 | Pages deploys | yes | 9 tests | `8b2d82862` | PASS | — | run 36859743101: STAGE 5.4.6, STAGE 5 success (F20) |
-| Feed age ≤ 6h | publisher on GitHub cron | — | — | FAIL twice overnight | FinOps (R01 activation) | F3, F7 |
+| Feed age ≤ 6h | publisher on GitHub cron; the guard also runs on 13 workflows' completions (this change) | 10 trigger tests; 10/10 mutations caught; history replay | not yet merged | FAIL: 4 breaches 09-30 to 10-02 | none for the mitigation; R01 needs owner approval | F3 |
 | Buyer security/compliance copy matches implementation (F17, F19) | yes | gates + tests | `8b2d82862` | PASS | — | 18:16Z procurement pack: no bcrypt / scope-bitmap / request-signing claims, security contact decodes to the .com address; 18:58Z security page says "about a minute" |
 | No fixed refresh cadence outside sla.html (Phase 6) | yes | gates | `8b2d82862` | PASS | — | 18:58Z executive-briefing and pricing carry no fixed cadence |
 | Invented business data off the site (Phase 7) | yes | 9 tests | `8b2d82862` | PASS | — | 18:16Z: all three pages 404 |
@@ -100,8 +102,8 @@ entitlement: no live payment was run.
 | SKU / capability | Status | Blocking evidence |
 | --- | --- | --- |
 | FREE API | HOLD | Per-minute limit not enforced live (F18) |
-| PRO | HOLD | Lifecycle immediacy intermittent (F17); Gumroad checkout unprovisioned (F21; not offered on the live checkout since #639); payment E2E not tested; one-time key link (F22) not yet deployed |
-| ENTERPRISE | HOLD | As PRO; signed-webhook canary BLOCKED; 4-hour freshness term unsupported (F7); premium feeds serve August items (F26) |
+| PRO | HOLD | Lifecycle immediacy intermittent (F17); Gumroad checkout unprovisioned (F21; not offered on the live checkout since #639); payment E2E not tested; one-time key link (F22) deployed (#643) |
+| ENTERPRISE | HOLD | As PRO; signed-webhook canary BLOCKED; 4-hour freshness term unsupported (F7); premium feeds current since #644 (F26) |
 | MSSP | HOLD | As ENTERPRISE (rotation canary now PASS) |
 | Malware review package | HOLD | #593: independent human review pending |
 | Swarm live operations | HOLD | #419/#420/#422 not re-verified |
@@ -111,14 +113,14 @@ entitlement: no live payment was run.
 
 | Component | Value | Evidence |
 | --- | --- | --- |
-| `main` | `61babc473` | #636 → `c14dbae11` (tree = reviewed head `82d9b7b5c`); #637 → `d80c72643` (tree = `ce348b2a2`); #638 → `8b2d82862` (tree `fa08a0feb`); #639 squash-merged 19:26Z → `aa97c8366` (tree `6cfc4fa5f` = reviewed head `baaf2ffee`); #640 (ledger only) → `5911a9722`, which deploys no Worker; #641 squash-merged 04:01:40Z by the repository owner → `acc38a24d` (tree `150d41a13` = reviewed head `5c6c6a8ad`); #642 squash-merged 07:02:33Z → `fcb252bd7` (tree `fe9f549e2` = reviewed head `2d4f922ae`; regression gate on `main` green, run 36976506794), which deploys no Worker; #643 squash-merged 12:21:02Z → `b516e7bb2` (tree `f1df2be36` = reviewed head `578fdaa49`); #644 squash-merged 12:40:59Z → `b41c38225` (tree `8b34ccd78` = reviewed head `3957d26d7`); #645 squash-merged 12:53:40Z → `61babc473` (tree `55031549e` = reviewed head `f8abde9f3`). Neither #644 nor #645 deploys a Worker |
+| `main` | `f042ab542` | #636 → `c14dbae11` (tree = reviewed head `82d9b7b5c`); #637 → `d80c72643` (tree = `ce348b2a2`); #638 → `8b2d82862` (tree `fa08a0feb`); #639 squash-merged 19:26Z → `aa97c8366` (tree `6cfc4fa5f` = reviewed head `baaf2ffee`); #640 (ledger only) → `5911a9722`, which deploys no Worker; #641 squash-merged 04:01:40Z by the repository owner → `acc38a24d` (tree `150d41a13` = reviewed head `5c6c6a8ad`); #642 squash-merged 07:02:33Z → `fcb252bd7` (tree `fe9f549e2` = reviewed head `2d4f922ae`; regression gate on `main` green, run 36976506794), which deploys no Worker; #643 squash-merged 12:21:02Z → `b516e7bb2` (tree `f1df2be36` = reviewed head `578fdaa49`); #644 squash-merged 12:40:59Z → `b41c38225` (tree `8b34ccd78` = reviewed head `3957d26d7`); #645 squash-merged 12:53:40Z → `61babc473` (tree `55031549e` = reviewed head `f8abde9f3`); #646 (ledger only) → `f042ab542`. None of #644–#646 deploys a Worker |
 | Deployed gateway | `b516e7bb2bd0b1c1d0c8ba6c7f939830ac9ce3d6`, deploy run 37006160812 (12:23Z) | `GET /api/health/live` 12:23Z: `deploy_commit_sha`, `deploy_run_id` 37006160812 |
 | Deployed revenue engine | `b516e7bb2`, deploy run 37006160913 (12:22Z) | run conclusion success |
 | Pages | `b516e7bb2`, pages-fast-publish run 37006160911 (all pre-deploy browser gates) | live pages checked 12:26Z (Post-merge verification (#643)) |
 | Live health | 200 `ok`, freshness FRESH; feed generated 2026-10-01T21:36:32Z (age 4h13m, limit 6h), 61 items. At 19:38Z: generated 16:01:55Z (age 3h37m), 63 items | `GET /api/health`, `/api/watchdog/health` 2026-10-02T01:50Z and 2026-10-01T19:38Z |
 | Re-check 2026-10-02T01:50Z | gateway still `aa97c8366`; `/api/pricing` `checkout` block unchanged; live `upgrade.html` still the #639 page | read-only GETs |
 | Re-check 2026-10-02T03:17Z | gateway still `aa97c8366` | `GET /api/health/live` |
-| Open PR | closing ledger update (this change) | — |
+| Open PR | F3 mitigation (this change) | — |
 
 Overnight 2026-09-30/10-01, from `generated_at` values the publisher's own
 freshness gate logged (no probe sampled either window; this session
@@ -173,7 +175,7 @@ triggered no production pipeline):
   brute-force lockout is unchanged. Tests: `operator-plane-metering.test.js`
   (7; 5 failed before).
 
-### F3 — Stale-feed 503 at 15:06Z: GitHub cron starvation (C04, R01) — ROOT-CAUSED; fix PREPARED, OPERATOR-BLOCKED
+### F3 — Stale-feed 503 at 15:06Z: GitHub cron starvation (C04, R01) — ROOT-CAUSED; zero-cost mitigation (this change); durable fix PREPARED, OPERATOR-BLOCKED
 
 - SLA heartbeat run 36734158488 saw `/api/health` 503 twice at 15:06Z. That
   was the correct readiness answer: generation 07:51:55Z (logged by guard run
@@ -184,9 +186,12 @@ triggered no production pipeline):
   `intel-freshness-guard.yml` (`7,37 * * * *`, 48/day) ran about 5 times/day;
   it ran at 08:57Z (feed 66 min old) and next at 15:51Z. `sla-heartbeat.yml`
   (`*/10`, 144/day) also ran about 5 times/day.
-- Not fixable by `workflow_run` chaining: every workflow display name carries
-  the release suffix (`test_every_workflow_display_name_is_v201`), so name
-  references break at each version bump (see F4).
+- Earlier I judged `workflow_run` chaining unsafe. Every workflow display
+  name carries the release suffix (`test_every_workflow_display_name_is_v201`),
+  so name references break silently at each version bump (see F4). The
+  mitigation below keeps that risk visible:
+  `tests/test_intel_freshness_guard_triggers.py` fails when a referenced
+  name stops matching.
 - Prepared `8f37c95ea` (ships OFF): on the :00/:30 ticks of the existing
   15-minute Worker cron, one `workflow_dispatch` of `intel-freshness-guard.yml`
   by file name. The guard keeps the only decision logic. Pinned OFF by
@@ -256,6 +261,58 @@ Scheduling evidence, 2026-09-28 → 2026-10-01 (Phase 6):
     (37008156413). It published at 13:29:40Z, and `/api/health` answered 200
     at 13:54Z.
   - No manual dispatch was made.
+
+**Zero-cost mitigation (this change, 2026-10-02):**
+
+- **Change.** `intel-freshness-guard.yml` keeps its cron and manual
+  dispatch. It also gains a `workflow_run` trigger: the guard runs when one
+  of 13 workflows completes on `main`. The guard's decision logic is
+  unchanged.
+- **Trigger set, chosen from history.** I replayed the repository's
+  1,714 workflow runs from 2026-09-28 to 10-02. GitHub delivers each
+  scheduled workflow about 3–5 times a day, whatever its cron. 13 workflows
+  delivered at different times, plus the guard's own cron, give:
+
+  | | Guard cron only | With the 13 triggers |
+  | --- | --- | --- |
+  | Guard runs per day | 4.4 | about 52 (the cron was sized for 48) |
+  | Longest gap between guard runs | 8 h 31 min | 2 h 24 min |
+  | Chance a 75-minute dispatch window has no guard run | 76% | 5.3% |
+
+- **The four breaches, replayed.** A guard run would have fallen 4.0–4.7 h
+  into each feed's life. A dispatched publisher run takes 33–61 minutes from
+  start to publication, so it would have landed before 6 h:
+  - 09-30 07:51Z feed → a guard run at 12:11Z (Pipeline Staleness Monitor);
+  - 09-30 15:33Z feed → 19:48Z (Generate & Sync);
+  - 09-30 21:44Z feed → 02:23Z (SLA Heartbeat);
+  - 10-02 06:04Z feed → 10:05Z (Enterprise Governance).
+  The set was chosen from the same history, so this replay is in-sample.
+  A run queued behind another `sentinel-data-writer` run publishes later.
+- **Cost.**
+  - Each guard run is seconds on a free public-repository runner. It reads
+    `/api/health` once and makes about 7 GitHub API calls.
+  - Measured rate: about 52 runs a day, roughly 1,600 Worker requests a
+    month.
+  - Ceiling: if GitHub ever delivered every scheduled slot, the 13 crons and
+    the guard's own would allow 304 runs a day, about 9,100 Worker requests
+    a month. Four of the 13 also run on qualifying pushes to `main`, adding
+    one run each. Both figures sit inside the Workers and R2 included
+    allowances.
+  - Publisher runs stay bounded by the guard's own rule: a dispatch only
+    when the feed is at least 4 h old and no publisher run is active.
+- **Security.**
+  - Only runs on `main` count (`branches: [main]`), and the job runs only
+    for this repository's own runs (`head_repository` check).
+  - None of the 13 workflows runs on `pull_request`, and none is itself
+    chained.
+  - No step reads the triggering run's data.
+  - Permissions are unchanged.
+- **Noise.** During a publisher outage the guard fails on most triggers
+  (`publisher_failing`, up to about two an hour) until its 4 h back-off
+  passes.
+- **Durable fix.** R01 still needs owner approval: the existing Worker
+  cron dispatches the guard on the :00 and :30 ticks, which do not depend
+  on GitHub's scheduler.
 
 ### F4 — All four `workflow_run` chains reference workflow names that no longer exist (R10, R29) — REPORTED
 
@@ -1403,7 +1460,7 @@ anonymous; HSTS on the site and the API.
 
 | ID | Status | Evidence / next step |
 | --- | --- | --- |
-| R01 | Root-caused; fix prepared, FinOps-blocked | F3 (scheduling evidence added 2026-10-01); runbook above |
+| R01 | Root-caused; zero-cost mitigation in this change (the guard also runs on 13 workflows' completions); durable fix prepared, owner approval needed | F3 (scheduling evidence 2026-10-01; history replay 2026-10-02); runbook above |
 | R02 | Open (#596), FinOps | F17: FAIL 07:01Z / PASS 08:56Z on the same matrix; copy now says "within about a minute" |
 | R03 | 500→429 deployed; the limiter reaches the cap only intermittently | F1, F18 (`200x33` live on two SHAs; certification Phase 8 passed at 12:26Z and 12:53Z, failed at 13:55Z, same SHA); product + FinOps decision |
 | R04 | Fixed, live PASS | F2: MSSP rotation canary PASS in cert 36839516753 |
@@ -1456,7 +1513,22 @@ anonymous; HSTS on the site and the API.
 | Payment release closure P0 (2026-10-02) | A verified payment gives exactly its entitlement, once, and keeps it through renewal; failures recover; CI's required SAST gate stops timing out | gateway `index.js` (one import, verify / legacy webhook / Gumroad sale), new `legacy-order-authority.js`, `gumroad-provisioning-lock.js` (additive action); revenue `subscription-engine.js`, `index.js`, `commercial-readiness.js`; 3 workflows; tests; harness; policy doc | verifyRazorpayHmac, RAZORPAY_TIER_PRICES, provisionApiKey, GumroadProvisioningLock, provisionCustomer, patchApiKeyEntitlement, PLAN_ID_ENV_KEYS, evaluateKeyRecordAccess, queueEmail, sendEmailViaProvider, the SAST gate script | failing tests on the pre-fix code for P0-1..3 and P1-1..4; 37-run SAST timing; F24 run logs | MEDIUM (payment paths of both Workers; no route, schema, auth or price change) | revert the squash commit; both Workers redeploy from main |
 | Payment and commercial release blocker closure (2026-10-02) | No API key in any email (owner decision); Gumroad never advertised while it cannot provision; an owner runbook for every operator-blocked control | gateway `index.js` (one import, one route line, redeem handler, activation email, admin re-issue route) and new `key-redemption.js`; revenue `index.js` (templates, callers, `issueActivationLink`, SendGrid request) and `commercial-readiness.js`; `customer/api-keys.html`; 15 pages' copy; evidence register; policy doc; runbook; ledger; 2 test files; harness; revenue deploy-gate list | evaluateKeyRecordAccess, strongAuthStates, GumroadProvisioningLock claim, readBodyCapped, auditLog, the admin auth and lockout, sendActivationEmail, queueEmail, sendEmailViaProvider, verify_public_claims.py and the evidence register | owner decision F22 (2026-10-02); F21 live 500 and product pages at 200; ten pages offering Gumroad unconditionally | MEDIUM (two new routes; customer email content; no entitlement, schema, auth or price change) | revert the squash commit; both Workers and Pages redeploy from main |
 | F26 premium baseline (2026-10-02) | The premium feeds are built from current intel, and the baseline survives between runs without git | `premium_feed_baseline.py` (guard denominator, two shared helpers, one report field), `generate_tiered_feeds.py` (one description), `r2_state_sync.py` (one owner-only entry), `sentinel-blogger.yml` (two non-blocking steps, one step id and output), regression-gate suite list, 3 new test files, the R2 state-file count pin | `_merge` and its window (shared, not re-implemented), `r2_state_sync.py` owner-only mechanism (`STATE_FILES`, `BROAD_SWEEP_EXCLUDED_PATHS`, `--only`), `r2_upload.s3_get`/`s3_cp` | runs 36956080062 and 36969320297 (guard refused 985 → 77 and 42); baseline items dated 2026-08-19..26; 2 tests fail on the old code | MEDIUM (premium feed content changes from 985 August items to the current window; publisher workflow gains two non-blocking steps; STAGE 4 untouched) | revert the squash commit; the next publisher run reads the checkout's copy again; delete `premium/state/feed.baseline.json` in R2 only if a corrupt copy must be discarded |
+| F3 mitigation (2026-10-02) | The guard looks at the feed often enough to dispatch the publisher before a 6 h breach, with no new secret or cost | `intel-freshness-guard.yml` (header comment, `workflow_run` trigger, one job condition), regression-gate suite list, new test file, ledger | `intel_freshness_guard.py` unchanged (its decision table, cooldown and failure back-off), the existing cron and dispatch path | 4 breaches 09-30 to 10-02; 1,714-run history replay (76% → 5.3% miss) | LOW (one workflow's triggers; no script, permission or production code change) | revert the squash commit |
 | CI reporting (2026-10-02) | Both gates can be required without deadlocking any PR; a failing certification canary records why | `intel-gateway-regression-gate.yml` (`pull_request` trigger, suite list), `commercial-customer-ops-certification.yml` (one line), `test_security_txt.py` (one assertion), 2 new tests, ledger, runbook §8 | the SAST gate's always-reporting pattern; the step's own `record()`/`canary()` | ruleset audit (no status-check rule); #641 merged red; runs 37006162439 and 37006645392 lost the canary's reason | LOW (CI only; the gate runs on every PR; no production code) | revert the squash commit |
+
+Blast radius (F3 mitigation):
+
+- **Files:** as listed.
+- **Imports, routes, dashboards, certification reports, `/api/v1/p*` and
+  data:** none.
+- **CI:** the regression gate gains one Python suite.
+- **Workflows:**
+  - `intel-freshness-guard.yml` runs more often. It still dispatches only
+    `sentinel-blogger.yml`, under the same rules.
+  - The 13 triggering workflows are not modified.
+- **Cloudflare:**
+  - measured: about 52 `/api/health` reads a day;
+  - ceiling: 304 a day, plus qualifying pushes to `main`.
 
 Blast radius (CI reporting):
 
@@ -1702,11 +1774,29 @@ none; `/api/v1/p*` shapes — unchanged; data schema — none (fewer
       and `test_weekly_threat_brief_branch_protection.py`.
     - These are pre-existing; the same class as F5.
 
+- F3 mitigation (local, 2026-10-02, on `f042ab542` plus this change):
+  - **New tests:** 10/10. 10/10 mutations caught:
+    - a drifted name in the guard;
+    - an upstream renamed without the guard;
+    - the branch filter removed;
+    - types widened;
+    - the publisher added;
+    - the job condition removed;
+    - triggering-run data passed to a step;
+    - an upstream gaining `pull_request`;
+    - the cron changed;
+    - permissions widened.
+  - **Existing suites:**
+    - regression-gate Python job: 1,948 passed and 4 subtests;
+    - guard decision table, public-repo workflow hygiene, v201 names and
+      concurrency scoping: 38 passed.
+  - **actionlint 1.7.7:** 0 findings on both changed workflows.
+
 ## Reuse report
 
 | Metric | Result |
 | --- | --- |
-| Existing engines reused | checkRateLimit, bumpCounterWriteThrough, incrementStrongRate, checkDailyQuota, buildUpgradeTrigger, timingSafeEqual, isWatchdogOperator, intel_freshness_guard.py; R09: verify_commercial_contract.py and verify_public_claims.py extended in place, driven by commercial-contract.json / evidence-register.json / platform-evidence.json; F9: verifyRazorpayHmac, timingSafeEqual; F13: report_archive_manager.py floor (behaviour kept, exit status corrected); F15: applyTierGateV2 (canonical mask fixed in place); F20: INCLUDE_DIR_FILE_EXCLUDES and the v157.0 validator (refactored into a function, same messages); F17/F19/Phase 6: evidence register + verify_public_claims.py (data-driven, no new gate); checkout P0: resolveCheckoutPlan and the checkout state machine (kept, extended with resume), js/checkout.js validateTaxId and bindPaymentFailedHandler, S5 pending-checkout key, S19 Plan price check, getPricingSnapshot, the gumroad-products catalog, evidence register + verify_public_claims.py; F22: evaluateKeyRecordAccess, strongAuthStates, GumroadProvisioningLock (no-action claim), readBodyCapped, auditLog, the admin auth and lockout, sendActivationEmail, queueEmail, sendEmailViaProvider |
+| Existing engines reused | checkRateLimit, bumpCounterWriteThrough, incrementStrongRate, checkDailyQuota, buildUpgradeTrigger, timingSafeEqual, isWatchdogOperator, intel_freshness_guard.py; R09: verify_commercial_contract.py and verify_public_claims.py extended in place, driven by commercial-contract.json / evidence-register.json / platform-evidence.json; F9: verifyRazorpayHmac, timingSafeEqual; F13: report_archive_manager.py floor (behaviour kept, exit status corrected); F15: applyTierGateV2 (canonical mask fixed in place); F20: INCLUDE_DIR_FILE_EXCLUDES and the v157.0 validator (refactored into a function, same messages); F17/F19/Phase 6: evidence register + verify_public_claims.py (data-driven, no new gate); checkout P0: resolveCheckoutPlan and the checkout state machine (kept, extended with resume), js/checkout.js validateTaxId and bindPaymentFailedHandler, S5 pending-checkout key, S19 Plan price check, getPricingSnapshot, the gumroad-products catalog, evidence register + verify_public_claims.py; F22: evaluateKeyRecordAccess, strongAuthStates, GumroadProvisioningLock (no-action claim), readBodyCapped, auditLog, the admin auth and lockout, sendActivationEmail, queueEmail, sendEmailViaProvider; F3 mitigation: intel_freshness_guard.py and its workflow, unchanged, triggered more often |
 | Existing routes extended | none added; commercial gate condition extended; checkout P0: `GET /api/pricing` gains an additive `checkout` field; F22: two new routes (`POST /api/keys/redeem`, `POST /api/admin/keys/{key}/redemption`), neither duplicating an existing route |
 | Existing dashboards extended | none |
 | New engines | 4: `freshness-guard-dispatch.js` (no GitHub-dispatch path existed in the Worker); `checkout-providers.js` (pure, 20 lines: no availability signal existed for the checkout); `legacy-order-authority.js` (pure: no Order-eligibility check existed; it reads the existing `RAZORPAY_TIER_PRICES`); `key-redemption.js` (pure: no one-time credential delivery existed; it calls the gateway's own access decision and the existing lock). The revenue engine's `issueActivationLink` mirrors its record, as that Worker mirrors other gateway code; a cross-worker test pins the two |
