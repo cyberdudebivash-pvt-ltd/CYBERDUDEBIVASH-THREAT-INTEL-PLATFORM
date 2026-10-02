@@ -315,15 +315,19 @@ const CONTROLS = [
   {
     id: "razorpay_verify_mssp_parity_broken",
     file: "workers/intel-gateway/src/index.js",
-    find: "  }, billing === \"annual\" ? \"annual\" : \"monthly\");",
-    replace: "  }, billing === \"annual\" ? \"annual\" : \"monthly\", null);",
+    // Re-anchored 2026-10-02: the cycle now comes from the Order
+    // (legacy-order-authority.js); same mutation, same test.
+    find: "    order_id: razorpay_order_id, payment_id: razorpay_payment_id,\n  }, authority.billing);",
+    replace: "    order_id: razorpay_order_id, payment_id: razorpay_payment_id,\n  }, authority.billing, null);",
     tests: [T("mssp-tenants.test.js")],
   },
   {
     id: "gumroad_mssp_parity_broken",
     file: "workers/intel-gateway/src/index.js",
-    find: "    sale_id, product_id, product_name, price, variants, subscription_id,\n  }, billingCycle);",
-    replace: "    sale_id, product_id, product_name, price, variants, subscription_id,\n  }, billingCycle, null);",
+    // Re-anchored 2026-10-02: the call is now the retry-safe key reuse
+    // fallback (one key per sale); same mutation, same test.
+    find: "      sale_id, product_id, product_name, price, variants, subscription_id,\n    }, billingCycle);",
+    replace: "      sale_id, product_id, product_name, price, variants, subscription_id,\n    }, billingCycle, null);",
     tests: [T("mssp-tenants.test.js")],
   },
   {
