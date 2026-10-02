@@ -83,7 +83,7 @@ entitlement: no live payment was run.
 | No raw API key in any email; one-time key link (F22, owner decision 2026-10-02) | yes | 12 tests; 9 controls | `b516e7bb2` (gateway run 37006160812, revenue run 37006160913) | PASS for every refusal path (12:23Z); a live redemption NOT TESTED (needs an issued link) | — | Post-merge verification (#643) |
 | Gumroad not offered while it cannot provision (F21) | yes | withdrawn-claim gate (17 variants) | `b516e7bb2` (Pages run 37006160911) | PASS: 12:26Z, none of the 17 variants on any of the 15 pages; checkout `available: false`. The four access products still answer 200 by direct link (08:33Z) | owner: unpublish, or set the secret | [runbook §1](PAYMENT_RELEASE_OPERATOR_RUNBOOK.md#1-f21-gumroad-production-safety) |
 | Premium feeds current (F26) | yes (this PR) | 10 tests; 3 workflow mutations caught | publisher, first run after merge | FAIL until then: the 05:58Z run uploaded all four from items dated 2026-08-19 to 08-26 | merge, then the next publisher run | F26 |
-| Required status checks on `main` | no | — | — | FAIL: ruleset 21556637 has no required-status-checks rule | repository admin | Payment and commercial release blocker closure |
+| Required status checks on `main` | readiness yes: both gates report on every PR (CI-reporting change) | 3 readiness tests | CI | FAIL: ruleset 21556637 has no required-status-checks rule | repository admin ([runbook §8](PAYMENT_RELEASE_OPERATOR_RUNBOOK.md#8-required-status-checks-on-main-repository-admin)) | Payment and commercial release blocker closure |
 | Legacy Razorpay Orders provision only this gateway's Orders at the exact price (P0-1) | yes | 7 tests, 4 controls | `acc38a24d` | NOT TESTED live | — | payment release closure P0 |
 | Razorpay renewals: no lockout after the daily check, renewal grace, Plan binding, claim release, one key per subscription (P0-2, P1-1..4) | yes | 14 tests, 8 controls | `acc38a24d` | NOT TESTED live | provider test mode | payment release closure P0 |
 | Gumroad provisioning failure retried with one key (P0-3) | yes | 5 tests, 2 controls | `acc38a24d` | NOT TESTED live | F21 secret | payment release closure P0 |
@@ -625,7 +625,7 @@ prices are $49 / $499 / $999. The route answers 401 anonymously (probed
 array and gets an object), so no buyer page shows it. Fix: derive the block
 from `config/commercial-contract.json` or remove it, in a P33 bug-fix PR.
 
-### F25 — The publisher cannot persist its committed state to `main` (R10, R15) — REPORTED, OWNER
+### F25 — The publisher cannot persist its committed state to `main` (R10, R15) — PARTLY ADDRESSED: the premium baseline persists in R2 (#644); STAGE 4 and two internal quality files await the owner
 
 `safe_git_commit.py` in `sentinel-blogger` commits the run's STIX bundles,
 reports, `index.html` and `data/cache/feed_state.json`. Its push to `main`
@@ -750,7 +750,7 @@ triggers):
 3. STAGE 3.1.19b uploads it.
 4. STAGE 3.1.20 builds the premium feeds from it.
 
-### F28 — The certification canary step loses a failing canary's result (R10, R18) — REPORTED, P2; fix proposed
+### F28 — The certification canary step loses a failing canary's result (R10, R18) — P2; FIX in the CI-reporting change
 
 `commercial-customer-ops-certification.yml`, Phases 8-15, runs under
 `bash -e`. Its `canary()` helper does
@@ -763,9 +763,19 @@ Observed in runs 37006162439 and 37006645392: the job ended with exit code
 1, with nothing after "ENTERPRISE denied MSSP tenant management: PASS". The
 canary-key cleanup still ran, through the step's EXIT trap.
 
-The run still fails closed, as it should, but the reason is lost. Fix:
-capture the exit code without tripping `-e`, for example
-`out=$(...) && rc=0 || rc=$?`.
+The run still fails closed, as it should, but the reason is lost.
+
+Fix (CI-reporting change): `out=$(...) && rc=0 || rc=$?`, which captures the
+exit code without tripping `-e`.
+`tests/test_certification_canary_step_records_failures.py` runs the step's
+own `record()` and `canary()` functions under `bash -e` with a stub canary:
+
+- a failure is recorded with its reason;
+- a blocked canary is recorded as blocked;
+- a pass is recorded as a pass;
+- in every case the step continues to its summary.
+
+On the old line, the failure and blocked cases abort.
 
 ### F27 — The daily full secret scan never completes (R08) — REPORTED, P2
 
@@ -1204,17 +1214,24 @@ Can each check be required today?
 - **`SAST Gate (required)`** (`sast-security-scan.yml`): yes. Its
   `pull_request` trigger has no path filter, so it reports on every PR to
   `main`.
-- **`workers/intel-gateway -- full unit suite (1121 tests)`**
-  (`intel-gateway-regression-gate.yml`): not yet. Its `pull_request` trigger
-  has a path filter. On a PR that touches none of those paths it never
-  starts, so a required check would wait forever. It must report on every
-  PR first.
+- **`workers/intel-gateway -- full unit suite (1121 tests)`** and
+  **`scripts/ + tests/ -- Python unit and regression suites`**
+  (`intel-gateway-regression-gate.yml`): yes, after the CI-reporting change.
+  - Before it, the `pull_request` trigger had a path filter. A PR that
+    touched none of those paths never started the gate, so a required check
+    would have waited forever.
+  - The change removes that filter for pull requests; pushes to `main` keep
+    it.
+  - `tests/test_regression_gate_required_check_readiness.py` pins both
+    workflows: they report on every PR to `main`, their check names stay
+    stable, and no job-level `if:` can skip a required job.
 
-Admin action: in Settings → Rules → Rulesets, open SENTINEL APEX
-Production Main Protection and add "Require status checks to pass".
-Require `SAST Gate (required)` from GitHub Actions now. Add the regression
-gate once it reports on every PR. Do not add a bypass for the publisher
-(F25).
+Admin action ([runbook §8](PAYMENT_RELEASE_OPERATOR_RUNBOOK.md#8-required-status-checks-on-main-repository-admin)):
+
+- Add "Require status checks to pass" to SENTINEL APEX Production Main
+  Protection.
+- Require the three checks above, with GitHub Actions as their source.
+- Do not add a bypass for the publisher (F25).
 
 Until then, release discipline is manual: no merge while any applicable
 check is queued, in progress, failed or cancelled.
@@ -1373,6 +1390,21 @@ anonymous; HSTS on the site and the API.
 | Payment release closure P0 (2026-10-02) | A verified payment gives exactly its entitlement, once, and keeps it through renewal; failures recover; CI's required SAST gate stops timing out | gateway `index.js` (one import, verify / legacy webhook / Gumroad sale), new `legacy-order-authority.js`, `gumroad-provisioning-lock.js` (additive action); revenue `subscription-engine.js`, `index.js`, `commercial-readiness.js`; 3 workflows; tests; harness; policy doc | verifyRazorpayHmac, RAZORPAY_TIER_PRICES, provisionApiKey, GumroadProvisioningLock, provisionCustomer, patchApiKeyEntitlement, PLAN_ID_ENV_KEYS, evaluateKeyRecordAccess, queueEmail, sendEmailViaProvider, the SAST gate script | failing tests on the pre-fix code for P0-1..3 and P1-1..4; 37-run SAST timing; F24 run logs | MEDIUM (payment paths of both Workers; no route, schema, auth or price change) | revert the squash commit; both Workers redeploy from main |
 | Payment and commercial release blocker closure (2026-10-02) | No API key in any email (owner decision); Gumroad never advertised while it cannot provision; an owner runbook for every operator-blocked control | gateway `index.js` (one import, one route line, redeem handler, activation email, admin re-issue route) and new `key-redemption.js`; revenue `index.js` (templates, callers, `issueActivationLink`, SendGrid request) and `commercial-readiness.js`; `customer/api-keys.html`; 15 pages' copy; evidence register; policy doc; runbook; ledger; 2 test files; harness; revenue deploy-gate list | evaluateKeyRecordAccess, strongAuthStates, GumroadProvisioningLock claim, readBodyCapped, auditLog, the admin auth and lockout, sendActivationEmail, queueEmail, sendEmailViaProvider, verify_public_claims.py and the evidence register | owner decision F22 (2026-10-02); F21 live 500 and product pages at 200; ten pages offering Gumroad unconditionally | MEDIUM (two new routes; customer email content; no entitlement, schema, auth or price change) | revert the squash commit; both Workers and Pages redeploy from main |
 | F26 premium baseline (2026-10-02) | The premium feeds are built from current intel, and the baseline survives between runs without git | `premium_feed_baseline.py` (guard denominator, two shared helpers, one report field), `generate_tiered_feeds.py` (one description), `r2_state_sync.py` (one owner-only entry), `sentinel-blogger.yml` (two non-blocking steps, one step id and output), regression-gate suite list, 3 new test files, the R2 state-file count pin | `_merge` and its window (shared, not re-implemented), `r2_state_sync.py` owner-only mechanism (`STATE_FILES`, `BROAD_SWEEP_EXCLUDED_PATHS`, `--only`), `r2_upload.s3_get`/`s3_cp` | runs 36956080062 and 36969320297 (guard refused 985 → 77 and 42); baseline items dated 2026-08-19..26; 2 tests fail on the old code | MEDIUM (premium feed content changes from 985 August items to the current window; publisher workflow gains two non-blocking steps; STAGE 4 untouched) | revert the squash commit; the next publisher run reads the checkout's copy again; delete `premium/state/feed.baseline.json` in R2 only if a corrupt copy must be discarded |
+| CI reporting (2026-10-02) | Both gates can be required without deadlocking any PR; a failing certification canary records why | `intel-gateway-regression-gate.yml` (`pull_request` trigger, suite list), `commercial-customer-ops-certification.yml` (one line), `test_security_txt.py` (one assertion), 2 new tests, ledger, runbook §8 | the SAST gate's always-reporting pattern; the step's own `record()`/`canary()` | ruleset audit (no status-check rule); #641 merged red; runs 37006162439 and 37006645392 lost the canary's reason | LOW (CI only; the gate runs on every PR; no production code) | revert the squash commit |
+
+Blast radius (CI reporting):
+
+- **Files:** as listed.
+- **Imports, routes, dashboards, certification reports, `/api/v1/p*` and
+  data:** none.
+- **CI:**
+  - the regression gate now runs on every pull request to `main`, docs-only
+    ones included: about 7 minutes of public-repository runner time each, at
+    no cost;
+  - pushes to `main` keep the path filter;
+  - the certification's canary step behaves the same, except that it now
+    records a failing or blocked canary instead of aborting.
+- **Workflows:** the two listed.
 
 Blast radius (F26 premium baseline):
 
@@ -1587,6 +1619,22 @@ none; `/api/v1/p*` shapes — unchanged; data schema — none (fewer
     - public-repo workflow hygiene: 46 passed and 16 subtests;
     - regression 41/41;
     - `test_severity_epss_truth.py` 17/17.
+
+- CI reporting (local, 2026-10-02, on the F26 head plus this change):
+  - **New tests:**
+    - readiness: 3/3; the pull-request filter test fails on the old
+      trigger;
+    - certification canary step: 3/3; the failure and blocked cases fail on
+      the old line.
+  - **Existing suites:**
+    - `test_security_txt.py` 18/18;
+    - regression-gate Python job: 1,938 passed and 4 subtests.
+  - **Workflow-reading tests:** 39 files, 539 passed and 20 subtests.
+    - 2 failures, identical on the unchanged head and run by no workflow:
+      `test_deploy_provenance_contract.py`, which expects a
+      `SHA="${GITHUB_SHA}"` line that `deploy-worker.yml` no longer has,
+      and `test_weekly_threat_brief_branch_protection.py`.
+    - These are pre-existing; the same class as F5.
 
 ## Reuse report
 

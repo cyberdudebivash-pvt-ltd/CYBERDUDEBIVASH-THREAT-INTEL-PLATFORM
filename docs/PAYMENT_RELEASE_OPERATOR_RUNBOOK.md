@@ -334,3 +334,39 @@ regression gate proves the test suite catches.
 | Wrong tenant | DENY | `mssp-tenants.test.js`; live MSSP isolation PASS (certification) |
 | Admin-secret mismatch | DENY 401/403 | Readiness and admin tests; live canary 401/403; deploy run 36962733371 401 |
 | Manual-payment request | Cannot auto-provision | `manual-payment-retirement` and `manual-notify-retirement` tests; live 410 on both Workers |
+
+## 8. Required status checks on `main` (repository admin)
+
+**BLOCKED — REPOSITORY ADMIN ACTION REQUIRED.**
+
+Ruleset 21556637 ("SENTINEL APEX Production Main Protection", active on
+`main`) has three rules: deletion, required linear history and pull request.
+It has no status-check rule, so a pull request can merge while a check is
+red or still running. #641 did.
+
+Once the CI-reporting change is on `main`, each of these checks reports on
+every pull request to `main`, and none can be skipped.
+`tests/test_regression_gate_required_check_readiness.py` keeps it that way.
+
+| Check name (exact) | Workflow |
+| --- | --- |
+| `SAST Gate (required)` | `sast-security-scan.yml` |
+| `workers/intel-gateway -- full unit suite (1121 tests)` | `intel-gateway-regression-gate.yml` |
+| `scripts/ + tests/ -- Python unit and regression suites` | `intel-gateway-regression-gate.yml` |
+
+Steps:
+
+1. In GitHub, open Settings → Rules → Rulesets, then SENTINEL APEX
+   Production Main Protection.
+2. Add the rule "Require status checks to pass".
+3. Add the three checks above. Choose GitHub Actions as their source, so a
+   status posted by another app or token cannot satisfy them.
+4. Optional: tick "Require branches to be up to date before merging". It is
+   stricter, and it re-runs the checks after every base change.
+5. Leave the bypass list unchanged. Do not give the publisher a bypass; F25
+   moves its state to R2 instead.
+6. Save. Then open a docs-only test pull request and confirm that all three
+   checks run and report.
+
+Until then, merges follow the manual rule: no merge while any applicable
+check is queued, in progress, failed or cancelled.

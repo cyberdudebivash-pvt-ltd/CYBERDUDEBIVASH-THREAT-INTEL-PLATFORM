@@ -100,10 +100,12 @@ def test_dist_ships_both_locations():
 def test_regression_gate_runs_this_suite_on_security_txt_changes():
     wf = yaml.safe_load((REPO / ".github" / "workflows" / "intel-gateway-regression-gate.yml").read_text(encoding="utf-8"))
     on = wf.get("on") or wf.get(True)
-    for event in ("pull_request", "push"):
-        paths = on[event]["paths"]
-        for p in ("security.txt", ".well-known/**", "scripts/security_txt_validator.py"):
-            assert p in paths, f"{event} paths must include {p}"
+    # Pull requests to main run the gate unconditionally (required-check
+    # readiness, 2026-10-02): no path filter can skip this suite there.
+    assert "paths" not in on["pull_request"] and "paths-ignore" not in on["pull_request"]
+    paths = on["push"]["paths"]
+    for p in ("security.txt", ".well-known/**", "scripts/security_txt_validator.py"):
+        assert p in paths, f"push paths must include {p}"
     assert "tests/test_security_txt.py" in (REPO / ".github" / "workflows" / "intel-gateway-regression-gate.yml").read_text(encoding="utf-8")
 
 
