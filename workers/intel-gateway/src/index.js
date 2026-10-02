@@ -166,6 +166,7 @@ import { buildAccountUsage } from './account-usage.js';
 import { buildReportsSitemapXml, MAX_SITEMAP_URLS } from './reports-sitemap.js';
 import { dispatchFreshnessGuard } from './freshness-guard-dispatch.js';
 import { checkoutProviderAvailability } from './checkout-providers.js';
+import { legacyOrderEntitlement } from './legacy-order-authority.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -5120,7 +5121,8 @@ async function handleRazorpayVerify(request, env, ctx, method) {
   // NOTE: a client-supplied `tier` field is deliberately NOT read here.
   // Tier is derived below from the verified Razorpay payment record only --
   // see the v185.2 SECURITY FIX comment before provisioning.
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, email, billing = "monthly" } = body;
+  // `billing` is not read: the Order's own notes set the cycle (P0 2026-10-02).
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, email } = body;
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     return jsonResp({ error: "razorpay_order_id, razorpay_payment_id, razorpay_signature required" }, 400);
   }
@@ -5185,19 +5187,24 @@ async function handleRazorpayVerify(request, env, ctx, method) {
   if (paymentEntity.status !== "captured") {
     return jsonResp({ error: "Payment not captured", code: "NOT_CAPTURED", status: paymentEntity.status }, 400);
   }
-  const authoritativeTier = String(paymentEntity.notes?.tier || "").toUpperCase();
-  if (!["PRO", "ENTERPRISE", "MSSP"].includes(authoritativeTier)) {
-    auditLog(ctx, env, { action: "payment_tier_unresolvable", payment_id: razorpay_payment_id });
-    return jsonResp({ error: "Could not determine tier from the verified payment record" }, 400);
+  // P0 (2026-10-02): tier, billing cycle and email come from the Order this
+  // gateway created (its notes, bound to the payment), and the captured
+  // amount must be that tier and cycle's INR price. The browser's `billing`
+  // used to set the key's cycle, so a monthly payment could be activated as
+  // annual. See legacy-order-authority.js.
+  const authority = legacyOrderEntitlement(paymentEntity, RAZORPAY_TIER_PRICES);
+  if (!authority.ok) {
+    auditLog(ctx, env, { action: "payment_not_activatable", payment_id: razorpay_payment_id, reason: authority.reason });
+    return jsonResp({ error: "This payment cannot be activated automatically", code: "ORDER_NOT_ELIGIBLE", reason: authority.reason }, 400);
   }
-  const tierUp = authoritativeTier;
-  const apiKey = await provisionApiKey(env, ctx, tierUp, email, "razorpay_checkout", {
+  const tierUp = authority.tier;
+  const apiKey = await provisionApiKey(env, ctx, tierUp, authority.email, "razorpay_checkout", {
     order_id: razorpay_order_id, payment_id: razorpay_payment_id,
-  }, billing === "annual" ? "annual" : "monthly");
+  }, authority.billing);
   // P2.6.1-001: Write unified idempotency key (1 year TTL)  -  prevents double-provision from webhook path
-  await env.SECURITY_HUB_KV.put(unifiedIdempKey, JSON.stringify({ email, tier: tierUp, ts: now(), source: "razorpay_checkout" }), { expirationTtl: 86400 * 365 });
+  await env.SECURITY_HUB_KV.put(unifiedIdempKey, JSON.stringify({ email: authority.email, tier: tierUp, ts: now(), source: "razorpay_checkout" }), { expirationTtl: 86400 * 365 });
   // Mark payment_id as consumed via per-path key (backward compat  -  1 year TTL)
-  await env.SECURITY_HUB_KV.put(verifyIdempKey, JSON.stringify({ email, tier: tierUp, ts: now() }), { expirationTtl: 86400 * 365 });
+  await env.SECURITY_HUB_KV.put(verifyIdempKey, JSON.stringify({ email: authority.email, tier: tierUp, ts: now() }), { expirationTtl: 86400 * 365 });
   // v185.5 CodeRabbit fix: this client-verify path -- not the webhook below --
   // is documented (see the comment above this function) as the one that
   // normally wins the provisioning race, since it runs synchronously right
@@ -5209,7 +5216,7 @@ async function handleRazorpayVerify(request, env, ctx, method) {
 
   // P2.6.1-002: Send activation email  -  wrapped in try/catch, never blocks provisioning
   ctx.waitUntil((async () => {
-    try { await sendActivationEmail(env, email, tierUp, apiKey); } catch (err) {
+    try { await sendActivationEmail(env, authority.email, tierUp, apiKey); } catch (err) {
       console.error("[handleRazorpayVerify] sendActivationEmail error:", err?.message || err);
     }
   })());
@@ -5217,7 +5224,7 @@ async function handleRazorpayVerify(request, env, ctx, method) {
   ctx.waitUntil(sendTelegramAlert(env,
     `? <b>RAZORPAY PAYMENT VERIFIED</b>\n` +
     `Plan: <b>${tierUp}</b>\n` +
-    `Email: ${email}\n` +
+    `Email: ${authority.email}\n` +
     `Payment ID: <code>${razorpay_payment_id}</code>\n` +
     `API Key: <code>${apiKey.slice(0, 16)}...</code>`
   ));
@@ -5269,6 +5276,21 @@ async function handleWebhookRazorpay(request, env, ctx) {
       auditLog(ctx, env, { action: "razorpay_subscription_payment_ignored", payment_id: payEntity.id || pid, event });
       return jsonResp({ status: "ignored_subscription_payment", payment_id: payEntity.id || pid });
     }
+    // P0 (2026-10-02): only an Order this gateway created (notes.platform,
+    // tier, billing, email) at that tier and cycle's exact INR price
+    // activates a key. This used to provision any captured payment on the
+    // account -- a payment link or page included -- defaulting the tier to
+    // PRO and the email to "unknown@razorpay". See legacy-order-authority.js.
+    const orderNotes = payload.payload?.order?.entity?.notes || {};
+    const authority = legacyOrderEntitlement(
+      { ...payEntity, notes: { ...orderNotes, ...(payEntity.notes || {}) } }, RAZORPAY_TIER_PRICES);
+    if (!authority.ok) {
+      auditLog(ctx, env, { action: "razorpay_payment_not_activatable", payment_id: payEntity.id || pid, event, reason: authority.reason });
+      return jsonResp({ status: "ignored_not_activatable", payment_id: payEntity.id || pid, reason: authority.reason });
+    }
+    const tier  = authority.tier;
+    const email = authority.email;
+
     // P2.6.1-001: Unified cross-path idempotency guard  -  checked FIRST before per-path key
     const unifiedIdempKey = `rzp_payment:${pid}`;
     const alreadyProvisioned = await env.SECURITY_HUB_KV.get(unifiedIdempKey);
@@ -5281,7 +5303,7 @@ async function handleWebhookRazorpay(request, env, ctx) {
 
     const apiKey = await provisionApiKey(env, ctx, tier, email, "razorpay_webhook", {
       payment_id: pid, amount, event,
-    }, notes.billing === "annual" ? "annual" : "monthly");
+    }, authority.billing);
     // P2.6.1-001: Write unified idempotency key (1 year TTL)  -  prevents double-provision from blog bridge path
     await env.SECURITY_HUB_KV.put(unifiedIdempKey, JSON.stringify({ email, tier, ts: now(), source: "razorpay_webhook" }), { expirationTtl: 86400 * 365 });
     // Backward-compat per-path key (1 year TTL)
@@ -5632,6 +5654,7 @@ async function processGumroadSale(env, ctx, formData, pingKind, release) {
   // The KV check is kept as defense-in-depth, unchanged: if the DO call
   // itself fails (e.g. a transient binding error), processing falls back to
   // it rather than crashing the whole webhook request.
+  let saleLock = null;
   if (env.GUMROAD_PROVISIONING_LOCK && !release) {
     try {
       const lockId = env.GUMROAD_PROVISIONING_LOCK.idFromName(sale_id);
@@ -5641,11 +5664,17 @@ async function processGumroadSale(env, ctx, formData, pingKind, release) {
       });
       const claimed = await claimResp.json();
       if (claimed.alreadyClaimed) return jsonResp({ status: "already_provisioned", sale_id });
+      saleLock = lock;
     } catch (lockErr) {
       console.error("[handleWebhookGumroad] GumroadProvisioningLock call failed, falling back to KV-only idempotency:", lockErr?.message || lockErr);
     }
   }
 
+  // P0 (2026-10-02): everything after the claim fails as a unit. A failure
+  // here used to leave the sale claimed, so each Gumroad retry was answered
+  // "already_provisioned" and the buyer never received a key, with only a
+  // console line to show for it. See gumroadProvisioningFailed().
+  try {
   // Idempotency guard: one provisioning per sale_id
   const idempKey = `gumroad_sale:${sale_id}`;
   const existing = await env.SECURITY_HUB_KV.get(idempKey);
@@ -5661,9 +5690,12 @@ async function processGumroadSale(env, ctx, formData, pingKind, release) {
     if (renewed) return renewed;
   }
 
-  const apiKey = await provisionApiKey(env, ctx, tier, email, "gumroad_webhook", {
-    sale_id, product_id, product_name, price, variants, subscription_id,
-  }, billingCycle);
+  // Retry-safe (P0 2026-10-02): a retry after a failure later in this
+  // function reuses the key this sale already minted, never a second one.
+  const apiKey = (await env.SECURITY_HUB_KV.get(`gumroad_sale_key_map:${sale_id}`))
+    || await provisionApiKey(env, ctx, tier, email, "gumroad_webhook", {
+      sale_id, product_id, product_name, price, variants, subscription_id,
+    }, billingCycle);
   await env.SECURITY_HUB_KV.put(`gumroad_sale_key_map:${sale_id}`, apiKey, { expirationTtl: GUMROAD_KEY_MAP_TTL });
 
   await env.SECURITY_HUB_KV.put(
@@ -5711,6 +5743,45 @@ async function processGumroadSale(env, ctx, formData, pingKind, release) {
   ));
 
   return jsonResp({ status: "provisioned", tier, sale_id });
+  } catch (err) {
+    return await gumroadProvisioningFailed(env, ctx, saleLock, { sale_id, email, tier, err });
+  }
+}
+
+/**
+ * P0 (2026-10-02): a Gumroad sale that failed after its lock was claimed.
+ * Releases the claim so Gumroad's retry can provision, keeps an auditable
+ * record (gumroad_failed:<sale_id>, a year, like holds) and alerts, then
+ * answers 500 so Gumroad does retry. Never throws.
+ */
+async function gumroadProvisioningFailed(env, ctx, saleLock, { sale_id, email, tier, err }) {
+  const error = String(err?.message || err).slice(0, 200);
+  console.error(`[handleWebhookGumroad] provisioning failed for sale ${sale_id}: ${error}`);
+  if (saleLock) {
+    try {
+      await saleLock.fetch("https://lock/claim", {
+        method: "POST", body: JSON.stringify({ action: "claim_release", saleId: sale_id }),
+      });
+    } catch (releaseErr) {
+      console.error("[handleWebhookGumroad] claim release failed:", releaseErr?.message || releaseErr);
+    }
+  }
+  try {
+    await env.SECURITY_HUB_KV.put(`gumroad_failed:${sale_id}`, JSON.stringify({
+      sale_id, email, tier, error, failed_at: now(),
+    }), { expirationTtl: GUMROAD_HOLD_TTL });
+  } catch (recordErr) {
+    console.error("[handleWebhookGumroad] failure record not written:", recordErr?.message || recordErr);
+  }
+  auditLog(ctx, env, { action: "gumroad_provisioning_failed", sale_id, error });
+  ctx.waitUntil(sendTelegramAlert(env,
+    `[FAIL] <b>GUMROAD PROVISIONING FAILED</b>\n` +
+    `Sale ID: <code>${sale_id}</code>\n` +
+    `Email: ${email}\n` +
+    `Error: ${error}\n` +
+    `Gumroad retries the ping; if it does not recover, see gumroad_failed:${sale_id}.`
+  ));
+  return jsonResp({ error: "provisioning_failed", sale_id }, 500);
 }
 
 // POST /api/payment/manual-notify  (UPI / NEFT / Crypto proof of payment)

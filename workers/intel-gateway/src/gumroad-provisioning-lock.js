@@ -156,6 +156,23 @@ export class GumroadProvisioningLock {
       });
     }
 
+    // P0 (2026-10-02): release a sale's claim when provisioning failed after
+    // the claim was taken, so Gumroad's retry can provision. Without it a
+    // failed sale stayed claimed forever and every retry was answered
+    // "already_provisioned" with no key ever issued. Additive action: the
+    // no-action claim contract below is unchanged.
+    if (body?.action === "claim_release") {
+      if (!body.saleId) {
+        return new Response(JSON.stringify({ error: "saleId_required" }), {
+          status: 400, headers: { "Content-Type": "application/json" },
+        });
+      }
+      await this.state.storage.delete(body.saleId);
+      return new Response(JSON.stringify({ ok: true, released: true }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+
     // Legacy Gumroad idempotency contract remains byte-for-byte compatible:
     // no action field + saleId continues to mean "claim this sale once".
     const saleId = body?.saleId;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { test } from "node:test";
-import { handleBillingWebhook, handleBillingSubscriptionStatus } from "../subscription-engine.js";
+import { handleBillingWebhook, handleBillingSubscriptionStatus, keyAccessUntil, RENEWAL_GRACE_HOURS_DEFAULT } from "../subscription-engine.js";
 
 // ---------------------------------------------------------------------------
 // Phase 2 (Razorpay Subscriptions): coverage for handleBillingWebhook(), the
@@ -162,8 +162,11 @@ test("handleBillingWebhook: subscription.charged for an ACTIVE subscription rene
   assert.equal(subAfter.renewal_count, 3);
   assert.equal(subAfter.current_period_end, expectedExpiry);
 
+  // The paid period ends at current_end; the KEY stays valid for the renewal
+  // grace after it (2026-10-02), so the next charge's webhook can land.
   const keyAfter = await env.API_KEYS_KV.get("sk_live_test2", "json");
-  assert.equal(keyAfter.expires_at, expectedExpiry, "a valid renewal must extend the live API key's expiry");
+  assert.equal(keyAfter.expires_at, keyAccessUntil(env, expectedExpiry), "a valid renewal must extend the live API key's expiry");
+  assert.equal(Date.parse(keyAfter.expires_at) - Date.parse(expectedExpiry), RENEWAL_GRACE_HOURS_DEFAULT * 3600e3);
 
   const linkAfter = await env.REVENUE_CRM_KV.get("razorpay_sub:rzp_sub_2", "json");
   assert.equal(linkAfter.status, "active");
@@ -211,7 +214,7 @@ test("handleBillingWebhook: a delayed/out-of-order charged event with an OLDER p
   assert.equal(subAfter.current_period_end, newerIso, "must keep the later period end, not the stale delayed one");
 
   const keyAfter = await env.API_KEYS_KV.get("sk_live_test4", "json");
-  assert.equal(keyAfter.expires_at, newerIso, "a delayed event must not push a paying customer's key expiry backward");
+  assert.equal(keyAfter.expires_at, keyAccessUntil(env, newerIso), "a delayed event must not push a paying customer's key expiry backward");
 
   const linkAfter = await env.REVENUE_CRM_KV.get("razorpay_sub:rzp_sub_4", "json");
   assert.equal(linkAfter.current_period_end, newerIso);

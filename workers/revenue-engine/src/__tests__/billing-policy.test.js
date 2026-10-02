@@ -472,6 +472,40 @@ test("refund.processed revokes the entitlement and issues the credit note (invoi
   assert.equal((await getInvoiceByPayment(env.CRM_DB, "pay_1")).status, "credited", "full credit note issued (billing-credit-notes.test.js)");
 });
 
+test("refund.created revokes at once (a Dashboard refund too); refund.failed revokes nothing and returns the request for retry", async () => {
+  const liveKey = (env) => {
+    env.REVENUE_CRM_KV.store.set("razorpay_sub:sub_1", JSON.stringify({ email: "buyer@example.com", tier: "PRO", status: "active", api_key: "cdb_live_key", internal_customer_id: "cust_buyer" }));
+    env.API_KEYS_KV.store.set("cdb_live_key", JSON.stringify({ tier: "PRO", email: "buyer@example.com", customer_id: "cust_buyer", expires_at: "2099-01-01T00:00:00Z" }));
+  };
+  const refundEvt = (event, id, status) => ({ event, payload: { refund: { entity: { id, payment_id: "pay_1", amount: 410000, status } } } });
+
+  // Refunded from the Razorpay Dashboard: no refund request, refund.created only.
+  const env = makeEnv();
+  await seedPayment(env);
+  liveKey(env);
+  assert.equal((await handleBillingWebhook(signed(refundEvt("refund.created", "rfnd_c", "pending"), "evt_rc"), env, ctx, "rid")).status, 200);
+  const revoked = JSON.parse(env.API_KEYS_KV.store.get("cdb_live_key"));
+  assert.equal(revoked.subscription_status, "refunded");
+  assert.ok(Date.parse(revoked.expires_at) <= Date.now());
+
+  // An approved refund that Razorpay reports as failed: the buyer keeps the
+  // access they paid for and the request goes back to the operator.
+  const env2 = makeEnv();
+  const id = await pendingRequest(env2);
+  liveKey(env2);
+  const rp = fakeRazorpay({ payments: { pay_1: { id: "pay_1", status: "captured", amount: 410000, amount_refunded: 0 } } });
+  try {
+    await handleRefundApprove(post("/x", { request_id: id }, { "X-Admin-Secret": ADMIN }), env2, ctx, "rid");
+  } finally { rp.restore(); }
+  assert.equal((await handleBillingWebhook(signed(refundEvt("refund.failed", "rfnd_f", "failed"), "evt_rf"), env2, ctx, "rid")).status, 200);
+  const kept = JSON.parse(env2.API_KEYS_KV.store.get("cdb_live_key"));
+  assert.equal(kept.subscription_status, undefined, "no deny status written");
+  assert.equal(kept.expires_at, "2099-01-01T00:00:00Z");
+  assert.equal(env2.API_KEYS_KV.store.has("jwt_deny:cust_buyer"), false);
+  const row = await env2.CRM_DB.prepare("SELECT status, last_error FROM refund_requests WHERE id = ?").bind(id).first();
+  assert.deepEqual({ ...row }, { status: "approved", last_error: "razorpay_refund_failed" });
+});
+
 test("a dispute webhook blocks the guarantee for that payment", async () => {
   const env = makeEnv();
   await seedPayment(env);

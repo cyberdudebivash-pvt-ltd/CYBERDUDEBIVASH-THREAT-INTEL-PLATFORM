@@ -154,6 +154,21 @@ jobs:
   # own unrelated-to-this-fix behavior). Every other event type reports
   # every surface relevant, matching exactly what always happened before
   # this change for those triggers.
+  #
+  # CI RELIABILITY (2026-10-02): no actions/checkout any more. The job used
+  # to clone the whole repository history (fetch-depth: 0) to compare two
+  # trees: over 37 PR runs (2026-09-30..10-02) that checkout took a median
+  # 207 s of a 211 s job, max 299 s, and the 5-minute job timeout cancelled
+  # it twice (runs 1125 and 1133 attempt 1), failing the required gate
+  # closed with no finding. The comparison needs only the PR's base and head
+  # commits and their trees, so the step fetches exactly those two commits
+  # (--depth=1, no history) without file contents (--filter=blob:none):
+  # 0.8 s and 2.4 MiB for PR #640's pair, measured against this repository.
+  # The comparison itself is unchanged: base tip vs head (two-dot), which
+  # lists every path the merge would change relative to the base and never
+  # needs a merge-base, so no history is required. Anything that prevents
+  # establishing that list (bad SHA, fetch failure, diff failure) fails the
+  # job, and the SAST Gate fails closed on it.
   changes:
     name: Classify Changed Surfaces
     runs-on: ubuntu-latest
@@ -164,18 +179,16 @@ jobs:
       semgrep_relevant: ${{ steps.classify.outputs.semgrep_relevant }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
       - name: Classify changed surfaces
         id: classify
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          GIT_AUTH_TOKEN: ${{ github.token }}
         run: |
+          set -u
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "Non-PR event ($EVENT_NAME) -- every surface is relevant, matching prior behavior."
             echo "python_relevant=true" >> "$GITHUB_OUTPUT"
@@ -184,8 +197,58 @@ jobs:
             exit 0
           fi
 
-          CHANGED=$(git diff --name-only "${PR_BASE_SHA}" "${PR_HEAD_SHA}")
-          echo "Files changed in this PR:"
+          fail_closed() {
+            echo "::error::$1 -- the changed surfaces cannot be established, so classification fails (SAST Gate fails closed)."
+            exit 1
+          }
+
+          for pair in "PR_BASE_SHA=${PR_BASE_SHA:-}" "PR_HEAD_SHA=${PR_HEAD_SHA:-}"; do
+            name="${pair%%=*}"
+            value="${pair#*=}"
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]] || fail_closed "$name is not a full commit SHA ('$value')"
+          done
+
+          # Fetch only what the comparison reads: the two commits and their
+          # trees. Commits already present locally are not fetched again.
+          git rev-parse --git-dir > /dev/null 2>&1 || git init -q . || fail_closed "git init failed"
+          MISSING=()
+          for sha in "$PR_BASE_SHA" "$PR_HEAD_SHA"; do
+            git cat-file -e "${sha}^{tree}" 2> /dev/null || MISSING+=("$sha")
+          done
+          if [ "${#MISSING[@]}" -gt 0 ]; then
+            git remote get-url origin > /dev/null 2>&1 || git remote add origin "${REPO_URL:-}" || fail_closed "cannot add remote '${REPO_URL:-}'"
+            # Same credential actions/checkout would use, passed to this one
+            # git process through the environment (never written to disk)
+            # and masked, like actions/checkout masks it.
+            AUTH_ENV=()
+            if [ -n "${GIT_AUTH_TOKEN:-}" ]; then
+              BASIC=$(printf 'x-access-token:%s' "$GIT_AUTH_TOKEN" | base64 -w0)
+              echo "::add-mask::${BASIC}"
+              AUTH_ENV=(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic ${BASIC}")
+            fi
+            FETCHED=false
+            started=$(date +%s)
+            for attempt in 1 2 3; do
+              if env ${AUTH_ENV[@]+"${AUTH_ENV[@]}"} git -c protocol.version=2 fetch --quiet --no-tags --no-recurse-submodules \
+                   --depth=1 --filter=blob:none origin "${MISSING[@]}"; then
+                FETCHED=true
+                break
+              fi
+              echo "::warning::Fetching ${#MISSING[@]} PR commit(s) failed (attempt $attempt of 3)."
+              [ "$attempt" -lt 3 ] && sleep $((attempt * ${CLASSIFY_RETRY_SLEEP_SECONDS:-5}))
+            done
+            [ "$FETCHED" = true ] || fail_closed "could not fetch the PR base/head commits"
+            echo "Fetched ${#MISSING[@]} commit(s) and their trees (no history, no file contents) in $(( $(date +%s) - started ))s."
+          fi
+
+          # Name-only comparison of the two trees. --no-renames lists both
+          # sides of a rename; -z keeps unusual paths unquoted, so the
+          # patterns below match them.
+          LIST_FILE=$(mktemp)
+          git diff --name-only --no-renames -z "$PR_BASE_SHA" "$PR_HEAD_SHA" > "$LIST_FILE" \
+            || fail_closed "git diff $PR_BASE_SHA $PR_HEAD_SHA failed"
+          CHANGED=$(tr '\0' '\n' < "$LIST_FILE")
+          echo "Files changed in this PR ($(grep -c . <<< "$CHANGED" || true)):"
           echo "$CHANGED"
           echo ""
 
@@ -193,26 +256,29 @@ jobs:
           DEPENDENCY_RELEVANT=false
           SEMGREP_RELEVANT=false
 
+          # Here-strings, not `echo | grep -q`: no pipe, so a long list can
+          # never turn a match into a false negative.
+
           # Mirrors Bandit's actual scan target (--recursive agent/) plus the
           # api/**.py restriction the old path filter used for api/.
-          if echo "$CHANGED" | grep -qE '^agent/|^api/.*\.py$'; then
+          if grep -qE '^agent/|^api/.*\.py$' <<< "$CHANGED"; then
             PYTHON_RELEVANT=true
           fi
 
           # Every dependency manifest pip-audit's own "safety" job scans.
-          if echo "$CHANGED" | grep -qE '^requirements\.txt$|^requirements-ci-light\.txt$|^api/requirements\.txt$|^syndicate/requirements_syndicate\.txt$|^platform/services/[^/]+/requirements\.txt$'; then
+          if grep -qE '^requirements\.txt$|^requirements-ci-light\.txt$|^api/requirements\.txt$|^syndicate/requirements_syndicate\.txt$|^platform/services/[^/]+/requirements\.txt$' <<< "$CHANGED"; then
             DEPENDENCY_RELEVANT=true
           fi
 
           # Mirrors Semgrep's actual scan target (agent/ api/, whole directory
           # -- not .py-restricted like Bandit/api's classification above).
-          if echo "$CHANGED" | grep -qE '^agent/|^api/'; then
+          if grep -qE '^agent/|^api/' <<< "$CHANGED"; then
             SEMGREP_RELEVANT=true
           fi
 
           # This workflow file changing is always relevant to every scanner
           # it defines -- matches the old path filter's own last entry.
-          if echo "$CHANGED" | grep -qE '^\.github/workflows/sast-security-scan\.yml$'; then
+          if grep -qE '^\.github/workflows/sast-security-scan\.yml$' <<< "$CHANGED"; then
             PYTHON_RELEVANT=true
             DEPENDENCY_RELEVANT=true
             SEMGREP_RELEVANT=true

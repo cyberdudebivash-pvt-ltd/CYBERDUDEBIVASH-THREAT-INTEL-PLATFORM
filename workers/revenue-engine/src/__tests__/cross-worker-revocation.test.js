@@ -50,6 +50,9 @@ function world() {
   const revenue = {
     CRM_DB: createD1(), REVENUE_CRM_KV: fakeKV(), API_KEYS_KV,
     RAZORPAY_KEY_ID: "rzp_test_TEST_ONLY", RAZORPAY_KEY_SECRET: "rzp_secret_TEST_ONLY", RAZORPAY_WEBHOOK_SECRET: WHSEC,
+    // A subscription with no server link activates only on a configured Plan
+    // (plan binding, 2026-10-02).
+    RAZORPAY_PLAN_ID_PRO_MONTHLY: "plan_TEST_ONLY_pro_monthly",
   };
   const gw = {
     API_KEYS_KV, RATE_LIMIT_KV: fakeKV(), SECURITY_HUB_KV: fakeKV(), ANALYTICS_KV: fakeKV(), REVENUE_CRM_KV: fakeKV(),
@@ -61,7 +64,8 @@ function world() {
       event, account_id: undefined,
       payload: {
         subscription: { entity: { id: SUB, status: event.split(".")[1], current_start: Math.floor(Date.now() / 1000),
-          current_end: Math.floor(Date.now() / 1000) + 30 * 86400, notes: { email: EMAIL, tier: "PRO", billing_cycle: "monthly" }, ...subPatch } },
+          current_end: Math.floor(Date.now() / 1000) + 30 * 86400, plan_id: "plan_TEST_ONLY_pro_monthly",
+          notes: { email: EMAIL, tier: "PRO", billing_cycle: "monthly" }, ...subPatch } },
         ...extra,
       },
     };

@@ -118,6 +118,16 @@ async function configurationChecks(env, nowMs) {
         `File the LUT for FY ${nextFy} and add it to luts before 1 April`));
     }
   }
+  // F22 (2026-10-02): paid keys are always shown on the checkout page;
+  // emailing a copy is the owner's decision and needs a provider key.
+  const keyEmailOn = env.KEY_EMAIL_DELIVERY_ENABLED === "true";
+  const emailProvider = !!env.SENDGRID_API_KEY;
+  checks.push(check("key_email_delivery", keyEmailOn && emailProvider, false,
+    keyEmailOn && emailProvider ? "Paid API keys are also emailed to the buyer."
+      : keyEmailOn ? "Key email is on but no email provider key is set: nothing is sent."
+      : "Paid API keys are not emailed (owner decision, F22): a buyer who closes the checkout before activation has no copy and needs support.",
+    keyEmailOn ? "wrangler secret put SENDGRID_API_KEY (revenue engine)"
+      : "Owner decision: set KEY_EMAIL_DELIVERY_ENABLED = \"true\" in wrangler.toml with a provider key, or keep keys on-page only"));
   checks.push(check("operator_alerts", !!env.SLACK_WEBHOOK_URL, false,
     env.SLACK_WEBHOOK_URL ? "Refund requests alert the operator." : "No alert channel: refund requests are only visible in this queue.",
     "wrangler secret put SLACK_WEBHOOK_URL"));

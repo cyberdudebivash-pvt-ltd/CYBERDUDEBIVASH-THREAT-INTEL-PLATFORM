@@ -354,7 +354,8 @@ test("paid activation: Razorpay verify (stubbed provider) -> MSSP self-service w
   hx.env.RAZORPAY_KEY_ID = "rzp_test_stub";
   hx.env.RAZORPAY_KEY_SECRET = "rzp-stub-secret";
   hx.net.receivers.set("https://api.razorpay.com/v1/payments/pay_stub_1", async () => ({
-    status: 200, body: { id: "pay_stub_1", order_id: "order_stub_1", status: "captured", notes: { tier: "MSSP" } },
+    status: 200, body: { id: "pay_stub_1", order_id: "order_stub_1", status: "captured", amount: 8330000, currency: "INR",
+      notes: { platform: "SENTINEL-APEX", tier: "MSSP", billing: "monthly", email: "mssp-buyer@example.com" } },
   }));
   hx.env.RESEND_API_KEY = "re_stub";
   const mails = [];
@@ -379,7 +380,7 @@ test("paid activation: Razorpay webhook, then refund denies and keeps tenants fo
     }), hx.env, hx.ctx);
     return res.status;
   };
-  assert.equal(await send({ event: "payment.captured", payload: { payment: { entity: { id: "pay_wh_1", amount: 83300, notes: { tier: "MSSP", email: "wh-buyer@example.com" } } } } }), 200);
+  assert.equal(await send({ event: "payment.captured", payload: { payment: { entity: { id: "pay_wh_1", amount: 8330000, currency: "INR", notes: { platform: "SENTINEL-APEX", tier: "MSSP", billing: "monthly", email: "wh-buyer@example.com" } } } } }), 200);
   const key = await selfServiceWorks(hx, "wh-buyer@example.com");
   const [{ tenant_id: id }] = (await hx.call("GET", "/api/mssp/tenants", { key })).body.tenants;
   assert.equal(await send({ event: "refund.processed", payload: { refund: { entity: { id: "rfnd_1", payment_id: "pay_wh_1" } } } }), 200);
