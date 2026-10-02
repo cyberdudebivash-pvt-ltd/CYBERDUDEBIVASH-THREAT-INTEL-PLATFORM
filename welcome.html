@@ -60,9 +60,9 @@ footer{border-top:1px solid var(--border);padding:24px 32px;text-align:center;fo
 </nav>
 
 <div class="hero">
-  <div class="hero-badge"><span class="dot"></span><span id="hero-badge-text">Checkout Confirmed</span></div>
+  <div class="hero-badge"><span class="dot"></span><span id="hero-badge-text">Thank you</span></div>
   <h1 id="hero-title">Welcome to <span>Sentinel APEX</span></h1>
-  <p id="hero-desc">Your subscription is being activated.</p>
+  <p id="hero-desc">Your access is activated as soon as the payment processor confirms your payment to us.</p>
 </div>
 
 <div class="page">
@@ -70,16 +70,16 @@ footer{border-top:1px solid var(--border);padding:24px 32px;text-align:center;fo
   <div id="gumroad-panel" class="card" style="display:none;">
     <div class="card-title">Gumroad Purchase</div>
     <div class="alert-box alert-pending">
-      &#9993; Your API key is being emailed to <strong id="gr-email">your inbox</strong> right now.
-      Gumroad checkout doesn't hand the key back to this page directly, so check your email
-      (and spam folder) for a message from CyberDudeBivash with your <code>cdb_pro_...</code> /
-      <code>cdb_ent_...</code> key and quickstart snippets. This usually arrives within a minute or two of purchase.
+      &#9993; Once Gumroad confirms your purchase to us, we email <strong id="gr-email">your inbox</strong> a one-time link
+      that reveals your API key. The email never contains the key itself: open the link, click Reveal and store the key
+      in your secrets manager. If nothing arrives within 15 minutes (check spam), email support@cyberdudebivash.com
+      with your Gumroad receipt.
     </div>
   </div>
 
   <div class="card">
     <div class="card-title">Quickstart</div>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">Swap in the key from your activation email wherever you see <code>YOUR_API_KEY</code> below. Keep it secret -- treat it like a password.</p>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">Swap in your API key (shown once on the checkout page, or by your one-time link) wherever you see <code>YOUR_API_KEY</code> below. Keep it secret -- treat it like a password.</p>
     <div class="snippet"><span class="tab">cURL</span>
 curl -H "X-API-Key: YOUR_API_KEY" \
   https://intel.cyberdudebivash.com/api/v1/intel/apex.json</div>
@@ -95,7 +95,7 @@ print(r.json())</div>
 
   <div class="card">
     <div class="card-title">What's Next</div>
-    <div class="check-item"><span class="ck">&#128272;</span><div class="ck-text"><strong>API Key</strong> — delivered by email (Gumroad) or shown above (Razorpay). Rate limit per your plan tier.</div></div>
+    <div class="check-item"><span class="ck">&#128272;</span><div class="ck-text"><strong>API Key</strong> — shown once on the Razorpay checkout page, or revealed once by the one-time link we email you (Gumroad). Never sent in an email. Rate limit per your plan tier.</div></div>
     <div class="check-item"><span class="ck">&#128202;</span><div class="ck-text"><strong>STIX 2.1 / TAXII 2.1 feed</strong> — ready to ingest into Splunk, Sentinel, QRadar, or MISP.</div></div>
     <div class="check-item"><span class="ck">&#128203;</span><div class="ck-text"><strong>MITRE ATT&amp;CK enrichment</strong> — every advisory tagged with tactics, techniques, CISA KEV and EPSS.</div></div>
   </div>
@@ -124,13 +124,13 @@ print(r.json())</div>
   var planName = PLAN_NAMES[plan] || '';
 
   if (planName) {
-    document.getElementById('hero-desc').textContent = 'Your ' + planName + ' subscription is being activated.';
+    document.getElementById('hero-desc').textContent = 'Your ' + planName + ' access activates as soon as the payment processor confirms your payment to us.';
   }
 
   // Gumroad: checkout happened entirely on Gumroad's hosted page -- the key
-  // itself never reaches this URL, only (at most) email/plan. It is
-  // delivered by email instead (see handleWebhookGumroad -> sendActivationEmail
-  // in workers/intel-gateway/src/index.js). The API key is deliberately never
+  // itself never reaches this URL, only (at most) email/plan. The buyer is
+  // emailed a one-time link that reveals it once (F22: handleWebhookGumroad ->
+  // sendActivationEmail -> key-redemption.js in workers/intel-gateway/src). The API key is deliberately never
   // read from or displayed via a URL parameter here: a live credential
   // traveling in a query string can leak through browser history, referrer
   // headers, and access logs. Razorpay's own checkout flow (upgrade.html)

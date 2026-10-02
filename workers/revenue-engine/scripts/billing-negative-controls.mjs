@@ -43,7 +43,9 @@ const SUITES = [
     "src/__tests__/cross-worker-revocation.test.js", "src/__tests__/commercial-readiness.test.js",
     "src/__tests__/pricing-fail-closed.test.js",
     // P0 2026-10-02: payment-to-entitlement hardening.
-    "src/__tests__/subscription-webhook-hardening.test.js", "src/__tests__/renewal-and-key-email.test.js"]],
+    "src/__tests__/subscription-webhook-hardening.test.js", "src/__tests__/renewal-and-key-email.test.js",
+    // F22 2026-10-02: keys are never emailed; one-time redemption.
+    "src/__tests__/activation-link.test.js"]],
   ["workers/intel-gateway", ["--test", "src/__tests__/razorpay-create-order-taxid.test.js",
     "src/__tests__/razorpay-webhook-subscription-guard.test.js", "src/__tests__/manual-notify-retirement.test.js",
     "src/__tests__/gumroad-membership.test.js", "src/__tests__/gumroad-lifecycle.test.js",
@@ -53,7 +55,9 @@ const SUITES = [
     // control exercised before.
     "src/__tests__/legacy-order-authority.test.js", "src/__tests__/gumroad-provisioning-recovery.test.js",
     "src/__tests__/payment-webhook-metering.test.js", "src/__tests__/gumroad-provisioning-lock.test.js",
-    "src/__tests__/mssp-tenants.test.js"]],
+    "src/__tests__/mssp-tenants.test.js",
+    // F22 2026-10-02: one-time key redemption and key-free activation email.
+    "src/__tests__/key-redemption.test.js"]],
 ];
 
 const BR = "workers/revenue-engine/src/billing-routes.js";
@@ -65,6 +69,7 @@ const GL = "workers/intel-gateway/src/gumroad-lifecycle.js";
 const EP = "workers/revenue-engine/src/enterprise-po.js";
 const RI = "workers/revenue-engine/src/index.js";
 const LA = "workers/intel-gateway/src/legacy-order-authority.js";
+const KR = "workers/intel-gateway/src/key-redemption.js";
 
 // [name, file, find, replace] -- `find` must occur exactly once.
 const CONTROLS = [
@@ -350,8 +355,9 @@ const CONTROLS = [
     "  const valid = await verifyRazorpayHmac(rawBody, sig, secret);", "  const valid = true;"],
   ["daily check expires Razorpay subscriptions at period end", RI,
     "    const providerManaged = rec.billing_provider === \"razorpay\" || !!rec.provider_sub_id;", "    const providerManaged = false;"],
+  // Re-anchored 2026-10-02 (F22): the flag now also gates the one-time link.
   ["key email sent with the owner flag off", RI,
-    "  const keyEmailOn = env.KEY_EMAIL_DELIVERY_ENABLED === \"true\";\n  const welcomeMsgId", "  const keyEmailOn = true;\n  const welcomeMsgId"],
+    "  const keyEmailOn = env.KEY_EMAIL_DELIVERY_ENABLED === \"true\";\n  const activation = keyEmailOn", "  const keyEmailOn = true;\n  const activation = keyEmailOn"],
   ["failed or skipped email recorded as sent", RI,
     "      msg.status = outcome === \"sent\" ? \"sent\" : outcome === \"no_provider\" ? \"skipped_no_provider\" : \"failed\";",
     "      msg.status = \"sent\";"],
@@ -375,6 +381,33 @@ const CONTROLS = [
   ["a replayed renewal extends access again (expiry relative, not Razorpay's period)", SE,
     "      await patchApiKeyEntitlement(env, link.api_key, { expires_at: keyAccessUntil(env, periodEnd) || periodEnd });\n      await putProviderLink(env, providerId, { ...link, status: \"active\", current_period_end: periodEnd",
     "      await patchApiKeyEntitlement(env, link.api_key, { expires_at: new Date(Math.max(Date.now(), Date.parse(JSON.parse(await env.API_KEYS_KV.get(link.api_key) || \"{}\").expires_at || 0)) + 30 * 86400000).toISOString() });\n      await putProviderLink(env, providerId, { ...link, status: \"active\", current_period_end: periodEnd"],
+  ["redemption replay allowed (one-time claim ignored)", KR,
+    "  if (claim !== \"claimed\") return { status: 410, outcome: \"replay\", ref };",
+    "  if (false) return { status: 410, outcome: \"replay\", ref };"],
+  ["redemption expiry not checked", KR,
+    "  if (!(Date.parse(rec.expires_at) > nowMs)) return { status: 410, outcome: \"expired\", ref };",
+    "  if (false) return { status: 410, outcome: \"expired\", ref };"],
+  ["redemption reveals a revoked key (access not checked)", KR,
+    "  const access = await deps.keyAccess(rec.key);",
+    "  const access = { ok: true, record: null };"],
+  ["redemption without the claim lock allowed (fail open)", GW,
+    "  if (!env.GUMROAD_PROVISIONING_LOCK) return \"unavailable\";\n  try {\n    const name = `redeem:${hash}`;",
+    "  if (!env.GUMROAD_PROVISIONING_LOCK) return \"claimed\";\n  try {\n    const name = `redeem:${hash}`;"],
+  ["redemption token accepted from the query string", GW,
+    "    token = raw ? JSON.parse(raw)?.token : null;",
+    "    token = (raw ? JSON.parse(raw)?.token : null) || new URL(request.url).searchParams.get(\"token\");"],
+  ["activation email carries the raw key", GW,
+    "      <a href=\"${redemption.url}\" style=\"color:#34d399;font-weight:700;\">Reveal my API key (one time) &rarr;</a>",
+    "      <code>${apiKey}</code> <a href=\"${redemption.url}\" style=\"color:#34d399;font-weight:700;\">Reveal my API key (one time) &rarr;</a>"],
+  ["welcome template renders a key", RI,
+    "<h2>Welcome to SENTINEL APEX ${v.tier}</h2><p>For your security",
+    "<h2>Welcome to SENTINEL APEX ${v.tier}</h2><code>${v.api_key}</code><p>For your security"],
+  ["queued variables shipped to the email provider", RI,
+    "        personalizations: [{ to: [{ email: msg.to }] }],",
+    "        personalizations: [{ to: [{ email: msg.to }], dynamic_template_data: msg.vars }],"],
+  ["activation notice queues the raw key", RI,
+    "    email, tier, req_day:tierCfg.req_day, req_min:tierCfg.req_min,\n    activation_url:",
+    "    email, tier, api_key:key, req_day:tierCfg.req_day, req_min:tierCfg.req_min,\n    activation_url:"],
 ];
 
 function stage() {

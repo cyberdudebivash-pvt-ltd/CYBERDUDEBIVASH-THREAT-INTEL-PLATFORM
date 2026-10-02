@@ -167,6 +167,7 @@ import { buildReportsSitemapXml, MAX_SITEMAP_URLS } from './reports-sitemap.js';
 import { dispatchFreshnessGuard } from './freshness-guard-dispatch.js';
 import { checkoutProviderAvailability } from './checkout-providers.js';
 import { legacyOrderEntitlement } from './legacy-order-authority.js';
+import { issueKeyRedemption, redeemKeyToken } from './key-redemption.js';
 // Issue #288: Durable Object class the Workers runtime instantiates via the
 // GUMROAD_PROVISIONING_LOCK binding (wrangler.toml). Must be a named export
 // of the Worker's main module -- see gumroad-provisioning-lock.js's header
@@ -3411,6 +3412,34 @@ export async function handleAdmin(request, env, ctx, path, method) {
     }, 201);
   }
 
+  // POST /api/admin/keys/{key}/redemption (F22, 2026-10-02): a new one-time
+  // link for a customer whose link expired or was used. Emailed only to the
+  // address on the key record, never to one the caller supplies, and the
+  // response never carries the token or the key. Only a key that would
+  // authenticate now gets a link.
+  const redemptionMatch = path.match(/^\/api\/admin\/keys\/([^\/]+)\/redemption$/);
+  if (redemptionMatch && method === "POST") {
+    const key = redemptionMatch[1];
+    const access = await redeemableKeyAccess(env, key);
+    if (!access.ok && access.reason === "unavailable") {
+      return jsonResp({ error: "Key authority unavailable; no link was issued" }, 503);
+    }
+    if (!access.ok) {
+      return jsonResp({ error: "Key not found or not active; no link was issued", reason: access.reason }, access.reason === "key_not_found" ? 404 : 409);
+    }
+    const to = [access.record.email, access.record.customer_id, access.record.label]
+      .find((v) => typeof v === "string" && v.includes("@"));
+    if (!to) return jsonResp({ error: "The key has no registered email address; no link was issued" }, 422);
+    const sent = await sendActivationEmail(env, to, access.record.tier, key);
+    auditLog(ctx, env, { action: "key_redemption_reissued", key_prefix: key.slice(0, 12), sent });
+    return jsonResp({
+      sent, key_prefix: key.slice(0, 12),
+      message: sent
+        ? "A new one-time link was emailed to the address on the key."
+        : "Nothing was sent: the email provider is not configured or delivery failed.",
+    }, sent ? 200 : 503);
+  }
+
   // DELETE /api/admin/keys/{key}
   const delMatch = path.match(/^\/api\/admin\/keys\/(.+)$/);
   if (delMatch && method === "DELETE") {
@@ -3570,6 +3599,7 @@ export async function handleAdmin(request, env, ctx, path, method) {
       "POST /api/admin/keys  body:{customer_id,tier,label?,expires_in_days?,managed_tenants?}",
       "PATCH /api/admin/keys/{key}/status  body:{subscription_status,reason?}",
       "POST /api/admin/keys/{key}/rotate",
+      "POST /api/admin/keys/{key}/redemption",
       "DELETE /api/admin/keys/{key}",
     ],
   }, 404);
@@ -4853,6 +4883,80 @@ async function computePortalToken(env, email) {
   } catch (_) { return null; }
 }
 
+// =============================================================================
+// One-time API key redemption (F22, 2026-10-02) -- see key-redemption.js.
+// =============================================================================
+
+// The decision resolveAuth() makes for an API key, in the same order: the KV
+// record, the strong authority when enabled, then evaluateKeyRecordAccess().
+// A key is revealed only if it would authenticate right now.
+async function redeemableKeyAccess(env, apiKey) {
+  let record;
+  try {
+    record = await env.API_KEYS_KV.get(apiKey, "json");
+  } catch (_) {
+    return { ok: false, reason: "unavailable" };
+  }
+  if (!record) return { ok: false, reason: "key_not_found" };
+  const strong = await strongAuthStates(env, `key:${apiKey}`, record.customer_id ? `customer:${record.customer_id}` : null);
+  if (strong.unavailable) return { ok: false, reason: "unavailable" };
+  if (strong.denied) return { ok: false, reason: "subscription_status_denied" };
+  const effective = strong.customerState ? { ...record, subscription_status: strong.customerState.status } : record;
+  const access = evaluateKeyRecordAccess(effective);
+  return access.allowed ? { ok: true, record } : { ok: false, reason: access.error || "denied" };
+}
+
+// Once per token, atomically: the GumroadProvisioningLock Durable Object's
+// existing no-action claim contract (the class is already reused for the
+// strong auth authority), one instance per token hash. Without the binding
+// nothing is redeemed (fail closed).
+async function claimRedemption(env, hash) {
+  if (!env.GUMROAD_PROVISIONING_LOCK) return "unavailable";
+  try {
+    const name = `redeem:${hash}`;
+    const lock = env.GUMROAD_PROVISIONING_LOCK.get(env.GUMROAD_PROVISIONING_LOCK.idFromName(name));
+    const res = await lock.fetch("https://lock/claim", { method: "POST", body: JSON.stringify({ saleId: name }) });
+    if (!res.ok) return "unavailable";
+    const body = await res.json();
+    return body.alreadyClaimed === false ? "claimed" : "replay";
+  } catch (_) {
+    return "unavailable";
+  }
+}
+
+const REDEEM_NO_STORE = { "Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer" };
+
+// POST /api/keys/redeem {token}. The token is accepted only in the JSON body,
+// never from the query string.
+async function handleKeyRedeem(request, env, ctx) {
+  if (request.method !== "POST") return jsonResp({ error: "POST required" }, 405, { ...REDEEM_NO_STORE, Allow: "POST" });
+  if (!(request.headers.get("Content-Type") || "").toLowerCase().includes("application/json")) {
+    return jsonResp({ error: "application/json required" }, 415, REDEEM_NO_STORE);
+  }
+  let token = null;
+  try {
+    const raw = await readBodyCapped(request, 2048);
+    token = raw ? JSON.parse(raw)?.token : null;
+  } catch (_) {
+    token = null;
+  }
+  const result = await redeemKeyToken(token, {
+    kv: env.API_KEYS_KV,
+    claim: (hash) => claimRedemption(env, hash),
+    keyAccess: (apiKey) => redeemableKeyAccess(env, apiKey),
+  });
+  // Never the key or the token: a 12-hex reference to the token's hash.
+  auditLog(ctx, env, { action: "key_redemption", outcome: result.outcome, token_ref: result.ref, tier: result.tier || null, reason: result.reason || null });
+  if (result.status === 200) {
+    return jsonResp({ status: "redeemed", api_key: result.api_key, tier: result.tier, expires_at: result.expires_at }, 200, REDEEM_NO_STORE);
+  }
+  if (result.status === 400) return jsonResp({ error: "A redemption token is required.", code: "redemption_invalid" }, 400, REDEEM_NO_STORE);
+  if (result.status === 503) {
+    return jsonResp({ error: "Temporarily unavailable. Your link was not used; try again shortly.", code: "redemption_retry" }, 503, REDEEM_NO_STORE);
+  }
+  return jsonResp({ error: "This link is invalid, already used or expired.", code: "redemption_unavailable" }, 410, REDEEM_NO_STORE);
+}
+
 // P2.6.1-002: Activation email via Resend API  -  fails silently, never blocks provisioning
 async function sendActivationEmail(env, email, tier, apiKey) {
   if (!env.RESEND_API_KEY) {
@@ -4861,6 +4965,11 @@ async function sendActivationEmail(env, email, tier, apiKey) {
   }
   try {
     const tierLabel = tier === "ENTERPRISE" ? "ENTERPRISE" : tier === "MSSP" ? "MSSP" : tier === "FREE" ? "FREE" : "PRO";
+    // F22 (2026-10-02, owner decision): the key is never put in an email.
+    // The email carries a one-time link instead (key-redemption.js); without
+    // one there is nothing safe to send, so this returns false and the
+    // caller's delivery-failure handling applies.
+    const redemption = await issueKeyRedemption(env.API_KEYS_KV, apiKey, { tier: tierLabel, source: "activation_email" });
     const portalToken = await computePortalToken(env, email);
     const portalBlock = portalToken
       ? `<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:20px;margin:24px 0;">
@@ -4873,27 +4982,28 @@ async function sendActivationEmail(env, email, tier, apiKey) {
     const msspBlock = tier === "MSSP"
       ? `<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:20px;margin:24px 0;">
       <p style="color:#94a3b8;margin:0 0 8px;">Add your first managed tenant (returns its tenant_id):</p>
-      <code style="color:#fbbf24;font-size:13px;word-break:break-all;">curl -X POST -H "X-API-Key: ${apiKey}" -H "Content-Type: application/json" -d '{"name":"Customer name"}' https://intel.cyberdudebivash.com/api/mssp/tenants</code>
+      <code style="color:#fbbf24;font-size:13px;word-break:break-all;">curl -X POST -H "X-API-Key: $CDB_API_KEY" -H "Content-Type: application/json" -d '{"name":"Customer name"}' https://intel.cyberdudebivash.com/api/mssp/tenants</code>
       <p style="color:#94a3b8;margin:8px 0 0;">Then use GET /api/mssp/tenants/{tenant_id}/feed, or the X-CDB-Watchdog-Tenant header on Cyber Watchdog. Tenants are served the shared intelligence feed, filtered per request.</p>
     </div>`
       : "";
     const htmlBody = `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Your CYBERDUDEBIVASH(R) Sentinel APEX API Key</title></head>
+<head><meta charset="UTF-8"><title>Your CYBERDUDEBIVASH(R) Sentinel APEX access is active</title></head>
 <body style="background:#0a0a0f;color:#e2e8f0;font-family:system-ui,sans-serif;margin:0;padding:32px;">
   <div style="max-width:600px;margin:0 auto;background:#111827;border:1px solid #1e40af;border-radius:12px;padding:40px;">
     <h1 style="color:#60a5fa;margin-top:0;">CYBERDUDEBIVASH(R) Sentinel APEX</h1>
-    <h2 style="color:#e2e8f0;">Your API Key is Ready</h2>
+    <h2 style="color:#e2e8f0;">Your API Access is Active</h2>
     <p style="color:#94a3b8;">Welcome! Your <strong style="color:#60a5fa;">${tierLabel}</strong> plan is now active.</p>
 
     <div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:20px;margin:24px 0;">
-      <p style="color:#94a3b8;margin:0 0 8px;">Your API Key:</p>
-      <code style="color:#34d399;font-size:14px;word-break:break-all;">${apiKey}</code>
+      <p style="color:#94a3b8;margin:0 0 8px;">For your security, this email does not contain your API key. Open this one-time link to view it once, then store it in your secrets manager:</p>
+      <a href="${redemption.url}" style="color:#34d399;font-weight:700;">Reveal my API key (one time) &rarr;</a>
+      <p style="color:#94a3b8;margin:8px 0 0;">The link works once and expires on ${redemption.expires_at.slice(0, 10)} (UTC). If it has expired or was already used, contact support from this address.</p>
     </div>
 
     <div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:20px;margin:24px 0;">
-      <p style="color:#94a3b8;margin:0 0 8px;">Quick Start:</p>
-      <code style="color:#fbbf24;font-size:13px;word-break:break-all;">curl -H "X-API-Key: ${apiKey}" https://intel.cyberdudebivash.com/api/feed</code>
+      <p style="color:#94a3b8;margin:0 0 8px;">Quick Start (with your key in CDB_API_KEY):</p>
+      <code style="color:#fbbf24;font-size:13px;word-break:break-all;">curl -H "X-API-Key: $CDB_API_KEY" https://intel.cyberdudebivash.com/api/feed</code>
     </div>
     ${msspBlock}
     ${portalBlock}
@@ -4912,7 +5022,7 @@ async function sendActivationEmail(env, email, tier, apiKey) {
       body: JSON.stringify({
         from: "CYBERDUDEBIVASH(R) Sentinel APEX <noreply@cyberdudebivash.com>",
         to: [email],
-        subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX API Key",
+        subject: "Your CYBERDUDEBIVASH(R) Sentinel APEX access is active",
         html: htmlBody,
       }),
     });
@@ -7964,6 +8074,13 @@ async function handleRequest(request, env, ctx) {
   // Already-issued FREE keys are not revoked.
   if (path === "/api/keys/free") {
     return jsonResp(FREE_KEYS_DISCONTINUED_BODY, 410);
+  }
+  // --- One-time API key redemption (F22, 2026-10-02) -------------------------
+  // The only way a key reaches a buyer who is not on the checkout page: the
+  // emailed one-time link (key-redemption.js). No authentication beyond the
+  // unguessable token; the anonymous rate limits apply as to any public call.
+  if (path === "/api/keys/redeem") {
+    return await handleKeyRedeem(request, env, ctx);
   }
 
   // --- Webhook Endpoints (no auth  -  webhook secret/sig verifies) --------------

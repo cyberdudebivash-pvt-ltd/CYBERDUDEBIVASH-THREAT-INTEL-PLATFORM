@@ -357,19 +357,53 @@ the operator and answers 500 so Gumroad retries. The retry reuses a key
 already minted for that sale. Before, the claim was kept, so every retry was
 answered `already_provisioned` and the buyer never got a key.
 
-**Paid-key email (F22, owner decision pending).** The welcome email that
-carries a new paid API key is queued at activation but **not sent** unless
-the owner sets `KEY_EMAIL_DELIVERY_ENABLED` to `"true"` on the revenue engine
-(with `SENDGRID_API_KEY`). When enabled, the email is sent once at
-activation, retried once by the daily run, then marked `failed`. Without a
-provider key it is marked `skipped_no_provider`. A message is marked `sent`
-only when the provider accepted it, and keys queued before the flag was set
-are never sent. Until then the buyer sees the key only on the checkout page
-(reloading that tab resumes; the customer portal shows masked keys only), so
-a buyer who loses the tab needs checkout support. Gumroad keys are emailed by
-the gateway (`RESEND_API_KEY`), which is why Gumroad is offered only while
-that email is configured. Readiness shows a `key_email_delivery` warning,
-never a blocker.
+**Key delivery (F22, owner decision 2026-10-02: never email a raw API
+key).** No email, queued email or provider payload contains an API key.
+A key reaches its buyer in one of two ways:
+
+- **Razorpay checkout:** shown on the checkout page once Razorpay's signed
+  confirmation has activated it. The status call needs the payment
+  signature. Reloading that tab resumes.
+- **One-time link:** the gateway's activation email (Gumroad sales and
+  legacy one-time Orders, when `RESEND_API_KEY` is set) and the revenue
+  engine's activation notice (when `KEY_EMAIL_DELIVERY_ENABLED="true"` and
+  `SENDGRID_API_KEY` are set) carry a link of the form
+  `customer/api-keys.html#redeem=<token>`.
+
+How the one-time link works:
+
+- **Issue.** The token is 32 random bytes. Only its SHA-256 is stored
+  (`API_KEYS_KV` `key_redeem:<hash>`, 72 hours).
+- **Transport.** The token travels in the URL fragment, so it never reaches
+  server logs or Referer headers. The page reveals the key only after the
+  buyer clicks, so a mail scanner that opens the link cannot spend it.
+- **Redeem.** `POST /api/keys/redeem {token}` reveals the key once.
+  - The key must still authenticate: the same KV record, strong-authority
+    and `evaluateKeyRecordAccess()` checks as API-key auth.
+  - The one-time claim is atomic, through the existing
+    `GumroadProvisioningLock` Durable Object.
+  - The response is `no-store`.
+- **Refusals.** A replay, an expired or unknown token, and a revoked,
+  refunded, suspended, lapsed or deleted key all get the same 410.
+- **Retry.** An authority or lock outage answers 503 and leaves the link
+  usable. Without the lock binding nothing is revealed.
+- **Audit.** Each attempt is audited with a 12-hex reference to the token
+  hash, never the token or key.
+
+Lost or expired link: an operator calls
+`POST /api/admin/keys/{key}/redemption` (admin key), which emails a new link
+to the address on the key record, never to a supplied one, and returns
+neither token nor key. Rotation (`POST /api/admin/keys/{key}/rotate`, or
+self-rotation with the current key) and revocation are unchanged. Rotation
+and MSSP tenant notices say the key is never emailed; the new key goes only
+to the authenticated caller.
+
+`KEY_EMAIL_DELIVERY_ENABLED` now controls only the revenue engine's
+activation notice. Unset (default), the notice is queued without a send
+time and is never sent, and no link is issued. Readiness shows a
+`key_email_delivery` warning, never a blocker. Queued messages no longer
+store keys, and SendGrid receives only the rendered message (previously
+every queued variable went out as `dynamic_template_data`).
 
 ## Commercial readiness and operator queue (S13/S22/S23, 2026-09-25)
 

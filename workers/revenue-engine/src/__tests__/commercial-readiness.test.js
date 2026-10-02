@@ -88,11 +88,14 @@ test("GST, LUT, account binding and alerts are warnings, not blockers (invoices 
   assert.match(byId(noLut, "export_lut_current_fy").detail, /26-27/);
 });
 
-test("F22: undecided key email is a warning, never a blocker, and never shows the provider key", async () => {
+test("F22: activation notices off is a warning, never a blocker, and never shows the provider key", async () => {
   const off = await buildCommercialReadiness(readyEnv({ KEY_EMAIL_DELIVERY_ENABLED: undefined }), NOW);
   assert.equal(off.verdict, "READY");
   assert.deepEqual(off.warnings, ["key_email_delivery"]);
-  assert.match(byId(off, "key_email_delivery").detail, /not emailed/);
+  assert.match(byId(off, "key_email_delivery").detail, /Activation notices are off/);
+  const on = await buildCommercialReadiness(readyEnv(), NOW);
+  assert.match(byId(on, "key_email_delivery").detail, /one-time key link/);
+  assert.match(byId(on, "key_email_delivery").detail, /never emailed/);
   const noProvider = await buildCommercialReadiness(readyEnv({ SENDGRID_API_KEY: undefined }), NOW);
   assert.deepEqual(noProvider.warnings, ["key_email_delivery"]);
   assert.match(byId(noProvider, "key_email_delivery").fix, /SENDGRID_API_KEY/);

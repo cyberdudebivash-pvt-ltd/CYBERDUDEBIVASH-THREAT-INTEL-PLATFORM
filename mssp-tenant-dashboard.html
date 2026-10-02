@@ -290,7 +290,7 @@ async function addTenant() {
       <strong style="color:var(--green);">✅ Tenant Provisioned</strong><br>
       API Key: <div class="key-display">${data.api_key}</div>
       Quota: ${quota.toLocaleString()} req/day | Tier: ${tier}<br>
-      <span style="color:var(--muted);">Welcome email sent to ${email}</span>
+      <span style="color:var(--muted);">Share this key with the tenant securely; it is never emailed and is not shown again.</span>
     `;
     document.getElementById('provResult').style.display = 'block';
     showToast('Tenant provisioned'); loadTenants();
@@ -316,8 +316,12 @@ async function saveTenant() {
 }
 async function rotateTenantKey(id, email) {
   if (!confirm(`Rotate API key for ${email}?`)) return;
-  await apiFetch('/api/apikeys/rotate', { method:'POST', body:JSON.stringify({ email }) });
-  showToast('Key rotated — new key emailed to tenant'); loadTenants();
+  const res = await apiFetch('/api/apikeys/rotate', { method:'POST', body:JSON.stringify({ email }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.new_key) { showToast('Error: '+(data.error||'rotation failed'),'err'); return; }
+  // F22: keys are never emailed. Shown once so it can be handed over securely.
+  window.prompt('Key rotated. Copy the new key now and share it with the tenant securely; it is not shown again or emailed:', data.new_key);
+  showToast('Key rotated'); loadTenants();
 }
 async function revokeTenant(id) {
   if (!confirm('Revoke this tenant? Their API key will stop working immediately.')) return;

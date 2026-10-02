@@ -80,7 +80,27 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:14px 2
 </nav>
 
 <div class="main">
-  <div class="lookup-card">
+  <!-- F22 (2026-10-02): one-time key redemption. The activation email never
+       contains the key, only a link with a one-time token in the URL
+       fragment (#redeem=...). Nothing is fetched until the buyer clicks,
+       so a mail scanner that opens the link cannot spend it. -->
+  <div class="lookup-card" id="redeemCard" hidden>
+    <div style="font-size:32px;margin-bottom:12px;">&#128273;</div>
+    <h2>Your API key</h2>
+    <p>This one-time link shows your key once. Store it in your secrets manager straight away; it is not shown again and is never sent by email.</p>
+    <button class="lookup-btn" id="redeemBtn" type="button">Reveal my API key</button>
+    <div id="redeemResult" hidden style="margin-top:20px;text-align:left;">
+      <div class="key-label">API key &middot; <span id="redeemTier"></span></div>
+      <div class="key-display" style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <code id="redeemedKey" style="word-break:break-all;"></code>
+        <button class="key-btn btn-copy" type="button" id="redeemCopy">Copy</button>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-top:12px;">Use it in the <code>X-API-Key</code> header. This link no longer works. If the key leaks, ask support to rotate it.</p>
+    </div>
+    <div class="err-msg" id="redeemErr" role="alert"></div>
+  </div>
+
+  <div class="lookup-card" id="lookupCard">
     <div style="font-size:32px;margin-bottom:12px;">🔑</div>
     <h2>My API Keys & Subscription</h2>
     <p>Open this page from the secure link in your subscription confirmation email to access your API key, rate limits, and subscription status. For security, your key and subscription details can't be looked up by email alone.</p>
@@ -277,7 +297,7 @@ async function requestRotation(email) {
 }
 
 function revealKey(i) {
-  showToast('For security, full keys are not re-displayed here. Check your original welcome email, or contact support@cyberdudebivash.com.');
+  showToast('For security, full keys are not re-displayed here. Use the one-time link from your activation email, or ask support@cyberdudebivash.com for a new link.');
 }
 
 function showToast(msg) {
@@ -292,6 +312,61 @@ const emailParam = params.get('email');
 const tokenParam = params.get('token');
 if (tokenParam) portalToken = tokenParam;
 if (emailParam) { document.getElementById('lookupEmail').value = emailParam; if (portalToken) lookupAccount(); }
+
+// One-time redemption (F22). The token stays in memory only: it is removed
+// from the address bar at once and sent only in a POST body.
+(function () {
+  const m = /^#redeem=([A-Za-z0-9_-]{43})$/.exec(location.hash || '');
+  if (!m) return;
+  let redeemToken = m[1];
+  history.replaceState(null, '', location.pathname + location.search);
+  const card = document.getElementById('redeemCard');
+  const btn = document.getElementById('redeemBtn');
+  const err = document.getElementById('redeemErr');
+  card.hidden = false;
+  document.getElementById('lookupCard').hidden = true;
+  function fail(msg) { err.textContent = msg; err.style.display = 'block'; }
+  btn.addEventListener('click', async function () {
+    if (!redeemToken) return;
+    err.style.display = 'none';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/keys/redeem', {
+        method: 'POST', cache: 'no-store', credentials: 'omit',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: redeemToken }),
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (res.ok && data.api_key) {
+        redeemToken = '';
+        document.getElementById('redeemedKey').textContent = data.api_key;
+        document.getElementById('redeemTier').textContent = data.tier || '';
+        document.getElementById('redeemResult').hidden = false;
+        btn.hidden = true;
+        return;
+      }
+      if (res.status === 410) {
+        redeemToken = '';
+        fail('This link was already used or has expired. If you did not use it, email support@cyberdudebivash.com from the address you bought with and we will send a new one.');
+        return;
+      }
+      if (res.status === 429 || res.status === 503) {
+        btn.disabled = false;
+        fail('Temporarily unavailable. Your link was not used; try again in a minute.');
+        return;
+      }
+      redeemToken = '';
+      fail('This link is not valid. Copy the full link from your activation email, or contact support@cyberdudebivash.com.');
+    } catch (_) {
+      btn.disabled = false;
+      fail('Network error. Your link was not used; try again.');
+    }
+  });
+  document.getElementById('redeemCopy').addEventListener('click', function () {
+    const txt = document.getElementById('redeemedKey').textContent;
+    navigator.clipboard.writeText(txt).then(function () { showToast('Key copied to clipboard'); });
+  });
+})();
 </script>
 </body>
 </html>

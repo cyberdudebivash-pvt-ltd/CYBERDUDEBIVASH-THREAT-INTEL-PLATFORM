@@ -402,7 +402,7 @@ async function handleTrialRequest(request, env, rid) {
 
   await queueEmail(env, {
     to: email, template: "trial_welcome",
-    vars: { name, company, api_key: apiKey, expires_at: expiresAt },
+    vars: { name, company, expires_at: expiresAt },
     send_at: new Date().toISOString(),
   });
 
@@ -1207,8 +1207,11 @@ async function sendEmailViaProvider(env, msg) {
         "Authorization": `Bearer ${env.SENDGRID_API_KEY}`,
         "Content-Type":  "application/json",
       },
+      // Only the rendered message goes to the provider. dynamic_template_data
+      // (no template_id is used) shipped every queued variable to SendGrid
+      // as well (F22, 2026-10-02).
       body: JSON.stringify({
-        personalizations: [{ to: [{ email: msg.to }], dynamic_template_data: msg.vars }],
+        personalizations: [{ to: [{ email: msg.to }] }],
         from:    { email: "intel@cyberdudebivash.com", name: "CYBERDUDEBIVASH Sentinel APEX" },
         subject: tpl.subject,
         content: [{ type: "text/html", value: tpl.html }],
@@ -1217,6 +1220,39 @@ async function sendEmailViaProvider(env, msg) {
     return resp.ok ? "sent" : "failed";
   } catch (_) {
     return "failed";
+  }
+}
+
+/**
+ * F22 (2026-10-02): a one-time link that reveals apiKey once, at the gateway
+ * (POST /api/keys/redeem, workers/intel-gateway/src/key-redemption.js, which
+ * owns this record shape; revenue-engine activation-link.test.js redeems a
+ * link issued here at the real gateway, pinning the two together).
+ * Only SHA-256(token) is stored, in the API_KEYS_KV namespace both Workers
+ * share. Returns null when the store is missing: the notice then carries no
+ * link, never the key.
+ */
+const KEY_REDEMPTION_PREFIX = "key_redeem:";
+const KEY_REDEMPTION_TTL_SECONDS = 72 * 3600;
+const KEY_REDEMPTION_PAGE = "https://intel.cyberdudebivash.com/customer/api-keys.html";
+
+async function issueActivationLink(env, apiKey, tier) {
+  if (!env.API_KEYS_KV || !apiKey) return null;
+  try {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    let bin = "";
+    for (const b of bytes) bin += String.fromCharCode(b);
+    const token = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+    const hash = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const nowMs = Date.now();
+    const expiresAt = new Date(nowMs + KEY_REDEMPTION_TTL_SECONDS * 1000).toISOString();
+    await env.API_KEYS_KV.put(KEY_REDEMPTION_PREFIX + hash, JSON.stringify({
+      v: 1, key: apiKey, tier: tier || null, source: "revenue_activation", issued_at: new Date(nowMs).toISOString(), expires_at: expiresAt,
+    }), { expirationTtl: KEY_REDEMPTION_TTL_SECONDS });
+    return { url: `${KEY_REDEMPTION_PAGE}#redeem=${token}`, expires_at: expiresAt };
+  } catch (_) {
+    return null;
   }
 }
 
@@ -1316,13 +1352,13 @@ function getEmailTemplate(name, vars) {
 <p><a href="https://intel.cyberdudebivash.com/upgrade.html?plan=pro">Start Pro →</a></p>`,
     },
     "trial_welcome": {
-      subject: "Your 7-day Pro trial is active — API key inside",
+      subject: "Your 7-day Pro trial is active",
       html: `<p>Hi ${T.name || "there"},</p>
 <p>Your <strong>7-day Pro trial</strong> is live.</p>
-<p><strong>Your API key:</strong><br><code style="background:#f5f5f5;padding:8px;display:block">${T.api_key || "[see dashboard]"}</code></p>
+<p>Your API key was shown once when you started the trial; for your security it is never sent by email.</p>
 <p>Expires: ${T.expires_at || "7 days from now"}</p>
 <p><strong>Quick start:</strong></p>
-<pre>curl -H "X-Api-Key: ${T.api_key || "YOUR_KEY"}" https://intel.cyberdudebivash.com/api/feed</pre>
+<pre>curl -H "X-Api-Key: $CDB_API_KEY" https://intel.cyberdudebivash.com/api/feed</pre>
 <p><a href="https://intel.cyberdudebivash.com/docs">Full API docs →</a></p>
 <p>To keep full access after your trial: <a href="https://intel.cyberdudebivash.com/upgrade.html?plan=pro">Upgrade to Pro (₹${ENGINE.DEAL_VALUES_INR.pro_monthly.toLocaleString('en-IN')}/mo) →</a></p>`,
     },
@@ -1787,7 +1823,7 @@ async function handleFreeKeyRequest(request, env, rid) {
           payment_metadata: {},
         }));
       }
-      await queueEmail(env, { to:email, template:"free_key_welcome", vars:{ api_key:activeKey.key, tier:"FREE", req_day:TIERS.FREE.req_day, upgrade_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html" } });
+      await queueEmail(env, { to:email, template:"free_key_welcome", vars:{ tier:"FREE", req_day:TIERS.FREE.req_day, upgrade_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html" } });
       return json({ success:true, already_exists:true, key:"[sent to your email]", tier:"FREE", message:"Your existing free API key has been resent to your email." });
     }
   }
@@ -1829,7 +1865,7 @@ async function handleFreeKeyRequest(request, env, rid) {
     }));
   }
 
-  await queueEmail(env, { to:email, template:"free_key_welcome", vars:{ api_key:key, tier:"FREE", req_day:TIERS.FREE.req_day, upgrade_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html" } });
+  await queueEmail(env, { to:email, template:"free_key_welcome", vars:{ tier:"FREE", req_day:TIERS.FREE.req_day, upgrade_url:"https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html" } });
   await trackEvent(env, "free_key_issued", { email, keyId });
 
   return json({ success:true, key, tier:"FREE", req_day:TIERS.FREE.req_day, req_min:TIERS.FREE.req_min, expires_at:expiresAt, upgrade_url:"/PAYMENT-GATEWAY.html", message:"API key issued. Check your email for onboarding details." });
@@ -2140,10 +2176,15 @@ async function provisionCustomer(env, { email, tier, billing_cycle, payment_id, 
   await env.REVENUE_CRM_KV.put("subscriptions:index", JSON.stringify(subIdx.slice(0,1000)));
 
   stage = "welcome_email";
-  // 4. Send welcome email with API key
+  // 4. Activation notice. F22 (2026-10-02, owner decision): the key is never
+  // emailed, nor stored in the email queue. With KEY_EMAIL_DELIVERY_ENABLED
+  // the notice carries a one-time link to reveal it (issueActivationLink).
   const portalToken = await computePortalToken(env, email);
+  const keyEmailOn = env.KEY_EMAIL_DELIVERY_ENABLED === "true";
+  const activation = keyEmailOn ? await issueActivationLink(env, key, tier) : null;
   const welcomeVars = {
-    email, tier, api_key:key, req_day:tierCfg.req_day, req_min:tierCfg.req_min,
+    email, tier, req_day:tierCfg.req_day, req_min:tierCfg.req_min,
+    activation_url: activation?.url || null, activation_expires_at: activation?.expires_at || null,
     period_end:currentPeriodEnd, features:tierCfg.features.join(", "),
     dashboard_url:"https://intel.cyberdudebivash.com", api_docs_url:"https://intel.cyberdudebivash.com/api-docs.html",
     customer_id:custRecord.id, sub_id:subId,
@@ -2151,12 +2192,8 @@ async function provisionCustomer(env, { email, tier, billing_cycle, payment_id, 
       ? `https://intel.cyberdudebivash.com/customer/api-keys.html?email=${encodeURIComponent(email)}&token=${portalToken}`
       : "https://intel.cyberdudebivash.com/PAYMENT-GATEWAY.html",
   };
-  // F22 (2026-10-02): this message was queued with no send_at, which
-  // runDailyOutreach() never selects, so it was never sent. Emailing paid
-  // keys is the owner's decision: with KEY_EMAIL_DELIVERY_ENABLED unset the
-  // stored message is exactly as before (queued, never sent); with "true" it
-  // is due now and one immediate attempt is made (the daily run retries once).
-  const keyEmailOn = env.KEY_EMAIL_DELIVERY_ENABLED === "true";
+  // Unset: queued with no send_at, never sent (as before). "true": due now,
+  // one immediate attempt, one retry by the daily run.
   const welcomeMsgId = await queueEmail(env, { to:email, template:"welcome_provisioned", vars:welcomeVars,
     ...(keyEmailOn ? { send_at: new Date().toISOString() } : {}) });
   if (keyEmailOn) await deliverQueuedEmailNow(env, welcomeMsgId);
@@ -2255,7 +2292,7 @@ async function handleApiKeyRotate(request, env, rid) {
   }
 
   await appendAuditLog(env, { action:"key_rotated", email:cleanEmail, new_key_prefix:newKey.substring(0,16), ts:now });
-  await queueEmail(env, { to:cleanEmail, template:"key_rotated", vars:{ new_key:newKey, tier:cust.tier } });
+  await queueEmail(env, { to:cleanEmail, template:"key_rotated", vars:{ tier:cust.tier } });
 
   return json({ success:true, new_key:newKey, old_key_prefix:oldKeys[0]?.key?.substring(0,16)||"—", tier:cust.tier, expires_at:cust.current_period_end });
 }
@@ -2537,7 +2574,7 @@ async function handleMSSPTenantCreate(request, env, rid) {
   await env.REVENUE_CRM_KV.put("mssp:tenants:index", JSON.stringify(idx.slice(0,1000)));
 
   // Welcome tenant
-  await queueEmail(env, { to:cleanTenant, template:"mssp_tenant_welcome", vars:{ tenant_name, api_key:key, tier:tenantTier, req_day:tenantKeyRecord.req_day, mssp_name:cleanMSSP } });
+  await queueEmail(env, { to:cleanTenant, template:"mssp_tenant_welcome", vars:{ tenant_name, tier:tenantTier, req_day:tenantKeyRecord.req_day, mssp_name:cleanMSSP } });
   await slackNotify(env, `🏢 *NEW MSSP TENANT* — ${tenant_name} (${cleanTenant})\nMSSP: ${cleanMSSP} | Tier: ${tenantTier} | Quota: ${tenantKeyRecord.req_day} req/day`);
 
   return json({ success:true, tenant_id:tenantId, api_key:key, tenant:tenantRecord });
@@ -2712,15 +2749,15 @@ async function appendAuditLog(env, entry) {
 
 // Email template definitions (extend existing getEmailTemplate)
 const COMMERCIAL_EMAIL_TEMPLATES = {
-  free_key_welcome: (v) => ({ subject:`Your SENTINEL APEX Free API Key`, html:`<h2>Your Free API Key</h2><p>Key: <code>${v.api_key}</code></p><p>Rate limit: ${v.req_day} requests/day</p><p><a href="${v.upgrade_url}">Upgrade to PRO</a> for full IOC access, Sigma/YARA rules, and more.</p>` }),
+  free_key_welcome: (v) => ({ subject:`Your SENTINEL APEX Free API Key`, html:`<h2>Your Free API Key</h2><p>Your key was shown once when you created it; for your security it is never sent by email.</p><p>Rate limit: ${v.req_day} requests/day</p><p><a href="${v.upgrade_url}">Upgrade to PRO</a> for full IOC access, Sigma/YARA rules, and more.</p>` }),
   payment_received: (v) => ({ subject:`Payment Received — Reference: ${v.payment_id}`, html:`<h2>Payment Under Review</h2><p>We've received your payment for <strong>${v.plan}</strong> via ${v.method}. Verification typically takes within ${v.expected_hours} business hours.</p><p>Reference: <strong>${v.payment_id}</strong></p>` }),
   payment_rejected: (v) => ({ subject:`Payment Could Not Be Verified`, html:`<h2>Payment Verification Issue</h2><p>Unfortunately we couldn't verify your payment: ${v.reason}</p><p><a href="${v.retry_url}">Try again</a> or contact us at support@cyberdudebivash.in</p>` }),
-  welcome_provisioned: (v) => ({ subject:`🔑 Your SENTINEL APEX ${v.tier} API Key is Ready`, html:`<h2>Welcome to SENTINEL APEX ${v.tier}</h2><p>Your API key: <code>${v.api_key}</code></p><p>Rate limit: ${v.req_day} requests/day, ${v.req_min} req/min</p><p>Valid until: ${v.period_end}</p><p>Features: ${v.features}</p><p><a href="${v.api_docs_url}">API Documentation</a> | <a href="${v.dashboard_url}">Platform Dashboard</a></p><p>Customer ID: ${v.customer_id}</p>` }),
-  key_rotated: (v) => ({ subject:`API Key Rotated — SENTINEL APEX ${v.tier}`, html:`<h2>Your API key has been rotated</h2><p>New key: <code>${v.new_key}</code></p><p>Your old key has been deactivated. Update your integrations now.</p>` }),
+  welcome_provisioned: (v) => ({ subject:`Your SENTINEL APEX ${v.tier} access is active`, html:`<h2>Welcome to SENTINEL APEX ${v.tier}</h2><p>For your security this email does not contain your API key. ${v.activation_url ? `<a href="${v.activation_url}">Reveal your API key (one-time link)</a>, then store it in your secrets manager. The link works once and expires on ${String(v.activation_expires_at || "").slice(0, 10)} (UTC).` : `Your key was shown on the checkout page.`} If you no longer have it, contact support from this address.</p><p>Rate limit: ${v.req_day} requests/day, ${v.req_min} req/min</p><p>Valid until: ${v.period_end}</p><p>Features: ${v.features}</p><p><a href="${v.api_docs_url}">API Documentation</a> | <a href="${v.dashboard_url}">Platform Dashboard</a></p><p>Customer ID: ${v.customer_id}</p>` }),
+  key_rotated: (v) => ({ subject:`API Key Rotated — SENTINEL APEX ${v.tier}`, html:`<h2>Your API key has been rotated</h2><p>The new key was returned to whoever requested the rotation; for your security it is never sent by email.</p><p>Your old key has been deactivated. Update your integrations now. If you did not request this, contact support immediately.</p>` }),
   renewal_reminder_7d: (v) => ({ subject:`⚠️ Your ${v.tier} subscription expires in ${v.days} days`, html:`<h2>Subscription Expiring Soon</h2><p>Your SENTINEL APEX ${v.tier} plan expires in ${v.days} days. <a href="${v.renew_url}">Renew now</a> to keep your API key active.</p>` }),
   renewal_reminder_3d: (v) => ({ subject:`🚨 Final Reminder: ${v.tier} expires in ${v.days} days`, html:`<h2>Last Chance — Renew Today</h2><p>Your API key will stop working in ${v.days} days. <a href="${v.renew_url}">Renew immediately</a>.</p>` }),
   subscription_expired: (v) => ({ subject:`Subscription Expired — API Key Deactivated`, html:`<h2>Your SENTINEL APEX ${v.tier} has expired</h2><p>Your API key has been deactivated. <a href="${v.renew_url}">Renew now</a> to restore access.</p>` }),
-  mssp_tenant_welcome: (v) => ({ subject:`Welcome to ${v.mssp_name} Threat Intelligence (Powered by SENTINEL APEX)`, html:`<h2>Welcome, ${v.tenant_name}</h2><p>Your threat intelligence API key: <code>${v.api_key}</code></p><p>Rate limit: ${v.req_day} requests/day</p>` }),
+  mssp_tenant_welcome: (v) => ({ subject:`Welcome to ${v.mssp_name} Threat Intelligence (Powered by SENTINEL APEX)`, html:`<h2>Welcome, ${v.tenant_name}</h2><p>Your threat intelligence access is set up. Your provider, ${v.mssp_name}, will share your API key with you securely; it is never sent by email.</p><p>Rate limit: ${v.req_day} requests/day</p>` }),
 };
 
 // Commercial template lookup, falling back to the cold-outreach template set
