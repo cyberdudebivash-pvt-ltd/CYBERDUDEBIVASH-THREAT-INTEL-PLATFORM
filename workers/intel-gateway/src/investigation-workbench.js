@@ -174,11 +174,14 @@ function detectionAvailability(item) {
 
 function itemScopedOutputs(item) {
   const id = stringOrNull(item?.id) || stringOrNull(item?.stix_id);
-  if (!id) return { detections: null, stix: null };
+  if (!id) return { detections: null };
   const encoded = encodeURIComponent(id);
   return {
+    // This is the only currently certified per-item machine-consumable
+    // output route in the Worker. STIX/TAXII exports remain feed/collection
+    // scoped and are therefore kept under global_feed_exports below rather
+    // than inventing an item-specific STIX contract.
     detections: `/api/v1/detections?intel_id=${encoded}`,
-    stix: `/api/stix?id=${encoded}`,
   };
 }
 
