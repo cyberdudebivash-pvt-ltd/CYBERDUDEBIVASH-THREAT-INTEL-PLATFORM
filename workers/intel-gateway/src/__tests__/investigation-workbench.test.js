@@ -248,6 +248,28 @@ test('composite risk is never mislabeled as CVSS in analyst evidence', async () 
   assert.ok(body.risk_explanation.why_this_matters.some(v => /this value is not CVSS/.test(v)));
 });
 
+test('actor attribution without explicit confidence stays unknown', async () => {
+  const actorOnly = {
+    ...baseItem,
+    id: 'intel--actor-no-confidence',
+    stix_id: 'indicator--44444444-4444-4444-8444-444444444444',
+    title: 'Actor attribution without explicit confidence',
+    actor_tag: 'Untracked Cluster',
+    actor_confidence: null,
+    report_url: '',
+    pdf_url: '',
+  };
+  const res = await call('/api/v1/investigation/item?id=' + encodeURIComponent(actorOnly.id), {
+    env: envWith([actorOnly]),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  const claim = body.evidence_claims.find(v => /Threat-actor attribution recorded/.test(v.claim));
+  assert.ok(claim);
+  assert.equal(claim.confidence, null);
+  assert.match(claim.reasoning, /does not assign an inferred attribution confidence/);
+});
+
 test('unsafe report targets are never projected to the customer response', () => {
   assert.equal(__test.safeReportPath('https://evil.example/report.pdf'), null);
   assert.equal(__test.safeReportPath('/reports/../secret'), null);
