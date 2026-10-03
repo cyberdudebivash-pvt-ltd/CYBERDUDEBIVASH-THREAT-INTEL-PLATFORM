@@ -112,12 +112,11 @@ async function loadFeed(env) {
 }
 
 function itemIdentity(item) {
-  return [
-    item?.id,
-    item?.stix_id,
-    item?.slug,
-    item?.cve_id,
-  ].map(stringOrNull).filter(Boolean);
+  const direct = [item?.id, item?.stix_id, item?.slug, item?.cve_id]
+    .map(stringOrNull).filter(Boolean);
+  const cves = safeArray(item?.cve_ids || item?.cves, 20)
+    .map(stringOrNull).filter(Boolean);
+  return [...new Set([...direct, ...cves])];
 }
 
 function findItem(items, id) {
