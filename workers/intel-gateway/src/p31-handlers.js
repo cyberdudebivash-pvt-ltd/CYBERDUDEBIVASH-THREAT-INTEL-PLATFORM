@@ -501,6 +501,10 @@ export function computeP31EntityNormalization(item) {
   return _computeEntityNormalization(item || {});
 }
 
+export function computeP31CampaignContext(item, allItems = []) {
+  return _computeCampaignContext(item || {}, Array.isArray(allItems) ? allItems : []);
+}
+
 export function computeP31Copilot(item) {
   return _computeCopilot(item || {});
 }
