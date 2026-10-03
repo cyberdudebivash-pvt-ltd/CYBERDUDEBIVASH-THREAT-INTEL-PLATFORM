@@ -30,8 +30,10 @@ import {
 import { computeP32EvidenceClaims } from './p32-handlers.js';
 import { enforceTierGate } from './revenue-enforcement.js';
 import { enforceScopeMiddleware } from './api-extensions.js';
+import { extractDetectionArtifacts } from './detection-registry.js';
 
-export const INVESTIGATION_WORKBENCH_VERSION = '1.0.0';
+export const INVESTIGATION_WORKBENCH_VERSION = '1.1.0';
+const PAID_INVESTIGATION_TIERS = new Set(['PRO', 'ENTERPRISE', 'MSSP']);
 
 const MAX_RELATED_ITEMS = 6;
 const MAX_GRAPH_NODES = 120;
@@ -153,18 +155,30 @@ function sanitizeItem(item) {
 }
 
 function detectionAvailability(item) {
-  const apex = item?.apex && typeof item.apex === 'object' ? item.apex : {};
-  const bundle = item?.detection_bundle && typeof item.detection_bundle === 'object'
-    ? item.detection_bundle : {};
-  const detectionRules = item?.detection_rules && typeof item.detection_rules === 'object'
-    ? item.detection_rules : {};
-  const present = value => typeof value === 'string' ? value.trim().length > 0 : Boolean(value);
+  // Canonical source: detection-registry.js, which reads the live per-item
+  // fields written by detection_bundle_injector.py and applies structural
+  // validation before an artifact is considered customer-available.
+  let artifacts = [];
+  try { artifacts = extractDetectionArtifacts(item); } catch (_) { artifacts = []; }
+  const formats = new Set(artifacts.map(a => a.artifact_type));
   return {
-    sigma: present(item?.sigma_rule || apex.sigma_rule || bundle.sigma || detectionRules.sigma),
-    yara: present(item?.yara_rule || apex.yara_rule || bundle.yara || detectionRules.yara),
-    kql: present(item?.kql_query || apex.kql_query || bundle.kql || detectionRules.kql),
-    spl: present(item?.spl_query || apex.spl_query || bundle.spl || detectionRules.spl),
-    suricata: present(item?.suricata_rule || bundle.suricata || detectionRules.suricata),
+    sigma: formats.has('sigma'),
+    yara: formats.has('yara'),
+    kql: formats.has('kql'),
+    spl: formats.has('spl'),
+    suricata: formats.has('suricata'),
+    artifact_count: artifacts.length,
+    validation: 'canonical_detection_registry',
+  };
+}
+
+function itemScopedOutputs(item) {
+  const id = stringOrNull(item?.id) || stringOrNull(item?.stix_id);
+  if (!id) return { detections: null, stix: null };
+  const encoded = encodeURIComponent(id);
+  return {
+    detections: `/api/v1/detections?intel_id=${encoded}`,
+    stix: `/api/stix?id=${encoded}`,
   };
 }
 
@@ -263,6 +277,7 @@ function buildInvestigation(item, allItems) {
     customer_outputs: {
       report: reports,
       browser_print_to_pdf: true,
+      item_scoped: itemScopedOutputs(item),
       global_feed_exports: [
         { format: 'STIX 2.1', path: '/api/v1/export/taxii.json' },
         { format: 'YARA', path: '/api/v1/export/yara.yar' },
@@ -270,7 +285,7 @@ function buildInvestigation(item, allItems) {
         { format: 'Snort', path: '/api/v1/export/snort.rules' },
         { format: 'Splunk CSV', path: '/api/v1/export/splunk.csv' },
       ],
-      note: 'Feed exports are existing tier-gated global outputs; they are not claimed to be item-specific.',
+      note: 'item_scoped links resolve this intelligence record; global_feed_exports are existing tier-gated feed outputs and are not represented as item-specific.',
     },
     limitations: itemLimitations(item, graph, evidenceClaims),
   };
@@ -429,13 +444,16 @@ export async function routeInvestigationWorkbench({ path, request, env, auth, re
   }
 
   const tier = normalizeTier(auth.tier);
-  if (tier === 'FREE') {
-    const gate = enforceTierGate('intel_graph', tier.toLowerCase());
+  // Fail closed on every tier except the three commercial identities this
+  // endpoint explicitly promises. Unknown/legacy tier strings must never
+  // inherit paid access merely because they are "not FREE".
+  if (!PAID_INVESTIGATION_TIERS.has(tier)) {
+    const gate = enforceTierGate('intel_graph', tier);
     return jsonResp({
       status: 'locked',
-      error: gate.reason,
-      message: gate.message,
-      upgrade: gate.upgrade,
+      error: gate.reason || 'pro_required',
+      message: gate.message || 'Analyst Investigation Workbench requires PRO, ENTERPRISE or MSSP.',
+      upgrade: gate.upgrade || null,
       workbench_version: INVESTIGATION_WORKBENCH_VERSION,
     }, 402, { 'Cache-Control': 'no-store' });
   }
