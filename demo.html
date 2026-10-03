@@ -124,7 +124,7 @@ a:hover{text-decoration:underline;}
 .iw-footer{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
 .iw-note{font-size:9px;color:#64748b;line-height:1.6;max-width:720px;}
 @media(max-width:720px){.iw-controls,.iw-live-controls,.iw-grid{grid-template-columns:1fr}.iw-btn{width:100%;}}
-@media print{.topbar,.demo-form-card,.alt-contact,.iw-controls,.iw-live-controls,.iw-footer,.form-submit{display:none!important}.iw-card{border:1px solid #999;background:#fff;color:#111}.iw-panel{break-inside:avoid;background:#fff}.iw-row,.iw-copy,.iw-note{color:#333}.iw-title,.iw-panel h4,.iw-row strong{color:#111}}
+@media print{body.iw-printing .topbar,body.iw-printing .page-wrap>div:first-child>*:not(#investigation-workbench),body.iw-printing .page-wrap>div:nth-child(2),body.iw-printing .page-wrap~*,body.iw-printing .iw-controls,body.iw-printing .iw-live-controls,body.iw-printing .iw-footer{display:none!important}body.iw-printing .page-wrap{display:block!important;max-width:none!important;padding:0!important}body.iw-printing #investigation-workbench{display:block!important;border:1px solid #999;background:#fff;color:#111;margin:0!important}body.iw-printing .iw-grid{display:grid!important}.iw-panel{break-inside:avoid;background:#fff}.iw-row,.iw-copy,.iw-note{color:#333}.iw-title,.iw-panel h4,.iw-row strong{color:#111}}
 
 /* D-01 scenario cards */
 .scenario-card{background:rgba(0,0,0,0.25);border:1px solid var(--border2);border-radius:6px;padding:14px;cursor:pointer;transition:border-color .2s,background .2s;text-align:center;}
@@ -298,6 +298,7 @@ a:hover{text-decoration:underline;}
       <div class="iw-footer" id="iw-footer" hidden>
         <div class="iw-note" id="iw-mode-note"></div>
         <div style="display:flex;gap:7px;flex-wrap:wrap;">
+          <button class="iw-btn iw-btn-secondary" id="iw-download-json" type="button">DOWNLOAD JSON</button>
           <button class="iw-btn iw-btn-secondary" id="iw-print" type="button">PRINT / SAVE PDF</button>
           <a class="iw-btn" href="/api-docs.html" style="text-decoration:none;">API CONTRACTS</a>
         </div>
@@ -582,6 +583,7 @@ window.runSandbox = function() {
   var state=document.getElementById('iw-state');
   var output=document.getElementById('iw-output');
   var footer=document.getElementById('iw-footer');
+  var lastPayload=null;
   if(!state||!output||!footer) return;
 
   function clear(id){var n=document.getElementById(id);if(n)n.replaceChildren();return n;}
@@ -597,6 +599,7 @@ window.runSandbox = function() {
   function renderLimitations(target,items){(items||[]).forEach(function(v){row(target,'LIMITATION',v);});}
 
   function renderReplay(data){
+    lastPayload=data;
     var timeline=clear('iw-timeline'), evidence=clear('iw-evidence'), mitre=clear('iw-mitre'), corr=clear('iw-correlation'), actions=clear('iw-actions');
     (data.events||[]).forEach(function(e){row(timeline,e.offset+' · '+e.stage,e.rule+' · '+e.severity);});
     row(evidence,'Synthetic scenario',data.description||data.name);
@@ -611,6 +614,7 @@ window.runSandbox = function() {
   }
 
   function renderLive(data){
+    lastPayload=data;
     var timeline=clear('iw-timeline'), evidence=clear('iw-evidence'), mitre=clear('iw-mitre'), corr=clear('iw-correlation'), actions=clear('iw-actions');
     row(timeline,'Intelligence',data.intelligence&&data.intelligence.title);
     (data.evidence_timeline||[]).forEach(function(e){row(timeline,e.label,e.ts);});
@@ -663,7 +667,20 @@ window.runSandbox = function() {
 
   document.getElementById('iw-run-replay').addEventListener('click',runReplay);
   document.getElementById('iw-run-live').addEventListener('click',runLive);
-  document.getElementById('iw-print').addEventListener('click',function(){window.print();});
+  document.getElementById('iw-download-json').addEventListener('click',function(){
+    if(!lastPayload){setState('Nothing to download yet. Load a replay or live investigation first.',false);return;}
+    var blob=new Blob([JSON.stringify(lastPayload,null,2)],{type:'application/json'});
+    var url=URL.createObjectURL(blob);var a=document.createElement('a');
+    var raw=(lastPayload.intelligence&&lastPayload.intelligence.id)||lastPayload.scenario_id||'investigation';
+    var safe=String(raw).replace(/[^a-zA-Z0-9._-]+/g,'-').slice(0,80)||'investigation';
+    a.href=url;a.download='sentinel-apex-'+safe+'.json';document.body.appendChild(a);a.click();a.remove();
+    setTimeout(function(){URL.revokeObjectURL(url);},0);
+  });
+  document.getElementById('iw-print').addEventListener('click',function(){
+    document.body.classList.add('iw-printing');
+    var cleanup=function(){document.body.classList.remove('iw-printing');window.removeEventListener('afterprint',cleanup);};
+    window.addEventListener('afterprint',cleanup);window.print();setTimeout(cleanup,1500);
+  });
   runReplay();
 })();
 </script>
