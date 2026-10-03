@@ -574,24 +574,56 @@ function _computePlaybook(item) {
   const isKev    = Boolean(item.kev_present || (item.apex || {}).kev_listed);
 
   // IOC pivot plan
+  //
+  // Customer-facing playbooks must never jump directly from third-party
+  // intelligence presence to a destructive/blocking action. Recorded IOCs
+  // can be stale, shared infrastructure, sinkholes, benign services or
+  // false positives. Every containment recommendation therefore follows the
+  // same production decision boundary: validate provenance/freshness,
+  // correlate against customer telemetry, obtain the customer's required
+  // approval, then contain only confirmed matches.
   const iocPivots = [];
   if (iocCnts.ipv4 > 0 || iocCnts.domain > 0) {
-    iocPivots.push({ type: "Network IOC", action: "Block at perimeter firewall + DNS sinkhole; correlate with NetFlow", priority: "P1" });
+    iocPivots.push({
+      type: "Network IOC",
+      action: "Validate indicator provenance and freshness; correlate with DNS/proxy/NetFlow telemetry; if a customer-environment match is confirmed and approved, apply the organization's network containment policy.",
+      priority: "P1",
+    });
   }
   if (iocCnts.sha256 > 0 || iocCnts.sha1 > 0 || iocCnts.md5 > 0) {
-    iocPivots.push({ type: "File Hash", action: "Submit to AV/EDR deny-list; scan endpoint inventory; check VirusTotal", priority: "P1" });
+    iocPivots.push({
+      type: "File Hash",
+      action: "Validate hash provenance and sample identity; correlate with EDR/AV telemetry and endpoint inventory; if confirmed and approved, apply the organization's endpoint containment or deny-list policy.",
+      priority: "P1",
+    });
   }
   if (iocCnts.url > 0) {
-    iocPivots.push({ type: "URL", action: "Block at proxy/web filter; review browsing history for access", priority: "P2" });
+    iocPivots.push({
+      type: "URL",
+      action: "Validate URL provenance and current ownership; review proxy/browser telemetry for customer-environment access; if confirmed and approved, apply the organization's web-control policy.",
+      priority: "P2",
+    });
   }
   if (iocCnts.email > 0) {
-    iocPivots.push({ type: "Email Address", action: "Search mail gateway logs; retract delivered messages if found", priority: "P1" });
+    iocPivots.push({
+      type: "Email Address",
+      action: "Validate sender/recipient context and message evidence; search mail telemetry for confirmed delivery; if malicious activity is confirmed and approved, apply the organization's mail-containment procedure.",
+      priority: "P1",
+    });
   }
   if (iocCnts.cve > 0) {
-    iocPivots.push({ type: "CVE Reference", action: "Cross-reference vulnerability scanner output; prioritize unpatched systems", priority: "P1" });
+    iocPivots.push({
+      type: "CVE Reference",
+      action: "Cross-reference authoritative vulnerability data with asset inventory and scanner evidence; prioritize remediation according to verified exposure, vendor guidance, KEV due dates where applicable, and the customer's documented SLA.",
+      priority: "P1",
+    });
   }
   if (iocCnts.registry > 0) {
-    iocPivots.push({ type: "Registry Key", action: "Search endpoint registry with EDR hunt query; identify persistence", priority: "P2" });
+    iocPivots.push({
+      type: "Registry Key",
+      action: "Validate that the registry artifact is specific to the observed behavior; hunt with EDR telemetry; if malicious persistence is confirmed and approved, follow the organization's endpoint response procedure.",
+      priority: "P2",
+    });
   }
 
   // Log sources (from TTP map)
@@ -622,15 +654,17 @@ function _computePlaybook(item) {
   escalation.push("Escalate if IOC matches found on production or crown-jewel systems");
   escalation.push("Escalate if the organization's documented remediation SLA, vendor deadline, or applicable CISA KEV due date is at risk");
 
-  // Timeline reconstruction steps
+  // Investigation workflow sequencing. These are intentionally phase-based,
+  // not invented universal clock deadlines: response SLAs differ by customer,
+  // asset criticality, regulatory scope, vendor guidance and confirmed impact.
   const timelineSteps = [
-    "T0: Confirm initial detection timestamp from feed",
-    "T+1h: Verify affected asset inventory against advisory scope",
-    "T+4h: Complete IOC correlation across SIEM (last 90 days)",
-    "T+8h: Threat hunt against MITRE ATT&CK TTPs in detection stack",
-    "T+24h: Patch gap analysis complete; remediation plan drafted",
-    "T+72h: Detection rule validated in non-prod environment",
-    "T+patch window: All affected systems remediated + verified",
+    "OBSERVE: Confirm the intelligence record timestamp, source and evidence provenance",
+    "VALIDATE: Verify affected assets, product/version scope and customer-environment relevance",
+    "CORRELATE: Search approved SIEM/EDR/DNS/proxy telemetry over the customer's available retention window",
+    "HUNT: Investigate mapped MITRE ATT&CK techniques and preserve supporting evidence",
+    "DECIDE: Determine containment/remediation actions using confirmed findings, business criticality and change-control requirements",
+    "VERIFY: Validate detection/remediation changes in the customer's approved test or staged environment where applicable",
+    "CLOSE: Record evidence, residual risk and completion against the customer's documented SLA or applicable external deadline",
   ];
 
   return { iocPivots, logSources, artifacts, escalation, timelineSteps };
