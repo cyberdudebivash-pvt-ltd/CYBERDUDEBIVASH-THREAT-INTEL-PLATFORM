@@ -75,6 +75,23 @@ function safeArray(value, limit = 50) {
   return Array.isArray(value) ? value.slice(0, limit) : [];
 }
 
+function iocCountOf(item) {
+  const declared = Number.parseInt(item?.ioc_count || 0, 10);
+  if (Number.isFinite(declared) && declared > 0) return declared;
+  const counts = item?.ioc_counts || item?.iocs_by_type;
+  if (!counts || typeof counts !== 'object' || Array.isArray(counts)) return 0;
+  return Object.values(counts).reduce((sum, value) => {
+    const n = Number.parseInt(value || 0, 10);
+    return sum + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
+}
+
+function stableGraphItem(item, fallbackIndex = 0) {
+  if (stringOrNull(item?.id)) return item;
+  const stable = stringOrNull(item?.stix_id) || stringOrNull(item?.slug) || stringOrNull(item?.cve_id);
+  return stable ? { ...item, id: stable } : { ...item, id: `workbench-item-${fallbackIndex}` };
+}
+
 function safeReportPath(value) {
   const v = stringOrNull(value);
   if (!v || !v.startsWith('/reports/') || v.includes('..')) return null;
@@ -132,7 +149,7 @@ function sanitizeItem(item) {
     cve_ids: safeArray(item?.cve_ids || item?.cves, 20),
     ttps: safeArray(item?.ttps, 30),
     mitre_tactics: safeArray(item?.mitre_tactics, 20),
-    ioc_count: Number.parseInt(item?.ioc_count || 0, 10) || 0,
+    ioc_count: iocCountOf(item),
   };
 }
 
@@ -177,7 +194,7 @@ function itemLimitations(item, graph, claims) {
   if (!(Number(item?.epss_score) > 0)) limitations.push('No positive EPSS score is attached to this record.');
   if (!stringOrNull(item?.actor_tag || item?.threat_actor)) limitations.push('No threat-actor attribution is attached to this record.');
   if (!Array.isArray(item?.ttps) || item.ttps.length === 0) limitations.push('No MITRE ATT&CK technique mapping is attached to this record.');
-  if ((Number.parseInt(item?.ioc_count || 0, 10) || 0) === 0) limitations.push('No IOC inventory is attached to this record.');
+  if (iocCountOf(item) === 0) limitations.push('No IOC inventory is attached to this record.');
   if (!claims?.length) limitations.push('No structured evidence claims are available for this record.');
   if (graph?.stats?.truncated) limitations.push('Graph response is bounded for edge-runtime safety; use the canonical P31 graph API for wider exploration.');
   limitations.push('This read-only view composes existing intelligence; it does not detonate binaries or execute indicators.');
@@ -200,7 +217,8 @@ function buildInvestigation(item, allItems) {
   const campaign = computeP31CampaignContext(item, allItems);
   const relatedItems = safeArray(campaign?.related, MAX_RELATED_ITEMS)
     .filter(candidate => itemIdentity(candidate).length > 0);
-  const graph = boundedGraph(computeP31Graph([item, ...relatedItems]));
+  const graphItems = [item, ...relatedItems].map((candidate, index) => stableGraphItem(candidate, index));
+  const graph = boundedGraph(computeP31Graph(graphItems));
   const copilot = computeP31Copilot(item);
   const evidenceClaims = computeP32EvidenceClaims(item);
   const entityContext = computeP31EntityNormalization(item);
@@ -379,7 +397,7 @@ function capabilities() {
       mutations: false,
       binary_detonation: false,
       external_scanning: false,
-      raw_ioc_values_in_workbench_response: false,
+      raw_ioc_arrays_in_workbench_response: false,
     },
   };
 }
