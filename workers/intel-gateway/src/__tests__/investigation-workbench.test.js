@@ -246,6 +246,10 @@ test('composite risk is never mislabeled as CVSS in analyst evidence', async () 
   assert.ok(claims.some(v => /SENTINEL APEX composite risk score 9\.4\/10/.test(v)));
   assert.ok(!claims.some(v => /CVSS score 9\.4/.test(v)));
   assert.ok(body.risk_explanation.why_this_matters.some(v => /this value is not CVSS/.test(v)));
+  const advisoryNode = body.correlation.graph.nodes.find(v => v.id === 'advisory:' + riskOnly.id);
+  assert.ok(advisoryNode);
+  assert.equal(advisoryNode.meta.cvss, null);
+  assert.equal(advisoryNode.meta.risk_score, 9.4);
 });
 
 test('actor attribution without explicit confidence stays unknown', async () => {
@@ -268,6 +272,11 @@ test('actor attribution without explicit confidence stays unknown', async () => 
   assert.ok(claim);
   assert.equal(claim.confidence, null);
   assert.match(claim.reasoning, /does not assign an inferred attribution confidence/);
+  const attributionEdge = body.correlation.graph.edges.find(v => v.relation === 'attributed_to');
+  assert.ok(attributionEdge);
+  assert.equal(attributionEdge.confidence, null);
+  assert.equal(attributionEdge.verified, false);
+  assert.match(attributionEdge.evidence, /no explicit actor confidence supplied/);
 });
 
 test('unsafe report targets are never projected to the customer response', () => {
