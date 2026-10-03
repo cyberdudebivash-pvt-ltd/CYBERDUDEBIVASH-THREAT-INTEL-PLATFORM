@@ -116,6 +116,7 @@ import { handlePremiumReport, handleReportList, handleReportGet, handleReportCsv
 // before this fix (all four returned HTTP 500 / crashed silently).
 import { getLiveIndicatorsSummary, runScheduledIngestion } from './ingestion/cron_worker.js';
 import { routeExports } from './routes/exports.js';
+import { routeInvestigationWorkbench } from './investigation-workbench.js';
 import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-meter.js';
 import { deductCredits } from './credit-system.js';
 import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
@@ -8894,6 +8895,19 @@ async function handleRequest(request, env, ctx) {
   if (Object.prototype.hasOwnProperty.call(INTEL_STATIC_PROXY, path)) {
     const proxyResp = await handleIntelStaticProxy(env, path, method);
     if (proxyResp) return proxyResp;
+  }
+
+  // --- Analyst Investigation Workbench -- read-only composition + synthetic replay ---
+  // Public capability/replay routes contain synthetic/metadata-only content. The live
+  // item route enforces customer authentication, paid entitlement and read:intel scope
+  // inside the module before reading R2. No mutations or additional storage writes.
+  if (path === "/api/v1/investigation/capabilities" ||
+      path === "/api/v1/investigation/item" ||
+      path === "/api/v1/demo/replay") {
+    const investigationRes = await routeInvestigationWorkbench({
+      path, request, env, auth, requestId: crypto.randomUUID(),
+    });
+    if (investigationRes) return investigationRes;
   }
 
   // --- routes/exports.js -- tier-gated multi-format SIEM/SOAR exports (v201.0) ---

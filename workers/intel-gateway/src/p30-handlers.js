@@ -196,6 +196,14 @@ function _computeTimeline(item) {
 }
 
 /**
+ * Public, side-effect-free projection for composed customer investigation views.
+ * Reuses the canonical P30 timeline computation without adding a second timeline engine.
+ */
+export function computeP30Timeline(item) {
+  return _computeTimeline(item).map(({ label, ts, epoch, color }) => ({ label, ts, epoch, color }));
+}
+
+/**
  * P30.3  -  Intelligence change tracking signals.
  * Detects enrichment deltas by inspecting field presence vs expected.
  */

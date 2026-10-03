@@ -49,6 +49,8 @@ test("isFirstPartyRead: anonymous GET of a dashboard read path is admitted", () 
   assert.equal(isFirstPartyRead({ path: "/api/v1/intel/stats", method: "HEAD", hasCredential: false }), true);
   assert.equal(isFirstPartyRead({ path: "/api/feed.json", method: "get", hasCredential: false }), true,
     "method comparison must be case-insensitive");
+  assert.equal(isFirstPartyRead({ path: "/api/v1/demo/replay", method: "GET", hasCredential: false }), true,
+    "the public synthetic demo is a first-party read, not commercial API consumption");
 });
 
 test("isFirstPartyRead: ANY credential routes to the commercial plane, on every path", () => {

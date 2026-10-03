@@ -116,6 +116,7 @@ li{margin-bottom:6px}
     <a href="#export-misp">MISP Export</a>
     <a href="#siem-dispatch">SIEM Dispatch</a>
     <a href="#intel-graph">Intel Graph</a>
+    <a href="#investigation-workbench">Investigation Workbench</a>
     <a href="#sla-cert">SLA Certificate</a>
     <a href="#invoices">Invoices</a>
     <div class="sidebar-section">MSSP</div>
@@ -140,7 +141,7 @@ li{margin-bottom:6px}
     <p>The SENTINEL APEX API provides programmatic access to real-time threat intelligence, STIX 2.1 bundles, analyst dossiers, IOC lookups, and SIEM dispatch integrations. Base URL:</p>
     <div class="endpoint"><strong>https://intel.cyberdudebivash.com/api/</strong></div>
     <div class="info-box">
-      <p>📘 All API responses are JSON. STIX endpoints return STIX 2.1-compliant bundles. Authentication via <code>X-API-Key</code> header is required for all endpoints except <code>/api/health</code>. Free tier provides 50 requests/day to public endpoints.</p>
+      <p>📘 All API responses are JSON. STIX endpoints return STIX 2.1-compliant bundles. Tiered endpoints authenticate with <code>X-API-Key</code> (or the documented Bearer-session flow). Public read-only routes such as health, feed previews and the synthetic investigation replay are keyless; each endpoint below states its own access boundary. The commercial Free API budget is 50 requests/day per network.</p>
     </div>
 
     <!-- R-04: QUICK START v185.0 -->
@@ -468,6 +469,23 @@ token = YOUR_API_KEY</pre>
     <pre>curl -H "X-API-Key: YOUR_ENT_KEY" \
   "https://intel.cyberdudebivash.com/api/v1/intel/graph/correlations?advisory_limit=100" | \
   jq '.graph.stats'</pre>
+
+    <h2 id="investigation-workbench">Analyst Investigation Workbench <span class="tag req" style="font-size:.7rem">PRO+</span></h2>
+    <p>Read-only analyst projection for one current intelligence item. The response composes the platform's existing evidence, correlation, ATT&amp;CK, timeline and investigation-guidance engines; it does not create or mutate incidents and does not return raw IOC arrays.</p>
+    <div class="endpoint"><span class="method-badge get">GET</span><strong>/api/v1/investigation/item?id={intelligence_id}</strong></div>
+    <table><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+      <tr><td>id</td><td>string</td><td>yes</td><td>Exact current-feed item id, STIX id, slug or CVE id (maximum 256 characters)</td></tr>
+    </table>
+    <p><strong>Access:</strong> authenticated PRO, Enterprise or MSSP customer identity with the platform's existing <code>read:intel</code> scope. Responses are <code>private, no-store</code>.</p>
+    <pre>curl -s -H "X-API-Key: YOUR_API_KEY" \
+  "https://intel.cyberdudebivash.com/api/v1/investigation/item?id=YOUR_ITEM_ID" \
+  | jq '{intelligence, risk_explanation, evidence_claims, mitre, correlation, evidence_timeline}'</pre>
+    <h3>Public synthetic replay</h3>
+    <p>The demo replay is explicitly synthetic and read-only. It uses documentation-only address space and <code>.example</code> domains; it performs no malware execution, scanning, authentication attempts, network actions or customer-data access.</p>
+    <div class="endpoint"><span class="method-badge get">GET</span><strong>/api/v1/demo/replay?scenario=ransomware</strong></div>
+    <p>Valid scenarios: <code>ransomware</code>, <code>credential</code>, <code>cloud</code>.</p>
+    <div class="endpoint"><span class="method-badge get">GET</span><strong>/api/v1/investigation/capabilities</strong> &mdash; Read-only capability contract</div>
+    <p>Interactive customer surface: <a href="/demo.html#investigation-workbench">demo.html#investigation-workbench</a>.</p>
 
     <h2 id="sla-cert">SLA Compliance Certificate <span class="tag req" style="font-size:.7rem">ENTERPRISE+</span></h2>
     <p>Generate a signed SLA compliance certificate for your organisation covering uptime, incident response SLA, data residency, and compliance frameworks.</p>
