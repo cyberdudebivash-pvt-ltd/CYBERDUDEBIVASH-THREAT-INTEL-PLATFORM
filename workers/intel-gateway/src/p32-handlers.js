@@ -807,7 +807,7 @@ export function buildP32DriftBlock(item) {
 // the number (same class of bug as the P38 schema-mirror fix). Each lookup falls
 // back to the prior hardcoded value/text if the named dimension is ever renamed.
 
-export function buildP32EvidenceTransparencyBlock(item) {
+export function computeP32EvidenceClaims(item) {
   const claims = [];
 
   const trust = computeEnterpriseTrustScore(item);
@@ -891,6 +891,12 @@ export function buildP32EvidenceTransparencyBlock(item) {
       color: "#6b7280",
     });
   }
+
+  return claims.map(c => ({ ...c }));
+}
+
+export function buildP32EvidenceTransparencyBlock(item) {
+  const claims = computeP32EvidenceClaims(item);
 
   const rows = claims.map(c => `<div style="padding:10px 14px;background:#0a0f1a;border:1px solid ${c.color}22;border-left:3px solid ${c.color};border-radius:4px;margin:6px 0;">
     <div style="color:${c.color};font-size:11px;font-weight:700;margin-bottom:5px;">Claim: ${esc(c.claim)}</div>
