@@ -234,7 +234,7 @@ curl -X POST http://localhost:8000/api/v1/simulator/monte-carlo \
 - Website: [cyberdudebivash.com](https://cyberdudebivash.com)
 - Intel Platform: [intel.cyberdudebivash.com](https://intel.cyberdudebivash.com)
 - Email: enterprise@cyberdudebivash.com
-- LinkedIn: [CyberDudeBivash](https://linkedin.com/company/cyberdudebivash)
+- LinkedIn: [CyberDudeBivash](https://www.linkedin.com/company/cyberdudebivash/)
 
 ---
 

@@ -58,7 +58,7 @@ export const metadata: Metadata = {
     "India cybersecurity",
     "enterprise security platform",
   ],
-  authors: [{ name: "Bivash Kumar Nayak", url: "https://www.linkedin.com/in/bivash-kumar-nayak/" }],
+  authors: [{ name: "Bivash Kumar Nayak", url: "https://www.linkedin.com/company/cyberdudebivash/" }],
   creator: "BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH(R)",
   publisher: "BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH(R)",
   robots: {
@@ -127,12 +127,12 @@ const organizationSchema = {
         "BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH(R) is a global cybersecurity innovation company based in Jajpur, Odisha, India. We build next-generation AI-driven threat intelligence, SOC automation, and defensive security platforms.",
       "founder": {
         "@type": "Person",
-        "@id": "https://www.linkedin.com/in/bivash-kumar-nayak/#person",
+        "@id": "https://intel.cyberdudebivash.com/about.html#founder",
         "name": "Bivash Kumar Nayak",
         "jobTitle": "Founder & CEO",
-        "url": "https://www.linkedin.com/in/bivash-kumar-nayak/",
+        "url": "https://www.linkedin.com/company/cyberdudebivash/",
         "sameAs": [
-          "https://www.linkedin.com/in/bivash-kumar-nayak/",
+          "https://www.linkedin.com/company/cyberdudebivash/",
           "https://github.com/cyberdudebivash",
         ],
       },
