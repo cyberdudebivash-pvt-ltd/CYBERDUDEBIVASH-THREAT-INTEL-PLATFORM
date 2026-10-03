@@ -635,6 +635,10 @@ window.runSandbox = function() {
     (data.mitre&&data.mitre.tactics||[]).forEach(function(v){badge(mitre,v);});
     var rel=data.correlation&&data.correlation.related_items||[];
     row(corr,'Correlation graph',String((data.correlation&&data.correlation.graph&&data.correlation.graph.stats&&data.correlation.graph.stats.returned_nodes)||0)+' nodes · '+String((data.correlation&&data.correlation.graph&&data.correlation.graph.stats&&data.correlation.graph.stats.returned_edges)||0)+' edges');
+    var meth=data.correlation&&data.correlation.methodology||{};
+    if(meth.note)row(corr,'CORRELATION POLICY',meth.note);
+    var confPolicy=data.correlation&&data.correlation.graph&&data.correlation.graph.confidence_policy||{};
+    if(confPolicy.numeric_relationship_confidence_exposed===false)row(corr,'EDGE CONFIDENCE','Not exposed — evidence/topology only; heuristic numeric scores are suppressed.');
     rel.slice(0,6).forEach(function(v){row(corr,v.id||'related item',v.title);});
     (data.risk_explanation&&data.risk_explanation.investigate_first||[]).forEach(function(v){row(actions,'INVESTIGATE',v);});
     (data.risk_explanation&&data.risk_explanation.next_actions||[]).forEach(function(v){row(actions,'NEXT',v);});
