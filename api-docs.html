@@ -478,6 +478,7 @@ token = YOUR_API_KEY</pre>
     </table>
     <p><strong>Access:</strong> authenticated PRO, Enterprise or MSSP customer identity with the platform's existing <code>read:intel</code> scope. Unknown or legacy tier strings fail closed. Responses are <code>private, no-store</code>.</p>
     <p><strong>Output scope:</strong> <code>customer_outputs.item_scoped.detections</code> points to the canonical per-item detection registry query. Report paths are projected only when they resolve under <code>/reports/</code>. TAXII/STIX/YARA/Suricata/Snort/Splunk entries under <code>global_feed_exports</code> remain feed-level exports and are never represented as item-specific artifacts.</p>
+    <p><strong>Correlation truth boundary:</strong> related records are investigative context derived from a matching recorded actor or at least two shared ATT&amp;CK techniques; that correlation does not prove a common campaign. The workbench exposes graph topology and evidence but deliberately suppresses historical P31 numeric edge-confidence heuristics until an authoritative relationship-confidence framework owns those values.</p>
     <pre>curl -s -H "X-API-Key: YOUR_API_KEY" \
   "https://intel.cyberdudebivash.com/api/v1/investigation/item?id=YOUR_ITEM_ID" \
   | jq '{intelligence, risk_explanation, evidence_claims, mitre, correlation, evidence_timeline}'</pre>

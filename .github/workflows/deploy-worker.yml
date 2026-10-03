@@ -753,8 +753,10 @@ jobs:
           errors = []
           if cap.get("mode") != "read_only":
               errors.append("capabilities.mode must be read_only")
+          if cap.get("workbench_version") != "1.2.0":
+              errors.append("capabilities.workbench_version must be 1.2.0")
           safety = cap.get("safety") or {}
-          for key in ("mutations", "binary_detonation", "external_scanning", "raw_ioc_arrays_in_workbench_response"):
+          for key in ("mutations", "binary_detonation", "external_scanning", "raw_ioc_arrays_in_workbench_response", "fabricated_relationship_confidence"):
               if safety.get(key) is not False:
                   errors.append(f"capabilities.safety.{key} must be false")
 
@@ -785,6 +787,14 @@ jobs:
             exit 1
           fi
           echo "OK: Investigation replay is GET-only (HTTP 405 on POST)"
+
+          LIVE_UNAUTH_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+            "https://intel.cyberdudebivash.com/api/v1/investigation/item?id=unauthenticated-boundary-probe" || echo "000")
+          if [ "$LIVE_UNAUTH_HTTP" != "401" ]; then
+            echo "FATAL: live investigation auth-boundary canary expected HTTP 401 without credentials, got ${LIVE_UNAUTH_HTTP}"
+            exit 1
+          fi
+          echo "OK: Live investigation fails closed without credentials (HTTP 401)"
 
           echo ""
           echo "=== Post-Deploy Smoke Test COMPLETE ==="

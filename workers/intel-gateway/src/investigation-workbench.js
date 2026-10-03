@@ -32,7 +32,7 @@ import { enforceTierGate } from './revenue-enforcement.js';
 import { enforceScopeMiddleware } from './api-extensions.js';
 import { extractDetectionArtifacts } from './detection-registry.js';
 
-export const INVESTIGATION_WORKBENCH_VERSION = '1.1.0';
+export const INVESTIGATION_WORKBENCH_VERSION = '1.2.0';
 const PAID_INVESTIGATION_TIERS = new Set(['PRO', 'ENTERPRISE', 'MSSP']);
 
 const MAX_RELATED_ITEMS = 6;
@@ -202,6 +202,38 @@ function boundedGraph(graph) {
   };
 }
 
+function evidenceSafeGraphProjection(graph) {
+  const bounded = boundedGraph(graph);
+  const edges = bounded.edges.map(edge => ({
+    ...edge,
+    // P31's historical edge confidence values predate an accepted canonical
+    // confidence framework. The workbench is a customer decision-support
+    // surface, so it deliberately refuses to present those heuristic numbers
+    // as measured confidence. Evidence text and topology remain available.
+    confidence: null,
+    verified: false,
+    confidence_state: 'NOT_EXPOSED',
+  }));
+  return {
+    nodes: bounded.nodes,
+    edges,
+    stats: {
+      ...bounded.stats,
+      avg_confidence: null,
+      scored_edges: 0,
+      unscored_edges: edges.length,
+      verified_edges: 0,
+      high_confidence_edges: 0,
+      confidence_semantics: 'Relationship confidence is not exposed by the Investigation Workbench until the platform canonical confidence framework is authoritative for relationship edges.',
+    },
+    confidence_policy: {
+      mode: 'evidence_only',
+      numeric_relationship_confidence_exposed: false,
+      reason: 'Avoid presenting historical heuristic edge scores as measured confidence.',
+    },
+  };
+}
+
 function itemLimitations(item, graph, claims) {
   const limitations = [];
   const apex = item?.apex && typeof item.apex === 'object' ? item.apex : {};
@@ -213,6 +245,7 @@ function itemLimitations(item, graph, claims) {
   if (iocCountOf(item) === 0) limitations.push('No IOC inventory is attached to this record.');
   if (!claims?.length) limitations.push('No structured evidence claims are available for this record.');
   if (graph?.stats?.truncated) limitations.push('Graph response is bounded for edge-runtime safety; use the canonical P31 graph API for wider exploration.');
+  limitations.push('Relationship topology is shown for investigation, but numeric edge confidence is intentionally not exposed because historical P31 edge scores are heuristic rather than an authoritative relationship-confidence measurement.');
   limitations.push('This read-only view composes existing intelligence; it does not detonate binaries or execute indicators.');
   return limitations;
 }
@@ -234,7 +267,7 @@ function buildInvestigation(item, allItems) {
   const relatedItems = safeArray(campaign?.related, MAX_RELATED_ITEMS)
     .filter(candidate => itemIdentity(candidate).length > 0);
   const graphItems = [item, ...relatedItems].map((candidate, index) => stableGraphItem(candidate, index));
-  const graph = boundedGraph(computeP31Graph(graphItems));
+  const graph = evidenceSafeGraphProjection(computeP31Graph(graphItems));
   const copilot = computeP31Copilot(item);
   const evidenceClaims = computeP32EvidenceClaims(item);
   const entityContext = computeP31EntityNormalization(item);
@@ -272,6 +305,12 @@ function buildInvestigation(item, allItems) {
     correlation: {
       campaign_name: campaign?.campaignName || null,
       related_items: relatedSummary(campaign),
+      methodology: {
+        related_items_basis: 'same recorded actor or at least two shared ATT&CK techniques',
+        campaign_label_basis: 'derived display label from recorded actor + threat type when present',
+        does_not_assert_common_campaign: true,
+        note: 'Correlation is investigative context, not proof that related records belong to one adversary operation.',
+      },
       graph,
     },
     evidence_timeline: timeline,
@@ -402,7 +441,7 @@ function capabilities() {
       path: '/api/v1/investigation/item?id=<intelligence-id>',
       authentication: 'API key or customer JWT',
       entitlement: 'PRO, ENTERPRISE or MSSP with read:intel scope',
-      outputs: ['risk explanation', 'evidence claims', 'MITRE context', 'correlation graph', 'timeline', 'playbook', 'report links when present', 'export links'],
+      outputs: ['risk explanation', 'evidence claims', 'MITRE context', 'evidence-only correlation graph', 'timeline', 'playbook', 'report links when present', 'export links'],
     },
     synthetic_replay: {
       path: '/api/v1/demo/replay?scenario=ransomware',
@@ -415,6 +454,7 @@ function capabilities() {
       binary_detonation: false,
       external_scanning: false,
       raw_ioc_arrays_in_workbench_response: false,
+      fabricated_relationship_confidence: false,
     },
   };
 }
