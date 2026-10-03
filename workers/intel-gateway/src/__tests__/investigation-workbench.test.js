@@ -215,6 +215,20 @@ test('paid investigation composes canonical engines without leaking raw IOC valu
   assert.ok(body.evidence_timeline.length > 0);
   assert.ok(body.evidence_timeline.some(e => e.label === 'Detection Rules Published'));
   assert.ok(body.investigation_playbook);
+  const pivotActions = body.investigation_playbook.iocPivots.map(p => p.action);
+  assert.ok(pivotActions.length > 0);
+  assert.ok(pivotActions.every(action => /validat|cross-reference/i.test(action)));
+  assert.ok(pivotActions.every(action => !/^(block|submit|retract|isolate|disable|delete)\b/i.test(action)));
+  assert.ok(pivotActions.every(action => !/must block|block immediately|deny-list immediately/i.test(action)));
+
+  const playbookTimeline = body.investigation_playbook.timelineSteps;
+  assert.deepEqual(
+    playbookTimeline.map(step => step.split(':', 1)[0]),
+    ['OBSERVE', 'VALIDATE', 'CORRELATE', 'HUNT', 'DECIDE', 'VERIFY', 'CLOSE'],
+  );
+  assert.ok(playbookTimeline.every(step => !/T\+\d+(?:h|m|d)\b/i.test(step)));
+  assert.ok(playbookTimeline.some(step => /customer.*documented SLA|applicable external deadline/i.test(step)));
+
   assert.equal(body.detection_availability.sigma, true);
   assert.equal(body.detection_availability.kql, true);
   assert.equal(body.detection_availability.artifact_count, 2);
