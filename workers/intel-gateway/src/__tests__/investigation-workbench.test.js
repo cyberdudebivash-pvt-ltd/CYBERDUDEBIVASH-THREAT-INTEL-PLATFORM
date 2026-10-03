@@ -200,6 +200,8 @@ test('paid investigation composes canonical engines without leaking raw IOC valu
   assert.ok(body.mitre.techniques.includes('T1190'));
   assert.ok(body.correlation.related_items.some(i => i.id === relatedItem.id));
   assert.ok(body.correlation.graph.nodes.length > 0);
+  assert.equal(body.correlation.graph.edges.some(e => e.relation === 'exploits'), false);
+  assert.equal(body.correlation.graph.edges.some(e => e.relation === 'employs_technique'), false);
   assert.ok(body.evidence_timeline.length > 0);
   assert.ok(body.evidence_timeline.some(e => e.label === 'Detection Rules Published'));
   assert.ok(body.investigation_playbook);
