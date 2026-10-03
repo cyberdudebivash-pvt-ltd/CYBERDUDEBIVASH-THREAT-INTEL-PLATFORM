@@ -41,6 +41,7 @@ import { getP21CertificationLevel }    from './p21-handlers.js';
 import { computeActionabilityScore }   from './p23-handlers.js';
 import { computeEnterpriseTrustScore } from './p25-handlers.js';
 import { computeP26Grade }             from './p26-handlers.js';
+import { extractDetectionArtifacts }    from './detection-registry.js';
 
 export const P30_VERSION = "P30.0";
 
@@ -153,6 +154,10 @@ function _computeVerificationStatus(item) {
  * P30.2  -  Threat evolution timeline derived from item timestamps.
  * Builds ordered sequence of intelligence lifecycle events.
  */
+function _detectionArtifactCount(item) {
+  try { return extractDetectionArtifacts(item).length; } catch (_) { return 0; }
+}
+
 function _computeTimeline(item) {
   const events = [];
 
@@ -180,8 +185,9 @@ function _computeTimeline(item) {
   if (item.epss_score != null && item.epss_score !== "") {
     events.push({ label: "EPSS Score Assigned", ts: `EPSS: ${parseFloat(item.epss_score || 0).toFixed(3)}`, epoch: 0, color: "#f59e0b" });
   }
-  if (Object.keys(item.detection_bundle || {}).length > 0) {
-    events.push({ label: "Detection Rules Published", ts: `${Object.keys(item.detection_bundle).length} format(s)`, epoch: 0, color: "#10b981" });
+  const detectionArtifactCount = _detectionArtifactCount(item);
+  if (detectionArtifactCount > 0) {
+    events.push({ label: "Detection Rules Published", ts: `${detectionArtifactCount} validated artifact(s)`, epoch: 0, color: "#10b981" });
   }
 
   // Sort chronological (epoch=0 items go last)
@@ -223,9 +229,9 @@ function _computeChangeTracking(item) {
   }
 
   const iocs = parseInt(item.ioc_count || 0);
-  const hasBundle = Object.keys(item.detection_bundle || {}).length > 0;
+  const hasBundle = _detectionArtifactCount(item) > 0;
   if (iocs > 0 && !hasBundle) {
-    changes.push({ type: "DETECTION_GAP", detail: `${iocs} IOCs present but no detection rules`, impact: "HIGH" });
+    changes.push({ type: "DETECTION_GAP", detail: `${iocs} IOCs present but no structurally valid per-item detection artifacts`, impact: "HIGH" });
   }
 
   const hasMitre = Array.isArray(item.ttps) && item.ttps.length > 0;

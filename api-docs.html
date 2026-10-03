@@ -476,7 +476,8 @@ token = YOUR_API_KEY</pre>
     <table><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
       <tr><td>id</td><td>string</td><td>yes</td><td>Exact current-feed item id, STIX id, slug or CVE id (maximum 256 characters)</td></tr>
     </table>
-    <p><strong>Access:</strong> authenticated PRO, Enterprise or MSSP customer identity with the platform's existing <code>read:intel</code> scope. Responses are <code>private, no-store</code>.</p>
+    <p><strong>Access:</strong> authenticated PRO, Enterprise or MSSP customer identity with the platform's existing <code>read:intel</code> scope. Unknown or legacy tier strings fail closed. Responses are <code>private, no-store</code>.</p>
+    <p><strong>Output scope:</strong> <code>customer_outputs.item_scoped.detections</code> points to the canonical per-item detection registry query. Report paths are projected only when they resolve under <code>/reports/</code>. TAXII/STIX/YARA/Suricata/Snort/Splunk entries under <code>global_feed_exports</code> remain feed-level exports and are never represented as item-specific artifacts.</p>
     <pre>curl -s -H "X-API-Key: YOUR_API_KEY" \
   "https://intel.cyberdudebivash.com/api/v1/investigation/item?id=YOUR_ITEM_ID" \
   | jq '{intelligence, risk_explanation, evidence_claims, mitre, correlation, evidence_timeline}'</pre>

@@ -39,6 +39,7 @@ import { computeActionabilityScore }   from './p23-handlers.js';
 import { computeEnterpriseTrustScore } from './p25-handlers.js';
 import { computeP26Grade }             from './p26-handlers.js';
 import { enforceTierGate }             from './revenue-enforcement.js';
+import { extractDetectionArtifacts }    from './detection-registry.js';
 
 export const P31_VERSION = "P31.0";
 
@@ -203,23 +204,39 @@ function _buildGraph(items) {
 
   const addEdge = (source, target, rel, confidence, evidence) => {
     const key = `${source}->${rel}->${target}`;
+    const normalizedConfidence = Number.isFinite(confidence)
+      ? Math.max(0, Math.min(1, confidence))
+      : null;
     if (!edgeSet.has(key)) {
       edgeSet.add(key);
-      edges.push({ source, target, relation: rel, confidence, evidence, verified: confidence >= 0.75 });
+      edges.push({
+        source, target, relation: rel,
+        confidence: normalizedConfidence,
+        evidence,
+        verified: normalizedConfidence != null && normalizedConfidence >= 0.75,
+      });
       if (nodes.has(source)) nodes.get(source).edgeCount++;
       if (nodes.has(target)) nodes.get(target).edgeCount++;
     } else {
-      // Reinforce confidence on repeat observation
+      // Repeated observations must not manufacture confidence. Preserve the
+      // strongest explicit/derived value already carried by an observation.
       const e = edges.find(e => e.source === source && e.target === target && e.relation === rel);
-      if (e) e.confidence = Math.min(0.99, e.confidence + 0.05);
+      if (e && normalizedConfidence != null && (e.confidence == null || normalizedConfidence > e.confidence)) {
+        e.confidence = normalizedConfidence;
+        e.verified = normalizedConfidence >= 0.75;
+      }
     }
   };
 
   for (const item of items) {
     const itemId = `advisory:${item.id || item.stix_id || Math.random()}`;
-    const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+    const cvss = parseFloat(item.cvss_score || 0);
+    const riskScore = parseFloat(item.risk_score || 0);
     addNode(itemId, "advisory", (item.title || "Advisory").slice(0, 60), {
-      severity: item.severity, cvss, source: item.source,
+      severity: item.severity,
+      cvss: cvss > 0 ? cvss : null,
+      risk_score: riskScore > 0 ? riskScore : null,
+      source: item.source,
     });
 
     // Actor nodes
@@ -231,8 +248,19 @@ function _buildGraph(items) {
         nation: normalized.nation || "UNKNOWN", motivation: normalized.motivation || "unknown",
         aliases: normalized.aliases || [],
       });
-      const actorConf = cvss >= 7 ? 0.85 : 0.65;
-      addEdge(itemId, actorId, "attributed_to", actorConf, `CVE/advisory attribution from ${item.source || "pipeline"}`);
+      const rawActorConfidence = Number.parseFloat(item.actor_confidence);
+      const actorConf = Number.isFinite(rawActorConfidence)
+        ? Math.max(0, Math.min(1, rawActorConfidence > 1 ? rawActorConfidence / 100 : rawActorConfidence))
+        : null;
+      addEdge(
+        itemId,
+        actorId,
+        "attributed_to",
+        actorConf,
+        actorConf == null
+          ? `Attribution recorded by ${item.source || "pipeline"}; no explicit actor confidence supplied`
+          : `Attribution recorded by ${item.source || "pipeline"} with explicit actor_confidence`,
+      );
     }
 
     // Technique nodes
@@ -243,11 +271,9 @@ function _buildGraph(items) {
       addNode(ttpId, "technique", ttp, { framework: "MITRE ATT&CK" });
       addEdge(itemId, ttpId, "uses_technique", 0.90, "MITRE ATT&CK mapping from pipeline enrichment");
 
-      // Link actor to technique if both present
-      if (actorRaw && actorRaw !== "Unknown") {
-        const actorId = `actor:${actorRaw.toLowerCase().replace(/\s+/g, "_")}`;
-        addEdge(actorId, ttpId, "employs_technique", 0.75, "Co-occurrence with attributed advisory");
-      }
+      // Do not synthesize a direct actor->technique edge from mere
+      // co-occurrence. The advisory->actor and advisory->technique edges
+      // preserve the evidence path without overstating actor behavior.
     }
 
     // Threat type nodes
@@ -272,12 +298,15 @@ function _buildGraph(items) {
     const cveMatches = (item.title + " " + item.description).match(/CVE-\d{4}-\d+/g) || [];
     for (const cve of [...new Set(cveMatches)].slice(0, 3)) {
       const cveId = `cve:${cve}`;
-      addNode(cveId, "vulnerability", cve, { cvss });
+      addNode(cveId, "vulnerability", cve, {
+        cvss: cvss > 0 ? cvss : null,
+        risk_score: riskScore > 0 ? riskScore : null,
+      });
       addEdge(itemId, cveId, "references", 0.99, "CVE mention in advisory title/description");
-      if (actorRaw && actorRaw !== "Unknown") {
-        const actorId = `actor:${actorRaw.toLowerCase().replace(/\s+/g, "_")}`;
-        addEdge(actorId, cveId, "exploits", cvss >= 7 ? 0.80 : 0.60, "Actor-CVE co-occurrence in advisory");
-      }
+      // Do not synthesize actor->CVE "exploits" from co-occurrence alone.
+      // The two evidence-backed advisory edges already preserve the graph
+      // path and let analysts decide whether stronger exploitation evidence
+      // exists elsewhere.
     }
 
     // IOC type nodes (structural only, no raw IOC values)
@@ -286,7 +315,7 @@ function _buildGraph(items) {
       if (!count || count === 0) continue;
       const iocTypeId = `ioc_type:${iocType.toLowerCase()}`;
       addNode(iocTypeId, "ioc_type", iocType.toUpperCase(), { count });
-      addEdge(itemId, iocTypeId, "contains_ioc_type", 0.99, `${count} ${iocType} IOC(s) verified by pipeline`);
+      addEdge(itemId, iocTypeId, "contains_ioc_type", 0.99, `${count} ${iocType} IOC(s) recorded on the intelligence item`);
     }
 
     // Severity cluster node
@@ -294,7 +323,7 @@ function _buildGraph(items) {
     if (["CRITICAL", "HIGH", "MEDIUM"].includes(sev)) {
       const sevId = `severity:${sev}`;
       addNode(sevId, "severity_cluster", sev, {});
-      addEdge(itemId, sevId, "severity_level", 0.99, "Pipeline-validated CVSS/severity mapping");
+      addEdge(itemId, sevId, "severity_level", 0.99, "Severity label carried on the current intelligence record");
     }
 
     // Tactic nodes (from kill_chain_phases or mitre_tactics)
@@ -315,11 +344,17 @@ function _buildGraph(items) {
       total_nodes: nodeArr.length,
       total_edges: edges.length,
       by_type: _countByField(nodeArr, "type"),
-      avg_confidence: edges.length > 0
-        ? Math.round(edges.reduce((s, e) => s + e.confidence, 0) / edges.length * 100) / 100
-        : 0,
+      avg_confidence: (() => {
+        const scored = edges.filter(e => Number.isFinite(e.confidence));
+        return scored.length > 0
+          ? Math.round(scored.reduce((s, e) => s + e.confidence, 0) / scored.length * 100) / 100
+          : null;
+      })(),
+      scored_edges: edges.filter(e => Number.isFinite(e.confidence)).length,
+      unscored_edges: edges.filter(e => !Number.isFinite(e.confidence)).length,
       verified_edges: edges.filter(e => e.verified).length,
-      high_confidence_edges: edges.filter(e => e.confidence >= 0.85).length,
+      high_confidence_edges: edges.filter(e => Number.isFinite(e.confidence) && e.confidence >= 0.85).length,
+      confidence_semantics: "relationship evidence confidence; null means no explicit relation-specific confidence was available",
     },
   };
 }
@@ -392,9 +427,10 @@ function _computeCampaignContext(item, allItems) {
   }).slice(0, 6);
 
   // Derive campaign name from actor + threat_type
-  const actorNorm = _normalizeActor(item.actor_tag || "");
-  const campaignName = actorNorm.canonical !== (item.actor_tag || "")
-    ? `${actorNorm.canonical}  -  ${(item.threat_type || "Intelligence").replace(/_/g, " ")} Campaign`
+  const actorName = String(item.actor_tag || item.threat_actor || "").trim();
+  const actorNorm = _normalizeActor(actorName);
+  const campaignName = actorName && actorName.toLowerCase() !== "unknown"
+    ? `${actorNorm.canonical || actorName}  -  ${(item.threat_type || "Intelligence").replace(/_/g, " ")} Campaign`
     : null;
 
   // Timeline events from timestamps
@@ -418,28 +454,43 @@ function _computeCampaignContext(item, allItems) {
  * this generates narrative-form natural-language copilot output.
  */
 function _computeCopilot(item) {
-  const cvss   = parseFloat(item.risk_score || item.cvss_score || 0);
-  const epss   = parseFloat(item.epss_score || 0);
-  const isKev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-  const sev    = (item.severity || "").toUpperCase();
-  const ttps   = Array.isArray(item.ttps) ? item.ttps : [];
-  const actor  = _normalizeActor(item.actor_tag || "");
-  const iocCnt = parseInt(item.ioc_count || 0);
-  const hasDet = Object.keys(item.detection_bundle || {}).length > 0;
-  const threatT = (item.threat_type || "").toLowerCase();
+  // risk_score is SENTINEL APEX's composite risk signal. It must never be
+  // relabeled as CVSS when cvss_score is absent; both are intentionally
+  // tracked independently for customer-facing explainability.
+  const riskScore = parseFloat(item.risk_score || 0);
+  const cvss      = parseFloat(item.cvss_score || 0);
+  const epss      = parseFloat(item.epss_score || 0);
+  const isKev     = Boolean(item.kev_present || (item.apex || {}).kev_listed);
+  const sev       = (item.severity || "").toUpperCase();
+  const ttps      = Array.isArray(item.ttps) ? item.ttps : [];
+  const actorRaw  = String(item.actor_tag || item.threat_actor || "").trim();
+  const actor     = _normalizeActor(actorRaw);
+  const iocCnt    = parseInt(item.ioc_count || 0);
+  let hasDet      = false;
+  try { hasDet = extractDetectionArtifacts(item).length > 0; } catch (_) { hasDet = false; }
+  const threatT   = (item.threat_type || "").toLowerCase();
 
   // WHY THIS MATTERS
   const whyParts = [];
-  if (isKev) whyParts.push("Listed in CISA KEV  -  confirmed active exploitation in the wild");
-  if (cvss >= 9) whyParts.push(`Critical CVSS ${cvss}  -  remote code execution or critical asset impact likely`);
-  else if (cvss >= 7) whyParts.push(`High-severity CVSS ${cvss}  -  significant compromise potential`);
-  if (epss > 0.3) whyParts.push(`EPSS ${(epss * 100).toFixed(1)}%  -  high probability of exploitation within 30 days`);
-  if (actor.canonical && actor.nation) {
-    const label = actor.nation === "RU" ? "Russian" : actor.nation === "CN" ? "Chinese" : actor.nation === "KP" ? "North Korean" : actor.nation === "IR" ? "Iranian" : "nation-state";
-    whyParts.push(`Attributed to ${actor.canonical} (${label} nexus)  -  high-sophistication persistent threat`);
+  if (isKev) whyParts.push("Listed in CISA KEV  -  active exploitation criteria are met for this vulnerability");
+  if (cvss >= 9) whyParts.push(`Critical CVSS ${cvss}  -  prioritize affected-asset assessment and remediation`);
+  else if (cvss >= 7) whyParts.push(`High-severity CVSS ${cvss}  -  significant technical impact is possible`);
+  else if (!(cvss > 0) && riskScore >= 9) whyParts.push(`SENTINEL APEX composite risk score ${riskScore}/10  -  high platform risk signal; this value is not CVSS`);
+  else if (!(cvss > 0) && riskScore >= 7) whyParts.push(`SENTINEL APEX composite risk score ${riskScore}/10  -  elevated platform risk signal; this value is not CVSS`);
+  if (epss > 0.3) whyParts.push(`EPSS ${(epss * 100).toFixed(1)}%  -  elevated modeled probability of exploitation within 30 days`);
+
+  if (actorRaw && actorRaw.toLowerCase() !== "unknown") {
+    const nationLabels = { RU: "Russian", CN: "Chinese", KP: "North Korean", IR: "Iranian" };
+    const label = nationLabels[actor.nation];
+    if (label) {
+      whyParts.push(`Threat-actor attribution: ${actor.canonical} (${label} nexus in the platform actor profile)  -  validate against supporting source evidence`);
+    } else {
+      whyParts.push(`Threat-actor attribution: ${actor.canonical}  -  validate attribution confidence and supporting source evidence`);
+    }
   }
-  if (threatT.includes("ransomware")) whyParts.push("Ransomware family  -  direct business continuity and financial risk");
-  if (threatT.includes("supply")) whyParts.push("Supply chain vector  -  upstream compromise risk to all downstream consumers");
+
+  if (threatT.includes("ransomware")) whyParts.push("Ransomware classification  -  business continuity, recovery and financial-impact controls should be reviewed");
+  if (threatT.includes("supply")) whyParts.push("Supply-chain classification  -  assess upstream and downstream exposure");
   if (whyParts.length === 0) whyParts.push(`${sev || "Unknown"} severity advisory from ${item.source || "intelligence feed"}  -  review for environment relevance`);
 
   // WHAT CHANGED
@@ -450,21 +501,21 @@ function _computeCopilot(item) {
   if (ageHours >= 0 && ageHours < 24) whatChanged.push("Freshly processed (<24h)  -  initial intelligence window");
   else if (ageHours >= 0 && ageHours < 72) whatChanged.push("Recent advisory (24-72h)  -  validate enrichment completeness");
   else if (ageHours > 0) whatChanged.push(`Advisory aged ${Math.round(ageHours / 24)} days  -  verify current exploitation status`);
-  if (iocCnt > 0) whatChanged.push(`${iocCnt} IOC(s) in inventory  -  network/endpoint blocking recommended`);
-  if (hasDet) whatChanged.push(`Detection rules available  -  deploy to SIEM/EDR immediately`);
-  if (!hasDet && ttps.length > 0) whatChanged.push("Detection rules not yet available  -  detection engineering required");
-  if (isKev && cvss < 7) whatChanged.push("KEV-listed despite moderate CVSS  -  exploitation complexity is low");
+  if (iocCnt > 0) whatChanged.push(`${iocCnt} IOC(s) recorded in the intelligence item  -  validate before blocking in the customer environment`);
+  if (hasDet) whatChanged.push("Structurally valid per-item detection artifacts are available through the canonical detection registry");
+  if (!hasDet && ttps.length > 0) whatChanged.push("No structurally valid per-item detection artifacts are currently available  -  detection engineering may be required");
+  if (isKev && cvss > 0 && cvss < 7) whatChanged.push("KEV-listed despite a CVSS score below 7  -  prioritize observed exploitation evidence over severity score alone");
 
   // WHAT TO INVESTIGATE FIRST
   const whatFirst = [];
-  if (isKev) whatFirst.push(`1. Verify patch status for all affected systems  -  KEV 15-day federal mandate applies`);
-  if (ttps.includes("T1566") || ttps.includes("T1566.001")) whatFirst.push("2. Review email gateway logs for phishing delivery vectors (last 72h)");
-  if (ttps.includes("T1078") || ttps.includes("T1133")) whatFirst.push("3. Audit external-facing authentication logs for anomalous access");
-  if (ttps.includes("T1059") || ttps.includes("T1059.001")) whatFirst.push("4. Review PowerShell/command execution logs on critical hosts");
-  if (ttps.some(t => t.startsWith("T1003"))) whatFirst.push("5. Monitor LSASS access via EDR  -  credential harvesting likely");
-  if (threatT.includes("ransomware")) whatFirst.push("6. Validate backup integrity and verify offline backup availability");
-  if (iocCnt > 0) whatFirst.push(`${whatFirst.length + 1}. Block IOCs at perimeter (${iocCnt} indicators available in this advisory)`);
-  if (whatFirst.length === 0) whatFirst.push(`1. Assess ${sev}-severity exposure across asset inventory`);
+  if (isKev) whatFirst.push("1. Verify affected-asset exposure and remediation against the CISA KEV due date and vendor guidance");
+  if (ttps.includes("T1566") || ttps.includes("T1566.001")) whatFirst.push("Review email gateway logs for phishing delivery vectors (last 72h)");
+  if (ttps.includes("T1078") || ttps.includes("T1133")) whatFirst.push("Audit external-facing authentication logs for anomalous access");
+  if (ttps.includes("T1059") || ttps.includes("T1059.001")) whatFirst.push("Review PowerShell/command execution logs on critical hosts");
+  if (ttps.some(t => t.startsWith("T1003"))) whatFirst.push("Monitor credential-access telemetry such as LSASS access through EDR");
+  if (threatT.includes("ransomware")) whatFirst.push("Validate backup integrity and offline/immutable recovery availability");
+  if (iocCnt > 0) whatFirst.push(`Validate and correlate the ${iocCnt} recorded indicator(s) against SIEM/EDR telemetry before containment actions`);
+  if (whatFirst.length === 0) whatFirst.push(`Assess ${sev || "recorded"} severity exposure across the asset inventory`);
 
   // WHAT LOGS
   const logSources = new Set();
@@ -484,11 +535,11 @@ function _computeCopilot(item) {
 
   // WHAT NEXT
   const whatNext = [];
-  if (!hasDet) whatNext.push("Engage detection engineering to author rules for identified TTPs");
-  if (iocCnt > 0) whatNext.push("Submit IOCs to TIP/SOAR for automated blocking workflow");
-  if (ttps.length > 3) whatNext.push("Run threat hunt using identified MITRE ATT&CK techniques");
-  whatNext.push("Brief security leadership within SLA window");
-  if (isKev || cvss >= 9) whatNext.push("Initiate emergency change request for patch deployment");
+  if (!hasDet) whatNext.push("Author and validate detections for the mapped TTPs before production deployment");
+  if (iocCnt > 0) whatNext.push("Validate indicators, then submit approved IOCs to TIP/SOAR or blocking workflows");
+  if (ttps.length > 3) whatNext.push("Run a threat hunt using the mapped MITRE ATT&CK techniques");
+  whatNext.push("Brief security leadership according to the organization's incident and vulnerability-management policy");
+  if (isKev || cvss >= 9 || riskScore >= 9) whatNext.push("Evaluate whether emergency remediation/change control is warranted based on exposure and business criticality");
 
   return { whyParts, whatChanged, whatFirst, logList, whatNext, ageHours };
 }
@@ -518,7 +569,8 @@ function _computePlaybook(item) {
   const ttps     = Array.isArray(item.ttps) ? item.ttps : [];
   const threatT  = (item.threat_type || "unknown").toLowerCase();
   const iocCnts  = item.ioc_counts || item.iocs_by_type || {};
-  const cvss     = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss     = parseFloat(item.cvss_score || 0);
+  const riskScore = parseFloat(item.risk_score || 0);
   const isKev    = Boolean(item.kev_present || (item.apex || {}).kev_listed);
 
   // IOC pivot plan
@@ -563,11 +615,12 @@ function _computePlaybook(item) {
   // Escalation criteria
   const escalation = [];
   if (isKev) escalation.push("ESCALATE IMMEDIATELY  -  CISA KEV-listed vulnerability with active exploitation");
-  if (cvss >= 9) escalation.push("ESCALATE  -  Critical CVSS; potential for widespread, uncontained compromise");
-  if (threatT.includes("ransomware")) escalation.push("ESCALATE  -  Ransomware family detected; activate BCP/DR procedures");
+  if (cvss >= 9) escalation.push("ESCALATE  -  Critical CVSS; prioritize exposure validation and remediation");
+  else if (!(cvss > 0) && riskScore >= 9) escalation.push("ESCALATE  -  SENTINEL APEX composite risk is critical; validate exposure before emergency action");
+  if (threatT.includes("ransomware")) escalation.push("ESCALATE  -  Ransomware classification; evaluate BCP/DR activation based on confirmed customer-environment evidence");
   if (ttps.some(t => ["T1486","T1489","T1490"].includes(t))) escalation.push("ESCALATE  -  Destructive/ransomware TTPs mapped; data integrity at risk");
   escalation.push("Escalate if IOC matches found on production or crown-jewel systems");
-  escalation.push(`Escalate if SLA threshold exceeded (CVSS ${cvss >= 7 ? "7+ = 30 day" : "4-6 = 45 day"} patch window)`);
+  escalation.push("Escalate if the organization's documented remediation SLA, vendor deadline, or applicable CISA KEV due date is at risk");
 
   // Timeline reconstruction steps
   const timelineSteps = [
