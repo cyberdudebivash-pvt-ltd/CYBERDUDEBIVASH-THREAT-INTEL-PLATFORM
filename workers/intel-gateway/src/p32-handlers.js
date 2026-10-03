@@ -890,7 +890,7 @@ export function computeP32EvidenceClaims(item) {
     const rawConfidence = Number.parseFloat(item.actor_confidence);
     const actorConfidence = Number.isFinite(rawConfidence)
       ? Math.max(0, Math.min(100, Math.round(rawConfidence)))
-      : 0;
+      : null;
     claims.push({
       claim: `Threat-actor attribution recorded: ${actor}`,
       source: sourceLabel,
@@ -941,7 +941,7 @@ export function buildP32EvidenceTransparencyBlock(item) {
     <div style="color:${c.color};font-size:11px;font-weight:700;margin-bottom:5px;">Claim: ${esc(c.claim)}</div>
     ${_row("Source", esc(c.source), "#94a3b8")}
     ${_row("Verification", esc(c.verification), "#06b6d4")}
-    ${_row("Confidence", `${c.confidence}%`, c.confidence >= 80 ? "#22c55e" : c.confidence >= 60 ? "#f59e0b" : "#ef4444")}
+    ${_row("Confidence", c.confidence == null ? "N/A" : `${c.confidence}%`, c.confidence == null ? "#6b7280" : c.confidence >= 80 ? "#22c55e" : c.confidence >= 60 ? "#f59e0b" : "#ef4444")}
     <div style="color:#8b949e;font-size:10px;margin-top:5px;line-height:1.4;">Reasoning: ${esc(c.reasoning)}</div>
   </div>`).join("");
 
