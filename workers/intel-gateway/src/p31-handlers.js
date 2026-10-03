@@ -204,23 +204,39 @@ function _buildGraph(items) {
 
   const addEdge = (source, target, rel, confidence, evidence) => {
     const key = `${source}->${rel}->${target}`;
+    const normalizedConfidence = Number.isFinite(confidence)
+      ? Math.max(0, Math.min(1, confidence))
+      : null;
     if (!edgeSet.has(key)) {
       edgeSet.add(key);
-      edges.push({ source, target, relation: rel, confidence, evidence, verified: confidence >= 0.75 });
+      edges.push({
+        source, target, relation: rel,
+        confidence: normalizedConfidence,
+        evidence,
+        verified: normalizedConfidence != null && normalizedConfidence >= 0.75,
+      });
       if (nodes.has(source)) nodes.get(source).edgeCount++;
       if (nodes.has(target)) nodes.get(target).edgeCount++;
     } else {
-      // Reinforce confidence on repeat observation
+      // Repeated observations must not manufacture confidence. Preserve the
+      // strongest explicit/derived value already carried by an observation.
       const e = edges.find(e => e.source === source && e.target === target && e.relation === rel);
-      if (e) e.confidence = Math.min(0.99, e.confidence + 0.05);
+      if (e && normalizedConfidence != null && (e.confidence == null || normalizedConfidence > e.confidence)) {
+        e.confidence = normalizedConfidence;
+        e.verified = normalizedConfidence >= 0.75;
+      }
     }
   };
 
   for (const item of items) {
     const itemId = `advisory:${item.id || item.stix_id || Math.random()}`;
-    const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+    const cvss = parseFloat(item.cvss_score || 0);
+    const riskScore = parseFloat(item.risk_score || 0);
     addNode(itemId, "advisory", (item.title || "Advisory").slice(0, 60), {
-      severity: item.severity, cvss, source: item.source,
+      severity: item.severity,
+      cvss: cvss > 0 ? cvss : null,
+      risk_score: riskScore > 0 ? riskScore : null,
+      source: item.source,
     });
 
     // Actor nodes
@@ -232,8 +248,19 @@ function _buildGraph(items) {
         nation: normalized.nation || "UNKNOWN", motivation: normalized.motivation || "unknown",
         aliases: normalized.aliases || [],
       });
-      const actorConf = cvss >= 7 ? 0.85 : 0.65;
-      addEdge(itemId, actorId, "attributed_to", actorConf, `CVE/advisory attribution from ${item.source || "pipeline"}`);
+      const rawActorConfidence = Number.parseFloat(item.actor_confidence);
+      const actorConf = Number.isFinite(rawActorConfidence)
+        ? Math.max(0, Math.min(1, rawActorConfidence > 1 ? rawActorConfidence / 100 : rawActorConfidence))
+        : null;
+      addEdge(
+        itemId,
+        actorId,
+        "attributed_to",
+        actorConf,
+        actorConf == null
+          ? `Attribution recorded by ${item.source || "pipeline"}; no explicit actor confidence supplied`
+          : `Attribution recorded by ${item.source || "pipeline"} with explicit actor_confidence`,
+      );
     }
 
     // Technique nodes
@@ -273,11 +300,18 @@ function _buildGraph(items) {
     const cveMatches = (item.title + " " + item.description).match(/CVE-\d{4}-\d+/g) || [];
     for (const cve of [...new Set(cveMatches)].slice(0, 3)) {
       const cveId = `cve:${cve}`;
-      addNode(cveId, "vulnerability", cve, { cvss });
+      addNode(cveId, "vulnerability", cve, {
+        cvss: cvss > 0 ? cvss : null,
+        risk_score: riskScore > 0 ? riskScore : null,
+      });
       addEdge(itemId, cveId, "references", 0.99, "CVE mention in advisory title/description");
       if (actorRaw && actorRaw !== "Unknown") {
         const actorId = `actor:${actorRaw.toLowerCase().replace(/\s+/g, "_")}`;
-        addEdge(actorId, cveId, "exploits", cvss >= 7 ? 0.80 : 0.60, "Actor-CVE co-occurrence in advisory");
+        const rawActorConfidence = Number.parseFloat(item.actor_confidence);
+        const actorConf = Number.isFinite(rawActorConfidence)
+          ? Math.max(0, Math.min(1, rawActorConfidence > 1 ? rawActorConfidence / 100 : rawActorConfidence))
+          : null;
+        addEdge(actorId, cveId, "exploits", actorConf, "Actor-CVE co-occurrence recorded in the advisory; explicit actor confidence carried when available");
       }
     }
 
@@ -316,11 +350,17 @@ function _buildGraph(items) {
       total_nodes: nodeArr.length,
       total_edges: edges.length,
       by_type: _countByField(nodeArr, "type"),
-      avg_confidence: edges.length > 0
-        ? Math.round(edges.reduce((s, e) => s + e.confidence, 0) / edges.length * 100) / 100
-        : 0,
+      avg_confidence: (() => {
+        const scored = edges.filter(e => Number.isFinite(e.confidence));
+        return scored.length > 0
+          ? Math.round(scored.reduce((s, e) => s + e.confidence, 0) / scored.length * 100) / 100
+          : null;
+      })(),
+      scored_edges: edges.filter(e => Number.isFinite(e.confidence)).length,
+      unscored_edges: edges.filter(e => !Number.isFinite(e.confidence)).length,
       verified_edges: edges.filter(e => e.verified).length,
-      high_confidence_edges: edges.filter(e => e.confidence >= 0.85).length,
+      high_confidence_edges: edges.filter(e => Number.isFinite(e.confidence) && e.confidence >= 0.85).length,
+      confidence_semantics: "relationship evidence confidence; null means no explicit relation-specific confidence was available",
     },
   };
 }
@@ -393,9 +433,10 @@ function _computeCampaignContext(item, allItems) {
   }).slice(0, 6);
 
   // Derive campaign name from actor + threat_type
-  const actorNorm = _normalizeActor(item.actor_tag || "");
-  const campaignName = actorNorm.canonical !== (item.actor_tag || "")
-    ? `${actorNorm.canonical}  -  ${(item.threat_type || "Intelligence").replace(/_/g, " ")} Campaign`
+  const actorName = String(item.actor_tag || item.threat_actor || "").trim();
+  const actorNorm = _normalizeActor(actorName);
+  const campaignName = actorName && actorName.toLowerCase() !== "unknown"
+    ? `${actorNorm.canonical || actorName}  -  ${(item.threat_type || "Intelligence").replace(/_/g, " ")} Campaign`
     : null;
 
   // Timeline events from timestamps
