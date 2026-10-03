@@ -299,6 +299,7 @@ a:hover{text-decoration:underline;}
         <div class="iw-note" id="iw-mode-note"></div>
         <div style="display:flex;gap:7px;flex-wrap:wrap;">
           <button class="iw-btn iw-btn-secondary" id="iw-download-json" type="button">DOWNLOAD JSON</button>
+          <button class="iw-btn iw-btn-secondary" id="iw-download-detections" type="button" hidden>DOWNLOAD DETECTIONS</button>
           <button class="iw-btn iw-btn-secondary" id="iw-print" type="button">PRINT / SAVE PDF</button>
           <a class="iw-btn" href="/api-docs.html" style="text-decoration:none;">API CONTRACTS</a>
         </div>
@@ -594,12 +595,22 @@ window.runSandbox = function() {
     if(secondary){d.appendChild(document.createTextNode(' — '+String(secondary)));}
     target.appendChild(d);
   }
+  function linkRow(target,primary,href){
+    if(!href)return;
+    var d=text('div','', 'iw-row');
+    var s=document.createElement('strong');s.textContent=String(primary||'');d.appendChild(s);
+    d.appendChild(document.createTextNode(' — '));
+    var a=document.createElement('a');a.href=String(href);a.target='_blank';a.rel='noopener';
+    a.textContent=String(href);a.style.color='var(--accent)';a.style.overflowWrap='anywhere';d.appendChild(a);
+    target.appendChild(d);
+  }
   function badge(target,value){if(!value)return;target.appendChild(text('span',value,'iw-badge'));}
   function setState(message,ok){state.textContent=message;state.style.color=ok===false?'#fca5a5':'#94a3b8';}
   function renderLimitations(target,items){(items||[]).forEach(function(v){row(target,'LIMITATION',v);});}
 
   function renderReplay(data){
     lastPayload=data;
+    var detBtn=document.getElementById('iw-download-detections');if(detBtn)detBtn.hidden=true;
     var timeline=clear('iw-timeline'), evidence=clear('iw-evidence'), mitre=clear('iw-mitre'), corr=clear('iw-correlation'), actions=clear('iw-actions');
     (data.events||[]).forEach(function(e){row(timeline,e.offset+' · '+e.stage,e.rule+' · '+e.severity);});
     row(evidence,'Synthetic scenario',data.description||data.name);
@@ -629,8 +640,13 @@ window.runSandbox = function() {
     (data.risk_explanation&&data.risk_explanation.next_actions||[]).forEach(function(v){row(actions,'NEXT',v);});
     renderLimitations(actions,data.limitations);
     var report=data.customer_outputs&&data.customer_outputs.report||{};
-    if(report.html) row(actions,'REPORT',report.html);
-    if(report.pdf) row(actions,'PDF',report.pdf);
+    if(report.html) linkRow(actions,'REPORT',report.html);
+    if(report.pdf) linkRow(actions,'PDF',report.pdf);
+    var itemScoped=data.customer_outputs&&data.customer_outputs.item_scoped||{};
+    var detBtn=document.getElementById('iw-download-detections');
+    if(detBtn)detBtn.hidden=!(itemScoped.detections&&data.detection_availability&&data.detection_availability.artifact_count>0);
+    if(itemScoped.detections) row(actions,'DETECTION API',itemScoped.detections);
+    if(itemScoped.stix) row(actions,'STIX API',itemScoped.stix);
     document.getElementById('iw-mode-note').textContent='Mode: LIVE AUTHENTICATED READ · No state mutations · API key retained only in this page input memory. Generated '+String(data.generated_at||'');
     output.hidden=false;footer.hidden=false;
   }
@@ -676,6 +692,24 @@ window.runSandbox = function() {
     a.href=url;a.download='sentinel-apex-'+safe+'.json';document.body.appendChild(a);a.click();a.remove();
     setTimeout(function(){URL.revokeObjectURL(url);},0);
   });
+  document.getElementById('iw-download-detections').addEventListener('click',async function(){
+    var outputs=lastPayload&&lastPayload.customer_outputs&&lastPayload.customer_outputs.item_scoped||{};
+    var path=outputs.detections;
+    var key=document.getElementById('iw-live-key').value.trim();
+    if(!path||!key){setState('Load an authenticated live investigation before downloading detections.',false);return;}
+    setState('Loading item-scoped detection artifacts...');
+    try{
+      var data=await fetchJson(path,{cache:'no-store',headers:{'X-API-Key':key}});
+      var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+      var url=URL.createObjectURL(blob);var a=document.createElement('a');
+      var raw=lastPayload&&lastPayload.intelligence&&lastPayload.intelligence.id||'investigation';
+      var safe=String(raw).replace(/[^a-zA-Z0-9._-]+/g,'-').slice(0,80)||'investigation';
+      a.href=url;a.download='sentinel-apex-'+safe+'-detections.json';document.body.appendChild(a);a.click();a.remove();
+      setTimeout(function(){URL.revokeObjectURL(url);},0);
+      setState('Item-scoped detection artifacts downloaded from the canonical detection registry.',true);
+    }catch(e){setState('Detection download unavailable: '+e.message,false);}
+  });
+
   document.getElementById('iw-print').addEventListener('click',function(){
     document.body.classList.add('iw-printing');
     var cleanup=function(){document.body.classList.remove('iw-printing');window.removeEventListener('afterprint',cleanup);};
