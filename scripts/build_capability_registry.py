@@ -158,7 +158,10 @@ CLASSIFICATIONS = {
     "sentinel-master-ops-center.html": ("ADMIN", None, "CDB-internal master operations command center."),
     # -- CUSTOMER_UI form-only: real customer surface, only function is a form/CTA --
     "contact-enterprise.html": ("CUSTOMER_UI", "form_only", "Enterprise sales contact form."),
-    "demo.html": ("CUSTOMER_UI", "form_only", "'Book a Demo' page; explicitly self-labeled sandbox/demo mode."),
+    "demo.html": ("CUSTOMER_UI", "live",
+        "2026-10-04: booking page now includes a real read-only Investigation Workbench. Public replay calls "
+        "/api/v1/demo/replay and is explicitly synthetic; authenticated PRO+/MSSP mode calls "
+        "/api/v1/investigation/item. The legacy API sandbox remains explicitly labelled static sample data."),
     "enterprise-demo.html": ("CUSTOMER_UI", "form_only", "Enterprise-tier 'Book a Demo' page."),
     "executive-briefing.html": ("CUSTOMER_UI", "form_only", "CISO/board briefing-pack marketing page; ROI cites a real external IBM breach-cost report."),
     "lead-capture.html": ("CUSTOMER_UI", "form_only", "Paywall-unlock lead-gen form."),
