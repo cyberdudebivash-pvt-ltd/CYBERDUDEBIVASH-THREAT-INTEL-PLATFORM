@@ -32,7 +32,17 @@ const baseItem = {
   ioc_count: 2,
   ioc_counts: { ipv4: 1, domain: 1 },
   iocs: ['192.0.2.99', 'do-not-leak.example'],
-  detection_bundle: { sigma: 'title: fixture' },
+  sigma_rule: [
+    'title: Workbench fixture',
+    'status: experimental',
+    'logsource:',
+    '  product: windows',
+    'detection:',
+    '  selection:',
+    '    EventID: 1',
+    '  condition: selection',
+  ].join('\n'),
+  kql_query: 'SecurityEvent | where EventID == 1 | project TimeGenerated, Computer',
   report_url: '/reports/2026/10/intel--workbench-test-001.html',
   pdf_url: '/reports/pdf/intel--workbench-test-001.pdf',
 };
@@ -141,6 +151,15 @@ test('FREE identity cannot cross the graph entitlement boundary', async () => {
   assert.equal(res.status, 402);
 });
 
+test('unknown or legacy tier strings fail closed instead of inheriting paid access', async () => {
+  const res = await call('/api/v1/investigation/item?id=' + encodeURIComponent(baseItem.id), {
+    auth: { tier: 'LEGACY_PRO', key: 'l'.repeat(32), sub: 'legacy-test', scopes: ['read:intel'] },
+  });
+  assert.equal(res.status, 402);
+  const body = await res.json();
+  assert.equal(body.status, 'locked');
+});
+
 test('explicit restrictive scope fails closed on paid identity', async () => {
   const res = await call('/api/v1/investigation/item?id=' + encodeURIComponent(baseItem.id), {
     auth: { ...paidAuth, scopes: ['read:cves'] },
@@ -182,14 +201,51 @@ test('paid investigation composes canonical engines without leaking raw IOC valu
   assert.ok(body.correlation.related_items.some(i => i.id === relatedItem.id));
   assert.ok(body.correlation.graph.nodes.length > 0);
   assert.ok(body.evidence_timeline.length > 0);
+  assert.ok(body.evidence_timeline.some(e => e.label === 'Detection Rules Published'));
   assert.ok(body.investigation_playbook);
   assert.equal(body.detection_availability.sigma, true);
+  assert.equal(body.detection_availability.kql, true);
+  assert.equal(body.detection_availability.artifact_count, 2);
+  assert.equal(body.detection_availability.validation, 'canonical_detection_registry');
   assert.equal(body.customer_outputs.report.html, baseItem.report_url);
   assert.equal(body.customer_outputs.report.pdf, baseItem.pdf_url);
+  assert.equal(body.customer_outputs.item_scoped.detections, '/api/v1/detections?intel_id=' + encodeURIComponent(baseItem.id));
+  assert.equal(body.customer_outputs.item_scoped.stix, '/api/stix?id=' + encodeURIComponent(baseItem.id));
 
   const serialized = JSON.stringify(body);
   assert.doesNotMatch(serialized, /192\.0\.2\.99/);
   assert.doesNotMatch(serialized, /do-not-leak\.example/);
+});
+
+test('composite risk is never mislabeled as CVSS in analyst evidence', async () => {
+  const riskOnly = {
+    ...baseItem,
+    id: 'intel--risk-only',
+    stix_id: 'indicator--33333333-3333-4333-8333-333333333333',
+    title: 'Risk-only fixture',
+    risk_score: 9.4,
+    cvss_score: null,
+    epss_score: null,
+    kev_present: false,
+    actor_tag: '',
+    actor_confidence: null,
+    ioc_count: 0,
+    ioc_counts: {},
+    iocs: [],
+    sigma_rule: '',
+    kql_query: '',
+    report_url: '',
+    pdf_url: '',
+  };
+  const res = await call('/api/v1/investigation/item?id=' + encodeURIComponent(riskOnly.id), {
+    env: envWith([riskOnly]),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  const claims = body.evidence_claims.map(c => c.claim);
+  assert.ok(claims.some(v => /SENTINEL APEX composite risk score 9\.4\/10/.test(v)));
+  assert.ok(!claims.some(v => /CVSS score 9\.4/.test(v)));
+  assert.ok(body.risk_explanation.why_this_matters.some(v => /this value is not CVSS/.test(v)));
 });
 
 test('unsafe report targets are never projected to the customer response', () => {
