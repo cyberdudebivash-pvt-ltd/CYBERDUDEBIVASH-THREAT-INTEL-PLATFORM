@@ -210,7 +210,7 @@ test('paid investigation composes canonical engines without leaking raw IOC valu
   assert.equal(body.customer_outputs.report.html, baseItem.report_url);
   assert.equal(body.customer_outputs.report.pdf, baseItem.pdf_url);
   assert.equal(body.customer_outputs.item_scoped.detections, '/api/v1/detections?intel_id=' + encodeURIComponent(baseItem.id));
-  assert.equal(body.customer_outputs.item_scoped.stix, '/api/stix?id=' + encodeURIComponent(baseItem.id));
+  assert.equal(Object.hasOwn(body.customer_outputs.item_scoped, 'stix'), false);
 
   const serialized = JSON.stringify(body);
   assert.doesNotMatch(serialized, /192\.0\.2\.99/);
