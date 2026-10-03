@@ -812,82 +812,121 @@ export function computeP32EvidenceClaims(item) {
 
   const trust = computeEnterpriseTrustScore(item);
   const dim = name => trust.dims.find(d => d.name === name);
-  const dimPct = (name, fallback) => { const d = dim(name); return d ? Math.round((d.earned / d.max) * 100) : fallback; };
-  const dimReason = (name, fallback) => { const d = dim(name); return d ? d.rationale : fallback; };
+  const dimPct = (name, fallback) => {
+    const d = dim(name);
+    return d ? Math.round((d.earned / d.max) * 100) : fallback;
+  };
+  const dimReason = (name, fallback) => {
+    const d = dim(name);
+    return d ? d.rationale : fallback;
+  };
+  const sourceLabel = String(item.source || item.source_domain || "Intelligence feed").trim();
 
-  // KEV claim
+  // KEV claim: only emitted when the item explicitly carries the KEV marker.
   const kev = Boolean(item.kev_present || (item.apex || {}).kev_listed);
   if (kev) {
     claims.push({
-      claim: "Active exploitation confirmed",
+      claim: "Listed in the CISA Known Exploited Vulnerabilities Catalog",
       source: "CISA Known Exploited Vulnerabilities (KEV) Catalog",
-      verification: "AUTOMATED  -  live KEV feed synchronization",
-      confidence: dimPct("Exploitation Verification", 99),
-      reasoning: dimReason("Exploitation Verification", "CISA requires confirmed evidence of active exploitation before KEV listing. Independent verification."),
+      verification: "AUTOMATED  -  KEV catalog match recorded by the enrichment pipeline",
+      confidence: dimPct("Exploitation Verification", 95),
+      reasoning: dimReason(
+        "Exploitation Verification",
+        "KEV inclusion is treated as evidence that CISA considers the vulnerability known to be exploited. This claim does not infer exploitation in a specific customer environment."
+      ),
       color: "#ef4444",
     });
   }
 
-  // CVSS claim
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+  // CVSS and SENTINEL APEX risk are distinct signals. Never substitute one
+  // for the other or label the platform composite score as CVSS.
+  const cvss = parseFloat(item.cvss_score || 0);
   if (cvss > 0) {
     claims.push({
       claim: `CVSS score ${cvss}  -  ${cvss >= 9 ? "Critical" : cvss >= 7 ? "High" : cvss >= 4 ? "Medium" : "Low"} severity`,
-      source: "NVD / Vendor Security Advisory",
-      verification: "AUTOMATED  -  NVD API batch enrichment (STAGE 3.1.2)",
-      confidence: dimPct("Severity Accuracy", 95),
-      reasoning: dimReason("Severity Accuracy", `CVSS v3.1 base score derived from AV/AC/PR/UI/S/C/I/A metrics. ${item.source || "Primary source"} advisory cross-referenced.`),
+      source: String(item.cvss_source || sourceLabel),
+      verification: "AUTOMATED  -  CVSS value present on the current intelligence record",
+      confidence: dimPct("Severity Accuracy", 90),
+      reasoning: dimReason(
+        "Severity Accuracy",
+        "CVSS is reported only from the dedicated cvss_score field; the platform composite risk score is not used as a substitute."
+      ),
       color: cvss >= 9 ? "#ef4444" : cvss >= 7 ? "#f97316" : "#f59e0b",
     });
   }
 
-  // EPSS claim
+  const riskScore = parseFloat(item.risk_score || 0);
+  if (riskScore > 0) {
+    claims.push({
+      claim: `SENTINEL APEX composite risk score ${riskScore}/10`,
+      source: "SENTINEL APEX risk engine",
+      verification: "AUTOMATED  -  platform risk score carried on the current intelligence record",
+      confidence: dimPct("Severity Accuracy", 80),
+      reasoning: "Composite platform risk signal. It is explicitly separate from CVSS and should be interpreted with the underlying CVSS, EPSS, KEV, IOC and ATT&CK evidence.",
+      color: riskScore >= 9 ? "#ef4444" : riskScore >= 7 ? "#f97316" : riskScore >= 4 ? "#f59e0b" : "#22c55e",
+    });
+  }
+
+  // EPSS claim.
   const epss = parseFloat(item.epss_score || 0);
   if (epss > 0) {
     claims.push({
-      claim: `${(epss * 100).toFixed(1)}% probability of exploitation within 30 days`,
-      source: "FIRST.org EPSS Model (Exploit Prediction Scoring System)",
-      verification: "AUTOMATED  -  FIRST.org API batch query (STAGE 3.1.2)",
+      claim: `${(epss * 100).toFixed(1)}% modeled probability of exploitation within 30 days`,
+      source: String(item.epss_source || "FIRST.org EPSS"),
+      verification: "AUTOMATED  -  EPSS score present on the current intelligence record",
       confidence: dimPct("EPSS Probability Score", 85),
-      reasoning: dimReason("EPSS Probability Score", "EPSS is a ML model trained on vulnerability characteristics and exploitation history. Score reflects exploitation probability vs. peer vulnerabilities."),
+      reasoning: dimReason(
+        "EPSS Probability Score",
+        "EPSS estimates exploitation probability for a vulnerability population; it is not evidence that a specific customer environment was exploited."
+      ),
       color: epss > 0.5 ? "#ef4444" : epss > 0.1 ? "#f97316" : "#22c55e",
     });
   }
 
-  // Attribution claim -- already item-aware (item.actor_confidence), not part of
-  // the hardcoded-regardless-of-evidence pattern the other claims had. Unchanged.
-  const actor = item.actor_tag || item.threat_actor;
-  if (actor) {
+  // Attribution claim. Do not invent confidence or claim a specific
+  // correlation method when the record does not carry that evidence.
+  const actor = String(item.actor_tag || item.threat_actor || "").trim();
+  if (actor && actor.toLowerCase() !== "unknown") {
+    const rawConfidence = Number.parseFloat(item.actor_confidence);
+    const actorConfidence = Number.isFinite(rawConfidence)
+      ? Math.max(0, Math.min(100, Math.round(rawConfidence)))
+      : 0;
     claims.push({
-      claim: `Attributed to threat actor: ${actor}`,
-      source: item.source || "OSINT / Threat Intelligence Vendor",
-      verification: "AUTOMATED  -  Actor attribution enricher (STAGE 3.1.10)",
-      confidence: Math.min(80, Math.round(parseFloat(item.actor_confidence || 60))),
-      reasoning: "Attribution derived from TTP fingerprint matching, infrastructure overlap, and MITRE ATT&CK group profile. Confirm via independent vendor feed.",
+      claim: `Threat-actor attribution recorded: ${actor}`,
+      source: sourceLabel,
+      verification: "RECORDED ATTRIBUTION  -  supporting source evidence should be reviewed before operational attribution decisions",
+      confidence: actorConfidence,
+      reasoning: Number.isFinite(rawConfidence)
+        ? "Confidence is the explicit actor_confidence value carried by the intelligence record; no additional confidence is invented here."
+        : "No explicit actor_confidence value is present, so this surface does not assign an inferred attribution confidence.",
       color: "#8b5cf6",
     });
   }
 
-  // IOC claim
-  const iocCnt = parseInt(item.ioc_count || 0);
-  if (iocCnt > 0) {
+  // IOC inventory claim. Presence/count is factual; external validation is
+  // not asserted unless a dedicated per-indicator validation record is used.
+  const iocCnt = parseInt(item.ioc_count || 0, 10);
+  if (Number.isFinite(iocCnt) && iocCnt > 0) {
     claims.push({
-      claim: `${iocCnt} actionable threat indicator(s) verified`,
-      source: "OSINT IOC Enrichment (VirusTotal / Shodan / RiskIQ)",
-      verification: "AUTOMATED  -  P20.2 IOC Hardener + OSINT enricher (STAGE 3.1.9)",
-      confidence: dimPct("IOC Operational Quality", 78),
-      reasoning: dimReason("IOC Operational Quality", "IOCs validated against external threat intelligence platforms. P20-hardened indicators have FP filtering applied."),
+      claim: `${iocCnt} threat indicator(s) recorded on this intelligence item`,
+      source: sourceLabel,
+      verification: "AUTOMATED  -  IOC inventory/count present after pipeline processing",
+      confidence: dimPct("IOC Operational Quality", 70),
+      reasoning: dimReason(
+        "IOC Operational Quality",
+        "This claim confirms inventory presence only. Validate per-indicator provenance, freshness and confidence before customer-environment blocking or containment."
+      ),
       color: "#22c55e",
     });
   }
 
   if (claims.length === 0) {
     claims.push({
-      claim: "Advisory published  -  no high-confidence claims verified",
-      source: item.source || "Feed source",
-      verification: "PENDING  -  enrichment pipeline",
+      claim: "Advisory published  -  no enriched evidence claim is currently available",
+      source: sourceLabel,
+      verification: "PENDING  -  additional enrichment/evidence required",
       confidence: Math.min(40, trust.pct),
-      reasoning: "Advisory entered pipeline but enrichment data not yet available. Confidence will increase as CVSS/EPSS/KEV data is populated.",
+      reasoning: "The record is present, but this evidence surface does not have enough explicit fields to make a stronger claim.",
       color: "#6b7280",
     });
   }
