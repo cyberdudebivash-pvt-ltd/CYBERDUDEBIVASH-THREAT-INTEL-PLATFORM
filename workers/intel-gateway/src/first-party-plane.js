@@ -166,6 +166,11 @@ export const FIRST_PARTY_READ_PATHS = Object.freeze(new Set([
   "/api/ai-feed/offer",
   "/api/ai-feed/health",
   "/api/ai-feed/live",
+  // demo.html's read-only analyst replay: one deterministic synthetic GET per
+  // page render. No credential, customer data, mutation or external action.
+  // Keep it on the web-read budget so a shared NAT cannot exhaust the 50/day
+  // commercial FREE quota merely by evaluating the public product demo.
+  "/api/v1/demo/replay",
 ]));
 
 /**
