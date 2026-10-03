@@ -324,6 +324,14 @@ function _buildGraph(items) {
   };
 }
 
+/**
+ * Side-effect-free graph projection for composed investigation surfaces.
+ * This is the same canonical P31 graph builder used by /api/v1/p31/graph.
+ */
+export function computeP31Graph(items) {
+  return _buildGraph(Array.isArray(items) ? items : []);
+}
+
 function _countByField(arr, field) {
   return arr.reduce((acc, item) => {
     acc[item[field]] = (acc[item[field]] || 0) + 1;
@@ -483,6 +491,18 @@ function _computeCopilot(item) {
   if (isKev || cvss >= 9) whatNext.push("Initiate emergency change request for patch deployment");
 
   return { whyParts, whatChanged, whatFirst, logList, whatNext, ageHours };
+}
+
+/**
+ * Read-only projections for composed analyst experiences. They intentionally expose
+ * the existing P31 calculations instead of reimplementing correlation or guidance.
+ */
+export function computeP31EntityNormalization(item) {
+  return _computeEntityNormalization(item || {});
+}
+
+export function computeP31Copilot(item) {
+  return _computeCopilot(item || {});
 }
 
 /**
@@ -745,6 +765,10 @@ export function buildP31CopilotBlock(item) {
 }
 
 // -- P31.5: Investigation Playbook Block ---------------------------------------
+
+export function computeP31Playbook(item) {
+  return _computePlaybook(item || {});
+}
 
 export function buildP31PlaybookBlock(item) {
   const pb = _computePlaybook(item);
