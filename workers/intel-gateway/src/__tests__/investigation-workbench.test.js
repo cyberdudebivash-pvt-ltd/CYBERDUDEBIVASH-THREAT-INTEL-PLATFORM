@@ -93,7 +93,7 @@ test('capabilities truthfully declare a read-only surface', async () => {
   assert.equal(body.mode, 'read_only');
   assert.equal(body.safety.mutations, false);
   assert.equal(body.safety.binary_detonation, false);
-  assert.equal(body.safety.raw_ioc_values_in_workbench_response, false);
+  assert.equal(body.safety.raw_ioc_arrays_in_workbench_response, false);
 });
 
 test('synthetic replay is public, deterministic in structure and explicitly non-operational', async () => {
