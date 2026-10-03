@@ -742,6 +742,51 @@ jobs:
           fi
 
           echo ""
+          echo "--- Investigation Workbench public contract canary ---"
+          CAPABILITIES=$(curl -sf --max-time 15 "https://intel.cyberdudebivash.com/api/v1/investigation/capabilities")
+          REPLAY=$(curl -sf --max-time 15 "https://intel.cyberdudebivash.com/api/v1/demo/replay?scenario=ransomware")
+          CAPABILITIES_JSON="$CAPABILITIES" REPLAY_JSON="$REPLAY" python3 - <<'PY'
+          import json, os, sys
+          cap = json.loads(os.environ["CAPABILITIES_JSON"])
+          replay = json.loads(os.environ["REPLAY_JSON"])
+
+          errors = []
+          if cap.get("mode") != "read_only":
+              errors.append("capabilities.mode must be read_only")
+          safety = cap.get("safety") or {}
+          for key in ("mutations", "binary_detonation", "external_scanning", "raw_ioc_arrays_in_workbench_response"):
+              if safety.get(key) is not False:
+                  errors.append(f"capabilities.safety.{key} must be false")
+
+          if replay.get("synthetic") is not True:
+              errors.append("replay.synthetic must be true")
+          if replay.get("read_only") is not True:
+              errors.append("replay.read_only must be true")
+          for key in ("customer_data", "network_actions", "malware_execution"):
+              if replay.get(key) is not False:
+                  errors.append(f"replay.{key} must be false")
+          events = replay.get("events") or []
+          if len(events) < 5:
+              errors.append("ransomware replay must contain at least five deterministic workflow events")
+          if any(not str(e.get("technique", "")).startswith("T") for e in events):
+              errors.append("every replay event must carry a MITRE ATT&CK technique id")
+
+          if errors:
+              print("FATAL: Investigation Workbench public contract canary failed:")
+              for e in errors:
+                  print(" -", e)
+              sys.exit(1)
+          print("OK: Investigation capabilities + synthetic replay safety contracts verified live")
+          PY
+
+          POST_REPLAY_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 -X POST             "https://intel.cyberdudebivash.com/api/v1/demo/replay?scenario=ransomware" || echo "000")
+          if [ "$POST_REPLAY_HTTP" != "405" ]; then
+            echo "FATAL: synthetic replay write-boundary canary expected HTTP 405, got ${POST_REPLAY_HTTP}"
+            exit 1
+          fi
+          echo "OK: Investigation replay is GET-only (HTTP 405 on POST)"
+
+          echo ""
           echo "=== Post-Deploy Smoke Test COMPLETE ==="
 
   # FIX (P0, 2026-09-10, operational-readiness audit): this workflow -- the
