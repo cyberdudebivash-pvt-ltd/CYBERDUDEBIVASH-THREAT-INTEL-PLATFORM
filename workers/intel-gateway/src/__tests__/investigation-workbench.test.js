@@ -104,6 +104,7 @@ test('capabilities truthfully declare a read-only surface', async () => {
   assert.equal(body.safety.mutations, false);
   assert.equal(body.safety.binary_detonation, false);
   assert.equal(body.safety.raw_ioc_arrays_in_workbench_response, false);
+  assert.equal(body.safety.fabricated_relationship_confidence, false);
 });
 
 test('synthetic replay is public, deterministic in structure and explicitly non-operational', async () => {
@@ -202,6 +203,15 @@ test('paid investigation composes canonical engines without leaking raw IOC valu
   assert.ok(body.correlation.graph.nodes.length > 0);
   assert.equal(body.correlation.graph.edges.some(e => e.relation === 'exploits'), false);
   assert.equal(body.correlation.graph.edges.some(e => e.relation === 'employs_technique'), false);
+  assert.ok(body.correlation.graph.edges.every(e => e.confidence === null));
+  assert.ok(body.correlation.graph.edges.every(e => e.verified === false));
+  assert.ok(body.correlation.graph.edges.every(e => e.confidence_state === 'NOT_EXPOSED'));
+  assert.equal(body.correlation.graph.stats.avg_confidence, null);
+  assert.equal(body.correlation.graph.stats.scored_edges, 0);
+  assert.equal(body.correlation.graph.stats.unscored_edges, body.correlation.graph.stats.returned_edges);
+  assert.equal(body.correlation.graph.confidence_policy.numeric_relationship_confidence_exposed, false);
+  assert.equal(body.correlation.methodology.does_not_assert_common_campaign, true);
+  assert.match(body.correlation.methodology.note, /not proof/i);
   assert.ok(body.evidence_timeline.length > 0);
   assert.ok(body.evidence_timeline.some(e => e.label === 'Detection Rules Published'));
   assert.ok(body.investigation_playbook);
@@ -278,6 +288,7 @@ test('actor attribution without explicit confidence stays unknown', async () => 
   assert.ok(attributionEdge);
   assert.equal(attributionEdge.confidence, null);
   assert.equal(attributionEdge.verified, false);
+  assert.equal(attributionEdge.confidence_state, 'NOT_EXPOSED');
   assert.match(attributionEdge.evidence, /no explicit actor confidence supplied/);
 });
 
