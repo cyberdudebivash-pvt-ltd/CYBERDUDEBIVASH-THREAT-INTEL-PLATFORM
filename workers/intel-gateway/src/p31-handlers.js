@@ -271,11 +271,9 @@ function _buildGraph(items) {
       addNode(ttpId, "technique", ttp, { framework: "MITRE ATT&CK" });
       addEdge(itemId, ttpId, "uses_technique", 0.90, "MITRE ATT&CK mapping from pipeline enrichment");
 
-      // Link actor to technique if both present
-      if (actorRaw && actorRaw !== "Unknown") {
-        const actorId = `actor:${actorRaw.toLowerCase().replace(/\s+/g, "_")}`;
-        addEdge(actorId, ttpId, "employs_technique", 0.75, "Co-occurrence with attributed advisory");
-      }
+      // Do not synthesize a direct actor->technique edge from mere
+      // co-occurrence. The advisory->actor and advisory->technique edges
+      // preserve the evidence path without overstating actor behavior.
     }
 
     // Threat type nodes
@@ -305,14 +303,10 @@ function _buildGraph(items) {
         risk_score: riskScore > 0 ? riskScore : null,
       });
       addEdge(itemId, cveId, "references", 0.99, "CVE mention in advisory title/description");
-      if (actorRaw && actorRaw !== "Unknown") {
-        const actorId = `actor:${actorRaw.toLowerCase().replace(/\s+/g, "_")}`;
-        const rawActorConfidence = Number.parseFloat(item.actor_confidence);
-        const actorConf = Number.isFinite(rawActorConfidence)
-          ? Math.max(0, Math.min(1, rawActorConfidence > 1 ? rawActorConfidence / 100 : rawActorConfidence))
-          : null;
-        addEdge(actorId, cveId, "exploits", actorConf, "Actor-CVE co-occurrence recorded in the advisory; explicit actor confidence carried when available");
-      }
+      // Do not synthesize actor->CVE "exploits" from co-occurrence alone.
+      // The two evidence-backed advisory edges already preserve the graph
+      // path and let analysts decide whether stronger exploitation evidence
+      // exists elsewhere.
     }
 
     // IOC type nodes (structural only, no raw IOC values)
@@ -321,7 +315,7 @@ function _buildGraph(items) {
       if (!count || count === 0) continue;
       const iocTypeId = `ioc_type:${iocType.toLowerCase()}`;
       addNode(iocTypeId, "ioc_type", iocType.toUpperCase(), { count });
-      addEdge(itemId, iocTypeId, "contains_ioc_type", 0.99, `${count} ${iocType} IOC(s) verified by pipeline`);
+      addEdge(itemId, iocTypeId, "contains_ioc_type", 0.99, `${count} ${iocType} IOC(s) recorded on the intelligence item`);
     }
 
     // Severity cluster node
@@ -329,7 +323,7 @@ function _buildGraph(items) {
     if (["CRITICAL", "HIGH", "MEDIUM"].includes(sev)) {
       const sevId = `severity:${sev}`;
       addNode(sevId, "severity_cluster", sev, {});
-      addEdge(itemId, sevId, "severity_level", 0.99, "Pipeline-validated CVSS/severity mapping");
+      addEdge(itemId, sevId, "severity_level", 0.99, "Severity label carried on the current intelligence record");
     }
 
     // Tactic nodes (from kill_chain_phases or mitre_tactics)
