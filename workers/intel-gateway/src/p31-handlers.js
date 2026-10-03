@@ -39,6 +39,7 @@ import { computeActionabilityScore }   from './p23-handlers.js';
 import { computeEnterpriseTrustScore } from './p25-handlers.js';
 import { computeP26Grade }             from './p26-handlers.js';
 import { enforceTierGate }             from './revenue-enforcement.js';
+import { extractDetectionArtifacts }    from './detection-registry.js';
 
 export const P31_VERSION = "P31.0";
 
@@ -418,28 +419,43 @@ function _computeCampaignContext(item, allItems) {
  * this generates narrative-form natural-language copilot output.
  */
 function _computeCopilot(item) {
-  const cvss   = parseFloat(item.risk_score || item.cvss_score || 0);
-  const epss   = parseFloat(item.epss_score || 0);
-  const isKev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-  const sev    = (item.severity || "").toUpperCase();
-  const ttps   = Array.isArray(item.ttps) ? item.ttps : [];
-  const actor  = _normalizeActor(item.actor_tag || "");
-  const iocCnt = parseInt(item.ioc_count || 0);
-  const hasDet = Object.keys(item.detection_bundle || {}).length > 0;
-  const threatT = (item.threat_type || "").toLowerCase();
+  // risk_score is SENTINEL APEX's composite risk signal. It must never be
+  // relabeled as CVSS when cvss_score is absent; both are intentionally
+  // tracked independently for customer-facing explainability.
+  const riskScore = parseFloat(item.risk_score || 0);
+  const cvss      = parseFloat(item.cvss_score || 0);
+  const epss      = parseFloat(item.epss_score || 0);
+  const isKev     = Boolean(item.kev_present || (item.apex || {}).kev_listed);
+  const sev       = (item.severity || "").toUpperCase();
+  const ttps      = Array.isArray(item.ttps) ? item.ttps : [];
+  const actorRaw  = String(item.actor_tag || item.threat_actor || "").trim();
+  const actor     = _normalizeActor(actorRaw);
+  const iocCnt    = parseInt(item.ioc_count || 0);
+  let hasDet      = false;
+  try { hasDet = extractDetectionArtifacts(item).length > 0; } catch (_) { hasDet = false; }
+  const threatT   = (item.threat_type || "").toLowerCase();
 
   // WHY THIS MATTERS
   const whyParts = [];
-  if (isKev) whyParts.push("Listed in CISA KEV  -  confirmed active exploitation in the wild");
-  if (cvss >= 9) whyParts.push(`Critical CVSS ${cvss}  -  remote code execution or critical asset impact likely`);
-  else if (cvss >= 7) whyParts.push(`High-severity CVSS ${cvss}  -  significant compromise potential`);
-  if (epss > 0.3) whyParts.push(`EPSS ${(epss * 100).toFixed(1)}%  -  high probability of exploitation within 30 days`);
-  if (actor.canonical && actor.nation) {
-    const label = actor.nation === "RU" ? "Russian" : actor.nation === "CN" ? "Chinese" : actor.nation === "KP" ? "North Korean" : actor.nation === "IR" ? "Iranian" : "nation-state";
-    whyParts.push(`Attributed to ${actor.canonical} (${label} nexus)  -  high-sophistication persistent threat`);
+  if (isKev) whyParts.push("Listed in CISA KEV  -  active exploitation criteria are met for this vulnerability");
+  if (cvss >= 9) whyParts.push(`Critical CVSS ${cvss}  -  prioritize affected-asset assessment and remediation`);
+  else if (cvss >= 7) whyParts.push(`High-severity CVSS ${cvss}  -  significant technical impact is possible`);
+  else if (!(cvss > 0) && riskScore >= 9) whyParts.push(`SENTINEL APEX composite risk score ${riskScore}/10  -  high platform risk signal; this value is not CVSS`);
+  else if (!(cvss > 0) && riskScore >= 7) whyParts.push(`SENTINEL APEX composite risk score ${riskScore}/10  -  elevated platform risk signal; this value is not CVSS`);
+  if (epss > 0.3) whyParts.push(`EPSS ${(epss * 100).toFixed(1)}%  -  elevated modeled probability of exploitation within 30 days`);
+
+  if (actorRaw && actorRaw.toLowerCase() !== "unknown") {
+    const nationLabels = { RU: "Russian", CN: "Chinese", KP: "North Korean", IR: "Iranian" };
+    const label = nationLabels[actor.nation];
+    if (label) {
+      whyParts.push(`Threat-actor attribution: ${actor.canonical} (${label} nexus in the platform actor profile)  -  validate against supporting source evidence`);
+    } else {
+      whyParts.push(`Threat-actor attribution: ${actor.canonical}  -  validate attribution confidence and supporting source evidence`);
+    }
   }
-  if (threatT.includes("ransomware")) whyParts.push("Ransomware family  -  direct business continuity and financial risk");
-  if (threatT.includes("supply")) whyParts.push("Supply chain vector  -  upstream compromise risk to all downstream consumers");
+
+  if (threatT.includes("ransomware")) whyParts.push("Ransomware classification  -  business continuity, recovery and financial-impact controls should be reviewed");
+  if (threatT.includes("supply")) whyParts.push("Supply-chain classification  -  assess upstream and downstream exposure");
   if (whyParts.length === 0) whyParts.push(`${sev || "Unknown"} severity advisory from ${item.source || "intelligence feed"}  -  review for environment relevance`);
 
   // WHAT CHANGED
@@ -450,21 +466,21 @@ function _computeCopilot(item) {
   if (ageHours >= 0 && ageHours < 24) whatChanged.push("Freshly processed (<24h)  -  initial intelligence window");
   else if (ageHours >= 0 && ageHours < 72) whatChanged.push("Recent advisory (24-72h)  -  validate enrichment completeness");
   else if (ageHours > 0) whatChanged.push(`Advisory aged ${Math.round(ageHours / 24)} days  -  verify current exploitation status`);
-  if (iocCnt > 0) whatChanged.push(`${iocCnt} IOC(s) in inventory  -  network/endpoint blocking recommended`);
-  if (hasDet) whatChanged.push(`Detection rules available  -  deploy to SIEM/EDR immediately`);
-  if (!hasDet && ttps.length > 0) whatChanged.push("Detection rules not yet available  -  detection engineering required");
-  if (isKev && cvss < 7) whatChanged.push("KEV-listed despite moderate CVSS  -  exploitation complexity is low");
+  if (iocCnt > 0) whatChanged.push(`${iocCnt} IOC(s) recorded in the intelligence item  -  validate before blocking in the customer environment`);
+  if (hasDet) whatChanged.push("Structurally valid per-item detection artifacts are available through the canonical detection registry");
+  if (!hasDet && ttps.length > 0) whatChanged.push("No structurally valid per-item detection artifacts are currently available  -  detection engineering may be required");
+  if (isKev && cvss > 0 && cvss < 7) whatChanged.push("KEV-listed despite a CVSS score below 7  -  prioritize observed exploitation evidence over severity score alone");
 
   // WHAT TO INVESTIGATE FIRST
   const whatFirst = [];
-  if (isKev) whatFirst.push(`1. Verify patch status for all affected systems  -  KEV 15-day federal mandate applies`);
-  if (ttps.includes("T1566") || ttps.includes("T1566.001")) whatFirst.push("2. Review email gateway logs for phishing delivery vectors (last 72h)");
-  if (ttps.includes("T1078") || ttps.includes("T1133")) whatFirst.push("3. Audit external-facing authentication logs for anomalous access");
-  if (ttps.includes("T1059") || ttps.includes("T1059.001")) whatFirst.push("4. Review PowerShell/command execution logs on critical hosts");
-  if (ttps.some(t => t.startsWith("T1003"))) whatFirst.push("5. Monitor LSASS access via EDR  -  credential harvesting likely");
-  if (threatT.includes("ransomware")) whatFirst.push("6. Validate backup integrity and verify offline backup availability");
-  if (iocCnt > 0) whatFirst.push(`${whatFirst.length + 1}. Block IOCs at perimeter (${iocCnt} indicators available in this advisory)`);
-  if (whatFirst.length === 0) whatFirst.push(`1. Assess ${sev}-severity exposure across asset inventory`);
+  if (isKev) whatFirst.push("1. Verify affected-asset exposure and remediation against the CISA KEV due date and vendor guidance");
+  if (ttps.includes("T1566") || ttps.includes("T1566.001")) whatFirst.push("Review email gateway logs for phishing delivery vectors (last 72h)");
+  if (ttps.includes("T1078") || ttps.includes("T1133")) whatFirst.push("Audit external-facing authentication logs for anomalous access");
+  if (ttps.includes("T1059") || ttps.includes("T1059.001")) whatFirst.push("Review PowerShell/command execution logs on critical hosts");
+  if (ttps.some(t => t.startsWith("T1003"))) whatFirst.push("Monitor credential-access telemetry such as LSASS access through EDR");
+  if (threatT.includes("ransomware")) whatFirst.push("Validate backup integrity and offline/immutable recovery availability");
+  if (iocCnt > 0) whatFirst.push(`Validate and correlate the ${iocCnt} recorded indicator(s) against SIEM/EDR telemetry before containment actions`);
+  if (whatFirst.length === 0) whatFirst.push(`Assess ${sev || "recorded"} severity exposure across the asset inventory`);
 
   // WHAT LOGS
   const logSources = new Set();
@@ -484,11 +500,11 @@ function _computeCopilot(item) {
 
   // WHAT NEXT
   const whatNext = [];
-  if (!hasDet) whatNext.push("Engage detection engineering to author rules for identified TTPs");
-  if (iocCnt > 0) whatNext.push("Submit IOCs to TIP/SOAR for automated blocking workflow");
-  if (ttps.length > 3) whatNext.push("Run threat hunt using identified MITRE ATT&CK techniques");
-  whatNext.push("Brief security leadership within SLA window");
-  if (isKev || cvss >= 9) whatNext.push("Initiate emergency change request for patch deployment");
+  if (!hasDet) whatNext.push("Author and validate detections for the mapped TTPs before production deployment");
+  if (iocCnt > 0) whatNext.push("Validate indicators, then submit approved IOCs to TIP/SOAR or blocking workflows");
+  if (ttps.length > 3) whatNext.push("Run a threat hunt using the mapped MITRE ATT&CK techniques");
+  whatNext.push("Brief security leadership according to the organization's incident and vulnerability-management policy");
+  if (isKev || cvss >= 9 || riskScore >= 9) whatNext.push("Evaluate whether emergency remediation/change control is warranted based on exposure and business criticality");
 
   return { whyParts, whatChanged, whatFirst, logList, whatNext, ageHours };
 }
@@ -518,7 +534,8 @@ function _computePlaybook(item) {
   const ttps     = Array.isArray(item.ttps) ? item.ttps : [];
   const threatT  = (item.threat_type || "unknown").toLowerCase();
   const iocCnts  = item.ioc_counts || item.iocs_by_type || {};
-  const cvss     = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss     = parseFloat(item.cvss_score || 0);
+  const riskScore = parseFloat(item.risk_score || 0);
   const isKev    = Boolean(item.kev_present || (item.apex || {}).kev_listed);
 
   // IOC pivot plan
@@ -563,11 +580,12 @@ function _computePlaybook(item) {
   // Escalation criteria
   const escalation = [];
   if (isKev) escalation.push("ESCALATE IMMEDIATELY  -  CISA KEV-listed vulnerability with active exploitation");
-  if (cvss >= 9) escalation.push("ESCALATE  -  Critical CVSS; potential for widespread, uncontained compromise");
-  if (threatT.includes("ransomware")) escalation.push("ESCALATE  -  Ransomware family detected; activate BCP/DR procedures");
+  if (cvss >= 9) escalation.push("ESCALATE  -  Critical CVSS; prioritize exposure validation and remediation");
+  else if (!(cvss > 0) && riskScore >= 9) escalation.push("ESCALATE  -  SENTINEL APEX composite risk is critical; validate exposure before emergency action");
+  if (threatT.includes("ransomware")) escalation.push("ESCALATE  -  Ransomware classification; evaluate BCP/DR activation based on confirmed customer-environment evidence");
   if (ttps.some(t => ["T1486","T1489","T1490"].includes(t))) escalation.push("ESCALATE  -  Destructive/ransomware TTPs mapped; data integrity at risk");
   escalation.push("Escalate if IOC matches found on production or crown-jewel systems");
-  escalation.push(`Escalate if SLA threshold exceeded (CVSS ${cvss >= 7 ? "7+ = 30 day" : "4-6 = 45 day"} patch window)`);
+  escalation.push("Escalate if the organization's documented remediation SLA, vendor deadline, or applicable CISA KEV due date is at risk");
 
   // Timeline reconstruction steps
   const timelineSteps = [
