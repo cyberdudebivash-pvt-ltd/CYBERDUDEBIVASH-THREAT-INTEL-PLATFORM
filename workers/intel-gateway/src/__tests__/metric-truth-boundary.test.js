@@ -13,10 +13,13 @@ import { buildP27MultiAudienceBlock } from '../p27-handlers.js';
 import { buildP28BusinessImpactBlock } from '../p28-handlers.js';
 import { buildP29LifecycleBlock, handleP29CustomerValueAnalytics } from '../p29-handlers.js';
 import { buildP30SLABlock } from '../p30-handlers.js';
-import { buildP32DecisionBlock } from '../p32-handlers.js';
+import { buildP32DecisionBlock, handleP32Customer } from '../p32-handlers.js';
 import {
   buildP33CaseBlock,
   buildP33OperationalDashboardBlock,
+  handleP33Metrics,
+  handleP33Mission,
+  handleP33Observability,
 } from '../p33-handlers.js';
 
 const riskOnly = {
@@ -147,6 +150,69 @@ test('P29 value analytics leaves customer outcome estimates unavailable without 
   assert.ok(body.operational_capacity_signals.priority_review_items >= 1);
 });
 
+test('P32 customer summary keeps composite risk distinct from explicit CVSS', async () => {
+  const env = {
+    INTEL_R2: {
+      async get() {
+        return { async json() { return { items: [riskOnly] }; } };
+      },
+    },
+  };
+  const res = await handleP32Customer(
+    new Request('https://intel.cyberdudebivash.com/api/v1/p32/customer'),
+    env,
+  );
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.exposure_summary.high_risk_count, 1);
+});
+
+test('P33 mission and metrics never manufacture customer outcome or CVSS semantics', async () => {
+  const env = {
+    INTEL_R2: {
+      async get() {
+        return { async json() { return { items: [riskOnly] }; } };
+      },
+    },
+  };
+
+  const missionRes = await handleP33Mission(
+    new Request('https://intel.cyberdudebivash.com/api/v1/p33/mission'),
+    env,
+  );
+  assert.equal(missionRes.status, 200);
+  const mission = await missionRes.json();
+  for (const queue of Object.values(mission.queues)) {
+    for (const item of queue) {
+      assert.equal(item.cvss, null);
+      assert.equal(item.risk_score, 9.8);
+      assert.equal(item.risk_is_cvss, false);
+    }
+  }
+
+  const metricsRes = await handleP33Metrics(
+    new Request('https://intel.cyberdudebivash.com/api/v1/p33/metrics'),
+    env,
+  );
+  assert.equal(metricsRes.status, 200);
+  const metrics = await metricsRes.json();
+  assert.equal(metrics.customer_success.measurement_status, 'UNAVAILABLE');
+  assert.equal(metrics.customer_success.patch_completion_pct, null);
+  assert.equal(metrics.customer_success.ioc_deployment_pct, null);
+  assert.equal(metrics.customer_success.operational_maturity, null);
+  assert.ok(metrics.intelligence_output_coverage);
+  assert.equal(typeof metrics.intelligence_output_coverage.mitre_mapping_pct, 'number');
+
+  const obsRes = await handleP33Observability(
+    new Request('https://intel.cyberdudebivash.com/api/v1/p33/observability'),
+    env,
+  );
+  assert.equal(obsRes.status, 200);
+  const obs = await obsRes.json();
+  assert.equal(obs.pipeline.health_pct, null);
+  assert.equal(obs.pipeline.measurement_status, 'UNAVAILABLE');
+});
+
 test('source guard forbids risk-to-CVSS fallback across hardened customer P25-P33 layers', () => {
   const files = [
     '../p25-handlers.js',
@@ -162,6 +228,8 @@ test('source guard forbids risk-to-CVSS fallback across hardened customer P25-P3
     /risk_score\s*\|\|\s*item\.cvss_score/,
     /item\.cvss_score\s*\|\|\s*item\.risk_score/,
     /sd\.cvss\s*\|\|\s*item\.cvss_score\s*\|\|\s*item\.risk_score/,
+    /risk_score\s*\|\|\s*i\.cvss_score/,
+    /i\.risk_score\s*\|\|\s*i\.cvss_score/,
   ];
   for (const rel of files) {
     const source = fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
