@@ -28,6 +28,21 @@ class ManualBillingTruthTests(unittest.TestCase):
     def test_no_reference_has_no_payment_claim(self):
         self.assertEqual(self.subscription("")["payment_verification"], "not_applicable")
 
+    def test_subscription_metadata_does_not_invent_revenue(self):
+        with patch.object(onboarding, "load_json", return_value={"subscriptions": []}), patch.object(onboarding, "save_json") as save:
+            onboarding.register_subscription("SUB-TEST", "C-TEST", "buyer@example.com", "PRO", 30, "TEST-REF", "OPERATOR-REF", "a" * 16)
+        meta = save.call_args.args[1]["_meta"]
+        self.assertIsNone(meta["mrr_inr"])
+        self.assertIsNone(meta["arr_equivalent_inr"])
+        self.assertEqual(meta["estimated_monthly_catalog_value_inr"], 4100)
+
+    def test_customer_metadata_does_not_invent_revenue(self):
+        with patch.object(onboarding, "load_json", return_value={"customers": []}), patch.object(onboarding, "save_json") as save:
+            onboarding.register_customer("C-TEST", "Test", "buyer@example.com", "Test", "IN", "PRO", "TEST-REF", "a" * 16)
+        meta = save.call_args.args[1]["_meta"]
+        self.assertIsNone(meta["mrr_inr"])
+        self.assertIsNone(meta["arr_inr"])
+
     def test_plan_price_is_not_captured_revenue(self):
         with patch.object(onboarding, "append_jsonl") as append:
             onboarding.write_payment_audit(
@@ -40,3 +55,4 @@ class ManualBillingTruthTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
