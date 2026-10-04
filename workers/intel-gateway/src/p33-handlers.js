@@ -14,6 +14,7 @@ import { computeP20QualityScore, getPublicationStage } from './p20-handlers.js';
 import { computeActionabilityScore }                    from './p23-handlers.js';
 import { computeEnterpriseTrustScore }                  from './p25-handlers.js';
 import { computeP26Grade }                              from './p26-handlers.js';
+import { explicitCvss, explicitRiskScore }                from './metric-semantics.js';
 
 export const P33_VERSION = 'P33.0';
 
@@ -266,7 +267,7 @@ export function buildP33MissionBlock(item, items = []) {
   const buckets = {
     critical:   sample.filter(i => (i.severity||'').toUpperCase() === 'CRITICAL'),
     high:       sample.filter(i => (i.severity||'').toUpperCase() === 'HIGH'),
-    patch:      sample.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) >= 7),
+    patch:      sample.filter(i => (explicitCvss(i) ?? 0) >= 7),
     detection:  sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0),
     hunting:    sample.filter(i => i.actor_tag),
     ir:         sample.filter(i => (i.kev_present || i.kev_listed) || parseFloat(i.risk_score || 0) >= 9),
@@ -331,81 +332,102 @@ ${queueDefs.map(q => {
 // -- P33.4: Enterprise Intelligence Recommendations ----------------------------
 // Time-horizoned action plan derived from existing decision engines
 
-const _TIME_HORIZONS = ['Immediate', '24 Hours', '72 Hours', '7 Days', '30 Days', 'Quarterly'];
+const _TIME_HORIZONS = ['Priority Review', 'Validate', 'Respond', 'Follow-up', 'Periodic'];
 const _IMPROVEMENT_TYPES = ['Architecture', 'Detection', 'Process'];
 
 export function buildP33RecommendationsBlock(item) {
   const q   = computeP20QualityScore(item);
   const a   = computeActionabilityScore(item);
   const t   = computeEnterpriseTrustScore(item);
-  const sev = (item.severity || '').toUpperCase();
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
-  const kev  = item.kev_present || item.kev_listed;
+  const sev = String(item.severity || '').toUpperCase();
+  const cvss = explicitCvss(item);
+  const risk = explicitRiskScore(item);
+  const kev  = Boolean(item.kev_present || item.kev_listed || (item.apex || {}).kev_listed);
   const hasTTPs  = (item.ttps || item.mitre_tactics || []).length > 0;
-  const hasActor = !!item.actor_tag;
+  const hasActor = Boolean(item.actor_tag || item.threat_actor);
+  const iocCount = Number.parseInt(item.ioc_count || 0, 10) || 0;
 
   const horizons = {
-    'Immediate':   [],
-    '24 Hours':    [],
-    '72 Hours':    [],
-    '7 Days':      [],
-    '30 Days':     [],
-    'Quarterly':   [],
-    'Architecture':  [],
-    'Detection':     [],
-    'Process':       [],
+    'Priority Review': [],
+    'Validate':        [],
+    'Respond':         [],
+    'Follow-up':       [],
+    'Periodic':        [],
+    'Architecture':    [],
+    'Detection':       [],
+    'Process':         [],
   };
 
-  // Immediate
-  if (kev)               horizons['Immediate'].push('Apply KEV patch immediately (CISA binding directive)');
-  if (sev === 'CRITICAL') horizons['Immediate'].push('Activate incident response runbook');
-  if (cvss >= 9.5)       horizons['Immediate'].push('Emergency change window for critical CVSS 9.5+');
+  // Priority is evidence-driven; Sentinel APEX does not invent a universal
+  // response clock or assume that CISA BOD deadlines apply to every customer.
+  if (kev) horizons['Priority Review'].push(
+    'Validate affected assets against the CISA KEV entry, vendor guidance and any recorded KEV due date; remediate under the customer\'s documented vulnerability-management policy.'
+  );
+  if (cvss != null && cvss >= 9) horizons['Priority Review'].push(
+    `Explicit CVSS ${cvss.toFixed(1)}: confirm affected product/version and internet/customer exposure before emergency change decisions.`
+  );
+  if (cvss == null && risk != null && risk >= 9) horizons['Priority Review'].push(
+    `SENTINEL APEX composite risk ${risk.toFixed(1)}/10: validate authoritative technical severity and exposure; this value is not CVSS.`
+  );
+  if (sev === 'CRITICAL') horizons['Priority Review'].push(
+    'Review the critical-severity intelligence against customer telemetry and asset criticality; activate incident response only when incident evidence or customer policy warrants it.'
+  );
 
-  // 24 Hours
-  if (cvss >= 9)         horizons['24 Hours'].push('Deploy detection rules for CVSS ? 9.0 vulnerability');
-  if (hasActor)          horizons['24 Hours'].push(`Hunt for ${esc(item.actor_tag)} TTPs in environment`);
-  if (a >= 70)           horizons['24 Hours'].push('Execute high-actionability IOC block and alert rules');
+  // Validation precedes containment. Recorded IOCs/TTPs/attribution are
+  // intelligence inputs, not proof that a customer environment is compromised.
+  horizons['Validate'].push('Confirm source provenance, freshness, affected scope and customer-environment relevance.');
+  if (iocCount > 0) horizons['Validate'].push(
+    `Validate and correlate ${iocCount} recorded IOC(s) against approved SIEM/EDR/DNS/proxy telemetry before any blocking or containment action.`
+  );
+  if (hasActor) horizons['Validate'].push(
+    `Validate the recorded actor attribution (${esc(item.actor_tag || item.threat_actor)}) against source evidence and attribution confidence before actor-specific conclusions.`
+  );
+  if (hasTTPs) horizons['Validate'].push(
+    'Validate mapped MITRE ATT&CK techniques against observed customer telemetry; technique mapping alone does not prove execution.'
+  );
 
-  // 72 Hours
-  horizons['72 Hours'].push('Complete IOC deployment to SIEM and EDR');
-  if (hasTTPs)           horizons['72 Hours'].push('Validate MITRE ATT&CK detection coverage for affected TTPs');
-  horizons['72 Hours'].push('Distribute executive summary to leadership');
+  // Response actions remain conditional on confirmed evidence and customer
+  // approval/change-control boundaries.
+  horizons['Respond'].push(
+    'Select containment, remediation and detection changes from confirmed findings, asset criticality and the customer\'s approval/change-control process.'
+  );
+  if (kev || (cvss != null && cvss >= 7) || sev === 'HIGH' || sev === 'CRITICAL') {
+    horizons['Respond'].push(
+      'Prioritize verified vulnerable assets for remediation using vendor guidance, applicable external deadlines and the customer\'s documented SLA.'
+    );
+  }
+  if (hasTTPs) horizons['Respond'].push(
+    'Validate candidate detections in an approved staged/non-production workflow before broad production deployment where the customer requires change control.'
+  );
 
-  // 7 Days
-  horizons['7 Days'].push('Complete patch validation and rollout to all affected systems');
-  horizons['7 Days'].push('Conduct lessons-learned session with SOC team');
-  if (t < 60)            horizons['7 Days'].push('Request additional intelligence sources to improve confidence');
+  horizons['Follow-up'].push('Record evidence, decisions, residual risk and completed remediation in the customer case/change system.');
+  if (t < 60) horizons['Follow-up'].push('Seek additional corroborating intelligence to improve source/evidence confidence.');
+  if (hasTTPs) horizons['Follow-up'].push('Review detection coverage for the mapped ATT&CK techniques and document remaining visibility gaps.');
+  horizons['Follow-up'].push('Assess legal, regulatory or disclosure obligations only from confirmed incident facts with the customer\'s legal/compliance owners.');
 
-  // 30 Days
-  horizons['30 Days'].push('Review and update detection engineering coverage for affected TTP set');
-  horizons['30 Days'].push('Update incident response playbooks with findings');
-  horizons['30 Days'].push('Assess compliance impact and file required disclosures');
+  horizons['Periodic'].push('Re-evaluate this intelligence when source, KEV, EPSS, exploit, actor or affected-product evidence changes.');
+  horizons['Periodic'].push('Exercise relevant incident-response and recovery procedures on the customer\'s normal governance cadence.');
 
-  // Quarterly
-  horizons['Quarterly'].push('Benchmark detection coverage against MITRE ATT&CK Navigator');
-  horizons['Quarterly'].push('Review threat actor profiles and update watchlist');
-  horizons['Quarterly'].push('Conduct tabletop exercise based on this threat scenario');
-
-  // Architecture
-  if (a < 50)           horizons['Architecture'].push('Evaluate additional telemetry sources for detection gap');
-  horizons['Architecture'].push('Review zero-trust architecture controls for affected platforms');
-  horizons['Architecture'].push('Assess network segmentation for affected attack vectors');
-
-  // Detection
-  horizons['Detection'].push('Develop custom Sigma rules for identified TTPs');
-  horizons['Detection'].push('Tune existing KQL/SPL rules to reduce false positives');
-  if (!hasTTPs)         horizons['Detection'].push('Request MITRE ATT&CK mapping from intelligence provider');
-
-  // Process
-  horizons['Process'].push('Update vulnerability management SLA thresholds for KEV advisories');
-  horizons['Process'].push('Implement automated IOC ingestion pipeline');
-  horizons['Process'].push('Establish threat intelligence sharing agreement for related actors');
+  // Architecture / Detection / Process improvements.
+  if (a < 50) horizons['Architecture'].push('Evaluate additional telemetry sources for identified visibility gaps.');
+  horizons['Architecture'].push('Review segmentation, identity and exposure controls relevant to confirmed affected platforms.');
+  horizons['Detection'].push('Author or tune detections from validated ATT&CK/evidence context and measure false-positive/false-negative behavior in customer telemetry.');
+  if (!hasTTPs) horizons['Detection'].push('Obtain authoritative ATT&CK mapping before technique-specific detection claims.');
+  horizons['Process'].push('Keep KEV/vendor/customer deadlines distinct; do not substitute platform-generated timing for the customer\'s SLA.');
+  horizons['Process'].push('Require provenance/freshness validation and approval before automated IOC containment.');
+  horizons['Process'].push('Document actor-attribution and legal-materiality evidence thresholds in the customer\'s governance process.');
 
   const HORIZON_COLORS = {
-    'Immediate': '#ef4444', '24 Hours': '#f97316', '72 Hours': '#eab308',
-    '7 Days': '#3b82f6', '30 Days': '#8b5cf6', 'Quarterly': '#22c55e',
+    'Priority Review': '#ef4444', 'Validate': '#f97316', 'Respond': '#eab308',
+    'Follow-up': '#3b82f6', 'Periodic': '#22c55e',
     'Architecture': '#06b6d4', 'Detection': '#a78bfa', 'Process': '#94a3b8',
   };
+
+  const metricBadge = cvss != null
+    ? `Explicit CVSS ${cvss.toFixed(1)}`
+    : risk != null
+      ? `APEX risk ${risk.toFixed(1)}/10 (not CVSS)`
+      : 'No explicit CVSS/risk score';
 
   const html = `
 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
@@ -413,10 +435,10 @@ export function buildP33RecommendationsBlock(item) {
     ['Quality', q + '/100', '#06b6d4'],
     ['Actionability', a + '/100', '#8b5cf6'],
     ['Trust', t + '/100', '#22c55e'],
-  ].map(([l, v, c]) => `
+  ].map(([l, v, col]) => `
   <div style="background:#0a0c10;border-radius:6px;padding:10px;text-align:center">
     <div style="font-size:10px;color:#64748b;margin-bottom:3px">${l}</div>
-    <div style="font-size:18px;font-weight:700;color:${c}">${esc(v)}</div>
+    <div style="font-size:18px;font-weight:700;color:${col}">${esc(v)}</div>
   </div>`).join('')}
 </div>
 ${[..._TIME_HORIZONS, ..._IMPROVEMENT_TYPES].map(h => {
@@ -430,7 +452,7 @@ ${[..._TIME_HORIZONS, ..._IMPROVEMENT_TYPES].map(h => {
 </div>`;
 }).join('')}`;
 
-  return _block('p33-recommendations', '? P33.4 Enterprise Intelligence Recommendations', html, `${sev} * CVSS ${cvss}`);
+  return _block('p33-recommendations', '? P33.4 Enterprise Intelligence Recommendations', html, `${sev || 'UNKNOWN'} * ${metricBadge}`);
 }
 
 // -- P33.5: Detection Coverage Matrix -----------------------------------------
@@ -536,9 +558,18 @@ export function buildP33HeatmapBlock(item, items = []) {
       const combined = text + ' ' + ttps;
       if (platform.tags.some(tag => combined.includes(tag))) hits++;
     }
-    const rawPct  = Math.min(100, Math.round(hits / Math.max(1, sample.length) * 100 * 2.5));
-    const cvssAdj = sample.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) >= 7).length > 3 ? 10 : 0;
-    return Math.min(100, rawPct + cvssAdj);
+    const rawPct = Math.min(100, Math.round(hits / Math.max(1, sample.length) * 100 * 2.5));
+    const explicitHighCvss = sample.filter(i => {
+      const score = explicitCvss(i);
+      return score != null && score >= 7;
+    }).length;
+    const highCompositeRisk = sample.filter(i => {
+      const score = explicitRiskScore(i);
+      return score != null && score >= 7;
+    }).length;
+    const severityAdj = explicitHighCvss > 3 ? 6 : 0;
+    const riskAdj = highCompositeRisk > 3 ? 4 : 0;
+    return Math.min(100, rawPct + severityAdj + riskAdj);
   }
 
   const scores = _PLATFORMS.map(p => ({ ...p, score: platformScore(p) }))
@@ -637,7 +668,7 @@ export function buildP33AutomationBlock(item, items = []) {
   const withTTPs     = sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0).length;
   const withIOC      = sample.filter(i => parseInt(i.ioc_count || i.indicator_count || 0) > 0).length;
   const withSeverity = sample.filter(i => i.severity).length;
-  const withScore    = sample.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) > 0).length;
+  const withScore    = sample.filter(i => (explicitCvss(i) ?? 0) > 0).length;
 
   function pct(n) { return totalItems > 0 ? Math.round(n / totalItems * 100) : 0; }
 
@@ -916,7 +947,7 @@ export async function handleP33Heatmap(request, env) {
       if (p.tags.some(tag => (text + ' ' + ttps).includes(tag))) hits++;
     }
     const rawPct = Math.min(100, Math.round(hits / Math.max(1, sample.length) * 100 * 2.5));
-    const cvssAdj = sample.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) >= 7).length > 3 ? 10 : 0;
+    const cvssAdj = sample.filter(i => (explicitCvss(i) ?? 0) >= 7).length > 3 ? 10 : 0;
     const score   = Math.min(100, rawPct + cvssAdj);
     const riskLabel = score >= 70 ? 'CRITICAL' : score >= 45 ? 'HIGH' : score >= 20 ? 'MEDIUM' : 'LOW';
     return { platform: p.label, risk_pct: score, risk_level: riskLabel, hits };
@@ -937,7 +968,7 @@ export async function handleP33Mission(request, env) {
   const queues = {
     critical:   sample.filter(i => (i.severity||'').toUpperCase() === 'CRITICAL').slice(0,15),
     high:       sample.filter(i => (i.severity||'').toUpperCase() === 'HIGH').slice(0,15),
-    patch:      sample.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) >= 7).slice(0,15),
+    patch:      sample.filter(i => (explicitCvss(i) ?? 0) >= 7).slice(0,15),
     detection:  sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0).slice(0,15),
     hunting:    sample.filter(i => i.actor_tag).slice(0,15),
     ir:         sample.filter(i => (i.kev_present || i.kev_listed) || parseFloat(i.risk_score || 0) >= 9).slice(0,10),
@@ -970,7 +1001,7 @@ export async function handleP33Recommendations(request, env) {
   const q   = computeP20QualityScore(item);
   const a   = computeActionabilityScore(item);
   const sev = (item.severity || '').toUpperCase();
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss = (explicitCvss(item) ?? 0);
   const kev  = !!(item.kev_present || item.kev_listed);
 
   const recs = {
@@ -1138,7 +1169,7 @@ export async function handleP33Metrics(request, env) {
   const avg        = arr => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
 
   const detPct   = Math.round(sample.filter(i => (i.ttps||i.mitre_tactics||[]).length > 0).length / Math.max(1,sample.length) * 100);
-  const patchPct = Math.round(sample.filter(i => i.patch_available || parseFloat(i.risk_score || i.cvss_score || 0) < 7).length / Math.max(1,sample.length) * 100);
+  const patchPct = Math.round(sample.filter(i => i.patch_available || (explicitCvss(i) ?? 0) < 7).length / Math.max(1,sample.length) * 100);
   const iocPct   = Math.round(sample.filter(i => parseInt(i.ioc_count || i.indicator_count || 0) > 0).length / Math.max(1,sample.length) * 100);
 
   return _jsonResp({
