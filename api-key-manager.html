@@ -851,9 +851,7 @@ let state = { token: null, tier: 'free', usage: {} };
 
 // ── Init ─────────────────────────────��───────────────────────��─────────────────
 window.onload = () => {
-  const saved = sessionStorage.getItem('sentinel_token');
-  if (saved) { state.token = saved; initDashboard(); }
-  else { showAuthGate(); }
+  showAuthGate();
 };
 
 function showAuthGate() {
@@ -867,13 +865,21 @@ function validateAuthInput() {
 }
 
 async function authenticate() {
-  const val = document.getElementById('authInput').value.trim();
+  const input = document.getElementById('authInput');
+  const val = input.value.trim();
   if (!val) return;
-  // Accept JWT (eyJ...) or API key (cdb_...)
   state.token = val;
-  sessionStorage.setItem('sentinel_token', val);
-  document.getElementById('authGate').style.display = 'none';
-  await initDashboard();
+  const probe = await apiFetch('/api/account/usage');
+  if (probe && !probe.error) {
+    input.value = '';
+    document.getElementById('authGate').style.display = 'none';
+    await initDashboard();
+    return;
+  }
+  state.token = null;
+  input.value = '';
+  document.getElementById('authErrorMsg').textContent = 'Authentication failed. Access remains locked.';
+  document.getElementById('authError').style.display = 'block';
 }
 
 async function initDashboard() {
