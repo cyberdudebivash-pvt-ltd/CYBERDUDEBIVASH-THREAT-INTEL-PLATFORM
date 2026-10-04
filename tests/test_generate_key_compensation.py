@@ -50,6 +50,16 @@ class KeyCompensationTests(unittest.TestCase):
             self.assertTrue(caught.exception.__suppress_context__)
             revoke.assert_called_once()
 
+    def test_keys_do_not_prove_realized_revenue(self):
+        with patch.object(keys, "load_json", return_value={"keys": {
+                "test": {"status": "active", "tier": "PRO",
+                         "expires_at": "2099-01-01T00:00:00+00:00"}}}):
+            summary = keys.revenue_summary()
+        self.assertIsNone(summary["mrr_inr"])
+        self.assertIsNone(summary["arr_equivalent_inr"])
+        self.assertEqual(summary["estimated_monthly_catalog_value_inr"], 4100)
+        self.assertEqual(summary["estimated_annual_catalog_value_inr"], 49200)
+
     def test_authority_failure_does_not_attempt_local_commit(self):
         with patch.object(keys, "live_provision_key", side_effect=keys.LiveProvisionError("unavailable")), \
              patch.object(keys, "load_json") as load, \
@@ -61,3 +71,4 @@ class KeyCompensationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
