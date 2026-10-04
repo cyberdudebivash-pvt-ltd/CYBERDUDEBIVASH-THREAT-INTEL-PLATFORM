@@ -10,7 +10,7 @@ import {
 } from '../metric-semantics.js';
 import { buildAnalystExplainabilityBlock } from '../p25-handlers.js';
 import { buildP27MultiAudienceBlock } from '../p27-handlers.js';
-import { buildP28BusinessImpactBlock } from '../p28-handlers.js';
+import { buildP28BusinessImpactBlock, buildP28FeedbackBlock, handleP28Feedback } from '../p28-handlers.js';
 import { buildP29LifecycleBlock, handleP29CustomerValueAnalytics } from '../p29-handlers.js';
 import { buildP30SLABlock } from '../p30-handlers.js';
 import { buildP32DecisionBlock, buildP32LifecycleBlock, handleP32Customer } from '../p32-handlers.js';
@@ -105,6 +105,143 @@ test('P28 business impact is qualitative and never fabricates monetary loss or b
   assert.match(html, /does not prove outage, breach, data loss, financial loss/i);
   assert.doesNotMatch(html, /\$\s*(?:100K|500K|1M|10M)/i);
   assert.doesNotMatch(html, /estimated exposure/i);
+});
+
+test('P28 feedback UI never reads browser credentials or claims offline persistence', () => {
+  const html = buildP28FeedbackBlock(riskOnly);
+  assert.doesNotMatch(html, /sessionStorage|getItem\(["']sentinel_api_key|X-API-Key/i);
+  assert.doesNotMatch(html, /will sync when online|will retry when online|Feedback noted/i);
+  assert.match(html, /credentials:\s*"omit"/);
+  assert.match(html, /Feedback was not recorded\. Please retry later\./);
+  assert.match(html, /does not include your API key or source IP/i);
+});
+
+test('P28 feedback handler fails closed when controls or storage are unavailable', async () => {
+  const makeReq = () => new Request('https://intel.cyberdudebivash.com/api/v1/p28/feedback', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'CF-Connecting-IP': '203.0.113.10',
+    },
+    body: JSON.stringify({
+      item_id: 'intel--metric-truth-risk-only',
+      rating: 5,
+      detection: 'good',
+      false_positive: false,
+      actionable: true,
+      comment: 'Useful context',
+    }),
+  });
+
+  let res = await handleP28Feedback(makeReq(), {});
+  assert.equal(res.status, 503);
+
+  const rateOnly = {
+    RATE_LIMIT_KV: { async get() { return '0'; }, async put() {} },
+  };
+  res = await handleP28Feedback(makeReq(), rateOnly);
+  assert.equal(res.status, 503);
+
+  const storageFailure = {
+    RATE_LIMIT_KV: { async get() { return '0'; }, async put() {} },
+    SECURITY_HUB_KV: { async put() { throw new Error('down'); } },
+  };
+  res = await handleP28Feedback(makeReq(), storageFailure);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'Feedback was not recorded');
+});
+
+test('P28 feedback validates schema, rate limit and durable write before reporting success', async () => {
+  const writes = [];
+  const counters = new Map();
+  const env = {
+    RATE_LIMIT_KV: {
+      async get(k) { return counters.get(k) || '0'; },
+      async put(k, v, opts) {
+        assert.equal(opts.expirationTtl, 3600);
+        counters.set(k, v);
+      },
+    },
+    SECURITY_HUB_KV: {
+      async put(k, v, opts) {
+        writes.push({ k, v: JSON.parse(v), opts });
+      },
+    },
+  };
+
+  const req = (body, headers = {}) => new Request('https://intel.cyberdudebivash.com/api/v1/p28/feedback', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'CF-Connecting-IP': '203.0.113.11',
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+
+  let res = await handleP28Feedback(req({
+    item_id: 'intel--metric-truth-risk-only',
+    rating: 5,
+    detection: 'excellent',
+    false_positive: false,
+    actionable: true,
+    comment: 'Validated feedback',
+  }), env);
+  assert.equal(res.status, 200);
+  const ok = await res.json();
+  assert.equal(ok.ok, true);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].opts.expirationTtl, 7776000);
+  assert.equal(writes[0].v.item_id, 'intel--metric-truth-risk-only');
+  assert.equal(writes[0].v.actionable, true);
+  assert.doesNotMatch(JSON.stringify(writes[0].v), /203\.0\.113\.11|api[_-]?key/i);
+
+  res = await handleP28Feedback(req({
+    item_id: 'intel--metric-truth-risk-only',
+    rating: 4.5,
+    detection: 'good',
+    false_positive: false,
+    actionable: true,
+    comment: '',
+  }), env);
+  assert.equal(res.status, 400);
+
+  res = await handleP28Feedback(req({
+    item_id: 'bad id with spaces',
+    rating: 4,
+    detection: 'good',
+    false_positive: false,
+    actionable: true,
+    comment: '',
+  }), env);
+  assert.equal(res.status, 400);
+
+  res = await handleP28Feedback(req({
+    item_id: 'intel--metric-truth-risk-only',
+    rating: 4,
+    detection: 'invented',
+    false_positive: false,
+    actionable: true,
+    comment: '',
+  }), env);
+  assert.equal(res.status, 400);
+
+  const limitedEnv = {
+    RATE_LIMIT_KV: {
+      async get() { return '20'; },
+      async put() { throw new Error('must not increment when already limited'); },
+    },
+    SECURITY_HUB_KV: { async put() { throw new Error('must not write when limited'); } },
+  };
+  res = await handleP28Feedback(req({
+    item_id: 'intel--metric-truth-risk-only',
+    rating: 5,
+    detection: 'good',
+    false_positive: false,
+    actionable: true,
+    comment: '',
+  }), limitedEnv);
+  assert.equal(res.status, 429);
 });
 
 test('P32 lifecycle is intelligence-readiness only and never asserts customer remediation completion', () => {

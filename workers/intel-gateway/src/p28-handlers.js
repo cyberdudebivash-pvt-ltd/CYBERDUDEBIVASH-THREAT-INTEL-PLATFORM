@@ -543,8 +543,7 @@ export function buildP28FeedbackBlock(item) {
 
   const body = `
     <div style="color:#6b7280;font-size:11px;margin-bottom:12px;">
-      Your feedback improves intelligence quality for all SENTINEL APEX customers.
-      Ratings are anonymous and stored securely per our data handling policy.
+      Your feedback helps improve intelligence quality. The feedback record does not include your API key or source IP and is retained for up to 90 days.
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
       <div>
@@ -577,7 +576,7 @@ export function buildP28FeedbackBlock(item) {
       <div style="color:#6b7280;font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;">Improvement Suggestions (optional)</div>
       <textarea id="${instanceId}-comment" rows="2" style="width:100%;background:#0a0f1a;border:1px solid #1e3a5f;color:#94a3b8;padding:8px;border-radius:4px;font-family:'Courier New',monospace;font-size:11px;resize:vertical;" placeholder="What could improve this report?"></textarea>
     </div>
-    <button onclick="p28SubmitFeedback_${instanceId}()" style="background:#1e3a5f;color:#38bdf8;border:none;padding:8px 18px;border-radius:4px;font-family:'Courier New',monospace;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.08em;">
+    <button id="${instanceId}-submit" onclick="p28SubmitFeedback_${instanceId}()" style="background:#1e3a5f;color:#38bdf8;border:none;padding:8px 18px;border-radius:4px;font-family:'Courier New',monospace;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.08em;">
       SUBMIT FEEDBACK
     </button>
     <span id="${instanceId}-status" style="color:#6b7280;font-size:11px;margin-left:12px;"></span>
@@ -593,28 +592,40 @@ export function buildP28FeedbackBlock(item) {
         });
       }
       window.p28Rate_${instanceId} = p28Rate_${instanceId};
-      window.p28SubmitFeedback_${instanceId} = function() {
+      window.p28SubmitFeedback_${instanceId} = async function() {
         var status = document.getElementById("${instanceId}-status");
-        var key = sessionStorage.getItem("sentinel_api_key") || "";
+        var submit = document.getElementById("${instanceId}-submit");
         var payload = {
           item_id:    "${itemId}",
           rating:     _rating,
           detection:  (document.getElementById("${instanceId}-detection")||{}).value || "",
-          false_positive: (document.getElementById("${instanceId}-fp")||{}).checked || false,
-          actionable: (document.getElementById("${instanceId}-actionable")||{}).checked || true,
+          false_positive: Boolean((document.getElementById("${instanceId}-fp")||{}).checked),
+          actionable: Boolean((document.getElementById("${instanceId}-actionable")||{}).checked),
           comment:    (document.getElementById("${instanceId}-comment")||{}).value || "",
         };
         if (!_rating) { if (status) status.textContent = "Please select a star rating."; return; }
+        if (submit) submit.disabled = true;
         if (status) status.textContent = "Submitting...";
-        fetch("${apiBase}/api/v1/p28/feedback", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-API-Key": key },
-          body: JSON.stringify(payload),
-        }).then(function(r) {
-          if (status) status.textContent = r.ok ? "Thank you  -  feedback recorded." : "Submitted (will sync when online).";
-        }).catch(function() {
-          if (status) status.textContent = "Feedback noted  -  will retry when online.";
-        });
+        try {
+          var r = await fetch("${apiBase}/api/v1/p28/feedback", {
+            method: "POST",
+            cache: "no-store",
+            credentials: "omit",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          var result = {};
+          try { result = await r.json(); } catch (_) {}
+          if (!r.ok || !result.ok) {
+            if (status) status.textContent = "Feedback was not recorded. Please retry later.";
+            return;
+          }
+          if (status) status.textContent = "Thank you - feedback recorded.";
+        } catch (_) {
+          if (status) status.textContent = "Feedback was not recorded. Please retry later.";
+        } finally {
+          if (submit) submit.disabled = false;
+        }
       };
     })();
     </scr` + `ipt>`;
@@ -702,48 +713,91 @@ export async function handleP28Feedback(request, env) {
   if (request.method !== "POST") {
     return _jsonResp({ error: "POST required" }, 405);
   }
-  // This widget is embedded directly in public report pages (buildP28FeedbackBlock
-  // renders it into every report), so it's intentionally reachable without a paid
-  // API key -- anonymous "was this helpful" feedback is the intended UX. But with
-  // no auth AND no rate limit, it was a fully open, unbounded state-changing write
-  // (KV storage abuse, fake-rating flooding). Cap per-IP instead of requiring auth,
-  // which would break the legitimate anonymous use case.
-  const ip = request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "unknown";
-  if (env.RATE_LIMIT_KV) {
-    const rlKey = `p28fb_rl:${ip}:${new Date().toISOString().slice(0, 13)}`; // hour bucket
-    const rlCount = parseInt((await env.RATE_LIMIT_KV.get(rlKey)) || "0", 10);
+
+  // Anonymous feedback is intentionally supported, but state-changing writes
+  // must remain bounded and auditable. Fail closed if either the rate-limit
+  // control or durable feedback store is unavailable.
+  if (!env.RATE_LIMIT_KV || typeof env.RATE_LIMIT_KV.get !== "function" || typeof env.RATE_LIMIT_KV.put !== "function") {
+    return _jsonResp({ error: "Feedback service temporarily unavailable" }, 503);
+  }
+  if (!env.SECURITY_HUB_KV || typeof env.SECURITY_HUB_KV.put !== "function") {
+    return _jsonResp({ error: "Feedback service temporarily unavailable" }, 503);
+  }
+
+  const contentType = String(request.headers.get("Content-Type") || "").toLowerCase();
+  if (!contentType.includes("application/json")) {
+    return _jsonResp({ error: "Content-Type application/json required" }, 415);
+  }
+
+  // CF-Connecting-IP is supplied by Cloudflare and is authoritative at the
+  // production edge. Do not trust X-Forwarded-For for abuse-control identity.
+  const ip = String(request.headers.get("CF-Connecting-IP") || "unknown").slice(0, 96);
+  const hour = new Date().toISOString().slice(0, 13);
+  const rlKey = `p28fb_rl:${ip}:${hour}`;
+  let rlCount = 0;
+  try {
+    rlCount = parseInt((await env.RATE_LIMIT_KV.get(rlKey)) || "0", 10);
+    if (!Number.isFinite(rlCount) || rlCount < 0) rlCount = 0;
     if (rlCount >= 20) {
       return _jsonResp({ error: "Too many feedback submissions from this network. Try again later." }, 429);
     }
     await env.RATE_LIMIT_KV.put(rlKey, String(rlCount + 1), { expirationTtl: 3600 });
+  } catch (_) {
+    return _jsonResp({ error: "Feedback service temporarily unavailable" }, 503);
   }
+
   let body;
   try { body = await request.json(); } catch (_) {
     return _jsonResp({ error: "Invalid JSON body" }, 400);
   }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return _jsonResp({ error: "JSON object required" }, 400);
+  }
+
   const { item_id, rating, detection, false_positive, actionable, comment } = body;
-  if (!item_id || !rating) {
+  const itemId = String(item_id || "").trim();
+  if (!itemId || rating === undefined || rating === null) {
     return _jsonResp({ error: "item_id and rating required" }, 400);
   }
-  if (typeof rating !== "number" || rating < 1 || rating > 5) {
-    return _jsonResp({ error: "rating must be 1-5" }, 400);
+  if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return _jsonResp({ error: "rating must be an integer from 1-5" }, 400);
+  }
+  if (itemId.length > 64 || !/^[A-Za-z0-9._:-]+$/.test(itemId)) {
+    return _jsonResp({ error: "invalid item_id" }, 400);
+  }
+
+  const allowedDetection = new Set(["", "excellent", "good", "fair", "poor", "no_detection"]);
+  const detectionValue = String(detection || "").trim();
+  if (!allowedDetection.has(detectionValue)) {
+    return _jsonResp({ error: "invalid detection rating" }, 400);
+  }
+  if (typeof false_positive !== "boolean" || typeof actionable !== "boolean") {
+    return _jsonResp({ error: "false_positive and actionable must be boolean" }, 400);
+  }
+  const commentValue = String(comment || "").trim();
+  if (commentValue.length > 500) {
+    return _jsonResp({ error: "comment exceeds 500 characters" }, 400);
   }
 
   const ts = Date.now();
-  const kvKey = `${FB_PREFIX}${String(item_id).slice(0, 64)}:${ts}`;
+  const nonce = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : String(ts);
+  const kvKey = `${FB_PREFIX}${itemId}:${ts}:${nonce}`;
   const record = {
-    item_id: String(item_id).slice(0, 64),
+    item_id: itemId,
     rating,
-    detection: String(detection || "").slice(0, 32),
-    false_positive: Boolean(false_positive),
-    actionable: Boolean(actionable !== false),
-    comment: String(comment || "").slice(0, 500),
+    detection: detectionValue,
+    false_positive,
+    actionable,
+    comment: commentValue,
     recorded_at: new Date(ts).toISOString(),
   };
+
   try {
     await env.SECURITY_HUB_KV.put(kvKey, JSON.stringify(record), { expirationTtl: 7776000 }); // 90d
   } catch (_) {
-    // KV unavailable in test  -  still return success to client
+    return _jsonResp({ error: "Feedback was not recorded" }, 503);
   }
   return _jsonResp({ ok: true, recorded_at: record.recorded_at });
 }
