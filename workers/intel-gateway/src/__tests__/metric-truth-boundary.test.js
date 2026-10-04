@@ -265,6 +265,41 @@ test('enterprise operations UI fails closed, keeps credentials memory-only, and 
   assert.doesNotMatch(source, /Patch within 30 days|CISA mandatory patches|Operational Lifecycle \(9-Stage\)/i);
 });
 
+test('landing and enterprise dashboards keep raw credentials out of persistent storage and never auto-substitute synthetic production data', () => {
+  const login = fs.readFileSync(new URL('../../../../landing/auth.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(login, /localStorage\.setItem\(['"]cdb_api_key/);
+  assert.doesNotMatch(login, /localStorage\.setItem\(['"]apex_jwt/);
+  assert.match(login, /sessionStorage\.setItem\(['"]apex_jwt/);
+
+  const landing = fs.readFileSync(new URL('../../../../landing/dashboard.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(landing, /localStorage\.(?:getItem|setItem|removeItem)\([^\n]*cdb_api_key/i);
+  assert.match(landing, /sessionStorage\.getItem\(['"]apex_jwt/);
+
+  const api = fs.readFileSync(new URL('../../../../landing/api.js', import.meta.url), 'utf8');
+  assert.match(api, /Authorization.*Bearer/);
+  assert.match(api, /X-API-Key/);
+
+  const enterprise = fs.readFileSync(new URL('../../../../dashboard/enterprise_dashboard.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(enterprise, /localStorage\.(?:getItem|setItem|removeItem)\(['"]cdb_(?:ent_key|jwt)/);
+  assert.doesNotMatch(enterprise, /consoleApiKey['"]\)\.value\s*=\s*key/);
+
+  const analyst = fs.readFileSync(new URL('../../../../dashboard/analyst_dashboard.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(analyst, /localStorage\.getItem\(['"]cdb_api_key/);
+  assert.doesNotMatch(analyst, /Feed load failed, using demo data/i);
+  assert.doesNotMatch(analyst, /Auto-load demo data on first render/i);
+  assert.match(analyst, /No synthetic data has been substituted/);
+
+  const os = fs.readFileSync(new URL('../../../../enterprise-cyber-intelligence-os.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(os, /sessionStorage\.(?:setItem|getItem)\(['"]ecios_token/);
+  assert.match(os, /\/api\/v1\/p33\/observability/);
+  assert.match(os, /Authentication failed\. Access remains locked\./);
+
+  const keyManager = fs.readFileSync(new URL('../../../../api-key-manager.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(keyManager, /sessionStorage\.(?:setItem|getItem)\(['"]sentinel_token/);
+  assert.match(keyManager, /\/api\/account\/usage/);
+  assert.match(keyManager, /Authentication failed\. Access remains locked\./);
+});
+
 test('enterprise customer dashboards never persist raw API keys and fail closed on authentication', () => {
   const pages = [
     '../../../../customer-value-dashboard.html',
