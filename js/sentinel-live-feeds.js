@@ -858,10 +858,10 @@
 
   // ── Run all loaders ───────────────────────────────────────────────────────────
   async function initAll() {
-    // Phase 1: Stats first (most important — fixes the 0-advisory display bug)
+    // Stats first (most important — fixes the 0-advisory display bug)
     await loadStats();
 
-    // Phase 2: All other widgets in parallel
+    // All other widgets in parallel
     await Promise.allSettled([
       loadThreatLevel(),
       loadThreatFeedPreview(),
@@ -877,7 +877,7 @@
       loadNEXUS(),
     ]);
 
-    // Phase 3: News feed (slower, may timeout)
+    // News feed (slower, may timeout)
     await loadNewsFeed();
 
     // Init IOC lookup (event-driven, not async)

@@ -1236,15 +1236,15 @@ def _build_html(
     s10 = sec("10", "Incident Response Playbook", (
         '<div class="playbook-grid">'
         '<div class="pb-phase">'
-        '<div class="pb-phase-title" style="color:#dc2626;">Phase 1 — 0-24 Hours (Containment)</div>'
+        '<div class="pb-phase-title" style="color:#dc2626;">0-24 Hours (Containment)</div>'
         + pblist(pb["0_24h"])
         + '</div>'
         '<div class="pb-phase">'
-        '<div class="pb-phase-title" style="color:#f59e0b;">Phase 2 — 24-72 Hours (Eradication)</div>'
+        '<div class="pb-phase-title" style="color:#f59e0b;">24-72 Hours (Eradication)</div>'
         + pblist(pb["24_72h"])
         + '</div>'
         '<div class="pb-phase">'
-        '<div class="pb-phase-title" style="color:#22c55e;">Phase 3 — 7 Days (Recovery)</div>'
+        '<div class="pb-phase-title" style="color:#22c55e;">7 Days (Recovery)</div>'
         + pblist(pb["7_day"])
         + '</div>'
         '</div>'

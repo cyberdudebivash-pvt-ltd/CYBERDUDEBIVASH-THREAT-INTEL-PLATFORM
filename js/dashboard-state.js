@@ -2,14 +2,14 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  *  SENTINEL APEX — Dashboard Truth Contract: Canonical State Vocabulary v1.0.0
  *
- *  Phase 1 deliverable of the Dashboard Truth Contract mission (see
+ *  deliverable of the Dashboard Truth Contract mission (see
  *  DASHBOARD_TRUTH_CONTRACT_PHASE0_FORENSIC_CENSUS.md at the repo root for the
  *  full forensic evidence this vocabulary is built from).
  *
  *  PURELY ADDITIVE. This module is not imported by index.html, js/api_adapter.js,
  *  js/card_renderer.js, or any CI workflow. It has zero side effects and cannot
  *  change production behavior. It exists so a future canonical normalizer
- *  (Phase 2+, not part of this PR) has one place to import a state vocabulary
+ *  (, not part of this PR) has one place to import a state vocabulary
  *  from, instead of every rendering surface inventing its own ad hoc
  *  true/false/''/null collapse of a real, multi-valued backend state.
  *
@@ -46,7 +46,7 @@
   const CONTRACT_VERSION = "1.0.0";
 
   /**
-   * Zero-fabrication sentinels (mission Phase 10). A future normalizer should
+   * Zero-fabrication sentinels (mission ). A future normalizer should
    * import these instead of ad hoc '', null, '—', or 'PROCESSING' strings, so
    * "we don't know" and "we know it's absent" stay textually distinguishable
    * from a real value everywhere in the codebase.
@@ -58,14 +58,14 @@
   });
 
   /**
-   * The 12 canonical states (mission Phase 5 / Phase 6). Every state carries:
+   * The 12 canonical states (mission / ). Every state carries:
    *   value           - the machine-readable enum value
    *   label           - customer-visible short label
    *   explanation     - one-sentence customer-visible explanation of what it means
    *   severity        - "neutral" | "info" | "warning" | "critical" (for badge styling)
    *   aria            - screen-reader text; must not rely on color alone
    *   telemetryEvent  - the event name a future observability layer should emit
-   *                     on transition into this state (mission Phase 15/16)
+   *                     on transition into this state (mission )
    *
    * These states intentionally span two different concerns that today's
    * codebase conflates (mission background, confirmed live by the census):
@@ -194,7 +194,7 @@
    * finding that evaluatePublicationGate()'s classification is today
    * computed and then discarded before the response is built (index.js:656
    * vs :701) -- would map onto the lifecycle group above. Not wired to any
-   * live call; provided so Phase 2's normalizer has an agreed mapping to
+   * live call; provided so 's normalizer has an agreed mapping to
    * implement rather than inventing one at migration time.
    * @param {string} publicationStatus - e.g. "CUSTOMER_READY" | "WITHHELD" |
    *   "REJECTED" | "PENDING_ENRICHMENT" | "NOT_EVALUATED" (certification-registry.js)
