@@ -7,7 +7,7 @@
  * a continuously operating enterprise decision-support system.
  * Implements ONLY capabilities audit-confirmed absent from P20-P31:
  *
- *   P32.1  Operational Intelligence Lifecycle     (9-stage process lifecycle)
+ *   P32.1  Intelligence Readiness Lifecycle       (record-readiness, not customer incident state)
  *   P32.2  Enterprise Decision Engine             (strategic governance decisions)
  *   P32.3  Intelligence Delta Engine              (yesterday vs today delta)
  *   P32.4  Detection Effectiveness Engine         (FP/FN/coverage per format)
@@ -125,15 +125,13 @@ function _ageHours(ts) {
 // P32.1 tracks the operational process: where is this advisory in the analyst workflow?
 
 const _LIFECYCLE_STAGES = [
-  { id: "discovery",    label: "Discovery",    icon: "?", desc: "Advisory ingested and initially classified" },
-  { id: "validation",   label: "Validation",   icon: "[OK]", desc: "Intelligence sources and claims verified" },
-  { id: "correlation",  label: "Correlation",  icon: "?", desc: "Related advisories and campaigns identified" },
-  { id: "enrichment",   label: "Enrichment",   icon: "??",  desc: "CVSS/EPSS/KEV/IOC/Actor data populated" },
-  { id: "detection",    label: "Detection",    icon: "?", desc: "Detection rules created and validated" },
-  { id: "response",     label: "Response",     icon: "?", desc: "Response playbooks and IR packages ready" },
-  { id: "recovery",     label: "Recovery",     icon: "?", desc: "Patch/mitigation guidance published" },
-  { id: "monitoring",   label: "Monitoring",   icon: "?", desc: "Ongoing threat landscape tracking active" },
-  { id: "retirement",   label: "Retirement",   icon: "?", desc: "Advisory archived  -  threat remediated" },
+  { id: "discovery",   label: "Discovery",   icon: "?", desc: "Advisory ingested and initially classified" },
+  { id: "validation",  label: "Validation",  icon: "[OK]", desc: "Source and evidence fields available for analyst validation" },
+  { id: "correlation", label: "Correlation", icon: "?", desc: "Related intelligence context available for investigation" },
+  { id: "enrichment",  label: "Enrichment",  icon: "??", desc: "Authoritative enrichment fields available when supplied" },
+  { id: "detection",   label: "Detection",   icon: "?", desc: "Recorded detection artifacts available for analyst use" },
+  { id: "response",    label: "Response Readiness", icon: "?", desc: "Investigation/response guidance available; this does not mean customer response has occurred" },
+  { id: "monitoring",  label: "Monitoring Context", icon: "?", desc: "Record remains within the active intelligence monitoring window" },
 ];
 
 function _computeOperationalLifecycle(item) {
@@ -146,20 +144,19 @@ function _computeOperationalLifecycle(item) {
   const hasSigma = Boolean((item.apex || {}).sigma_rule || item.sigma_rule);
   const hasKQL   = Boolean((item.apex || {}).kql_query  || item.kql_query);
   const hasSrc   = Boolean(item.source_url);
-  const hasCVE   = (item.cve_ids || []).length > 0 || String(item.title || "").includes("CVE-");
   const ageH     = _ageHours(item.processed_ts || item.timestamp || item.published);
 
-  // Gate conditions per stage (cumulative)
+  // Intelligence-readiness gates only. These stages describe what the record
+  // contains, never customer incident/remediation progress. A feed item cannot
+  // prove that containment, recovery, patching or closure occurred.
   const gates = {
     discovery:   true,
     validation:  hasSrc && Boolean(item.confidence),
     correlation: hasActor || hasTTPs,
     enrichment:  cvss > 0 || hasEPSS || hasKEV,
-    detection:   hasSigma || hasKQL || (item.detection_bundle && item.detection_bundle.length > 0),
-    response:    hasTTPs && hasIOC,
-    recovery:    hasCVE && (cvss > 0),
-    monitoring:  ageH >= 0 && ageH < 720, // within 30 days
-    retirement:  ageH > 8760, // > 365 days old
+    detection:   hasSigma || hasKQL || (item.detection_bundle && typeof item.detection_bundle === "object" && Object.keys(item.detection_bundle).length > 0),
+    response:    hasTTPs || hasIOC,
+    monitoring:  ageH >= 0 && ageH < 720, // intelligence recency only
   };
 
   const current = Object.keys(gates).findIndex(k => !gates[k]);
@@ -191,20 +188,20 @@ export function buildP32LifecycleBlock(item) {
   const body = `
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap;">
     <div style="padding:10px 18px;background:#1a1200;border:1px solid #f59e0b33;border-radius:5px;">
-      <div style="color:#8b949e;font-size:9px;text-transform:uppercase;">Current Stage</div>
+      <div style="color:#8b949e;font-size:9px;text-transform:uppercase;">Current Intelligence Readiness Stage</div>
       <div style="color:#f59e0b;font-size:14px;font-weight:800;">${stages[stageIdx].label.toUpperCase()}</div>
     </div>
     <div style="flex:1;">
-      <div style="color:#8b949e;font-size:9px;margin-bottom:3px;">Progress: ${pct}%</div>
+      <div style="color:#8b949e;font-size:9px;margin-bottom:3px;">Readiness coverage: ${pct}%</div>
       ${_meter(pct, "#f59e0b")}
-      <div style="color:#6b7280;font-size:9px;">${stageIdx + 1} of ${stages.length} stages complete</div>
+      <div style="color:#6b7280;font-size:9px;">${stageIdx + 1} of ${stages.length} intelligence-readiness stages satisfied; this is not customer incident/remediation progress</div>
     </div>
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;">${stageCards}</div>`;
 
   return _block(`p32-lifecycle-${esc(item.id || "x")}`,
-    "P32.1  -  Operational Intelligence Lifecycle", "#f59e0b", body,
-    "9-stage operational process: Discovery -> Validation -> Correlation -> Enrichment -> Detection -> Response -> Recovery -> Monitoring -> Retirement");
+    "P32.1  -  Intelligence Readiness Lifecycle", "#f59e0b", body,
+    "Record-readiness process only: Discovery -> Validation -> Correlation -> Enrichment -> Detection -> Response Readiness -> Monitoring Context. It does not assert customer containment, recovery, patching or closure.");
 }
 
 // -- P32.2: Enterprise Decision Engine -----------------------------------------
@@ -1360,7 +1357,10 @@ export async function handleP32Customer(request, env) {
   const critical = items.filter(i => String(i.severity || "").toUpperCase() === "CRITICAL");
   const kev      = items.filter(i => Boolean(i.kev_present || (i.apex || {}).kev_listed));
   const newItems = items.filter(i => _ageHours(i.processed_ts || i.timestamp) < 48);
-  const highRisk = items.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) >= 8.0).length;
+  const highRisk = items.filter(i => {
+    const risk = explicitRiskScore(i);
+    return risk != null && risk >= 8.0;
+  }).length;
 
   const topActions = [];
   for (const item of [...kev, ...critical].slice(0, 5)) {

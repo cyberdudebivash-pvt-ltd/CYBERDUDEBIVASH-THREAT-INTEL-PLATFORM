@@ -15,6 +15,7 @@ import { computeActionabilityScore }                    from './p23-handlers.js'
 import { computeEnterpriseTrustScore }                  from './p25-handlers.js';
 import { computeP26Grade }                              from './p26-handlers.js';
 import { explicitCvss, explicitRiskScore }                from './metric-semantics.js';
+import { PRICING_TIERS }                                  from './pricing-data.js';
 import { extractDetectionArtifacts }                          from './detection-registry.js';
 
 export const P33_VERSION = 'P33.0';
@@ -999,8 +1000,16 @@ export async function handleP33Mission(request, env) {
 
   const summary = Object.fromEntries(Object.entries(queues).map(([k, v]) => [k, v.length]));
   const missionItems = Object.fromEntries(Object.entries(queues).map(([k, v]) => [
-    k, v.map(i => ({ id: i.id, cve_id: i.cve_id, title: i.title, severity: i.severity,
-                     cvss: i.risk_score || i.cvss_score, actor: i.actor_tag }))
+    k, v.map(i => ({
+      id: i.id,
+      cve_id: i.cve_id || null,
+      title: i.title,
+      severity: i.severity,
+      cvss: explicitCvss(i),
+      risk_score: explicitRiskScore(i),
+      risk_is_cvss: false,
+      actor: i.actor_tag || i.threat_actor || null,
+    }))
   ]));
 
   return _jsonResp({
@@ -1220,25 +1229,54 @@ export async function handleP33Metrics(request, env) {
   const trstScores = sample.map(i => computeEnterpriseTrustScore(i));
   const avg        = arr => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
 
-  const detPct   = Math.round(sample.filter(i => (i.ttps||i.mitre_tactics||[]).length > 0).length / Math.max(1,sample.length) * 100);
-  const patchPct = Math.round(sample.filter(i => i.patch_available || (explicitCvss(i) ?? 0) < 7).length / Math.max(1,sample.length) * 100);
-  const iocPct   = Math.round(sample.filter(i => parseInt(i.ioc_count || i.indicator_count || 0) > 0).length / Math.max(1,sample.length) * 100);
+  const mitreMappingPct = Math.round(
+    sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0).length /
+    Math.max(1, sample.length) * 100
+  );
+  const detectionArtifactPct = Math.round(
+    sample.filter(i => {
+      try { return extractDetectionArtifacts(i).length > 0; } catch (_) { return false; }
+    }).length / Math.max(1, sample.length) * 100
+  );
+  const iocInventoryPct = Math.round(
+    sample.filter(i => parseInt(i.ioc_count || i.indicator_count || 0) > 0).length /
+    Math.max(1, sample.length) * 100
+  );
 
   return _jsonResp({
     version: P33_VERSION, generated_at: new Date().toISOString(),
     feed_items: items.length, items_sampled: sample.length,
     platform_quality: { avg_quality: avg(qualScores), avg_actionability: avg(actScores), avg_trust: avg(trstScores) },
+    intelligence_output_coverage: {
+      detection_artifact_pct: detectionArtifactPct,
+      mitre_mapping_pct: mitreMappingPct,
+      ioc_inventory_pct: iocInventoryPct,
+    },
     customer_success: {
-      detection_adoption_pct: detPct,
-      patch_completion_pct:   patchPct,
-      ioc_deployment_pct:     iocPct,
-      operational_maturity:   Math.round((detPct + patchPct + iocPct) / 3),
+      measurement_status: 'UNAVAILABLE',
+      patch_completion_pct: null,
+      ioc_deployment_pct: null,
+      operational_maturity: null,
+      note: 'Customer remediation, IOC deployment and operational maturity require customer-owned outcome telemetry and are not inferred from feed contents.',
     },
     marketplace_tiers: {
-      standard:    { price_per_month: 499,   features: ['Feed access', 'Basic IOC', 'CVE alerts'] },
-      professional:{ price_per_month: 1999,  features: ['All Standard', 'Detection packs', 'MITRE mapping', 'API access'] },
-      enterprise:  { price_per_month: 4999,  features: ['All Professional', 'MSSP console', 'Custom integrations', 'SLA guarantee'] },
-      mssp:        { price_per_month: 9999,  features: ['All Enterprise', 'Multi-tenant', 'White-label', 'Dedicated analyst'] },
+      pricing_source: '/api/pricing',
+      contract_note: 'Values mirror the canonical gateway pricing module; /api/pricing is the customer-facing authority.',
+      pro: {
+        label: PRICING_TIERS.PRO.label,
+        usd_monthly: PRICING_TIERS.PRO.usd_monthly,
+        usd_annual: PRICING_TIERS.PRO.usd_annual,
+      },
+      enterprise: {
+        label: PRICING_TIERS.ENTERPRISE.label,
+        usd_monthly: PRICING_TIERS.ENTERPRISE.usd_monthly,
+        usd_annual: PRICING_TIERS.ENTERPRISE.usd_annual,
+      },
+      mssp: {
+        label: PRICING_TIERS.MSSP.label,
+        usd_monthly: PRICING_TIERS.MSSP.usd_monthly,
+        usd_annual: PRICING_TIERS.MSSP.usd_annual,
+      },
     },
   });
 }
@@ -1257,6 +1295,10 @@ export async function handleP33Observability(request, env) {
     threat_level: tl.level,
     p33_status: 'OPERATIONAL',
     campaigns: { unique_actors: byActor.size },
-    pipeline: { health_pct: 90, steps_complete: 10, total_steps: 11 },
+    pipeline: {
+      health_pct: null,
+      measurement_status: 'UNAVAILABLE',
+      note: 'Pipeline health percentage is not inferred from a threat-intelligence sample; use authoritative platform health/observability telemetry.',
+    },
   });
 }

@@ -868,8 +868,8 @@ let state = {
   selected:     null,
   filterSev:    'all',
   searchQuery:  '',
-  apiKey:       localStorage.getItem('cdb_api_key') || '',
-  tier:         localStorage.getItem('cdb_tier') || 'FREE',
+  apiKey:       '',
+  tier:         'FREE',
   syncState:    { status: 'unknown', apex_mode: null, feed_age_h: null, last_checked: null },
 };
 
@@ -987,7 +987,7 @@ async function loadFeed() {
       CONFIG.latestPathStatic
     );
     if (!data) {
-      data = generateDemoData();
+      throw new Error('No authoritative threat-intelligence feed is currently available');
     }
 
     state.items = normalizeItems(data);
@@ -997,10 +997,18 @@ async function loadFeed() {
     document.getElementById('feed-count').textContent = `${state.items.length} advisories`;
     document.getElementById('feed-badge').textContent = state.items.length;
   } catch (err) {
-    console.warn('Feed load failed, using demo data:', err);
-    state.items = generateDemoData();
+    console.warn('Authoritative feed load failed:', err);
+    state.items = [];
+    state.filtered = [];
     updateKPIs();
-    renderFeed();
+    const grid = document.getElementById('intel-feed');
+    if (grid) {
+      grid.innerHTML = '<div class="empty-state">Live intelligence is temporarily unavailable. No synthetic data has been substituted.</div>';
+    }
+    const count = document.getElementById('feed-count');
+    const badge = document.getElementById('feed-badge');
+    if (count) count.textContent = '0 advisories';
+    if (badge) badge.textContent = '0';
   } finally {
     showLoader(false);
   }
@@ -1663,17 +1671,7 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 2500);
 }
 
-// Auto-load demo data on first render
-setTimeout(() => {
-  if (state.items.length === 0) {
-    state.items = generateDemoData().map((d,i) => ({...d, ...{id: d.id, risk_score: d.risk_score || 50}}));
-    state.items = normalizeItems(state.items);
-    updateKPIs();
-    renderFeed();
-    updateMitreHeatmap();
-    loadPlatformStats();
-  }
-}, 1500);
+// Production dashboards never auto-substitute synthetic intelligence.
 </script>
 
     <!-- P0 FIX v134.0: Shared ACTOR_MAP + resolveActor + live feed loader -->

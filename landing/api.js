@@ -67,9 +67,18 @@ const APEX = (() => {
    * params (unlike the retired Railway backend) -- it returns the full
    * tier-appropriate set; slice client-side instead.
    */
-  async function _fetchIntelSlice(apiKey, start, end) {
+  function credentialHeaders(credential) {
     const headers = {};
-    if (apiKey && apiKey !== 'anon') headers['X-API-Key'] = apiKey;
+    if (!credential || credential === 'anon') return headers;
+    const value = String(credential).trim();
+    const looksJwt = value.startsWith('eyJ') && value.split('.').length === 3;
+    if (looksJwt) headers['Authorization'] = 'Bearer ' + value;
+    else headers['X-API-Key'] = value;
+    return headers;
+  }
+
+  async function _fetchIntelSlice(credential, start, end) {
+    const headers = credentialHeaders(credential);
     const res = await apiFetch('/api/v1/intel/latest.json', { headers });
     if (res.ok && res.data && Array.isArray(res.data.items)) {
       res.data = { ...res.data, items: res.data.items.slice(start, end) };
@@ -88,10 +97,8 @@ const APEX = (() => {
   }
 
   /** GET /api/v1/stats — platform stats */
-  async function fetchStats(apiKey) {
-    const headers = {};
-    if (apiKey && apiKey !== 'anon') headers['X-API-Key'] = apiKey;
-    return apiFetch('/api/v1/stats', { headers });
+  async function fetchStats(credential) {
+    return apiFetch('/api/v1/stats', { headers: credentialHeaders(credential) });
   }
 
   /**
