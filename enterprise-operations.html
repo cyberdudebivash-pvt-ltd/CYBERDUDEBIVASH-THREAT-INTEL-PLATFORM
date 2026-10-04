@@ -263,32 +263,55 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0c10;color:#e2e8f
 
 <script>
 const API = '';
+let _accessToken = '';
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
+// Raw customer credentials are intentionally memory-only. Reload/navigation
+// requires re-authentication; long-lived API keys must never be persisted in
+// Web Storage where any same-origin script could recover them.
 async function attemptAuth() {
-  const token = document.getElementById('auth-token').value.trim();
+  const input = document.getElementById('auth-token');
+  const token = input.value.trim();
   const err   = document.getElementById('auth-err');
   err.style.display = 'none';
   if (!token) { err.textContent = 'Token required.'; err.style.display='block'; return; }
   try {
-    const r = await fetch(`${API}/api/health`, {headers:{'Authorization':'Bearer '+token}});
-    if (!r.ok) throw new Error('401');
-    sessionStorage.setItem('apex_token', token);
+    const r = await fetch(`${API}/api/v1/p32/observability`, {
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: {
+        'Authorization':'Bearer '+token,
+        'X-API-Key': token,
+      },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    await r.json();
+    _accessToken = token;
+    input.value = '';
     document.getElementById('auth-gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
-    init();
+    await init();
   } catch {
-    const stored = sessionStorage.getItem('apex_token');
-    if (stored && stored === token) { document.getElementById('auth-gate').style.display='none'; document.getElementById('app').style.display='block'; init(); return; }
-    err.textContent = 'Authentication failed. Verify your access token.';
+    _accessToken = '';
+    input.value = '';
+    err.textContent = 'Authentication failed. Access remains locked.';
     err.style.display = 'block';
   }
 }
 
-function getToken() { return sessionStorage.getItem('apex_token') || ''; }
+function getToken() { return _accessToken; }
 
 async function apiFetch(path) {
-  const r = await fetch(`${API}${path}`, {headers:{'Authorization':'Bearer '+getToken()}});
+  const token = getToken();
+  if (!token) throw new Error('Authentication required');
+  const r = await fetch(`${API}${path}`, {
+    cache: 'no-store',
+    credentials: 'omit',
+    headers: {
+      'Authorization':'Bearer '+token,
+      'X-API-Key': token,
+    },
+  });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
@@ -305,9 +328,7 @@ function switchTab(name) {
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 async function init() {
-  // check stored token
-  const t = sessionStorage.getItem('apex_token');
-  if (!t) return;
+  if (!getToken()) return;
   await Promise.all([loadObservability(), loadPanel('analyst')]);
   _loaded['analyst'] = true;
   startClock();
@@ -415,46 +436,37 @@ async function loadCustomer() {
   const detEl  = document.getElementById('customer-detail');
   try {
     const d = await apiFetch('/api/v1/p32/customer');
-    const s = d.summary || {};
+    const s = d.exposure_summary || {};
+    const h = d.intelligence_health || {};
+    const actions = Array.isArray(d.top_required_actions) ? d.top_required_actions : [];
+
     expEl.innerHTML = `
-      <div class="exp-card"><div class="exp-label">Critical Advisories</div><div class="exp-val c-red">${s.critical_count??'—'}</div><div class="exp-change" style="color:#ef4444">Immediate action required</div></div>
-      <div class="exp-card"><div class="exp-label">High Severity</div><div class="exp-val c-orange">${s.high_count??'—'}</div><div class="exp-change c-gray">Patch within 30 days</div></div>
-      <div class="exp-card"><div class="exp-label">KEV Listed</div><div class="exp-val c-red">${s.kev_count??'—'}</div><div class="exp-change" style="color:#ef4444">CISA mandatory patches</div></div>
-      <div class="exp-card"><div class="exp-label">Avg Trust Score</div><div class="exp-val c-cyan">${s.avg_trust??'—'}</div><div class="exp-change c-gray">Intelligence confidence</div></div>
-      <div class="exp-card"><div class="exp-label">Avg Maturity</div><div class="exp-val c-purple">${s.avg_maturity??'—'}</div><div class="exp-change c-gray">CMM-5 scale</div></div>
-      <div class="exp-card"><div class="exp-label">Detection Coverage</div><div class="exp-val c-green">${s.detection_pct??'—'}%</div><div class="exp-change c-gray">Items with detections</div></div>
+      <div class="exp-card"><div class="exp-label">Critical Advisories</div><div class="exp-val c-red">${s.critical_advisories??'—'}</div><div class="exp-change c-gray">Intelligence records; validate customer exposure</div></div>
+      <div class="exp-card"><div class="exp-label">KEV Advisories</div><div class="exp-val c-red">${s.kev_advisories??'—'}</div><div class="exp-change c-gray">Use applicable KEV/vendor/customer deadlines</div></div>
+      <div class="exp-card"><div class="exp-label">New &lt;48h</div><div class="exp-val c-orange">${s.new_last_48h??'—'}</div><div class="exp-change c-gray">Recently processed intelligence</div></div>
+      <div class="exp-card"><div class="exp-label">High APEX Risk</div><div class="exp-val c-orange">${s.high_risk_count??'—'}</div><div class="exp-change c-gray">Composite risk; not CVSS or confirmed impact</div></div>
+      <div class="exp-card"><div class="exp-label">Feed Items</div><div class="exp-val c-cyan">${h.feed_items??'—'}</div><div class="exp-change c-gray">Current intelligence inventory</div></div>
+      <div class="exp-card"><div class="exp-label">Detection Artifacts</div><div class="exp-val c-green">${h.detection_coverage_pct??'—'}%</div><div class="exp-change c-gray">Recorded artifact coverage; not customer deployment</div></div>
     `;
-    // New risks
-    const newRisks = d.new_risks || [];
-    const actions  = d.required_actions || [];
+
     detEl.innerHTML = `
       <div class="section">
-        <div class="section-header"><div class="section-title">🔴 New Risks <span class="section-badge">${newRisks.length}</span></div></div>
-        <div class="section-body"><div class="queue">${newRisks.slice(0,10).map(r=>`
-          <div class="queue-item">
-            <div class="q-icon" style="background:#ef444420;color:#ef4444">⚠</div>
-            <div class="q-body">
-              <div class="q-title">${esc(r.cve_id||r.title||'Unknown')}</div>
-              <div class="q-meta">${esc(r.title||'')} · ${r.severity||'N/A'}</div>
-            </div>
-          </div>`).join('') || '<div style="color:#475569;font-size:12px">No new critical risks.</div>'}</div>
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">✅ Required Actions <span class="section-badge">${actions.length}</span></div></div>
+        <div class="section-header"><div class="section-title">Priority Review Actions <span class="section-badge">${actions.length}</span></div></div>
         <div class="section-body"><div class="queue">${actions.slice(0,10).map(a=>`
           <div class="queue-item">
             <div class="q-icon" style="background:#22c55e20;color:#22c55e">▶</div>
             <div class="q-body">
-              <div class="q-title">${esc(a.action||'Unknown action')}</div>
-              <div class="q-meta">${esc(a.rationale||'')} · Priority: ${a.priority||'N/A'}</div>
+              <div class="q-title">${esc(a.action||'Review required')}</div>
+              <div class="q-meta">${esc(a.evidence||'Validate customer-environment relevance before action.')} · ${esc(a.severity||'N/A')}${a.kev?' · KEV':''}</div>
             </div>
-          </div>`).join('') || '<div style="color:#475569;font-size:12px">No required actions.</div>'}</div>
+          </div>`).join('') || '<div style="color:#475569;font-size:12px">No priority review actions in the current intelligence sample.</div>'}</div>
         </div>
       </div>
+      <div style="font-size:11px;color:#64748b;padding:0 4px">Threat intelligence does not prove customer compromise, business impact, patch completion, containment or remediation.</div>
     `;
   } catch(e) {
-    expEl.innerHTML = `<div class="loading" style="color:#ef4444">Failed to load customer data: ${e.message}</div>`;
+    expEl.innerHTML = `<div class="loading" style="color:#ef4444">Failed to load customer intelligence: ${esc(e.message)}</div>`;
+    detEl.innerHTML = '';
   }
 }
 
@@ -463,39 +475,29 @@ async function loadLifecycle() {
   const el = document.getElementById('lifecycle-container');
   try {
     const d = await apiFetch('/api/v1/p32/lifecycle');
-    const items   = d.items || [];
-    const sample  = items[0] || {};
-    const stages  = sample.lifecycle_stages || [];
-    const decisions = sample.strategic_decisions || [];
-
-    const STAGE_COLORS = ['#22c55e','#06b6d4','#3b82f6','#8b5cf6','#f97316','#ef4444','#22c55e','#06b6d4','#64748b'];
+    const dist = d.stage_distribution || {};
+    const entries = Object.entries(dist);
+    const colors = ['#22c55e','#06b6d4','#3b82f6','#8b5cf6','#f97316','#eab308','#64748b'];
 
     el.innerHTML = `
       <div class="section">
-        <div class="section-header"><div class="section-title">🔄 Operational Lifecycle (9-Stage) <span class="section-badge">Sample: ${esc(sample.cve_id||sample.title||'N/A')}</span></div></div>
+        <div class="section-header"><div class="section-title">Intelligence Readiness Lifecycle <span class="section-badge">${d.feed_items??0} records</span></div></div>
         <div class="section-body">
-          <div class="lifecycle-stages">${stages.map((s,i)=>`
+          <div class="lifecycle-stages">${entries.map(([stage,count],i)=>`
             <div class="stage-row">
-              <div class="stage-dot" style="background:${s.active?STAGE_COLORS[i]:'#1f2937'}"></div>
-              <div class="stage-name" style="color:${s.active?'#e2e8f0':'#475569'}">${esc(s.stage||'')}</div>
-              <div class="stage-desc">${esc(s.condition||'')}</div>
-              <div class="stage-badge" style="background:${s.active?STAGE_COLORS[i]+'20':'#0a0c10'};color:${s.active?STAGE_COLORS[i]:'#475569'}">${s.active?'ACTIVE':'PENDING'}</div>
-            </div>`).join('') || '<div style="color:#475569;font-size:12px">No lifecycle data.</div>'}
+              <div class="stage-dot" style="background:${colors[i%colors.length]}"></div>
+              <div class="stage-name" style="color:#e2e8f0">${esc(stage)}</div>
+              <div class="stage-desc">Records currently satisfying this intelligence-readiness stage</div>
+              <div class="stage-badge" style="background:${colors[i%colors.length]}20;color:${colors[i%colors.length]}">${count}</div>
+            </div>`).join('') || '<div style="color:#475569;font-size:12px">No lifecycle distribution available.</div>'}
           </div>
-          <div style="margin-top:12px;font-size:11px;color:#64748b">Items processed: ${d.items_sampled||0}</div>
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">⚡ Strategic Decisions (Sample) <span class="section-badge">${esc(sample.cve_id||'N/A')}</span></div></div>
-        <div class="section-body">${decisions.map(dec=>`
-          <div class="decision-item ${dec.active?'active':'inactive'}">
-            <div class="decision-label" style="color:${dec.active?'#ef4444':'#94a3b8'}">${dec.active?'● ':'○ '}${esc(dec.action||'')}</div>
-            <div class="decision-evidence">${esc(dec.rationale||'')} · Confidence: ${dec.confidence??'—'}</div>
-          </div>`).join('') || '<div style="color:#475569;font-size:12px">No decisions.</div>'}
+          <div style="margin-top:12px;font-size:11px;color:#64748b">Readiness stages describe intelligence-record completeness/context only. They do not assert customer incident response, recovery, patching or closure.</div>
         </div>
       </div>
     `;
-  } catch(e) { el.innerHTML = `<div class="loading" style="color:#ef4444">Failed to load lifecycle: ${e.message}</div>`; }
+  } catch(e) {
+    el.innerHTML = `<div class="loading" style="color:#ef4444">Failed to load intelligence readiness: ${esc(e.message)}</div>`;
+  }
 }
 
 // ─── Detection Effectiveness ──────────────────────────────────────────────────
