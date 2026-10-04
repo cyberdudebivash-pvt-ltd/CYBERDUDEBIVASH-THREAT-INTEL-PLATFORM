@@ -42,6 +42,7 @@ import { computeActionabilityScore }   from './p23-handlers.js';
 import { computeEnterpriseTrustScore } from './p25-handlers.js';
 import { computeP26Grade }             from './p26-handlers.js';
 import { extractDetectionArtifacts }    from './detection-registry.js';
+import { explicitCvss, explicitRiskScore, hasExplicitCvss } from './metric-semantics.js';
 
 export const P30_VERSION = "P30.0";
 
@@ -118,7 +119,7 @@ function _computeVerificationStatus(item) {
   const hasNvdRef    = Boolean(item.nvd_url || (item.apex || {}).nvd_url);
   const hasKev       = Boolean(item.kev_present || (item.apex || {}).kev_listed);
   const hasEpss      = Boolean(item.epss_score != null && item.epss_score !== "");
-  const hasCvss      = Boolean(item.risk_score || item.cvss_score);
+  const hasCvss      = hasExplicitCvss(item);
   const hasSource    = Boolean(item.source_url);
   const hasEvidence  = Array.isArray(item.evidence_chain) && item.evidence_chain.length > 0;
   const hasMitre     = Array.isArray(item.ttps) && item.ttps.length > 0;
@@ -216,7 +217,7 @@ export function computeP30Timeline(item) {
 function _computeChangeTracking(item) {
   const changes = [];
 
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss = (explicitCvss(item) ?? 0);
   const severity = (item.severity || "").toUpperCase();
   const cvssToSev = cvss >= 9 ? "CRITICAL" : cvss >= 7 ? "HIGH" : cvss >= 4 ? "MEDIUM" : cvss > 0 ? "LOW" : null;
   if (cvssToSev && severity && cvssToSev !== severity) {
@@ -286,42 +287,68 @@ function _computeIOCLifecycle(item) {
  * Platform SLA engine is aggregate; P30 adds per-item deadline derivation.
  */
 function _computeItemSLA(item) {
-  const cvss    = parseFloat(item.risk_score || item.cvss_score || 0);
-  const isKev   = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-  const epss    = parseFloat(item.epss_score || 0);
-  const sev     = (item.severity || "").toUpperCase();
+  // Historical P30 code manufactured universal patch/detection/remediation
+  // deadlines from CVSS/risk. That is not a customer SLA and can be unsafe.
+  // This projection now reports only evidence-backed external deadlines and
+  // a policy-neutral urgency classification. Customer SLA remains external.
+  const cvss  = explicitCvss(item);
+  const risk  = explicitRiskScore(item);
+  const isKev = Boolean(item.kev_present || (item.apex || {}).kev_listed);
+  const epss  = parseFloat(item.epss_score || 0);
+  const sev   = String(item.severity || "").toUpperCase();
 
-  // SLA tier
-  let slaTier, patchDays, detectionDays, remediationDays, slaColor;
+  const explicitDeadlineRaw =
+    item.kev_due_date ||
+    item.cisa_kev_due_date ||
+    item.vendor_deadline ||
+    item.remediation_due_date ||
+    null;
 
-  if (isKev || (cvss >= 9 && epss > 0.1)) {
-    slaTier = "PLATINUM"; patchDays = 15; detectionDays = 24; remediationDays = 30; slaColor = "#ef4444";
-  } else if (cvss >= 9 || (cvss >= 7 && epss > 0.05)) {
-    slaTier = "ENTERPRISE"; patchDays = 30; detectionDays = 48; remediationDays = 45; slaColor = "#f59e0b";
-  } else if (cvss >= 7 || sev === "HIGH" || sev === "CRITICAL") {
-    slaTier = "STANDARD"; patchDays = 45; detectionDays = 72; remediationDays = 60; slaColor = "#3b82f6";
-  } else {
-    slaTier = "BASELINE"; patchDays = 90; detectionDays = 120; remediationDays = 90; slaColor = "#6b7280";
+  let explicitDeadline = null;
+  let deadlineEpoch = null;
+  if (explicitDeadlineRaw) {
+    const parsed = Date.parse(String(explicitDeadlineRaw));
+    if (Number.isFinite(parsed)) {
+      deadlineEpoch = parsed;
+      explicitDeadline = new Date(parsed).toISOString().slice(0, 10);
+    }
   }
 
-  const ts = item.timestamp || item.published_at || item.processed_at || "";
-  let baseEpoch = 0;
-  try { baseEpoch = ts ? new Date(ts).getTime() : 0; } catch (_) {}
+  let slaTier = "STANDARD_REVIEW";
+  let slaColor = "#3b82f6";
+  if (isKev) {
+    slaTier = explicitDeadline ? "KEV_DEADLINE" : "KEV_PRIORITY";
+    slaColor = "#ef4444";
+  } else if ((cvss != null && cvss >= 9) || sev === "CRITICAL" || (risk != null && risk >= 9)) {
+    slaTier = "PRIORITY_REVIEW";
+    slaColor = "#f59e0b";
+  } else if ((cvss != null && cvss >= 7) || sev === "HIGH" || epss > 0.1 || (risk != null && risk >= 7)) {
+    slaTier = "ELEVATED_REVIEW";
+    slaColor = "#f59e0b";
+  }
 
-  const msPerDay = 86400000;
-  const patchDeadline      = baseEpoch > 0 ? new Date(baseEpoch + patchDays * msPerDay).toISOString().slice(0, 10) : "N/A";
-  const detectionDeadline  = baseEpoch > 0 ? new Date(baseEpoch + detectionDays / 24 * msPerDay).toISOString().slice(0, 10) : "N/A";
-  const remediationDeadline= baseEpoch > 0 ? new Date(baseEpoch + remediationDays * msPerDay).toISOString().slice(0, 10) : "N/A";
-
-  // Urgency: how many days past deadline?
   const now = Date.now();
-  const patchOverdue    = baseEpoch > 0 ? Math.floor((now - (baseEpoch + patchDays * msPerDay)) / msPerDay) : 0;
-  const isOverdue       = patchOverdue > 0;
+  const isOverdue = deadlineEpoch != null && now > deadlineEpoch;
+  const overdueDays = isOverdue ? Math.floor((now - deadlineEpoch) / 86400000) : 0;
 
   return {
-    slaTier, slaColor, patchDays, detectionDays, remediationDays,
-    patchDeadline, detectionDeadline, remediationDeadline,
-    isOverdue, patchOverdue: Math.max(0, patchOverdue),
+    slaTier,
+    slaColor,
+    explicitDeadline,
+    explicitDeadlineSource: item.kev_due_date || item.cisa_kev_due_date
+      ? "CISA KEV / authoritative feed field"
+      : item.vendor_deadline
+        ? "Vendor deadline field"
+        : item.remediation_due_date
+          ? "Recorded remediation deadline"
+          : null,
+    customerSlaKnown: false,
+    isOverdue,
+    patchOverdue: Math.max(0, overdueDays),
+    cvss,
+    risk,
+    isKev,
+    epss,
   };
 }
 
@@ -517,30 +544,33 @@ export function buildP30IOCLifecycleBlock(item) {
 export function buildP30SLABlock(item) {
   const sla = _computeItemSLA(item);
 
+  const cvssText = sla.cvss != null ? sla.cvss.toFixed(1) : "Not present";
+  const riskText = sla.risk != null ? `${sla.risk.toFixed(1)}/10 (SENTINEL APEX composite risk; not CVSS)` : "Not present";
+  const deadlineText = sla.explicitDeadline || "No authoritative external deadline recorded";
+
   const body = `
   <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
     <div style="background:#1a2030;border-radius:4px;padding:8px 16px;">
       <span style="color:${sla.slaColor};font-size:13px;font-weight:700;">${sla.slaTier}</span>
-      <div style="color:#6b7280;font-size:9px;">SLA TIER</div>
+      <div style="color:#6b7280;font-size:9px;">RESPONSE PRIORITY</div>
     </div>
     ${sla.isOverdue ? `<div style="background:#ef444422;border:1px solid #ef4444;border-radius:4px;padding:8px 16px;">
-      <span style="color:#ef4444;font-size:12px;font-weight:700;">PATCH OVERDUE ${sla.patchOverdue}d</span>
+      <span style="color:#ef4444;font-size:12px;font-weight:700;">RECORDED DEADLINE OVERDUE ${sla.patchOverdue}d</span>
     </div>` : ""}
   </div>
   <div>
-    ${_row("SLA Tier", sla.slaTier, sla.slaColor)}
-    ${_row("Patch Deadline", sla.patchDeadline, sla.isOverdue ? "#ef4444" : "#f9fafb")}
-    ${_row("Detection Deadline", sla.detectionDeadline, "#f9fafb")}
-    ${_row("Remediation Deadline", sla.remediationDeadline, "#f9fafb")}
-    ${_row("Patch Window", `${sla.patchDays} days`, sla.slaColor)}
-    ${_row("Detection Window", `${sla.detectionDays} hours`, sla.slaColor)}
-    ${_row("Remediation Window", `${sla.remediationDays} days`, sla.slaColor)}
-    ${sla.isOverdue ? _row("Overdue By", `${sla.patchOverdue} day(s)  -  escalate immediately`, "#ef4444") : _row("SLA Status", "WITHIN SLA WINDOW", "#22c55e")}
+    ${_row("Response Priority", sla.slaTier, sla.slaColor)}
+    ${_row("Explicit CVSS", cvssText, sla.cvss != null ? "#f9fafb" : "#6b7280")}
+    ${_row("Composite Risk", riskText, sla.risk != null ? "#f9fafb" : "#6b7280")}
+    ${_row("Authoritative External Deadline", deadlineText, sla.isOverdue ? "#ef4444" : "#f9fafb")}
+    ${sla.explicitDeadlineSource ? _row("Deadline Source", sla.explicitDeadlineSource, "#94a3b8") : ""}
+    ${_row("Customer SLA", "Use the customer's documented vulnerability/incident SLA; SENTINEL APEX does not invent one.", "#94a3b8")}
+    ${sla.isOverdue ? _row("Deadline Status", `OVERDUE BY ${sla.patchOverdue} DAY(S) - escalate under customer policy`, "#ef4444") : _row("Deadline Status", sla.explicitDeadline ? "RECORDED DEADLINE NOT OVERDUE" : "NO AUTHORITATIVE DEADLINE TO ASSESS", sla.explicitDeadline ? "#22c55e" : "#6b7280")}
   </div>`;
 
-  return _block(`p30-sla-${esc(item.id || "x")}`, "P30.7 Enterprise SLA Intelligence",
+  return _block(`p30-sla-${esc(item.id || "x")}`, "P30.7 Enterprise Response Timing Intelligence",
     sla.slaColor, body,
-    `${sla.slaTier} tier  -  patch: ${sla.patchDays}d / detection: ${sla.detectionDays}h / remediation: ${sla.remediationDays}d`);
+    "Policy-neutral urgency + authoritative deadline context; customer SLA is never fabricated");
 }
 
 // -- P30.8: Customer Trust Timeline Block --------------------------------------
@@ -560,9 +590,11 @@ export function buildP30TrustTimelineBlock(item) {
   }
 
   if (sla.isOverdue) {
-    trustEvents.push({ label: "SLA BREACH DETECTED", detail: `Patch deadline exceeded by ${sla.patchOverdue} day(s)`, color: "#ef4444", icon: "[FAIL]" });
+    trustEvents.push({ label: "RECORDED DEADLINE OVERDUE", detail: `Authoritative recorded deadline exceeded by ${sla.patchOverdue} day(s); follow customer escalation policy`, color: "#ef4444", icon: "[FAIL]" });
+  } else if (sla.explicitDeadline) {
+    trustEvents.push({ label: "RECORDED DEADLINE ACTIVE", detail: `Authoritative deadline ${sla.explicitDeadline}; customer SLA remains separately governed`, color: "#3b82f6", icon: "[OK]" });
   } else {
-    trustEvents.push({ label: "SLA COMPLIANT", detail: `${sla.slaTier} tier  -  within ${sla.patchDays}d patch window`, color: "#22c55e", icon: "[OK]" });
+    trustEvents.push({ label: "CUSTOMER SLA NOT INFERRED", detail: "No authoritative external deadline is recorded; use the customer's documented SLA", color: "#6b7280", icon: "?" });
   }
 
   if (changes.length === 0) {
@@ -580,7 +612,7 @@ export function buildP30TrustTimelineBlock(item) {
   }
 
   // Overall trust rating
-  const trustPct = Math.round((v.verificationPct * 0.4) + (changes.length === 0 ? 30 : 10) + (!sla.isOverdue ? 30 : 5));
+  const trustPct = Math.round((v.verificationPct * 0.7) + (changes.length === 0 ? 30 : 10));
   const trustColor = trustPct >= 80 ? "#22c55e" : trustPct >= 60 ? "#3b82f6" : trustPct >= 40 ? "#f59e0b" : "#ef4444";
   const trustLabel = trustPct >= 80 ? "HIGH TRUST" : trustPct >= 60 ? "MODERATE TRUST" : trustPct >= 40 ? "LOW TRUST" : "INSUFFICIENT";
 
@@ -608,7 +640,7 @@ export function buildP30TrustTimelineBlock(item) {
   <div style="margin-top:12px;">${eventRows}</div>`;
 
   return _block(`p30-trust-${esc(item.id || "x")}`, "P30.8 Customer Trust Timeline",
-    trustColor, body, "Holistic trust narrative: verification + SLA + change tracking + IOC status");
+    trustColor, body, "Holistic trust narrative: verification + authoritative deadline context + change tracking + IOC status");
 }
 
 // -- P30 Package ---------------------------------------------------------------
