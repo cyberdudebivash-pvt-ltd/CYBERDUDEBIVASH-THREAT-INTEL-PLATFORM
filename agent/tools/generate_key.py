@@ -437,8 +437,11 @@ def revenue_summary() -> dict:
     return {
         "active_keys": len(active),
         "tier_breakdown": tier_counts,
-        "mrr_inr": mrr,
-        "arr_equivalent_inr": mrr * 12,
+        "mrr_inr": None,
+        "arr_equivalent_inr": None,
+        "revenue_status": "unverified_no_payment_ledger",
+        "estimated_monthly_catalog_value_inr": mrr,
+        "estimated_annual_catalog_value_inr": mrr * 12,
         "as_of": now_utc(),
     }
 
@@ -554,8 +557,8 @@ def cmd_revenue(args):
     print(f"\n  SENTINEL APEX Revenue Summary — {summary['as_of'][:10]}")
     print(f"  ─────────────────────────────────────────")
     print(f"  Active Keys:  {summary['active_keys']}")
-    print(f"  MRR (INR):    ₹{summary['mrr_inr']:,}")
-    print(f"  ARR (INR):    ₹{summary['arr_equivalent_inr']:,}")
+    print("  Verified MRR: unavailable (payment ledger not consulted)")
+    print(f"  Catalog value: ₹{summary['estimated_monthly_catalog_value_inr']:,}/month (estimate; not revenue)")
     print(f"  Tier Breakdown:")
     for tier, count in summary["tier_breakdown"].items():
         print(f"    {tier:<12}: {count}")
