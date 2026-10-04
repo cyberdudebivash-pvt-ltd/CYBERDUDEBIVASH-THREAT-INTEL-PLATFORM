@@ -31,3 +31,11 @@ test('CVE and IOC lookup retain anonymous operation when no bounded JWT exists',
   assert.doesNotMatch(cve, /Authentication required|Access remains locked/i);
   assert.doesNotMatch(lookup, /Authentication required|Access remains locked/i);
 });
+
+
+test('API-key acquisition page uses only the bounded current session JWT for non-security UI hints', () => {
+  const source = read('../../../../get-api-key.html');
+  assert.doesNotMatch(source, /localStorage\.getItem\(['"]cdb_jwt/);
+  assert.doesNotMatch(source, /sessionStorage\.getItem\(['"]cdb_jwt/);
+  assert.match(source, /sessionStorage\.getItem\(['"]apex_jwt['"]\)/);
+});
