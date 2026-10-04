@@ -21,7 +21,7 @@ test('accepts only bounded log-safe caller request IDs', () => {
 
   const rejected = [
     '',
-    ' has-space',
+    'has internal space',
     'contains space',
     'line\nbreak',
     '<script>',
