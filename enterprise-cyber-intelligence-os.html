@@ -272,18 +272,26 @@ const _loaded = {};
 
 /* ---- auth ---- */
 async function doAuth() {
-  const key = document.getElementById('auth-key').value.trim();
+  const input = document.getElementById('auth-key');
+  const key = input.value.trim();
   if (!key) { showAuthErr('Please enter an API key.'); return; }
   try {
-    const r = await fetch(API + '/api/health', { headers: { Authorization: 'Bearer ' + key } });
+    const r = await fetch(API + '/api/v1/p33/observability', {
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: { Authorization: 'Bearer ' + key, 'X-API-Key': key }
+    });
     if (!r.ok) throw new Error('HTTP ' + r.status);
+    await r.json();
     _token = key;
-    sessionStorage.setItem('ecios_token', key);
+    input.value = '';
     document.getElementById('auth-gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     initApp();
   } catch(e) {
-    showAuthErr('Authentication failed. Verify API key and retry.');
+    _token = '';
+    input.value = '';
+    showAuthErr('Authentication failed. Access remains locked.');
   }
 }
 
@@ -294,17 +302,11 @@ function showAuthErr(m) {
 }
 
 function doLogout() {
-  sessionStorage.removeItem('ecios_token');
+  _token = '';
   location.reload();
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  const t = sessionStorage.getItem('ecios_token');
-  if (t) {
-    _token = t;
-    document.getElementById('auth-key').value = t;
-    doAuth();
-  }
   document.getElementById('auth-key').addEventListener('keydown', e => { if (e.key === 'Enter') doAuth(); });
 });
 
