@@ -40,6 +40,7 @@ import { computeEnterpriseTrustScore } from './p25-handlers.js';
 import { computeP26Grade }             from './p26-handlers.js';
 import { enforceTierGate }             from './revenue-enforcement.js';
 import { extractDetectionArtifacts }    from './detection-registry.js';
+import { explicitCvss }                     from './metric-semantics.js';
 
 export const P31_VERSION = "P31.0";
 
@@ -674,7 +675,7 @@ function _computePlaybook(item) {
 
 export function buildP31KnowledgeGraphBlock(item) {
   const en = _computeEntityNormalization(item);
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss = (explicitCvss(item) ?? 0);
   const nodeColor = { threat_actor: "#ff4444", technique: "#0088ff", vulnerability: "#ff6600", tactic: "#8b5cf6", ioc_type: "#ef4444", source: "#22c55e" };
 
   const actorNode = en.actor.canonical ? `
@@ -903,7 +904,7 @@ export function buildP31PlaybookBlock(item) {
 
 export function buildP31RelationshipBlock(item) {
   const en = _computeEntityNormalization(item);
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss = (explicitCvss(item) ?? 0);
   const isKev = Boolean(item.kev_present || (item.apex || {}).kev_listed);
 
   const relationships = [];
@@ -1054,7 +1055,7 @@ export async function handleP31Search(request, env, tier) {
         const en = _computeEntityNormalization(item);
         results.push({
           id: item.id, title: (item.title || "").slice(0, 100),
-          severity: item.severity, cvss: parseFloat(item.risk_score || item.cvss_score || 0),
+          severity: item.severity, cvss: (explicitCvss(item) ?? 0),
           actor: en.actor.canonical, ttp_count: en.ttps.length,
           cve_count: en.cves.length, source: item.source,
           match_context: `Matched in advisory for q="${q}"`,
