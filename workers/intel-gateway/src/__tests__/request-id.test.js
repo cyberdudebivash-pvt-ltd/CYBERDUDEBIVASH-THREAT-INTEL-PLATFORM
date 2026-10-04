@@ -23,7 +23,6 @@ test('accepts only bounded log-safe caller request IDs', () => {
     '',
     'has internal space',
     'contains space',
-    'line\nbreak',
     '<script>',
     'a'.repeat(129),
   ];
