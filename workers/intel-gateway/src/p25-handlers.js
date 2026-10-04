@@ -151,7 +151,7 @@ export function buildExplainableScoreBlock(item) {
   // IOC & TTP coverage (0-5 pts each)
   const iocScore = iocCnt >= 5 ? 5 : iocCnt >= 2 ? 3 : iocCnt >= 1 ? 1 : 0;
   signals.push({ label: "IOC Coverage", pts: iocScore, max: 5, color: iocScore >= 4 ? "#22c55e" : iocScore >= 2 ? "#eab308" : "#6b7280",
-    reason: iocCnt > 0 ? `${iocCnt} indicator(s) available for threat hunting and blocking` : "No IOCs extracted  -  detection limited to behavioral patterns" });
+    reason: iocCnt > 0 ? `${iocCnt} recorded indicator(s) available for validation and threat hunting; containment requires customer-telemetry confirmation` : "No IOCs extracted  -  detection limited to behavioral patterns" });
   total += iocScore;
 
   const ttpScore = ttpCnt >= 3 ? 5 : ttpCnt >= 2 ? 3 : ttpCnt >= 1 ? 1 : 0;
