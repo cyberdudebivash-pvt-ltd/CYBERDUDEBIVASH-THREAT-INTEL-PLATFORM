@@ -265,6 +265,36 @@ test('enterprise operations UI fails closed, keeps credentials memory-only, and 
   assert.doesNotMatch(source, /Patch within 30 days|CISA mandatory patches|Operational Lifecycle \(9-Stage\)/i);
 });
 
+test('enterprise customer dashboards never persist raw API keys and fail closed on authentication', () => {
+  const pages = [
+    '../../../../customer-value-dashboard.html',
+    '../../../../enterprise-intelligence-health-dashboard.html',
+    '../../../../enterprise-knowledge-graph.html',
+    '../../../../enterprise-trust-center.html',
+  ];
+  for (const rel of pages) {
+    const source = fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /sessionStorage\.(?:setItem|getItem)\([^\n]*(?:api_key|sentinel_api_key|apex_api_key)/i, rel);
+    assert.doesNotMatch(source, /localStorage\.(?:setItem|getItem)\([^\n]*(?:api_key|sentinel_api_key|apex_api_key)/i, rel);
+  }
+
+  const customer = fs.readFileSync(new URL('../../../../customer-value-dashboard.html', import.meta.url), 'utf8');
+  assert.match(customer, /\/api\/v1\/p27\/observability/);
+  assert.match(customer, /Authentication failed\. Access remains locked\./);
+  assert.doesNotMatch(customer, /allow dashboard load in offline\/dev context/i);
+
+  const health = fs.readFileSync(new URL('../../../../enterprise-intelligence-health-dashboard.html', import.meta.url), 'utf8');
+  assert.match(health, /\/api\/v1\/p30\/observability/);
+  assert.match(health, /Authentication failed\. Access remains locked\./);
+  assert.doesNotMatch(health, /show dashboard anyway|offline \/ demo mode|degraded mode/i);
+
+  const graph = fs.readFileSync(new URL('../../../../enterprise-knowledge-graph.html', import.meta.url), 'utf8');
+  assert.match(graph, /\/api\/v1\/p31\/graph/);
+
+  const trust = fs.readFileSync(new URL('../../../../enterprise-trust-center.html', import.meta.url), 'utf8');
+  assert.match(trust, /\/api\/auth\/validate/);
+});
+
 test('enterprise trust dashboard fails closed and never persists API keys in Web Storage', () => {
   const source = fs.readFileSync(
     new URL('../../../../enterprise-trust-dashboard.html', import.meta.url),
