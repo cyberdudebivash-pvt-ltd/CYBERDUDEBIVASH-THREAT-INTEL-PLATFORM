@@ -548,11 +548,10 @@ async function doLogin(e) {
     return;
   }
 
-  // Store token + the raw key (dashboard.html reads the raw key from this
-  // same localStorage key for X-API-Key requests)
+  // Persist only the bounded session JWT for this browser tab/session.
+  // The long-lived raw API key is never written to Web Storage.
   try {
-    localStorage.setItem('apex_jwt', token);
-    localStorage.setItem('cdb_api_key', apiKey);
+    sessionStorage.setItem('apex_jwt', token);
   } catch(e){}
 
   setLoading('loginBtn', false, '<i class="fa-solid fa-right-to-bracket" style="margin-right:6px"></i>Sign In');
@@ -570,7 +569,7 @@ async function doLogin(e) {
 /* ── On page load: check for existing token ───────────────────── */
 window.addEventListener('load', () => {
   try {
-    const tok = localStorage.getItem('apex_jwt');
+    const tok = sessionStorage.getItem('apex_jwt');
     if (tok) {
       showMsg('loginMsg', 'info', 'You are already signed in. Redirecting to dashboard...');
       setTimeout(() => { window.location.href = 'dashboard.html'; }, 1500);
