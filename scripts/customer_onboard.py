@@ -173,8 +173,11 @@ def register_customer(
     # Recompute MRR
     mrr = sum(TIER_PRICING_INR.get(c.get("tier", "FREE"), 0)
               for c in customers if c.get("status") == "active")
-    meta["mrr_inr"] = mrr
-    meta["arr_inr"] = mrr * 12
+    meta["mrr_inr"] = None
+    meta["revenue_status"] = "unverified_no_payment_ledger"
+    meta["estimated_monthly_catalog_value_inr"] = mrr
+    meta["arr_inr"] = None
+    meta["estimated_annual_catalog_value_inr"] = mrr * 12
 
     save_json(CUSTOMERS_PATH, data)
     return record
@@ -235,8 +238,11 @@ def register_subscription(
 
     mrr = sum(TIER_PRICING_INR.get(s.get("tier","FREE"), 0)
               for s in subs if s.get("status") == "active")
-    meta["mrr_inr"] = mrr
-    meta["arr_equivalent_inr"] = mrr * 12
+    meta["mrr_inr"] = None
+    meta["revenue_status"] = "unverified_no_payment_ledger"
+    meta["estimated_monthly_catalog_value_inr"] = mrr
+    meta["arr_equivalent_inr"] = None
+    meta["estimated_annual_catalog_value_inr"] = mrr * 12
 
     save_json(SUBSCRIPTIONS_PATH, data)
     return record
@@ -478,7 +484,7 @@ def cmd_list(args):
               f"{c['country']:<8} {c['tier']:<12} {c.get('status','?')}")
     meta = data.get("_meta", {})
     print(f"\n  Total: {meta.get('total_customers',0)} | Active: {meta.get('active_customers',0)} "
-          f"| MRR: ₹{meta.get('mrr_inr',0):,}/mo")
+          f"| Verified MRR: unavailable (payment ledger not consulted)")
 
 
 # ─── REVENUE COMMAND ─────────────────────────────────────────────────────────
@@ -490,8 +496,8 @@ def cmd_revenue(args):
     print(f"  ─────────────────────────────────────────")
     print(f"  Active API Keys : {summary['active_keys']}")
     print(f"  Active Subs     : {meta.get('active_count', '?')}")
-    print(f"  MRR (INR)       : ₹{summary['mrr_inr']:,}")
-    print(f"  ARR (INR)       : ₹{summary['arr_equivalent_inr']:,}")
+    print("  Verified MRR    : unavailable (payment ledger not consulted)")
+    print("  Verified ARR    : unavailable (payment ledger not consulted)")
     print(f"  Tier Breakdown:")
     for tier, count in summary["tier_breakdown"].items():
         print(f"    {tier:<14}: {count}")
