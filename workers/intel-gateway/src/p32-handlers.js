@@ -1473,21 +1473,50 @@ export async function handleP32Dashboard(request, env) {
   for (const item of items.slice(0, 200)) {
     const sev   = String(item.severity || "").toUpperCase();
     const kev   = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-    const cvss  = (explicitCvss(item) ?? 0);
-    const hasDet = Boolean((item.apex || {}).sigma_rule || (item.detection_bundle || []).length > 0);
-    const hasIOC  = parseInt(item.ioc_count || 0) > 0;
-    const hasCVE  = (item.cve_ids || []).length > 0 || (item.title || "").includes("CVE-");
+    const cvss  = explicitCvss(item);
+    const risk  = explicitRiskScore(item);
+    const hasDet = Boolean(
+      (item.apex || {}).sigma_rule ||
+      item.sigma_rule ||
+      item.kql_query ||
+      item.yara_rule ||
+      (item.detection_bundle && typeof item.detection_bundle === "object" && Object.keys(item.detection_bundle).length > 0)
+    );
+    const hasIOC = parseInt(item.ioc_count || 0) > 0;
+    const hasCVE = (item.cve_ids || []).length > 0 || (item.title || "").includes("CVE-");
 
-    const entry = { id: item.id, title: (item.title || "").slice(0, 80), severity: sev, kev, cvss };
+    const entry = {
+      id: item.id,
+      title: (item.title || "").slice(0, 80),
+      severity: sev,
+      kev,
+      cvss,
+      risk_score: risk,
+      risk_is_cvss: false,
+    };
 
-    if (!hasDet && (sev === "CRITICAL" || sev === "HIGH")) queues.detection.push(entry);
-    if (hasCVE && kev) queues.patch.push({ ...entry, priority: "IMMEDIATE" });
-    else if (hasCVE && sev === "CRITICAL") queues.patch.push({ ...entry, priority: "24H" });
-    if (hasIOC) queues.hunting.push(entry);
-    if (sev === "CRITICAL" || kev) queues.executive.push(entry);
+    if (!hasDet && (sev === "CRITICAL" || sev === "HIGH")) {
+      queues.detection.push({ ...entry, priority: kev || sev === "CRITICAL" ? "PRIORITY" : "ELEVATED" });
+    }
+    if (hasCVE && kev) {
+      queues.patch.push({ ...entry, priority: "KEV_PRIORITY", timing: "applicable KEV/vendor deadline + customer SLA" });
+    } else if (hasCVE && (sev === "CRITICAL" || (cvss != null && cvss >= 9) || (risk != null && risk >= 9))) {
+      queues.patch.push({ ...entry, priority: "PRIORITY_REVIEW", timing: "customer SLA / vendor guidance" });
+    }
+    if (hasIOC) {
+      queues.hunting.push({ ...entry, requires_ioc_validation: true });
+    }
+    if (sev === "CRITICAL" || kev) {
+      queues.executive.push({ ...entry, escalation_basis: "customer materiality / incident policy; not inferred incident impact" });
+    }
 
     const ttps = Array.isArray(item.ttps) ? item.ttps : [];
-    if (ttps.some(t => ["T1041","T1048","T1567"].includes(t))) queues.compliance.push(entry);
+    if (ttps.some(t => ["T1041","T1048","T1567"].includes(t))) {
+      queues.compliance.push({
+        ...entry,
+        review_reason: "Mapped data-exfiltration ATT&CK context; mapping alone does not prove a breach or notification obligation.",
+      });
+    }
   }
 
   // Truncate queues
@@ -1497,6 +1526,8 @@ export async function handleP32Dashboard(request, env) {
     version: P32_VERSION,
     generated_at: new Date().toISOString(),
     feed_items: items.length,
+    timing_policy: "Customer SLA / authoritative external deadline; no universal platform response clock",
+    queue_truth_boundary: "Queue inclusion is review context, not proof of compromise, customer impact, legal materiality or completed action.",
     queues,
   });
 }
