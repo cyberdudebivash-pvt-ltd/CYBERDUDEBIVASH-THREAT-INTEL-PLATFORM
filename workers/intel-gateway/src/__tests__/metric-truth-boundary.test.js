@@ -13,7 +13,7 @@ import { buildP27MultiAudienceBlock } from '../p27-handlers.js';
 import { buildP28BusinessImpactBlock } from '../p28-handlers.js';
 import { buildP29LifecycleBlock, handleP29CustomerValueAnalytics } from '../p29-handlers.js';
 import { buildP30SLABlock } from '../p30-handlers.js';
-import { buildP32DecisionBlock, handleP32Customer } from '../p32-handlers.js';
+import { buildP32DecisionBlock, buildP32LifecycleBlock, handleP32Customer } from '../p32-handlers.js';
 import {
   buildP33CaseBlock,
   buildP33OperationalDashboardBlock,
@@ -105,6 +105,13 @@ test('P28 business impact is qualitative and never fabricates monetary loss or b
   assert.match(html, /does not prove outage, breach, data loss, financial loss/i);
   assert.doesNotMatch(html, /\$\s*(?:100K|500K|1M|10M)/i);
   assert.doesNotMatch(html, /estimated exposure/i);
+});
+
+test('P32 lifecycle is intelligence-readiness only and never asserts customer remediation completion', () => {
+  const html = buildP32LifecycleBlock(riskOnly);
+  assert.match(html, /Intelligence Readiness Lifecycle/i);
+  assert.match(html, /not customer incident\/remediation progress/i);
+  assert.doesNotMatch(html, /threat remediated|Recovery|Patch\/mitigation guidance published/i);
 });
 
 test('P33 case readiness does not manufacture customer incident lifecycle state', () => {
@@ -200,6 +207,10 @@ test('P33 mission and metrics never manufacture customer outcome or CVSS semanti
   assert.equal(metrics.customer_success.patch_completion_pct, null);
   assert.equal(metrics.customer_success.ioc_deployment_pct, null);
   assert.equal(metrics.customer_success.operational_maturity, null);
+  assert.equal(metrics.marketplace_tiers.pro.usd_monthly, 49);
+  assert.equal(metrics.marketplace_tiers.enterprise.usd_monthly, 499);
+  assert.equal(metrics.marketplace_tiers.mssp.usd_monthly, 999);
+  assert.equal(metrics.marketplace_tiers.pricing_source, '/api/pricing');
   assert.ok(metrics.intelligence_output_coverage);
   assert.equal(typeof metrics.intelligence_output_coverage.mitre_mapping_pct, 'number');
 
