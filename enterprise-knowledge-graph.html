@@ -330,18 +330,16 @@
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
-  function storedKey() {
-    try { return sessionStorage.getItem('sentinel_api_key') || ''; } catch { return ''; }
-  }
-
-  function storeKey(k) {
-    try { sessionStorage.setItem('sentinel_api_key', k); } catch {}
-  }
-
   async function verifyKey(key) {
     try {
-      const r = await fetch(`${API}/api/health`, { headers: { 'X-API-Key': key } });
-      return r.ok;
+      const r = await fetch(`${API}/api/v1/p31/graph`, {
+        cache: 'no-store',
+        credentials: 'omit',
+        headers: { 'X-API-Key': key, 'Authorization': 'Bearer ' + key }
+      });
+      if (!r.ok) return false;
+      await r.json();
+      return true;
     } catch { return false; }
   }
 
@@ -352,7 +350,7 @@
     const ok = await verifyKey(key);
     if (ok) {
       _apiKey = key;
-      storeKey(key);
+      document.getElementById('api-key-input').value = '';
       showApp();
     } else {
       document.getElementById('auth-error').style.display = 'block';
@@ -360,16 +358,11 @@
   });
 
   document.getElementById('btn-logout').addEventListener('click', () => {
-    sessionStorage.removeItem('sentinel_api_key');
+    _apiKey = '';
     location.reload();
   });
 
   async function init() {
-    const k = storedKey();
-    if (k) {
-      const ok = await verifyKey(k);
-      if (ok) { _apiKey = k; showApp(); return; }
-    }
     document.getElementById('auth-gate').style.display = 'flex';
   }
 
