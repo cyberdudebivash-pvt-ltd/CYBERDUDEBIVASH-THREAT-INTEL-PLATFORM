@@ -53,6 +53,9 @@ of Truth finding in `COMMERCIAL_READINESS.md` §1.
 
 ## Response envelope
 
+**Request correlation contract:** `sentinel-apex.v210`
+
+
 All intel-gateway responses pass through the outer response choke point and receive the platform's
 baseline security headers. Cross-origin behavior is route-aware: genuinely public read-only routes
 may use wildcard CORS, customer/browser routes grant only the approved production browser origin,
