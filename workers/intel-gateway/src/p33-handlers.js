@@ -15,6 +15,7 @@ import { computeActionabilityScore }                    from './p23-handlers.js'
 import { computeEnterpriseTrustScore }                  from './p25-handlers.js';
 import { computeP26Grade }                              from './p26-handlers.js';
 import { explicitCvss, explicitRiskScore }                from './metric-semantics.js';
+import { PRICING_TIERS }                                  from './pricing-data.js';
 import { extractDetectionArtifacts }                          from './detection-registry.js';
 
 export const P33_VERSION = 'P33.0';
@@ -1259,10 +1260,23 @@ export async function handleP33Metrics(request, env) {
       note: 'Customer remediation, IOC deployment and operational maturity require customer-owned outcome telemetry and are not inferred from feed contents.',
     },
     marketplace_tiers: {
-      standard:    { price_per_month: 499,   features: ['Feed access', 'Basic IOC', 'CVE alerts'] },
-      professional:{ price_per_month: 1999,  features: ['All Standard', 'Detection packs', 'MITRE mapping', 'API access'] },
-      enterprise:  { price_per_month: 4999,  features: ['All Professional', 'MSSP console', 'Custom integrations', 'SLA guarantee'] },
-      mssp:        { price_per_month: 9999,  features: ['All Enterprise', 'Multi-tenant', 'White-label', 'Dedicated analyst'] },
+      pricing_source: '/api/pricing',
+      contract_note: 'Values mirror the canonical gateway pricing module; /api/pricing is the customer-facing authority.',
+      pro: {
+        label: PRICING_TIERS.PRO.label,
+        usd_monthly: PRICING_TIERS.PRO.usd_monthly,
+        usd_annual: PRICING_TIERS.PRO.usd_annual,
+      },
+      enterprise: {
+        label: PRICING_TIERS.ENTERPRISE.label,
+        usd_monthly: PRICING_TIERS.ENTERPRISE.usd_monthly,
+        usd_annual: PRICING_TIERS.ENTERPRISE.usd_annual,
+      },
+      mssp: {
+        label: PRICING_TIERS.MSSP.label,
+        usd_monthly: PRICING_TIERS.MSSP.usd_monthly,
+        usd_annual: PRICING_TIERS.MSSP.usd_annual,
+      },
     },
   });
 }
