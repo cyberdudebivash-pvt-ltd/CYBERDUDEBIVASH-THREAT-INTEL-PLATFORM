@@ -13,10 +13,13 @@ import { buildP27MultiAudienceBlock } from '../p27-handlers.js';
 import { buildP28BusinessImpactBlock } from '../p28-handlers.js';
 import { buildP29LifecycleBlock, handleP29CustomerValueAnalytics } from '../p29-handlers.js';
 import { buildP30SLABlock } from '../p30-handlers.js';
-import { buildP32DecisionBlock } from '../p32-handlers.js';
+import { buildP32DecisionBlock, buildP32LifecycleBlock, handleP32Customer } from '../p32-handlers.js';
 import {
   buildP33CaseBlock,
   buildP33OperationalDashboardBlock,
+  handleP33Metrics,
+  handleP33Mission,
+  handleP33Observability,
 } from '../p33-handlers.js';
 
 const riskOnly = {
@@ -104,6 +107,13 @@ test('P28 business impact is qualitative and never fabricates monetary loss or b
   assert.doesNotMatch(html, /estimated exposure/i);
 });
 
+test('P32 lifecycle is intelligence-readiness only and never asserts customer remediation completion', () => {
+  const html = buildP32LifecycleBlock(riskOnly);
+  assert.match(html, /Intelligence Readiness Lifecycle/i);
+  assert.match(html, /not customer incident\/remediation progress/i);
+  assert.doesNotMatch(html, /threat remediated|Patch\/mitigation guidance published|>RECOVERY<|>RETIREMENT</i);
+});
+
 test('P33 case readiness does not manufacture customer incident lifecycle state', () => {
   const html = buildP33CaseBlock(riskOnly);
   assert.match(html, /INTELLIGENCE READINESS/i);
@@ -147,6 +157,73 @@ test('P29 value analytics leaves customer outcome estimates unavailable without 
   assert.ok(body.operational_capacity_signals.priority_review_items >= 1);
 });
 
+test('P32 customer summary keeps composite risk distinct from explicit CVSS', async () => {
+  const env = {
+    INTEL_R2: {
+      async get() {
+        return { async json() { return { items: [riskOnly] }; } };
+      },
+    },
+  };
+  const res = await handleP32Customer(
+    new Request('https://intel.cyberdudebivash.com/api/v1/p32/customer'),
+    env,
+  );
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.exposure_summary.high_risk_count, 1);
+});
+
+test('P33 mission and metrics never manufacture customer outcome or CVSS semantics', async () => {
+  const env = {
+    INTEL_R2: {
+      async get() {
+        return { async json() { return { items: [riskOnly] }; } };
+      },
+    },
+  };
+
+  const missionRes = await handleP33Mission(
+    new Request('https://intel.cyberdudebivash.com/api/v1/p33/mission'),
+    env,
+  );
+  assert.equal(missionRes.status, 200);
+  const mission = await missionRes.json();
+  for (const queue of Object.values(mission.queues)) {
+    for (const item of queue) {
+      assert.equal(item.cvss, null);
+      assert.equal(item.risk_score, 9.8);
+      assert.equal(item.risk_is_cvss, false);
+    }
+  }
+
+  const metricsRes = await handleP33Metrics(
+    new Request('https://intel.cyberdudebivash.com/api/v1/p33/metrics'),
+    env,
+  );
+  assert.equal(metricsRes.status, 200);
+  const metrics = await metricsRes.json();
+  assert.equal(metrics.customer_success.measurement_status, 'UNAVAILABLE');
+  assert.equal(metrics.customer_success.patch_completion_pct, null);
+  assert.equal(metrics.customer_success.ioc_deployment_pct, null);
+  assert.equal(metrics.customer_success.operational_maturity, null);
+  assert.equal(metrics.marketplace_tiers.pro.usd_monthly, 49);
+  assert.equal(metrics.marketplace_tiers.enterprise.usd_monthly, 499);
+  assert.equal(metrics.marketplace_tiers.mssp.usd_monthly, 999);
+  assert.equal(metrics.marketplace_tiers.pricing_source, '/api/pricing');
+  assert.ok(metrics.intelligence_output_coverage);
+  assert.equal(typeof metrics.intelligence_output_coverage.mitre_mapping_pct, 'number');
+
+  const obsRes = await handleP33Observability(
+    new Request('https://intel.cyberdudebivash.com/api/v1/p33/observability'),
+    env,
+  );
+  assert.equal(obsRes.status, 200);
+  const obs = await obsRes.json();
+  assert.equal(obs.pipeline.health_pct, null);
+  assert.equal(obs.pipeline.measurement_status, 'UNAVAILABLE');
+});
+
 test('source guard forbids risk-to-CVSS fallback across hardened customer P25-P33 layers', () => {
   const files = [
     '../p25-handlers.js',
@@ -162,6 +239,8 @@ test('source guard forbids risk-to-CVSS fallback across hardened customer P25-P3
     /risk_score\s*\|\|\s*item\.cvss_score/,
     /item\.cvss_score\s*\|\|\s*item\.risk_score/,
     /sd\.cvss\s*\|\|\s*item\.cvss_score\s*\|\|\s*item\.risk_score/,
+    /risk_score\s*\|\|\s*i\.cvss_score/,
+    /i\.risk_score\s*\|\|\s*i\.cvss_score/,
   ];
   for (const rel of files) {
     const source = fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -169,6 +248,86 @@ test('source guard forbids risk-to-CVSS fallback across hardened customer P25-P3
       assert.doesNotMatch(source, pattern, `${rel} reintroduced risk/CVSS conflation`);
     }
   }
+});
+
+test('enterprise operations UI fails closed, keeps credentials memory-only, and consumes current P32 contracts', () => {
+  const source = fs.readFileSync(
+    new URL('../../../../enterprise-operations.html', import.meta.url),
+    'utf8',
+  );
+  assert.doesNotMatch(source, /sessionStorage\.(?:setItem|getItem)\(['"]apex_token/);
+  assert.doesNotMatch(source, /localStorage\.(?:setItem|getItem)\([^\n]*token/i);
+  assert.match(source, /Authentication failed\. Access remains locked\./);
+  assert.match(source, /\/api\/v1\/p32\/observability/);
+  assert.match(source, /exposure_summary/);
+  assert.match(source, /top_required_actions/);
+  assert.match(source, /stage_distribution/);
+  assert.doesNotMatch(source, /Patch within 30 days|CISA mandatory patches|Operational Lifecycle \(9-Stage\)/i);
+});
+
+test('landing and enterprise dashboards keep raw credentials out of persistent storage and never auto-substitute synthetic production data', () => {
+  const login = fs.readFileSync(new URL('../../../../landing/auth.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(login, /localStorage\.setItem\(['"]cdb_api_key/);
+  assert.doesNotMatch(login, /localStorage\.setItem\(['"]apex_jwt/);
+  assert.match(login, /sessionStorage\.setItem\(['"]apex_jwt/);
+
+  const landing = fs.readFileSync(new URL('../../../../landing/dashboard.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(landing, /localStorage\.(?:getItem|setItem|removeItem)\([^\n]*cdb_api_key/i);
+  assert.match(landing, /sessionStorage\.getItem\(['"]apex_jwt/);
+
+  const api = fs.readFileSync(new URL('../../../../landing/api.js', import.meta.url), 'utf8');
+  assert.match(api, /Authorization.*Bearer/);
+  assert.match(api, /X-API-Key/);
+
+  const enterprise = fs.readFileSync(new URL('../../../../dashboard/enterprise_dashboard.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(enterprise, /localStorage\.(?:getItem|setItem|removeItem)\(['"]cdb_(?:ent_key|jwt)/);
+  assert.doesNotMatch(enterprise, /consoleApiKey['"]\)\.value\s*=\s*key/);
+
+  const analyst = fs.readFileSync(new URL('../../../../dashboard/analyst_dashboard.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(analyst, /localStorage\.getItem\(['"]cdb_api_key/);
+  assert.doesNotMatch(analyst, /Feed load failed, using demo data/i);
+  assert.doesNotMatch(analyst, /Auto-load demo data on first render/i);
+  assert.match(analyst, /No synthetic data has been substituted/);
+
+  const os = fs.readFileSync(new URL('../../../../enterprise-cyber-intelligence-os.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(os, /sessionStorage\.(?:setItem|getItem)\(['"]ecios_token/);
+  assert.match(os, /\/api\/v1\/p33\/observability/);
+  assert.match(os, /Authentication failed\. Access remains locked\./);
+
+  const keyManager = fs.readFileSync(new URL('../../../../api-key-manager.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(keyManager, /sessionStorage\.(?:setItem|getItem)\(['"]sentinel_token/);
+  assert.match(keyManager, /\/api\/account\/usage/);
+  assert.match(keyManager, /Authentication failed\. Access remains locked\./);
+});
+
+test('enterprise customer dashboards never persist raw API keys and fail closed on authentication', () => {
+  const pages = [
+    '../../../../customer-value-dashboard.html',
+    '../../../../enterprise-intelligence-health-dashboard.html',
+    '../../../../enterprise-knowledge-graph.html',
+    '../../../../enterprise-trust-center.html',
+  ];
+  for (const rel of pages) {
+    const source = fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /sessionStorage\.(?:setItem|getItem)\([^\n]*(?:api_key|sentinel_api_key|apex_api_key)/i, rel);
+    assert.doesNotMatch(source, /localStorage\.(?:setItem|getItem)\([^\n]*(?:api_key|sentinel_api_key|apex_api_key)/i, rel);
+  }
+
+  const customer = fs.readFileSync(new URL('../../../../customer-value-dashboard.html', import.meta.url), 'utf8');
+  assert.match(customer, /\/api\/v1\/p27\/observability/);
+  assert.match(customer, /Authentication failed\. Access remains locked\./);
+  assert.doesNotMatch(customer, /allow dashboard load in offline\/dev context/i);
+
+  const health = fs.readFileSync(new URL('../../../../enterprise-intelligence-health-dashboard.html', import.meta.url), 'utf8');
+  assert.match(health, /\/api\/v1\/p30\/observability/);
+  assert.match(health, /Authentication failed\. Access remains locked\./);
+  assert.doesNotMatch(health, /show dashboard anyway|offline \/ demo mode|degraded mode/i);
+
+  const graph = fs.readFileSync(new URL('../../../../enterprise-knowledge-graph.html', import.meta.url), 'utf8');
+  assert.match(graph, /\/api\/v1\/p31\/graph/);
+
+  const trust = fs.readFileSync(new URL('../../../../enterprise-trust-center.html', import.meta.url), 'utf8');
+  assert.match(trust, /\/api\/auth\/validate/);
 });
 
 test('enterprise trust dashboard fails closed and never persists API keys in Web Storage', () => {
