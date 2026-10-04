@@ -378,26 +378,39 @@
 
 <script>
 /* ── Auth ── */
-function authenticate() {
-  const key = document.getElementById('api-key-input').value.trim();
+async function authenticate() {
+  const input = document.getElementById('api-key-input');
+  const key = input.value.trim();
   if (!key) { showErr('Enter your enterprise API key.'); return; }
-  // Validate against live API
-  fetch('/api/health', { headers: { 'Authorization': 'Bearer ' + key } })
-    .then(r => {
-      if (r.status === 401 || r.status === 403) { showErr('Invalid API key. Contact support@cyberdudebivash.com'); return; }
-      // Accept 200 or any non-auth error (worker may not know this endpoint without key)
-      sessionStorage.setItem('apex_api_key', key);
-      document.getElementById('auth-gate').style.display = 'none';
-      document.getElementById('main-content').style.display = 'block';
-      loadDashboard(key);
-    })
-    .catch(() => {
-      // Offline / CORS — allow entry, dashboard will surface errors per-widget
-      sessionStorage.setItem('apex_api_key', key);
-      document.getElementById('auth-gate').style.display = 'none';
-      document.getElementById('main-content').style.display = 'block';
-      loadDashboard(key);
+
+  // Fail closed against an authenticated dashboard dependency. A transport
+  // error or unexpected status is never treated as successful authentication.
+  try {
+    const base = window.location.hostname.includes('localhost') ? 'https://intel.cyberdudebivash.com' : '';
+    const res = await fetch(base + '/api/v1/p25/observability', {
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: {
+        'Authorization': 'Bearer ' + key,
+        'X-API-Key': key,
+      },
     });
+    if (!res.ok) {
+      showErr(res.status === 401 || res.status === 403
+        ? 'API key is not authorized for this dashboard.'
+        : 'Unable to validate dashboard access. Try again or contact support.');
+      return;
+    }
+    await res.json();
+    document.getElementById('auth-gate').style.display = 'none';
+    document.getElementById('main-content').style.display = 'block';
+    await loadDashboard(key);
+  } catch (_) {
+    showErr('Unable to validate dashboard access. Access remains locked.');
+  } finally {
+    // Credential remains only in this in-memory call chain.
+    input.value = '';
+  }
 }
 
 function showErr(msg) {
@@ -589,7 +602,10 @@ function renderFeed(items) {
     const sev      = String(item.severity || 'UNKNOWN').toUpperCase();
     const sevColor = severityColor[sev] || '#6b7280';
     const kev      = !!(sd.kev || item.kev_present || item.kev);
-    const cvss     = parseFloat(sd.cvss || item.cvss_score || item.risk_score || 0);
+    const cvssRaw  = Number(item.cvss_score ?? item.cvss ?? NaN);
+    const cvss     = Number.isFinite(cvssRaw) && cvssRaw > 0 && cvssRaw <= 10 ? cvssRaw : null;
+    const riskRaw  = Number(item.risk_score ?? NaN);
+    const risk     = Number.isFinite(riskRaw) && riskRaw >= 0 && riskRaw <= 10 ? riskRaw : null;
     const conf     = Math.round(parseFloat(item.confidence || 0) * 100);
     const enrich   = parseInt(item.enrichment_score || 0);
     const ttpCnt   = parseInt(item.ttp_count || 0);
@@ -606,7 +622,7 @@ function renderFeed(items) {
       </td>
       <td><span class="pill" style="color:${sevColor};border-color:${sevColor}44;background:${sevColor}11;">${sev}</span></td>
       <td style="color:${kev?'#ef4444':'#4b5563'};font-weight:700;">${kev?'KEV':'—'}</td>
-      <td style="color:${cvss>=9?'#ef4444':cvss>=7?'#f97316':cvss>=4?'#eab308':'#6b7280'};font-weight:600;">${cvss>0?cvss.toFixed(1):'—'}</td>
+      <td style="color:${cvss!=null&&cvss>=9?'#ef4444':cvss!=null&&cvss>=7?'#f97316':cvss!=null&&cvss>=4?'#eab308':'#6b7280'};font-weight:600;" title="${risk!=null?'APEX risk '+risk.toFixed(1)+'/10 is separate from CVSS':'No separate APEX risk score'}">${cvss!=null?cvss.toFixed(1):'—'}</td>
       <td style="color:${conf>=60?'#22c55e':conf>=30?'#eab308':'#6b7280'};">${conf}%</td>
       <td>
         <div style="background:#1a1f2e;border-radius:2px;height:4px;width:60px;margin-bottom:2px;">
@@ -626,15 +642,8 @@ function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-/* ── Check for existing session ── */
-(function() {
-  const key = sessionStorage.getItem('apex_api_key');
-  if (key) {
-    document.getElementById('auth-gate').style.display = 'none';
-    document.getElementById('main-content').style.display = 'block';
-    loadDashboard(key);
-  }
-})();
+/* Credential persistence is intentionally disabled.
+   Re-authentication is required after page reload/navigation. */
 </script>
 </body>
 </html>
