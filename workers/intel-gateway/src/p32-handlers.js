@@ -1360,7 +1360,10 @@ export async function handleP32Customer(request, env) {
   const critical = items.filter(i => String(i.severity || "").toUpperCase() === "CRITICAL");
   const kev      = items.filter(i => Boolean(i.kev_present || (i.apex || {}).kev_listed));
   const newItems = items.filter(i => _ageHours(i.processed_ts || i.timestamp) < 48);
-  const highRisk = items.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) >= 8.0).length;
+  const highRisk = items.filter(i => {
+    const risk = explicitRiskScore(i);
+    return risk != null && risk >= 8.0;
+  }).length;
 
   const topActions = [];
   for (const item of [...kev, ...critical].slice(0, 5)) {
