@@ -7,7 +7,7 @@
  * a continuously operating enterprise decision-support system.
  * Implements ONLY capabilities audit-confirmed absent from P20-P31:
  *
- *   P32.1  Operational Intelligence Lifecycle     (9-stage process lifecycle)
+ *   P32.1  Intelligence Readiness Lifecycle       (record-readiness, not customer incident state)
  *   P32.2  Enterprise Decision Engine             (strategic governance decisions)
  *   P32.3  Intelligence Delta Engine              (yesterday vs today delta)
  *   P32.4  Detection Effectiveness Engine         (FP/FN/coverage per format)
