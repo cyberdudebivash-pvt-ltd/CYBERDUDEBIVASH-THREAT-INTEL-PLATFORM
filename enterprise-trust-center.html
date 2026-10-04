@@ -132,7 +132,6 @@
   function auth() {
     const key = document.getElementById("api-key-input").value.trim();
     if (!key) return;
-    sessionStorage.setItem("apex_api_key", key);
     // Validate against the canonical key-validation endpoint. /api/health
     // reports INTELLIGENCE FRESHNESS (structured 503 while the feed is
     // stale) and never validated a key, so a valid customer could be shown
@@ -150,11 +149,9 @@
           document.getElementById("main").style.display = "block";
           loadAll(key);
         } else {
-          sessionStorage.removeItem("apex_api_key");
           err.style.display = "block";
         }
       }).catch(() => {
-        sessionStorage.removeItem("apex_api_key");
         err.style.display = "block";
       });
   }
@@ -346,14 +343,7 @@
     // This hook is available for future P29.8 extensions
   }
 
-  // Auto-auth if key already in sessionStorage
-  window.addEventListener("load", () => {
-    const stored = sessionStorage.getItem("apex_api_key");
-    if (stored) {
-      document.getElementById("api-key-input").value = stored;
-      auth();
-    }
-  });
+  // Raw credentials are not persisted; reload/navigation requires re-authentication.
 
   // Allow Enter key to submit
   document.getElementById("api-key-input").addEventListener("keydown", e => {
