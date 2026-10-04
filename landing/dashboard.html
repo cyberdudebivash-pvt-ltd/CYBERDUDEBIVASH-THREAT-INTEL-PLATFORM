@@ -188,14 +188,15 @@
 <script>
 'use strict';
 
-const LS_KEY = 'cdb_api_key';
-let currentKey = localStorage.getItem(LS_KEY) || '';
+let currentKey = '';
+let currentCredential = '';
 let currentTier = 'free';
 
 // Init
 document.addEventListener('DOMContentLoaded', () => {
-  if (currentKey) {
-    document.getElementById('api-key-input').value = currentKey;
+  const sessionJwt = sessionStorage.getItem('apex_jwt') || '';
+  if (sessionJwt) {
+    currentCredential = sessionJwt;
     fetchAndRender();
   }
   // Check URL params for success/cancel
@@ -213,8 +214,9 @@ function useDemo(key) {
 
 function clearKey() {
   document.getElementById('api-key-input').value = '';
-  localStorage.removeItem(LS_KEY);
   currentKey = '';
+  currentCredential = '';
+  sessionStorage.removeItem('apex_jwt');
   currentTier = 'free';
   updateTierBadge('free');
   document.getElementById('intel-grid').innerHTML = '<div class="loading-state">API key cleared. Enter a key to load intel.</div>';
@@ -347,7 +349,11 @@ function renderCard(item) {
 async function fetchAndRender() {
   const keyInput = document.getElementById('api-key-input');
   const key = keyInput ? keyInput.value.trim() : '';
-  if (key) { localStorage.setItem(LS_KEY, key); currentKey = key; }
+  if (key) {
+    currentKey = key;
+    currentCredential = key;
+  }
+  const credential = currentCredential || key || null;
 
   const btn = document.getElementById('fetch-btn');
   const keyStatus = document.getElementById('key-status');
@@ -359,7 +365,7 @@ async function fetchAndRender() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<span style="font-family:var(--font-data)">⟳ Loading...</span>'; }
   document.getElementById('intel-grid').innerHTML = '<div class="loading-state"><span class="spin" aria-hidden="true">⟳</span> Fetching threat intelligence...</div>';
 
-  const { ok, data, error, status } = await APEX.fetchIntel(key || null, 20);
+  const { ok, data, error, status } = await APEX.fetchIntel(credential, 20);
 
   if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L13 7L7 13M1 7h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> Load Intel'; }
 
@@ -419,7 +425,7 @@ async function runSearch() {
   const q = (document.getElementById('search-input').value || '').trim();
   if (!q) { Toast.warn('Enter a search query.'); return; }
   document.getElementById('search-results').innerHTML = '<div class="loading-state"><span class="spin">⟳</span> Searching...</div>';
-  const key = currentKey || localStorage.getItem(LS_KEY) || '';
+  const key = currentCredential || currentKey || '';
   // v184.6: intel-gateway (the real production Worker) has no dedicated
   // /api/v1/intel/search route. Instead of calling a nonexistent endpoint,
   // pull the caller's tier-gated feed via the existing fetchFeed() helper
@@ -444,7 +450,7 @@ async function runSearch() {
 }
 
 async function loadStats() {
-  const key = currentKey || localStorage.getItem(LS_KEY) || '';
+  const key = currentCredential || currentKey || '';
   document.getElementById('stats-content').innerHTML = '<div class="loading-state"><span class="spin">⟳</span> Loading stats...</div>';
   const { ok, data } = await APEX.fetchStats(key);
   if (!ok || !data) {
