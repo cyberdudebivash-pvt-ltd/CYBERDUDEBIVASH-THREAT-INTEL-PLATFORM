@@ -561,8 +561,8 @@ const STATE = {
   page: 1,
   filter: 'all',
   query: '',
-  apiKey: localStorage.getItem('cdb_ent_key') || '',
-  jwtToken: localStorage.getItem('cdb_jwt') || '',
+  apiKey: '',
+  jwtToken: '',
   alerts: JSON.parse(localStorage.getItem('cdb_alerts') || '[]'),
   watchlists: JSON.parse(localStorage.getItem('cdb_watchlists') || 'null') || [
     {id:1,name:'Critical CVEs',items:['CVE-2026','CVE-2025','zero-day'],created:new Date().toISOString()},
@@ -615,8 +615,7 @@ async function authenticateKey(){
     if(r.ok && d.token){
       STATE.apiKey = key;
       STATE.jwtToken = d.token;
-      localStorage.setItem('cdb_ent_key', key);
-      localStorage.setItem('cdb_jwt', d.token);
+      // Credentials remain memory-only; reload/navigation requires re-authentication.
       const tier = d.tier || 'unknown';
       st.className='auth-status ok';
       st.textContent = '✓ Authenticated — Tier: '+tier.toUpperCase()+' | Key: '+key.substring(0,12)+'...';
@@ -624,8 +623,8 @@ async function authenticateKey(){
       document.getElementById('apiKeyInput').value='';
       document.getElementById('feedTier').textContent=tier.toUpperCase()+' Feed';
       toast('Enterprise feed unlocked ✓');
-      // Pre-fill console API key
-      document.getElementById('consoleApiKey').value = key;
+      // Do not copy a raw long-lived credential into another DOM field.
+      document.getElementById('consoleApiKey').value = '';
       refreshData();
     } else {
       st.className='auth-status err';
@@ -641,7 +640,6 @@ async function authenticateKey(){
 
 function clearAuth(){
   STATE.apiKey = ''; STATE.jwtToken = '';
-  localStorage.removeItem('cdb_ent_key'); localStorage.removeItem('cdb_jwt');
   document.getElementById('authStatus').textContent = 'Key cleared. Enter your API key for full access.';
   document.getElementById('authStatus').className = 'auth-status';
   document.getElementById('clearAuthBtn').style.display='none';
@@ -1175,15 +1173,7 @@ function refreshData(){
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async function init(){
-  // Restore auth UI if key saved
-  if(STATE.apiKey){
-    document.getElementById('authStatus').textContent='✓ Key loaded from session — fetching enterprise feed...';
-    document.getElementById('authStatus').className='auth-status ok';
-    document.getElementById('clearAuthBtn').style.display='';
-    document.getElementById('feedTier').textContent='Enterprise Feed';
-    document.getElementById('consoleApiKey').value=STATE.apiKey;
-  }
-
+  // Credentials are intentionally not restored from browser storage.
   renderWatchlists();
   renderAlerts();
   renderSavedSearches();
