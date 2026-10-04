@@ -224,3 +224,44 @@ def test_api_reference_card_claims_are_live_or_removed():
     assert "fetch('/api/watchdog/health'" in html
     assert 'id="arc-count"' in html and 'id="arc-version"' in html
     assert "Uptime commitment (Enterprise / MSSP; Pro 99.5%)" in html
+
+
+def test_legacy_threat_graph_has_no_synthetic_fallback_or_random_attribution():
+    html = _text("dashboard/threat_graph_dashboard.html")
+    for banned in ("generateDemoData", "seededRisk", "Math.random", "185.220.101.45", "S001"):
+        assert banned not in html
+    target = "/enterprise-knowledge-graph.html"
+    assert f'content="0; url={target}"' in html
+    assert f'href="{target}"' in html
+    assert 'name="robots" content="noindex, follow"' in html
+    assert "window.location.search + window.location.hash" in html
+    assert "fetch(`${API}/api/v1/p31/graph`" in _text(target.lstrip('/'))
+
+
+def test_legacy_graph_redirect_preserves_query_and_fragment():
+    import subprocess
+    import shutil
+    node = shutil.which("node")
+    assert node, "Node is required to verify executable redirect behavior"
+    html = _text("dashboard/threat_graph_dashboard.html")
+    script = re.search(r"<script>(.*?)</script>", html, re.S).group(1)
+    harness = """
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const script = JSON.parse(process.argv[1]);
+for (const [search, hash] of [['', ''], ['?view=campaign&limit=10', '#graph'], ['?next=https%3A%2F%2Fexample.com', '#ioc']]) {
+  let result;
+  vm.runInNewContext(script, {window: {location: {search, hash, replace: url => {result = url;}}}});
+  assert.equal(result, '/enterprise-knowledge-graph.html' + search + hash);
+}
+"""
+    subprocess.run([node, '-e', harness, json.dumps(script)], check=True, capture_output=True, text=True)
+
+
+def test_global_deployment_distinguishes_contract_from_observed_availability():
+    html = _visible("global-deployment.html")
+    for banned in ("99.99%", "Live in 30 seconds", "No firewall changes required", "● LIVE"):
+        assert banned not in html
+    assert "Uptime commitments, not measured uptime" in html
+    assert "not regional health measurements or compliance attestations" in html
+    assert "Outbound HTTPS access required" in html

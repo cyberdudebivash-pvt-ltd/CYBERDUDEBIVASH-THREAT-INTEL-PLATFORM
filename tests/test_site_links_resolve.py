@@ -20,6 +20,8 @@ include_singles), so a new broken link fails CI instead of reaching
 customers.
 """
 import ast
+from html.parser import HTMLParser
+from scripts import build_dist_artifact as builder
 import re
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -50,18 +52,40 @@ INCLUDE_DIRS, INCLUDE_SINGLES, DOCS_WHITELIST = _dist_rules()
 
 
 def _published_pages():
-    pages = sorted(REPO.glob("*.html"))
+    pages = [p for p in sorted(REPO.glob("*.html")) if not builder.is_excluded_html(p.name)]
     for d in INCLUDE_DIRS:
         if d != "reports":
-            pages += sorted((REPO / d).rglob("*.html"))
+            excluded = set(builder.INCLUDE_DIR_FILE_EXCLUDES.get(d, ()))
+            pages += [p for p in sorted((REPO / d).rglob("*.html"))
+                      if p.relative_to(REPO / d).as_posix() not in excluded]
+    pages += [REPO / "docs" / p for p in sorted(DOCS_WHITELIST)]
     return pages
 
 
+class RouteAttributes(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.urls = []
+        self.redirects = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        for key in ("href", "src", "action", "poster"):
+            if attrs.get(key):
+                self.urls.append(attrs[key])
+        if tag == "meta" and attrs.get("http-equiv", "").lower() == "refresh":
+            match = re.search(r";\s*url\s*=\s*(.+)", attrs.get("content", ""), re.I)
+            if match:
+                self.urls.append(match.group(1).strip("\"' "))
+                self.redirects.append(self.urls[-1])
+
+
 def _internal_links(page: Path):
-    text = re.sub(r"<!--.*?-->", "", page.read_text(encoding="utf-8", errors="ignore"), flags=re.S)
+    parser = RouteAttributes()
+    parser.feed(page.read_text(encoding="utf-8", errors="replace"))
     base = f"{SITE}/{page.relative_to(REPO).as_posix()}"
-    for _attr, raw in ATTR_RE.findall(text):
-        url = raw.strip().replace("&amp;", "&")
+    for raw in parser.urls:
+        url = raw.strip()
         if url.startswith(("#", "mailto:", "tel:", "javascript:", "data:")) or any(c in url for c in "{}$'+` "):
             continue
         u = urlparse(urljoin(base, url))
@@ -73,11 +97,11 @@ def _shipped_file(rel: str) -> bool:
     if not (REPO / rel).is_file():
         return False
     if "/" not in rel:
-        return rel.endswith(".html") or rel in INCLUDE_SINGLES
+        return (rel.endswith(".html") and not builder.is_excluded_html(rel)) or rel in INCLUDE_SINGLES
     top, rest = rel.split("/", 1)
     if top == "docs":
         return rest in DOCS_WHITELIST
-    return top in INCLUDE_DIRS
+    return top in INCLUDE_DIRS and rest not in builder.INCLUDE_DIR_FILE_EXCLUDES.get(top, ())
 
 
 def _is_shipped(path: str) -> bool:
@@ -135,3 +159,35 @@ def test_sitemap_urls_resolve_to_shipped_files():
             elif not _is_shipped(u.path):
                 broken.append(f"{sm.name}: {loc.strip()}")
     assert broken == [], "sitemap URLs that 404:\n" + "\n".join(broken[:40])
+
+
+def test_parser_covers_redirects_forms_and_single_quoted_links():
+    parser = RouteAttributes()
+    parser.feed("<a href='/missing.html'>x</a><form action='/submit'></form>"
+                "<meta http-equiv='refresh' content='0; URL=/target.html'>"
+                "<!-- <a href='/ignored'> -->")
+    assert parser.urls == ['/missing.html', '/submit', '/target.html']
+
+
+def test_quarantined_files_do_not_count_as_resolved_routes():
+    assert not _is_shipped('/conversion-analytics.html')
+    assert not _is_shipped('/dashboard/revenue_acceleration.html')
+
+
+def test_published_meta_redirects_have_no_cycles():
+    redirects = {}
+    for page in _published_pages():
+        parser = RouteAttributes()
+        parser.feed(page.read_text(encoding='utf-8', errors='replace'))
+        for target in parser.redirects:
+            base = f"{SITE}/{page.relative_to(REPO).as_posix()}"
+            url = urlparse(urljoin(base, target))
+            if url.netloc == urlparse(SITE).netloc:
+                redirects['/' + page.relative_to(REPO).as_posix()] = url.path
+    for origin in redirects:
+        seen = set()
+        current = origin
+        while current in redirects:
+            assert current not in seen, f"redirect cycle starting at {origin}: {sorted(seen)}"
+            seen.add(current)
+            current = redirects[current]
