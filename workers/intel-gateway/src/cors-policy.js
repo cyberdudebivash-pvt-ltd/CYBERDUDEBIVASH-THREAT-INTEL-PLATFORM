@@ -279,9 +279,9 @@ function classifyRoute(path, method) {
 // (no BROWSER-class route in intel-gateway uses it -- confirmed via
 // repo-wide grep; only revenue-engine's separate CRM surface does).
 const BROWSER_METHODS = ["GET", "POST", "PUT", "DELETE"];
-const BROWSER_HEADERS = ["Content-Type", "Authorization", "X-API-Key", "X-Sentinel-Key"];
+const BROWSER_HEADERS = ["Content-Type", "Authorization", "X-API-Key", "X-Sentinel-Key", "X-Request-ID"];
 const PUBLIC_METHODS = ["GET", "HEAD"];
-const PUBLIC_HEADERS = ["Content-Type"];
+const PUBLIC_HEADERS = ["Content-Type", "X-Request-ID"];
 
 function methodAllowed(list, method) {
   return typeof method === "string" && list.includes(method.toUpperCase());
@@ -354,8 +354,13 @@ function resolveCorsForRoute(request, path, method) {
 function applyCorsPolicy(response, request, path, method) {
   const { acao, vary } = resolveCorsForRoute(request, path, method);
   const headers = new Headers(response.headers);
-  if (acao) headers.set("Access-Control-Allow-Origin", acao);
-  else headers.delete("Access-Control-Allow-Origin");
+  if (acao) {
+    headers.set("Access-Control-Allow-Origin", acao);
+    headers.set("Access-Control-Expose-Headers", "X-Request-ID");
+  } else {
+    headers.delete("Access-Control-Allow-Origin");
+    headers.delete("Access-Control-Expose-Headers");
+  }
   // Never emitted by this platform (no cookie/credentialed fetch anywhere
   // in intel-gateway -- see this file's header comment); deleted rather
   // than merely "never set" so a future accidental addition anywhere
