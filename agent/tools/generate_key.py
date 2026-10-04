@@ -221,41 +221,58 @@ def generate_key(
     key = live["key"]
     key_hash = sha256(key)
 
-    expiry = days_from_now(days)
-    grace_end = days_from_now(days + GRACE_PERIOD_DAYS)
+    try:
+        expiry = days_from_now(days)
+        grace_end = days_from_now(days + GRACE_PERIOD_DAYS)
 
-    record = {
-        "key_hash":       key_hash,
-        "tier":           tier,
-        "customer_email": customer_email,
-        "customer_name":  customer_name,
-        "company":        company,
-        "reference_id":   reference_id,
-        "api_calls_per_day": TIER_QUOTAS.get(tier, 100),
-        "issued_at":      now_utc(),
-        "expires_at":     expiry,
-        "grace_ends_at":  grace_end,
-        "status":         "active",
-        "renewal_count":  0,
-        "notes":          notes,
-    }
+        record = {
+            "key_hash":       key_hash,
+            "tier":           tier,
+            "customer_email": customer_email,
+            "customer_name":  customer_name,
+            "company":        company,
+            "reference_id":   reference_id,
+            "api_calls_per_day": TIER_QUOTAS.get(tier, 100),
+            "issued_at":      now_utc(),
+            "expires_at":     expiry,
+            "grace_ends_at":  grace_end,
+            "status":         "active",
+            "renewal_count":  0,
+            "notes":          notes,
+        }
 
-    # Load and update active_keys.json
-    data = load_json(ACTIVE_KEYS_PATH, {"_meta": {}, "keys": {}})
-    if "keys" not in data:
-        data["keys"] = {}
-    data["keys"][key_hash] = record
-    data.setdefault("_meta", {})
-    data["_meta"]["last_updated"] = now_utc()
-    data["_meta"]["total_keys"] = len(data["keys"])
-    save_json(ACTIVE_KEYS_PATH, data)
+        # Load and update active_keys.json
+        data = load_json(ACTIVE_KEYS_PATH, {"_meta": {}, "keys": {}})
+        if "keys" not in data:
+            data["keys"] = {}
+        data["keys"][key_hash] = record
+        data.setdefault("_meta", {})
+        data["_meta"]["last_updated"] = now_utc()
+        data["_meta"]["total_keys"] = len(data["keys"])
+        save_json(ACTIVE_KEYS_PATH, data)
 
-    # Audit log
-    _append_audit("KEY_GENERATED", key_hash[:12], tier, customer_email, reference_id)
+        # Audit log
+        _append_audit("KEY_GENERATED", key_hash[:12], tier, customer_email, reference_id)
 
-    result = dict(record)
-    result["key"] = key  # Include plaintext ONLY in this return value — never stored
-    return result
+        result = dict(record)
+        result["key"] = key  # Include plaintext ONLY in this return value — never stored
+        return result
+    except Exception:
+        # The caller cannot compensate until this function returns the key.
+        # Revoke directly: local bookkeeping may be the failing component.
+        try:
+            live_revoke_key(key)
+        except Exception:
+            raise LiveProvisionError(
+                "CRITICAL: live credential issuance succeeded, local recording failed, "
+                "and compensating revocation failed. Reconcile the production key "
+                "using the customer/reference before retrying."
+            ) from None
+        raise LiveProvisionError(
+            "Local key recording failed after issuance; the live credential was revoked. "
+            "Reconcile local audit records before retrying."
+        ) from None
+
 
 
 def activate_key(key_hash: str) -> bool:
