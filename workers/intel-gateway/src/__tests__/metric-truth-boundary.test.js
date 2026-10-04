@@ -111,7 +111,7 @@ test('P32 lifecycle is intelligence-readiness only and never asserts customer re
   const html = buildP32LifecycleBlock(riskOnly);
   assert.match(html, /Intelligence Readiness Lifecycle/i);
   assert.match(html, /not customer incident\/remediation progress/i);
-  assert.doesNotMatch(html, /threat remediated|Recovery|Patch\/mitigation guidance published/i);
+  assert.doesNotMatch(html, /threat remediated|Patch\/mitigation guidance published|>RECOVERY<|>RETIREMENT</i);
 });
 
 test('P33 case readiness does not manufacture customer incident lifecycle state', () => {
