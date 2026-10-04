@@ -34,6 +34,7 @@ import { getP21CertificationLevel }   from './p21-handlers.js';
 import { computeActionabilityScore }  from './p23-handlers.js';
 import { computeEnterpriseTrustScore} from './p25-handlers.js';
 import { computeP26Grade }            from './p26-handlers.js';
+import { explicitCvss, explicitRiskScore, hasExplicitCvss } from './metric-semantics.js';
 
 export const P29_VERSION = "P29.0";
 
@@ -335,21 +336,24 @@ const _DECISION_CATALOG = [
     icon: "?",
     color: "#ef4444",
     test: item => {
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss = explicitCvss(item);
+      const risk = explicitRiskScore(item);
       const kev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      return { active: kev || cvss >= 7, priority: kev ? "IMMEDIATE" : cvss >= 9 ? "24H" : "7D" };
+      const sev  = String(item.severity || "").toUpperCase();
+      const active = kev || (cvss != null && cvss >= 7) || sev === "CRITICAL" || sev === "HIGH" || (risk != null && risk >= 8);
+      const priority = kev ? "KEV PRIORITY" : (cvss != null && cvss >= 9) || sev === "CRITICAL" || (risk != null && risk >= 9) ? "HIGH" : "STANDARD";
+      return { active, priority };
     },
     rationale: (item) => {
       const kev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
-      return kev
-        ? `KEV-listed  -  active exploitation confirmed. Emergency patch deployment required.`
-        : `CVSS ${cvss.toFixed(1)}  -  patch within defined SLA to prevent exploitation.`;
+      const cvss = explicitCvss(item);
+      const risk = explicitRiskScore(item);
+      if (kev) return "CISA KEV-listed vulnerability: validate affected assets and remediate by the applicable KEV/vendor/customer deadline.";
+      if (cvss != null) return `Explicit CVSS ${cvss.toFixed(1)}: prioritize remediation according to verified exposure and the customer's documented SLA.`;
+      if (risk != null) return `SENTINEL APEX composite risk score ${risk.toFixed(1)}/10: validate technical severity and exposure; this value is not CVSS.`;
+      return "Severity signal present without an explicit CVSS score: validate authoritative vulnerability severity and customer exposure before remediation.";
     },
-    impact: (item) => {
-      const kev = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      return kev ? "Risk reduction: HIGH. Estimated analyst effort: 1-4h." : "Risk reduction: MEDIUM-HIGH. Effort: 2-8h.";
-    },
+    impact: () => "Expected outcome: reduce verified exposure while preserving customer change-control and evidence requirements.",
   },
   {
     id: "HUNT",
@@ -370,7 +374,7 @@ const _DECISION_CATALOG = [
           ? `${hasTTPs} MITRE ATT&CK technique(s) mapped. Proactive hunting recommended.`
           : "No actor attribution or TTPs available. Hunt priority LOW.";
     },
-    impact: () => "Risk reduction: MEDIUM. Estimated analyst effort: 4-16h.",
+    impact: () => "Risk reduction: MEDIUM. Analyst effort varies by customer telemetry coverage and investigation scope.",
   },
   {
     id: "DETECT",
@@ -428,7 +432,7 @@ const _DECISION_CATALOG = [
           ? "Lateral movement TTPs detected. Micro-segment high-value asset networks."
           : "Containment not required based on available intelligence.";
     },
-    impact: () => "Blast radius reduction: CRITICAL if active. Effort: 2-8h.",
+    impact: () => "Potential blast-radius reduction depends on confirmed customer-environment impact and approved containment.",
   },
   {
     id: "RECOVER",
@@ -437,7 +441,7 @@ const _DECISION_CATALOG = [
     color: "#22c55e",
     test: item => {
       const kev   = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      const cvss  = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss  = (explicitCvss(item) ?? 0);
       const sev   = (item.severity || "").toUpperCase();
       const active = kev || (cvss >= 9 && sev === "CRITICAL");
       return { active, priority: active ? "HIGH" : "LOW" };
@@ -448,7 +452,7 @@ const _DECISION_CATALOG = [
         ? "Active exploitation confirmed. Validate backup integrity and test restore procedures."
         : "CRITICAL severity advisory. Proactively validate DR/BCP procedures.";
     },
-    impact: () => "Business continuity assurance: HIGH. Effort: 4-12h.",
+    impact: () => "Business-continuity value depends on customer recovery architecture and validated impact.",
   },
   {
     id: "ESCALATE",
@@ -457,18 +461,18 @@ const _DECISION_CATALOG = [
     color: "#a855f7",
     test: item => {
       const kev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss = (explicitCvss(item) ?? 0);
       const sev  = (item.severity || "").toUpperCase();
       return { active: kev || (cvss >= 9 && sev === "CRITICAL"), priority: kev ? "IMMEDIATE" : "HIGH" };
     },
     rationale: (item) => {
       const kev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss = (explicitCvss(item) ?? 0);
       return kev
-        ? "KEV-listed. Board-level escalation may be required. Notify CISO within 1 hour."
+        ? "KEV-listed. Board-level escalation may be required. Escalate according to the customer's incident, vulnerability-management and executive-notification policy."
         : `CVSS ${cvss.toFixed(1)} CRITICAL. Escalate to CISO for patching prioritization decision.`;
     },
-    impact: () => "Executive alignment: CRITICAL. Communication effort: 0.5-2h.",
+    impact: () => "Executive escalation follows the customer's materiality and notification policy.",
   },
   {
     id: "ACCEPT",
@@ -476,20 +480,24 @@ const _DECISION_CATALOG = [
     icon: "[OK]",
     color: "#6b7280",
     test: item => {
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss = explicitCvss(item);
+      const risk = explicitRiskScore(item);
       const kev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
       const epss = parseFloat(item.epss_score || 0);
-      const active = !kev && cvss < 4 && epss < 0.1;
+      const sev  = String(item.severity || "").toUpperCase();
+      const lowSignal = (cvss != null && cvss < 4) || (cvss == null && risk != null && risk < 4);
+      const active = !kev && lowSignal && epss < 0.1 && (sev === "LOW" || sev === "INFO");
       return { active, priority: "LOW" };
     },
     rationale: (item) => {
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss = explicitCvss(item);
+      const risk = explicitRiskScore(item);
       const epss = parseFloat(item.epss_score || 0);
-      return !item.kev_present && cvss < 4
-        ? `CVSS ${cvss.toFixed(1)}, EPSS ${epss.toFixed(3)}  -  formal risk acceptance may be appropriate. Document rationale.`
-        : "Risk acceptance not recommended. Higher severity or exploitation probability present.";
+      if (cvss != null) return `Explicit CVSS ${cvss.toFixed(1)}, EPSS ${epss.toFixed(3)}: formal risk acceptance may be considered only under the customer's documented risk-acceptance process.`;
+      if (risk != null) return `SENTINEL APEX composite risk score ${risk.toFixed(1)}/10, EPSS ${epss.toFixed(3)}: risk acceptance requires customer validation; composite risk is not CVSS.`;
+      return "Insufficient technical severity evidence for automated risk acceptance.";
     },
-    impact: () => "Residual risk: LOW (when formally documented). Effort: 0.5-1h.",
+    impact: () => "Residual risk must be recorded and approved under the customer's formal risk-acceptance process.",
   },
 ];
 
@@ -547,7 +555,7 @@ function _computeLifecycle(item) {
 
   const hasKEV   = Boolean(item.kev_present || (item.apex || {}).kev_listed);
   const hasEPSS  = Boolean(item.epss_score);
-  const hasCVSS  = Boolean(item.risk_score || item.cvss_score);
+  const hasCVSS  = hasExplicitCvss(item);
   const hasIOC   = parseInt(item.ioc_count || 0) > 0;
   const hasSTIX  = Boolean(item.stix_bundle);
   const hasSrc   = Boolean(item.source_url);
