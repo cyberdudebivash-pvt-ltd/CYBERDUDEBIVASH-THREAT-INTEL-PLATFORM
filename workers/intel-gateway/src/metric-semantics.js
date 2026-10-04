@@ -25,7 +25,7 @@ export function explicitCvss(item = {}) {
   ];
   for (const value of candidates) {
     const n = finiteInRange(value, 0, 10);
-    if (n !== null && n > 0) return n;
+    if (n !== null) return n;
   }
   return null;
 }
