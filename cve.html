@@ -209,18 +209,20 @@ h1{font-size:30px;font-weight:700;margin-bottom:10px}
     });
   }
 
-  function apiUrl(qs) {
+  function sessionAuthHeaders() {
     var headers = {};
-    var key = null;
-    try { key = localStorage.getItem("cdb_api_key"); } catch (_) {}
-    return { url: API_BASE + "/api/cves?" + qs, key: key };
+    var token = null;
+    try { token = sessionStorage.getItem("apex_jwt"); } catch (_) {}
+    if (token) headers["Authorization"] = "Bearer " + token;
+    return headers;
   }
 
   function doFetch(qs) {
-    var req = apiUrl(qs);
-    var headers = {};
-    if (req.key) headers["X-API-Key"] = req.key;
-    return fetch(req.url, { headers: headers }).then(function (r) {
+    return fetch(API_BASE + "/api/cves?" + qs, {
+      cache: "no-store",
+      credentials: "omit",
+      headers: sessionAuthHeaders()
+    }).then(function (r) {
       return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; });
     });
   }
