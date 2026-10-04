@@ -136,6 +136,7 @@ import {
 // one true response choke point -- withBaselineHeaders() and the OPTIONS
 // branch below -- so no individual route handler needs to change.
 import { applyCorsPolicy, buildPreflightResponse, classifyRoute } from './cors-policy.js';
+import { resolveRequestId, withRequestId, withoutRequestId } from './request-id.js';
 // In-isolate counter layer: batches KV writes on the hot request path.
 // See rate-limit-cache.js for the cost rationale and the exact trade-off.
 import { bumpCounter, bumpCounterWriteThrough, peekCounter } from './rate-limit-cache.js';
@@ -9135,10 +9136,11 @@ async function handleRequest(request, env, ctx) {
 // same as any other response) is the direct fix: it stops the second,
 // unnecessary CORS decision from running at all, rather than papering
 // over its symptom.
-function withBaselineHeaders(response, request, path, method) {
+function withBaselineHeaders(response, request, path, method, requestId) {
   const headers = new Headers(response.headers);
   for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
+  headers.set("X-Request-ID", requestId);
   const withSecurity = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   if (method === "OPTIONS") return withSecurity;
   return applyCorsPolicy(withSecurity, request, path, method);
@@ -9424,6 +9426,7 @@ export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
     const method = request.method.toUpperCase();
+    const requestId = resolveRequestId(request);
 
     // Cache key is the FULL request (Cache API default: path + query
     // string), deliberately NOT stripped the way the ai/* proxy strips its
@@ -9441,14 +9444,14 @@ export default {
     if (edgeCache) {
       try {
         const cached = await edgeCache.match(request);
-        if (cached) return cached;
+        if (cached) return withRequestId(cached, requestId);
       } catch (cacheErr) {
-        console.error(`[fetch] edge cache match failed for ${pathname}: ${cacheErr && cacheErr.message ? cacheErr.message : cacheErr}`);
+        console.error(`[fetch] request_id=${requestId} edge cache match failed for ${pathname}: ${cacheErr && cacheErr.message ? cacheErr.message : cacheErr}`);
       }
     }
 
     try {
-      const response = withBaselineHeaders(await handleRequest(request, env, ctx), request, pathname, method);
+      const response = withBaselineHeaders(await handleRequest(request, env, ctx), request, pathname, method, requestId);
       // Only a 200 is ever stored -- never pins an error/outage in place
       // for the TTL. Cache-Control is normalised to a known, bounded value
       // here rather than trusting each individual handler to have set one
@@ -9466,15 +9469,18 @@ export default {
       const privateResponse = responseCc.includes("private") || responseCc.includes("no-store");
       if (edgeCache && response.status === 200 && edgeTtl > 0 && !privateResponse && ctx && typeof ctx.waitUntil === "function") {
         try {
-          const toCache = new Response(response.clone().body, {
+          let toCache = new Response(response.clone().body, {
             status: response.status,
             statusText: response.statusText,
             headers: new Headers(response.headers),
           });
           toCache.headers.set("Cache-Control", `public, max-age=${edgeTtl}`);
+          // Correlation is request-specific. Never persist one caller's
+          // X-Request-ID in the shared edge cache.
+          toCache = withoutRequestId(toCache);
           ctx.waitUntil(edgeCache.put(request, toCache));
         } catch (putErr) {
-          console.error(`[fetch] edge cache put failed for ${pathname}: ${putErr && putErr.message ? putErr.message : putErr}`);
+          console.error(`[fetch] request_id=${requestId} edge cache put failed for ${pathname}: ${putErr && putErr.message ? putErr.message : putErr}`);
         }
       }
       return response;
@@ -9484,13 +9490,13 @@ export default {
       // catch-all for every route, reachable unauthenticated, and
       // err.message can carry internal detail (paths, binding names,
       // upstream API error text).
-      console.error(`[fetch] unhandled error: ${err && err.message ? err.message : err}`);
+      console.error(`[fetch] request_id=${requestId} unhandled error: ${err && err.message ? err.message : err}`);
       return withBaselineHeaders(
         new Response(JSON.stringify({ error: "Internal gateway error" }), {
           status: 500,
           headers: { ...JSON_CONTENT },
         }),
-        request, pathname, method
+        request, pathname, method, requestId
       );
     }
   },
