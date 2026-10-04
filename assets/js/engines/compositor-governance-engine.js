@@ -6,12 +6,12 @@
 //   RC3: will-change:transform before paint → Chrome pre-allocates empty GPU
 //        layer → compositor captures blank frame → canvas stays blank.
 //   Fix: Two-phase GPU promotion:
-//     Phase 1 (init):    will-change:auto  — no pre-paint layer
-//     Phase 2 (promote): will-change:transform AFTER first content is drawn
+//     (init):    will-change:auto  — no pre-paint layer
+//     (promote): will-change:transform AFTER first content is drawn
 //
 // API (window.CDB_COMPOSITOR):
-//   .init(canvas)        — Phase 1: set will-change:auto (call at DOM ready)
-//   .promote(canvas)     — Phase 2: promote GPU layer (call AFTER first paint)
+//   .init(canvas)        — set will-change:auto (call at DOM ready)
+//   .promote(canvas)     — promote GPU layer (call AFTER first paint)
 //   .demote(canvas)      — remove GPU layer (pause/hide)
 //   .isPromoted(canvas)  — boolean state check
 //   .safeMode(canvas)    — force will-change:auto + translateZ:none (emergency)
@@ -58,7 +58,7 @@
   /* ── Public API ─────────────────────────────────────────────────────────── */
 
   /**
-   * init(canvas) — Phase 1: apply will-change:auto.
+   * init(canvas) — apply will-change:auto.
    * Call immediately when canvas element is available, before any drawing.
    * Prevents Chrome from pre-allocating an empty GPU compositor layer.
    */
@@ -73,7 +73,7 @@
   }
 
   /**
-   * promote(canvas) — Phase 2: promote to GPU compositor layer.
+   * promote(canvas) — promote to GPU compositor layer.
    * MUST be called inside requestAnimationFrame, AFTER the first content draw.
    * Chrome will composite the frame with actual content, not blank.
    */

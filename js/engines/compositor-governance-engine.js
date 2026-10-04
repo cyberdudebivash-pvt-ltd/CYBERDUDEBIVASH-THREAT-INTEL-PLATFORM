@@ -16,8 +16,8 @@
 //         All canvas styling governed exclusively by CSS !important overrides.
 //
 // API (window.CDB_COMPOSITOR):
-//   .init(canvas)        -- Phase 1: set will-change:auto (call at DOM ready)
-//   .promote(canvas)     -- Phase 2: promote GPU layer (call AFTER first paint)
+//   .init(canvas)        -- set will-change:auto (call at DOM ready)
+//   .promote(canvas)     -- promote GPU layer (call AFTER first paint)
 //   .demote(canvas)      -- remove GPU layer (pause/hide)
 //   .isPromoted(canvas)  -- boolean state check
 //   .safeMode(canvas)    -- force will-change:auto + translateZ:none (emergency)
@@ -56,7 +56,7 @@
     return false;
   }
 
-  // init(canvas) -- Phase 1: set will-change:auto + block backface promotion.
+  // init(canvas) -- set will-change:auto + block backface promotion.
   // RC7 FIX: backface-visibility:hidden (even without !important) is a Chrome
   // GPU compositor layer promotion trigger. Setting it in init() caused Chrome
   // to pre-allocate an EMPTY GPU layer BEFORE first paint -- blank canvas.

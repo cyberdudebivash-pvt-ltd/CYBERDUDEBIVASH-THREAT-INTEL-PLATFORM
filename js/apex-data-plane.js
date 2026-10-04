@@ -4,11 +4,11 @@
  *  Shared fetch/contract-safety/race-safety primitives for dynamic dashboard widgets
  *
  *  STAGE 2 of the SENTINEL APEX Dynamic Frontend Transformation mandate
- *  (Phase 2 of the pre-existing "Dashboard Truth Contract" mission -- see
- *  DASHBOARD_TRUTH_CONTRACT_PHASE0_FORENSIC_CENSUS.md). That mission's Phase 1
+ *  (of the pre-existing "Dashboard Truth Contract" mission -- see
+ *  DASHBOARD_TRUTH_CONTRACT_PHASE0_FORENSIC_CENSUS.md). That mission
  *  already shipped js/dashboard-state.js (canonical state vocabulary) and
  *  js/dashboard_contract_validator.js (card-shape validator), explicitly
- *  scoped for "a future canonical normalizer, Phase 2+, not part of that PR."
+ *  scoped for "a future canonical normalizer, , not part of that PR."
  *  js/api_adapter.js separately already has a solid fetchAndNormalize()
  *  (timeout + AbortController + retry-with-backoff + normalizeApexResponse)
  *  -- but index.html never calls it; the only two live call sites of

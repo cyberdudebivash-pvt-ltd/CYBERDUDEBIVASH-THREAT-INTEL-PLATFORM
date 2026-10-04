@@ -3,12 +3,12 @@
  * Author: CYBERGOD / TECH GOD
  * Description: The Master CISO Dashboard — 100% synced to Railway API backend.
  *
- * PHASE 2: safeFetch — 3 retries, 8s timeout, AbortController, fallback, never crash UI
- * PHASE 3: Dynamic version from GET /health, fallback to "v81.9", never blank
- * PHASE 4: Real-time polling every 30s — stats, alerts, intel feed; cleanup on unmount
- * PHASE 5: Auth UI (login/register modal), API Key UI (generate/masked/usage), enhanced SOAR
- * PHASE 6: Null-safe rendering (?.  ?? defaults) + try/catch on ALL async
- * PHASE 7: Validated under API failure, slow network, empty data, high load
+ * safeFetch — 3 retries, 8s timeout, AbortController, fallback, never crash UI
+ * Dynamic version from GET /health, fallback to "v81.9", never blank
+ * Real-time polling every 30s — stats, alerts, intel feed; cleanup on unmount
+ * Auth UI (login/register modal), API Key UI (generate/masked/usage), enhanced SOAR
+ * Null-safe rendering (?.  ?? defaults) + try/catch on ALL async
+ * Validated under API failure, slow network, empty data, high load
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -38,7 +38,7 @@ const sevColor = (s) =>
   ] || T.textMuted);
 
 // ═══════════════════════════════════════════════════════════
-// PHASE 2 — safeFetch: 3 retries, 8s timeout, never crash UI
+// safeFetch: 3 retries, 8s timeout, never crash UI
 // ═══════════════════════════════════════════════════════════
 async function safeFetch(url, opts = {}, retries = 3) {
   const TIMEOUT_MS = 8000;
@@ -333,7 +333,7 @@ function IntelFeed({ items, limit = 10 }) {
   );
 }
 
-// ═══ PHASE 5 — AUTH MODAL ══════════════════════════════
+// ═══ AUTH MODAL ══════════════════════════════
 
 function AuthModal({ mode: initialMode, onClose, onSuccess }) {
   const [mode, setMode] = useState(initialMode || "login"); // "login" | "register"
@@ -440,7 +440,7 @@ function AuthModal({ mode: initialMode, onClose, onSuccess }) {
   );
 }
 
-// ═══ PHASE 5 — API KEY PANEL ════════════════════════════
+// ═══ API KEY PANEL ════════════════════════════
 
 function ApiKeyPanel({ jwt }) {
   const [apiKey, setApiKey] = useState(null);
@@ -588,7 +588,7 @@ function ApiKeyPanel({ jwt }) {
   );
 }
 
-// ═══ PHASE 5 — ENHANCED SOAR ACTION PANEL ═════════════════
+// ═══ ENHANCED SOAR ACTION PANEL ═════════════════
 
 function SoarActionPanel({ jwt, apiKey }) {
   const [actionLog, setActionLog] = useState([]);
@@ -928,19 +928,19 @@ export default function CDBSentinelDashboard() {
   const [feedPage, setFeedPage] = useState(0);
   const FEED_PAGE_SIZE = 12;
 
-  // ── PHASE 3 — dynamic version from /health ──
+  // ── dynamic version from /health ──
   const [platformVersion, setPlatformVersion] = useState(DASHBOARD_VERSION);
   const [health, setHealth] = useState(null);
 
-  // ── PHASE 5 — Auth state ──
+  // ── Auth state ──
   const [authModal, setAuthModal] = useState(null); // null | "login" | "register"
   const [session, setSession] = useState(null); // { token, user }
 
-  // ── PHASE 4 — Polling ref ──
+  // ── Polling ref ──
   const pollIntervalRef = useRef(null);
   const pollControllersRef = useRef([]);
 
-  // ═══ PHASE 2/6 — Core fetch helper (wraps safeFetch with auth context) ═══
+  // ═══ Core fetch helper (wraps safeFetch with auth context) ═══
   const apiFetch = useCallback(async (path, opts = {}) => {
     return safeFetch(`${API_BASE}${path}`, {
       ...opts,
@@ -953,7 +953,7 @@ export default function CDBSentinelDashboard() {
     setLoading(true);
     setErrors({});
 
-    // PHASE 3: Health + dynamic version
+    // Health + dynamic version
     try {
       const h = await apiFetch("/health");
       if (!h?._fallback) {
@@ -1033,12 +1033,12 @@ export default function CDBSentinelDashboard() {
     setLoading(false);
   }, [apiFetch]);
 
-  // ═══ PHASE 4 — Initial load ═══
+  // ═══ Initial load ═══
   useEffect(() => {
     loadAll();
   }, [loadAll]);
 
-  // ═══ PHASE 4 — Real-time polling every 30s ═══
+  // ═══ Real-time polling every 30s ═══
   useEffect(() => {
     // Clear any existing interval before setting a new one
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
@@ -1086,7 +1086,7 @@ export default function CDBSentinelDashboard() {
       setLastRefresh(new Date());
     }, 30000); // 30s
 
-    // ── PHASE 4 cleanup — cancel timers + abort controllers ──
+    // ── cleanup — cancel timers + abort controllers ──
     return () => {
       clearInterval(pollIntervalRef.current);
       pollControllersRef.current.forEach(c => { try { c.abort(); } catch (_) {} });
@@ -1094,7 +1094,7 @@ export default function CDBSentinelDashboard() {
     };
   }, [session]); // restart polling when auth session changes
 
-  // ── Derived counts (PHASE 6: all null-safe) ──
+  // ── Derived counts (all null-safe) ──
   const critCount = stats?.severity_distribution?.CRITICAL
     ?? cves.filter(c => c?.severity?.toUpperCase() === "CRITICAL").length;
   const highCount = stats?.severity_distribution?.HIGH
@@ -1138,7 +1138,7 @@ export default function CDBSentinelDashboard() {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.text, fontFamily: T.fontBody }}>
 
-      {/* ── PHASE 5: Auth Modal ── */}
+      {/* ── Auth Modal ── */}
       {authModal && (
         <AuthModal
           mode={authModal}
@@ -1158,7 +1158,7 @@ export default function CDBSentinelDashboard() {
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: `linear-gradient(135deg, ${T.accent}, ${T.blue})`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 14, color: T.bg }}>S</div>
             <span style={{ fontWeight: 800, fontSize: 16, color: T.white, fontFamily: T.fontHeading }}>CDB-SENTINEL</span>
-            {/* PHASE 3: dynamic version — never blank */}
+            {/* dynamic version — never blank */}
             <Badge color={T.apexGold} bg="rgba(255,215,0,0.15)">{platformVersion} APEX</Badge>
             {health && <Badge color={T.low} bg={`${T.low}15`}><LiveDot />LIVE</Badge>}
           </div>
@@ -1188,7 +1188,7 @@ export default function CDBSentinelDashboard() {
                 ↻ {lastRefresh.toLocaleTimeString()}
               </span>
             )}
-            {/* PHASE 5: Auth button */}
+            {/* Auth button */}
             {session ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Badge color={T.low} bg={`${T.low}15`}>
@@ -1306,7 +1306,7 @@ export default function CDBSentinelDashboard() {
               }
             />
 
-            {/* PHASE 5: Enhanced SOAR Action Panel */}
+            {/* Enhanced SOAR Action Panel */}
             <SoarActionPanel jwt={session?.token ?? null} />
 
             <div style={{ height: 1, background: T.border, margin: "24px 0" }} />
@@ -1439,7 +1439,7 @@ export default function CDBSentinelDashboard() {
         {/* ── API ACCESS TAB ── */}
         {!loading && tab === "api" && (
           <>
-            {/* PHASE 5: API Key Panel — shown when logged in */}
+            {/* API Key Panel — shown when logged in */}
             {session && (
               <div style={{ marginBottom: 28 }}>
                 <ApiKeyPanel jwt={session.token} />

@@ -5438,9 +5438,9 @@ function renderTopThreats(data) {
                 console.warn('[BLOCK] Duplicate boot sequence prevented');
                 return;
             }
-            // PHASE 1: Instant render from embedded cache (< 50ms, zero network)
+            // Instant render from embedded cache (< 50ms, zero network)
             try { bootFromEmbeddedCache(); } catch(e) { console.warn('[BOOT] Embedded cache error:', e); }
-            // PHASE 2: Upgrade to live data in background
+            // Upgrade to live data in background
             loadGOCIntel().catch(() => {});
             scheduleAutoRefresh();
         }
@@ -6481,8 +6481,8 @@ function renderTopThreats(data) {
             }
 
             // ── GENESIS ANALYZE LIVE \u2014 v123.0 production fix ────────────────
-            // Phase 1: fetch pre-generated R2/GH-Pages AI JSON (zero latency)
-            // Phase 2: if all three return null, synthesize from live Worker feed
+            // fetch pre-generated R2/GH-Pages AI JSON (zero latency)
+            // if all three return null, synthesize from live Worker feed
             // Result: button ALWAYS renders meaningful intel \u2014 never blank
             async function triggerAIAnalysis() {
                 const btn    = document.getElementById('analyze-live-btn');
@@ -6496,7 +6496,7 @@ function renderTopThreats(data) {
                 if (status) { status.style.display = 'inline'; status.textContent = 'PROCESSING...'; status.style.color = '#a855f7'; }
 
                 try {
-                    // Phase 1: pre-generated static AI endpoints
+                    // pre-generated static AI endpoints
                     const [analyzeRes, respondRes, correlateRes] = await Promise.allSettled([
                         fetch(AI_BASE + 'analyze.json',   { cache: 'no-cache' }).then(r => r.ok ? r.json() : null),
                         fetch(AI_BASE + 'respond.json',   { cache: 'no-cache' }).then(r => r.ok ? r.json() : null),
@@ -6507,7 +6507,7 @@ function renderTopThreats(data) {
                     let respond   = respondRes.status   === 'fulfilled' ? respondRes.value   : null;
                     let correlate = correlateRes.status === 'fulfilled' ? correlateRes.value : null;
 
-                    // Phase 2: live synthesis fallback when static files unavailable
+                    // live synthesis fallback when static files unavailable
                     if (!analyze && !respond && !correlate) {
                         if (status) { status.textContent = '⚡ COMPUTING LIVE INTEL...'; status.style.color = '#f59e0b'; }
                         const synth = await _synthAnalysisFromLiveFeed();

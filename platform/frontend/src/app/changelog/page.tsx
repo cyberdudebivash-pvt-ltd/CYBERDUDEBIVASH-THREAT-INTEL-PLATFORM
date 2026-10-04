@@ -71,7 +71,7 @@ const RELEASES: Release[] = [
   {
     version: "2.2.0",
     date: "2026-06-19",
-    title: "Phase 2 — IOC Intelligence Feed, Blog & Mobile Nav",
+    title: "IOC Intelligence Feed, Blog & Mobile Nav",
     changes: [
       { type: "feature", text: "30-record IOC Intelligence Feed — 10 IPs, 10 domains, 10 SHA256 hashes" },
       { type: "feature", text: "Individual IOC profile pages with MITRE ATT&CK mapping and confidence scoring" },

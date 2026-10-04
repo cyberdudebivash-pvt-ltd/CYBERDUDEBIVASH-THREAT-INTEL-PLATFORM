@@ -58,6 +58,10 @@ import shutil
 import subprocess
 import sys
 import time
+try:
+    from scripts.customer_copy_gate import require_clean_customer_copy
+except ModuleNotFoundError:
+    from customer_copy_gate import require_clean_customer_copy
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
@@ -656,6 +660,7 @@ def build_manifest(dist_dir: Path, run_id: str, version: str, git_sha: str) -> D
         rel = str(fpath.relative_to(dist_dir)).replace("\\", "/")
         if rel == "deployment_manifest.json":
             continue  # don't checksum the manifest itself
+        require_clean_customer_copy(fpath)
         files[rel] = {
             "sha256": sha256_file(fpath),
             "size":   fpath.stat().st_size,
