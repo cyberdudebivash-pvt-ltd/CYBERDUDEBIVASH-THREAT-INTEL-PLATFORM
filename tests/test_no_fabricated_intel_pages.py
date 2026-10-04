@@ -265,3 +265,68 @@ def test_global_deployment_distinguishes_contract_from_observed_availability():
     assert "Uptime commitments, not measured uptime" in html
     assert "not regional health measurements or compliance attestations" in html
     assert "Outbound HTTPS access required" in html
+
+
+def test_analyst_dashboard_source_and_unavailable_states():
+    import subprocess
+    import shutil
+    html = _text('dashboard/analyst_dashboard.html')
+    for banned in ('generateDemoData', 'generateDemoRecs', 'buildDemoStix', 'getPhasePrediction', "label: 'CVSS Base'", 'totalRules +=', 'item.ttps.length + 1'):
+        assert banned not in html, banned
+    scripts = re.findall(r'<script\b[^>]*>(.*?)</script\s*>', html, re.S | re.I)
+    script = max(scripts, key=len)
+    node = shutil.which('node')
+    assert node, 'Node is required for dashboard executable verification'
+    harness = r"""
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const nodes = new Map();
+const element = id => { if (!nodes.has(id)) nodes.set(id, {innerHTML:'stale',textContent:'stale',style:{},value:''}); return nodes.get(id); };
+const context = vm.createContext({window:{location:{origin:'https://intel.cyberdudebivash.com'}}, URL, AbortSignal, console:{warn(){}}, document:{addEventListener(){},getElementById:element}, fetch:async()=>{throw new Error('offline');}});
+vm.runInContext(JSON.parse(process.argv[1]), context);
+const run = code => vm.runInContext(code, context);
+(async () => {
+  for (const v of [null,undefined,'',false,true,' ',{},[],NaN,Infinity,-1,101]) assert.equal(run(`boundedMetric(${typeof v === 'number' && !Number.isFinite(v) ? String(v) : JSON.stringify(v)}, 100)`),null);
+  assert.equal(run('boundedMetric(0, 10)'),0);
+  assert.equal(run("boundedMetric('0', 1)"),0);
+  assert.equal(run('boundedMetric(1.01, 1)'),null);
+  assert.equal(run("safeSourceUrl('javascript:alert(1)')"),'');
+  assert.equal(run("safeSourceUrl('https://user:pass@example.com/')"),'');
+  assert.equal(run("safeSourceUrl('https://example.com/report')"),'https://example.com/report');
+  assert.equal(run('normalizeItems(null).length'),0);
+  assert.equal(run("normalizeItems({items:'bad'}).length"),0);
+  context.fixture = {id: `x');globalThis.injected=true;//`, risk_score:0, cvss_score:0, epss_score:0, severity:'<img>', cves:'bad', actors:{}, iocs:{ipv4:['1.2.3.4',null]}, ttps:['T1486']};
+  run("state.items = normalizeItems([null,fixture]); state.feedStatus='ready';");
+  assert.equal(run('state.items[0].risk_score'),0);
+  assert.equal(run('state.items[0].cvss_score'),0);
+  assert.equal(run('state.items[0].epss_score'),0);
+  assert.equal(run('state.items[0].cves.length'),0);
+  run('renderDetail(state.items[0]); renderFeed(); updateKPIs(); updateRulesSummary(state.items[0]);');
+  assert.ok(element('detail-panel').innerHTML.includes('No source STIX bundle'));
+  assert.ok(element('detail-panel').innerHTML.includes('No source recommendations'));
+  assert.ok(!element('detail-panel').innerHTML.includes('SOURCE-REPORTED PHASE:'));
+  assert.ok(!element('detail-panel').innerHTML.includes('CVSS Base'));
+  assert.equal(element('kpi-rules').textContent,'—');
+  // Execute the browser-decoded click attribute: hostile IDs remain data.
+  const attr = element('threat-feed').innerHTML.match(/onclick="([^"]+)"/)[1];
+  const decoded = attr.replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+  let selected;
+  context.selectItem = id => { selected = id; };
+  vm.runInContext(decoded, context);
+  assert.equal(selected,run('state.items[0].id'));
+  assert.equal(context.injected,undefined);
+  await run('loadFeed()');
+  assert.equal(run('state.items.length'),0);
+  assert.equal(run('state.selected'),null);
+  assert.equal(element('kpi-pipeline').textContent,'Unavailable');
+  assert.ok(element('threat-feed').innerHTML.includes('temporarily unavailable'));
+  assert.equal(element('detail-panel').textContent,'Live advisory details are unavailable.');
+  // A valid empty response is authoritative; do not resurrect another feed.
+  let calls=0;
+  context.fetch=async()=>{calls++;return {ok:true,json:async()=>[]};};
+  const empty=await run("fetchWithFallback('/a','/b')");
+  assert.equal(empty.length,0); assert.equal(calls,1);
+})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+    result = subprocess.run([node, '-e', harness, json.dumps(script)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
