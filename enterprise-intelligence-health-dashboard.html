@@ -314,35 +314,29 @@
 
   let _apiKey = '';
 
-  function authenticate() {
-    const key = document.getElementById('api-key-input').value.trim();
+  async function authenticate() {
+    const input = document.getElementById('api-key-input');
+    const key = input.value.trim();
     if (!key) {
       showAuthError('Please enter your API key or session token.');
       return;
     }
-    // Store and verify against /api/health
     _apiKey = key;
-    sessionStorage.setItem('sentinel_api_key', key);
-    verifyAndShow();
-  }
-
-  function verifyAndShow() {
-    fetch('/api/health', {
-      headers: _apiKey ? { 'X-API-Key': _apiKey, 'Authorization': 'Bearer ' + _apiKey } : {}
-    })
-    .then(r => {
-      // Accept 200 or 401 (key may be auth-only; health may be public)
-      if (r.status === 200 || r.status === 401) {
-        showDashboard();
-      } else {
-        // Fallback: show dashboard anyway (offline / demo mode)
-        showDashboard();
-      }
-    })
-    .catch(() => {
-      // Network error — show dashboard in degraded mode
+    try {
+      const r = await fetch('/api/v1/p30/observability', {
+        cache: 'no-store',
+        credentials: 'omit',
+        headers: { 'X-API-Key': key, 'Authorization': 'Bearer ' + key }
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      await r.json();
+      input.value = '';
       showDashboard();
-    });
+    } catch (_) {
+      _apiKey = '';
+      input.value = '';
+      showAuthError('Authentication failed. Access remains locked.');
+    }
   }
 
   function showAuthError(msg) {
@@ -640,13 +634,8 @@
     }
   }
 
-  // On load: check for existing session
+  // Raw credentials are never persisted. Reload/navigation requires re-authentication.
   window.addEventListener('DOMContentLoaded', () => {
-    const stored = sessionStorage.getItem('sentinel_api_key');
-    if (stored) {
-      _apiKey = stored;
-      verifyAndShow();
-    }
     document.getElementById('api-key-input').addEventListener('keydown', e => {
       if (e.key === 'Enter') authenticate();
     });
