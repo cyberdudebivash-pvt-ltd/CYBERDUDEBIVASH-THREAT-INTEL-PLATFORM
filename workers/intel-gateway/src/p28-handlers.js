@@ -26,6 +26,7 @@
 
 import { computeActionabilityScore } from './p23-handlers.js';
 import { computeP26Grade }           from './p26-handlers.js';
+import { explicitCvss, explicitRiskScore } from './metric-semantics.js';
 
 export const P28_VERSION = "P28.0";
 
@@ -147,22 +148,36 @@ export function buildP28EnvironmentRiskBlock(item) {
 // All derived from CVSS/KEV/EPSS/severity  -  zero fabrication.
 
 function _deriveFinancialBand(item) {
-  const cvss  = parseFloat(item.cvss_score || item.risk_score || 0);
-  const kev   = Boolean(item.kev_present || (item.apex && item.apex.kev_listed) || (item._score_details && item._score_details.kev));
+  // This is a qualitative business-impact review signal, not a loss model.
+  // Threat intelligence alone cannot establish customer-specific financial
+  // exposure without asset value, incident scope, controls, downtime, data,
+  // contractual and jurisdictional context.
+  const cvss  = explicitCvss(item);
+  const risk  = explicitRiskScore(item);
+  const kev   = Boolean(item.kev_present || (item.apex && item.apex.kev_listed));
   const epss  = parseFloat(item.epss_score || 0);
   const sev   = String(item.severity || "").toUpperCase();
   let score   = 0;
   if (sev === "CRITICAL") score += 40;
   else if (sev === "HIGH") score += 25;
   else if (sev === "MEDIUM") score += 12;
-  if (kev)         score += 30;
-  if (epss > 0.7)  score += 20;
+  if (kev) score += 30;
+  if (epss > 0.7) score += 20;
   else if (epss > 0.4) score += 10;
-  if (cvss >= 9.0) score += 10;
+  if (cvss != null && cvss >= 9.0) score += 10;
+  else if (cvss == null && risk != null && risk >= 9.0) score += 6;
 
-  if (score >= 65)  return { band: "HIGH",   label: "High Financial Impact",   color: "#ef4444", range: "$1M+" };
-  if (score >= 35)  return { band: "MEDIUM", label: "Medium Financial Impact", color: "#f59e0b", range: "$100K-$1M" };
-  return              { band: "LOW",    label: "Low Financial Impact",    color: "#22c55e", range: "<$100K" };
+  const base = score >= 65
+    ? { band: "HIGH", label: "High Business-Impact Review Priority", color: "#ef4444" }
+    : score >= 35
+      ? { band: "MEDIUM", label: "Medium Business-Impact Review Priority", color: "#f59e0b" }
+      : { band: "LOW", label: "Standard Business-Impact Review Priority", color: "#22c55e" };
+  return {
+    ...base,
+    range: "Not quantified from threat intelligence",
+    quantified: false,
+    methodology: "qualitative review priority from recorded threat signals; not a financial-loss estimate",
+  };
 }
 
 function _deriveOperationalDisruption(item) {
@@ -191,14 +206,14 @@ function _deriveComplianceImplications(item) {
   const desc  = String(item.description || "").toLowerCase();
   const ttps  = (item.ttps || []).join(" ").toLowerCase();
   const corpus = desc + " " + ttps;
-  const impl = [];
-  if (corpus.includes("pii") || corpus.includes("personal data") || corpus.includes("gdpr")) impl.push("GDPR / Data Protection");
-  if (corpus.includes("payment") || corpus.includes("credit card") || corpus.includes("pci")) impl.push("PCI-DSS");
-  if (corpus.includes("health") || corpus.includes("phi") || corpus.includes("hipaa"))        impl.push("HIPAA");
-  if (corpus.includes("financial") || corpus.includes("banking") || corpus.includes("swift")) impl.push("SOX / DORA");
-  if (corpus.includes("supply chain") || corpus.includes("third party"))                      impl.push("NIST SSDF / NIS2");
-  if (impl.length === 0) impl.push("Standard security reporting obligations");
-  return impl;
+  const areas = [];
+  if (corpus.includes("pii") || corpus.includes("personal data") || corpus.includes("gdpr")) areas.push("Data-protection review context");
+  if (corpus.includes("payment") || corpus.includes("credit card") || corpus.includes("pci")) areas.push("Payment-card / PCI review context");
+  if (corpus.includes("health") || corpus.includes("phi") || corpus.includes("hipaa")) areas.push("Healthcare / health-data review context");
+  if (corpus.includes("financial") || corpus.includes("banking") || corpus.includes("swift")) areas.push("Financial-services regulatory review context");
+  if (corpus.includes("supply chain") || corpus.includes("third party")) areas.push("Third-party / supply-chain governance review context");
+  if (areas.length === 0) areas.push("Customer security-governance review");
+  return areas;
 }
 
 export function buildP28BusinessImpactBlock(item) {
@@ -208,63 +223,67 @@ export function buildP28BusinessImpactBlock(item) {
   const sev        = String(item.severity || "UNKNOWN").toUpperCase();
   const kev        = Boolean(item.kev_present || (item.apex && item.apex.kev_listed));
   const epss       = parseFloat(item.epss_score || 0);
-
-  const repLevel   = (sev === "CRITICAL" || kev) ? "HIGH" : (sev === "HIGH" ? "MEDIUM" : "LOW");
-  const repColor   = repLevel === "HIGH" ? "#ef4444" : repLevel === "MEDIUM" ? "#f59e0b" : "#22c55e";
+  const cvss       = explicitCvss(item);
+  const risk       = explicitRiskScore(item);
 
   const disruptRows = disruption.map(d => {
-    const c = d.level === "CRITICAL" ? "#ef4444" : d.level === "HIGH" ? "#f59e0b" : "#22c55e";
+    const col = d.level === "CRITICAL" ? "#ef4444" : d.level === "HIGH" ? "#f59e0b" : "#22c55e";
     return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
-      <span style="color:${c};font-size:10px;font-weight:700;min-width:68px;">${esc(d.level)}</span>
+      <span style="color:${col};font-size:10px;font-weight:700;min-width:68px;">${esc(d.level)}</span>
       <span style="color:#94a3b8;font-size:11px;">${esc(d.label)}</span>
     </div>`;
   }).join("");
 
-  const compRows = compliance.map(c =>
-    `<div style="color:#94a3b8;font-size:11px;padding:2px 0;">&#8226; ${esc(c)}</div>`
+  const compRows = compliance.map(x =>
+    `<div style="color:#94a3b8;font-size:11px;padding:2px 0;">&#8226; ${esc(x)}</div>`
   ).join("");
+
+  const metricText = cvss != null
+    ? `Explicit CVSS ${cvss.toFixed(1)}`
+    : risk != null
+      ? `APEX composite risk ${risk.toFixed(1)}/10 (not CVSS)`
+      : "No explicit CVSS/risk score";
+
+  const recommendation = (kev || sev === "CRITICAL")
+    ? "Prioritize customer exposure validation and accountable security ownership. Escalate to executives or incident response only under the customer's documented materiality/incident policy and confirmed environment evidence."
+    : sev === "HIGH"
+      ? "Assign a remediation/validation owner and process the intelligence through the customer's documented vulnerability and risk workflow."
+      : "Monitor and validate through the customer's normal security-operations cadence.";
 
   const body = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
       <div style="background:#0a0f1a;border:1px solid ${financial.color}33;border-radius:5px;padding:12px;">
-        <div style="color:#6b7280;font-size:9px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;">Financial Impact</div>
+        <div style="color:#6b7280;font-size:9px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;">Business Impact Review</div>
         <div style="color:${financial.color};font-size:16px;font-weight:700;">${esc(financial.band)}</div>
-        <div style="color:#6b7280;font-size:10px;margin-top:4px;">${esc(financial.range)} estimated exposure</div>
-        <div style="color:#374151;font-size:9px;margin-top:3px;">Based on severity, KEV status, EPSS ${(epss*100).toFixed(0)}%</div>
+        <div style="color:#6b7280;font-size:10px;margin-top:4px;">${esc(financial.range)}</div>
+        <div style="color:#374151;font-size:9px;margin-top:3px;">${esc(metricText)}; KEV ${kev ? "YES" : "NO"}; EPSS ${Number.isFinite(epss) ? (epss * 100).toFixed(1) + "%" : "N/A"}</div>
       </div>
-      <div style="background:#0a0f1a;border:1px solid ${repColor}33;border-radius:5px;padding:12px;">
-        <div style="color:#6b7280;font-size:9px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;">Reputation Impact</div>
-        <div style="color:${repColor};font-size:16px;font-weight:700;">${esc(repLevel)}</div>
-        <div style="color:#6b7280;font-size:10px;margin-top:4px;">${kev ? "Actively exploited * public breach risk" : sev === "CRITICAL" ? "Critical severity * potential media attention" : "Contained risk profile"}</div>
+      <div style="background:#0a0f1a;border:1px solid #3b82f633;border-radius:5px;padding:12px;">
+        <div style="color:#6b7280;font-size:9px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;">Impact Truth Boundary</div>
+        <div style="color:#3b82f6;font-size:13px;font-weight:700;">CUSTOMER CONTEXT REQUIRED</div>
+        <div style="color:#6b7280;font-size:10px;margin-top:4px;">Threat intelligence does not prove outage, breach, data loss, financial loss, reputation damage, materiality or notification obligations.</div>
       </div>
     </div>
     <div style="margin-bottom:12px;">
-      <div style="color:#6b7280;font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;">Operational Disruption</div>
+      <div style="color:#6b7280;font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;">Potential Operational Disruption Signals</div>
       ${disruptRows}
     </div>
     <div>
-      <div style="color:#6b7280;font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;">Compliance Implications</div>
+      <div style="color:#6b7280;font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;">Compliance / Governance Review Areas</div>
       ${compRows}
+      <div style="color:#374151;font-size:9px;margin-top:5px;">Review areas are contextual prompts only; applicability requires confirmed incident facts, affected data/systems, jurisdiction, contracts and customer legal/compliance assessment.</div>
     </div>
     <div style="margin-top:12px;padding:10px 12px;background:#0a0f1a;border:1px solid #1e3a5f;border-radius:4px;">
       <div style="color:#6b7280;font-size:9px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;">Executive Recommendation</div>
-      <div style="color:#94a3b8;font-size:11px;">${
-        kev && sev === "CRITICAL"
-          ? "Escalate to CISO and Board immediately. Activate incident response plan. Track through executive briefing cycle."
-          : sev === "CRITICAL"
-          ? "Brief CISO within 24 hours. Assign dedicated remediation owner. Track in risk register."
-          : sev === "HIGH"
-          ? "Assign remediation owner. Include in next CISO weekly briefing. Update risk register."
-          : "Monitor through standard vulnerability management cycle. Include in quarterly security review."
-      }</div>
+      <div style="color:#94a3b8;font-size:11px;">${esc(recommendation)}</div>
     </div>`;
 
   return _block(
     "p28-business-impact",
-    "P28.3  -  Executive Business Impact",
+    "P28.3  -  Executive Business Impact Review",
     "#f59e0b",
     body,
-    "Financial * Operational * Compliance * Reputation impact derived from verified threat fields"
+    "Qualitative customer review context; no fabricated loss, breach, materiality or legal conclusions"
   );
 }
 
@@ -283,74 +302,61 @@ const _QUEUE_COLORS = {
 export function buildP28ActionCenterBlock(item) {
   const sev   = String(item.severity || "").toUpperCase();
   const kev   = Boolean(item.kev_present || (item.apex && item.apex.kev_listed));
-  const epss  = parseFloat(item.epss_score || 0);
   const ttps  = (item.ttps || []).join(" ").toLowerCase();
   const desc  = String(item.description || "").toLowerCase();
   const hasCve = (item.cve_ids || []).length > 0 || String(item.title || "").toUpperCase().includes("CVE-");
-  const hasSigma = (item.apex && item.apex.sigma_rule) || (item.validation_status === "VALIDATED");
-  const hasIoc = (item.ioc_count || 0) > 0;
+  const hasSigma = Boolean((item.apex && item.apex.sigma_rule) || item.sigma_rule);
+  const hasIoc = Number.parseInt(item.ioc_count || 0, 10) > 0;
 
-  // action score from P23 (reuse)
   let actScore = 0;
   try { actScore = computeActionabilityScore(item); } catch (_) {}
 
-  // -- Patch Queue --
+  const priority = kev || sev === "CRITICAL" ? "PRIORITY" : sev === "HIGH" ? "ELEVATED" : "STANDARD";
+
   const patchItems = [];
   if (hasCve) {
-    const priority = kev ? "IMMEDIATE" : sev === "CRITICAL" ? "24h" : sev === "HIGH" ? "72h" : "7d";
-    const cves = item.cve_ids && item.cve_ids.length > 0 ? item.cve_ids.join(", ") : "See advisory";
-    patchItems.push({ priority, action: `Apply vendor patch for ${cves}`, owner: "Vulnerability Management" });
-  }
-  if (kev) {
-    patchItems.push({ priority: "IMMEDIATE", action: "Verify patching status  -  CISA KEV listed", owner: "Vulnerability Management" });
-  }
-  if (patchItems.length === 0 && sev !== "INFO") {
-    patchItems.push({ priority: "7d", action: "Review vendor security advisories for mitigations", owner: "Security Engineering" });
+    const cves = item.cve_ids && item.cve_ids.length > 0 ? item.cve_ids.join(", ") : "advisory CVE";
+    patchItems.push({ priority, action: `Validate affected assets/versions for ${cves}; apply vendor remediation under applicable KEV/vendor deadlines and customer SLA/change control.`, owner: "Vulnerability Management" });
+  } else if (sev !== "INFO") {
+    patchItems.push({ priority, action: "Review authoritative vendor/security guidance and validate affected customer scope before remediation.", owner: "Security Engineering" });
   }
 
-  // -- Hunt Queue --
   const huntItems = [];
   if (hasIoc) {
-    huntItems.push({ priority: "24h", action: `Search EDR/SIEM for ${item.ioc_count} known IOCs`, owner: "Threat Hunting" });
+    huntItems.push({ priority, action: `Validate provenance/freshness, then search approved customer telemetry for ${item.ioc_count} recorded IOC(s); do not treat raw IOC presence as proof of compromise.`, owner: "Threat Hunting" });
   }
   if (ttps.includes("lateral movement") || desc.includes("lateral movement")) {
-    huntItems.push({ priority: "24h", action: "Hunt for lateral movement indicators in network logs", owner: "Threat Hunting" });
+    huntItems.push({ priority, action: "Review available network/identity/endpoint telemetry for lateral-movement evidence.", owner: "Threat Hunting" });
   }
   if ((item.mitre_tactics || []).length > 0) {
     const tactics = item.mitre_tactics.slice(0, 3).join(", ");
-    huntItems.push({ priority: "72h", action: `Review ATT&CK telemetry for: ${tactics}`, owner: "Threat Hunting" });
+    huntItems.push({ priority: "STANDARD", action: `Validate ATT&CK mappings against customer telemetry for: ${tactics}.`, owner: "Threat Hunting" });
   }
   if (huntItems.length === 0) {
-    huntItems.push({ priority: "7d", action: "Standard threat hunt per TTPs in advisory", owner: "Threat Hunting" });
+    huntItems.push({ priority: "STANDARD", action: "Build an evidence-backed hunt hypothesis only where mapped TTPs and required telemetry exist.", owner: "Threat Hunting" });
   }
 
-  // -- Detection Queue --
   const detectItems = [];
   if (hasSigma) {
-    detectItems.push({ priority: "24h", action: "Deploy validated Sigma rule to SIEM", owner: "Detection Engineering" });
+    detectItems.push({ priority, action: "Validate the available Sigma rule against customer log schema/telemetry and staged change controls before production deployment.", owner: "Detection Engineering" });
   }
-  detectItems.push({ priority: kev ? "IMMEDIATE" : "72h", action: "Validate ATT&CK detection coverage for advisory TTPs", owner: "Detection Engineering" });
-  if ((item.ioc_count || 0) > 0) {
-    detectItems.push({ priority: "24h", action: `Import ${item.ioc_count} IOCs into threat intel platform`, owner: "SOC Analyst" });
+  detectItems.push({ priority, action: "Assess ATT&CK detection coverage and document visibility gaps for the advisory.", owner: "Detection Engineering" });
+  if (hasIoc) {
+    detectItems.push({ priority: "STANDARD", action: `After provenance/freshness validation, ingest approved IOC intelligence into the customer's TIP/SIEM according to retention and tenant-isolation policy.`, owner: "SOC Analyst" });
   }
 
-  // -- Executive Queue --
   const execItems = [];
   if (sev === "CRITICAL" || kev) {
-    execItems.push({ priority: "IMMEDIATE", action: "Notify CISO and security leadership", owner: "CISO" });
+    execItems.push({ priority: "PRIORITY", action: "Review with security leadership according to customer materiality/escalation policy; do not infer confirmed incident impact from intelligence alone.", owner: "CISO / Security Leadership" });
   }
-  execItems.push({ priority: sev === "CRITICAL" ? "24h" : "7d", action: "Update risk register and threat landscape briefing", owner: "CISO / Risk" });
+  execItems.push({ priority: "STANDARD", action: "Record evidence-backed risk/response status in the customer's risk or case-management process.", owner: "CISO / Risk" });
 
-  // -- Compliance Queue --
   const compItems = [];
-  const compImpl = _deriveComplianceImplications(item);
-  if (!compImpl[0].startsWith("Standard")) {
-    compItems.push({ priority: "7d", action: `Review regulatory obligations: ${compImpl.join(", ")}`, owner: "Compliance" });
-  }
-  compItems.push({ priority: "30d", action: "Update risk assessment per advisory findings", owner: "Risk / Compliance" });
+  const reviewAreas = _deriveComplianceImplications(item);
+  compItems.push({ priority: "STANDARD", action: `Assess applicable legal/compliance obligations from confirmed incident facts; contextual review areas: ${reviewAreas.join(", ")}.`, owner: "Legal / Compliance" });
 
   const _queueSection = (title, color, items) => {
-    const priColor = (p) => p === "IMMEDIATE" ? "#ef4444" : p === "24h" ? "#f97316" : p === "72h" ? "#f59e0b" : "#22c55e";
+    const priColor = p => p === "PRIORITY" ? "#ef4444" : p === "ELEVATED" ? "#f59e0b" : "#22c55e";
     const rows = items.map(i =>
       `<div style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid #0d1117;">
         <span style="color:${priColor(i.priority)};font-size:9px;font-weight:700;min-width:66px;padding-top:1px;">${esc(i.priority)}</span>
@@ -360,7 +366,6 @@ export function buildP28ActionCenterBlock(item) {
         </div>
       </div>`
     ).join("");
-
     return `<div style="background:#0a0f1a;border:1px solid ${color}22;border-left:3px solid ${color};border-radius:4px;padding:10px 12px;margin-bottom:8px;">
       <div style="color:${color};font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;">${esc(title)}</div>
       ${rows}
@@ -369,24 +374,23 @@ export function buildP28ActionCenterBlock(item) {
 
   const actLabel = actScore >= 80 ? "HIGH ACTIONABILITY" : actScore >= 50 ? "MEDIUM ACTIONABILITY" : "LOW ACTIONABILITY";
   const actColor = actScore >= 80 ? "#22c55e" : actScore >= 50 ? "#f59e0b" : "#ef4444";
-
   const body = `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
       <span style="color:${actColor};font-size:12px;font-weight:700;">${actLabel}</span>
       <span style="color:#374151;font-size:11px;">Actionability Score: ${actScore}/100</span>
     </div>
-    ${_queueSection("Patch Queue", _QUEUE_COLORS.patch, patchItems)}
+    ${_queueSection("Remediation Validation Queue", _QUEUE_COLORS.patch, patchItems)}
     ${_queueSection("Threat Hunt Queue", _QUEUE_COLORS.hunt, huntItems)}
-    ${_queueSection("Detection Deployment Queue", _QUEUE_COLORS.detection, detectItems)}
-    ${_queueSection("Executive Tasks", _QUEUE_COLORS.executive, execItems)}
-    ${compItems.length > 0 ? _queueSection("Compliance Tasks", _QUEUE_COLORS.compliance, compItems) : ""}`;
+    ${_queueSection("Detection Validation Queue", _QUEUE_COLORS.detection, detectItems)}
+    ${_queueSection("Executive Review Tasks", _QUEUE_COLORS.executive, execItems)}
+    ${_queueSection("Legal / Compliance Review", _QUEUE_COLORS.compliance, compItems)}`;
 
   return _block(
     "p28-action-center",
     "P28.5  -  Customer Action Center",
     "#38bdf8",
     body,
-    "Patch * Hunt * Detection * Executive * Compliance queues  -  prioritized by KEV / EPSS / CVSS"
+    "Evidence-first remediation * hunt * detection * executive * legal/compliance queues; customer policy owns timing"
   );
 }
 
@@ -408,68 +412,68 @@ function _buildRoleGuidance(item) {
   const sev   = String(item.severity || "").toUpperCase();
   const kev   = Boolean(item.kev_present || (item.apex && item.apex.kev_listed));
   const epss  = parseFloat(item.epss_score || 0);
-  const cvss  = parseFloat(item.cvss_score || item.risk_score || 0);
+  const cvss  = explicitCvss(item);
+  const risk  = explicitRiskScore(item);
   const hasCve = (item.cve_ids || []).length > 0 || String(item.title || "").includes("CVE-");
-  const hasIoc = (item.ioc_count || 0) > 0;
-  const hasSig = Boolean(item.apex && item.apex.sigma_rule);
+  const hasIoc = Number.parseInt(item.ioc_count || 0, 10) > 0;
+  const hasSig = Boolean((item.apex && item.apex.sigma_rule) || item.sigma_rule);
   const tactics = (item.mitre_tactics || []).slice(0, 4).join(", ") || "see advisory";
   const cveList = (item.cve_ids || []).slice(0, 3).join(", ") || "advisory reference";
+  const metric = cvss != null ? `CVSS ${cvss.toFixed(1)}`
+    : risk != null ? `APEX risk ${risk.toFixed(1)}/10 (not CVSS)`
+    : "CVSS/risk not recorded";
 
   return {
     soc: [
-      hasIoc ? `Search EDR and SIEM for ${item.ioc_count} IOC${item.ioc_count !== 1 ? "s" : ""} from this advisory` : "Review advisory for behavioral indicators",
-      hasSig  ? "Deploy Sigma detection rule to SIEM and validate alert firing" : "Create detection query based on advisory TTPs",
-      kev     ? "Flag as active exploitation  -  escalate immediately to threat hunter" : `Monitor for exploitation attempts  -  EPSS ${(epss*100).toFixed(0)}%`,
-      `Review MITRE ATT&CK coverage for: ${tactics}`,
-      "Document triage results and update case management system",
+      hasIoc ? `Validate and search customer telemetry for ${item.ioc_count} recorded IOC(s); confirm provenance/freshness before containment` : "Review advisory for behavioral indicators and evidence gaps",
+      hasSig ? "Validate Sigma logic against customer log schema and staged telemetry before production deployment" : "Develop/test a detection hypothesis from validated TTP/evidence context",
+      kev ? "Treat KEV as priority vulnerability intelligence; confirm customer exposure before incident conclusions" : `Monitor according to customer policy; EPSS ${Number.isFinite(epss) ? (epss*100).toFixed(1) + "%" : "N/A"}`,
+      `Validate MITRE ATT&CK mappings against observed telemetry: ${tactics}`,
+      "Document triage evidence, negative findings, assumptions and decisions in case management",
     ],
     hunter: [
-      `Conduct retroactive hunt across endpoint and network telemetry for TTPs: ${tactics}`,
-      hasIoc  ? `Pivot from ${item.ioc_count} IOC${item.ioc_count !== 1 ? "s" : ""}  -  IP/domain/hash  -  across 90-day historical data` : "Build IOC hypothesis from TTP patterns in advisory",
-      kev     ? "Treat as active campaign  -  check for beaconing, lateral movement, persistence" : "Focus on early indicators of compromise per kill chain phases",
-      "Cross-reference with threat actor profile and known campaign patterns",
-      "Produce hunt report with positive/negative findings for analyst team",
+      `Hunt only where required telemetry exists for mapped TTPs: ${tactics}`,
+      hasIoc ? `Pivot from validated IOC evidence across the customer's available/approved retention window` : "Build behavioral hypotheses from mapped TTPs and source evidence",
+      "Do not infer a common campaign or compromise solely from IOC/TTP co-occurrence",
+      "Cross-reference actor/campaign claims with provenance and attribution confidence",
+      "Produce a hunt report that distinguishes observed evidence from intelligence context",
     ],
     ir: [
-      sev === "CRITICAL" || kev ? "Activate incident response plan  -  classify severity per IR playbook" : "Standby readiness  -  monitor for initial compromise signals",
-      `Prepare forensic collection procedures for affected systems  -  focus on ${tactics || "advisory TTPs"}`,
-      hasCve  ? `Confirm patch availability for ${cveList} with vendor` : "Identify mitigations and workarounds from vendor advisory",
-      "Brief CISO and legal if exploitation is detected  -  initiate notification procedures",
-      "Update IR runbook with this advisory's specifics and lessons learned post-incident",
+      "Activate the customer incident-response process only when incident evidence or the customer's escalation policy warrants it",
+      `Prepare evidence-preserving forensic collection for plausibly affected systems; focus on ${tactics}`,
+      hasCve ? `Confirm affected versions and authoritative vendor remediation for ${cveList}` : "Obtain authoritative mitigation guidance and validate affected scope",
+      "Engage CISO/legal/compliance based on confirmed incident facts and customer notification policy",
+      "Record containment/remediation decisions and residual risk",
     ],
     seceng: [
-      hasCve  ? `Assess patch applicability for ${cveList} in your environment` : "Identify affected components and assess exposure surface",
-      "Implement network-layer mitigations (firewall rules, WAF policies) pending patch",
-      hasSig  ? "Test and deploy Sigma detection rule  -  validate against lab environment first" : "Develop detection content based on advisory indicators",
-      `Harden configurations per MITRE ATT&CK mitigations for: ${tactics}`,
-      "Update vulnerability scanner signatures and conduct targeted scan post-patch",
+      hasCve ? `Assess patch applicability and affected asset scope for ${cveList}` : "Identify affected components and validate exposure",
+      "Validate compensating controls in customer context before enforcing firewall/WAF/identity changes",
+      hasSig ? "Test available Sigma detection against representative customer telemetry before production rollout" : "Develop detection content from validated evidence/TTPs",
+      `Review ATT&CK mitigations relevant to: ${tactics}`,
+      "Verify remediation using approved scanner/configuration/telemetry evidence",
     ],
     vulnmgr: [
-      hasCve  ? `Add ${cveList} to vulnerability tracking system with ${kev ? "IMMEDIATE" : sev === "CRITICAL" ? "24h" : sev === "HIGH" ? "72h" : "7-day"} SLA` : "Track advisory in vulnerability management backlog",
-      `CVSS: ${cvss > 0 ? cvss.toFixed(1) : "N/A"} * EPSS: ${(epss*100).toFixed(0)}% * KEV: ${kev ? "YES  -  patch immediately" : "No"}`,
-      "Confirm asset inventory coverage  -  identify all affected systems in CMDB",
-      kev     ? "Escalate to engineering and operations for emergency patching" : `Schedule patch deployment per ${sev === "CRITICAL" ? "72h" : "standard"} change management cycle`,
-      "Track patch completion rate and report to CISO weekly until closure",
+      hasCve ? `Track ${cveList}; use KEV/vendor deadlines and the customer's documented SLA/change process` : "Track advisory and validate affected scope",
+      `${metric} * EPSS: ${Number.isFinite(epss) ? (epss*100).toFixed(1) + "%" : "N/A"} * KEV: ${kev ? "YES" : "NO"}`,
+      "Confirm asset inventory coverage and affected product/version",
+      "Prioritize remediation from verified exposure, vendor guidance, asset criticality and customer policy",
+      "Record completion evidence and residual risk through closure",
     ],
     ciso: [
-      kev || sev === "CRITICAL"
-        ? "Actively exploited or critical severity  -  executive briefing required within 24 hours"
-        : sev === "HIGH"
-        ? "High severity  -  include in weekly security briefing and track in risk register"
-        : "Track in standard security operations cadence",
-      `Financial exposure: ${_deriveFinancialBand(item).band} (${_deriveFinancialBand(item).range})`,
-      "Assign named remediation owner with clear SLA and accountability",
-      "Assess third-party and supply chain exposure  -  notify as appropriate",
-      "Review cyber insurance coverage and notification obligations if exploited",
+      sev === "CRITICAL" || kev
+        ? "Prioritize security-leadership review; executive/IR escalation follows customer materiality and incident policy"
+        : "Track through the customer's normal security-risk governance cadence",
+      `Business-impact review: ${_deriveFinancialBand(item).band}; financial loss is not quantified from threat intelligence`,
+      "Assign accountable validation/remediation ownership and use the customer's documented SLA",
+      "Assess third-party/supply-chain relevance from confirmed affected dependencies",
+      "Assess insurance/legal/notification obligations only from confirmed incident facts with appropriate owners",
     ],
     exec: [
-      kev || sev === "CRITICAL"
-        ? "Business risk: CRITICAL  -  review with CISO, confirm incident plan is activated"
-        : "Business risk: ELEVATED  -  include in next board security update",
-      `Financial impact band: ${_deriveFinancialBand(item).band} * Range: ${_deriveFinancialBand(item).range}`,
-      "Confirm security team has remediation owner, timeline, and resources",
-      "Review regulatory disclosure obligations with legal counsel",
-      "Request status update from CISO within 48 hours  -  track to closure",
+      "Request evidence-backed status from security leadership when customer escalation/materiality criteria are met",
+      "Do not interpret vulnerability severity, KEV, EPSS or IOC presence as a confirmed breach or quantified financial loss",
+      "Confirm accountable ownership, customer-approved timeline and resources",
+      "Legal/regulatory disclosure decisions remain with the customer's legal/compliance process",
+      "Track material residual risk to closure under established governance cadence",
     ],
   };
 }
@@ -628,7 +632,7 @@ export function buildP28FeedbackBlock(item) {
 // Per-item metrics summary pulled from existing feed fields + computed scores.
 
 export function buildP28MetricsBlock(item) {
-  const cvss  = parseFloat(item.cvss_score || item.risk_score || 0);
+  const cvss  = (explicitCvss(item) ?? 0);
   const epss  = parseFloat(item.epss_score || 0);
   const conf  = parseFloat(item.confidence || item.confidence_score || 0.5);
   const enrichScore = parseFloat(item.enrichment_score || 0);

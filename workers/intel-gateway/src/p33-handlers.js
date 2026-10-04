@@ -14,6 +14,8 @@ import { computeP20QualityScore, getPublicationStage } from './p20-handlers.js';
 import { computeActionabilityScore }                    from './p23-handlers.js';
 import { computeEnterpriseTrustScore }                  from './p25-handlers.js';
 import { computeP26Grade }                              from './p26-handlers.js';
+import { explicitCvss, explicitRiskScore }                from './metric-semantics.js';
+import { extractDetectionArtifacts }                          from './detection-registry.js';
 
 export const P33_VERSION = 'P33.0';
 
@@ -89,13 +91,14 @@ function _buildCaseId(item) {
 }
 
 function _caseStatus(item) {
-  const q  = computeP20QualityScore(item);
-  const a  = computeActionabilityScore(item);
-  const sev = (item.severity || '').toUpperCase();
-  if (sev === 'CRITICAL' && a >= 70) return { status: 'ACTIVE_INVESTIGATION', color: '#ef4444' };
-  if (sev === 'HIGH' && q >= 60)     return { status: 'IN_PROGRESS', color: '#f97316' };
-  if (q >= 40)                       return { status: 'UNDER_REVIEW', color: '#eab308' };
-  return { status: 'MONITORING', color: '#22c55e' };
+  const q = computeP20QualityScore(item);
+  const a = computeActionabilityScore(item);
+  const sev = String(item.severity || '').toUpperCase();
+  const kev = Boolean(item.kev_present || item.kev_listed || (item.apex || {}).kev_listed);
+  if (kev || sev === 'CRITICAL' || a >= 70) return { status: 'PRIORITY_INTEL_REVIEW', color: '#ef4444' };
+  if (sev === 'HIGH' || q >= 60) return { status: 'ELEVATED_INTEL_REVIEW', color: '#f97316' };
+  if (q >= 40) return { status: 'STANDARD_INTEL_REVIEW', color: '#eab308' };
+  return { status: 'MONITORING_INTEL', color: '#22c55e' };
 }
 
 export function buildP33CaseBlock(item) {
@@ -105,37 +108,45 @@ export function buildP33CaseBlock(item) {
   const a        = computeActionabilityScore(item);
   const t        = computeEnterpriseTrustScore(item);
   const g        = computeP26Grade(item);
-  const sev      = (item.severity || 'UNKNOWN').toUpperCase();
+  const sev      = String(item.severity || 'UNKNOWN').toUpperCase();
   const stage    = getPublicationStage(q);
-  const cvss     = item.risk_score || item.cvss_score || 0;
-  const epss     = item.epss_score || 0;
-  const kev      = item.kev_present || item.kev_listed;
-  const actors   = item.actor_tag ? [item.actor_tag] : [];
+  const cvss     = explicitCvss(item);
+  const risk     = explicitRiskScore(item);
+  const epssRaw  = Number(item.epss_score);
+  const epss     = Number.isFinite(epssRaw) ? epssRaw : null;
+  const kev      = Boolean(item.kev_present || item.kev_listed || (item.apex || {}).kev_listed);
+  const actors   = item.actor_tag || item.threat_actor ? [item.actor_tag || item.threat_actor] : [];
   const ttps     = (item.ttps || item.mitre_tactics || []).slice(0, 5);
-  const iocCount = parseInt(item.ioc_count || item.indicator_count || 0);
+  const iocCount = parseInt(item.ioc_count || item.indicator_count || 0) || 0;
+  let detectionCount = 0;
+  try { detectionCount = extractDetectionArtifacts(item).length; } catch (_) { detectionCount = 0; }
 
-  // Case timeline phases derived from actionability and quality
-  const phases = [
-    { name: 'Discovery',          done: true,             ts: item.timestamp || item.published_at || '' },
-    { name: 'Initial Triage',     done: q > 0,            ts: '' },
-    { name: 'Evidence Collection',done: t > 30,           ts: '' },
-    { name: 'Attribution',        done: actors.length > 0,ts: '' },
-    { name: 'Detection Deploy',   done: ttps.length > 0,  ts: '' },
-    { name: 'Containment',        done: a >= 60,          ts: '' },
-    { name: 'Recovery',           done: a >= 80,          ts: '' },
-    { name: 'Lessons Learned',    done: false,            ts: '' },
-    { name: 'Case Closure',       done: false,            ts: '' },
+  // These are INTELLIGENCE READINESS signals only. SENTINEL APEX does not
+  // claim a customer has triaged, contained, recovered or closed an incident
+  // from feed metadata or actionability scores.
+  const readiness = [
+    { name: 'Intelligence Ingested', ready: true },
+    { name: 'Quality Scored', ready: q > 0 },
+    { name: 'Evidence / Trust Context', ready: t > 0 },
+    { name: 'Actor Attribution Recorded', ready: actors.length > 0 },
+    { name: 'ATT&CK Context Recorded', ready: ttps.length > 0 },
+    { name: 'IOC Inventory Recorded', ready: iocCount > 0 },
+    { name: 'Detection Artifacts Recorded', ready: detectionCount > 0 },
   ];
-  const phaseDone = phases.filter(p => p.done).length;
+  const readyCount = readiness.filter(x => x.ready).length;
+
+  const metricText = cvss != null ? cvss.toFixed(1) : 'N/A';
+  const riskText = risk != null ? risk.toFixed(1) + '/10' : 'N/A';
+  const epssText = epss != null ? ((epss <= 1 ? epss * 100 : epss).toFixed(1) + '%') : 'N/A';
 
   const html = `
 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
   <div style="background:#0a0c10;border:1px solid #1f2937;border-radius:6px;padding:10px">
-    <div style="font-size:10px;color:#64748b;margin-bottom:4px">CASE ID</div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:4px">INTELLIGENCE CASE ID</div>
     <div style="font-size:13px;font-weight:700;color:#06b6d4">${esc(caseId)}</div>
   </div>
   <div style="background:#0a0c10;border:1px solid #1f2937;border-radius:6px;padding:10px">
-    <div style="font-size:10px;color:#64748b;margin-bottom:4px">STATUS</div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:4px">REVIEW STATUS</div>
     <div style="font-size:12px;font-weight:700;color:${cs.color}">${esc(cs.status)}</div>
   </div>
   <div style="background:#0a0c10;border:1px solid #1f2937;border-radius:6px;padding:10px">
@@ -145,44 +156,47 @@ export function buildP33CaseBlock(item) {
 </div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
   <div>
-    <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">CASE SCORES</div>
+    <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">INTELLIGENCE SCORES</div>
     ${_row('Quality Score', q + '/100', '#06b6d4')}
     ${_row('Actionability Score', a + '/100', '#8b5cf6')}
     ${_row('Trust Score', t + '/100', '#22c55e')}
-    ${_row('CVSS', String(cvss), _sevColor(sev))}
-    ${_row('EPSS', (epss * 100).toFixed(1) + '%', '#f97316')}
-    ${_row('KEV Listed', kev ? '[OK] YES' : '[FAIL] No', kev ? '#ef4444' : '#64748b')}
+    ${_row('Explicit CVSS', metricText, cvss != null ? _sevColor(sev) : '#64748b')}
+    ${_row('APEX Composite Risk', riskText + ' (not CVSS)', '#f59e0b')}
+    ${_row('EPSS', epssText, '#f97316')}
+    ${_row('KEV Listed', kev ? '[OK] YES' : 'No', kev ? '#ef4444' : '#64748b')}
     ${_row('IOC Count', String(iocCount), '#06b6d4')}
     ${_row('Publication Stage', stage, '#94a3b8')}
   </div>
   <div>
-    <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">INVESTIGATION PHASES (${phaseDone}/9)</div>
-    ${phases.map(p => `
+    <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">INTELLIGENCE READINESS (${readyCount}/${readiness.length})</div>
+    ${readiness.map(x => `
     <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #0a0c10;font-size:11px">
-      <span style="color:${p.done ? '#22c55e' : '#475569'};width:14px">${p.done ? '[OK]' : '?'}</span>
-      <span style="color:${p.done ? '#e2e8f0' : '#475569'}">${esc(p.name)}</span>
+      <span style="color:${x.ready ? '#22c55e' : '#475569'};width:14px">${x.ready ? '[OK]' : '?'}</span>
+      <span style="color:${x.ready ? '#e2e8f0' : '#475569'}">${esc(x.name)}</span>
     </div>`).join('')}
+    <div style="font-size:9px;color:#475569;margin-top:7px">Readiness does not represent customer incident triage, containment, recovery or closure.</div>
   </div>
 </div>
 <div style="margin-bottom:10px">
-  <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">THREAT ACTORS</div>
-  ${actors.length ? actors.map(a => _badge(a, '#ef4444')).join('') : '<span style="font-size:11px;color:#475569">No attributed actors</span>'}
+  <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">RECORDED THREAT ACTORS</div>
+  ${actors.length ? actors.map(x => _badge(x, '#ef4444')).join('') : '<span style="font-size:11px;color:#475569">No attributed actors</span>'}
 </div>
 <div style="margin-bottom:10px">
-  <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">MITRE ATT&amp;CK TTPs</div>
-  ${ttps.length ? ttps.map(t => _badge(t.id || t.name || t, '#8b5cf6')).join('') : '<span style="font-size:11px;color:#475569">No TTPs mapped</span>'}
+  <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">MAPPED MITRE ATT&amp;CK</div>
+  ${ttps.length ? ttps.map(x => _badge(x.id || x.name || x, '#8b5cf6')).join('') : '<span style="font-size:11px;color:#475569">No TTPs mapped</span>'}
 </div>
 <div style="background:#0a0c10;border:1px solid #1f2937;border-radius:6px;padding:10px">
-  <div style="font-size:10px;font-weight:700;color:#94a3b8;margin-bottom:4px">RESPONSE CHECKLIST</div>
+  <div style="font-size:10px;font-weight:700;color:#94a3b8;margin-bottom:4px">ANALYST DECISION CHECKLIST</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px">
-    ${['Validate IOC in environment','Deploy detection rules','Patch vulnerable systems',
-       'Hunt for threat actor TTPs','Notify relevant teams','Document evidence',
-       'Assess business impact','Initiate recovery plan'].map(c =>
-      `<div style="color:#64748b">? ${esc(c)}</div>`).join('')}
+    ${['Validate source/provenance','Confirm affected customer assets',
+       'Correlate validated IOCs/TTPs with telemetry','Validate detections before deployment',
+       'Use customer SLA/change control','Document evidence and assumptions',
+       'Assess business impact from confirmed facts','Escalate/contain only under customer policy'].map(x =>
+      `<div style="color:#64748b">? ${esc(x)}</div>`).join('')}
   </div>
 </div>`;
 
-  return _block('p33-case', '? P33.1 Enterprise Case Intelligence', html, `Case: ${caseId}`);
+  return _block('p33-case', '? P33.1 Enterprise Intelligence Case', html, `Case: ${caseId}`);
 }
 
 // -- P33.2: Threat Campaign Intelligence --------------------------------------
@@ -266,7 +280,7 @@ export function buildP33MissionBlock(item, items = []) {
   const buckets = {
     critical:   sample.filter(i => (i.severity||'').toUpperCase() === 'CRITICAL'),
     high:       sample.filter(i => (i.severity||'').toUpperCase() === 'HIGH'),
-    patch:      sample.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) >= 7),
+    patch:      sample.filter(i => (explicitCvss(i) ?? 0) >= 7),
     detection:  sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0),
     hunting:    sample.filter(i => i.actor_tag),
     ir:         sample.filter(i => (i.kev_present || i.kev_listed) || parseFloat(i.risk_score || 0) >= 9),
@@ -331,81 +345,102 @@ ${queueDefs.map(q => {
 // -- P33.4: Enterprise Intelligence Recommendations ----------------------------
 // Time-horizoned action plan derived from existing decision engines
 
-const _TIME_HORIZONS = ['Immediate', '24 Hours', '72 Hours', '7 Days', '30 Days', 'Quarterly'];
+const _TIME_HORIZONS = ['Priority Review', 'Validate', 'Respond', 'Follow-up', 'Periodic'];
 const _IMPROVEMENT_TYPES = ['Architecture', 'Detection', 'Process'];
 
 export function buildP33RecommendationsBlock(item) {
   const q   = computeP20QualityScore(item);
   const a   = computeActionabilityScore(item);
   const t   = computeEnterpriseTrustScore(item);
-  const sev = (item.severity || '').toUpperCase();
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
-  const kev  = item.kev_present || item.kev_listed;
+  const sev = String(item.severity || '').toUpperCase();
+  const cvss = explicitCvss(item);
+  const risk = explicitRiskScore(item);
+  const kev  = Boolean(item.kev_present || item.kev_listed || (item.apex || {}).kev_listed);
   const hasTTPs  = (item.ttps || item.mitre_tactics || []).length > 0;
-  const hasActor = !!item.actor_tag;
+  const hasActor = Boolean(item.actor_tag || item.threat_actor);
+  const iocCount = Number.parseInt(item.ioc_count || 0, 10) || 0;
 
   const horizons = {
-    'Immediate':   [],
-    '24 Hours':    [],
-    '72 Hours':    [],
-    '7 Days':      [],
-    '30 Days':     [],
-    'Quarterly':   [],
-    'Architecture':  [],
-    'Detection':     [],
-    'Process':       [],
+    'Priority Review': [],
+    'Validate':        [],
+    'Respond':         [],
+    'Follow-up':       [],
+    'Periodic':        [],
+    'Architecture':    [],
+    'Detection':       [],
+    'Process':         [],
   };
 
-  // Immediate
-  if (kev)               horizons['Immediate'].push('Apply KEV patch immediately (CISA binding directive)');
-  if (sev === 'CRITICAL') horizons['Immediate'].push('Activate incident response runbook');
-  if (cvss >= 9.5)       horizons['Immediate'].push('Emergency change window for critical CVSS 9.5+');
+  // Priority is evidence-driven; Sentinel APEX does not invent a universal
+  // response clock or assume that CISA BOD deadlines apply to every customer.
+  if (kev) horizons['Priority Review'].push(
+    'Validate affected assets against the CISA KEV entry, vendor guidance and any recorded KEV due date; remediate under the customer\'s documented vulnerability-management policy.'
+  );
+  if (cvss != null && cvss >= 9) horizons['Priority Review'].push(
+    `Explicit CVSS ${cvss.toFixed(1)}: confirm affected product/version and internet/customer exposure before emergency change decisions.`
+  );
+  if (cvss == null && risk != null && risk >= 9) horizons['Priority Review'].push(
+    `SENTINEL APEX composite risk ${risk.toFixed(1)}/10: validate authoritative technical severity and exposure; this value is not CVSS.`
+  );
+  if (sev === 'CRITICAL') horizons['Priority Review'].push(
+    'Review the critical-severity intelligence against customer telemetry and asset criticality; activate incident response only when incident evidence or customer policy warrants it.'
+  );
 
-  // 24 Hours
-  if (cvss >= 9)         horizons['24 Hours'].push('Deploy detection rules for CVSS ? 9.0 vulnerability');
-  if (hasActor)          horizons['24 Hours'].push(`Hunt for ${esc(item.actor_tag)} TTPs in environment`);
-  if (a >= 70)           horizons['24 Hours'].push('Execute high-actionability IOC block and alert rules');
+  // Validation precedes containment. Recorded IOCs/TTPs/attribution are
+  // intelligence inputs, not proof that a customer environment is compromised.
+  horizons['Validate'].push('Confirm source provenance, freshness, affected scope and customer-environment relevance.');
+  if (iocCount > 0) horizons['Validate'].push(
+    `Validate and correlate ${iocCount} recorded IOC(s) against approved SIEM/EDR/DNS/proxy telemetry before any blocking or containment action.`
+  );
+  if (hasActor) horizons['Validate'].push(
+    `Validate the recorded actor attribution (${esc(item.actor_tag || item.threat_actor)}) against source evidence and attribution confidence before actor-specific conclusions.`
+  );
+  if (hasTTPs) horizons['Validate'].push(
+    'Validate mapped MITRE ATT&CK techniques against observed customer telemetry; technique mapping alone does not prove execution.'
+  );
 
-  // 72 Hours
-  horizons['72 Hours'].push('Complete IOC deployment to SIEM and EDR');
-  if (hasTTPs)           horizons['72 Hours'].push('Validate MITRE ATT&CK detection coverage for affected TTPs');
-  horizons['72 Hours'].push('Distribute executive summary to leadership');
+  // Response actions remain conditional on confirmed evidence and customer
+  // approval/change-control boundaries.
+  horizons['Respond'].push(
+    'Select containment, remediation and detection changes from confirmed findings, asset criticality and the customer\'s approval/change-control process.'
+  );
+  if (kev || (cvss != null && cvss >= 7) || sev === 'HIGH' || sev === 'CRITICAL') {
+    horizons['Respond'].push(
+      'Prioritize verified vulnerable assets for remediation using vendor guidance, applicable external deadlines and the customer\'s documented SLA.'
+    );
+  }
+  if (hasTTPs) horizons['Respond'].push(
+    'Validate candidate detections in an approved staged/non-production workflow before broad production deployment where the customer requires change control.'
+  );
 
-  // 7 Days
-  horizons['7 Days'].push('Complete patch validation and rollout to all affected systems');
-  horizons['7 Days'].push('Conduct lessons-learned session with SOC team');
-  if (t < 60)            horizons['7 Days'].push('Request additional intelligence sources to improve confidence');
+  horizons['Follow-up'].push('Record evidence, decisions, residual risk and completed remediation in the customer case/change system.');
+  if (t < 60) horizons['Follow-up'].push('Seek additional corroborating intelligence to improve source/evidence confidence.');
+  if (hasTTPs) horizons['Follow-up'].push('Review detection coverage for the mapped ATT&CK techniques and document remaining visibility gaps.');
+  horizons['Follow-up'].push('Assess legal, regulatory or disclosure obligations only from confirmed incident facts with the customer\'s legal/compliance owners.');
 
-  // 30 Days
-  horizons['30 Days'].push('Review and update detection engineering coverage for affected TTP set');
-  horizons['30 Days'].push('Update incident response playbooks with findings');
-  horizons['30 Days'].push('Assess compliance impact and file required disclosures');
+  horizons['Periodic'].push('Re-evaluate this intelligence when source, KEV, EPSS, exploit, actor or affected-product evidence changes.');
+  horizons['Periodic'].push('Exercise relevant incident-response and recovery procedures on the customer\'s normal governance cadence.');
 
-  // Quarterly
-  horizons['Quarterly'].push('Benchmark detection coverage against MITRE ATT&CK Navigator');
-  horizons['Quarterly'].push('Review threat actor profiles and update watchlist');
-  horizons['Quarterly'].push('Conduct tabletop exercise based on this threat scenario');
-
-  // Architecture
-  if (a < 50)           horizons['Architecture'].push('Evaluate additional telemetry sources for detection gap');
-  horizons['Architecture'].push('Review zero-trust architecture controls for affected platforms');
-  horizons['Architecture'].push('Assess network segmentation for affected attack vectors');
-
-  // Detection
-  horizons['Detection'].push('Develop custom Sigma rules for identified TTPs');
-  horizons['Detection'].push('Tune existing KQL/SPL rules to reduce false positives');
-  if (!hasTTPs)         horizons['Detection'].push('Request MITRE ATT&CK mapping from intelligence provider');
-
-  // Process
-  horizons['Process'].push('Update vulnerability management SLA thresholds for KEV advisories');
-  horizons['Process'].push('Implement automated IOC ingestion pipeline');
-  horizons['Process'].push('Establish threat intelligence sharing agreement for related actors');
+  // Architecture / Detection / Process improvements.
+  if (a < 50) horizons['Architecture'].push('Evaluate additional telemetry sources for identified visibility gaps.');
+  horizons['Architecture'].push('Review segmentation, identity and exposure controls relevant to confirmed affected platforms.');
+  horizons['Detection'].push('Author or tune detections from validated ATT&CK/evidence context and measure false-positive/false-negative behavior in customer telemetry.');
+  if (!hasTTPs) horizons['Detection'].push('Obtain authoritative ATT&CK mapping before technique-specific detection claims.');
+  horizons['Process'].push('Keep KEV/vendor/customer deadlines distinct; do not substitute platform-generated timing for the customer\'s SLA.');
+  horizons['Process'].push('Require provenance/freshness validation and approval before automated IOC containment.');
+  horizons['Process'].push('Document actor-attribution and legal-materiality evidence thresholds in the customer\'s governance process.');
 
   const HORIZON_COLORS = {
-    'Immediate': '#ef4444', '24 Hours': '#f97316', '72 Hours': '#eab308',
-    '7 Days': '#3b82f6', '30 Days': '#8b5cf6', 'Quarterly': '#22c55e',
+    'Priority Review': '#ef4444', 'Validate': '#f97316', 'Respond': '#eab308',
+    'Follow-up': '#3b82f6', 'Periodic': '#22c55e',
     'Architecture': '#06b6d4', 'Detection': '#a78bfa', 'Process': '#94a3b8',
   };
+
+  const metricBadge = cvss != null
+    ? `Explicit CVSS ${cvss.toFixed(1)}`
+    : risk != null
+      ? `APEX risk ${risk.toFixed(1)}/10 (not CVSS)`
+      : 'No explicit CVSS/risk score';
 
   const html = `
 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
@@ -413,10 +448,10 @@ export function buildP33RecommendationsBlock(item) {
     ['Quality', q + '/100', '#06b6d4'],
     ['Actionability', a + '/100', '#8b5cf6'],
     ['Trust', t + '/100', '#22c55e'],
-  ].map(([l, v, c]) => `
+  ].map(([l, v, col]) => `
   <div style="background:#0a0c10;border-radius:6px;padding:10px;text-align:center">
     <div style="font-size:10px;color:#64748b;margin-bottom:3px">${l}</div>
-    <div style="font-size:18px;font-weight:700;color:${c}">${esc(v)}</div>
+    <div style="font-size:18px;font-weight:700;color:${col}">${esc(v)}</div>
   </div>`).join('')}
 </div>
 ${[..._TIME_HORIZONS, ..._IMPROVEMENT_TYPES].map(h => {
@@ -430,7 +465,7 @@ ${[..._TIME_HORIZONS, ..._IMPROVEMENT_TYPES].map(h => {
 </div>`;
 }).join('')}`;
 
-  return _block('p33-recommendations', '? P33.4 Enterprise Intelligence Recommendations', html, `${sev} * CVSS ${cvss}`);
+  return _block('p33-recommendations', '? P33.4 Enterprise Intelligence Recommendations', html, `${sev || 'UNKNOWN'} * ${metricBadge}`);
 }
 
 // -- P33.5: Detection Coverage Matrix -----------------------------------------
@@ -536,9 +571,18 @@ export function buildP33HeatmapBlock(item, items = []) {
       const combined = text + ' ' + ttps;
       if (platform.tags.some(tag => combined.includes(tag))) hits++;
     }
-    const rawPct  = Math.min(100, Math.round(hits / Math.max(1, sample.length) * 100 * 2.5));
-    const cvssAdj = sample.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) >= 7).length > 3 ? 10 : 0;
-    return Math.min(100, rawPct + cvssAdj);
+    const rawPct = Math.min(100, Math.round(hits / Math.max(1, sample.length) * 100 * 2.5));
+    const explicitHighCvss = sample.filter(i => {
+      const score = explicitCvss(i);
+      return score != null && score >= 7;
+    }).length;
+    const highCompositeRisk = sample.filter(i => {
+      const score = explicitRiskScore(i);
+      return score != null && score >= 7;
+    }).length;
+    const severityAdj = explicitHighCvss > 3 ? 6 : 0;
+    const riskAdj = highCompositeRisk > 3 ? 4 : 0;
+    return Math.min(100, rawPct + severityAdj + riskAdj);
   }
 
   const scores = _PLATFORMS.map(p => ({ ...p, score: platformScore(p) }))
@@ -637,7 +681,7 @@ export function buildP33AutomationBlock(item, items = []) {
   const withTTPs     = sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0).length;
   const withIOC      = sample.filter(i => parseInt(i.ioc_count || i.indicator_count || 0) > 0).length;
   const withSeverity = sample.filter(i => i.severity).length;
-  const withScore    = sample.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) > 0).length;
+  const withScore    = sample.filter(i => (explicitCvss(i) ?? 0) > 0).length;
 
   function pct(n) { return totalItems > 0 ? Math.round(n / totalItems * 100) : 0; }
 
@@ -693,68 +737,74 @@ ${steps.map((s, idx) => `
 
 export function buildP33OperationalDashboardBlock(item, items = []) {
   const sample = (items.length ? items : [item]).slice(0, 100);
-  const tl     = _threatLevel(sample);
-  const g      = computeP26Grade(item);
-  const q      = computeP20QualityScore(item);
-  const a      = computeActionabilityScore(item);
+  const tl = _threatLevel(sample);
+  const g = computeP26Grade(item);
 
-  const critCount = sample.filter(i => (i.severity||'').toUpperCase() === 'CRITICAL').length;
-  const highCount = sample.filter(i => (i.severity||'').toUpperCase() === 'HIGH').length;
-  const kevCount  = sample.filter(i => i.kev_present || i.kev_listed).length;
-  const patchPct  = Math.min(100, 100 - Math.round(critCount / Math.max(1, sample.length) * 100));
-  const detPct    = Math.round(sample.filter(i => (i.ttps||i.mitre_tactics||[]).length > 0).length / Math.max(1, sample.length) * 100);
+  const critCount = sample.filter(i => String(i.severity || '').toUpperCase() === 'CRITICAL').length;
+  const highCount = sample.filter(i => String(i.severity || '').toUpperCase() === 'HIGH').length;
+  const kevCount = sample.filter(i => i.kev_present || i.kev_listed || (i.apex || {}).kev_listed).length;
+  const mitreMapped = sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0).length;
+  const detectionItems = sample.filter(i => {
+    try { return extractDetectionArtifacts(i).length > 0; } catch (_) { return false; }
+  }).length;
+  const mitrePct = Math.round(mitreMapped / Math.max(1, sample.length) * 100);
+  const detPct = Math.round(detectionItems / Math.max(1, sample.length) * 100);
 
-  const businessRisk = Math.min(100, Math.round(
+  // Feed-priority index is an intelligence triage signal only. It must not be
+  // presented as customer business risk, patch completion or incident impact.
+  const feedPriorityIndex = Math.min(100, Math.round(
     (critCount * 8 + highCount * 4 + kevCount * 10) / Math.max(1, sample.length) * 20
   ));
 
-  const execSummary = `Current threat landscape shows ${critCount} critical and ${highCount} high-severity advisories across ${sample.length} active intelligence items. ` +
-    (kevCount > 0 ? `${kevCount} KEV-listed vulnerabilities require immediate patching per CISA directive. ` : '') +
-    `Detection coverage is ${detPct}% and business risk score is ${businessRisk}/100. ` +
-    `Overall intelligence grade: ${g}.`;
+  const execSummary =
+    `Current intelligence sample contains ${critCount} critical and ${highCount} high-severity records across ${sample.length} items. ` +
+    (kevCount > 0 ? `${kevCount} item(s) are CISA KEV-listed and warrant exposure validation against applicable KEV/vendor/customer deadlines. ` : '') +
+    `Detection-artifact coverage is ${detPct}%; MITRE mapping coverage is ${mitrePct}%. ` +
+    `Feed priority index is ${feedPriorityIndex}/100 and is not a customer business-risk, breach, remediation or patch-completion metric. Intelligence grade: ${g}.`;
 
   const html = `
 <div style="text-align:center;padding:16px;background:${tl.color}10;border:1px solid ${tl.color}30;border-radius:8px;margin-bottom:14px">
-  <div style="font-size:10px;color:#64748b;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Current Threat Level</div>
+  <div style="font-size:10px;color:#64748b;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Current Intelligence Threat Level</div>
   <div style="font-size:36px;font-weight:900;color:${tl.color};letter-spacing:2px">${esc(tl.level)}</div>
-  <div style="font-size:12px;color:${tl.color};margin-top:4px">Threat Index: ${tl.score}/100</div>
+  <div style="font-size:12px;color:${tl.color};margin-top:4px">Feed Threat Index: ${tl.score}/100</div>
 </div>
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
   ${[
     ['Critical Advisories', String(critCount), '#ef4444'],
     ['High Advisories', String(highCount), '#f97316'],
     ['KEV Listed', String(kevCount), '#ef4444'],
-    ['Business Risk', businessRisk + '/100', businessRisk >= 50 ? '#ef4444' : '#eab308'],
-    ['Detection Coverage', detPct + '%', detPct >= 70 ? '#22c55e' : '#eab308'],
-    ['Intelligence Grade', g, '#06b6d4'],
-  ].map(([l, v, c]) => `
+    ['Feed Priority Index', feedPriorityIndex + '/100', feedPriorityIndex >= 50 ? '#ef4444' : '#eab308'],
+    ['Detection Artifacts', detPct + '%', detPct >= 70 ? '#22c55e' : '#eab308'],
+    ['MITRE Mapping', mitrePct + '%', mitrePct >= 70 ? '#22c55e' : '#eab308'],
+  ].map(([l, v, col]) => `
   <div style="background:#0a0c10;border:1px solid #1f2937;border-radius:6px;padding:10px;text-align:center">
     <div style="font-size:9px;color:#64748b;margin-bottom:3px">${esc(l)}</div>
-    <div style="font-size:16px;font-weight:700;color:${c}">${esc(v)}</div>
+    <div style="font-size:16px;font-weight:700;color:${col}">${esc(v)}</div>
   </div>`).join('')}
 </div>
 <div style="background:#0a0c10;border:1px solid #1f2937;border-radius:6px;padding:12px;margin-bottom:12px">
-  <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">EXECUTIVE SUMMARY</div>
+  <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">EXECUTIVE INTELLIGENCE SUMMARY</div>
   <div style="font-size:12px;color:#e2e8f0;line-height:1.6">${esc(execSummary)}</div>
 </div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
   <div>
-    <div style="font-size:10px;color:#64748b;margin-bottom:4px">Patch Completion Status</div>
-    <div style="height:8px;background:#1e293b;border-radius:4px;overflow:hidden">
-      <div style="height:100%;width:${patchPct}%;background:${patchPct >= 80 ? '#22c55e' : '#eab308'}"></div>
-    </div>
-    <div style="font-size:10px;color:#94a3b8;margin-top:3px">${patchPct}% estimated compliant</div>
-  </div>
-  <div>
-    <div style="font-size:10px;color:#64748b;margin-bottom:4px">Detection Coverage</div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:4px">Detection-Artifact Coverage</div>
     <div style="height:8px;background:#1e293b;border-radius:4px;overflow:hidden">
       <div style="height:100%;width:${detPct}%;background:${detPct >= 70 ? '#22c55e' : '#eab308'}"></div>
     </div>
-    <div style="font-size:10px;color:#94a3b8;margin-top:3px">${detPct}% with MITRE-mapped detections</div>
+    <div style="font-size:10px;color:#94a3b8;margin-top:3px">${detPct}% of sampled records carry canonical detection artifacts</div>
   </div>
-</div>`;
+  <div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:4px">MITRE Mapping Coverage</div>
+    <div style="height:8px;background:#1e293b;border-radius:4px;overflow:hidden">
+      <div style="height:100%;width:${mitrePct}%;background:${mitrePct >= 70 ? '#22c55e' : '#eab308'}"></div>
+    </div>
+    <div style="font-size:10px;color:#94a3b8;margin-top:3px">${mitrePct}% of sampled records contain ATT&amp;CK context</div>
+  </div>
+</div>
+<div style="font-size:9px;color:#475569;margin-top:10px">Customer patch status, business impact, breach status and financial loss are not inferred from threat-intelligence feed data.</div>`;
 
-  return _block('p33-ops-dashboard', '?? P33.9 Customer Operational Dashboard', html, `Threat Level: ${tl.level}`);
+  return _block('p33-ops-dashboard', '?? P33.9 Customer Intelligence Operations Dashboard', html, `Threat Level: ${tl.level}`);
 }
 
 // -- P33.10: API Gateway Status ------------------------------------------------
@@ -840,10 +890,11 @@ export async function handleP33Cases(request, env) {
     return {
       case_id:        caseId,
       advisory_id:    item.id,
-      cve_id:         item.cve_id || item.id,
+      cve_id:         item.cve_id || null,
       title:          item.title,
       severity:       item.severity,
-      cvss:           item.risk_score || item.cvss_score,
+      cvss:           explicitCvss(item),
+      risk_score:     explicitRiskScore(item),
       kev:            !!(item.kev_present || item.kev_listed),
       status:         cs.status,
       quality_score:  q,
@@ -916,7 +967,7 @@ export async function handleP33Heatmap(request, env) {
       if (p.tags.some(tag => (text + ' ' + ttps).includes(tag))) hits++;
     }
     const rawPct = Math.min(100, Math.round(hits / Math.max(1, sample.length) * 100 * 2.5));
-    const cvssAdj = sample.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) >= 7).length > 3 ? 10 : 0;
+    const cvssAdj = sample.filter(i => (explicitCvss(i) ?? 0) >= 7).length > 3 ? 10 : 0;
     const score   = Math.min(100, rawPct + cvssAdj);
     const riskLabel = score >= 70 ? 'CRITICAL' : score >= 45 ? 'HIGH' : score >= 20 ? 'MEDIUM' : 'LOW';
     return { platform: p.label, risk_pct: score, risk_level: riskLabel, hits };
@@ -937,7 +988,7 @@ export async function handleP33Mission(request, env) {
   const queues = {
     critical:   sample.filter(i => (i.severity||'').toUpperCase() === 'CRITICAL').slice(0,15),
     high:       sample.filter(i => (i.severity||'').toUpperCase() === 'HIGH').slice(0,15),
-    patch:      sample.filter(i => parseFloat(i.risk_score || i.cvss_score || 0) >= 7).slice(0,15),
+    patch:      sample.filter(i => (explicitCvss(i) ?? 0) >= 7).slice(0,15),
     detection:  sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0).slice(0,15),
     hunting:    sample.filter(i => i.actor_tag).slice(0,15),
     ir:         sample.filter(i => (i.kev_present || i.kev_listed) || parseFloat(i.risk_score || 0) >= 9).slice(0,10),
@@ -960,38 +1011,63 @@ export async function handleP33Mission(request, env) {
 }
 
 export async function handleP33Recommendations(request, env) {
-  const items  = await _loadFeed(env);
-  const url    = new URL(request.url);
-  const id     = url.searchParams.get('id');
-  const sample = id ? (items.filter(i => i.id === id || i.cve_id === id).concat(items)).slice(0, 1) : items.slice(0, 1);
-  const item   = sample[0];
-  if (!item) return _jsonResp({ error: 'No items in feed' }, 404);
+  const items = await _loadFeed(env);
+  const url = new URL(request.url);
+  const id = url.searchParams.get('id');
+  const item = id
+    ? items.find(i => i.id === id || i.cve_id === id)
+    : items[0];
+  if (!item) return _jsonResp({ error: 'No matching intelligence item' }, 404);
 
-  const q   = computeP20QualityScore(item);
-  const a   = computeActionabilityScore(item);
-  const sev = (item.severity || '').toUpperCase();
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
-  const kev  = !!(item.kev_present || item.kev_listed);
+  const q = computeP20QualityScore(item);
+  const a = computeActionabilityScore(item);
+  const sev = String(item.severity || '').toUpperCase();
+  const cvss = explicitCvss(item);
+  const risk = explicitRiskScore(item);
+  const kev = Boolean(item.kev_present || item.kev_listed || (item.apex || {}).kev_listed);
+  const iocCount = parseInt(item.ioc_count || 0) || 0;
 
-  const recs = {
-    immediate: kev ? ['Apply KEV patch immediately (CISA binding directive)'] : [],
-    h24:       cvss >= 9 ? ['Deploy detection rules for CVSS ? 9.0 vulnerability'] : [],
-    h72:       ['Complete IOC deployment to SIEM and EDR'],
-    d7:        ['Complete patch validation and rollout'],
-    d30:       ['Review detection engineering coverage', 'Update incident response playbooks'],
-    quarterly: ['Benchmark detection vs MITRE ATT&CK Navigator', 'Conduct tabletop exercise'],
-    architecture: ['Review zero-trust controls for affected platforms'],
-    detection: ['Develop Sigma rules for identified TTPs', 'Tune FP rates'],
-    process:   ['Update vulnerability management SLA thresholds', 'Automate IOC ingestion'],
+  const recommendations = {
+    priority_review: [],
+    validate: [
+      'Validate source provenance, freshness, affected product/version and customer-environment relevance.',
+    ],
+    respond: [
+      'Use confirmed findings, customer asset criticality, documented SLA and change-control policy to select remediation/containment actions.',
+    ],
+    follow_up: [
+      'Record evidence, decisions and residual risk in the customer case/risk process.',
+    ],
+    periodic: [
+      'Re-evaluate when KEV, EPSS, exploit, actor, affected-product or source evidence changes.',
+    ],
+    architecture: ['Review telemetry, identity, segmentation and exposure-control gaps relevant to confirmed affected platforms.'],
+    detection: ['Validate or develop detections from evidence-backed ATT&CK context before production deployment.'],
+    process: ['Keep external KEV/vendor deadlines distinct from the customer SLA; validate IOCs before automated containment.'],
   };
-  if (sev === 'CRITICAL') { recs.immediate.push('Activate incident response runbook'); }
-  if (item.actor_tag)     { recs.h24.push(`Hunt for ${item.actor_tag} TTPs in environment`); }
+
+  if (kev) recommendations.priority_review.push('Validate affected assets against the CISA KEV entry/vendor guidance and remediate under applicable KEV/customer deadlines.');
+  if ((cvss != null && cvss >= 9) || sev === 'CRITICAL' || (risk != null && risk >= 9)) {
+    recommendations.priority_review.push('Prioritize exposure validation and accountable security review; do not infer a confirmed incident from technical severity alone.');
+  }
+  if (iocCount > 0) recommendations.validate.push(`Validate provenance/freshness and correlate ${iocCount} recorded IOC(s) against customer telemetry before any block/deny action.`);
+  if (item.actor_tag || item.threat_actor) recommendations.validate.push('Validate actor-attribution provenance/confidence before actor-specific hunting or legal/geopolitical conclusions.');
 
   return _jsonResp({
-    version: P33_VERSION, generated_at: new Date().toISOString(),
-    advisory: { id: item.id, title: item.title, severity: sev, cvss, kev },
+    version: P33_VERSION,
+    generated_at: new Date().toISOString(),
+    advisory: {
+      id: item.id,
+      title: item.title,
+      severity: sev,
+      cvss,
+      risk_score: risk,
+      risk_is_cvss: false,
+      kev,
+    },
     scores: { quality: q, actionability: a },
-    recommendations: recs,
+    timing_policy: 'Customer SLA / applicable authoritative external deadline; no universal platform clock',
+    recommendations,
   });
 }
 
@@ -1031,9 +1107,15 @@ export async function handleP33Dashboard(request, env) {
   const critCount = sample.filter(i => (i.severity||'').toUpperCase() === 'CRITICAL').length;
   const highCount = sample.filter(i => (i.severity||'').toUpperCase() === 'HIGH').length;
   const kevCount  = sample.filter(i => i.kev_present || i.kev_listed).length;
-  const withTTPs  = sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0).length;
-  const detPct    = Math.round(withTTPs / Math.max(1, sample.length) * 100);
-  const businessRisk = Math.min(100, Math.round((critCount * 8 + highCount * 4 + kevCount * 10) / Math.max(1, sample.length) * 20));
+  const withTTPs = sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0).length;
+  const withDetections = sample.filter(i => {
+    try { return extractDetectionArtifacts(i).length > 0; } catch (_) { return false; }
+  }).length;
+  const detPct = Math.round(withDetections / Math.max(1, sample.length) * 100);
+  const mitrePct = Math.round(withTTPs / Math.max(1, sample.length) * 100);
+  const feedPriorityIndex = Math.min(100, Math.round(
+    (critCount * 8 + highCount * 4 + kevCount * 10) / Math.max(1, sample.length) * 20
+  ));
 
   // Campaign summary
   const byActor = new Map();
@@ -1049,10 +1131,11 @@ export async function handleP33Dashboard(request, env) {
     threat_level: tl,
     summary: {
       critical_count: critCount, high_count: highCount, kev_count: kevCount,
-      detection_pct: detPct, business_risk_score: businessRisk,
+      detection_pct: detPct, mitre_mapping_pct: mitrePct, feed_priority_index: feedPriorityIndex,
+      business_risk_score: null, business_risk_measurement_status: 'UNAVAILABLE',
     },
     campaign_activity: { unique_actors: byActor.size - (byActor.has('UNATTRIBUTED') ? 1 : 0), top_actors: topActors },
-    executive_summary: `Threat level ${tl.level}. ${critCount} critical advisories. ${kevCount} KEV items. Detection coverage ${detPct}%. Business risk score ${businessRisk}/100.`,
+    executive_summary: `Threat level ${tl.level}. ${critCount} critical advisories. ${kevCount} KEV items. Detection-artifact coverage ${detPct}%. MITRE mapping ${mitrePct}%. Feed priority index ${feedPriorityIndex}/100 (not customer business risk).`,
   });
 }
 
@@ -1138,7 +1221,7 @@ export async function handleP33Metrics(request, env) {
   const avg        = arr => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
 
   const detPct   = Math.round(sample.filter(i => (i.ttps||i.mitre_tactics||[]).length > 0).length / Math.max(1,sample.length) * 100);
-  const patchPct = Math.round(sample.filter(i => i.patch_available || parseFloat(i.risk_score || i.cvss_score || 0) < 7).length / Math.max(1,sample.length) * 100);
+  const patchPct = Math.round(sample.filter(i => i.patch_available || (explicitCvss(i) ?? 0) < 7).length / Math.max(1,sample.length) * 100);
   const iocPct   = Math.round(sample.filter(i => parseInt(i.ioc_count || i.indicator_count || 0) > 0).length / Math.max(1,sample.length) * 100);
 
   return _jsonResp({

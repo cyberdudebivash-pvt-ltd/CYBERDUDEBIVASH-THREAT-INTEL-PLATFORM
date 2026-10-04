@@ -21,6 +21,7 @@
 
 import { computeP20QualityScore }    from './p20-handlers.js';
 import { getP21CertificationLevel }  from './p21-handlers.js';
+import { explicitCvss, explicitRiskScore } from './metric-semantics.js';
 
 export const P25_VERSION = "P25.0";
 
@@ -82,7 +83,7 @@ function _dim(label, earned, max, bullets, color) {
  */
 export function buildExplainableScoreBlock(item) {
   const sd        = item._score_details || {};
-  const cvss      = parseFloat(sd.cvss || item.cvss_score || item.risk_score || 0);
+  const cvss      = (explicitCvss(item) ?? 0);
   const epss      = parseFloat(sd.epss || item.epss_score || 0);
   const kev       = !!(sd.kev || item.kev_present || item.kev);
   const exploit   = !!(sd.active_exploit || item.active_exploit);
@@ -150,7 +151,7 @@ export function buildExplainableScoreBlock(item) {
   // IOC & TTP coverage (0-5 pts each)
   const iocScore = iocCnt >= 5 ? 5 : iocCnt >= 2 ? 3 : iocCnt >= 1 ? 1 : 0;
   signals.push({ label: "IOC Coverage", pts: iocScore, max: 5, color: iocScore >= 4 ? "#22c55e" : iocScore >= 2 ? "#eab308" : "#6b7280",
-    reason: iocCnt > 0 ? `${iocCnt} indicator(s) available for threat hunting and blocking` : "No IOCs extracted  -  detection limited to behavioral patterns" });
+    reason: iocCnt > 0 ? `${iocCnt} recorded indicator(s) available for validation and threat hunting; containment requires customer-telemetry confirmation` : "No IOCs extracted  -  detection limited to behavioral patterns" });
   total += iocScore;
 
   const ttpScore = ttpCnt >= 3 ? 5 : ttpCnt >= 2 ? 3 : ttpCnt >= 1 ? 1 : 0;
@@ -249,7 +250,7 @@ export function buildSourceConsensusBlock(item) {
 
 export function buildAnalystExplainabilityBlock(item) {
   const sd       = item._score_details || {};
-  const cvss     = parseFloat(sd.cvss || item.cvss_score || item.risk_score || 0);
+  const cvss     = (explicitCvss(item) ?? 0);
   const kev      = !!(sd.kev || item.kev_present || item.kev);
   const zeroday  = !!(sd.zero_day || item.zero_day);
   const exploit  = !!(sd.active_exploit || item.active_exploit);
@@ -264,34 +265,33 @@ export function buildAnalystExplainabilityBlock(item) {
   // WHY this intelligence matters
   const whyReasons = [];
   if (kev)       whyReasons.push("Active exploitation confirmed in CISA KEV  -  this is a real-world attack, not theoretical.");
-  if (zeroday)   whyReasons.push("Zero-day vulnerability: no vendor patch exists. Immediate compensating controls required.");
-  if (exploit)   whyReasons.push("Active in-the-wild exploitation detected. Threat actors are currently weaponizing this.");
-  if (cvss >= 9) whyReasons.push(`CVSS ${cvss.toFixed(1)} Critical: remotely exploitable, no authentication required.`);
-  if (cvss >= 7 && !whyReasons.some(r => r.includes("CVSS"))) whyReasons.push(`CVSS ${cvss.toFixed(1)} High severity with demonstrated attack path.`);
+  if (zeroday)   whyReasons.push("Zero-day signal recorded: verify vendor advisory, patch/mitigation availability and affected customer scope before response.");
+  if (exploit)   whyReasons.push("Active-exploitation signal recorded: validate the source/provenance and customer-environment relevance before containment decisions.");
+  if (cvss >= 9) whyReasons.push(`Explicit CVSS ${cvss.toFixed(1)} is critical severity; consult the authoritative vector/advisory for attack vector, privileges, user interaction and scope.`);
+  if (cvss >= 7 && !whyReasons.some(r => r.includes("CVSS"))) whyReasons.push(`Explicit CVSS ${cvss.toFixed(1)} is high severity; validate affected configuration and customer exposure.`);
   if (whyReasons.length === 0) whyReasons.push(`${severity} severity intelligence item. Monitor and apply standard patch hygiene.`);
 
-  // HOW to respond
+  // HOW to respond -- validation before containment, and customer policy
+  // owns timing/change control.
   const howSteps = [];
-  if (kev || zeroday || exploit) {
-    howSteps.push("Initiate emergency change management for immediate patching or mitigation.");
-    howSteps.push("Apply network-layer compensating controls (block attack vector, restrict exposure).");
-    howSteps.push("Enable enhanced logging on all potentially affected assets.");
-  } else if (cvss >= 7) {
-    howSteps.push("Schedule out-of-band patch deployment within 24-72 hours.");
-    howSteps.push("Validate current detection rules cover the attack vector.");
+  howSteps.push("Validate source provenance, affected product/version, customer exposure and current vendor guidance.");
+  if (kev || zeroday || exploit || cvss >= 7) {
+    howSteps.push("Prioritize verified affected assets using applicable KEV/vendor deadlines and the customer's documented vulnerability-management SLA.");
+    howSteps.push("Validate candidate compensating controls and detection changes against the customer environment before production deployment.");
+    howSteps.push("Increase logging/telemetry coverage on confirmed or plausibly affected assets where customer policy permits.");
   } else {
-    howSteps.push("Include in next scheduled patch cycle.");
-    howSteps.push("Verify SIEM detection coverage using mapped ATT&CK techniques.");
+    howSteps.push("Process through the customer's normal vulnerability and threat-intelligence review cadence.");
+    howSteps.push("Verify SIEM/EDR detection coverage for mapped ATT&CK techniques where applicable.");
   }
-  if (iocCnt > 0) howSteps.push(`Deploy ${iocCnt} extracted indicator(s) to threat blocking infrastructure (EDR/firewall/proxy).`);
-  if (tactics.length > 0) howSteps.push(`Hunt for ATT&CK techniques: ${tactics.slice(0,3).join(", ")}.`);
+  if (iocCnt > 0) howSteps.push(`Validate provenance/freshness and correlate ${iocCnt} recorded indicator(s) against customer telemetry before any blocking or containment action.`);
+  if (tactics.length > 0) howSteps.push(`Hunt for mapped ATT&CK techniques only where the required telemetry is available: ${tactics.slice(0,3).join(", ")}.`);
 
   // EXPECTED OUTCOMES
   const outcomes = [];
-  if (kev || exploit) outcomes.push("Successful patching eliminates confirmed active exploitation vector.");
-  if (iocCnt > 0)    outcomes.push(`Blocking ${iocCnt} indicator(s) disrupts attacker infrastructure observed in active campaigns.`);
+  if (kev || exploit) outcomes.push("Verified remediation can reduce exposure to the affected vulnerability or observed exploitation path.");
+  if (iocCnt > 0)    outcomes.push(`Validated IOC correlation can support evidence-based containment decisions without treating raw intelligence as proof of compromise.`);
   if (tactics.length > 0) outcomes.push("Detection rule deployment enables SOC visibility into attack chain.");
-  outcomes.push("Documented response improves audit posture and regulatory compliance evidence.");
+  outcomes.push("Documented evidence and decisions support customer audit, governance and incident-review requirements.");
 
   // PRIORITY AUDIENCE
   let audience, audienceColor;
@@ -336,7 +336,7 @@ export function buildAnalystExplainabilityBlock(item) {
 export function computeEnterpriseTrustScore(item) {
   const sd        = item._score_details  || {};
   const apexAi    = item.apex_ai         || item.apex || {};
-  const cvss      = parseFloat(sd.cvss   || item.cvss_score || item.risk_score || 0);
+  const cvss      = (explicitCvss(item) ?? 0);
   // epss_score is stored 0-1 (FIRST.org native scale); normalize to a 0-100
   // percentage here, matching p20-handlers.js's convention -- previously this
   // was compared directly against 0-100 thresholds below (D5), so it could
@@ -376,7 +376,7 @@ export function computeEnterpriseTrustScore(item) {
       rationale: epss > 0 ? `EPSS: ${epss.toFixed(1)}% (FIRST model, updated daily).` : "EPSS probability not available." },
     // D6  IOC Operational Quality (max 8)
     { name: "IOC Operational Quality",  earned: iocCnt >= 5 ? 8 : iocCnt >= 3 ? 6 : iocCnt >= 1 ? 3 : 0, max: 8,
-      rationale: iocCnt > 0 ? `${iocCnt} validated indicator(s) available for immediate deployment.` : "No IOCs extracted  -  detection depends on behavioral patterns only." },
+      rationale: iocCnt > 0 ? `${iocCnt} recorded indicator(s) available for provenance/freshness validation and customer-telemetry correlation.` : "No IOCs extracted  -  detection depends on behavioral patterns only." },
     // D7  ATT&CK Coverage (max 8)
     { name: "MITRE ATT&CK Coverage",    earned: ttpCnt >= 3 ? 8 : ttpCnt >= 2 ? 6 : ttpCnt >= 1 ? 3 : 0, max: 8,
       rationale: ttpCnt > 0 ? `${ttpCnt} ATT&CK technique(s) mapped.` : "No ATT&CK mapping  -  SOC detection coverage unknown." },
