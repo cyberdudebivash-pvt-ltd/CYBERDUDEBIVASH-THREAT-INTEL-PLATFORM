@@ -217,7 +217,8 @@ def register_subscription(
         "api_key_hash_prefix": key_hash_prefix,
         "price_usd":           TIER_PRICING_USD.get(tier_up, 0),
         "price_inr":           TIER_PRICING_INR.get(tier_up, 0),
-        "auto_renew":          True,
+        "auto_renew":          False,
+        "payment_verification": "operator_reference_unverified" if payment_ref else "not_applicable",
         "created_at":          now_utc(),
     }
 
@@ -249,7 +250,7 @@ def write_payment_audit(
     tier: str,
     ref_id: str,
     payment_ref: str,
-    amount_inr: int,
+    amount_inr: int | None,
     country: str,
 ):
     append_jsonl(PAYMENT_AUDIT_PATH, {
@@ -260,7 +261,9 @@ def write_payment_audit(
         "tier":        tier.upper(),
         "ref_id":      ref_id,
         "payment_ref": payment_ref,
-        "amount_inr":  amount_inr,
+        "amount_inr":  None,
+        "amount_status": "not_verified",
+        "listed_plan_price_inr": amount_inr,
         "country":     normalize_country(country),
         "operator":    "customer_onboard.py v184.0",
     })
@@ -513,7 +516,7 @@ def main():
     prov.add_argument("--days",        type=int, default=30, help="Subscription length in days (default: 30)")
     prov.add_argument("--ref",         default="", help="Reference ID (auto-generated if omitted)")
     prov.add_argument("--payment-ref", default="", dest="payment_ref",
-                      help="Verified payment reference. Required for paid tiers; never auto-generated.")
+                      help="Operator payment reference (not provider-verified by this tool). Required for paid tiers.")
 
     sub.add_parser("list",    help="List all registered customers")
     sub.add_parser("revenue", help="Revenue and subscription summary")
