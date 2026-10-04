@@ -510,7 +510,7 @@ function _computeCopilot(item) {
   // WHAT TO INVESTIGATE FIRST
   const whatFirst = [];
   if (isKev) whatFirst.push("1. Verify affected-asset exposure and remediation against the CISA KEV due date and vendor guidance");
-  if (ttps.includes("T1566") || ttps.includes("T1566.001")) whatFirst.push("Review email gateway logs for phishing delivery vectors (last 72h)");
+  if (ttps.includes("T1566") || ttps.includes("T1566.001")) whatFirst.push("Review email gateway logs for phishing delivery vectors across the customer's available/approved retention window");
   if (ttps.includes("T1078") || ttps.includes("T1133")) whatFirst.push("Audit external-facing authentication logs for anomalous access");
   if (ttps.includes("T1059") || ttps.includes("T1059.001")) whatFirst.push("Review PowerShell/command execution logs on critical hosts");
   if (ttps.some(t => t.startsWith("T1003"))) whatFirst.push("Monitor credential-access telemetry such as LSASS access through EDR");
