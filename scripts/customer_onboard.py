@@ -35,6 +35,7 @@ import hashlib
 import argparse
 import datetime
 import textwrap
+import re
 
 # ─── PATH: allow import from agent/tools ─────────────────────────────────────
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -337,6 +338,27 @@ def generate_welcome_package(
     return pkg
 
 
+
+def save_welcome_package(customer_id: str, package: str) -> str:
+    """Create an operator-only credential artifact without email-derived paths."""
+    if not re.fullmatch(r"C-[0-9A-F]{8}", customer_id):
+        raise ValueError("invalid customer ID for welcome package")
+    os.makedirs(WELCOME_PKG_DIR, mode=0o700, exist_ok=True)
+    if os.path.islink(WELCOME_PKG_DIR):
+        raise ValueError("welcome package directory must not be a symbolic link")
+    os.chmod(WELCOME_PKG_DIR, 0o700)
+    path = os.path.join(WELCOME_PKG_DIR, f"{customer_id}.txt")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(package)
+    except BaseException:
+        os.unlink(path)
+        raise
+    return path
+
 # ─── MAIN PROVISION COMMAND ──────────────────────────────────────────────────
 def cmd_provision(args):
     tier     = args.tier.upper()
@@ -377,7 +399,7 @@ def cmd_provision(args):
             notes=f"Onboarded via customer_onboard.py | country={country}",
         )
         key_hash_prefix = key_record["key_hash"][:16]
-        print(f"         Key: {key_record['key'][:20]}...")
+        print("         Credential issued; secret omitted from terminal output.")
 
         # Steps 2-5 are the local commercial/audit commit. If any fail,
         # compensate by revoking the already-issued live credential.
@@ -409,15 +431,12 @@ def cmd_provision(args):
 
         print("  [5/5] Generating welcome package...")
         pkg = generate_welcome_package(key_record, customer_record, sub_record)
-        os.makedirs(WELCOME_PKG_DIR, exist_ok=True)
-        pkg_file = os.path.join(WELCOME_PKG_DIR, f"{customer_id}_{args.email.split('@')[0]}.txt")
-        with open(pkg_file, "w", encoding="utf-8") as handle:
-            handle.write(pkg)
+        pkg_file = save_welcome_package(customer_id, pkg)
 
         committed = True
         print(f"         Saved: {pkg_file}")
         print()
-        print(pkg)
+        print("  Credential package saved for secure operator handoff; contents omitted from logs.")
         print()
         print("  ✓ Onboarding complete.")
         print("  ✓ Live credential provisioned in production API authority.")
