@@ -250,6 +250,21 @@ test('source guard forbids risk-to-CVSS fallback across hardened customer P25-P3
   }
 });
 
+test('enterprise operations UI fails closed, keeps credentials memory-only, and consumes current P32 contracts', () => {
+  const source = fs.readFileSync(
+    new URL('../../../../enterprise-operations.html', import.meta.url),
+    'utf8',
+  );
+  assert.doesNotMatch(source, /sessionStorage\.(?:setItem|getItem)\(['"]apex_token/);
+  assert.doesNotMatch(source, /localStorage\.(?:setItem|getItem)\([^\n]*token/i);
+  assert.match(source, /Authentication failed\. Access remains locked\./);
+  assert.match(source, /\/api\/v1\/p32\/observability/);
+  assert.match(source, /exposure_summary/);
+  assert.match(source, /top_required_actions/);
+  assert.match(source, /stage_distribution/);
+  assert.doesNotMatch(source, /Patch within 30 days|CISA mandatory patches|Operational Lifecycle \(9-Stage\)/i);
+});
+
 test('enterprise trust dashboard fails closed and never persists API keys in Web Storage', () => {
   const source = fs.readFileSync(
     new URL('../../../../enterprise-trust-dashboard.html', import.meta.url),
