@@ -30,6 +30,7 @@ import { getP21CertificationLevel }  from './p21-handlers.js';
 import { computeActionabilityScore } from './p23-handlers.js';
 import { computeEnterpriseTrustScore } from './p25-handlers.js';
 import { computeP26Grade }           from './p26-handlers.js';
+import { explicitCvss, explicitRiskScore } from './metric-semantics.js';
 
 export const P27_VERSION = "P27.0";
 
@@ -266,75 +267,82 @@ export function buildP27ExposureAnalysisBlock(item) {
  * P27.8 generates 6 distinct tailored variants from the same underlying data.
  */
 function _buildAudiencePackages(item) {
-  const sd       = item._score_details || {};
-  const cvss     = parseFloat(sd.cvss || item.cvss_score || item.risk_score || 0);
-  const kev      = !!(sd.kev || item.kev_present || item.kev);
+  const cvss     = explicitCvss(item);
+  const risk     = explicitRiskScore(item);
+  const kev      = Boolean(item.kev_present || item.kev || (item.apex || {}).kev_listed);
   const severity = String(item.severity || "UNKNOWN").toUpperCase();
-  const title    = esc(item.title || "Vulnerability");
-  const cves     = (item.cve || item.cve_ids || []).slice(0, 2).join(", ") || "No CVE assigned";
-  const ttps     = (item.ttps || item.mitre_tactics || []).slice(0, 3);
-  const actor    = esc(item.actor_tag || "Unattributed");
-  const iocCnt   = parseInt(item.ioc_count || 0);
-  const conf     = Math.round(parseFloat(item.confidence || 0) * 100);
+  const title    = esc(item.title || "Security intelligence item");
+  const cveArr   = Array.isArray(item.cve) ? item.cve : (Array.isArray(item.cve_ids) ? item.cve_ids : []);
+  const cves     = cveArr.slice(0, 2).join(", ") || "No CVE assigned";
+  const ttps     = (item.ttps || item.mitre_tactics || []).slice(0, 3).map(x => x?.id || x?.name || x);
+  const actorRaw = String(item.actor_tag || item.threat_actor || "").trim();
+  const actor    = actorRaw ? esc(actorRaw) : "Unattributed";
+  const iocCnt   = Number.parseInt(item.ioc_count || 0, 10) || 0;
+  const confRaw  = Number(item.confidence);
+  const confText = Number.isFinite(confRaw)
+    ? `${Math.round((confRaw <= 1 ? confRaw * 100 : confRaw))}%`
+    : "Not recorded";
+  const metricText = cvss != null
+    ? `Explicit CVSS ${cvss.toFixed(1)}`
+    : risk != null
+      ? `SENTINEL APEX composite risk ${risk.toFixed(1)}/10 (not CVSS)`
+      : "No explicit CVSS/risk score";
 
-  const urgencyWord = kev ? "IMMEDIATE" : cvss >= 9 ? "URGENT" : cvss >= 7 ? "HIGH" : "STANDARD";
-  const businessRisk = kev ? "confirmed active exploitation presents existential operational risk"
-    : cvss >= 9 ? "critical severity with remote exploitation potential"
-    : cvss >= 7 ? "high severity requiring prompt security response"
-    : "moderate severity to be addressed within standard patch cycles";
+  const urgencyWord = kev ? "KEV PRIORITY"
+    : (cvss != null && cvss >= 9) || severity === "CRITICAL" || (risk != null && risk >= 9) ? "PRIORITY REVIEW"
+    : (cvss != null && cvss >= 7) || severity === "HIGH" ? "ELEVATED REVIEW"
+    : "STANDARD REVIEW";
 
-  const complianceRisk = (cvss >= 7 || kev)
-    ? "NIS2 Article 21, DORA ICT incident reporting, and SOC 2 CC7.1 requirements may be triggered."
-    : "Standard patch compliance obligations apply under CIS Controls 7 and ISO 27001 A.8.8.";
-
-  const financialImpact = kev
-    ? "Active exploitation risk carries potential for operational shutdown, ransomware deployment, and significant recovery costs ($500K-$10M+ range for enterprise incidents)."
-    : cvss >= 9
-    ? "Unmitigated critical vulnerability creates material financial liability from breach response, regulatory fines, and customer notification obligations."
-    : "Financial exposure is manageable with standard patch management; delayed remediation increases insurance premium risk.";
+  const commonTruth = [
+    `${metricText}; severity ${severity}.`,
+    kev ? "CISA KEV listing indicates evidence of exploitation; customer exposure still requires asset validation." : "No CISA KEV signal is recorded on this item.",
+    ttps.length ? `Mapped ATT&CK: ${ttps.join(", ")}; mapping is investigative context, not proof of execution.` : "No ATT&CK techniques are mapped.",
+    iocCnt > 0 ? `${iocCnt} recorded IOC(s) require provenance/freshness validation and customer-telemetry correlation before containment.` : "No IOC inventory is recorded.",
+    actorRaw ? `Recorded actor attribution: ${actor}; validate provenance/confidence before actor-specific conclusions.` : "No threat-actor attribution is recorded.",
+  ].join(" ");
 
   return [
     {
-      audience:  "CEO / Managing Director",
-      color:     "#8b5cf6",
-      icon:      "?",
-      summary:   `${title} represents a ${urgencyWord} security matter. Our security operations team has identified ${businessRisk}. ${kev ? "Active exploitation has been confirmed by CISA. " : ""}Recommended action: authorize emergency security response budget and confirm incident response readiness. ${financialImpact} Intelligence confidence: ${conf}%.`,
-      action:    kev ? "Authorize emergency IR response. Brief legal and communications teams." : `Confirm patch approval and security budget allocation within ${cvss >= 9 ? "24 hours" : "7 days"}.`,
+      audience: "CEO / Managing Director",
+      color: "#8b5cf6",
+      icon: "?",
+      summary: `${title} is classified for ${urgencyWord}. ${commonTruth} Intelligence confidence: ${confText}. Business/material impact is not inferred from technical intelligence alone.`,
+      action: "Confirm accountable security ownership, resources and executive visibility according to the organization's materiality and incident-governance policy.",
     },
     {
-      audience:  "CISO / Security Leadership",
-      color:     "#ef4444",
-      icon:      "??",
-      summary:   `${title} (${cves})  -  CVSS ${cvss.toFixed(1)}, ${severity}. ${kev ? "CISA KEV listed  -  confirmed in-the-wild exploitation. " : ""}ATT&CK techniques: ${ttps.length > 0 ? ttps.join(", ") : "not mapped"}. ${iocCnt > 0 ? `${iocCnt} operational indicator(s) ready for deployment. ` : ""}Threat actor attribution: ${actor}. Detection rule validation status: ${item.sigma_rule ? "Sigma rule available" : "behavioral detection only"}. P21 certification required before board briefing.`,
-      action:    `Deploy detection rules. ${iocCnt > 0 ? `Block ${iocCnt} IOC(s) at perimeter. ` : ""}Initiate vulnerability assessment on affected assets. ${kev ? "Activate IR procedures immediately." : `Patch within ${cvss >= 9 ? "24h" : cvss >= 7 ? "72h" : "30 days"}.`}`,
+      audience: "CISO / Security Leadership",
+      color: "#ef4444",
+      icon: "??",
+      summary: `${title} (${cves}). ${commonTruth} Detection availability must be validated against the canonical detection registry and customer telemetry before production use.`,
+      action: "Validate affected assets and telemetry first; then approve remediation, hunt, detection and containment actions under customer change-control and response policy.",
     },
     {
-      audience:  "Board of Directors",
-      color:     "#3b82f6",
-      icon:      "??",
-      summary:   `SENTINEL APEX has identified a ${severity} security vulnerability (${title}). ${kev ? "This vulnerability is being actively exploited by threat actors globally. " : ""}${financialImpact} Management has been briefed and security response is ${kev ? "underway" : "planned"}. ${complianceRisk} No customer data compromise has been confirmed at this stage.`,
-      action:    kev ? "Approve emergency response. Request written incident status within 4 hours." : "Accept risk register update. Review next quarter's security investment allocation.",
+      audience: "Board of Directors",
+      color: "#3b82f6",
+      icon: "??",
+      summary: `SENTINEL APEX has identified ${severity} threat intelligence requiring ${urgencyWord.toLowerCase()}. ${kev ? "The item is CISA KEV-listed. " : ""}No breach, materiality, customer-data impact, financial loss or regulatory-reporting obligation is asserted from this intelligence record alone.`,
+      action: "Request evidence-backed status from security leadership when the organization's escalation/materiality criteria are met; avoid treating threat-intelligence signals as confirmed incident impact.",
     },
     {
-      audience:  "Compliance & Legal",
-      color:     "#22c55e",
-      icon:      "??",
-      summary:   `${title} (${cves}) carries potential regulatory implications. ${complianceRisk} CVSS score: ${cvss.toFixed(1)}. ${kev ? "CISA Known Exploited Vulnerability  -  potential mandatory reporting timelines under NIS2 (72h) and DORA (initial notification within 4h) may apply. " : ""}Remediation timeline: ${kev ? "immediate" : cvss >= 7 ? "within 72 hours" : "standard maintenance window"}. Document remediation actions for audit trail and cyber insurance notification requirements.`,
-      action:    kev ? "Initiate regulatory notification assessment. Review incident response communication templates." : "Update risk register. Confirm patch completion evidence collection for audit purposes.",
+      audience: "Compliance & Legal",
+      color: "#22c55e",
+      icon: "??",
+      summary: `${title} (${cves}). ${metricText}. Technical severity, KEV status, actor/TTP mappings and IOCs can inform a legal/compliance assessment but do not independently establish a breach, affected jurisdiction, materiality or notification deadline.`,
+      action: "Assess obligations only from confirmed incident facts, affected data/systems, jurisdictions, contracts and applicable law with the customer's legal/compliance owners.",
     },
     {
-      audience:  "Operations / IT Leadership",
-      color:     "#f97316",
-      icon:      "??",
-      summary:   `Patch deployment required for ${title}. Affected vector: ${item.attack_vector || "see technical advisory"}. ${iocCnt > 0 ? `${iocCnt} network indicator(s) available for immediate firewall/proxy blocking. ` : ""}${item.sigma_rule ? "Sigma detection rule available for SIEM deployment. " : ""}${ttps.length > 0 ? `MITRE ATT&CK: ${ttps.join(", ")}. ` : ""}Estimated remediation effort: ${kev ? "emergency change (4-8 hours)" : cvss >= 7 ? "expedited change (1-3 days)" : "standard change (2-4 weeks)"}.`,
-      action:    `Schedule ${kev ? "emergency" : cvss >= 7 ? "expedited" : "standard"} patch window. ${iocCnt > 0 ? `Deploy IOC blocklist to firewall/proxy/EDR. ` : ""}Update SIEM detection configuration.`,
+      audience: "Operations / IT Leadership",
+      color: "#f97316",
+      icon: "??",
+      summary: `${title}. ${commonTruth} Affected vector: ${esc(item.attack_vector || "consult authoritative advisory/vector")}. No remediation duration or maintenance window is manufactured by SENTINEL APEX.`,
+      action: "Confirm affected product/version and asset scope; use vendor guidance, applicable external deadlines and customer change-management/SLA policy for remediation scheduling. Validate IOCs/detections before production enforcement.",
     },
     {
-      audience:  "MSSP / Security Partner",
-      color:     "#06b6d4",
-      icon:      "?",
-      summary:   `Customer alert  -  ${title} (${cves}). Severity: ${severity}, CVSS ${cvss.toFixed(1)}. ${kev ? "KEV: YES  -  active exploitation confirmed. Priority: P1-CRITICAL. " : `Priority: ${cvss >= 9 ? "P1" : cvss >= 7 ? "P2" : "P3"}. `}${iocCnt} IOC(s) available. Detection: ${item.sigma_rule ? "Sigma" : ""}${item.kql_query ? "/KQL" : ""}${item.suricata_rule ? "/Suricata" : ""} ${!item.sigma_rule && !item.kql_query && !item.suricata_rule ? "behavioral only" : ""}. ATT&CK: ${ttps.length > 0 ? ttps.slice(0,2).join(", ") : "N/A"}. Confidence: ${conf}%. STIX bundle: ${item.stix_bundle ? "AVAILABLE" : "N/A"}.`,
-      action:    `${kev ? "Immediate customer notification. Deploy detection. Verify patch status across all customer environments." : `Schedule patch window communication. ${iocCnt > 0 ? "Push IOC feed to customer platforms." : ""}`}`,
+      audience: "MSSP / Security Partner",
+      color: "#06b6d4",
+      icon: "?",
+      summary: `Customer intelligence: ${title} (${cves}). ${commonTruth} Confidence: ${confText}. Maintain tenant isolation and use each customer's entitlement, evidence, approval and SLA boundaries.`,
+      action: "Correlate the intelligence separately per tenant; notify or act only under the affected customer's agreed service scope, escalation policy and validated environment evidence.",
     },
   ];
 }
@@ -576,7 +584,7 @@ export function buildP27StructuralIntegrityBlock(item) {
   const g4LowConf  = conf < 0.05;
 
   // G5: Cross-field consistency (CVSS vs severity  -  P22 auto-fix may have resolved)
-  const cvss     = parseFloat(sd.cvss || item.cvss_score || item.risk_score || 0);
+  const cvss     = (explicitCvss(item) ?? 0);
   const sevBand  = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
   const sev      = String(item.severity || "").toUpperCase();
   const expectedBand = cvss >= 9 ? 3 : cvss >= 7 ? 2 : cvss >= 4 ? 1 : 0;
