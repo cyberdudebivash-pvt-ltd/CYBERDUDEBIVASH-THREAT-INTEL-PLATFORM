@@ -52,6 +52,10 @@ test('metric truth boundary never manufactures CVSS from risk_score or contamina
   const withCvss = { ...riskOnly, cvss_score: 7.4 };
   assert.equal(explicitCvss(withCvss), 7.4);
   assert.equal(explicitRiskScore(withCvss), 9.8);
+
+  const explicitZero = { ...riskOnly, cvss_score: 0 };
+  assert.equal(explicitCvss(explicitZero), 0);
+  assert.equal(hasExplicitCvss(explicitZero), true);
 });
 
 test('customer-facing P25-P33 surfaces do not relabel composite risk as CVSS', () => {
