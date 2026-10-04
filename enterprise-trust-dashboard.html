@@ -603,7 +603,7 @@ function renderFeed(items) {
     const sevColor = severityColor[sev] || '#6b7280';
     const kev      = !!(sd.kev || item.kev_present || item.kev);
     const cvssRaw  = Number(item.cvss_score ?? item.cvss ?? NaN);
-    const cvss     = Number.isFinite(cvssRaw) && cvssRaw > 0 && cvssRaw <= 10 ? cvssRaw : null;
+    const cvss     = Number.isFinite(cvssRaw) && cvssRaw >= 0 && cvssRaw <= 10 ? cvssRaw : null;
     const riskRaw  = Number(item.risk_score ?? NaN);
     const risk     = Number.isFinite(riskRaw) && riskRaw >= 0 && riskRaw <= 10 ? riskRaw : null;
     const conf     = Math.round(parseFloat(item.confidence || 0) * 100);
