@@ -53,6 +53,7 @@ import { computeP20QualityScore }      from './p20-handlers.js';
 import { computeActionabilityScore }   from './p23-handlers.js';
 import { computeEnterpriseTrustScore } from './p25-handlers.js';
 import { computeP26Grade }             from './p26-handlers.js';
+import { explicitCvss, explicitRiskScore, hasExplicitCvss } from './metric-semantics.js';
 
 export const P32_VERSION = "P32.0";
 
@@ -136,7 +137,7 @@ const _LIFECYCLE_STAGES = [
 ];
 
 function _computeOperationalLifecycle(item) {
-  const cvss     = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss     = (explicitCvss(item) ?? 0);
   const hasKEV   = Boolean(item.kev_present || (item.apex || {}).kev_listed);
   const hasEPSS  = Boolean(item.epss_score);
   const hasActor = Boolean(item.actor_tag || item.threat_actor);
@@ -216,20 +217,26 @@ export function buildP32LifecycleBlock(item) {
 const _STRATEGIC_DECISIONS = [
   {
     id: "immediate_action",
-    label: "Immediate Action Required",
+    label: "Priority Review Required",
     icon: "?",
     color: "#ef4444",
     test: (item) => {
       const kev = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss = explicitCvss(item);
+      const risk = explicitRiskScore(item);
       const sev = String(item.severity || "").toUpperCase();
-      return kev || (sev === "CRITICAL" && cvss >= 9.0);
+      return kev || (cvss != null && cvss >= 9.0) || sev === "CRITICAL" || (risk != null && risk >= 9);
     },
     evidence: (item) => {
       const kev = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
-      return kev ? `CISA KEV listed  -  actively exploited in the wild. CVSS ${cvss}.`
-        : `CVSS ${cvss}  -  critical severity with remote exploitation confirmed.`;
+      const cvss = explicitCvss(item);
+      const risk = explicitRiskScore(item);
+      if (kev) return cvss != null
+        ? `CISA KEV-listed vulnerability with explicit CVSS ${cvss.toFixed(1)}. Validate affected assets and remediate under applicable KEV/vendor/customer deadlines.`
+        : "CISA KEV-listed vulnerability. Validate affected assets and authoritative severity; no CVSS value is inferred from composite risk.";
+      if (cvss != null) return `Explicit CVSS ${cvss.toFixed(1)} with critical severity context. Validate customer exposure before emergency change decisions.`;
+      if (risk != null) return `SENTINEL APEX composite risk ${risk.toFixed(1)}/10. This is not CVSS; validate technical severity and customer exposure before emergency action.`;
+      return "Critical severity signal without explicit CVSS/risk evidence; obtain authoritative severity and exposure evidence before emergency action.";
     },
   },
   {
@@ -262,7 +269,7 @@ const _STRATEGIC_DECISIONS = [
     evidence: (item) => {
       const ttps = Array.isArray(item.ttps) ? item.ttps : [];
       const dataExfil = ttps.filter(t => ["T1041","T1048","T1567","T1011","T1052","T1030"].includes(t));
-      return `Data exfiltration techniques detected (${dataExfil.join(", ")}). NIS2/GDPR/SOC2 breach notification timeline may apply.`;
+      return `Mapped data-exfiltration techniques (${dataExfil.join(", ")}). Technique mapping alone does not prove a breach; assess confirmed incident facts with legal/compliance owners before determining notification obligations.`;
     },
   },
   {
@@ -282,45 +289,63 @@ const _STRATEGIC_DECISIONS = [
       const actor = String(item.actor_tag || "unattributed");
       const ttps = Array.isArray(item.ttps) ? item.ttps : [];
       const destructive = ttps.filter(t => ["T1485","T1486","T1499","T1561","T1491"].includes(t));
-      if (destructive.length) return `Destructive TTPs confirmed (${destructive.join(", ")}). Review cyberwarfare/critical infrastructure obligations.`;
-      return `Nation-state actor attribution (${actor})  -  potential geopolitical/liability implications.`;
+      if (destructive.length) return `Destructive ATT&CK techniques are mapped (${destructive.join(", ")}). Mapping alone does not prove observed execution; validate telemetry before legal or regulatory conclusions.`;
+      return `Recorded nation-state actor attribution (${actor}). Validate source provenance and attribution confidence before legal or geopolitical conclusions.`;
     },
   },
   {
     id: "escalate_board",
-    label: "Board-Level Escalation",
+    label: "Executive Escalation Review",
     icon: "??",
     color: "#f59e0b",
     test: (item) => {
       const kev = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss = explicitCvss(item);
+      const risk = explicitRiskScore(item);
       const sev = String(item.severity || "").toUpperCase();
       const iocCnt = parseInt(item.ioc_count || 0);
-      return (sev === "CRITICAL" && kev) || (cvss >= 9.5 && iocCnt > 5);
+      return (sev === "CRITICAL" && kev) ||
+        (cvss != null && cvss >= 9.5 && iocCnt > 5) ||
+        (risk != null && risk >= 9.5 && sev === "CRITICAL");
     },
     evidence: (item) => {
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss = explicitCvss(item);
+      const risk = explicitRiskScore(item);
       const iocCnt = parseInt(item.ioc_count || 0);
       const kev = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      return `CVSS ${cvss} critical${kev ? " + CISA KEV" : ""} with ${iocCnt} IOCs. Materiality threshold for board disclosure likely reached per NIS2/DORA/SOX Annex.`;
+      const signals = [];
+      if (cvss != null) signals.push(`explicit CVSS ${cvss.toFixed(1)}`);
+      if (risk != null) signals.push(`APEX composite risk ${risk.toFixed(1)}/10`);
+      if (kev) signals.push("CISA KEV listed");
+      if (iocCnt > 0) signals.push(`${iocCnt} recorded IOC(s)`);
+      return `${signals.join(", ") || "High-severity intelligence signal"}. Consider executive escalation under the customer's materiality and incident-notification policy; SENTINEL APEX does not infer legal materiality from these signals.`;
     },
   },
   {
     id: "accept_risk",
-    label: "Accept Risk (Monitor Only)",
+    label: "Risk-Acceptance Review",
     icon: "?",
     color: "#6b7280",
     test: (item) => {
       const sev = String(item.severity || "").toUpperCase();
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss = explicitCvss(item);
+      const risk = explicitRiskScore(item);
       const epss = parseFloat(item.epss_score || 0);
       const kev = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-      return !kev && cvss < 4.0 && epss < 0.01 && (sev === "LOW" || sev === "INFO");
+      const lowTechnicalSignal = (cvss != null && cvss < 4.0) ||
+        (cvss == null && risk != null && risk < 4.0);
+      return !kev && lowTechnicalSignal && epss < 0.01 && (sev === "LOW" || sev === "INFO");
     },
     evidence: (item) => {
-      const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+      const cvss = explicitCvss(item);
+      const risk = explicitRiskScore(item);
       const epss = parseFloat(item.epss_score || 0);
-      return `CVSS ${cvss} (low severity), EPSS ${(epss * 100).toFixed(2)}% exploitation probability. Risk acceptance criteria met  -  document and monitor.`;
+      const metric = cvss != null
+        ? `explicit CVSS ${cvss.toFixed(1)}`
+        : risk != null
+          ? `SENTINEL APEX composite risk ${risk.toFixed(1)}/10 (not CVSS)`
+          : "no authoritative severity metric";
+      return `${metric}, EPSS ${(epss * 100).toFixed(2)}%. This may qualify for customer risk-acceptance review, but approval requires the customer's documented governance process.`;
     },
   },
   {
@@ -391,7 +416,7 @@ export function buildP32DecisionBlock(item) {
 // P32.3 generates structured delta: what changed, why it matters, operational impact.
 
 function _computeDelta(item) {
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss = (explicitCvss(item) ?? 0);
   const epss = parseFloat(item.epss_score || 0);
   const kev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
   const sev  = String(item.severity || "").toUpperCase();
@@ -411,7 +436,7 @@ function _computeDelta(item) {
   // EPSS movement (significant delta)
   if (epss > 0.5) {
     deltas.push({ field: "EPSS Score", change: `${(epss * 100).toFixed(1)}% exploitation probability`,
-      impact: "HIGH", detail: "EPSS threshold crossed 50%  -  imminent exploitation in the wild highly likely",
+      impact: "HIGH", detail: "EPSS is above 50%, indicating elevated modeled probability of exploitation in the EPSS forecast window; it does not prove imminent or observed exploitation",
       color: "#f97316" });
   } else if (epss > 0.1) {
     deltas.push({ field: "EPSS Score", change: `${(epss * 100).toFixed(1)}%`,
@@ -423,7 +448,7 @@ function _computeDelta(item) {
   if (iocCnt > 0) {
     deltas.push({ field: "IOC Count", change: `+${iocCnt} indicators`,
       impact: iocCnt > 10 ? "HIGH" : "MEDIUM",
-      detail: `${iocCnt} actionable IOC(s) available for immediate threat intelligence platform ingestion`,
+      detail: `${iocCnt} recorded IOC(s) available for provenance/freshness validation and controlled ingestion`,
       color: iocCnt > 10 ? "#f97316" : "#f59e0b" });
   }
 
@@ -439,7 +464,7 @@ function _computeDelta(item) {
   const hasDet = Boolean(apex.sigma_rule || apex.kql_query || (item.detection_bundle || []).length > 0);
   if (hasDet) {
     deltas.push({ field: "Detection Status", change: "RULES AVAILABLE",
-      impact: "HIGH", detail: "Detection rules confirmed present  -  deploy to SIEM within SLA",
+      impact: "HIGH", detail: "Detection rules are present; validate against customer telemetry and change-control requirements before production deployment",
       color: "#22c55e" });
   } else {
     deltas.push({ field: "Detection Status", change: "NO RULES YET",
@@ -450,11 +475,11 @@ function _computeDelta(item) {
   // CVSS level
   if (cvss >= 9.0) {
     deltas.push({ field: "CVSS Score", change: `${cvss}  -  CRITICAL`,
-      impact: "CRITICAL", detail: "Critical CVSS rating  -  maximum attack impact with high exploitability",
+      impact: "CRITICAL", detail: "Critical explicit CVSS rating; validate exploitability, affected configuration and customer exposure before response decisions",
       color: "#ef4444" });
   } else if (cvss >= 7.0) {
     deltas.push({ field: "CVSS Score", change: `${cvss}  -  HIGH`,
-      impact: "HIGH", detail: "High severity  -  significant privilege escalation or RCE potential",
+      impact: "HIGH", detail: "High explicit CVSS rating; consult the authoritative vector/advisory for actual impact and exploitability characteristics",
       color: "#f97316" });
   }
 
@@ -527,7 +552,7 @@ const _DET_EFFECTIVENESS = [
 ];
 
 function _computeDetectionEffectiveness(item) {
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss = (explicitCvss(item) ?? 0);
   const kev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
   const ttps  = Array.isArray(item.ttps) ? item.ttps : [];
   const iocCnt = parseInt(item.ioc_count || 0);
@@ -615,7 +640,7 @@ const _ENV_PLATFORMS = [
 ];
 
 function _computeEnvSimulation(item) {
-  const cvss  = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss  = (explicitCvss(item) ?? 0);
   const kev   = Boolean(item.kev_present || (item.apex || {}).kev_listed);
   const sev   = String(item.severity || "").toUpperCase();
   const ttps  = Array.isArray(item.ttps) ? item.ttps : [];
@@ -693,7 +718,7 @@ export function buildP32EnvironmentSimulatorBlock(item) {
 // P32.6 tracks 8 intelligence dimensions for drift signals with causal explanations.
 
 function _computeDriftSignals(item) {
-  const cvss  = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss  = (explicitCvss(item) ?? 0);
   const epss  = parseFloat(item.epss_score || 0);
   const conf  = parseFloat(item.confidence || 0);
   const iocCnt = parseInt(item.ioc_count || 0);
@@ -970,7 +995,7 @@ function _computeMaturity(item) {
   const gradeScore = { "A+": 100, "A": 95, "B+": 85, "B": 75, "C+": 65, "C": 55, "D": 40, "F": 20 };
   const gradeNum = gradeScore[grade] || 20;
 
-  const cvss    = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss    = (explicitCvss(item) ?? 0);
   const hasKEV  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
   const hasEPSS = Boolean(item.epss_score);
   const ttps    = Array.isArray(item.ttps) ? item.ttps : [];
@@ -1073,7 +1098,7 @@ function _computeOperationalMetrics(item) {
     : null;
 
   // MTTR: Mean Time To Remediate (estimate from CVSS/KEV/SLA)
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss = (explicitCvss(item) ?? 0);
   const kev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
   const sev  = String(item.severity || "").toUpperCase();
   const patchDays = kev ? 2 : sev === "CRITICAL" ? 15 : sev === "HIGH" ? 30 : sev === "MEDIUM" ? 60 : 90;
@@ -1139,7 +1164,7 @@ function _computeReleaseGate(item) {
   try { trust = computeEnterpriseTrustScore(item); } catch (_) {}
 
   const kev  = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-  const cvss = parseFloat(item.risk_score || item.cvss_score || 0);
+  const cvss = (explicitCvss(item) ?? 0);
   const sev  = String(item.severity || "").toUpperCase();
   const ttps = Array.isArray(item.ttps) ? item.ttps : [];
   const iocCnt = parseInt(item.ioc_count || 0);
@@ -1376,7 +1401,7 @@ export async function handleP32Quality(request, env) {
     if (!item.source_url) issues.push({ id: iids, type: "MISSING_SOURCE_URL", severity: "WARNING" });
     if (!item.ttps || item.ttps.length === 0) issues.push({ id: iids, type: "MISSING_MITRE_TTPS", severity: "WARNING" });
     if (!item.executive_summary && !item.exec_summary) issues.push({ id: iids, type: "MISSING_EXECUTIVE_SUMMARY", severity: "WARNING" });
-    if (parseFloat(item.risk_score || item.cvss_score || 0) === 0) issues.push({ id: iids, type: "MISSING_CVSS", severity: "WARNING" });
+    if ((explicitCvss(item) ?? 0) === 0) issues.push({ id: iids, type: "MISSING_CVSS", severity: "WARNING" });
 
     // Duplicate advisory check (same title prefix in top-20 chars)
     const titleKey = (item.title || "").toLowerCase().slice(0, 20).trim();
@@ -1448,7 +1473,7 @@ export async function handleP32Dashboard(request, env) {
   for (const item of items.slice(0, 200)) {
     const sev   = String(item.severity || "").toUpperCase();
     const kev   = Boolean(item.kev_present || (item.apex || {}).kev_listed);
-    const cvss  = parseFloat(item.risk_score || item.cvss_score || 0);
+    const cvss  = (explicitCvss(item) ?? 0);
     const hasDet = Boolean((item.apex || {}).sigma_rule || (item.detection_bundle || []).length > 0);
     const hasIOC  = parseInt(item.ioc_count || 0) > 0;
     const hasCVE  = (item.cve_ids || []).length > 0 || (item.title || "").includes("CVE-");
