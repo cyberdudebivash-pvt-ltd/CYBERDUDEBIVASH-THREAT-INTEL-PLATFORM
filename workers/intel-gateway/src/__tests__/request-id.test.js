@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import {
   REQUEST_ID_RE,
@@ -49,4 +50,14 @@ test('response correlation is per-request and removable before shared caching', 
   const cacheCopy = withoutRequestId(correlated);
   assert.equal(cacheCopy.headers.get('X-Request-ID'), null);
   assert.equal(cacheCopy.headers.get('Cache-Control'), 'public, max-age=300');
+});
+
+
+test('gateway choke point attaches request IDs and strips them from shared cache writes', () => {
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  assert.match(source, /const requestId = resolveRequestId\(request\)/);
+  assert.match(source, /headers\.set\("X-Request-ID", requestId\)/);
+  assert.match(source, /if \(cached\) return withRequestId\(cached, requestId\)/);
+  assert.match(source, /toCache = withoutRequestId\(toCache\)/);
+  assert.match(source, /request_id=\$\{requestId\} unhandled error/);
 });
