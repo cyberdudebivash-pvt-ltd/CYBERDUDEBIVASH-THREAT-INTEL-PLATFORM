@@ -583,7 +583,7 @@ export function buildP29LifecycleBlock(item) {
   const checks = [
     ["KEV Status",        lc.hasKEV,  lc.hasKEV ? "Listed in CISA KEV" : "Not in CISA KEV"],
     ["EPSS Score",        lc.hasEPSS, lc.hasEPSS ? `EPSS: ${parseFloat(item.epss_score || 0).toFixed(3)}` : "EPSS data absent"],
-    ["CVSS Score",        lc.hasCVSS, lc.hasCVSS ? `CVSS: ${item.risk_score || item.cvss_score}` : "No CVSS score"],
+    ["CVSS Score",        lc.hasCVSS, lc.hasCVSS ? `CVSS: ${explicitCvss(item).toFixed(1)}` : "No explicit CVSS score"],
     ["IOC Validation",    lc.hasIOC,  lc.hasIOC  ? `${item.ioc_count} IOC(s) present` : "No IOCs"],
     ["STIX Bundle",       lc.hasSTIX, lc.hasSTIX ? "STIX 2.1 bundle linked" : "No STIX bundle"],
     ["Source URL",        lc.hasSrc,  lc.hasSrc  ? "Source URL verified" : "No source URL"],
@@ -730,14 +730,21 @@ export async function handleP29CustomerValueAnalytics(request, env) {
     const withMITRE          = items.filter(i => (i.ttps || []).length + (i.mitre_tactics || []).length > 0).length;
     const avgEnrichment      = Math.round(items.reduce((s, i) => s + parseFloat(i.enrichment_score || 0), 0) / items.length);
 
-    // Estimated analyst hours saved (heuristic: 2h per advisory that has detection + IOCs)
-    const fullyEnriched      = items.filter(i => parseInt(i.ioc_count || 0) > 0 && Object.keys(i.detection_bundle || {}).length > 0).length;
-    const estHoursSaved      = fullyEnriched * 2;
-
-    // Estimated risk reduction: items with KEV patched = ~$500K+ exposure per item (industry benchmark range)
-    const highRiskMitigated  = items.filter(i => {
-      const cvss = parseFloat(i.risk_score || i.cvss_score || 0);
-      return cvss >= 7 || Boolean(i.kev_present);
+    // Observable product-output coverage only. The platform does not claim
+    // analyst-hours saved, financial loss avoided or "risk mitigated" unless a
+    // customer-owned measurement source exists. Feed presence is not proof of
+    // remediation or business impact.
+    const fullyEnriched = items.filter(i =>
+      parseInt(i.ioc_count || 0) > 0 &&
+      Object.keys(i.detection_bundle || {}).length > 0
+    ).length;
+    const priorityReviewItems = items.filter(i => {
+      const cvss = explicitCvss(i);
+      const risk = explicitRiskScore(i);
+      return Boolean(i.kev_present || (i.apex || {}).kev_listed) ||
+        (cvss != null && cvss >= 7) ||
+        (risk != null && risk >= 8) ||
+        ["HIGH", "CRITICAL"].includes(String(i.severity || "").toUpperCase());
     }).length;
 
     return _jsonResp({
@@ -755,9 +762,18 @@ export async function handleP29CustomerValueAnalytics(request, env) {
         avg_enrichment_score:      avgEnrichment,
         fully_enriched_items:      fullyEnriched,
       },
+      operational_capacity_signals: {
+        priority_review_items:     priorityReviewItems,
+        detection_formats_total:   totalDetections,
+        ioc_signals_recorded:      totalIOCs,
+        fully_enriched_items:      fullyEnriched,
+      },
       estimated_impact: {
-        analyst_hours_saved:       estHoursSaved,
-        high_risk_items_mitigated: highRiskMitigated,
+        analyst_hours_saved:       null,
+        high_risk_items_mitigated: null,
+        financial_loss_avoided:    null,
+        measurement_status:        "UNAVAILABLE",
+        reason: "Customer outcome/impact telemetry is not connected; SENTINEL APEX does not infer saved hours, mitigated risk or financial impact from feed contents.",
         detection_formats_total:   totalDetections,
         ioc_signals_generated:     totalIOCs,
       },
