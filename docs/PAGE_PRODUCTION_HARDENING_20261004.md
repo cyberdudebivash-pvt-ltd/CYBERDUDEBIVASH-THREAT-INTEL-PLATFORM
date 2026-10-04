@@ -84,7 +84,7 @@ The deployment inventory excludes internal/quarantined pages and report archives
 | `intelligence-archive.html` | Pass | 1 | Behavioral/content review pending |
 | `iocs.html` | Pass | 1 | Behavioral/content review pending |
 | `kev.html` | Pass | 1 | Behavioral/content review pending |
-| `lead-capture.html` | Pass | 1 | Behavioral/content review pending |
+| `lead-capture.html` | Pass | 1 | Failed-delivery confirmation remediated; live verification pending |
 | `lead-pipeline.html` | Pass | 1 | Behavioral/content review pending |
 | `login.html` | Pass | 1 | Behavioral/content review pending |
 | `lookup.html` | Pass | 1 | Behavioral/content review pending |
@@ -172,3 +172,5 @@ The deployment inventory excludes internal/quarantined pages and report archives
 | `docs/faq.html` | Pass | 1 | Behavioral/content review pending |
 | `docs/index.html` | Pass | 0 | Behavioral/content review pending |
 | `docs/quickstart.html` | Pass | 1 | Behavioral/content review pending |
+
+Continuation 2026-10-05: corrected homepage asset cache-version drift and synchronized the pipeline AI Brain template with the shipped block. PRO lead capture now confirms only HTTP-successful delivery, preserves inputs on failure, prevents duplicate pending submissions and removes unsupported response-time/advisory-count claims. Delivery and timeout behavior have executable negative controls; live form submissions were not sent.

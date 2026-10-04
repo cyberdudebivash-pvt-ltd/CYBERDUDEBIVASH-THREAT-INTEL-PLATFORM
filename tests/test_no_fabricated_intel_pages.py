@@ -330,3 +330,56 @@ const run = code => vm.runInContext(code, context);
 """
     result = subprocess.run([node, '-e', harness, json.dumps(script)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_lead_submission_never_confirms_failed_delivery():
+    import shutil
+    import subprocess
+    html = _text('lead-capture.html')
+    assert '73 live advisories' not in html
+    assert 'within 2 hours' not in html
+    assert '251–1,000 employees' in html
+    assert 'id="lead-status" role="status" aria-live="polite"' in html
+    script = re.search(r'<script>(.*?)</script>', html, re.S).group(1)
+    node = shutil.which('node')
+    assert node, 'Node required for form behavior verification'
+    harness = r"""
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+async function scenario(mode) {
+  let submit, requests=0, resolve;
+  const button={disabled:false};
+  const form={action:'https://formspree.io/f/xaqznnoe',style:{},reportValidity:()=>mode!=='invalid',querySelector:()=>button,setAttribute(){},removeAttribute(){},addEventListener:(_,fn)=>{submit=fn;}};
+  const nodes={'lead-form':form,'lead-status':{textContent:''},'success-box':{style:{display:'none'}},'confirm-ref':{},'ref-display':{},'ref-id-field':{}};
+  const context={document:{getElementById:id=>nodes[id]},FormData:class{},AbortSignal,console,fetch:async()=>{
+    requests++;
+    if(mode==='offline')throw new Error('offline');
+    if(mode==='timeout')throw new Error('TimeoutError');
+    if(mode==='pending')return new Promise(r=>{resolve=r;});
+    return {ok:mode==='success'};
+  }};
+  vm.runInNewContext(JSON.parse(process.argv[1]),context);
+  const first=submit.call(form,{preventDefault(){}});
+  if(mode==='pending') {
+    assert.equal(button.disabled,true);
+    await submit.call(form,{preventDefault(){}});
+    assert.equal(requests,1);
+    resolve({ok:true});
+  }
+  await first;
+  assert.equal(button.disabled,false);
+  if(mode==='success'||mode==='pending') {
+    assert.equal(form.style.display,'none');
+    assert.equal(nodes['success-box'].style.display,'block');
+    assert.ok(nodes['confirm-ref'].textContent.startsWith('LC-'));
+  } else {
+    assert.notEqual(form.style.display,'none');
+    assert.equal(nodes['success-box'].style.display,'none');
+    if(mode==='invalid')assert.equal(requests,0);
+    else assert.ok(nodes['lead-status'].textContent.includes('could not be confirmed'));
+  }
+}
+(async()=>{for(const mode of ['success','rejected','offline','timeout','pending','invalid'])await scenario(mode);})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+    result = subprocess.run([node,'-e',harness,json.dumps(script)], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
