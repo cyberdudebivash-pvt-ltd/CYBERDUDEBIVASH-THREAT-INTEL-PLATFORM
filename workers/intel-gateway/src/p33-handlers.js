@@ -737,68 +737,74 @@ ${steps.map((s, idx) => `
 
 export function buildP33OperationalDashboardBlock(item, items = []) {
   const sample = (items.length ? items : [item]).slice(0, 100);
-  const tl     = _threatLevel(sample);
-  const g      = computeP26Grade(item);
-  const q      = computeP20QualityScore(item);
-  const a      = computeActionabilityScore(item);
+  const tl = _threatLevel(sample);
+  const g = computeP26Grade(item);
 
-  const critCount = sample.filter(i => (i.severity||'').toUpperCase() === 'CRITICAL').length;
-  const highCount = sample.filter(i => (i.severity||'').toUpperCase() === 'HIGH').length;
-  const kevCount  = sample.filter(i => i.kev_present || i.kev_listed).length;
-  const patchPct  = Math.min(100, 100 - Math.round(critCount / Math.max(1, sample.length) * 100));
-  const detPct    = Math.round(sample.filter(i => (i.ttps||i.mitre_tactics||[]).length > 0).length / Math.max(1, sample.length) * 100);
+  const critCount = sample.filter(i => String(i.severity || '').toUpperCase() === 'CRITICAL').length;
+  const highCount = sample.filter(i => String(i.severity || '').toUpperCase() === 'HIGH').length;
+  const kevCount = sample.filter(i => i.kev_present || i.kev_listed || (i.apex || {}).kev_listed).length;
+  const mitreMapped = sample.filter(i => (i.ttps || i.mitre_tactics || []).length > 0).length;
+  const detectionItems = sample.filter(i => {
+    try { return extractDetectionArtifacts(i).length > 0; } catch (_) { return false; }
+  }).length;
+  const mitrePct = Math.round(mitreMapped / Math.max(1, sample.length) * 100);
+  const detPct = Math.round(detectionItems / Math.max(1, sample.length) * 100);
 
-  const businessRisk = Math.min(100, Math.round(
+  // Feed-priority index is an intelligence triage signal only. It must not be
+  // presented as customer business risk, patch completion or incident impact.
+  const feedPriorityIndex = Math.min(100, Math.round(
     (critCount * 8 + highCount * 4 + kevCount * 10) / Math.max(1, sample.length) * 20
   ));
 
-  const execSummary = `Current threat landscape shows ${critCount} critical and ${highCount} high-severity advisories across ${sample.length} active intelligence items. ` +
-    (kevCount > 0 ? `${kevCount} KEV-listed vulnerabilities require immediate patching per CISA directive. ` : '') +
-    `Detection coverage is ${detPct}% and business risk score is ${businessRisk}/100. ` +
-    `Overall intelligence grade: ${g}.`;
+  const execSummary =
+    `Current intelligence sample contains ${critCount} critical and ${highCount} high-severity records across ${sample.length} items. ` +
+    (kevCount > 0 ? `${kevCount} item(s) are CISA KEV-listed and warrant exposure validation against applicable KEV/vendor/customer deadlines. ` : '') +
+    `Detection-artifact coverage is ${detPct}%; MITRE mapping coverage is ${mitrePct}%. ` +
+    `Feed priority index is ${feedPriorityIndex}/100 and is not a customer business-risk, breach, remediation or patch-completion metric. Intelligence grade: ${g}.`;
 
   const html = `
 <div style="text-align:center;padding:16px;background:${tl.color}10;border:1px solid ${tl.color}30;border-radius:8px;margin-bottom:14px">
-  <div style="font-size:10px;color:#64748b;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Current Threat Level</div>
+  <div style="font-size:10px;color:#64748b;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">Current Intelligence Threat Level</div>
   <div style="font-size:36px;font-weight:900;color:${tl.color};letter-spacing:2px">${esc(tl.level)}</div>
-  <div style="font-size:12px;color:${tl.color};margin-top:4px">Threat Index: ${tl.score}/100</div>
+  <div style="font-size:12px;color:${tl.color};margin-top:4px">Feed Threat Index: ${tl.score}/100</div>
 </div>
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
   ${[
     ['Critical Advisories', String(critCount), '#ef4444'],
     ['High Advisories', String(highCount), '#f97316'],
     ['KEV Listed', String(kevCount), '#ef4444'],
-    ['Business Risk', businessRisk + '/100', businessRisk >= 50 ? '#ef4444' : '#eab308'],
-    ['Detection Coverage', detPct + '%', detPct >= 70 ? '#22c55e' : '#eab308'],
-    ['Intelligence Grade', g, '#06b6d4'],
-  ].map(([l, v, c]) => `
+    ['Feed Priority Index', feedPriorityIndex + '/100', feedPriorityIndex >= 50 ? '#ef4444' : '#eab308'],
+    ['Detection Artifacts', detPct + '%', detPct >= 70 ? '#22c55e' : '#eab308'],
+    ['MITRE Mapping', mitrePct + '%', mitrePct >= 70 ? '#22c55e' : '#eab308'],
+  ].map(([l, v, col]) => `
   <div style="background:#0a0c10;border:1px solid #1f2937;border-radius:6px;padding:10px;text-align:center">
     <div style="font-size:9px;color:#64748b;margin-bottom:3px">${esc(l)}</div>
-    <div style="font-size:16px;font-weight:700;color:${c}">${esc(v)}</div>
+    <div style="font-size:16px;font-weight:700;color:${col}">${esc(v)}</div>
   </div>`).join('')}
 </div>
 <div style="background:#0a0c10;border:1px solid #1f2937;border-radius:6px;padding:12px;margin-bottom:12px">
-  <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">EXECUTIVE SUMMARY</div>
+  <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px">EXECUTIVE INTELLIGENCE SUMMARY</div>
   <div style="font-size:12px;color:#e2e8f0;line-height:1.6">${esc(execSummary)}</div>
 </div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
   <div>
-    <div style="font-size:10px;color:#64748b;margin-bottom:4px">Patch Completion Status</div>
-    <div style="height:8px;background:#1e293b;border-radius:4px;overflow:hidden">
-      <div style="height:100%;width:${patchPct}%;background:${patchPct >= 80 ? '#22c55e' : '#eab308'}"></div>
-    </div>
-    <div style="font-size:10px;color:#94a3b8;margin-top:3px">${patchPct}% estimated compliant</div>
-  </div>
-  <div>
-    <div style="font-size:10px;color:#64748b;margin-bottom:4px">Detection Coverage</div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:4px">Detection-Artifact Coverage</div>
     <div style="height:8px;background:#1e293b;border-radius:4px;overflow:hidden">
       <div style="height:100%;width:${detPct}%;background:${detPct >= 70 ? '#22c55e' : '#eab308'}"></div>
     </div>
-    <div style="font-size:10px;color:#94a3b8;margin-top:3px">${detPct}% with MITRE-mapped detections</div>
+    <div style="font-size:10px;color:#94a3b8;margin-top:3px">${detPct}% of sampled records carry canonical detection artifacts</div>
   </div>
-</div>`;
+  <div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:4px">MITRE Mapping Coverage</div>
+    <div style="height:8px;background:#1e293b;border-radius:4px;overflow:hidden">
+      <div style="height:100%;width:${mitrePct}%;background:${mitrePct >= 70 ? '#22c55e' : '#eab308'}"></div>
+    </div>
+    <div style="font-size:10px;color:#94a3b8;margin-top:3px">${mitrePct}% of sampled records contain ATT&amp;CK context</div>
+  </div>
+</div>
+<div style="font-size:9px;color:#475569;margin-top:10px">Customer patch status, business impact, breach status and financial loss are not inferred from threat-intelligence feed data.</div>`;
 
-  return _block('p33-ops-dashboard', '?? P33.9 Customer Operational Dashboard', html, `Threat Level: ${tl.level}`);
+  return _block('p33-ops-dashboard', '?? P33.9 Customer Intelligence Operations Dashboard', html, `Threat Level: ${tl.level}`);
 }
 
 // -- P33.10: API Gateway Status ------------------------------------------------
