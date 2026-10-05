@@ -27,7 +27,6 @@ export const COMMERCIAL_MIRROR = Object.freeze({
   gstin: "21ARKPN8270G1ZP",
   seller_legal: "BIVASHA KUMAR NAYAK",
   seller_trade_name: "CYBERDUDEBIVASH(R)",
-  seller_display_name: "CYBERDUDEBIVASH ECOSYSTEM®",
   tiers: Object.freeze({
     FREE: Object.freeze({ usd_monthly: 0, inr_monthly: 0 }),
     PRO: Object.freeze({ usd_monthly: 49, inr_monthly: 4100 }),
@@ -100,7 +99,7 @@ export function quotaForTier(tier) {
 
 export function watchdogOffer() {
   const seller = {
-    display_name: COMMERCIAL_MIRROR.seller_display_name,
+    legal_name: COMMERCIAL_MIRROR.seller_legal,
     trade_name: COMMERCIAL_MIRROR.seller_trade_name,
     gstin: COMMERCIAL_MIRROR.gstin,
   };
@@ -827,7 +826,7 @@ export function deployManifest(tier) {
   return {
     product: WATCHDOG_NAME,
     mode: "customer-environment",
-    seller: COMMERCIAL_MIRROR.seller_display_name,
+    seller: COMMERCIAL_MIRROR.seller_trade_name,
     entitlement: "PRO+ reads GET /api/watchdog/brief. The poller is not an Enterprise boundary.",
     runtime: "Node.js 18+",
     poll: {
