@@ -18,7 +18,7 @@ Integration:
     b2b_streaming_engine.dispatch_pulse(threat_pulse_payload)
 
 (c) 2026 CyberDudeBivash Pvt. Ltd. All Rights Reserved.
-Founder & CEO - Bivash Kumar Nayak
+Founder & CEO - CYBERDUDEBIVASH ECOSYSTEM®
 """
 
 import os

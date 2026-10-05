@@ -452,7 +452,7 @@ REGEX_TARGETS = [
     ),
     # case-studies.html / testimonials.html -- footer.
     # PR #435 (2026-09-19) rewrote both footers to the correct legal entity
-    # ("BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH(R)") and, in the same
+    # ("CYBERDUDEBIVASH ECOSYSTEM®") and, in the same
     # pass, dropped the trailing " &nbsp;·&nbsp; vX.Y.Z" version suffix
     # entirely -- current text ends "... &nbsp;·&nbsp; SENTINEL APEX" with
     # no version at all. The two patterns below intentionally no longer match

@@ -103,6 +103,7 @@ test("offer prices come from the runtime provider and equal config/commercial-co
   }
   assert.equal(COMMERCIAL_MIRROR.gstin, CONTRACT.gstin);
   assert.equal(COMMERCIAL_MIRROR.seller_legal, CONTRACT.seller_legal);
+  assert.equal(COMMERCIAL_MIRROR.seller_display_name, CONTRACT.seller_display_name);
   const offer = watchdogOffer();
   const pro = offer.plans.find((p) => p.id === "PRO");
   const ent = offer.plans.find((p) => p.id === "ENTERPRISE");

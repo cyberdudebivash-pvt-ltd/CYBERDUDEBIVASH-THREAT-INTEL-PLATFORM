@@ -58,6 +58,7 @@ export const MAX_WEBHOOK_TIMEOUT_MS = DELIVERY_POLICY.timeout_ms;
 export const SELLER = Object.freeze({
   gstin: "21ARKPN8270G1ZP",
   seller_legal: "BIVASHA KUMAR NAYAK",
+  seller_display_name: "CYBERDUDEBIVASH ECOSYSTEM®",
   seller_trade_name: "CYBERDUDEBIVASH(R)",
 });
 
@@ -149,7 +150,7 @@ export function quotaForTier(tier) {
 
 export function watchdogOffer() {
   const seller = {
-    legal_name: SELLER.seller_legal,
+    display_name: SELLER.seller_display_name,
     trade_name: SELLER.seller_trade_name,
     gstin: SELLER.gstin,
   };
@@ -1833,7 +1834,7 @@ export function deployManifest(tier) {
   return {
     product: WATCHDOG_NAME,
     mode: "customer-environment",
-    seller: SELLER.seller_trade_name,
+    seller: SELLER.seller_display_name,
     entitlement: "PRO+ reads GET /api/watchdog/brief. The poller is not an Enterprise boundary.",
     runtime: "Node.js 18+",
     poll: {

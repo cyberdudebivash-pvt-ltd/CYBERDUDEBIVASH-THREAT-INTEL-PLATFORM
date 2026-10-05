@@ -283,21 +283,21 @@ Each action scored 1-10 on: Revenue Impact | Effort | Risk | Customer Demand | T
 
 | Day | Task | Owner | Revenue Unlock |
 |---|---|---|---|
-| Day 1 | Stripe account setup + PRO product created | Bivash | Payment infrastructure |
+| Day 1 | Stripe account setup + PRO product created | CYBERDUDEBIVASH ECOSYSTEM® | Payment infrastructure |
 | Day 2 | Stripe webhook handler deployed (Cloudflare Worker) | Dev | Automated API keys |
 | Day 3 | PAYMENT-GATEWAY.html updated → Stripe links | Dev | Immediate payment flow |
 | Day 3 | pricing.html fixed: Enterprise $999, MSSP $1,999 | Dev | Trust restored |
 | Day 4 | Free API key instant issuance (email form) | Dev | Top-of-funnel |
-| Day 5 | 7-email nurture sequence live (SendGrid) | Bivash | 7-day conversion |
+| Day 5 | 7-email nurture sequence live (SendGrid) | CYBERDUDEBIVASH ECOSYSTEM® | 7-day conversion |
 | Day 5 | "Weekly IOC Pack" lead magnet page live | Dev | Email capture |
 | Day 6 | Detection Pack product page live | Dev | Standalone product |
-| Day 7 | 50 LinkedIn SOC manager messages sent | Bivash | Direct pipeline |
-| Day 10 | 10 Enterprise cold emails sent | Bivash | Enterprise pipeline |
-| Day 12 | 5 MSSP outreach emails sent | Bivash | MSSP pipeline |
-| Day 14 | First demo calls (enterprise + MSSP) | Bivash | Sales motion |
+| Day 7 | 50 LinkedIn SOC manager messages sent | CYBERDUDEBIVASH ECOSYSTEM® | Direct pipeline |
+| Day 10 | 10 Enterprise cold emails sent | CYBERDUDEBIVASH ECOSYSTEM® | Enterprise pipeline |
+| Day 12 | 5 MSSP outreach emails sent | CYBERDUDEBIVASH ECOSYSTEM® | MSSP pipeline |
+| Day 14 | First demo calls (enterprise + MSSP) | CYBERDUDEBIVASH ECOSYSTEM® | Sales motion |
 | Day 21 | First enterprise conversion (target) | — | $999/mo |
 | Day 25 | First MSSP partner signed (target) | — | $1,999/mo |
-| Day 30 | Revenue review: MRR, trial conversions, pipeline | Bivash | Optimization |
+| Day 30 | Revenue review: MRR, trial conversions, pipeline | CYBERDUDEBIVASH ECOSYSTEM® | Optimization |
 
 ---
 

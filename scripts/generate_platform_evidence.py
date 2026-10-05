@@ -62,7 +62,7 @@ def build():
         "payment": {
             "provider": "Razorpay",
             "invoicing": "GST invoice (India), GSTIN " + contract["gstin"],
-            "seller": contract["seller_legal"] + " trading as " + contract["seller_trade_name"],
+            "seller": contract.get("seller_display_name", contract["seller_trade_name"]),
         },
         "uptime_commitment": {
             tier: {

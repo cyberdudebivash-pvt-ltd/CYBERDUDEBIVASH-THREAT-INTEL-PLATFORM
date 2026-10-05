@@ -17,7 +17,7 @@ Integration:
     conversion_pipeline.process_finding(finding, client_context)
 
 (c) 2026 CyberDudeBivash Pvt. Ltd. All Rights Reserved.
-Founder & CEO - Bivash Kumar Nayak
+Founder & CEO - CYBERDUDEBIVASH ECOSYSTEM®
 """
 
 import os

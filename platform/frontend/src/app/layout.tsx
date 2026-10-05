@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     template: "%s | SENTINEL APEX — CYBERDUDEBIVASH",
   },
   description:
-    "CYBERDUDEBIVASH® SENTINEL APEX — Enterprise AI-native cyber threat intelligence platform. Real-time CVE tracking, CISA KEV, STIX 2.1, MITRE ATT&CK mapping, IOC feeds, ransomware intelligence, and autonomous SOC. Founded by Bivash Kumar Nayak.",
+    "CYBERDUDEBIVASH® SENTINEL APEX — Enterprise AI-native cyber threat intelligence platform. Real-time CVE tracking, CISA KEV, STIX 2.1, MITRE ATT&CK mapping, IOC feeds, ransomware intelligence, and autonomous SOC. operated by CYBERDUDEBIVASH ECOSYSTEM®.",
   keywords: [
     "threat intelligence platform",
     "cybersecurity SaaS",
@@ -54,13 +54,13 @@ export const metadata: Metadata = {
     "autonomous SOC",
     "SENTINEL APEX",
     "CyberDudeBivash",
-    "Bivash Kumar Nayak",
+    "CYBERDUDEBIVASH ECOSYSTEM®",
     "India cybersecurity",
     "enterprise security platform",
   ],
-  authors: [{ name: "Bivash Kumar Nayak", url: "https://www.linkedin.com/company/cyberdudebivash/" }],
-  creator: "BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH(R)",
-  publisher: "BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH(R)",
+  authors: [{ name: "CYBERDUDEBIVASH ECOSYSTEM®", url: "https://www.linkedin.com/company/cyberdudebivash/" }],
+  creator: "CYBERDUDEBIVASH ECOSYSTEM®",
+  publisher: "CYBERDUDEBIVASH ECOSYSTEM®",
   robots: {
     index: true,
     follow: true,
@@ -114,7 +114,7 @@ const organizationSchema = {
     {
       "@type": "Organization",
       "@id": "https://cyberdudebivash.com/#organization",
-      "name": "BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH(R)",
+      "name": "CYBERDUDEBIVASH ECOSYSTEM®",
       "alternateName": ["CyberDudeBivash", "CYBERDUDEBIVASH"],
       "url": "https://cyberdudebivash.com/",
       "logo": {
@@ -124,18 +124,7 @@ const organizationSchema = {
         "height": 512,
       },
       "description":
-        "BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH(R) is a global cybersecurity innovation company based in Jajpur, Odisha, India. We build next-generation AI-driven threat intelligence, SOC automation, and defensive security platforms.",
-      "founder": {
-        "@type": "Person",
-        "@id": "https://intel.cyberdudebivash.com/about.html#founder",
-        "name": "Bivash Kumar Nayak",
-        "jobTitle": "Founder & CEO",
-        "url": "https://www.linkedin.com/company/cyberdudebivash/",
-        "sameAs": [
-          "https://www.linkedin.com/company/cyberdudebivash/",
-          "https://github.com/cyberdudebivash",
-        ],
-      },
+        "CYBERDUDEBIVASH ECOSYSTEM® is a global cybersecurity innovation company based in Jajpur, Odisha, India. We build next-generation AI-driven threat intelligence, SOC automation, and defensive security platforms.",
       "address": {
         "@type": "PostalAddress",
         "addressLocality": "Jajpur Road",
