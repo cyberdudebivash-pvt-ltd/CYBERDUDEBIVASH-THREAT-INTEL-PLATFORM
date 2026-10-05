@@ -16,7 +16,7 @@ Replace Make.com with zero cost. Posts your threat intel reports from
 | Bluesky | FREE | App password only |
 | Facebook Page | FREE | Graph API |
 | Tumblr | FREE | OAuth app |
-| Reddit (Profile) | FREE | Script app |
+| Reddit (Optional) | FREE | Disabled unless an active official destination is explicitly configured |
 | Threads | FREE | Meta Developers |
 
 ---
@@ -206,9 +206,9 @@ TUMBLR_BLOG_NAME       = cyberdudebivash-news
 ```
 REDDIT_CLIENT_ID     = <client id>
 REDDIT_CLIENT_SECRET = <client secret>
-REDDIT_USERNAME      = Immediate_Gold9789
+REDDIT_USERNAME      = <active official reddit username>
 REDDIT_PASSWORD      = <your reddit password>
-REDDIT_SUBREDDIT     = u_Immediate_Gold9789
+REDDIT_SUBREDDIT     = <approved subreddit or profile destination>
 ```
 
 ---
@@ -278,7 +278,7 @@ Check the logs to confirm each platform posts successfully.
     ├── Bluesky
     ├── Facebook Page
     ├── Tumblr
-    ├── Reddit (Profile)
+    ├── Reddit (only when explicitly configured)
     └── Threads
        │
        ▼
