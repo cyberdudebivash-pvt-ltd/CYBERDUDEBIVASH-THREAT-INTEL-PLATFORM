@@ -58,7 +58,7 @@ export const MAX_WEBHOOK_TIMEOUT_MS = DELIVERY_POLICY.timeout_ms;
 export const SELLER = Object.freeze({
   gstin: "21ARKPN8270G1ZP",
   seller_legal: "BIVASHA KUMAR NAYAK",
-  seller_display_name: "CYBERDUDEBIVASH ECOSYSTEM®",
+  seller_display_name: "CYBERDUDEBIVASH ECOSYSTEM\u00ae",
   seller_trade_name: "CYBERDUDEBIVASH(R)",
 });
 
