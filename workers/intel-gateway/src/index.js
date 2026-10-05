@@ -1599,7 +1599,7 @@ ${commercialGateBanner}
 <!-- Header -->
 <div class="hdr">
   <div class="hdr-left">
-    <div class="logo">? CYBERDUDEBIVASH SENTINEL APEX v${PLATFORM_VERSION}</div>
+    <div class="logo">SENTINEL APEX Threat Intel Platform v${PLATFORM_VERSION}</div>
     <div class="sub">Threat Intelligence Report * ${genTime} UTC</div>
     <div class="hdr-badges" style="margin-top:10px;">
       <span class="badge b-sev">${sev}</span>
@@ -1758,7 +1758,7 @@ ${commercialGateBanner}
       ${processed ? `<div class="meta-row"><span class="meta-key">Processed</span><span class="meta-val">${processed} UTC</span></div>` : ""}
       <div class="meta-row"><span class="meta-key">Report Generated</span><span class="meta-val">${genTime} UTC</span></div>
       ${srcSafe ? `<div class="meta-row"><span class="meta-key">Primary Source</span><span class="meta-val"><a href="${srcSafe}" target="_blank" rel="noopener" style="color:#00d4aa;">${srcName} ?</a></span></div>` : ""}
-      <div class="meta-row"><span class="meta-key">Intelligence Generator</span><span class="meta-val">CYBERDUDEBIVASH SENTINEL APEX v${PLATFORM_VERSION}</span></div>
+      <div class="meta-row"><span class="meta-key">Intelligence Generator</span><span class="meta-val">SENTINEL APEX v${PLATFORM_VERSION}</span></div>
       <div class="meta-row"><span class="meta-key">Platform Endpoint</span><span class="meta-val">${esc(reqPath)}</span></div>
     </div>
   </div>
@@ -1779,7 +1779,8 @@ ${commercialGateBanner}
 <!-- Footer -->
 <div class="ftr">
   <div style="margin-bottom:6px;">
-    CYBERDUDEBIVASH(R) SENTINEL APEX v${PLATFORM_VERSION} &mdash; PROFESSIONAL THREAT INTELLIGENCE PLATFORM
+    SENTINEL APEX Threat Intel Platform v${PLATFORM_VERSION}
+    <div style="margin:16px 0;"><a href="https://www.cyberdudebivash.com/" style="display:inline-flex;align-items:center;min-height:44px;padding:10px 16px;border:1px solid #67e8f9;border-radius:8px;background:#101c2e;color:#fff;font:700 16px/1.5 system-ui,sans-serif;text-decoration:underline;text-underline-offset:4px;">Powered By CYBERDUDEBIVASH</a></div>
   </div>
   <div>
     intel.cyberdudebivash.com &nbsp;&middot;&nbsp; Generated ${genTime} UTC &nbsp;&middot;&nbsp; ${tlp}
