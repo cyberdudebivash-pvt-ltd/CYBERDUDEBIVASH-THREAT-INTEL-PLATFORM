@@ -145,6 +145,32 @@ test("Case 10: preflight, approved origin + supported method/header -> 204 with 
 });
 
 // -- Case 11: preflight, unapproved origin -----------------------------------
+test("request correlation is browser-readable and X-Request-ID is allowed by preflight", () => {
+  const customerReq = req("https://intel.cyberdudebivash.com/api/v1/p33/dashboard", {
+    Origin: APPROVED,
+  });
+  const applied = applyCorsPolicy(okResponse(), customerReq, "/api/v1/p33/dashboard", "GET");
+  assert.equal(applied.headers.get("Access-Control-Expose-Headers"), "X-Request-ID");
+
+  const preflight = req("https://intel.cyberdudebivash.com/api/v1/p33/dashboard", {
+    Origin: APPROVED,
+    "Access-Control-Request-Method": "GET",
+    "Access-Control-Request-Headers": "x-api-key, x-request-id",
+  });
+  const res = buildPreflightResponse(preflight, "/api/v1/p33/dashboard");
+  assert.equal(res.status, 204);
+  assert.match(res.headers.get("Access-Control-Allow-Headers") || "", /X-Request-ID/i);
+
+  const publicPreflight = req("https://intel.cyberdudebivash.com/api/feed.json", {
+    Origin: EVIL,
+    "Access-Control-Request-Method": "GET",
+    "Access-Control-Request-Headers": "x-request-id",
+  });
+  const publicRes = buildPreflightResponse(publicPreflight, "/api/feed.json");
+  assert.equal(publicRes.status, 204);
+  assert.match(publicRes.headers.get("Access-Control-Allow-Headers") || "", /X-Request-ID/i);
+});
+
 test("Case 11: preflight, unapproved origin -> fail closed (403, no ACAO)", () => {
   const r = req("https://intel.cyberdudebivash.com/api/v1/p33/dashboard", {
     Origin: EVIL,

@@ -53,18 +53,28 @@ of Truth finding in `COMMERCIAL_READINESS.md` §1.
 
 ## Response envelope
 
-Standard JSON responses carry `SECURITY_HEADERS` (HSTS, X-Content-Type-Options, X-Frame-Options,
-Referrer-Policy, Permissions-Policy — `SECURITY_CERTIFICATION.md` §4) and
-`Access-Control-Allow-Origin: "*"` (§5 of the same document — a known, flagged gap, not a
-documented feature to rely on for origin-restricted integrations). CSP is present only on the 3 HTML
-report response sites, not on JSON responses.
+**Request correlation contract:** `sentinel-apex.v210`
+
+
+All intel-gateway responses pass through the outer response choke point and receive the platform's
+baseline security headers. Cross-origin behavior is route-aware: genuinely public read-only routes
+may use wildcard CORS, customer/browser routes grant only the approved production browser origin,
+and internal/admin/webhook routes receive no browser CORS grant.
+
+Every response also carries `X-Request-ID`. A caller may supply a bounded, log-safe
+`X-Request-ID`; otherwise the gateway generates an opaque `sentinel-apex-<uuid>` identifier.
+Use this value when reporting an API failure so the client request can be correlated with gateway
+logs. The identifier is request-specific and is deliberately stripped before a PUBLIC response is
+stored in the shared edge cache, then attached to the current request on cache hits. Browser clients
+may read it through `Access-Control-Expose-Headers: X-Request-ID`.
 
 ## Known API-surface gaps (full detail in the referenced certification documents)
 
 - 12 `/api/v1/p34/*` endpoints are unauthenticated where their own governing ADR says they should be
   internal-only (`SECURITY_CERTIFICATION.md` §6).
-- No request-level tracing/correlation ID is returned in any response
-  (`OPERATIONAL_READINESS.md` §2) — integrators building retry/debugging tooling against this API
-  cannot correlate a client-side request to a server-side log entry today.
-- CORS is unrestricted (`SECURITY_CERTIFICATION.md` §5) — fine for public GETs, worth confirming
-  before building any credentialed cross-origin integration.
+- Distributed tracing across external services is not claimed. The live gateway now provides
+  request-level correlation through `X-Request-ID`, including top-level gateway/cache error logs,
+  but this is correlation rather than a full OpenTelemetry-style distributed trace.
+- CORS is route-aware and fail-closed for authenticated/internal surfaces. Public read-only routes,
+  approved browser routes, and internal/admin/webhook routes have distinct policies in
+  `workers/intel-gateway/src/cors-policy.js`.
