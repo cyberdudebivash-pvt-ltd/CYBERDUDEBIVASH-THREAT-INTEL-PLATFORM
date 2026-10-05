@@ -5,11 +5,11 @@ import { IntelPageLayout } from "@/components/intel-pages/IntelPageLayout";
 export const metadata: Metadata = {
   title: "Threat Intelligence Blog — Research & Analysis",
   description:
-    "CYBERDUDEBIVASH® SENTINEL APEX threat intelligence blog — in-depth CVE research, APT campaign analysis, ransomware reports, ICS/OT advisories, and malware reverse-engineering by Bivash Kumar Nayak.",
+    "CYBERDUDEBIVASH® SENTINEL APEX threat intelligence blog — in-depth CVE research, APT campaign analysis, ransomware reports, ICS/OT advisories, and malware reverse-engineering by CYBERDUDEBIVASH ECOSYSTEM®.",
   keywords: [
     "threat intelligence blog", "cybersecurity research", "CVE analysis", "APT report",
     "ransomware research", "ICS OT advisory", "malware analysis", "SENTINEL APEX blog",
-    "CyberDudeBivash", "Bivash Kumar Nayak", "cybersecurity India",
+    "CyberDudeBivash", "CYBERDUDEBIVASH ECOSYSTEM®", "cybersecurity India",
   ],
   alternates: { canonical: "https://intel.cyberdudebivash.com/blog" },
   openGraph: {
@@ -158,14 +158,14 @@ const blogListSchema = {
   "name": "CYBERDUDEBIVASH® SENTINEL APEX Threat Intelligence Blog",
   "description": "In-depth threat intelligence research including CVE analysis, APT campaigns, ransomware, ICS/OT advisories, and malware reverse-engineering.",
   "url": "https://intel.cyberdudebivash.com/blog",
-  "author": { "@type": "Organization", "name": "BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH(R)" },
+  "author": { "@type": "Organization", "name": "CYBERDUDEBIVASH ECOSYSTEM®" },
   "blogPost": BLOG_POSTS.map((p) => ({
     "@type": "BlogPosting",
     "headline": p.title,
     "description": p.excerpt,
     "url": `https://intel.cyberdudebivash.com${p.externalPath}`,
     "datePublished": p.date,
-    "author": { "@type": "Organization", "name": "BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH(R)" },
+    "author": { "@type": "Organization", "name": "CYBERDUDEBIVASH ECOSYSTEM®" },
     "keywords": p.tags.join(", "),
   })),
 };
