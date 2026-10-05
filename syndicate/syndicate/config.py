@@ -61,7 +61,7 @@ class SyndicationConfig:
     REDDIT_CLIENT_SECRET: str = os.getenv("REDDIT_CLIENT_SECRET", "")
     REDDIT_USERNAME: str = os.getenv("REDDIT_USERNAME", "")
     REDDIT_PASSWORD: str = os.getenv("REDDIT_PASSWORD", "")
-    REDDIT_SUBREDDIT: str = os.getenv("REDDIT_SUBREDDIT", "u_Immediate_Gold9789")
+    REDDIT_SUBREDDIT: str = os.getenv("REDDIT_SUBREDDIT", "")
 
     # ── Threads ───────────────────────────────────────────────────────────────
     THREADS_ACCESS_TOKEN: str = os.getenv("THREADS_ACCESS_TOKEN", "")
