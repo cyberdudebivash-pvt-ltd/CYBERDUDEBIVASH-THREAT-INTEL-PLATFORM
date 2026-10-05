@@ -86,6 +86,7 @@ export const COMMERCIAL_MIRROR = Object.freeze({
   gstin: SELLER.gstin,
   seller_legal: SELLER.seller_legal,
   seller_trade_name: SELLER.seller_trade_name,
+  seller_display_name: SELLER.seller_display_name,
   tiers: Object.freeze({
     get FREE() { return planPrice("FREE"); },
     get PRO() { return planPrice("PRO"); },

@@ -1,6 +1,6 @@
 """
 CYBERDUDEBIVASH SENTINEL SYNDICATION ENGINE — Reddit Platform
-Posts links to user profile subreddit (u/Immediate_Gold9789) via Reddit API.
+Posts links to an explicitly configured Reddit destination via Reddit API.
 Free tier: 100 requests/minute.
 
 Requires:
@@ -8,7 +8,7 @@ Requires:
   - REDDIT_CLIENT_SECRET
   - REDDIT_USERNAME
   - REDDIT_PASSWORD
-  - REDDIT_SUBREDDIT : e.g. u_Immediate_Gold9789
+  - REDDIT_SUBREDDIT : explicit destination; no default is provided
 
 How to get: https://www.reddit.com/prefs/apps > Create App (script type)
 """
