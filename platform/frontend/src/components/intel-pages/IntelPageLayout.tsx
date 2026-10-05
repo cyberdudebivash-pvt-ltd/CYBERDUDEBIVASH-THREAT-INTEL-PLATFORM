@@ -103,12 +103,12 @@ export function IntelPageLayout({ children, breadcrumbs }: IntelPageLayoutProps)
               <p className="text-xs font-semibold text-cyan-400 mb-3 uppercase tracking-wider">CYBERDUDEBIVASH®</p>
               <p className="text-gray-600 text-xs leading-relaxed">
                 AI-native threat intelligence platform. Real-time CVE, IOC, and APT intelligence.
-                Founded by Bivash Kumar Nayak, Jajpur Road, Odisha, India.
+                operated by CYBERDUDEBIVASH ECOSYSTEM®, Jajpur Road, Odisha, India.
               </p>
             </div>
           </div>
           <div className="mt-8 pt-6 border-t border-gray-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-600">
-            <p>© 2026 BIVASHA KUMAR NAYAK trading as CYBERDUDEBIVASH®. All rights reserved.</p>
+            <p>© 2026 CYBERDUDEBIVASH ECOSYSTEM®. All rights reserved.</p>
             <p>Intelligence data is TLP:GREEN unless otherwise marked.</p>
           </div>
         </div>
