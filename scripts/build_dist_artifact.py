@@ -1063,6 +1063,13 @@ def main() -> int:
         total_files += 1
         log.info("  Created dist/.nojekyll")
 
+    # Presentation branding precedes checksum/provenance calculation. Archived
+    # source reports, API data and signed/downloadable artifacts remain unchanged.
+    subprocess.run([
+        "node", str(REPO_ROOT / "scripts" / "sentinel-branding.cjs"),
+        str(DIST_DIR), "SENTINEL APEX Threat Intel Platform",
+    ], check=True)
+
     # ── 7. Build deployment manifest ────────────────────────────────────────
     log.info("")
     log.info("Building deployment manifest (SHA-256 checksums)...")

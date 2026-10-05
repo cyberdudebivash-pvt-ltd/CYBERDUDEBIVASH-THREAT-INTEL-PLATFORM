@@ -199,7 +199,7 @@ test('customer console exposes the production V4.47.0 control-plane capabilities
   assert.ok(!html.includes('SSE · REAL TIME'), 'idle UI must not imply an active event stream');
   assert.match(
     html,
-    /<a class="back-platform" id="backToPlatform" href="\/" aria-label="Back to CYBERDUDEBIVASH Sentinel APEX platform">/,
+    /<a class="back-platform" id="backToPlatform" href="\/" aria-label="Back to SENTINEL APEX Threat Intel Platform">/,
     'SWARM header must expose a same-origin back-to-platform navigation control',
   );
   assert.ok(html.includes('<span>BACK TO PLATFORM</span>'));
@@ -212,7 +212,7 @@ test('customer console exposes the production V4.47.0 control-plane capabilities
 
 test('customer console provides direct navigation back to the Sentinel APEX platform root', () => {
   const html = __test.ui();
-  const expected = '<a class="back-platform" id="backToPlatform" href="/" aria-label="Back to CYBERDUDEBIVASH Sentinel APEX platform">';
+  const expected = '<a class="back-platform" id="backToPlatform" href="/" aria-label="Back to SENTINEL APEX Threat Intel Platform">';
   assert.ok(html.includes(expected));
   assert.ok(html.includes('<span class="back-arrow" aria-hidden="true">←</span><span>BACK TO PLATFORM</span>'));
   assert.equal((html.match(/id="backToPlatform"/g) || []).length, 1, 'navigation control must be unique');
