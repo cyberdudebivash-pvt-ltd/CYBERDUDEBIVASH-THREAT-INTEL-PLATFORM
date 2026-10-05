@@ -35,6 +35,7 @@ import hashlib
 import argparse
 import datetime
 import textwrap
+import re
 
 # ─── PATH: allow import from agent/tools ─────────────────────────────────────
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -172,8 +173,11 @@ def register_customer(
     # Recompute MRR
     mrr = sum(TIER_PRICING_INR.get(c.get("tier", "FREE"), 0)
               for c in customers if c.get("status") == "active")
-    meta["mrr_inr"] = mrr
-    meta["arr_inr"] = mrr * 12
+    meta["mrr_inr"] = None
+    meta["revenue_status"] = "unverified_no_payment_ledger"
+    meta["estimated_monthly_catalog_value_inr"] = mrr
+    meta["arr_inr"] = None
+    meta["estimated_annual_catalog_value_inr"] = mrr * 12
 
     save_json(CUSTOMERS_PATH, data)
     return record
@@ -216,7 +220,8 @@ def register_subscription(
         "api_key_hash_prefix": key_hash_prefix,
         "price_usd":           TIER_PRICING_USD.get(tier_up, 0),
         "price_inr":           TIER_PRICING_INR.get(tier_up, 0),
-        "auto_renew":          True,
+        "auto_renew":          False,
+        "payment_verification": "operator_reference_unverified" if payment_ref else "not_applicable",
         "created_at":          now_utc(),
     }
 
@@ -233,8 +238,11 @@ def register_subscription(
 
     mrr = sum(TIER_PRICING_INR.get(s.get("tier","FREE"), 0)
               for s in subs if s.get("status") == "active")
-    meta["mrr_inr"] = mrr
-    meta["arr_equivalent_inr"] = mrr * 12
+    meta["mrr_inr"] = None
+    meta["revenue_status"] = "unverified_no_payment_ledger"
+    meta["estimated_monthly_catalog_value_inr"] = mrr
+    meta["arr_equivalent_inr"] = None
+    meta["estimated_annual_catalog_value_inr"] = mrr * 12
 
     save_json(SUBSCRIPTIONS_PATH, data)
     return record
@@ -248,7 +256,7 @@ def write_payment_audit(
     tier: str,
     ref_id: str,
     payment_ref: str,
-    amount_inr: int,
+    amount_inr: int | None,
     country: str,
 ):
     append_jsonl(PAYMENT_AUDIT_PATH, {
@@ -259,7 +267,9 @@ def write_payment_audit(
         "tier":        tier.upper(),
         "ref_id":      ref_id,
         "payment_ref": payment_ref,
-        "amount_inr":  amount_inr,
+        "amount_inr":  None,
+        "amount_status": "not_verified",
+        "listed_plan_price_inr": amount_inr,
         "country":     normalize_country(country),
         "operator":    "customer_onboard.py v184.0",
     })
@@ -337,6 +347,27 @@ def generate_welcome_package(
     return pkg
 
 
+
+def save_welcome_package(customer_id: str, package: str) -> str:
+    """Create an operator-only credential artifact without email-derived paths."""
+    if not re.fullmatch(r"C-[0-9A-F]{8}", customer_id):
+        raise ValueError("invalid customer ID for welcome package")
+    os.makedirs(WELCOME_PKG_DIR, mode=0o700, exist_ok=True)
+    if os.path.islink(WELCOME_PKG_DIR):
+        raise ValueError("welcome package directory must not be a symbolic link")
+    os.chmod(WELCOME_PKG_DIR, 0o700)
+    path = os.path.join(WELCOME_PKG_DIR, f"{customer_id}.txt")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(package)
+    except BaseException:
+        os.unlink(path)
+        raise
+    return path
+
 # ─── MAIN PROVISION COMMAND ──────────────────────────────────────────────────
 def cmd_provision(args):
     tier     = args.tier.upper()
@@ -377,7 +408,7 @@ def cmd_provision(args):
             notes=f"Onboarded via customer_onboard.py | country={country}",
         )
         key_hash_prefix = key_record["key_hash"][:16]
-        print(f"         Key: {key_record['key'][:20]}...")
+        print("         Credential issued; secret omitted from terminal output.")
 
         # Steps 2-5 are the local commercial/audit commit. If any fail,
         # compensate by revoking the already-issued live credential.
@@ -409,15 +440,12 @@ def cmd_provision(args):
 
         print("  [5/5] Generating welcome package...")
         pkg = generate_welcome_package(key_record, customer_record, sub_record)
-        os.makedirs(WELCOME_PKG_DIR, exist_ok=True)
-        pkg_file = os.path.join(WELCOME_PKG_DIR, f"{customer_id}_{args.email.split('@')[0]}.txt")
-        with open(pkg_file, "w", encoding="utf-8") as handle:
-            handle.write(pkg)
+        pkg_file = save_welcome_package(customer_id, pkg)
 
         committed = True
         print(f"         Saved: {pkg_file}")
         print()
-        print(pkg)
+        print("  Credential package saved for secure operator handoff; contents omitted from logs.")
         print()
         print("  ✓ Onboarding complete.")
         print("  ✓ Live credential provisioned in production API authority.")
@@ -456,7 +484,7 @@ def cmd_list(args):
               f"{c['country']:<8} {c['tier']:<12} {c.get('status','?')}")
     meta = data.get("_meta", {})
     print(f"\n  Total: {meta.get('total_customers',0)} | Active: {meta.get('active_customers',0)} "
-          f"| MRR: ₹{meta.get('mrr_inr',0):,}/mo")
+          f"| Verified MRR: unavailable (payment ledger not consulted)")
 
 
 # ─── REVENUE COMMAND ─────────────────────────────────────────────────────────
@@ -468,8 +496,8 @@ def cmd_revenue(args):
     print(f"  ─────────────────────────────────────────")
     print(f"  Active API Keys : {summary['active_keys']}")
     print(f"  Active Subs     : {meta.get('active_count', '?')}")
-    print(f"  MRR (INR)       : ₹{summary['mrr_inr']:,}")
-    print(f"  ARR (INR)       : ₹{summary['arr_equivalent_inr']:,}")
+    print("  Verified MRR    : unavailable (payment ledger not consulted)")
+    print("  Verified ARR    : unavailable (payment ledger not consulted)")
     print(f"  Tier Breakdown:")
     for tier, count in summary["tier_breakdown"].items():
         print(f"    {tier:<14}: {count}")
@@ -494,7 +522,7 @@ def main():
     prov.add_argument("--days",        type=int, default=30, help="Subscription length in days (default: 30)")
     prov.add_argument("--ref",         default="", help="Reference ID (auto-generated if omitted)")
     prov.add_argument("--payment-ref", default="", dest="payment_ref",
-                      help="Verified payment reference. Required for paid tiers; never auto-generated.")
+                      help="Operator payment reference (not provider-verified by this tool). Required for paid tiers.")
 
     sub.add_parser("list",    help="List all registered customers")
     sub.add_parser("revenue", help="Revenue and subscription summary")
