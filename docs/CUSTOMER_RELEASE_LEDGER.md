@@ -374,8 +374,7 @@ the feed is over 6h, so freshness breaches also count against uptime credits.
 ### F8 — Legal entity naming (R27) — OWNER DECISION
 
 `README.md` and many footers say "CYBERDUDEBIVASH Pvt. Ltd."; the contract's
-`seller_legal` is an individual ("BIVASHA KUMAR NAYAK") trading as
-CYBERDUDEBIVASH(R). Invoices and terms must name the actual seller.
+`seller_legal` remains the statutory seller record in the commercial contract. Public customer-facing surfaces use `CYBERDUDEBIVASH ECOSYSTEM®`; statutory invoices must continue to use the legally required seller identity.
 
 ### F9 — Payment webhooks metered as anonymous FREE traffic (R05, R06) — MERGED, DEPLOYED; adversarial audit merged (#637); signed live delivery NOT TESTED
 
