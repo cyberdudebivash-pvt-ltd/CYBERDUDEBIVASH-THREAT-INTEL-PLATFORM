@@ -990,6 +990,7 @@ async function loadFeed() {
       throw new Error('No authoritative threat-intelligence feed is currently available');
     }
 
+    state.feedStatus = 'ready';
     state.items = normalizeItems(data);
     updateKPIs();
     renderFeed();
@@ -998,10 +999,17 @@ async function loadFeed() {
     document.getElementById('feed-badge').textContent = state.items.length;
   } catch (err) {
     console.warn('Authoritative feed load failed:', err);
+    state.feedStatus = 'unavailable';
+    state.selected = null;
     state.items = [];
     state.filtered = [];
     updateKPIs();
-    const grid = document.getElementById('intel-feed');
+    updateMitreHeatmap();
+    renderIOCExplorer({});
+    document.getElementById('detail-panel').textContent = 'Live advisory details are unavailable.';
+    document.getElementById('rules-badge').textContent = '—';
+    document.getElementById('rules-summary').textContent = 'Artifact availability is unverified.';
+    const grid = document.getElementById('threat-feed');
     if (grid) {
       grid.innerHTML = '<div class="empty-state">Live intelligence is temporarily unavailable. No synthetic data has been substituted.</div>';
     }
@@ -1019,12 +1027,12 @@ async function fetchWithFallback(...urls) {
     try {
       const headers = {};
       if (state.apiKey) headers['X-API-Key'] = state.apiKey;
-      const r = await fetch(url, { cache: 'no-store', headers });
+      const r = await fetch(url, { cache: 'no-store', headers, signal: AbortSignal.timeout(8000) });
       if (r.ok) {
         const raw = await r.json();
         // Handle API envelope {status, data:[...]} and plain arrays
         const items = raw.data || raw.advisories || raw.items || (Array.isArray(raw) ? raw : null);
-        if (items && items.length > 0) return items;
+        if (Array.isArray(items)) return items;
       }
     } catch (e) { /* try next url */ }
   }
@@ -1033,32 +1041,58 @@ async function fetchWithFallback(...urls) {
 
 function normalizeItems(raw) {
   if (!Array.isArray(raw)) {
-    raw = raw.advisories || raw.items || [];
+    raw = raw?.advisories || raw?.items || [];
+    if (!Array.isArray(raw)) raw = [];
   }
-  return raw.slice(0, CONFIG.maxItems).map((item, i) => ({
-    id:          item.id || item.intel_id || `ITEM-${i}`,
+  return raw.filter(item => item && typeof item === 'object' && !Array.isArray(item)).slice(0, CONFIG.maxItems).map((item, i) => ({
+    id:          String(item.id || item.intel_id || `ITEM-${i}`),
     title:       item.title || 'Unknown Threat',
-    severity:    item.severity || item.risk_severity || inferSeverity(item),
-    risk_score:  item.risk_score || item.score || 0,
-    cves:        item.cves || extractCVEs(item.title + ' ' + (item.description || '')),
-    actors:      item.actors || item.threat_actors || [],
-    malware:     item.malware_families || item.malware || [],
-    iocs:        item.iocs || {},
-    ttps:        item.ttps || item.mitre_ttps || [],
-    source:      item.source || item.source_url || '',
-    published:   item.published || item.date || item.timestamp || new Date().toISOString(),
+    severity:    ['CRITICAL','HIGH','MEDIUM','LOW','INFORMATIONAL'].includes(String(item.severity || item.risk_severity).toUpperCase()) ? String(item.severity || item.risk_severity).toUpperCase() : inferSeverity(item),
+    risk_score:  boundedMetric(item.risk_score ?? item.score, 100),
+    cves:        stringList(item.cves || extractCVEs(item.title + ' ' + (item.description || ''))),
+    actors:      stringList(item.actors || item.threat_actors || []),
+    malware:     stringList(item.malware_families || item.malware || []),
+    iocs:        normalizeIocs(item.iocs),
+    ttps:        stringList(item.ttps || item.mitre_ttps || []),
+    source:      safeSourceUrl(item.source_url || item.source),
+    published:   item.published || item.date || item.timestamp || null,
     description: item.description || item.content || item.summary || '',
     stix_bundle: item.stix_bundle || null,
-    kev_status:  item.kev_status || false,
-    epss_score:  item.epss_score || 0,
+    kev_status:  item.kev_status === true || item.kev_present === true,
+    epss_score:  boundedMetric(item.epss_score, 1),
+    cvss_score:  boundedMetric(item.cvss_score ?? item.cvss, 10),
     attack_chain:item.attack_chain || null,
-    recommendations: item.recommendations || [],
+    recommendations: Array.isArray(item.recommendations) ? item.recommendations.filter(r => r && (typeof r === 'string' || typeof r === 'object')) : [],
   }));
 }
 
+function stringList(value) {
+  return Array.isArray(value) ? value.filter(v => typeof v === 'string') : [];
+}
+
+function normalizeIocs(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([key]) => ['ipv4','ipv6','domain','sha256','md5','sha1','url','cve'].includes(key)).map(([key, values]) => [key, stringList(values)]));
+}
+
+function boundedMetric(value, maximum) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean' || (typeof value !== 'number' && typeof value !== 'string') || (typeof value === 'string' && !value.trim())) return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= maximum ? n : null;
+}
+
+function safeSourceUrl(value) {
+  if (typeof value !== 'string') return '';
+  try {
+    const url = new URL(value);
+    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : '';
+  } catch { return ''; }
+}
+
 function inferSeverity(item) {
-  const score = item.risk_score || item.score || 0;
-  if (score >= 85 || item.kev_status) return 'CRITICAL';
+  const score = boundedMetric(item.risk_score ?? item.score, 100);
+  if (score === null) return 'UNKNOWN';
+  if (score >= 85 || item.kev_status === true || item.kev_present === true) return 'CRITICAL';
   if (score >= 70) return 'HIGH';
   if (score >= 45) return 'MEDIUM';
   if (score >= 20) return 'LOW';
@@ -1069,90 +1103,24 @@ function extractCVEs(text) {
   return [...new Set((text.match(/CVE-\d{4}-\d{4,7}/gi) || []).map(c => c.toUpperCase()))].slice(0, 5);
 }
 
-// ── Demo Data ─────────────────────────────────────────────────────
-function generateDemoData() {
-  return [
-    {
-      id: 'APEX-2024-001', title: 'CRITICAL: LockBit 3.0 + Log4Shell CVE-2021-44228 Active Campaign',
-      severity: 'CRITICAL', risk_score: 97, cves: ['CVE-2021-44228'],
-      actors: ['LockBit', 'APT41'], malware: ['LockBit', 'Cobalt Strike'],
-      ttps: ['T1190', 'T1059.001', 'T1486', 'T1490', 'T1003.001'],
-      iocs: { ipv4: ['198.51.100.10', '203.0.113.50'], domain: ['lockbit-c2.example.com'], sha256: ['a3f1d2c4' + 'e5b67890'.repeat(7)] },
-      published: new Date(Date.now() - 2*3600000).toISOString(),
-      kev_status: true, epss_score: 0.97,
-      description: 'Active ransomware campaign exploiting Log4Shell. CISA KEV-listed. Immediate patching required.',
-    },
-    {
-      id: 'APEX-2024-002', title: 'HIGH: ProxyLogon Exploitation Chain — Exchange Server Compromise',
-      severity: 'HIGH', risk_score: 78, cves: ['CVE-2021-26855'],
-      actors: ['HAFNIUM', 'APT28'], malware: ['China Chopper', 'DLTMiner'],
-      ttps: ['T1190', 'T1059.003', 'T1078', 'T1071.001'],
-      iocs: { ipv4: ['192.0.2.100'], domain: ['hafnium-c2.example.com', 'exchange-webshell.net'] },
-      published: new Date(Date.now() - 6*3600000).toISOString(),
-      kev_status: true, epss_score: 0.75,
-      description: 'HAFNIUM exploiting Exchange ProxyLogon chain. Web shells deployed post-compromise.',
-    },
-    {
-      id: 'APEX-2024-003', title: 'MEDIUM: Cl0p Ransomware MOVEit Transfer Zero-Day Exploitation',
-      severity: 'MEDIUM', risk_score: 62, cves: ['CVE-2023-34362'],
-      actors: ['Cl0p'], malware: ['Cl0p'],
-      ttps: ['T1190', 'T1566', 'T1486'],
-      iocs: { domain: ['clop-ransom.example.com'], sha256: ['deadbeef'.repeat(8)] },
-      published: new Date(Date.now() - 24*3600000).toISOString(),
-      kev_status: false, epss_score: 0.42,
-      description: 'Cl0p ransomware actively exploiting MOVEit Transfer SQL injection vulnerability.',
-    },
-    {
-      id: 'APEX-2024-004', title: 'HIGH: BlackCat ALPHV Ransomware — Healthcare Sector Targeting',
-      severity: 'HIGH', risk_score: 81, cves: ['CVE-2024-1709'],
-      actors: ['BlackCat'], malware: ['BlackCat', 'Cobalt Strike'],
-      ttps: ['T1486', 'T1490', 'T1059', 'T1562', 'T1190'],
-      iocs: { ipv4: ['10.0.0.1', '172.16.0.1'], domain: ['blackcat-leak.example.com'] },
-      published: new Date(Date.now() - 12*3600000).toISOString(),
-      kev_status: true, epss_score: 0.88,
-      description: 'ALPHV/BlackCat targeting critical healthcare infrastructure. ConnectWise ScreenConnect exploit.',
-    },
-    {
-      id: 'APEX-2024-005', title: 'CRITICAL: APT29 Midnight Blizzard — Supply Chain Compromise',
-      severity: 'CRITICAL', risk_score: 92, cves: [],
-      actors: ['APT29', 'Midnight Blizzard'], malware: ['SUNBURST', 'TEARDROP'],
-      ttps: ['T1195', 'T1566', 'T1071', 'T1027', 'T1550'],
-      iocs: { domain: ['updates.example-sw.com', 'telemetry.avsvmcloud.com'] },
-      published: new Date(Date.now() - 1*3600000).toISOString(),
-      kev_status: false, epss_score: 0.0,
-      description: 'Russian SVR-attributed supply chain attack. Multiple government and technology sector victims.',
-    },
-    {
-      id: 'APEX-2024-006', title: 'LOW: Emotet Banking Trojan Resurgence — Phishing Campaign',
-      severity: 'LOW', risk_score: 35, cves: [],
-      actors: ['TA542'], malware: ['Emotet', 'TrickBot'],
-      ttps: ['T1566.001', 'T1059.003', 'T1027'],
-      iocs: { ipv4: ['198.51.100.20'], domain: ['emotet-dropper.example.net'] },
-      published: new Date(Date.now() - 48*3600000).toISOString(),
-      kev_status: false, epss_score: 0.05,
-      description: 'New Emotet spam campaign via malicious Office macros. Standard phishing prevention applies.',
-    },
-  ];
-}
-
 // ── KPI Update ────────────────────────────────────────────────────
 function updateKPIs() {
   const counts = { CRITICAL: 0, HIGH: 0 };
-  let totalIocs = 0, totalCves = new Set(), totalRules = 0;
+  let totalIocs = 0, totalCves = new Set();
 
   state.items.forEach(item => {
     if (counts[item.severity] !== undefined) counts[item.severity]++;
     Object.values(item.iocs).forEach(v => { if (Array.isArray(v)) totalIocs += v.length; });
     item.cves.forEach(c => totalCves.add(c));
-    totalRules += (item.ttps.length > 0 ? 2 : 0);
+    // Rule availability cannot be inferred from TTP counts.
   });
 
   document.getElementById('kpi-critical').textContent = counts.CRITICAL;
   document.getElementById('kpi-high').textContent     = counts.HIGH;
   document.getElementById('kpi-iocs').textContent     = totalIocs.toLocaleString();
   document.getElementById('kpi-cves').textContent     = totalCves.size;
-  document.getElementById('kpi-rules').textContent    = totalRules;
-  document.getElementById('kpi-pipeline').textContent = '✓ OK';
+  document.getElementById('kpi-rules').textContent    = '—';
+  document.getElementById('kpi-pipeline').textContent = state.feedStatus === 'ready' ? 'Feed loaded' : 'Unavailable';
   document.getElementById('kpi-pipeline-time').textContent = new Date().toUTCString().slice(17, 25) + ' UTC';
 }
 
@@ -1181,13 +1149,13 @@ function renderFeed() {
 
   container.innerHTML = state.filtered.map(item => `
     <div class="threat-item ${state.selected?.id === item.id ? 'selected' : ''}"
-         onclick="selectItem('${item.id}')">
+         onclick="selectItem(${escHtml(JSON.stringify(item.id))})">
       <div class="threat-item-header">
         <div class="threat-title">${escHtml(item.title)}</div>
         <span class="severity-badge sev-${item.severity}">${item.severity}</span>
       </div>
       <div class="threat-meta">
-        <span>⚡ ${item.risk_score}/100</span>
+        <span>⚡ ${item.risk_score === null ? 'Risk unavailable' : item.risk_score + '/100'}</span>
         ${item.kev_status ? '<span style="color:var(--accent-red);">🚨 KEV</span>' : ''}
         <span>${timeAgo(item.published)}</span>
       </div>
@@ -1216,16 +1184,13 @@ function selectItem(id) {
 function renderDetail(item) {
   const panel = document.getElementById('detail-panel');
   const iocs = item.iocs || {};
-  const scoreColor = item.risk_score >= 85 ? '#ff3366' : item.risk_score >= 70 ? '#ff8c00' : item.risk_score >= 45 ? '#ffd700' : '#00ff9d';
+  const scoreColor = item.risk_score === null ? '#94a3b8' : item.risk_score >= 85 ? '#ff3366' : item.risk_score >= 70 ? '#ff8c00' : item.risk_score >= 45 ? '#ffd700' : '#00ff9d';
   const circumference = 2 * Math.PI * 36;
-  const dashoffset = circumference * (1 - item.risk_score / 100);
+  const dashoffset = circumference * (1 - (item.risk_score ?? 0) / 100);
 
   const scoreComponents = [
-    { label: 'CVSS Base',  val: Math.min(30, (item.risk_score / 100) * 30), max: 30 },
-    { label: 'EPSS Score', val: (item.epss_score || 0) * 20, max: 20 },
-    { label: 'KEV Status', val: item.kev_status ? 25 : 0, max: 25 },
-    { label: 'Malware',    val: item.malware.length > 0 ? Math.min(15, item.malware.length * 5) : 0, max: 15 },
-    { label: 'IOC Density',val: Math.min(5, Object.values(iocs).flat().length * 0.2), max: 5 },
+    { label: 'Source CVSS (0–10)', val: item.cvss_score, max: 10 },
+    { label: 'Source EPSS (0–1)', val: item.epss_score, max: 1 },
   ];
 
   panel.innerHTML = `
@@ -1246,7 +1211,7 @@ function renderDetail(item) {
               stroke-linecap="round"/>
           </svg>
           <div class="score-ring-text">
-            <span class="score-number" style="color:${scoreColor}">${item.risk_score}</span>
+            <span class="score-number" style="color:${scoreColor}">${item.risk_score ?? '—'}</span>
             <span class="score-label">RISK</span>
           </div>
         </div>
@@ -1255,19 +1220,19 @@ function renderDetail(item) {
             <div class="score-component">
               <span class="score-comp-label">${c.label}</span>
               <div class="score-comp-bar">
-                <div class="score-comp-fill" style="width:${(c.val/c.max*100)}%;background:${c.val>20?'var(--accent-red)':c.val>10?'var(--accent-orange)':'var(--accent-cyan)'}"></div>
+                <div class="score-comp-fill" style="width:${c.val === null ? 0 : (c.val/c.max*100)}%;background:${c.val>20?'var(--accent-red)':c.val>10?'var(--accent-orange)':'var(--accent-cyan)'}"></div>
               </div>
-              <span class="score-comp-val" style="color:${c.val>20?'var(--accent-red)':'var(--text-secondary)'}">${c.val.toFixed(1)}</span>
+              <span class="score-comp-val" style="color:${c.val>20?'var(--accent-red)':'var(--text-secondary)'}">${c.val === null ? 'Unavailable' : c.val.toFixed(3)}</span>
             </div>
           `).join('')}
         </div>
       </div>
 
       <div class="detail-meta">
-        <div class="detail-meta-item">📅 Published: <span>${new Date(item.published).toUTCString().slice(0,25)}</span></div>
+        <div class="detail-meta-item">📅 Published: <span>${item.published && Number.isFinite(Date.parse(item.published)) ? new Date(item.published).toUTCString().slice(0,25) : 'Unavailable'}</span></div>
         ${item.kev_status ? '<div class="detail-meta-item" style="color:var(--accent-red);">🚨 <span>CISA KEV Confirmed</span></div>' : ''}
-        ${item.epss_score > 0 ? `<div class="detail-meta-item">🎯 EPSS: <span>${(item.epss_score*100).toFixed(0)}%</span></div>` : ''}
-        ${item.source ? `<div class="detail-meta-item">🔗 <a href="${item.source}" target="_blank" style="color:var(--accent-cyan);text-decoration:none;font-size:12px;">Source</a></div>` : ''}
+        ${item.epss_score !== null ? `<div class="detail-meta-item">🎯 EPSS: <span>${(item.epss_score*100).toFixed(0)}%</span></div>` : ''}
+        ${item.source ? `<div class="detail-meta-item">🔗 <a href="${escHtml(item.source)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-cyan);text-decoration:none;font-size:12px;">Source</a></div>` : ''}
       </div>
 
       <p style="font-size:12px;color:var(--text-secondary);margin-top:12px;line-height:1.6;">${escHtml(item.description)}</p>
@@ -1300,7 +1265,7 @@ function renderDetail(item) {
 
         <!-- Tab: STIX -->
         <div id="tab-stix" class="tab-content" style="display:none;">
-          <div class="stix-viewer">${escHtml(JSON.stringify(item.stix_bundle || buildDemoStix(item), null, 2))}</div>
+          <div class="stix-viewer">${escHtml(item.stix_bundle ? JSON.stringify(item.stix_bundle, null, 2) : 'No source STIX bundle is available for this advisory. Use the documented STIX export API for supported exports.')}</div>
         </div>
       </div>
     </div>
@@ -1325,7 +1290,7 @@ function renderAttackChain(item) {
     'Impact':            activeTtps.some(t => ['T1486','T1490','T1489'].includes(t)),
   };
 
-  const currentPhase = [...Object.entries(phaseActive)].reverse().find(([,v]) => v)?.[0] || null;
+  const currentPhase = phases.includes(item.attack_chain?.current_phase) ? item.attack_chain.current_phase : null;
 
   const icons = {
     'Initial Access': '🎣', 'Execution': '⚡', 'Persistence': '🔒',
@@ -1350,30 +1315,17 @@ function renderAttackChain(item) {
     </div>
     ${currentPhase ? `
       <div style="background:rgba(255,51,102,0.08);border:1px solid rgba(255,51,102,0.2);border-radius:6px;padding:12px;margin-bottom:12px;">
-        <div style="font-size:12px;color:var(--accent-red);font-weight:600;margin-bottom:4px;">⚠ CURRENT PHASE: ${currentPhase}</div>
-        <div style="font-size:11px;color:var(--text-secondary);">${getPhasePrediction(currentPhase, item.malware)}</div>
+        <div style="font-size:12px;color:var(--accent-red);font-weight:600;margin-bottom:4px;">SOURCE-REPORTED PHASE: ${currentPhase}</div>
+        <div style="font-size:11px;color:var(--text-secondary);">Advisory context only. This does not establish the current state of your environment.</div>
       </div>
     ` : ''}
     <div style="font-size:12px;color:var(--text-secondary);">
-      <strong style="color:var(--text-primary);">TTPs Observed:</strong>
+      <strong style="color:var(--text-primary);">Advisory TTPs (not customer incident observations):</strong>
       <div class="mitre-grid" style="margin-top:8px;">
         ${(item.ttps || []).map(t => `<span class="mitre-cell">${escHtml(t)}</span>`).join('') || '<span style="color:var(--text-dim);">No TTPs mapped</span>'}
       </div>
     </div>
   `;
-}
-
-function getPhasePrediction(phase, malware) {
-  const preds = {
-    'Initial Access':  'Adversary has gained entry. Expect rapid execution and persistence next.',
-    'Execution':       'Payload running. Credential dumping and lateral movement likely next.',
-    'Credential Access':'Credentials compromised. Lateral movement with stolen credentials imminent.',
-    'Lateral Movement':'Spreading across network. Data collection and exfiltration risk is HIGH.',
-    'C&C':            'C2 established. Adversary can issue commands and receive stolen data.',
-    'Exfiltration':   'Data being exfiltrated. Ransomware deployment may follow.',
-    'Impact':         'CRITICAL: Ransomware/destruction in progress. Immediate containment required.',
-  };
-  return preds[phase] || 'Attack chain in progress. Monitor for escalation.';
 }
 
 function renderIOCDetail(iocs) {
@@ -1396,7 +1348,7 @@ function renderIOCDetail(iocs) {
           ${(iocs[s.key] || []).slice(0, 10).map(v => `
             <div class="ioc-item">
               <span class="ioc-val" title="${escHtml(v)}">${escHtml(v)}</span>
-              <span class="copy-btn" onclick="copyToClip('${escHtml(v)}')">copy</span>
+              <span class="copy-btn" onclick="copyToClip(${escHtml(JSON.stringify(String(v)))})">copy</span>
             </div>
           `).join('')}
           ${(iocs[s.key]||[]).length > 10 ? `<div style="font-size:11px;color:var(--text-dim);padding:4px;">+${(iocs[s.key]||[]).length - 10} more</div>` : ''}
@@ -1407,63 +1359,24 @@ function renderIOCDetail(iocs) {
 }
 
 function renderRecommendations(item) {
-  const recs = item.recommendations.length > 0 ? item.recommendations : generateDemoRecs(item);
+  const recs = Array.isArray(item.recommendations) ? item.recommendations : [];
+  if (!recs.length) return '<p>No source recommendations are available. Review the advisory and your response policy before taking action.</p>';
   return `<div class="rec-list">
     ${recs.map((rec, i) => `
       <div class="rec-item">
         <div class="rec-header" onclick="toggleRec(${i})">
-          <span class="rec-priority ${(rec.priority||'P3').toLowerCase()}">${rec.priority || 'P3'}</span>
+          <span class="rec-priority ${['P1','P2','P3','P4'].includes(rec.priority) ? rec.priority.toLowerCase() : ''}">${escHtml(rec.priority || 'Unspecified')}</span>
           <span class="rec-action">${escHtml(rec.action || rec)}</span>
           <span class="rec-urgency">${escHtml(rec.urgency || '')}</span>
         </div>
         <div class="rec-body" id="rec-body-${i}">
           ${rec.rationale ? `<div class="rec-rationale">${escHtml(rec.rationale)}</div>` : ''}
-          ${rec.implementation ? `<div class="rec-steps">${rec.implementation.map(s => `<div class="rec-step">${escHtml(s)}</div>`).join('')}</div>` : ''}
+          ${Array.isArray(rec.implementation) ? `<div class="rec-steps">${rec.implementation.map(s => `<div class="rec-step">${escHtml(s)}</div>`).join('')}</div>` : ''}
           ${rec.control ? `<div style="margin-top:8px;font-size:11px;color:var(--accent-cyan);">📋 ${escHtml(rec.control)}</div>` : ''}
         </div>
       </div>
     `).join('')}
   </div>`;
-}
-
-function generateDemoRecs(item) {
-  const recs = [];
-  if ((item.iocs.ipv4 || []).length > 0) {
-    recs.push({ priority: 'P1', urgency: 'Immediate', action: `Block ${(item.iocs.ipv4||[]).length} malicious IPs at perimeter firewall`,
-      rationale: 'Active C2 infrastructure. Blocking prevents beacon check-ins.',
-      implementation: ['Add to firewall deny rule immediately', 'Apply to all ingress/egress points'],
-      control: 'CIS Control 12: Network Infrastructure Management' });
-  }
-  if (item.kev_status) {
-    recs.push({ priority: 'P1', urgency: '< 24h (CISA KEV)', action: `Emergency patch for KEV CVEs: ${item.cves.join(', ')}`,
-      rationale: 'CISA KEV = confirmed active exploitation. Federal mandate requires urgent patching.',
-      implementation: ['Identify all instances in asset inventory', 'Apply vendor patch immediately'],
-      control: 'CIS Control 7: Continuous Vulnerability Management' });
-  }
-  if (item.malware.some(m => ['LockBit','BlackCat','Conti','REvil'].includes(m))) {
-    recs.push({ priority: 'P1', urgency: 'Immediate', action: 'Activate ransomware response: verify backups + segment network',
-      rationale: 'Ransomware detected. Backup integrity critical — groups target backups first.',
-      implementation: ['Verify offline backup integrity NOW', 'Block SMB lateral movement', 'Enable canary file monitoring'],
-      control: 'CIS Control 11: Data Recovery' });
-  }
-  recs.push({ priority: 'P3', urgency: 'Within 8h', action: 'Deploy generated detection rules to SIEM',
-    rationale: 'Sigma/YARA rules from SENTINEL APEX provide immediate SIEM/EDR coverage.',
-    implementation: ['Convert Sigma rules via sigma-cli', 'Import to Splunk/Elastic/Sentinel'],
-    control: 'CIS Control 8: Audit Log Management' });
-  return recs;
-}
-
-function buildDemoStix(item) {
-  return {
-    type: 'bundle', spec_version: '2.1',
-    id: `bundle--${item.id.toLowerCase().replace(/[^a-z0-9]/g,'-')}`,
-    objects: [
-      { type: 'report', name: item.title, x_cdb_risk_score: item.risk_score },
-      ...(item.iocs.ipv4 || []).slice(0,3).map(ip => ({
-        type: 'indicator', pattern: `[ipv4-addr:value = '${ip}']`, pattern_type: 'stix',
-      })),
-    ],
-  };
 }
 
 // ── Tab Switching ─────────────────────────────────────────────────
@@ -1495,9 +1408,9 @@ function renderIOCExplorer(iocs) {
 
   container.innerHTML = allIocs.slice(0, 15).map(({ type, value }) => `
     <div class="ioc-item" style="margin-bottom:4px;">
-      <span style="font-size:9px;color:var(--text-dim);min-width:45px;">${type}</span>
+      <span style="font-size:9px;color:var(--text-dim);min-width:45px;">${escHtml(type)}</span>
       <span class="ioc-val" style="font-size:10px;">${escHtml(value)}</span>
-      <span class="copy-btn" onclick="copyToClip('${escHtml(value)}')">⌘</span>
+      <span class="copy-btn" onclick="copyToClip(${escHtml(JSON.stringify(String(value)))})">⌘</span>
     </div>
   `).join('');
 }
@@ -1521,38 +1434,14 @@ function updateMitreHeatmap() {
   container.innerHTML = sorted.map(([ttp, count]) => {
     const intensity = count / maxCount;
     const bg = `rgba(0,212,255,${0.05 + intensity * 0.35})`;
-    return `<span class="mitre-cell" style="background:${bg};" title="${ttp}: ${count} occurrences" onclick="filterByTtp('${ttp}')">${escHtml(ttp)} <sup>${count}</sup></span>`;
+    return `<span class="mitre-cell" style="background:${bg};" title="${escHtml(ttp)}: ${count} occurrences" onclick="filterByTtp(${escHtml(JSON.stringify(ttp))})">${escHtml(ttp)} <sup>${count}</sup></span>`;
   }).join('');
 }
 
 // ── Rules Summary ─────────────────────────────────────────────────
 function updateRulesSummary(item) {
-  const sigmaCount = item.ttps.length > 0 ? item.ttps.length + 1 : 0;
-  const yaraCount  = Object.keys(item.iocs).length > 0 ? 2 : 0;
-
-  document.getElementById('rules-badge').textContent = sigmaCount + yaraCount;
-  document.getElementById('rules-summary').innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:8px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;">
-        <span style="color:var(--text-secondary);">Sigma Rules</span>
-        <span style="color:var(--accent-cyan);font-family:var(--font-mono);font-weight:700;">${sigmaCount}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;">
-        <span style="color:var(--text-secondary);">YARA Rules</span>
-        <span style="color:var(--accent-cyan);font-family:var(--font-mono);font-weight:700;">${yaraCount}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;">
-        <span style="color:var(--text-secondary);">Playbooks</span>
-        <span style="color:var(--accent-green);font-family:var(--font-mono);font-weight:700;">1</span>
-      </div>
-      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
-        <div style="font-size:11px;color:var(--text-secondary);">MITRE Coverage:</div>
-        <div class="mitre-grid" style="margin-top:6px;">
-          ${(item.ttps || []).slice(0,8).map(t => `<span class="mitre-cell" style="font-size:9px;">${escHtml(t)}</span>`).join('')}
-        </div>
-      </div>
-    </div>
-  `;
+  document.getElementById('rules-badge').textContent = '—';
+  document.getElementById('rules-summary').innerHTML = '<p>Rule and playbook counts are not supplied by this feed. <a href="/api-docs.html">Review the detection export API</a> for available artifacts; validate them in your environment before deployment.</p>';
 }
 
 // ── Platform Stats ────────────────────────────────────────────────
@@ -1568,18 +1457,18 @@ async function loadPlatformStats() {
 
   const m = apiStats && apiStats.metrics ? apiStats.metrics : {};
   const stats = {
-    'Total Advisories': m.total_advisories || state.items.length || '—',
-    'Critical':         m.critical_count   || state.items.filter(i => i.severity === 'CRITICAL').length || '—',
-    'KEV Tagged':       m.kev_tagged       || state.items.filter(i => i.kev_status).length || '—',
-    'Avg Risk Score':   m.avg_risk_score   || (state.items.length ? (state.items.reduce((s,i) => s+i.risk_score, 0)/state.items.length).toFixed(1) : '—'),
-    'API Version':      (apiStats && apiStats.platform_version) || 'v134.0',
+    'Total Advisories': m.total_advisories ?? state.items.length,
+    'Critical':         m.critical_count ?? state.items.filter(i => i.severity === 'CRITICAL').length,
+    'KEV Tagged':       m.kev_tagged ?? state.items.filter(i => i.kev_status).length,
+    'Avg Risk Score':   boundedMetric(m.avg_risk_score, 100) ?? 'Unavailable',
+    'API Version':      (apiStats && apiStats.platform_version) || 'Unavailable',
     'STIX Version':     '2.1',
   };
 
   container.innerHTML = Object.entries(stats).map(([k, v]) => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px;">
       <span style="color:var(--text-secondary);">${k}</span>
-      <span style="color:var(--text-primary);font-family:var(--font-mono);font-weight:600;">${v}</span>
+      <span style="color:var(--text-primary);font-family:var(--font-mono);font-weight:600;">${escHtml(v)}</span>
     </div>
   `).join('');
 }
@@ -1606,9 +1495,9 @@ function setupSearch() {
     } else {
       container.innerHTML = allIocs.slice(0, 15).map(({ type, value }) => `
         <div class="ioc-item" style="margin-bottom:4px;">
-          <span style="font-size:9px;color:var(--text-dim);min-width:45px;">${type}</span>
+          <span style="font-size:9px;color:var(--text-dim);min-width:45px;">${escHtml(type)}</span>
           <span class="ioc-val" style="font-size:10px;">${escHtml(value)}</span>
-          <span class="copy-btn" onclick="copyToClip('${escHtml(value)}')">⌘</span>
+          <span class="copy-btn" onclick="copyToClip(${escHtml(JSON.stringify(String(value)))})">⌘</span>
         </div>
       `).join('');
     }
@@ -1649,7 +1538,8 @@ function escHtml(str) {
 }
 
 function timeAgo(iso) {
-  const d = Date.now() - new Date(iso).getTime();
+  if (!iso || !Number.isFinite(Date.parse(iso))) return 'Date unavailable';
+  const d = Math.max(0, Date.now() - new Date(iso).getTime());
   if (d < 3600000) return `${Math.floor(d/60000)}m ago`;
   if (d < 86400000) return `${Math.floor(d/3600000)}h ago`;
   return `${Math.floor(d/86400000)}d ago`;

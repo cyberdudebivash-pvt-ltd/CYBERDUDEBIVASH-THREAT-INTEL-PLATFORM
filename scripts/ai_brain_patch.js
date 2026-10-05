@@ -82,7 +82,7 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
-     PHASE 1 — CAMPAIGN CLUSTERING ENGINE
+     CAMPAIGN CLUSTERING ENGINE
      Groups threats by actor/family with confidence scoring, campaign evolution,
      behavioral fingerprint, and risk trajectory sparklines.
      ══════════════════════════════════════════════════════════════════════════ */
@@ -150,7 +150,7 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
-     PHASE 2 — ANOMALY INTELLIGENCE ENGINE
+     ANOMALY INTELLIGENCE ENGINE
      Isolation-Forest-style scoring: flags statistical outliers across
      CVSS×KEV×exploit-velocity space. Outputs zero-day candidates, APT signals,
      supply-chain anomalies with confidence percentiles.
@@ -190,7 +190,7 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
-     PHASE 3 — PREDICTIVE ATTACK-CHAIN MODELING
+     PREDICTIVE ATTACK-CHAIN MODELING
      Generates 30-day sector risk forecasts with exploit velocity modeling,
      attack wave prediction, IOC correlation intelligence, and confidence
      interval bands.
@@ -249,7 +249,7 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
-     PHASE 4 — THREAT ACTOR ATTRIBUTION ENGINE
+     THREAT ACTOR ATTRIBUTION ENGINE
      AI-powered actor profiling with behavioral fingerprinting,
      TTP clustering, attribution confidence, and nation-state likelihood.
      ══════════════════════════════════════════════════════════════════════════ */
@@ -290,7 +290,7 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
-     PHASE 5 — AI SOC PRIORITIZATION ENGINE
+     AI SOC PRIORITIZATION ENGINE
      Generates ranked SOC action queue with urgency classification,
      remediation SLA, CVSS×KEV×velocity composite scoring.
      ══════════════════════════════════════════════════════════════════════════ */

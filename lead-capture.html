@@ -71,20 +71,21 @@ select option{background:var(--bg2);}
       <div style="margin-bottom:6px;">✓ <strong style="color:var(--text)">CISA KEV verified</strong> intelligence</div>
       <div style="margin-bottom:6px;">✓ <strong style="color:var(--text)">MITRE ATT&amp;CK v15</strong> mapped</div>
       <div style="margin-bottom:6px;">✓ <strong style="color:var(--text)">STIX 2.1 compliant</strong> — Splunk/Sentinel/QRadar ready</div>
-      <div>✓ <strong style="color:var(--text)">73 live advisories</strong> updated every 6 hours</div>
+      <div>✓ <strong style="color:var(--text)">Current advisories</strong> available in the <a href="/threats.html">live threat feed</a></div>
     </div>
   </div>
 
   <div>
     <div class="form-card">
       <h2>Request PRO Access</h2>
-      <div class="form-sub">Takes 30 seconds. Our team will follow up within 2 hours.</div>
+      <div class="form-sub">Request checkout assistance. For direct subscription access, <a href="/upgrade.html">use the secure checkout</a>.</div>
 
       <div id="success-box" class="success-box">
         <h3>✓ Request received</h3>
-        <p>Your request has been submitted. Our team will follow up with checkout details within 2 hours at the email you provided.<br><br>Reference ID: <strong id="confirm-ref" style="color:var(--accent);font-family:var(--mono);"></strong></p>
+        <p>Your request has been submitted. The request service accepted your submission. This does not confirm payment or activate PRO access.<br><br>Reference ID: <strong id="confirm-ref" style="color:var(--accent);font-family:var(--mono);"></strong></p>
       </div>
 
+      <p id="lead-status" role="status" aria-live="polite"></p>
       <form id="lead-form" action="https://formspree.io/f/xaqznnoe" method="POST">
         <input type="hidden" name="_subject" value="SENTINEL APEX PRO Access Request">
         <input type="hidden" name="source" value="lead-capture">
@@ -138,7 +139,7 @@ select option{background:var(--bg2);}
             <option value="1-10">1–10 employees</option>
             <option value="11-50">11–50 employees</option>
             <option value="51-250">51–250 employees</option>
-            <option value="251-1000">251–</option>
+            <option value="251-1000">251–1,000 employees</option>
             <option value="1000+">1,000+ employees</option>
           </select>
         </div>
@@ -148,7 +149,7 @@ select option{background:var(--bg2);}
         </div>
 
         <button type="submit" class="btn-submit">REQUEST PRO ACCESS →</button>
-        <div class="privacy">No spam. Our team will follow up within 2 hours.</div>
+        <div class="privacy">Your request does not charge you or activate a subscription.</div>
       </form>
     </div>
   </div>
@@ -165,24 +166,35 @@ const ref=genRef();
 document.getElementById('ref-display').value=ref;
 document.getElementById('ref-id-field').value=ref;
 
-document.getElementById('lead-form').addEventListener('submit',function(e){
+let leadPending = false;
+document.getElementById('lead-form').addEventListener('submit', async function(e){
   e.preventDefault();
-  const fd=new FormData(this);
-  fetch(this.action,{method:'POST',body:fd,headers:{'Accept':'application/json'}})
-    .then(r=>{
-      if(r.ok){
-        this.style.display='none';
-        const sb=document.getElementById('success-box');
-        sb.style.display='block';
-        document.getElementById('confirm-ref').textContent=ref;
-      }
-    })
-    .catch(()=>{
-      this.style.display='none';
-      const sb=document.getElementById('success-box');
-      sb.style.display='block';
-      document.getElementById('confirm-ref').textContent=ref;
+  if (leadPending) return;
+  if (!this.reportValidity()) return;
+  leadPending = true;
+  const button = this.querySelector('button[type="submit"]');
+  const status = document.getElementById('lead-status');
+  button.disabled = true;
+  this.setAttribute('aria-busy', 'true');
+  status.textContent = 'Submitting your request…';
+  try {
+    const response = await fetch(this.action, {
+      method:'POST', body:new FormData(this), headers:{'Accept':'application/json'},
+      signal:AbortSignal.timeout(10000)
     });
+    if (!response.ok) throw new Error('Request rejected');
+    this.style.display = 'none';
+    document.getElementById('success-box').style.display = 'block';
+    document.getElementById('confirm-ref').textContent = ref;
+    status.textContent = 'Request accepted by the submission service.';
+  } catch (_) {
+    document.getElementById('success-box').style.display = 'none';
+    status.textContent = 'Submission could not be confirmed. Your details remain in the form. Retry when connected, or contact bivash@cyberdudebivash.com with your reference ID. A timeout may occur after the service accepts a request; avoid repeated submissions.';
+  } finally {
+    leadPending = false;
+    button.disabled = false;
+    this.removeAttribute('aria-busy');
+  }
 });
 </script>
 </body>

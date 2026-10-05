@@ -224,3 +224,162 @@ def test_api_reference_card_claims_are_live_or_removed():
     assert "fetch('/api/watchdog/health'" in html
     assert 'id="arc-count"' in html and 'id="arc-version"' in html
     assert "Uptime commitment (Enterprise / MSSP; Pro 99.5%)" in html
+
+
+def test_legacy_threat_graph_has_no_synthetic_fallback_or_random_attribution():
+    html = _text("dashboard/threat_graph_dashboard.html")
+    for banned in ("generateDemoData", "seededRisk", "Math.random", "185.220.101.45", "S001"):
+        assert banned not in html
+    target = "/enterprise-knowledge-graph.html"
+    assert f'content="0; url={target}"' in html
+    assert f'href="{target}"' in html
+    assert 'name="robots" content="noindex, follow"' in html
+    assert "window.location.search + window.location.hash" in html
+    assert "fetch(`${API}/api/v1/p31/graph`" in _text(target.lstrip('/'))
+
+
+def test_legacy_graph_redirect_preserves_query_and_fragment():
+    import subprocess
+    import shutil
+    node = shutil.which("node")
+    assert node, "Node is required to verify executable redirect behavior"
+    html = _text("dashboard/threat_graph_dashboard.html")
+    script = re.search(r"<script>(.*?)</script>", html, re.S).group(1)
+    harness = """
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const script = JSON.parse(process.argv[1]);
+for (const [search, hash] of [['', ''], ['?view=campaign&limit=10', '#graph'], ['?next=https%3A%2F%2Fexample.com', '#ioc']]) {
+  let result;
+  vm.runInNewContext(script, {window: {location: {search, hash, replace: url => {result = url;}}}});
+  assert.equal(result, '/enterprise-knowledge-graph.html' + search + hash);
+}
+"""
+    subprocess.run([node, '-e', harness, json.dumps(script)], check=True, capture_output=True, text=True)
+
+
+def test_global_deployment_distinguishes_contract_from_observed_availability():
+    html = _visible("global-deployment.html")
+    for banned in ("99.99%", "Live in 30 seconds", "No firewall changes required", "● LIVE"):
+        assert banned not in html
+    assert "Uptime commitments, not measured uptime" in html
+    assert "not regional health measurements or compliance attestations" in html
+    assert "Outbound HTTPS access required" in html
+
+
+def test_analyst_dashboard_source_and_unavailable_states():
+    import subprocess
+    import shutil
+    html = _text('dashboard/analyst_dashboard.html')
+    for banned in ('generateDemoData', 'generateDemoRecs', 'buildDemoStix', 'getPhasePrediction', "label: 'CVSS Base'", 'totalRules +=', 'item.ttps.length + 1'):
+        assert banned not in html, banned
+    scripts = re.findall(r'<script\b[^>]*>(.*?)</script\s*>', html, re.S | re.I)
+    script = max(scripts, key=len)
+    node = shutil.which('node')
+    assert node, 'Node is required for dashboard executable verification'
+    harness = r"""
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const nodes = new Map();
+const element = id => { if (!nodes.has(id)) nodes.set(id, {innerHTML:'stale',textContent:'stale',style:{},value:''}); return nodes.get(id); };
+const context = vm.createContext({window:{location:{origin:'https://intel.cyberdudebivash.com'}}, URL, AbortSignal, console:{warn(){}}, document:{addEventListener(){},getElementById:element}, fetch:async()=>{throw new Error('offline');}});
+vm.runInContext(JSON.parse(process.argv[1]), context);
+const run = code => vm.runInContext(code, context);
+(async () => {
+  for (const v of [null,undefined,'',false,true,' ',{},[],NaN,Infinity,-1,101]) assert.equal(run(`boundedMetric(${typeof v === 'number' && !Number.isFinite(v) ? String(v) : JSON.stringify(v)}, 100)`),null);
+  assert.equal(run('boundedMetric(0, 10)'),0);
+  assert.equal(run("boundedMetric('0', 1)"),0);
+  assert.equal(run('boundedMetric(1.01, 1)'),null);
+  assert.equal(run("safeSourceUrl('javascript:alert(1)')"),'');
+  assert.equal(run("safeSourceUrl('https://user:pass@example.com/')"),'');
+  assert.equal(run("safeSourceUrl('https://example.com/report')"),'https://example.com/report');
+  assert.equal(run('normalizeItems(null).length'),0);
+  assert.equal(run("normalizeItems({items:'bad'}).length"),0);
+  context.fixture = {id: `x');globalThis.injected=true;//`, risk_score:0, cvss_score:0, epss_score:0, severity:'<img>', cves:'bad', actors:{}, iocs:{ipv4:['1.2.3.4',null]}, ttps:['T1486']};
+  run("state.items = normalizeItems([null,fixture]); state.feedStatus='ready';");
+  assert.equal(run('state.items[0].risk_score'),0);
+  assert.equal(run('state.items[0].cvss_score'),0);
+  assert.equal(run('state.items[0].epss_score'),0);
+  assert.equal(run('state.items[0].cves.length'),0);
+  run('renderDetail(state.items[0]); renderFeed(); updateKPIs(); updateRulesSummary(state.items[0]);');
+  assert.ok(element('detail-panel').innerHTML.includes('No source STIX bundle'));
+  assert.ok(element('detail-panel').innerHTML.includes('No source recommendations'));
+  assert.ok(!element('detail-panel').innerHTML.includes('SOURCE-REPORTED PHASE:'));
+  assert.ok(!element('detail-panel').innerHTML.includes('CVSS Base'));
+  assert.equal(element('kpi-rules').textContent,'—');
+  // Execute the browser-decoded click attribute: hostile IDs remain data.
+  const attr = element('threat-feed').innerHTML.match(/onclick="([^"]+)"/)[1];
+  const decoded = attr.replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+  let selected;
+  context.selectItem = id => { selected = id; };
+  vm.runInContext(decoded, context);
+  assert.equal(selected,run('state.items[0].id'));
+  assert.equal(context.injected,undefined);
+  await run('loadFeed()');
+  assert.equal(run('state.items.length'),0);
+  assert.equal(run('state.selected'),null);
+  assert.equal(element('kpi-pipeline').textContent,'Unavailable');
+  assert.ok(element('threat-feed').innerHTML.includes('temporarily unavailable'));
+  assert.equal(element('detail-panel').textContent,'Live advisory details are unavailable.');
+  // A valid empty response is authoritative; do not resurrect another feed.
+  let calls=0;
+  context.fetch=async()=>{calls++;return {ok:true,json:async()=>[]};};
+  const empty=await run("fetchWithFallback('/a','/b')");
+  assert.equal(empty.length,0); assert.equal(calls,1);
+})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+    result = subprocess.run([node, '-e', harness, json.dumps(script)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_lead_submission_never_confirms_failed_delivery():
+    import shutil
+    import subprocess
+    html = _text('lead-capture.html')
+    assert '73 live advisories' not in html
+    assert 'within 2 hours' not in html
+    assert '251–1,000 employees' in html
+    assert 'id="lead-status" role="status" aria-live="polite"' in html
+    script = re.search(r'<script>(.*?)</script>', html, re.S).group(1)
+    node = shutil.which('node')
+    assert node, 'Node required for form behavior verification'
+    harness = r"""
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+async function scenario(mode) {
+  let submit, requests=0, resolve;
+  const button={disabled:false};
+  const form={action:'https://formspree.io/f/xaqznnoe',style:{},reportValidity:()=>mode!=='invalid',querySelector:()=>button,setAttribute(){},removeAttribute(){},addEventListener:(_,fn)=>{submit=fn;}};
+  const nodes={'lead-form':form,'lead-status':{textContent:''},'success-box':{style:{display:'none'}},'confirm-ref':{},'ref-display':{},'ref-id-field':{}};
+  const context={document:{getElementById:id=>nodes[id]},FormData:class{},AbortSignal,console,fetch:async()=>{
+    requests++;
+    if(mode==='offline')throw new Error('offline');
+    if(mode==='timeout')throw new Error('TimeoutError');
+    if(mode==='pending')return new Promise(r=>{resolve=r;});
+    return {ok:mode==='success'};
+  }};
+  vm.runInNewContext(JSON.parse(process.argv[1]),context);
+  const first=submit.call(form,{preventDefault(){}});
+  if(mode==='pending') {
+    assert.equal(button.disabled,true);
+    await submit.call(form,{preventDefault(){}});
+    assert.equal(requests,1);
+    resolve({ok:true});
+  }
+  await first;
+  assert.equal(button.disabled,false);
+  if(mode==='success'||mode==='pending') {
+    assert.equal(form.style.display,'none');
+    assert.equal(nodes['success-box'].style.display,'block');
+    assert.ok(nodes['confirm-ref'].textContent.startsWith('LC-'));
+  } else {
+    assert.notEqual(form.style.display,'none');
+    assert.equal(nodes['success-box'].style.display,'none');
+    if(mode==='invalid')assert.equal(requests,0);
+    else assert.ok(nodes['lead-status'].textContent.includes('could not be confirmed'));
+  }
+}
+(async()=>{for(const mode of ['success','rejected','offline','timeout','pending','invalid'])await scenario(mode);})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+    result = subprocess.run([node,'-e',harness,json.dumps(script)], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
