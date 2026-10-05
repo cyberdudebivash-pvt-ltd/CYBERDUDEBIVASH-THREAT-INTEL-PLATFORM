@@ -57,7 +57,7 @@ export const MAX_WEBHOOK_TIMEOUT_MS = DELIVERY_POLICY.timeout_ms;
 // Seller identity (not a price). The unit test pins it to the contract.
 export const SELLER = Object.freeze({
   gstin: "21ARKPN8270G1ZP",
-  seller_legal: "BIVASHA KUMAR NAYAK",
+  seller_legal: "CYBERDUDEBIVASH ECOSYSTEM®",
   seller_trade_name: "CYBERDUDEBIVASH(R)",
 });
 
