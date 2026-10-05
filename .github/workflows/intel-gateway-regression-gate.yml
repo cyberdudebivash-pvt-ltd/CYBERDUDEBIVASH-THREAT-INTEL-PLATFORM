@@ -242,6 +242,11 @@ jobs:
       # against: pytest was never installed and `| tail -15` swallowed the
       # "No module named pytest" failure, so the step "passed" having run
       # nothing. Nothing here is piped, and `set -o pipefail` is set regardless.
+      - name: "Operator onboarding credential and payment truth"
+        run: |
+          python3 -m unittest discover -s tests -p test_customer_onboard_handoff.py -v
+          python3 -m unittest discover -s tests -p test_customer_onboard_billing_truth.py -v
+
       - name: "Python unit tests (self-contained suites)"
         shell: bash
         run: |
@@ -446,6 +451,9 @@ jobs:
                     "refusing to pass vacuously")
               sys.exit(1)
           PY
+
+      - name: "Operator key issuance compensation"
+        run: python3 -m unittest discover -s tests -p test_generate_key_compensation.py -v
 
       - name: "Regression suite (regression_tests.py)"
         run: python3 scripts/regression_tests.py

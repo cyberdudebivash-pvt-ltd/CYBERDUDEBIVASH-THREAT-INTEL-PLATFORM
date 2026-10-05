@@ -175,8 +175,12 @@ h1{font-size:30px;font-weight:700;margin-bottom:10px}
     runLookup(v);
   });
 
-  function apiKey() {
-    try { return localStorage.getItem("cdb_api_key"); } catch (_) { return null; }
+  function sessionAuthHeaders() {
+    var headers = {};
+    var token = null;
+    try { token = sessionStorage.getItem("apex_jwt"); } catch (_) {}
+    if (token) headers["Authorization"] = "Bearer " + token;
+    return headers;
   }
 
   function runLookup(value) {
@@ -185,11 +189,11 @@ h1{font-size:30px;font-weight:700;margin-bottom:10px}
     resultEl.style.display = "none";
     btn.disabled = true;
 
-    var headers = {};
-    var key = apiKey();
-    if (key) headers["X-API-Key"] = key;
-
-    fetch(API_BASE + "/api/ioc/lookup?value=" + encodeURIComponent(value), { headers: headers })
+    fetch(API_BASE + "/api/ioc/lookup?value=" + encodeURIComponent(value), {
+      cache: "no-store",
+      credentials: "omit",
+      headers: sessionAuthHeaders()
+    })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); })
       .then(function (res) {
         loading.style.display = "none";
