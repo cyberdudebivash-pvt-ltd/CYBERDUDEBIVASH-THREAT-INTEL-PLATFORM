@@ -135,11 +135,14 @@ on:
       # Pages artifact too. PRs #668/#669 changed manifest.json + llms*.txt but did
       # not match this workflow's previous path filters, leaving production stale
       # even though main was correct. Keep these explicit paths aligned with
-      # build_dist_artifact.py's public root-file inclusion contract.
+      # build_dist_artifact.py's public root-file inclusion contract. The workflow
+      # file itself is also included so a release-control fix can republish current main
+      # immediately instead of requiring an unrelated frontend/content commit.
       - '*.html'
       - 'manifest.json'
       - 'llms.txt'
       - 'llms-full.txt'
+      - '.github/workflows/pages-fast-publish.yml'
   # ADDITIVE FIX (issue #320, see header comment above): identical paths
   # list to the push trigger above -- only fires when a merged PR actually
   # touched one of these files, matching that trigger's own scoping intent
@@ -158,6 +161,7 @@ on:
       - 'manifest.json'
       - 'llms.txt'
       - 'llms-full.txt'
+      - '.github/workflows/pages-fast-publish.yml'
   workflow_dispatch: {}
 
 permissions:
