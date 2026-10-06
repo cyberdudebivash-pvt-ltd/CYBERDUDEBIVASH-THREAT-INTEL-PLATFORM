@@ -989,8 +989,8 @@ def main():
 
     items = _load_feed()
     if not items:
-        log.error("No feed items — skipped to prevent data loss.")
-        sys.exit(0)
+        log.error("No feed items — regeneration blocked to preserve existing data.")
+        sys.exit(1)
 
     log.info(f"Processing {len(items)} items | KEV={sum(1 for i in items if i.get('kev') is True)} | "
              f"Critical={sum(1 for i in items if _safe_float(i.get('risk_score')) >= 9.0)} | "
@@ -1074,7 +1074,8 @@ def main():
     bh_path = os.path.join(ROOT, "data", "bughunter", "bughunter_output.json")
     bughunter = generate_bughunter(items, bh_path)
     results.append(_safe_write(bh_path, bughunter))
-    log.info(f"BUGHUNTER: findings={bughunter['metrics']['total_findings']} critical={bughunter['metrics']['critical_findings']}")
+    scan_metrics = bughunter.get("metrics", {})
+    log.info(f"BUGHUNTER: status={bughunter.get('status', 'SAVED_SCAN')} findings={scan_metrics.get('total_findings', 'unmeasured')} critical={scan_metrics.get('critical_findings', 'unmeasured')}")
 
     # 8. INCIDENTS
     incidents = generate_incidents(items)
