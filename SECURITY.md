@@ -2,7 +2,7 @@
 
 **Platform Version:** v184.0 (GOD-MODE-GLOBAL-RELEASE)
 **Last Updated:** 2026-06-20
-**Contact:** security@cyberdudebivash.com
+**Contact:** bivash@cyberdudebivash.com
 
 ---
 
@@ -21,7 +21,7 @@
 **DO NOT** report security vulnerabilities through public GitHub issues, PR comments, or public forums.
 
 **Preferred channel:**
-- Email: security@cyberdudebivash.com
+- Email: bivash@cyberdudebivash.com
 - Subject line: `[SECURITY] <brief-description>`
 - PGP: Available on request via the email above
 
