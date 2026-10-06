@@ -23,14 +23,14 @@ def test_ci_metadata_is_persisted_via_review_pr_not_direct_main(tmp_path, monkey
     monkeypatch.setenv('GITHUB_RUN_ID', '37490666334')
     monkeypatch.setenv('GITHUB_RUN_ATTEMPT', '1')
     calls = []
-    monkeypatch.setattr(git_sync, 'run_git', lambda *args: calls.append(args) or subprocess.CompletedProcess(args, 0))
+    monkeypatch.setattr(git_sync, 'run_git', lambda *args: calls.append(args) or subprocess.CompletedProcess(args, 0, 'a'*40))
     http = []
     def urlopen(req, **kwargs):
         http.append(req)
         return Response([{'number': 701}] if existing else []) if req.method == 'GET' else Response({'number': 701})
     monkeypatch.setattr(urllib.request, 'urlopen', urlopen)
     result = git_sync.publish_metadata_pr('offline-token', 'owner/repo')
-    assert calls == [('push', 'origin', 'HEAD:refs/heads/sentinel-generated/run-37490666334-1')]
+    assert calls == [('rev-parse', 'HEAD'), ('push', 'origin', 'HEAD:refs/heads/sentinel-generated/run-37490666334-1')]
     assert result['state'] == 'PERSISTED_REVIEW_PENDING' and result['main_updated'] is False
     assert len(http) == (1 if existing else 2)
     if not existing:
@@ -41,10 +41,74 @@ def test_rejected_metadata_branch_fails_without_api_or_false_success(tmp_path, m
     monkeypatch.setattr(git_sync, 'REPO_ROOT', tmp_path)
     monkeypatch.setenv('GITHUB_RUN_ID', '123')
     monkeypatch.setenv('GITHUB_RUN_ATTEMPT', '1')
-    monkeypatch.setattr(git_sync, 'run_git', lambda *args: subprocess.CompletedProcess(args, 1))
+    monkeypatch.setattr(git_sync, 'run_git', lambda *args: subprocess.CompletedProcess(args, 0, 'a'*40) if args[0] == 'rev-parse' else subprocess.CompletedProcess(args, 1))
     with pytest.raises(RuntimeError, match='branch push rejected'):
         git_sync.publish_metadata_pr('offline-token', 'owner/repo')
     assert not (tmp_path/'data/health/git_sync_state.json').exists()
+
+
+@pytest.mark.parametrize('method,status,message,reason', [
+    ('POST', 403, 'GitHub Actions is not permitted to create or approve pull requests.', 'ACTIONS_PR_CREATION_DISABLED'),
+    ('POST', 403, 'Resource not accessible by integration', 'TOKEN_OR_POLICY_FORBIDDEN'),
+    ('GET', 403, 'Forbidden', 'TOKEN_OR_POLICY_FORBIDDEN'),
+    ('POST', 401, 'Bad credentials', 'TOKEN_AUTHENTICATION_REJECTED'),
+    ('POST', 422, 'Validation failed', 'GITHUB_API_REJECTED'),
+])
+def test_pr_rejection_preserves_commit_evidence_and_remains_blocking(tmp_path, monkeypatch, method, status, message, reason):
+    monkeypatch.setattr(git_sync, 'REPO_ROOT', tmp_path)
+    monkeypatch.setenv('GITHUB_RUN_ID', '123')
+    monkeypatch.setenv('GITHUB_RUN_ATTEMPT', '2')
+    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(tmp_path/'summary.md'))
+    calls = []
+    commit_sha = 'b'*40
+    monkeypatch.setattr(git_sync, 'run_git', lambda *args: calls.append(args) or subprocess.CompletedProcess(args, 0, commit_sha))
+    def urlopen(req, **kwargs):
+        if req.method == method:
+            body = json.dumps({'message': message, 'private_debug': 'offline-secret-token'}).encode()
+            raise urllib.error.HTTPError(req.full_url, status, 'forbidden', {}, io.BytesIO(body))
+        return Response([])
+    monkeypatch.setattr(urllib.request, 'urlopen', urlopen)
+    with pytest.raises(RuntimeError, match=reason) as error:
+        git_sync.publish_metadata_pr('offline-secret-token', 'owner/repo')
+    state = json.loads((tmp_path/'data/health/git_sync_state.json').read_text())
+    assert state['state'] == 'PERSISTED_PR_BLOCKED'
+    assert state['commit_sha'] == commit_sha and state['http_status'] == status
+    assert state['main_updated'] is False and 'pr_number' not in state
+    assert state['branch'] == 'sentinel-generated/run-123-2'
+    assert state['compare_url'] == f'https://github.com/owner/repo/compare/main...{commit_sha}'
+    assert calls == [('rev-parse', 'HEAD'), ('push', 'origin', 'HEAD:refs/heads/sentinel-generated/run-123-2')]
+    evidence = (tmp_path/'summary.md').read_text() + json.dumps(state) + str(error.value)
+    assert 'offline-secret-token' not in evidence and 'private_debug' not in evidence
+    assert 'main not updated' in evidence and 'do not bypass main protection' in evidence
+
+
+@pytest.mark.parametrize('failure,reason', [
+    ('transport', 'GITHUB_TRANSPORT_UNAVAILABLE'),
+    ('json', 'INVALID_GITHUB_RESPONSE'),
+    ('lookup', 'INVALID_PR_LOOKUP_RESPONSE'),
+    ('identity', 'MISSING_PR_IDENTITY'),
+])
+def test_github_response_failure_never_claims_a_pr_exists(tmp_path, monkeypatch, failure, reason):
+    monkeypatch.setattr(git_sync, 'REPO_ROOT', tmp_path)
+    monkeypatch.setenv('GITHUB_RUN_ID', '123')
+    monkeypatch.setenv('GITHUB_RUN_ATTEMPT', '1')
+    monkeypatch.setattr(git_sync, 'run_git', lambda *args: subprocess.CompletedProcess(args, 0, 'c'*40))
+    def urlopen(req, **kwargs):
+        if failure == 'transport':
+            raise urllib.error.URLError('offline-secret-token')
+        if failure == 'json':
+            class InvalidResponse(Response):
+                def read(self, size): return b'not-json offline-secret-token'
+            return InvalidResponse(None)
+        if failure == 'lookup': return Response({'number': 701})
+        return Response([] if req.method == 'GET' else {})
+    monkeypatch.setattr(urllib.request, 'urlopen', urlopen)
+    with pytest.raises(RuntimeError, match=reason) as error:
+        git_sync.publish_metadata_pr('offline-secret-token', 'owner/repo')
+    state = json.loads((tmp_path/'data/health/git_sync_state.json').read_text())
+    assert state['state'] == 'PERSISTED_PR_BLOCKED' and state['reason'] == reason
+    assert state['main_updated'] is False and 'pr_number' not in state
+    assert 'offline-secret-token' not in str(error.value)
 
 @pytest.fixture
 def budget(monkeypatch):
