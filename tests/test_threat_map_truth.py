@@ -80,7 +80,7 @@ def test_genesis_attack_map_does_not_guess_flows():
     assert ENGINE.count('href="#eicc-heatmap"') == 2
     # The G11 tile is drawn by the engine renderer only; the fallback
     # (renderGenesis) draws no tiles since tests/test_genesis_truth.py.
-    assert ENGINE.count("No attack geodata in feed") == 1
+    assert ENGINE.count("Connect source/target attack telemetry") == 1
     assert 'id="eicc-heatmap"' in INDEX
 
 

@@ -87,7 +87,7 @@ test("the AI-brain template is the shipped index.html block, byte for byte", () 
 });
 
 test("EICC engine renders from the shared snapshot, with no fetch of its own for intelligence", () => {
-  assert.match(EICC, /<script src="\/js\/apex-dashboard-snapshot\.js"><\/script>\s*<script>\s*\(function eiccEngine\(\)\{/);
+  assert.match(EICC, /<script src="\/js\/apex-dashboard-snapshot\.js\?v=[0-9a-f]{12}"><\/script>\s*<script>\s*\(function eiccEngine\(\)\{/);
   assert.match(EICC_SCRIPT, /SNAP\.load\(/);
   assert.doesNotMatch(EICC_SCRIPT, /['"`][^'"`\n]*(feed\.json|latest\.json|feed_manifest)/, "EICC must not fetch a feed artifact itself");
   assert.doesNotMatch(EICC_SCRIPT, /source_country/, "publisher geography is not attack origin");
