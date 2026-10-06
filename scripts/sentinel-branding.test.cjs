@@ -108,3 +108,32 @@ test('public non-HTML metadata uses canonical SENTINEL APEX Threat Intel identit
   assert.equal(manifest.name, NAME);
   assert.equal(manifest.short_name, 'SENTINEL APEX');
 });
+
+test('public AI-search profiles stay aligned with the canonical commercial contract', () => {
+  const root = path.resolve(__dirname, '..');
+  const llms = fs.readFileSync(path.join(root, 'llms.txt'), 'utf8');
+  const llmsFull = fs.readFileSync(path.join(root, 'llms-full.txt'), 'utf8');
+  const contract = JSON.parse(fs.readFileSync(path.join(root, 'config/commercial-contract.json'), 'utf8'));
+  const free = contract.tiers.free;
+  const pro = contract.tiers.pro;
+  const enterprise = contract.tiers.enterprise;
+  const mssp = contract.tiers.mssp;
+
+  const expectedRateLine =
+    `Rate Limits: Free (${free.requests_per_minute} req/min, ${free.requests_per_day}/day), ` +
+    `Pro (${pro.requests_per_minute} req/min, ${pro.requests_per_day.toLocaleString('en-US')}/day), ` +
+    `Enterprise (${enterprise.requests_per_minute} req/min, ${enterprise.requests_per_day.toLocaleString('en-US')}/day), ` +
+    `MSSP (${mssp.requests_per_minute.toLocaleString('en-US')} req/min, ${mssp.requests_per_day.toLocaleString('en-US')}/day). No tier is unlimited.`;
+
+  assert.ok(llmsFull.includes(expectedRateLine));
+  assert.ok(llmsFull.includes(`Pro ${pro.uptime_commitment}`));
+  assert.ok(llmsFull.includes(`Enterprise ${enterprise.uptime_commitment}`));
+  assert.ok(llmsFull.includes(`MSSP ${mssp.uptime_commitment}`));
+  assert.ok(!/SOC 2 Type II ready/i.test(llmsFull));
+  assert.ok(!/Followers:\s*\d/i.test(llmsFull));
+  assert.ok(!/god-mode/i.test(llmsFull));
+  assert.ok(!/Enterprise \(unlimited\)/i.test(llmsFull));
+  assert.ok(!/74\+ live/i.test(llms + '\n' + llmsFull));
+  assert.ok(!/<100ms P95/i.test(llmsFull));
+  assert.ok(!/≤15 minute lag|updated every 6 hours/i.test(llmsFull));
+});
