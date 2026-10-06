@@ -90,3 +90,21 @@ test('production dist builder brands before manifest and checksum provenance gen
     'branding must complete before deployment manifest/checksum provenance is generated',
   );
 });
+
+test('public non-HTML metadata uses canonical SENTINEL APEX Threat Intel identity', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const root = path.resolve(__dirname, '..');
+  const llms = fs.readFileSync(path.join(root, 'llms.txt'), 'utf8');
+  const llmsFull = fs.readFileSync(path.join(root, 'llms-full.txt'), 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+
+  assert.ok(llms.startsWith('# SENTINEL APEX Threat Intel Platform — AI Search Profile'));
+  assert.ok(llms.includes('Powered By CYBERDUDEBIVASH.'));
+  assert.ok(!llms.includes('# CYBERDUDEBIVASH® SENTINEL APEX'));
+  assert.ok(llmsFull.startsWith('# SENTINEL APEX Threat Intel Platform — Full AI Search & LLM Profile'));
+  assert.ok(llmsFull.includes('Primary Platform: SENTINEL APEX Threat Intel Platform'));
+  assert.ok(!llmsFull.includes('Primary Platform: CYBERDUDEBIVASH® SENTINEL APEX'));
+  assert.equal(manifest.name, NAME);
+  assert.equal(manifest.short_name, 'SENTINEL APEX');
+});
