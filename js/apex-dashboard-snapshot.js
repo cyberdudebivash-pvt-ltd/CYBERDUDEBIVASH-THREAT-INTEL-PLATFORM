@@ -51,10 +51,28 @@
   // iocs [] is truthy, so `ioc_count||iocs` turned the sum into a string of
   // digits). Numeric ioc_count, else iocs.length, else a numeric scalar.
   function iocContribution(it) {
-    if (typeof it.ioc_count === 'number') return it.ioc_count;
-    if (Array.isArray(it.iocs)) return it.iocs.length;
-    var n = Number(it.iocs);
-    return isNaN(n) ? 0 : n;
+    if (!it || typeof it !== 'object') return 0;
+    function count(value) {
+      if (typeof value !== 'number' && typeof value !== 'string') return null;
+      if (typeof value === 'string' && !value.trim()) return null;
+      var n = Number(value);
+      return Number.isSafeInteger(n) && n >= 0 ? n : null;
+    }
+    var explicit = count(it.ioc_count);
+    if (explicit !== null) return explicit;
+    // Prefer actual indicator arrays over an unmeasured placeholder array.
+    if (Array.isArray(it.iocs) && it.iocs.length) return it.iocs.length;
+    if (Array.isArray(it.indicators) && it.indicators.length) return it.indicators.length;
+    if (it.ioc_counts && typeof it.ioc_counts === 'object' && !Array.isArray(it.ioc_counts)) {
+      return Object.values(it.ioc_counts).reduce(function(total, value) {
+        var n = count(value);
+        return total + (n === null ? 0 : n);
+      }, 0);
+    }
+    var indicators = count(it.indicator_count);
+    if (indicators !== null) return indicators;
+    var scalar = count(it.iocs);
+    return scalar === null ? 0 : scalar;
   }
 
   function sourceHost(it) {

@@ -6037,7 +6037,7 @@ function renderTopThreats(data) {
                          valFn: s => (s.total_exposures||0) + ' SIGNALS', descFn: s => (s.critical_exposures||0) + ' RCE / unauthenticated'},
                         // No attack geodata exists in the feed (G11 produces no flows).
                         {key:'G11_GlobalAttackMap', id:'G11', name:'Attack Map',      icon:'🗺️', color:'#e11d48',
-                         valFn: s => 'N/A', descFn: s => 'No attack geodata in feed'},
+                         valFn: s => 'CONNECT', descFn: s => 'Connect source/target attack telemetry'},
                         {key:'G12_AIThreatHunter', id:'G12', name:'Threat Clusters', icon:'🤖', color:'#7c3aed',
                          valFn: s => (s.clusters_identified||0) + ' CLUSTERS', descFn: s => (s.trending_techniques||0) + ' techniques trending (7d)'},
                     ];
@@ -6237,17 +6237,27 @@ function renderTopThreats(data) {
             function renderBugHunterEngine(data) {
                 try {
                     const m = data.metrics || {};
+                    function measuredCount(value) {
+                        if (typeof value !== 'number' && typeof value !== 'string') return null;
+                        if (typeof value === 'string' && !value.trim()) return null;
+                        var count = Number(value);
+                        return Number.isSafeInteger(count) && count >= 0 ? count : null;
+                    }
+                    function scanCount(value) {
+                        var count = measuredCount(value);
+                        return count === null ? 'Awaiting scan' : count === 0 ? 'None detected' : count.toLocaleString();
+                    }
                     // Top metrics
                     const subEl = document.getElementById('bh-subdomain-count');
                     if (subEl) subEl.textContent = (m.subdomains || 0).toLocaleString();
                     const liveEl = document.getElementById('bh-livehost-count');
                     if (liveEl) liveEl.textContent = (m.live_hosts || 0).toLocaleString();
                     const apiEl = document.getElementById('bh-api-count');
-                    if (apiEl) apiEl.textContent = (m.api_endpoints || 0).toLocaleString();
+                    if (apiEl) apiEl.textContent = scanCount(m.api_endpoints);
                     const critEl = document.getElementById('bh-critical-count');
                     if (critEl) {
-                        const c = m.critical_findings || 0;
-                        critEl.textContent = c.toLocaleString();
+                        const c = measuredCount(m.critical_findings);
+                        critEl.textContent = scanCount(m.critical_findings);
                         critEl.style.color = c > 0 ? '#ef4444' : '#00d4aa';
                     }
                     // ROI
@@ -6278,8 +6288,16 @@ function renderTopThreats(data) {
                         var badge = document.createElement('span');
                         badge.id = 'bh-health-badge';
                         badge.style.cssText = 'margin-left:10px;font-size:9px;color:#00d4aa;font-family:var(--font-mono);';
-                        badge.textContent = '● LIVE';
+                        badge.textContent = '● SCAN SNAPSHOT';
                         bhHeader.appendChild(badge);
+                    }
+                    var scanBadge = document.getElementById('bh-health-badge');
+                    if (scanBadge) {
+                        var scanTime = Date.parse(data.timestamp || '');
+                        scanBadge.textContent = Number.isFinite(scanTime)
+                            ? '● SCAN SNAPSHOT · ' + new Date(scanTime).toISOString()
+                            : '● SCAN TIMESTAMP UNAVAILABLE';
+                        scanBadge.title = 'Saved scan evidence' + (data.domain ? ' for ' + String(data.domain) : '') + '; not continuous monitoring';
                     }
                 } catch(e) { console.warn('[BUG HUNTER ENGINE]', e); }
             }
