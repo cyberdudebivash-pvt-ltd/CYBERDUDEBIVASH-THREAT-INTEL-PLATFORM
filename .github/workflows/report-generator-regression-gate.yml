@@ -154,7 +154,7 @@ jobs:
           cache: 'pip'
 
       - name: Install test dependencies
-        run: pip install pytest pyyaml requests==2.34.2 --quiet
+        run: pip install pytest pyyaml requests==2.34.2 'PyJWT[crypto]==2.15.1' --quiet
 
       - name: Scan malware customer release Python surfaces
         run: |
@@ -271,3 +271,6 @@ jobs:
       - name: Run pipeline-staleness alert diagnostics regression tests (P0 2026-09-18 staleness incident)
         run: |
           python -m pytest tests/test_pipeline_staleness_diagnostics.py -v --tb=short
+
+      - name: Reject OIDC algorithm confusion and invalid signing keys
+        run: python -m pytest tests/test_oidc_rs256_migration.py -v --tb=short
