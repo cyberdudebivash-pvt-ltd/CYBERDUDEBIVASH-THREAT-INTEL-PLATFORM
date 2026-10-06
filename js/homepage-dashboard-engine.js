@@ -6116,44 +6116,26 @@ function renderTopThreats(data) {
             // ── CORTEX RENDERER ─────────────────────────────────────────────
             function renderCortexEngine(data) {
                 try {
-                    const kg = data.knowledge_graph || {};
-                    const cortexEl = document.getElementById('cortex-nodes');
-                    if (cortexEl && kg.total_nodes != null) {
-                        cortexEl.textContent = kg.total_nodes;
-                        // Add tooltip
-                        const parent = cortexEl.closest('[style]');
-                        if (parent) {
-                            const edgesHint = parent.querySelector('.cortex-edges-hint');
-                            if (!edgesHint) {
-                                const hint = document.createElement('div');
-                                hint.className = 'cortex-edges-hint';
-                                hint.style.cssText = 'font-size:9px;color:var(--text-muted);margin-top:2px;font-family:var(--font-mono);';
-                                hint.textContent = (kg.total_edges||0) + ' EDGES // DENSITY ' + ((kg.density||0)*100).toFixed(2) + '%';
-                                cortexEl.parentNode.appendChild(hint);
-                            }
-                        }
-                    }
-
-                    // Stream events count
-                    const stream = data.stream || {};
-                    if (stream.event_count) {
-                        const streamBadge = document.getElementById('cortex-stream-count');
-                        if (streamBadge) streamBadge.textContent = stream.event_count;
-                    }
-
-                    // Top influencers
-                    const influencers = data.top_influencers || [];
-                    const clusters = data.cluster_count || (data.clusters ? (Array.isArray(data.clusters) ? data.clusters.length : data.clusters) : null);
-                    if (clusters && cortexEl) {
-                        const clusterEl = document.createElement('div');
-                        clusterEl.style.cssText = 'font-size:8px;color:var(--accent);margin-top:4px;font-family:var(--font-mono);letter-spacing:1px;';
-                        clusterEl.textContent = clusters + ' THREAT CLUSTERS';
-                        if (!cortexEl.parentNode.querySelector('.cortex-clusters')) {
-                            clusterEl.className = 'cortex-clusters';
-                            cortexEl.parentNode.appendChild(clusterEl);
-                        }
-                    }
-
+                    const el = document.getElementById('cortex-nodes');
+                    if (!el) return;
+                    ['.cortex-edges-hint', '.cortex-clusters'].forEach(function(selector) {
+                        const old = el.parentNode && el.parentNode.querySelector(selector);
+                        if (old) old.remove();
+                    });
+                    el.textContent = 'Graph pending';
+                    const stream = document.getElementById('cortex-stream-count');
+                    if (stream) stream.textContent = 'Telemetry not connected';
+                    const kg = data && data.evidence_type === 'explicit_feed_relationships' && data.knowledge_graph;
+                    if (!kg) return;
+                    const counts = [kg.total_nodes, kg.total_edges, kg.unique_advisories, data.actor_groups];
+                    if (!counts.every(function(n) { return Number.isSafeInteger(n) && n >= 0; }) || kg.unique_advisories > kg.total_nodes) return;
+                    el.textContent = kg.total_nodes.toLocaleString();
+                    const hint = document.createElement('div');
+                    hint.className = 'cortex-edges-hint';
+                    hint.style.cssText = 'font-size:9px;color:var(--text-muted);margin-top:2px;font-family:var(--font-mono);';
+                    hint.textContent = kg.total_edges.toLocaleString() + ' explicit feed relationships | ' +
+                        kg.unique_advisories.toLocaleString() + ' unique advisories | ' + data.actor_groups.toLocaleString() + ' actor groups';
+                    if (el.parentNode) el.parentNode.appendChild(hint);
                 } catch(e) { console.warn('[CORTEX ENGINE]', e); }
             }
 
