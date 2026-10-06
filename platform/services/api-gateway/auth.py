@@ -18,10 +18,10 @@ from enum import Enum
 from typing import Any, Optional
 
 import httpx
+import jwt
 import structlog
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-import jwt
 from pydantic import BaseModel, Field
 
 log = structlog.get_logger("sentinel.auth")
