@@ -17,6 +17,34 @@ test('display branding handles marks, case and technical identifiers without dup
   );
 });
 
+
+test('canonical parent ecosystem identity survives presentation branding', () => {
+  for (const canonical of [
+    'CYBERDUDEBIVASH ECOSYSTEM®',
+    'CYBERDUDEBIVASH ECOSYSTEM&reg;',
+    'CYBERDUDEBIVASH ECOSYSTEM&#174;',
+    'CYBERDUDEBIVASH ECOSYSTEM(R)',
+  ]) {
+    assert.equal(displayName(canonical), canonical);
+    const html = '<html><head></head><body><p>'+canonical+'</p><footer>'+canonical+'</footer></body></html>';
+    const out = brandHtml(html, NAME);
+    assert.ok(out.includes('<p>'+canonical+'</p>'));
+    assert.ok(out.includes('<footer>'+canonical));
+    assert.ok(!out.includes('SENTINEL APEX ECOSYSTEM'));
+    assert.equal(brandHtml(out, NAME), out);
+  }
+});
+
+test('production homepage artifact preserves parent brand and rejects retired variants', () => {
+  const root = path.resolve(__dirname, '..');
+  const source = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const out = brandHtml(source, NAME);
+  assert.ok(out.includes('CYBERDUDEBIVASH ECOSYSTEM&reg;'));
+  assert.ok(!/SENTINEL APEX ECOSYSTEM(?:®|&reg;|&#174;|\(R\))?/i.test(out));
+  assert.ok(!/BIVASHA KUMAR NAYAK|BIVASH KUMAR NAYAK|trading as CYBERDUDEBIVASH/i.test(out));
+  assert.ok(out.includes('Powered By CYBERDUDEBIVASH ECOSYSTEM&reg;'));
+});
+
 test('platform name input is canonicalized and rejects markup/control-character injection', () => {
   assert.equal(canonicalPlatformName('  '+NAME+'  '), NAME);
   for (const invalid of [
@@ -39,7 +67,7 @@ test('human-readable surfaces change while technical and seller identity remain 
   assert.ok(out.includes(script));
   assert.ok(out.includes('<pre>CYBERDUDEBIVASH</pre>'));
   assert.ok(out.includes('Seller of record: CYBERDUDEBIVASH — GSTIN 21ARKPN8270G1ZP'));
-  assert.ok(out.includes('Powered By CYBERDUDEBIVASH'));
+  assert.ok(out.includes('Powered By CYBERDUDEBIVASH ECOSYSTEM&reg;'));
   assert.ok(out.includes('href="https://www.cyberdudebivash.com/"'));
   assert.equal(brandHtml(out, NAME), out);
 });
@@ -48,7 +76,7 @@ test('pages without a footer gain exactly one attribution; fragments and raw cod
   const page = brandHtml('<html><head></head><body>CYBERDUDEBIVASH</body></html>', NAME);
   assert.ok(page.includes('<footer aria-label="Platform attribution">'));
   assert.equal((page.match(/data-sentinel-attribution=/g)||[]).length, 1);
-  assert.equal((page.match(/Powered By CYBERDUDEBIVASH/g)||[]).length, 1);
+  assert.equal((page.match(/Powered By CYBERDUDEBIVASH ECOSYSTEM&reg;/g)||[]).length, 1);
   assert.equal(brandHtml('<code>CYBERDUDEBIVASH</code>', NAME), '<code>CYBERDUDEBIVASH</code>');
 });
 
@@ -100,11 +128,11 @@ test('public non-HTML metadata uses canonical SENTINEL APEX Threat Intel identit
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
   assert.ok(llms.startsWith('# SENTINEL APEX Threat Intel Platform — AI Search Profile'));
-  assert.ok(llms.includes('Powered By CYBERDUDEBIVASH.'));
+  assert.ok(llms.includes('Powered By CYBERDUDEBIVASH ECOSYSTEM®.'));
   assert.ok(!llms.includes('# CYBERDUDEBIVASH® SENTINEL APEX'));
   assert.ok(llmsFull.startsWith('# SENTINEL APEX Threat Intel Platform — Full AI Search & LLM Profile'));
   assert.ok(llmsFull.includes('Primary Platform: SENTINEL APEX Threat Intel Platform'));
-  assert.ok(llmsFull.includes('Parent Attribution: Powered By CYBERDUDEBIVASH'));
+  assert.ok(llmsFull.includes('Parent Attribution: Powered By CYBERDUDEBIVASH ECOSYSTEM®'));
   assert.ok(!llmsFull.includes('Primary Platform: CYBERDUDEBIVASH® SENTINEL APEX'));
   assert.equal(manifest.name, NAME);
   assert.equal(manifest.short_name, 'SENTINEL APEX');
