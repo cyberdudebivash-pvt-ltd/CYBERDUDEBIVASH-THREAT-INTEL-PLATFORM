@@ -60,6 +60,10 @@ on:
       - 'config/cloudflare_pre_revenue_guard.json'
       - 'workers/intel-gateway/wrangler.toml'
       - 'tests/test_cloudflare_pre_revenue_guard.py'
+      - 'scripts/cloudflare_workload_guard.py'
+      - 'config/cloudflare_worker_workload_baseline.json'
+      - 'tests/test_cloudflare_workload_guard.py'
+      - 'workers/**/wrangler.*'
       - 'scripts/r2_state_sync.py'
       - 'scripts/backup_r2.py'
       - 'scripts/backup_kv_to_r2.py'
@@ -128,7 +132,9 @@ jobs:
         run: python -m pytest tests/test_r2_lifecycle_manager.py -v --tb=short
 
       - name: "GATE O -- pre-revenue Cloudflare plan/usage expansion guard"
-        run: python -m pytest tests/test_cloudflare_pre_revenue_guard.py -v --tb=short
+        run: |
+          python scripts/cloudflare_workload_guard.py
+          python -m pytest tests/test_cloudflare_pre_revenue_guard.py tests/test_cloudflare_workload_guard.py -v --tb=short
 
       - name: "r2_state_sync.py -- bounded state round-trip + retry ceiling"
         run: python -m pytest tests/test_r2_state_sync.py -v --tb=short
