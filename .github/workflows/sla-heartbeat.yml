@@ -1,0 +1,61 @@
+# =============================================================================
+# SLA Heartbeat -- external uptime probe for /api/sla/* (2026-09-26)
+# =============================================================================
+# /api/sla/status, /api/sla/report and /api/sla/certificate compute uptime
+# from heartbeats posted to POST /api/sla/ping. Nothing posted any, so all of
+# them reported insufficient_data and the status pages had nothing real to
+# show. This workflow is that heartbeat.
+#
+# It runs OUTSIDE the Worker on purpose: a probe from inside the Worker (its
+# own cron) cannot observe the Worker being down. When the Worker is down the
+# result cannot be delivered either, so scripts/sla_heartbeat.py keeps it in
+# a buffer (carried between runs in the Actions cache) and replays it with
+# its original timestamp once the Worker answers again.
+#
+# A run goes red when the site is DOWN (exit 1) or the admin secret is
+# missing/rejected (exit 2), so the owner is notified by GitHub.
+# =============================================================================
+name: SLA Heartbeat v201.0
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sla-heartbeat
+  cancel-in-progress: false
+
+jobs:
+  heartbeat:
+    name: Probe /api/health and record the heartbeat
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/sla_heartbeat.py
+          sparse-checkout-cone-mode: false
+
+      - name: Restore undelivered heartbeats
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .sla-heartbeat
+          key: sla-heartbeat-${{ github.run_id }}
+          restore-keys: sla-heartbeat-
+
+      - name: Probe and record
+        env:
+          WORKER_ADMIN_SECRET: ${{ secrets.WORKER_ADMIN_SECRET }}
+        run: python3 scripts/sla_heartbeat.py
+
+      - name: Keep undelivered heartbeats for the next run
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .sla-heartbeat
+          key: sla-heartbeat-${{ github.run_id }}

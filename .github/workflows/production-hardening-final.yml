@@ -1,0 +1,65 @@
+# Synthetic engine checks only; release approval requires live customer-path evidence.
+name: "SENTINEL APEX — Engine Smoke Evidence v201.0"
+
+on:
+  schedule:
+    - cron: "0 1,7,13,19 * * *"
+  workflow_dispatch:
+    inputs:
+      run_quality:
+        description: "Run synthetic dossier quality check"
+        type: boolean
+        default: true
+      run_tenant:
+        description: "Run synthetic tenant permission checks"
+        type: boolean
+        default: true
+      run_monetization:
+        description: "Run synthetic monetization check"
+        type: boolean
+        default: true
+
+concurrency:
+  group: sentinel-hardening-smoke
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  production-hardening:
+    name: "Synthetic engine checks (not production certification)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Setup Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      # The three engines use the Python standard library. No cloud credentials,
+      # network access, package installation or repository writes are needed.
+      - name: Run isolated engine checks
+        env:
+          RUN_QUALITY: ${{ github.event.inputs.run_quality || 'true' }}
+          RUN_TENANT: ${{ github.event.inputs.run_tenant || 'true' }}
+          RUN_MONETIZATION: ${{ github.event.inputs.run_monetization || 'true' }}
+        run: |
+          python3 scripts/hardening_smoke.py \
+            --output "$RUNNER_TEMP/hardening-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --quality "$RUN_QUALITY" --tenant "$RUN_TENANT" --monetization "$RUN_MONETIZATION"
+      - name: Retain smoke evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: synthetic-engine-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hardening-evidence-${{ github.run_id }}-${{ github.run_attempt }}/*.json
+          if-no-files-found: error
+          retention-days: 3

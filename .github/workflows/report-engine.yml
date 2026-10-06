@@ -1,0 +1,84 @@
+# CYBERDUDEBIVASH SENTINEL APEX  -  Premium Report Engine
+# Auto-generates weekly executive threat intelligence reports
+# Runs every Monday at 06:00 UTC + manual dispatch
+
+name: Premium Report Engine  -  Weekly Briefing v201.0
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      report_type:
+        description: 'Report type'
+        default: 'weekly'
+        required: false
+        type: choice
+        options:
+          - weekly
+          - executive_briefing
+          - tactical_ioc
+          - vulnerability
+      days:
+        description: 'Time range (days)'
+        default: '7'
+        required: false
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+concurrency:
+  group: sentinel-data-writer
+  cancel-in-progress: false
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name:  Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name:  Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name:  Generate Report
+        # v184.8 FIX: `days` has no `type:` constraint (free string,
+        # workflow_dispatch-only) and was previously spliced unquoted into
+        # the run: command before the shell parsed it, in the same step as
+        # CDB_JWT_SECRET. Both inputs now flow through env: and are quoted.
+        env:
+          CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
+          PYTHONPATH: ${{ github.workspace }}
+          REPORT_TYPE: ${{ github.event.inputs.report_type || 'weekly' }}
+          REPORT_DAYS: ${{ github.event.inputs.days || '7' }}
+        run: |
+          python -m agent.v52_report_engine.engine \
+            --type "${REPORT_TYPE}" \
+            --days "${REPORT_DAYS}"
+
+      - name:  Commit Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "CYBERDUDEBIVASH"
+          git config user.email "bivash@cyberdudebivash.com"
+          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
+          git add -f data/intelligence/reports/ 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No reports to commit"
+          else
+            git commit -m " Weekly intelligence report  -  $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+            git stash --include-untracked --quiet 2>/dev/null || true
+            git fetch origin main --quiet 2>/dev/null || true
+            git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null || true; git merge origin/main -X ours --no-edit --quiet 2>/dev/null || true; }
+            git stash pop --quiet 2>/dev/null || true
+            git push origin main || echo '::warning::Push deferred — will sync next run.'
+          fi

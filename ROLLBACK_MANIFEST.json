@@ -1,0 +1,42 @@
+{
+  "manifest_version": "1.0",
+  "generated_at": "2026-08-07T16:55:00Z",
+  "branch": "claude/titan-stage-22-cleanup-vjc8a7",
+  "pre_cleanup_commit": "dd1b373b9750d091e58a88a5abbbc0b049cae449",
+  "cleanup_commit": "f19103c22e71123f45997ca1de2789643e241ffd",
+  "summary": "Every action taken in this cleanup pass is reversible without rewriting git history. Two independent rollback layers exist: (1) git-level, for anything that was git-tracked before this commit, and (2) local checksum-verified file backups, for the one operation (data/.manifest_backups pruning) that ran through the new storage_governance.py safety machinery.",
+  "rollback_layers": [
+    {
+      "layer": "git (durable, works from any clone)",
+      "applies_to": "Everything in this commit: node_modules untrack, reports/2026/07 untrack, manifest_backups prune, root .bat/.ps1/stray-file deletes, code changes",
+      "full_revert": "git revert f19103c22e71123f45997ca1de2789643e241ffd",
+      "partial_revert_examples": [
+        "git checkout dd1b373b9750d091e58a88a5abbbc0b049cae449 -- workers/intel-gateway/node_modules/",
+        "git checkout dd1b373b9750d091e58a88a5abbbc0b049cae449 -- reports/2026/07/",
+        "git checkout dd1b373b9750d091e58a88a5abbbc0b049cae449 -- data/.manifest_backups/",
+        "git checkout dd1b373b9750d091e58a88a5abbbc0b049cae449 -- '*.bat' '*.ps1'"
+      ],
+      "note": "No history rewrite was performed anywhere in this pass (no git filter-repo, no BFG, per explicit task constraint) -- every removed blob remains reachable from dd1b373b and earlier history indefinitely."
+    },
+    {
+      "layer": "local checksum-verified backup (session/disk-scoped, new in this pass)",
+      "applies_to": "data/.manifest_backups/ prune only (the only operation that ran through the new scripts/storage_governance.py backup contract)",
+      "batch_id": "20260807T164957Z-e2550290",
+      "restore_command": "python3 scripts/storage_governance.py restore --batch 20260807T164957Z-e2550290",
+      "verify_command": "python3 scripts/storage_governance.py verify-backup --batch 20260807T164957Z-e2550290",
+      "backup_location": "data/governance/deletion_backups/20260807T164957Z-e2550290/ (gitignored -- local to this checkout only, not pushed)",
+      "manifest_location": "data/governance/rollback_manifest_20260807T164957Z-e2550290.json",
+      "last_verified": "2026-08-07T16:50:00Z -- 30/30 OK, 0 mismatched, 0 missing",
+      "note": "This layer only exists on disk in this session's container. It is a same-session convenience on top of the git-level rollback, not a replacement for it -- once this container is reclaimed, the git-level rollback (layer 1) is the only remaining path, which is sufficient since the same 30 files are also recoverable via `git checkout dd1b373b... -- data/.manifest_backups/`."
+    }
+  ],
+  "special_case_reports_2026_07": {
+    "note": "reports/2026/07/ (7,359 files) was archived via the existing scripts/report_archive_manager.py, which uses `git rm --cached` only -- it does not delete from disk. As of this manifest, all 7,359 files remain physically present in this checkout at reports/2026/07/ (now untracked). If a rollback is needed, both the git-level restore above AND the files already on local disk are available. Independent of either: these reports are also durably served from the Cloudflare R2 bucket sentinel-apex-reports (see SAFE_CLEANUP_PLAN.md section 3.2), so public URLs are unaffected regardless of this repository's state.",
+    "archive_tool_manifest": "data/archive/report_archive_manifest.json",
+    "archive_tool_audit_log": "data/archive/report_archive_audit.jsonl"
+  },
+  "not_applicable": [
+    "No Cloudflare resources were modified, deleted, or deployed to. No R2, KV, or D1 operation was performed. This manifest covers git/filesystem state only.",
+    "No production routing, index.js, authentication, schema, or CI stage logic was modified -- only two governance scripts (storage_governance.py, report_archive_manager.py) and .gitignore."
+  ]
+}

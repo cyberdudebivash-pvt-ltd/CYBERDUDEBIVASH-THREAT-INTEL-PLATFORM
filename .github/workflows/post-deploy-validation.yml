@@ -1,0 +1,367 @@
+name: "SENTINEL APEX -- Post-Deploy Validation v201.0"
+
+# Runs automatically after every successful deploy-worker.
+# Validates all production gates. Fails loudly if any hard gate is violated.
+# This is the final safety net before the platform is declared OPERATIONAL.
+
+on:
+  workflow_run:
+    # v184.0 FIX: corrected workflow name from "SENTINEL APEX -- Worker Deploy"
+    # to "deploy-worker" (the actual name field in deploy-worker.yml).
+    # Previous name caused post-deploy validation to NEVER auto-trigger.
+    workflows: ["deploy-worker"]
+    types:
+      - completed
+  workflow_dispatch:
+    # Manual re-validation entry point. workflow_run alone only sees deploys
+    # that go through deploy-worker.yml -- it cannot see a Wrangler CLI
+    # deploy, a Cloudflare dashboard deploy/rollback, or a secret rotation,
+    # since none of those produce a GitHub Actions event to chain off of.
+    # This input lets an operator re-run the full gate suite after any of
+    # those out-of-band changes without waiting for or faking a commit.
+    inputs:
+      reason:
+        description: "Why is this validation being run manually?"
+        required: false
+        default: "Manual re-validation"
+        type: choice
+        options:
+          - "Manual re-validation"
+          - "Wrangler CLI deployment"
+          - "Cloudflare dashboard deployment"
+          - "Secret rotation"
+          - "Emergency hotfix"
+          - "Rollback"
+          - "Other"
+      deployment_type:
+        description: "What kind of production change (if any) prompted this run?"
+        required: false
+        default: "unspecified"
+        type: choice
+        options:
+          - "unspecified"
+          - "worker-code"
+          - "secret"
+          - "binding"
+          - "rollback"
+          - "none"
+      operator_notes:
+        description: "Optional context (commit SHA, ticket link, incident ref, etc.)"
+        required: false
+        type: string
+
+# Must not overlap with master orchestrator during the same deploy window
+concurrency:
+  group: sentinel-post-deploy-validation
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  WORKER_BASE: "https://intel.cyberdudebivash.com"
+
+jobs:
+
+  post-deploy-gate:
+    name: "Post-Deploy Validation"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # workflow_run: only proceed if the deploy it's chained to actually succeeded.
+    # workflow_dispatch: no workflow_run conclusion exists to check -- always proceed.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 3
+
+      - name: "Set up Python 3.11"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: "Install dependencies"
+        timeout-minutes: 3
+        run: |
+          pip install requests --quiet 2>&1 | tail -3
+
+      - name: "Warm-up delay -- allow Worker propagation"
+        run: |
+          echo "[POST-DEPLOY] Waiting 30s for Cloudflare Worker propagation..."
+          sleep 30
+
+      - name: "GATE A -- API availability"
+        id: gate_a
+        timeout-minutes: 3
+        run: |
+          echo "[GATE A] Checking all API endpoints..."
+          # v184.0 PERMANENT FIX: Two-tier endpoint check.
+          #
+          # PUBLIC endpoints: must return HTTP 200. Hard fail on non-200.
+          #   /api/v1/intel/latest.json, /api/v1/intel/top10.json, /api/feed.json
+          #
+          # AUTH-PROTECTED endpoints: 200 OR 401 both confirm the endpoint is
+          #   reachable and responding. 401 = "endpoint exists, auth required"
+          #   which is CORRECT behaviour for /api/v1/intel/apex.json (premium tier).
+          #   Only 000 (timeout/DNS fail) or 5xx (server error) are hard failures.
+          #
+          # DO NOT revert to single-tier 200-only check -- apex.json is intentionally
+          # auth-protected and will always return 401 without a valid JWT token.
+          #
+          # P0 HEALTH CONTRACT (2026-09-24): /api/health is NOT an availability
+          # probe. Since PR #488 it answers 503 while customer intelligence is
+          # stale/empty/unavailable -- the truthful contract. Requiring 200
+          # here blocked healthy Worker deploys (including the deploys that
+          # fix staleness) and could only be "fixed" by making /api/health lie.
+          # Worker availability = /api/health/live; /api/health is validated
+          # as a STRUCTURED contract by scripts/deployment_health_contract.py:
+          #   200 ok (fresh)                     -> PASS, customer healthy
+          #   503 valid SENTINEL degraded/unhealthy body -> PASS (operational),
+          #       customer intelligence NOT healthy; release freshness stays
+          #       blocked by STAGE 5.9.10 (public_feed_freshness_gate.py)
+          #   any other 503 (HTML/Cloudflare page, empty/malformed JSON,
+          #   exception, wrong service), status/HTTP/freshness contradictions,
+          #   or exposed secret/config fields -> FAIL
+          # DO NOT put /api/health back into the 200-only loop below.
+
+          FAIL=0
+
+          echo "  -- Worker liveness + /api/health structured contract --"
+          if python3 scripts/deployment_health_contract.py --base-url "${{ env.WORKER_BASE }}"; then
+            echo "  [PASS] Worker live; /api/health returned a valid contract response"
+          else
+            echo "  [FAIL] Worker liveness or /api/health contract violated (see ::error:: lines above)"
+            FAIL=$((FAIL+1))
+          fi
+
+          echo "  -- Public endpoints (must be HTTP 200) --"
+          for ENDPOINT in \
+            "${{ env.WORKER_BASE }}/api/v1/intel/latest.json" \
+            "${{ env.WORKER_BASE }}/api/v1/intel/top10.json" \
+            "${{ env.WORKER_BASE }}/api/feed.json"; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$ENDPOINT" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "  [PASS] $ENDPOINT -- HTTP $STATUS"
+            else
+              echo "  [FAIL] $ENDPOINT -- HTTP $STATUS"
+              FAIL=$((FAIL+1))
+            fi
+          done
+
+          echo "  -- Auth-protected endpoints (200 or 401 both valid) --"
+          for ENDPOINT in \
+            "${{ env.WORKER_BASE }}/api/v1/intel/apex.json"; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$ENDPOINT" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
+              echo "  [PASS] $ENDPOINT -- HTTP $STATUS (auth-protected endpoint confirmed reachable)"
+            elif echo "$STATUS" | grep -qE "^5"; then
+              echo "  [FAIL] $ENDPOINT -- HTTP $STATUS (server error)"
+              FAIL=$((FAIL+1))
+            else
+              echo "  [FAIL] $ENDPOINT -- HTTP $STATUS (unreachable)"
+              FAIL=$((FAIL+1))
+            fi
+          done
+
+          if [ "$FAIL" -gt 0 ]; then
+            echo "[GATE A] FAILED: $FAIL endpoints unreachable or returning server errors"
+            exit 1
+          fi
+          echo "[GATE A] PASS: Worker operational; all API endpoints reachable"
+
+      - name: "GATE B -- Version consistency"
+        timeout-minutes: 2
+        run: |
+          echo "[GATE B] Checking version consistency..."
+          # /api/health/live: Worker version with no data dependency. /api/health
+          # returns 503 while the feed is stale, which would turn this into an
+          # "unknown -> skipping hard fail" and silently weaken the gate.
+          LIVE_VERSION=$(curl -sf --max-time 10 "${{ env.WORKER_BASE }}/api/health/live" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('version','unknown'))" 2>/dev/null || echo "unknown")
+          REPO_VERSION=$(python3 -c "import json,pathlib; print(json.loads(pathlib.Path('config/version.json').read_text()).get('version','unknown'))" 2>/dev/null || echo "unknown")
+          echo "[GATE B] Live: $LIVE_VERSION | Repo: $REPO_VERSION"
+          if [ "$LIVE_VERSION" = "unknown" ] || [ "$REPO_VERSION" = "unknown" ]; then
+            echo "[GATE B] WARNING: Could not verify version -- skipping hard fail"
+          elif [ "$LIVE_VERSION" != "$REPO_VERSION" ]; then
+            echo "[GATE B] FAIL: Version mismatch $LIVE_VERSION != $REPO_VERSION"
+            exit 1
+          else
+            echo "[GATE B] PASS: Version consistent at $LIVE_VERSION"
+          fi
+
+      - name: "GATE C -- Advisory count threshold"
+        timeout-minutes: 3
+        run: |
+          echo "[GATE C] Checking advisory count..."
+          LATEST=$(curl -s --max-time 20 "${{ env.WORKER_BASE }}/api/v1/intel/latest.json" || echo '[]')
+          COUNT=$(echo "$LATEST" | python3 -c "
+          import sys, json
+          try:
+            d = json.load(sys.stdin)
+            items = d if isinstance(d, list) else d.get('advisories', d.get('items', d.get('data', [])))
+            print(len(items))
+          except Exception as e:
+            print(0)
+          " 2>/dev/null || echo "0")
+          echo "[GATE C] Advisory count from live Worker: $COUNT"
+          # v184.0 PERMANENT FIX: minimum threshold lowered from 50 to 10.
+          #
+          # Root cause: Worker serves from R2 (Cloudflare Object Storage).
+          # R2 data is synced by the r2-data-sync workflow on its own schedule,
+          # INDEPENDENT of the Worker deploy. After a fresh Worker deploy, R2 may
+          # contain fewer items than the git repo (which has 132 at latest.json).
+          # The old threshold of 50 caused HARD FAIL whenever R2 lagged the repo.
+          #
+          # Minimum of 10 ensures the feed is non-empty and substantive.
+          # DO NOT raise this threshold above 10 without first confirming
+          # r2-data-sync runs and populates R2 before post-deploy-validation.
+          MIN_COUNT=10
+          if [ "$COUNT" -lt "$MIN_COUNT" ]; then
+            echo "[GATE C] FAIL: Only $COUNT advisories in live feed (minimum $MIN_COUNT)"
+            exit 1
+          fi
+          echo "[GATE C] PASS: $COUNT advisories served (minimum $MIN_COUNT)"
+
+      - name: "GATE D -- JWT auth operational"
+        timeout-minutes: 2
+        env:
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+        run: |
+          echo "[GATE D] Checking JWT/auth system..."
+          # checks.jwt_configured is a secret-presence flag and is no longer
+          # returned to anonymous callers of /api/health (P0 health freshness
+          # contract). It is still returned to operator calls authenticated
+          # with the Worker's ADMIN_SECRET, so this gate authenticates rather
+          # than being weakened. Fails closed if the repo secret is missing.
+          if [ -z "${ADMIN_SECRET}" ]; then
+            echo "::error::[GATE D] secrets.ADMIN_SECRET is not configured -- cannot verify JWT auth. Add repository secret ADMIN_SECRET (value = the Worker's ADMIN_SECRET)."
+            exit 1
+          fi
+          # -s (not -sf): /api/health answers 503 while intelligence is stale;
+          # the operator body still carries checks.jwt_configured.
+          HEALTH=$(curl -s --max-time 10 -H "X-Admin-Key: ${ADMIN_SECRET}" "${{ env.WORKER_BASE }}/api/health" || echo '{}')
+          # v184.1 FIX: jwt_configured lives under the "checks" object in the
+          # Worker's /api/health response (workers/intel-gateway/src/index.js:
+          # checks: { ..., jwt_configured: !!(env.CDB_JWT_SECRET), ... }), not
+          # at the top level. Reading it at the top level always fell through
+          # to the "false" default below regardless of the real secret state --
+          # confirmed by 4 other validators in this repo (post_deploy_validator.py,
+          # commercial_saas_validator.py, self_healing_engine.py, deploy-worker.yml)
+          # already reading the same nested path correctly. Aligning to that
+          # existing, proven pattern rather than introducing a new one.
+          JWT=$(echo "$HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('checks',{}).get('jwt_configured','false'))" 2>/dev/null || echo "false")
+          echo "[GATE D] JWT configured: $JWT"
+          if [ "$JWT" != "true" ] && [ "$JWT" != "True" ]; then
+            echo "[GATE D] FAIL: JWT auth not confirmed operational"
+            exit 1
+          fi
+          echo "[GATE D] PASS: JWT auth operational"
+
+      - name: "GATE E -- Frontend integrity"
+        timeout-minutes: 3
+        run: |
+          set -o pipefail
+          echo "[GATE E] Validating frontend integrity..."
+          python3 scripts/frontend_integrity.py verify 2>&1 | tail -20
+          echo "[GATE E] PASS: Frontend integrity check complete"
+
+      - name: "GATE F -- Post-deploy validator (full suite)"
+        timeout-minutes: 5
+        env:
+          # Used only as the X-Admin-Key header for the operator /api/health
+          # view (GATE E: jwt_configured, GATE F: r2_intel); never printed.
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+        run: |
+          set -o pipefail
+          echo "[GATE F] Running full post-deploy validator suite..."
+          # Checks the script's real exit code via pipefail rather than
+          # grepping its printed text for specific strings -- same failure
+          # class as the pricing-gate bug already fixed (a script whose
+          # output format changes, or that fails via traceback instead of
+          # the expected message, would silently pass the old grep check).
+          python3 scripts/post_deploy_validator.py 2>&1 | tee /tmp/pdv_output.txt
+          echo "[GATE F] PASS: Full validation suite completed"
+
+      - name: "GATE G -- Report URL integrity"
+        timeout-minutes: 3
+        run: |
+          echo "[GATE G] Auto-repairing malformed report_url fields (--fix pass)..."
+          python3 scripts/report_url_integrity_gate.py --fix || true
+          echo "[GATE G] Scanning all feed JSON files for malformed report_url fields..."
+          python3 scripts/report_url_integrity_gate.py
+          echo "[GATE G] Report URL integrity check complete"
+
+      - name: "Run SLA engine snapshot"
+        timeout-minutes: 5
+        run: |
+          echo "[SLA] Running SLA engine snapshot..."
+          python3 scripts/sla_engine.py --tier enterprise --report 2>&1 | tail -25 || true
+          echo "[SLA] Snapshot complete"
+
+      - name: "Print deployment certification"
+        env:
+          INTEL_STATE: ${{ steps.gate_a.outputs.intelligence_state }}
+          INTEL_HEALTHY: ${{ steps.gate_a.outputs.intelligence_healthy }}
+        run: |
+          echo "============================================================"
+          echo "SENTINEL APEX -- DEPLOYMENT CERTIFICATION"
+          echo "============================================================"
+          echo "Trigger:      ${{ github.event_name }}"
+          echo "Deploy Run:   ${{ github.event.workflow_run.id || 'N/A (manual trigger)' }}"
+          echo "Commit SHA:   ${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "Reason:       ${{ github.event.inputs.reason || 'N/A (automatic trigger)' }}"
+          echo "Deploy Type:  ${{ github.event.inputs.deployment_type || 'N/A (automatic trigger)' }}"
+          echo "Notes:        ${{ github.event.inputs.operator_notes || 'N/A' }}"
+          echo "Validated At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Status:       CERTIFIED OPERATIONAL"
+          echo "============================================================"
+          echo "GATE A (API Availability):    PASS"
+          echo "GATE B (Version Consistency): PASS"
+          echo "GATE C (Advisory Count):      PASS"
+          echo "GATE D (JWT Auth):            PASS"
+          echo "GATE E (Frontend Integrity):  PASS"
+          echo "GATE F (Full Validator):      PASS"
+          echo "GATE G (Report URL Integrity): PASS"
+          echo "============================================================"
+          # Deployment certification is NOT customer-intelligence
+          # certification: a stale/unavailable feed is reported here and
+          # stays release-blocked by STAGE 5.9.10 (public_feed_freshness_gate.py).
+          echo "Customer intelligence:        ${INTEL_STATE:-unknown}"
+          if [ "${INTEL_HEALTHY}" != "true" ]; then
+            echo "::warning::Deployment certified OPERATIONAL, but customer intelligence is ${INTEL_STATE:-unknown}. Release freshness certification remains BLOCKED until STAGE 5.9.10 passes."
+            echo "WORKER DEPLOYMENT CERTIFIED -- CUSTOMER INTELLIGENCE NOT CERTIFIED"
+            echo "============================================================"
+            exit 0
+          fi
+          echo "PLATFORM IS PRODUCTION-CERTIFIED"
+          echo "============================================================"
+
+  # FIX (P0, 2026-09-10, operational-readiness audit): see deploy-worker.yml's
+  # identical job for the full rationale -- this workflow had zero failure
+  # notification.
+  notify-on-failure:
+    name: "Notify on post-deploy validation failure"
+    needs: post-deploy-gate
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Send failure alert
+        env:
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
+        run: |
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "Post-deploy validation (post-deploy-validation.yml) FAILED -- the most recent production deploy may not actually be healthy." \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

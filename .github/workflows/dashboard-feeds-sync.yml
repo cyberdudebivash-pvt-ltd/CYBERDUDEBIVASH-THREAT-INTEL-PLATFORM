@@ -1,0 +1,216 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX v200.0
+# DASHBOARD-FEEDS-SYNC — Generate customer dashboard feeds from authoritative R2
+# =============================================================================
+name: "SENTINEL APEX — Dashboard Feeds Sync v201.0"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/generate_dashboard_feeds.py'
+      - 'scripts/r2_state_sync.py'
+      - '.github/workflows/dashboard-feeds-sync.yml'
+  schedule:
+    - cron: '30 3,9,15,21 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (generate but do not upload to R2)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  PIPELINE_VERSION: "201.0"
+  PYTHONIOENCODING: "utf-8"
+  PYTHONUTF8: "1"
+
+concurrency:
+  group: sentinel-data-writer
+  cancel-in-progress: false
+
+jobs:
+  generate-dashboard-feeds:
+    name: "Generate Dashboard Feeds from R2 + Publish"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.actor != 'github-actions[bot]')
+
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+          ref: "${{ github.ref }}"
+
+      - name: "Python 3.12 setup"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: "Install dependencies"
+        run: |
+          python -m pip install --upgrade pip --quiet
+          pip install awscli --quiet
+
+      - name: "Ensure output directories"
+        run: mkdir -p api/v1/intel api/reports data/stix data/cache data/intelligence_repository
+
+      - name: "Restore authoritative intelligence state from R2"
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --download
+
+      - name: "Pre-generation authority gate"
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
+          candidates = [pathlib.Path('data/feed_manifest.json'), pathlib.Path('data/stix/feed_manifest.json')]
+          for p in candidates:
+              if not p.exists():
+                  continue
+              try:
+                  d=json.loads(p.read_text(encoding='utf-8'), parse_constant=reject_constant)
+              except Exception as e:
+                  print(f'::error::{p}: invalid strict JSON: {e}')
+                  sys.exit(1)
+              items=d if isinstance(d,list) else (d.get('items') or d.get('data') or d.get('advisories') or d.get('results') or []) if isinstance(d,dict) else []
+              if items:
+                  print(f'AUTHORITY=R2 PATH={p} RECORDS={len(items)} STRICT_JSON=PASS')
+                  break
+          else:
+              print('::error::Authoritative R2 snapshot contains no usable intelligence; refusing to publish empty dashboard generation')
+              sys.exit(1)
+          PY
+
+      - name: "Generate all dashboard feeds"
+        run: python3 scripts/generate_dashboard_feeds.py
+        env:
+          PIPELINE_VERSION: ${{ env.PIPELINE_VERSION }}
+          API_OUT_DIR: "api/v1/intel"
+
+      - name: "Validate customer feed outputs"
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
+          def strict_load(path):
+              return json.loads(path.read_text(encoding='utf-8'), parse_constant=reject_constant)
+          # api/v1/intel/apex.json is not ours: generate_api_manifests.py
+          # (sentinel-blogger) is its sole producer (P0 Phase 3C).
+          files = [
+            'api/v1/intel/ai_summary.json','api/v1/intel/stats.json',
+            'api/v1/intel/campaigns.json','api/v1/intel/ransomware.json','api/v1/intel/apt.json',
+            'api/v1/intel/epss.json','api/v1/intel/defcon.json','api/v1/intel/pulse.json',
+            'api/v1/intel/darkweb.json','api/v1/intel/cybermap.json'
+          ]
+          parsed={}
+          for name in files:
+              p=pathlib.Path(name)
+              if not p.exists() or p.stat().st_size < 10:
+                  print(f'::error::{name}: missing/empty'); sys.exit(1)
+              try: d=strict_load(p)
+              except Exception as e:
+                  print(f'::error::{name}: invalid strict JSON: {e}'); sys.exit(1)
+              if not isinstance(d,(dict,list)):
+                  print(f'::error::{name}: invalid top-level shape'); sys.exit(1)
+              parsed[name]=d
+          if pathlib.Path('api/v1/intel/apex.json').exists() and \
+             strict_load(pathlib.Path('api/v1/intel/apex.json')).get('generator') == 'generate_dashboard_feeds.py':
+              print('::error::generate_dashboard_feeds.py wrote apex.json; it must not (single producer)'); sys.exit(1)
+          stats=parsed['api/v1/intel/stats.json']
+          count=stats.get('total', 0) if isinstance(stats,dict) else 0
+          if not isinstance(count,(int,float)) or isinstance(count,bool) or count <= 0:
+              print(f'::error::stats.json advertises non-positive advisory count ({count}); refusing destructive empty publication')
+              sys.exit(1)
+          print(f'VALIDATION=PASS DASHBOARD_ADVISORIES={count} FILES={len(files)} STRICT_JSON=PASS')
+          PY
+
+      - name: "Upload dashboard generation to Cloudflare R2"
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BUCKET="sentinel-apex-data"
+          for FILE in \
+            api/v1/intel/ai_summary.json api/v1/intel/stats.json \
+            api/v1/intel/campaigns.json api/v1/intel/ransomware.json api/v1/intel/apt.json \
+            api/v1/intel/epss.json api/v1/intel/defcon.json api/v1/intel/pulse.json \
+            api/v1/intel/darkweb.json api/v1/intel/cybermap.json; do
+            echo "Publishing $FILE"
+            aws s3 cp "$FILE" "s3://${BUCKET}/${FILE}" \
+              --endpoint-url "$ENDPOINT" --content-type "application/json" \
+              --cache-control "max-age=120, s-maxage=120" --quiet
+          done
+          echo "R2_PUBLICATION=PASS FILES=10"
+
+      - name: "Purge Cloudflare cache"
+        if: github.event.inputs.dry_run != 'true'
+        continue-on-error: true
+        run: |
+          ZONE_ID="${{ secrets.CF_ZONE_ID }}"
+          TOKEN="${{ secrets.CF_CACHE_PURGE_TOKEN }}"
+          if [ -z "$ZONE_ID" ] || [ -z "$TOKEN" ]; then
+            echo "[WARN] cache purge credentials unavailable; endpoint canary below remains authoritative"
+            exit 0
+          fi
+          curl --fail-with-body -sS -X POST \
+            "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+            --data '{"files":["https://intel.cyberdudebivash.com/api/v1/intel/ai_summary.json","https://intel.cyberdudebivash.com/api/v1/intel/stats","https://intel.cyberdudebivash.com/api/v1/intel/campaigns","https://intel.cyberdudebivash.com/api/v1/intel/ransomware","https://intel.cyberdudebivash.com/api/v1/intel/apt","https://intel.cyberdudebivash.com/api/v1/intel/epss","https://intel.cyberdudebivash.com/api/v1/intel/defcon","https://intel.cyberdudebivash.com/api/v1/intel/pulse","https://intel.cyberdudebivash.com/api/v1/intel/darkweb","https://intel.cyberdudebivash.com/api/v1/intel/cybermap"]}'
+
+      - name: "Production semantic canary"
+        if: github.event.inputs.dry_run != 'true'
+        run: |
+          sleep 8
+          python3 - <<'PY'
+          import json, time, urllib.request, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
+          base='https://intel.cyberdudebivash.com'
+          endpoints=['/api/v1/intel/apex.json','/api/v1/intel/ai_summary.json','/api/v1/intel/stats']
+          last=None
+          for attempt in range(4):
+              try:
+                  payloads={}
+                  for ep in endpoints:
+                      req=urllib.request.Request(base+ep, headers={'Cache-Control':'no-cache','User-Agent':'SentinelAPEX-v200-canary'})
+                      with urllib.request.urlopen(req, timeout=15) as r:
+                          if r.status != 200: raise RuntimeError(f'{ep}: HTTP {r.status}')
+                          payloads[ep]=json.loads(r.read().decode('utf-8'), parse_constant=reject_constant)
+                  # Advisory count comes from stats (this workflow's output).
+                  # apex.json is the FEED owned by generate_api_manifests.py
+                  # (P0 Phase 3C) and is only checked for its feed shape.
+                  stats=payloads['/api/v1/intel/stats']
+                  count=stats.get('total',0) if isinstance(stats,dict) else 0
+                  apex=payloads['/api/v1/intel/apex.json']
+                  apex_ok=isinstance(apex,dict) and isinstance(apex.get('items'),list) and apex.get('generator')=='generate_api_manifests.py'
+                  if apex_ok and isinstance(count,(int,float)) and not isinstance(count,bool) and count > 0:
+                      print(f'PRODUCTION_CANARY=PASS API_ADVISORIES={count} APEX_FEED_SHAPE=PASS STRICT_JSON=PASS')
+                      sys.exit(0)
+                  last=f'stats advisory count={count} apex_feed_shape={apex_ok}'
+              except Exception as e:
+                  last=str(e)
+              time.sleep(5*(attempt+1))
+          print(f'::error::PRODUCTION_CANARY=FAIL {last}')
+          sys.exit(1)
+          PY

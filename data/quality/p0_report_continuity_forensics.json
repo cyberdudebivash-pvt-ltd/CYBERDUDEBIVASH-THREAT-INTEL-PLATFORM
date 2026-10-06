@@ -1,0 +1,224 @@
+{
+  "report": "P0 Report Continuity Incident -- Forensic Dataset",
+  "generated_at": "2026-08-22T11:00:00Z",
+  "branch": "claude/p0-report-continuity-pipeline-order",
+  "reproduced_on_commit": "32542add85cf882d131ab869289735272016ad9e",
+  "methodology": "Direct re-run of scripts/report_existence_validator.py logic against data/stix/feed_manifest.json and api/feed.json SEPARATELY on a fresh checkout of current main, superseding the stale pre-incident 546/1020 figures cited in the triggering CI run (#2140).",
+  "feeds": {
+    "api/feed.json": {
+      "total_items": 90,
+      "with_report_url": 87,
+      "empty_report_url": 3,
+      "external_url_skipped": 87,
+      "bad_prefix": 0,
+      "checked_local": 0,
+      "present_on_disk": 0,
+      "missing_on_disk": 0,
+      "note": "Every report_url in this feed is fully-qualified/external (http-prefixed); report_existence_validator.py never checks these as local files, so this feed contributes 0 to STAGE 5.4.1 failures today."
+    },
+    "data/stix/feed_manifest.json": {
+      "total_items": 1349,
+      "empty_report_url": 0,
+      "external_url_skipped": 473,
+      "bad_prefix": 0,
+      "checked_local": 876,
+      "present_on_disk": 643,
+      "missing_on_disk": 233
+    }
+  },
+  "missing_by_day": {
+    "2026-08-19": 3,
+    "2026-08-20": 116,
+    "2026-08-21": 69,
+    "2026-08-22": 45
+  },
+  "present_by_day_same_range": {
+    "2026-08-20": 146,
+    "2026-08-21": 268,
+    "2026-08-22": 229
+  },
+  "pattern_observed": "Missing entries are NOT concentrated in one catastrophic day -- they are spread across the last several days at a declining-but-nonzero rate (100% / 44.3% / 20.5% / 16.4% missing, oldest to newest day observed), consistent with an ONGOING per-run gap that partially self-corrects over subsequent runs, not a single historical incident.",
+  "root_cause_classification": {
+    "primary_class": "D -- Late-stage manifest rewrite/reconciliation without file-existence verification",
+    "description": "scripts/generate_intel_reports.py (STAGE 3.6) is the sole engine that atomically writes a report HTML file, validates it (existence + min size + HTML signature), and ONLY THEN sets item[\"report_url\"] -- on any failure it explicitly clears report_url to \"\". This engine never produces a dangling reference. However, scripts/run_pipeline.py stage_sync_root_feed_json() runs a SECOND time at the very end of the pipeline (after STAGE 3.6) and performs a canonical manifest write-back (Step 7) that includes a RECONCILIATION sub-step: items present in the quality-engine-filtered payload but not matched by id/stix_id in the pre-quality manifest snapshot are APPENDED verbatim -- report_url field included -- with no re-check that the file it names exists in this run's working tree. Any upstream mechanism that carries an item (and its report_url) forward across runs without going through STAGE 3.6's own generation for THIS run (the intel_quality_engine's own source-balancing/carry-forward behavior, or the prev_feed thin-manifest fallback) can introduce exactly this class of dangling reference.",
+    "secondary_contributing_factor": "scripts/safe_git_commit.py (STAGE 4) confirmed actively exercising a conflict-recovery cascade in production (8 \"conflict-recovery\" commits found in the last 300 commits on main, including one from ~2 hours before this investigation) that restores both reports/ (as a directory union via ) and data/stix/feed_manifest.json (as a full single-file replace via the same ref) from ORIG_HEAD independently. This composition is SAFE as long as ORIG_HEAD itself is materialization-clean (a directory-union restore can only add files, never remove the ones a clean manifest references) -- meaning this cascade amplifies/propagates an upstream gap rather than independently causing one. Fixing the true final-writer gap (Step 7's reconciliation) is therefore sufficient; safe_git_commit.py required no changes.",
+    "unrelated_finding_not_in_scope": "data/stix/feed_manifest.json on committed main (verified via ) is currently a bare JSON list, not the {\"advisories\": [...]} dict envelope that stage_sync_root_feed_json() Step 7 (v143.1.1) intends to always produce -- meaning Step 7 is silently failing or being bypassed on some runs. This is a real, separate format-integrity question worth its own investigation, but is NOT the cause of the report_url/file dangling-reference defect (reproduced and fixed identically regardless of which envelope shape the manifest was in) and is explicitly left untouched here per the minimal-change-surface mandate. The new materialization barrier defensively re-envelopes to dict before its own repair pass runs, purely to guarantee it can never itself narrow the manifest -- it does not address why the drift happens upstream."
+  },
+  "sample_missing_items": [
+    {
+      "id": "intel--1b10790bf14af85a",
+      "report_url": "/reports/2026/08/intel--1b10790bf14af85a.html",
+      "processed_at": "2026-08-22T06:05:24Z",
+      "severity": "MEDIUM",
+      "feed_source": "rss_seclists_org_rss_oss_sec_rss"
+    },
+    {
+      "id": "intel--5c912d86c2fcd32c",
+      "report_url": "/reports/2026/08/intel--5c912d86c2fcd32c.html",
+      "processed_at": "2026-08-22T02:56:02Z",
+      "severity": "MEDIUM",
+      "feed_source": "rss_cvefeed_io_rssfeed_latest_xml"
+    },
+    {
+      "id": "intel--b1c6d0ed62587968",
+      "report_url": "/reports/2026/08/intel--b1c6d0ed62587968.html",
+      "processed_at": "2026-08-21T21:58:57Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--24ef657f978f5eeb",
+      "report_url": "/reports/2026/08/intel--24ef657f978f5eeb.html",
+      "processed_at": "2026-08-21T21:58:57Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--335a98687632043c",
+      "report_url": "/reports/2026/08/intel--335a98687632043c.html",
+      "processed_at": "2026-08-21T21:58:57Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--a3d0b9020a3ba404",
+      "report_url": "/reports/2026/08/intel--a3d0b9020a3ba404.html",
+      "processed_at": "2026-08-21T21:58:57Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--748165809782ea71",
+      "report_url": "/reports/2026/08/intel--748165809782ea71.html",
+      "processed_at": "2026-08-21T21:58:57Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--a839285442f49093",
+      "report_url": "/reports/2026/08/intel--a839285442f49093.html",
+      "processed_at": "2026-08-21T21:58:57Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--708995b129119059",
+      "report_url": "/reports/2026/08/intel--708995b129119059.html",
+      "processed_at": "2026-08-21T21:58:57Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--72a600bce2bf94b0",
+      "report_url": "/reports/2026/08/intel--72a600bce2bf94b0.html",
+      "processed_at": "2026-08-21T21:58:57Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--5d53df324ad4de68",
+      "report_url": "/reports/2026/08/intel--5d53df324ad4de68.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--0bb75a595b16677f",
+      "report_url": "/reports/2026/08/intel--0bb75a595b16677f.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--e36e7ea7d0e4652a",
+      "report_url": "/reports/2026/08/intel--e36e7ea7d0e4652a.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--a64bbaca7ed4b970",
+      "report_url": "/reports/2026/08/intel--a64bbaca7ed4b970.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--83589cd82f0de2ee",
+      "report_url": "/reports/2026/08/intel--83589cd82f0de2ee.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--d2f1fad861faded0",
+      "report_url": "/reports/2026/08/intel--d2f1fad861faded0.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--edb253c26b57a376",
+      "report_url": "/reports/2026/08/intel--edb253c26b57a376.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--2801599a4a74045b",
+      "report_url": "/reports/2026/08/intel--2801599a4a74045b.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--047dbd644d2b3572",
+      "report_url": "/reports/2026/08/intel--047dbd644d2b3572.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--4bf2061ff72e8108",
+      "report_url": "/reports/2026/08/intel--4bf2061ff72e8108.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--605cab514f024627",
+      "report_url": "/reports/2026/08/intel--605cab514f024627.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--b74fa8cc3dc59a56",
+      "report_url": "/reports/2026/08/intel--b74fa8cc3dc59a56.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--bc48ab3aa01d4d55",
+      "report_url": "/reports/2026/08/intel--bc48ab3aa01d4d55.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--2b265eba81fb488d",
+      "report_url": "/reports/2026/08/intel--2b265eba81fb488d.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    },
+    {
+      "id": "intel--a408a86a7cb0c756",
+      "report_url": "/reports/2026/08/intel--a408a86a7cb0c756.html",
+      "processed_at": "2026-08-21T14:18:19Z",
+      "severity": "HIGH",
+      "feed_source": "ransomware_live"
+    }
+  ]
+}

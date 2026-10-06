@@ -1,0 +1,302 @@
+// Customer dashboard data contract (P0, 2026-09-24): ATT&CK tactic coverage,
+// campaign semantics, ransomware classification, geo attribution, and the
+// index.js route wiring that exposes them.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  ATTACK_TACTICS, normalizeTactic, techniqueIdsOf, buildTechniqueTacticMap, deriveItemTactics,
+  deriveAttackTacticCoverage, campaignEvidence, buildCampaignsPayload, classifyRansomware,
+  buildRansomwarePayload, geoAttributionCoverage, referenceTacticsFor, isPipelineTitle,
+} from "../dashboard-contract.js";
+import { TECHNIQUE_TACTIC_IDS, ATTACK_REFERENCE, REFERENCE_TACTICS } from "../attack-technique-tactics.js";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const INDEX = readFileSync(path.join(HERE, "..", "index.js"), "utf8");
+
+const GROUPS = [
+  { name: "LockBit 3.0", sector: "Healthcare" }, { name: "BlackCat/ALPHV", sector: "Energy" },
+  { name: "Cl0p", sector: "Government" }, { name: "Play", sector: "Legal" }, { name: "Akira", sector: "SMB" },
+];
+
+// Shapes copied from the live /api/feed.json items (2026-09-24).
+const ITEM_TACTICS = {
+  id: "a1", title: "Chrome cookie stealer", severity: "HIGH", risk_score: 7.1,
+  mitre_tactics: [{ id: "T1539", name: "Steal Web Session Cookie", tactic: "Credential Access" }],
+  attck_technique_ids: ["T1539"], tags: ["T1539"],
+};
+const ITEM_ATTCK_MULTI = {
+  id: "a2", title: "Snipe-IT 2FA bypass", severity: "MEDIUM", risk_score: 5,
+  attck_technique_ids: ["T1078", "T1190"],
+  attck_techniques: [
+    { technique_id: "T1078", tactic: "Defense Evasion / Persistence / Privilege Escalation / Initial Access" },
+    { technique_id: "T1190", tactic: "Initial Access" },
+  ],
+};
+const ITEM_IDS_ONLY = { id: "a3", title: "RCE in X", severity: "CRITICAL", risk_score: 9.8, attck_technique_ids: ["T1539"], tags: [] };
+const ITEM_CRITICAL_NO_EVIDENCE = { id: "a4", title: "Low Security Vulnerability (CVE-2026-61742)", severity: "CRITICAL", risk_score: 1.85, tags: ["pip:x"] };
+
+test("ATT&CK tactic list is the 14 Enterprise tactics in matrix order", () => {
+  assert.equal(ATTACK_TACTICS.length, 14);
+  assert.equal(ATTACK_TACTICS[0].name, "Reconnaissance");
+  assert.equal(ATTACK_TACTICS[13].name, "Impact");
+  assert.equal(normalizeTactic("initial-access"), "Initial Access");
+  assert.equal(normalizeTactic("TA0011"), "Command and Control");
+  assert.equal(normalizeTactic("Weaponization"), null, "Lockheed kill-chain phases are not ATT&CK tactics");
+});
+
+test("technique ids are read from structured fields and T-id tags only", () => {
+  assert.deepEqual(techniqueIdsOf({ tags: ["T1190", "pip:foo", "T1059.001"], attck_technique_ids: ["T1203"] }).sort(),
+    ["T1059.001", "T1190", "T1203"]);
+});
+
+test("tactic derivation precedence: mitre_tactics, attck_techniques, id map, legacy", () => {
+  const map = buildTechniqueTacticMap([ITEM_TACTICS, ITEM_ATTCK_MULTI]);
+  assert.deepEqual(deriveItemTactics(ITEM_TACTICS, map), { tactics: ["Credential Access"], method: "mitre_tactics" });
+  const multi = deriveItemTactics(ITEM_ATTCK_MULTI, map);
+  assert.equal(multi.method, "attck_techniques");
+  assert.deepEqual(multi.tactics.sort(), ["Defense Evasion", "Initial Access", "Persistence", "Privilege Escalation"]);
+  assert.deepEqual(deriveItemTactics(ITEM_IDS_ONLY, map), { tactics: ["Credential Access"], method: "technique_id_map" });
+  assert.deepEqual(deriveItemTactics({ kill_chain_phase: "Lateral-Movement" }, map), { tactics: ["Lateral Movement"], method: "legacy_kill_chain" });
+});
+
+// Live /api/feed.json shape (2026-09-25): technique ids, mitre_tactics as
+// technique NAMES, attck_techniques as {id, name} -- no tactic anywhere.
+const ITEM_LIVE_IDS_NO_TACTIC = {
+  id: "l1", title: "Macfinger ClickFix malware", severity: "CRITICAL", risk_score: 9.1,
+  mitre_tactics: ["Exfiltration Over C2 Channel"], attck_techniques: [{ id: "T1041", name: "Exfiltration Over C2 Channel" }],
+  attck_technique_ids: ["T1041"],
+};
+
+test("generated technique->tactic table matches the committed MITRE ATT&CK reference", () => {
+  const ref = JSON.parse(readFileSync(path.join(HERE, "..", "..", "..", "..", "data", "attck", "enterprise-attack.json"), "utf8"));
+  const tacticId = Object.fromEntries(ref.tactics.map((t) => [t.shortname, t.attck_id]));
+  assert.equal(ATTACK_REFERENCE.content_hash, ref.content_hash, "rerun python3 scripts/build_attack_tactic_map.py");
+  assert.deepEqual(REFERENCE_TACTICS, Object.fromEntries(ref.tactics.map((t) => [t.attck_id, t.name])));
+  for (const t of ref.techniques) {
+    const want = [...new Set(t.tactics.map((s) => tacticId[s]).filter(Boolean))].sort();
+    const got = TECHNIQUE_TACTIC_IDS[t.attck_id] || TECHNIQUE_TACTIC_IDS[t.attck_id.split(".")[0]];
+    assert.deepEqual(got, want, t.attck_id);
+  }
+  assert.equal(Object.keys(TECHNIQUE_TACTIC_IDS).filter((k) => !ref.techniques.some((t) => t.attck_id === k)).length, 0,
+    "no technique outside the reference");
+});
+
+test("technique ids without a tactic pair map through the ATT&CK reference (live feed shape)", () => {
+  assert.deepEqual(deriveItemTactics(ITEM_LIVE_IDS_NO_TACTIC, buildTechniqueTacticMap([ITEM_LIVE_IDS_NO_TACTIC])),
+    { tactics: ["Exfiltration"], method: "attck_reference" });
+  assert.deepEqual(referenceTacticsFor("T1078").sort(), ["Defense Evasion", "Initial Access", "Persistence", "Privilege Escalation"],
+    "v18 Stealth folds into Defense Evasion on the 14-tactic matrix");
+  assert.deepEqual(referenceTacticsFor("T1059.001"), ["Execution"], "sub-technique falls back to its parent");
+  assert.deepEqual(referenceTacticsFor("T9999"), [], "unknown id maps to nothing");
+  assert.equal(normalizeTactic("Stealth"), "Defense Evasion");
+  assert.equal(normalizeTactic("TA0112"), "Defense Evasion");
+  // Feed-carried pairs still win over the reference.
+  const map = buildTechniqueTacticMap([ITEM_TACTICS]);
+  assert.equal(deriveItemTactics(ITEM_IDS_ONLY, map).method, "technique_id_map");
+  const { block } = deriveAttackTacticCoverage([ITEM_LIVE_IDS_NO_TACTIC, ITEM_CRITICAL_NO_EVIDENCE], "t");
+  assert.equal(block.derivation_version, "attack-tactics/1.1");
+  assert.equal(block.items_with_attack_evidence, 1);
+  assert.equal(block.method_counts.attck_reference, 1);
+  assert.equal(block.method_counts.none, 1, "a CRITICAL item with no technique ids stays uncounted");
+  assert.equal(block.tactics.find((t) => t.name === "Exfiltration").count, 1);
+  assert.equal(block.tactics_observed, 1, "one technique contributes only its own tactic");
+  assert.equal(block.reference.content_hash, ATTACK_REFERENCE.content_hash);
+});
+
+test("pipeline-generated titles are not campaign or ransomware evidence (live 2026-09-25)", () => {
+  const fabricated = [
+    { id: "p1", title: "Phishing Campaign \u2014 Credential Harvesting Operation", _orig_title: "CDB-UNATTR-PHI Campaign",
+      description: "Hackers Exploited Ethereum Bridge Contract to Drain Full Balance from Payy Network", threat_type: "Phishing", tags: ["phishing"] },
+    { id: "p2", title: "CDB-MOB-02 Campaign", description: "Read This Before You Buy That TV Streaming Stick", threat_type: "Phishing", tags: [] },
+    { id: "p3", title: "Unattributed Ransomware Campaign \u2014 Active Threat", description: "x", tags: [] },
+    { id: "p4", title: "APT41 Espionage Campaign \u2014 Multi-Sector Targeting", description: "x", tags: [] },
+  ];
+  for (const it of fabricated) {
+    assert.equal(isPipelineTitle(it), true, it.title);
+    assert.deepEqual(campaignEvidence(it), [], it.title);
+  }
+  assert.equal(classifyRansomware(fabricated[2], GROUPS).ransomware, false, "a template title is not ransomware evidence");
+  // A restored real headline keeps its lineage marker and still counts.
+  const restored = { id: "r1", title: "Fake PDF Files Hide Konni Malware Campaign Targeting Ukraine Organizations",
+    _orig_title: "CDB-UNATTR-APT Campaign", tags: [] };
+  assert.equal(isPipelineTitle(restored), false);
+  assert.deepEqual(campaignEvidence(restored), ["title:campaign"]);
+  const payload = buildCampaignsPayload([...fabricated, restored], "t");
+  assert.equal(payload.active_campaign_count, 1);
+  assert.equal(payload.campaign_semantics.version, "campaign-evidence/1.3");
+});
+
+test("severity never produces a tactic: a CRITICAL item with no ATT&CK evidence contributes nothing", () => {
+  const { block } = deriveAttackTacticCoverage([ITEM_CRITICAL_NO_EVIDENCE], "t");
+  assert.equal(block.items_with_attack_evidence, 0);
+  assert.equal(block.tactics_observed, 0);
+  assert.ok(block.tactics.every((t) => t.count === 0));
+});
+
+test("feed with MITRE tactics yields non-zero coverage (the all-zero defect)", () => {
+  const payload = buildCampaignsPayload([ITEM_TACTICS, ITEM_ATTCK_MULTI, ITEM_IDS_ONLY, ITEM_CRITICAL_NO_EVIDENCE], "2026-09-24T00:00:00Z");
+  const at = payload.attack_tactics;
+  assert.equal(at.model, "mitre_attack_enterprise_tactics");
+  assert.equal(at.items_evaluated, 4);
+  assert.equal(at.items_with_attack_evidence, 3);
+  assert.equal(at.tactics.find((t) => t.name === "Credential Access").count, 2);
+  assert.equal(at.tactics.find((t) => t.name === "Initial Access").count, 1);
+  assert.ok(at.tactics_observed > 0);
+  assert.ok(payload.total_tactics > 0, "legacy phase counters must not stay zero when ATT&CK evidence exists");
+  assert.ok(payload.coverage_pct > 0);
+  assert.equal(at.generated_at, "2026-09-24T00:00:00Z");
+});
+
+test("legacy /campaigns keys are preserved for existing readers", () => {
+  const payload = buildCampaignsPayload([], "t");
+  for (const k of ["phases", "coverage_pct", "active_campaigns", "total_tactics", "generated_at"]) assert.ok(k in payload, k);
+  assert.deepEqual(Object.keys(payload.phases), ["recon", "weaponize", "deliver", "exploit", "install", "c2", "action"]);
+  assert.equal(payload.coverage_pct, 0);
+  assert.equal(payload.active_campaigns.length, 0);
+});
+
+test("a CRITICAL vulnerability is not a campaign; campaign evidence is", () => {
+  assert.deepEqual(campaignEvidence(ITEM_CRITICAL_NO_EVIDENCE), []);
+  assert.deepEqual(campaignEvidence({ title: "CVE-2026-1 KEV", severity: "CRITICAL", kev: true, risk_score: 9.9 }), []);
+  assert.deepEqual(campaignEvidence({ title: "Fake PDF Files Hide Konni Malware Campaign Targeting Ukraine" }), ["title:campaign"]);
+  assert.deepEqual(campaignEvidence({ title: "New Galago Ransomware Operation Emerges" }), ["title:operation"]);
+  assert.deepEqual(campaignEvidence({ title: "x", campaign_id: "camp-7" }), [], "a pipeline campaign id alone is not a campaign");
+  assert.deepEqual(campaignEvidence({ title: "Konni campaign targets Ukraine", campaign_id: "camp-7" }),
+    ["title:campaign", "campaign_id"], "a campaign id is kept as supporting evidence");
+  assert.deepEqual(campaignEvidence({ title: "Konni campaign targets Ukraine", campaign_id: "UNCLASSIFIED" }),
+    ["title:campaign"], "the pipeline's UNCLASSIFIED placeholder is not a campaign link");
+  assert.deepEqual(campaignEvidence({ title: "x", mitre_group_name: "APT29" }), [], "an actor label alone is not a campaign");
+  // Live item (2026-09-24): policy news carrying a heuristic group label.
+  assert.deepEqual(campaignEvidence({ title: "New bill would create federal investigative body for AI-driven hacks",
+    tags: ["T1203"], threat_type: "Threat Intel", mitre_group_name: "APT-22 / Sea Turtle" }), []);
+  assert.deepEqual(campaignEvidence({ title: "APT29 phishing campaign hits embassies", mitre_group_name: "APT29" }),
+    ["title:campaign", "mitre_group:APT29"], "a group is kept as supporting evidence");
+  assert.deepEqual(campaignEvidence({ title: "x", actor: "CDB-UNATTR-APT", mitre_group_name: "Unattributed APT Cluster" }), [],
+    "placeholder attributions are not a named actor");
+  assert.deepEqual(campaignEvidence({ title: "Phishing campaign hits banks", mitre_group_name: "Unattributed LockBit cluster" }),
+    ["title:campaign"], "a placeholder label is never recorded as a named group");
+  assert.deepEqual(campaignEvidence({ title: "Phishing campaign hits banks", mitre_group_name: "LockBit cluster (unattributed)" }),
+    ["title:campaign"]);
+  const payload = buildCampaignsPayload([ITEM_CRITICAL_NO_EVIDENCE, ITEM_IDS_ONLY], "t");
+  assert.equal(payload.active_campaign_count, 0);
+  assert.equal(payload.active_campaigns.length, 0);
+});
+
+test("campaigns: pipeline campaign links on unrelated news are not campaigns (live false positives, 2026-09-24)", () => {
+  // Live R2 items: keyword-inferred campaign links on CVE, court and policy news.
+  const live = [
+    { id: "k1", title: "CVE-2026-48540 - Krayin CRM 2.2.6 Stored Template Injection XSS via Lead Title",
+      campaign_id: "CAMP-APT41Healthcare", threat_type: "Threat Intelligence", tags: ["CVE-2026-48540", "rss"] },
+    { id: "k2", title: "Ukrainian ransomware developer jailed for nearly 13 years", campaign_id: "CAMP-LockBitRoyalMail",
+      mitre_group_name: "LockBit Ransomware Group", threat_type: "Threat Intelligence", tags: ["rss"] },
+    { id: "k3", title: "Bipartisan Senate leaders introduce bill to bolster telecom cybersecurity",
+      campaign_id: "CAMP-VoltTyphoonCritical", mitre_group_name: "Volt Typhoon", tags: ["rss"] },
+    { id: "k4", title: "17,000 URLs Reveal How ClickFix Turns Trusted Websites Into Malware Traps", campaign_name: "OP-GHOSTPULSE" },
+    { id: "k5", title: "TeamFiltration Campaign Compromises Seven Microsoft 365 Accounts Using Default Passwords" },
+  ];
+  const payload = buildCampaignsPayload(live, "t");
+  assert.equal(payload.active_campaign_count, 1);
+  assert.deepEqual(payload.active_campaigns.map((c) => c.id), ["k5"]);
+  assert.equal(payload.campaign_semantics.version, "campaign-evidence/1.3");
+});
+
+test("ransomware: LockBit and ALPHV advisories classify from structured fields and titles", () => {
+  const lockbit = classifyRansomware({ title: "LockBit 3.0 affiliate hits hospital", tags: [] }, GROUPS);
+  assert.equal(lockbit.ransomware, true);
+  assert.deepEqual(lockbit.groups, ["LockBit 3.0"]);
+  const alphv = classifyRansomware({ title: "Advisory", tags: ["alphv"] }, GROUPS);
+  assert.equal(alphv.ransomware, true);
+  assert.deepEqual(alphv.groups, ["BlackCat/ALPHV"]);
+  assert.ok(alphv.evidence.includes("tags:BlackCat/ALPHV"));
+  const typed = classifyRansomware({ title: "Advisory", threat_type: "Ransomware" }, GROUPS);
+  assert.ok(typed.evidence.includes("threat_type:ransomware"));
+});
+
+test("ransomware: description prose, bare 'ransom', 'extort' and 'play' do not classify", () => {
+  const historic = { title: "Patch Tuesday fixes 60 flaws", description: "Last year this bug was used in ransomware attacks.", tags: [] };
+  assert.equal(classifyRansomware(historic, GROUPS).ransomware, false, "description is never read");
+  assert.equal(classifyRansomware({ title: "Man held for ransom of stolen laptop" }, GROUPS).ransomware, false);
+  assert.equal(classifyRansomware({ title: "Extortion email scam" }, GROUPS).ransomware, false);
+  assert.equal(classifyRansomware({ title: "Google Play app flaw" }, GROUPS).ransomware, false);
+  assert.equal(classifyRansomware({ title: "Akiranet library bug" }, GROUPS).ransomware, false, "word boundary");
+  assert.equal(classifyRansomware({ title: "Play ransomware claims retailer" }, GROUPS).groups[0], "Play");
+});
+
+test("ransomware: a placeholder actor label is not evidence (live false positive, 2026-09-24)", () => {
+  // Live R2 item: product-launch news whose pipeline cluster label named ransomware.
+  const scoutz = { title: "SCOUTz Prospect Intelligence Platform Launches for MSPs with 30-Day Beta", tags: ["T1566"],
+    threat_type: "Threat Intel", actor: "Unattributed Ransomware Actor", actor_tag: "CDB-UNATTR-RAN" };
+  assert.equal(classifyRansomware(scoutz, GROUPS).ransomware, false);
+  assert.equal(classifyRansomware({ title: "Product launch", mitre_group_name: "Ransomware cluster (unattributed)" }, GROUPS).ransomware, false);
+  assert.equal(classifyRansomware({ title: "x", actor: "LockBit 3.0" }, GROUPS).ransomware, false, "an actor label alone is not evidence");
+});
+
+test("ransomware: pipeline actor labels never classify or name a group (live false positives, 2026-09-24)", () => {
+  // Live R2 items: keyword-inferred attributions on a kernel CVE and on Ryuk court news.
+  const kernel = { title: "CVE-2026-89686: In the Linux kernel, the following vulnerability has been resolved: nfsd",
+    tags: ["nvd", "cve", "critical"], threat_type: "Threat Intelligence", actor: "Cl0p Ransomware", actor_tag: "CDB-FIN-11",
+    mitre_group_name: "Cl0p" };
+  assert.deepEqual(classifyRansomware(kernel, GROUPS), { ransomware: false, evidence: [], groups: [] });
+  const ryuk = { title: "US Court Sentences Armenian Man to Prison for Ryuk Ransomware Attacks", tags: ["rss"],
+    actor: "LockBit Ransomware Group", mitre_group_name: "LockBit 3.0" };
+  const r = classifyRansomware(ryuk, GROUPS);
+  assert.equal(r.ransomware, true, "the title is independent evidence");
+  assert.deepEqual(r.groups, [], "LockBit is not active because a pipeline label named it");
+  assert.ok(r.evidence.includes("title:ransomware"));
+  assert.ok(r.evidence.includes("actor_label:LockBit Ransomware Group"), "kept as supporting evidence");
+  const placeholder = classifyRansomware({ title: "Ransomware hits hospital", actor: "Unattributed LockBit cluster" }, GROUPS);
+  assert.deepEqual(placeholder.groups, []);
+  assert.ok(!placeholder.evidence.some((e) => /lockbit/i.test(e)), "a placeholder label is never a named group");
+  const payload = buildRansomwarePayload([kernel, ryuk], GROUPS, "t");
+  assert.equal(payload.ransomware_advisories, 1);
+  assert.equal(payload.active_groups, 0);
+  assert.equal(payload.classification.version, "ransomware-classifier/1.2");
+});
+
+test("ransomware payload: no active group from a static list; victims stay unmeasured", () => {
+  const none = buildRansomwarePayload([ITEM_TACTICS, ITEM_CRITICAL_NO_EVIDENCE], GROUPS, "t");
+  assert.equal(none.active_groups, 0);
+  assert.equal(none.ransomware_advisories, 0);
+  assert.equal(none.recent_advisories.length, 0);
+  assert.deepEqual(none.top_groups, []);
+  assert.equal(none.monitor_status, "OPERATIONAL");
+  assert.equal(none.new_victims_30d, null);
+  assert.equal(none.victims_measured, false);
+  const one = buildRansomwarePayload([{ id: "r", title: "Cl0p exploits MOVEit again", tags: [] }], GROUPS, "t");
+  assert.equal(one.active_groups, 1);
+  assert.equal(one.top_groups[0].victims_30d, null);
+  assert.equal(one.top_groups[0].status, "IN_CURRENT_FEED");
+});
+
+test("geo attribution counts actor_country only", () => {
+  const cov = geoAttributionCoverage([{ actor_country: "RU" }, { actor_country: "Unknown" }, { source_country: "US" }, {}]);
+  assert.equal(cov.items_evaluated, 4);
+  assert.equal(cov.items_with_country_attribution, 1);
+  assert.equal(cov.attribution_field, "actor_country");
+});
+
+test("index.js routes delegate to the contract and never apply the 74 fallback", () => {
+  assert.match(INDEX, /function computeKillChain\(items\) \{\s*return buildCampaignsPayload\(items, now\(\)\);/);
+  assert.match(INDEX, /function computeRansomware\(items\) \{\s*return buildRansomwarePayload\(items, RANSOMWARE_GROUPS, now\(\)\);/);
+  assert.doesNotMatch(INDEX, /_LEGACY_FEED_COUNT_FALLBACK\s*=\s*74/);
+  assert.doesNotMatch(INDEX, /\?\?\s*_LEGACY_FEED_COUNT_FALLBACK/);
+  assert.doesNotMatch(INDEX, /item\.actor_country \|\| item\.source_country/, "publisher geography is not attack origin");
+  assert.match(INDEX, /campaigns_detected: kcData\.active_campaign_count/);
+});
+
+test("/api/v1/intel/stats exposes the feed generation time and publication state", () => {
+  const start = INDEX.indexOf('if (path === "/api/v1/intel/stats"');
+  const body = INDEX.slice(start, start + 2200);
+  assert.match(body, /last_feed_sync_utc: publication\.generated_at/);
+  assert.match(body, /publication,/);
+  assert.match(body, /latest_item_published_at: stats\.last_sync/);
+});
+
+test("a synthetic empty feed is never reported as a fresh publication", () => {
+  assert.match(INDEX, /_synthetic_empty: true/);
+  assert.match(INDEX, /evaluatePublicIntelligence\(feedData && !feedData\._synthetic_empty \? feedData : null/);
+  assert.match(INDEX, /feedData\._synthetic_empty \? null : \(feedData\.generated_at \|\| null\)/);
+});

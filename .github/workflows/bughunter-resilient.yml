@@ -1,0 +1,106 @@
+# CYBERDUDEBIVASH SENTINEL APEX  -  Bug Hunter Resilient Recon
+# Uses v54 resilient scanner with 3-tier subdomain fallback
+# Runs every 8 hours + manual dispatch
+
+name: Bug Hunter Resilient Recon v201.0
+
+on:
+  schedule:
+    - cron: '15 */8 * * *'
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Target domain'
+        default: 'cyberdudebivash.com'
+        required: false
+      timeout:
+        description: 'HTTP timeout (seconds)'
+        default: '15'
+        required: false
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+# Resource-scoped lock: this workflow reads shared intelligence but writes only
+# its own derived namespace. A global sentinel-data-writer lock can starve or
+# cancel pending jobs because GitHub concurrency retains only one pending run.
+concurrency:
+  group: sentinel-data-writer-bughunter
+  cancel-in-progress: false
+
+jobs:
+  resilient-recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name:  Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name:  Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name:  Install Dependencies
+        run: |
+          pip install requests --quiet
+
+      - name:  Run Resilient Bug Hunter Scan
+        env:
+          CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
+          BH_TARGET_DOMAIN: ${{ github.event.inputs.domain || 'cyberdudebivash.com' }}
+          BH_TIMEOUT: ${{ github.event.inputs.timeout || '15' }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m agent.v54_bughunter_resilience.resilient_scanner \
+            --domain "${BH_TARGET_DOMAIN}" \
+            --timeout "${BH_TIMEOUT}"
+
+      - name:  Validate Output
+        run: |
+          echo "=== Bug Hunter Output ==="
+          python3 -c "
+          import json
+          with open('data/bughunter/bughunter_output.json') as f:
+              d = json.load(f)
+          m = d.get('metrics', {})
+          print(f\"Subdomains:  {m.get('subdomains', 0)}\")
+          print(f\"Live hosts:  {m.get('live_hosts', 0)}\")
+          print(f\"Findings:    {m.get('total_findings', 0)}\")
+          print(f\"Risk:        \${m.get('risk_exposure', 0):,}\")
+          print(f\"Engines:     {len(d.get('engines', []))}/12\")
+          has_data = m.get('subdomains', 0) > 0
+          print(f\"Has data:    {'YES [OK]' if has_data else 'NO [FAIL]'}\")
+          if not has_data:
+              print('WARNING: Zero subdomains  -  external APIs may be down')
+          "
+
+      - name:  Commit Results
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "CYBERDUDEBIVASH"
+          git config user.email "bivash@cyberdudebivash.com"
+          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
+          git add -f data/bughunter/bughunter_output.json || true
+          git add -f data/bughunter/scan_history/ || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m " Bug Hunter v54 resilient scan  -  $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+                        git rebase --abort 2>/dev/null || true; git merge --abort 2>/dev/null || true
+            rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
+            for i in 1 2 3 4; do
+              git fetch origin main --quiet 2>/dev/null || true
+              git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null||true; git merge origin/main -X ours --no-edit --quiet||true; }
+              if git push origin main; then echo "Push OK ($i/4)"; break; fi
+              sleep $((i*15))
+              [ $i -eq 4 ] && echo "Push deferred."
+            done
+          fi

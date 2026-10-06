@@ -1,0 +1,102 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX v200.0 - MULTI-SOURCE INTELLIGENCE ENRICHMENT
+# Runtime state authority: Cloudflare R2
+# =============================================================================
+name: CDB Multi-Source Intelligence Enrichment v201.0
+
+on:
+  schedule:
+    - cron: '45 1,5,9,13,17,21 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PIPELINE_VERSION: "201.0"
+
+concurrency:
+  group: sentinel-data-writer
+  cancel-in-progress: false
+
+jobs:
+  multi-source-enrichment:
+    name: Multi-Source Intelligence v200
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {fetch-depth: 1, ref: "${{ github.ref }}"}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: {python-version: '3.12', cache: 'pip'}
+      - name: "Install Dependencies"
+        run: pip install requests feedparser --quiet
+      - name: "Prepare Directories"
+        run: mkdir -p data/enrichment data/stix data/cache api
+      - name: "Bootstrap Critical Files"
+        env:
+          CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
+        run: python3 scripts/bootstrap_critical_files.py
+
+      - name: "Download Intel State from R2"
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --download
+
+      - name: "True Incremental Intel Ingestion"
+        env:
+          GITHUB_TOKEN_INTEL: ${{ secrets.GH_INTEL_TOKEN }}
+          CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python3 scripts/true_intel_ingestor.py
+
+      - name: "Validate Manifest Integrity"
+        run: python3 scripts/validate_manifest_integrity.py
+
+      # P0: this engine writes registry/chunk state that the immediately
+      # following R2 publication persists. Suppressing its exit status allowed
+      # a green workflow to publish incomplete/previous-generation state.
+      - name: "Run Intelligence Persistence Engine"
+        run: python3 scripts/intel_persistence_engine.py
+
+      - name: "Validate persistence outputs before publication"
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          def reject_constant(token):
+              raise ValueError(f'non-standard JSON constant: {token}')
+          required=[
+            'data/stix/feed_manifest.json',
+            'data/intelligence_repository/intelligence_index.json',
+            'data/intelligence_repository/advisory_registry.json',
+            'data/intelligence_repository/intel_retention_registry.json',
+            'data/intelligence_repository/intel_lifecycle_registry.json',
+            'data/intelligence_repository/historical_feed_registry.json',
+          ]
+          for name in required:
+              p=pathlib.Path(name)
+              if not p.exists() or p.stat().st_size < 2:
+                  print(f'::error::Missing/empty required persistence output: {name}'); sys.exit(1)
+              try: d=json.loads(p.read_text(encoding='utf-8'), parse_constant=reject_constant)
+              except Exception as e:
+                  print(f'::error::Invalid strict JSON {name}: {e}'); sys.exit(1)
+              if not isinstance(d,(dict,list)):
+                  print(f'::error::Invalid state shape {name}'); sys.exit(1)
+          print('PERSISTENCE_VALIDATION=PASS STRICT_JSON=PASS')
+          PY
+
+      - name: "Upload Intel State to R2"
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --upload
+
+      - name: "Runtime state publication summary"
+        run: |
+          echo "STATE_AUTHORITY=R2"
+          echo "PIPELINE_VERSION=${PIPELINE_VERSION}"
+          echo "PUBLICATION=PASS"

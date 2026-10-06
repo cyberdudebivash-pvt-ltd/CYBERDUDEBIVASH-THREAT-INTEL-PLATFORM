@@ -1,0 +1,10 @@
+{
+  "threat_id": "thr-df609e93b5f5",
+  "title": "CISA Warns of TeamCity RCE Vulnerability Actively Exploited in Attacks",
+  "scripts": [
+    {
+      "type": "hardening_bash",
+      "content": "#!/bin/bash\n# CDB APEX v37.0 - Emergency Hardening Script\n# Threat: CISA Warns of TeamCity RCE Vulnerability Actively Exploited \n# Generated: 2026-08-06T11:03:03.315384+00:00\n\necho \"[*] Updating system packages...\"\napt-get update && apt-get upgrade -y 2>/dev/null || yum update -y 2>/dev/null\n\necho \"[*] Enabling firewall...\"\nufw enable 2>/dev/null || firewall-cmd --set-default-zone=drop 2>/dev/null\n\necho \"[*] Disabling unnecessary services...\"\nsystemctl disable --now telnet.socket 2>/dev/null\nsystemctl disable --now rsh.socket 2>/dev/null\n\necho \"[*] Setting secure SSH configuration...\"\nsed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config\nsed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config\nsystemctl restart sshd\n\necho \"[+] Hardening complete for threat: thr-df609e93b5f5\"\n"
+    }
+  ]
+}

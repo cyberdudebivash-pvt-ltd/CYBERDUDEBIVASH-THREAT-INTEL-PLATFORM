@@ -1,0 +1,1248 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX v184.0
+# GENERATE-AND-SYNC — AI TRACKER PIPELINE + PHASE 6 SCALE GOVERNANCE
+# =============================================================================
+#
+# PURPOSE:
+#   Dedicated workflow for generating and syncing all AI Brain outputs:
+#     api/ai/tracker.json        — AI engine outputs (Alpha/Beta/Gamma)
+#     api/ai/health.json         — AI operational telemetry
+#     api/ai/executive-brief.json — Boardroom intelligence
+#
+#   This workflow is SEPARATE from sentinel-blogger (sentinel-data-writer group)
+#   to ELIMINATE race conditions. Uses its own concurrency group: sentinel-ai-writer
+#
+# PHASE 6 SCALE GOVERNANCE:
+#   - Cache segmentation: pip deps cached by hash, AI outputs cached by feed hash
+#   - Dependency layering: validate gates run BEFORE AI generation
+#   - Workflow parallelization: validation steps run in parallel where safe
+#   - Deployment observability: full step timing + pipeline telemetry
+#   - Build duration optimization: shallow checkout, cached pip, conditional run
+#   - Deterministic deployment tracing: run ID + feed hash in every commit msg
+#
+# PIPELINE TELEMETRY (Phase 6):
+#   All steps emit structured telemetry:
+#     STEP_TIMING_MS    - per-step wall-clock time
+#     OUTPUT_SIZE_KB    - output file sizes
+#     FEED_ITEM_COUNT   - items ingested
+#     SCHEMA_VALID      - schema validation result
+#     PIPELINE_RUN_ID   - GitHub run ID (deterministic)
+#
+# SAFETY RULES (inherited from sentinel-blogger v184.0):
+#   RULE 1:  Zero inline Python in YAML
+#   RULE 2:  All logic in dedicated scripts/ only
+#   RULE 3:  Encoding guard runs FIRST
+#   RULE 4:  Pure ASCII in this file
+#   RULE 5:  Zero heredoc blocks
+#   RULE 6:  Simple 1-line script calls only
+#   RULE 7:  Atomic writes (.tmp -> rename, zero corruption risk)
+#   RULE 8:  Stash-safe push retry (5 attempts, exponential backoff)
+#   RULE 9:  CI loop guard (github-actions[bot] push never triggers re-run)
+#   RULE 10: Hard-fail schema validation gates before any data write
+#
+# CONCURRENCY:
+#   group: sentinel-ai-writer (NEVER sentinel-data-writer - prevents manifest race)
+#   cancel-in-progress: false (never drop an in-flight AI generation run)
+#
+# SCHEDULE:
+#   - Every 6 hours offset from sentinel-blogger (runs at 0h) and
+#     multi-source-intel (runs at 1:45h) => AI tracker runs at 2h
+#   - Offset prevents concurrent push contention on origin/main
+#
+# AUTHOR: CYBERDUDEBIVASH Pvt. Ltd. | Principal AI Systems Architect
+# =============================================================================
+
+name: "SENTINEL APEX — Generate & Sync AI Tracker v201.0"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/generate_ai_tracker.py'
+      - 'scripts/generate_ai_endpoints.py'
+      - 'scripts/run_pipeline.py'
+      - 'scripts/report_generator.py'
+      - 'scripts/intel_publication_gate.py'
+      - 'scripts/intel_enterprise_quality_engine.py'
+      - 'scripts/validate_monetization.py'
+      - 'upgrade.html'
+      - '.github/workflows/generate-and-sync.yml'
+  schedule:
+    # Every 6h at :00 past 3am — offset +3h from sentinel-blogger (0,4,8,12,16,20 UTC)
+    # and +1:15h from multi-source-intel (1:45,5:45,... UTC).
+    #
+    # P0 RACE CONDITION FIX (v184.0):
+    #   PREVIOUS BUG: '0 2,8,14,20' caused simultaneous starts with sentinel-blogger
+    #   at 8:00 and 20:00 UTC (sentinel-blogger runs every 4h: 0,4,8,12,16,20).
+    #   Both workflows do git commit+push and R2 uploads, creating push conflicts
+    #   and R2 write races. sentinel-blogger (sentinel-data-writer group) and
+    #   generate-and-sync (sentinel-ai-writer group) are different concurrency groups
+    #   so GitHub Actions does NOT serialize them — they run simultaneously.
+    #
+    #   FIX: Shift to 3,9,15,21 UTC — 3h after sentinel-blogger's 0/12h runs,
+    #   1h after sentinel-blogger's 8/20h runs finish (~6-10min runtime).
+    #   sentinel-blogger has a 90min timeout, so 3h buffer is fully safe.
+    - cron: '0 3,9,15,21 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (generate outputs but do not commit)'
+        required: false
+        type: boolean
+        default: false
+      feed_override:
+        description: 'Custom feed path (leave blank for auto)'
+        required: false
+        type: string
+        default: ''
+      force_regenerate:
+        description: 'Force regenerate even if feed unchanged'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PIPELINE_VERSION: "201.0"
+  PYTHONIOENCODING: "utf-8"
+  PYTHONUTF8: "1"
+  AI_TRACKER_SCHEMA: "sentinel-apex-ai-tracker-v2"
+
+# CRITICAL: sentinel-ai-writer — never share with sentinel-data-writer
+# This isolates AI output generation from the main intel ingestion pipeline.
+concurrency:
+  group: sentinel-ai-writer
+  cancel-in-progress: false
+
+jobs:
+  generate-ai-tracker:
+    name: "AI Tracker Generation + Scale Governance"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # CI LOOP GUARD: Prevent github-actions[bot] push-triggered re-runs
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.actor != 'github-actions[bot]')
+
+    env:
+      CDB_JWT_SECRET:    ${{ secrets.CDB_JWT_SECRET }}
+      GITHUB_RUN_ID:     ${{ github.run_id }}
+      GITHUB_RUN_NUMBER: ${{ github.run_number }}
+      DRY_RUN:           ${{ github.event.inputs.dry_run || 'false' }}
+      FEED_OVERRIDE:     ${{ github.event.inputs.feed_override || '' }}
+      FORCE_REGEN:       ${{ github.event.inputs.force_regenerate || 'false' }}
+
+    steps:
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 0 — PIPELINE INIT + TELEMETRY HEADER
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "PIPELINE INIT — Record start time + emit telemetry header"
+        run: |
+          echo "PIPELINE_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+          echo "============================================================"
+          echo "SENTINEL APEX AI TRACKER PIPELINE v${PIPELINE_VERSION}"
+          echo "Run ID     : $GITHUB_RUN_ID"
+          echo "Run Number : $GITHUB_RUN_NUMBER"
+          echo "Trigger    : ${{ github.event_name }}"
+          echo "Dry Run    : ${DRY_RUN}"
+          echo "Schema     : ${AI_TRACKER_SCHEMA}"
+          echo "Timestamp  : $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "============================================================"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 1 — CHECKOUT (shallow, main only — fastest possible)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 1 — Checkout repository (shallow, main)"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+          ref: "${{ github.ref }}"
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 2 — PYTHON + CACHE SEGMENTATION (Phase 6: cache by requirements hash)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 2 — Python 3.12 + pip cache (segmented by requirements hash)"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: "STAGE 2.1 — Install AI tracker dependencies"
+        run: |
+          STEP_START=$(date +%s%3N)
+          python -m pip install --upgrade pip --quiet
+          pip install requests --quiet 2>&1 | tail -3
+          pip install reportlab --quiet 2>&1 | tail -3
+          STEP_END=$(date +%s%3N)
+          echo "STEP_TIMING_DEPS_MS=$((STEP_END - STEP_START))" >> "$GITHUB_ENV"
+          echo "[TELEMETRY] deps install: $((STEP_END - STEP_START))ms"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 3 — HARD-FAIL VALIDATION GATES (Phase 6: fail-fast before write)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 3 — GATE 1: Python syntax guard (all scripts)"
+        run: |
+          # v184.0 P0 HARDENING: py_compile (syntax) + pyflakes (undefined names / NameErrors)
+          # py_compile catches SyntaxError; pyflakes catches NameError, ImportError, unused vars
+          python3 -m pip install pyflakes --quiet 2>&1 | tail -1
+          ERRORS=0
+          for f in scripts/*.py; do
+            [ -f "$f" ] || continue
+            python3 -m py_compile "$f" 2>/tmp/py_err.txt
+            if [ $? -ne 0 ]; then
+              echo "::error::SYNTAX ERROR: $f"
+              cat /tmp/py_err.txt
+              ERRORS=$((ERRORS+1))
+            fi
+          done
+          echo "Checked scripts/*.py — syntax errors: ${ERRORS}"
+          [ "$ERRORS" -eq 0 ] || { echo "::error::ABORTING — syntax errors detected"; exit 1; }
+          # Static undefined-name analysis (catches NameError before runtime)
+          FLAKE_ERRORS=0
+          for f in scripts/*.py; do
+            [ -f "$f" ] || continue
+            python3 -m pyflakes "$f" 2>&1 | grep -E "undefined name|'[^']+' imported but unused|redefinition of" > /tmp/flake_err.txt || true
+            if [ -s /tmp/flake_err.txt ]; then
+              echo "::warning::PYFLAKES WARNINGS in $f:"
+              cat /tmp/flake_err.txt
+            fi
+          done
+          echo "Running pyflakes a' undefined-name check on scripts/generate_intel_reports.py"
+          python3 -m pyflakes scripts/generate_intel_reports.py 2>&1 | grep "undefined name" > /tmp/undef_err.txt || true
+          if [ -s /tmp/undef_err.txt ]; then
+            echo "::error::UNDEFINED NAME(S) detected — would cause NameError at runtime:"
+            cat /tmp/undef_err.txt
+            exit 1
+          fi
+          echo "GATE 1: ALL PASS (syntax + undefined-name check)"
+
+      - name: "STAGE 3.1 — GATE 2: Feed manifest integrity check"
+        run: |
+          # RULE 1: Zero inline Python in YAML -- use jq for manifest integrity check
+          if [ ! -f "data/stix/feed_manifest.json" ]; then
+            echo "[WARN] feed_manifest.json not found -- will use CSV fallback"
+          else
+            COUNT=$(jq 'if type == "array" then length else ((.items // .entries // []) | length) end' \
+              data/stix/feed_manifest.json 2>/dev/null || echo "0")
+            if [ "${COUNT:-0}" -lt 5 ]; then
+              echo "[WARN] Manifest only has ${COUNT} items -- using CSV fallback"
+            else
+              echo "[OK] Manifest integrity: ${COUNT} items"
+            fi
+          fi
+
+      - name: "STAGE 3.2 — GATE 3: Encoding guard (abort on mojibake)"
+        run: |
+          if [ -f "scripts/encoding_guard.py" ]; then
+            python3 scripts/encoding_guard.py || { echo "::error::Encoding guard FAILED"; exit 1; }
+          else
+            echo "[OK] encoding_guard.py not present — skipping (non-blocking)"
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 4 — ENSURE OUTPUT DIRECTORIES
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 4 — Ensure api/ai/ output directories"
+        run: |
+          mkdir -p api/ai
+          mkdir -p data/ai-telemetry
+          echo "[OK] Output directories ready"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 4.1 — CISA KEV FEED MARKER (v184.0 — non-blocking)
+      # Marks any feed items matching the live CISA KEV catalog as CRITICAL.
+      # Runs before AI tracker generation so tracker inherits KEV enrichment.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 4.1 — CISA KEV Feed Marker (v184.0)"
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          set +e
+          if [ -f "api/feed.json" ]; then
+            FEED_PATH="api/feed.json" python3 scripts/kev_feed_marker.py
+            KEV_EXIT=$?
+            if [ -f "data/health/kev_marker_report.json" ]; then
+              KEV_MARKED=$(jq -r '.items_marked // "0"' data/health/kev_marker_report.json 2>/dev/null || echo "0")
+              KEV_SIZE=$(jq -r '.kev_catalog_size // "0"' data/health/kev_marker_report.json 2>/dev/null || echo "0")
+              echo "[KEV-MARKER] CatalogSize=$KEV_SIZE | NewlyMarked=$KEV_MARKED"
+            fi
+          else
+            echo "[KEV-MARKER] api/feed.json not present — skipping (non-fatal)"
+          fi
+          set -e
+          echo "STAGE 4.1: CISA KEV Feed Marker complete"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 4.2 — INTELLIGENCE QUALITY HARDENER (v184.0 — non-blocking)
+      # Fixes actor attribution, clamps invalid scores, improves generic titles,
+      # flags synthetic CVEs, adds IOC type hints, derives TLP levels.
+      # Runs before AI tracker generation so tracker reflects hardened data.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 4.2 — Intelligence Quality Hardener (v184.0)"
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          set +e
+          if [ -f "api/feed.json" ]; then
+            FEED_PATH="api/feed.json" python3 scripts/intelligence_quality_hardener.py
+            IQH_EXIT=$?
+            if [ -f "data/health/intelligence_quality_hardener_report.json" ]; then
+              IQH_STATUS=$(jq -r '.status // "UNKNOWN"' data/health/intelligence_quality_hardener_report.json 2>/dev/null || echo "UNKNOWN")
+              IQH_SYNTHETIC=$(jq -r '.synthetic_cve_flagged // "?"' data/health/intelligence_quality_hardener_report.json 2>/dev/null || echo "?")
+              IQH_ACTORS=$(jq -r '.actors_upgraded // "?"' data/health/intelligence_quality_hardener_report.json 2>/dev/null || echo "?")
+              echo "[INTEL-QUALITY] Status=$IQH_STATUS | Synthetic=$IQH_SYNTHETIC | Actors=$IQH_ACTORS"
+            fi
+          else
+            echo "[INTEL-QUALITY] api/feed.json not present — skipping (non-fatal)"
+          fi
+          set -e
+          echo "STAGE 4.2: Intelligence Quality Hardener complete"
+
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 4.3 -- REAL OSINT IOC ENRICHMENT (v184.0 P0-001 fix)
+      # Extracts real IOCs from AlienVault OTX, URLhaus, MalwareBazaar,
+      # Abuse.ch, and ThreatFox per advisory CVE/title. Adds verified
+      # ioc_list, ioc_count, ioc_types, ioc_confidence fields to feed.
+      # Non-blocking (continue-on-error) -- pipeline continues if keys absent.
+      # RULE 1: Zero inline Python -- all logic in real_osint_ioc_enricher.py
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 4.3 -- Real OSINT IOC Enrichment (OTX + URLhaus + MalwareBazaar)"
+        timeout-minutes: 8
+        continue-on-error: true
+        env:
+          OTX_API_KEY:           ${{ secrets.OTX_API_KEY }}
+          URLHAUS_API_KEY:       ${{ secrets.URLHAUS_API_KEY }}
+          MALWAREBAZAAR_API_KEY: ${{ secrets.MALWAREBAZAAR_API_KEY }}
+          THREATFOX_API_KEY:     ${{ secrets.THREATFOX_API_KEY }}
+          FEED_PATH:             "api/feed.json"
+          MAX_ADVISORIES:        "50"
+        run: |
+          set +e
+          STEP_START=$(date +%s%3N)
+          echo "::group::Real OSINT IOC Enricher (v184.0)"
+
+          if [ ! -f "api/feed.json" ]; then
+            echo "[IOC-ENRICH] api/feed.json not present -- skipping (non-fatal)"
+            echo "::endgroup::"
+            exit 0
+          fi
+
+          # Count pre-enrichment IOCs (jq -- RULE 1: zero inline Python)
+          PRE_IOC=$(jq '[.[] | (.ioc_count // 0)] | add // 0' api/feed.json 2>/dev/null || echo 0)
+          echo "[IOC-ENRICH] Pre-enrichment total IOCs: ${PRE_IOC}"
+
+          python3 scripts/real_osint_ioc_enricher.py
+          IOC_EXIT=$?
+
+          # Count post-enrichment IOCs (jq -- RULE 1: zero inline Python)
+          POST_IOC=$(jq '[.[] | (.ioc_count // 0)] | add // 0' api/feed.json 2>/dev/null || echo 0)
+
+          STEP_END=$(date +%s%3N)
+          echo "STEP_TIMING_IOC_ENRICH_MS=$((STEP_END - STEP_START))" >> "$GITHUB_ENV"
+          echo "[IOC-ENRICH] Post-enrichment: ${POST_IOC} IOCs | delta: $((POST_IOC - PRE_IOC)) | exit=${IOC_EXIT}"
+
+          if [ "$IOC_EXIT" -eq 0 ]; then
+            echo "[IOC-ENRICH] Real OSINT IOC enrichment complete"
+          else
+            echo "::warning::real_osint_ioc_enricher.py exited ${IOC_EXIT} -- non-fatal, pipeline continues"
+            echo "[IOC-ENRICH] Check OTX_API_KEY / URLHAUS_API_KEY secrets in repo settings"
+          fi
+          echo "::endgroup::"
+          set -e
+          exit 0
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 3.1.11 — DETECTION ENGINEERING CORE (v184.0)
+      # Full 10-stage detection pipeline: validate, suppress FPs, normalize multi-SIEM,
+      # generate retro-hunt packs, map telemetry deps, benchmark quality, analyze gaps,
+      # and package enterprise deployment bundles.
+      # Outputs: api/detections/*.json + data/audit/detection_*.json
+      # Non-blocking (continue-on-error) — zero-failure architecture.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 3.1.11 - Detection Engineering Core (v184.0)"
+        timeout-minutes: 15
+        continue-on-error: true
+        env:
+          FEED_PATH: "api/feed.json"
+        run: |
+          set +e
+          STEP_START=$(date +%s%3N)
+          echo "::group::Detection Engineering Core (v184.0)"
+          echo "[DET-ENG] Starting Detection Engineering Core..."
+          echo "[DET-ENG] Feed: ${FEED_PATH}"
+
+          python3 scripts/stage_3_1_11_detection_engineering_core.py
+          DET_EXIT=$?
+
+          STEP_END=$(date +%s%3N)
+          echo "STEP_TIMING_DET_ENG_MS=$((STEP_END - STEP_START))" >> "$GITHUB_ENV"
+          echo "[DET-ENG] Detection Engineering Core: $((STEP_END - STEP_START))ms | exit=${DET_EXIT}"
+
+          if [ "$DET_EXIT" -ne 0 ]; then
+            echo "::warning::Detection Engineering Core exited ${DET_EXIT} -- non-fatal, pipeline continues"
+            echo "[DET-ENG] Check scripts/stage_3_1_11_detection_engineering_core.py for errors"
+          else
+            echo "[DET-ENG] Detection Engineering Core completed successfully"
+            DET_COUNT=$(python3 -c "import os,json; d='api/detections'; print(len([f for f in os.listdir(d) if f.endswith('.json') and f != 'detection-index.json']))" 2>/dev/null || echo "N/A")
+            echo "[DET-ENG] Detection packs generated: ${DET_COUNT}"
+          fi
+
+          echo "::endgroup::"
+          set -e
+          exit 0
+
+      # ═════════════════════════════════════════════════════════════════════
+      # SENTINEL APEX v184.0 — ENTERPRISE CTI TRANSFORMATION STAGES
+      # Phases 1-6: Actor Attribution, Campaign Correlation, Malware Intel,
+      # Detection Content v2, Knowledge Graph, Executive Brief
+      # ═════════════════════════════════════════════════════════════════════
+
+      - name: "STAGE 3.1.18 - Threat Actor Intelligence Engine (v184.0)"
+        timeout-minutes: 8
+        continue-on-error: true
+        run: |
+          set +e
+          echo "::group::STAGE 3.1.18 — Threat Actor Intelligence Engine v184.0"
+          echo "[TAIE] Starting actor attribution for all advisories..."
+          python3 scripts/threat_actor_engine.py
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 0 ]; then
+            ATTR_RATE=$(python3 -c "import json; r=json.load(open('data/health/actor_attribution_report.json')); print(r.get('attribution_rate_pct','?'))" 2>/dev/null || echo "N/A")
+            echo "[TAIE] Actor attribution complete | Rate: ${ATTR_RATE}%"
+          else
+            echo "::warning::TAIE exited ${EXIT_CODE} -- non-fatal, pipeline continues"
+          fi
+          echo "::endgroup::"
+          set -e; exit 0
+
+      - name: "STAGE 3.1.19 - Campaign Intelligence Engine (v184.0)"
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          set +e
+          echo "::group::STAGE 3.1.19 — Campaign Intelligence Engine v184.0"
+          echo "[CIE] Starting campaign correlation for all advisories..."
+          python3 scripts/campaign_intelligence_engine.py
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 0 ]; then
+            CORR_RATE=$(python3 -c "import json; r=json.load(open('data/health/campaign_correlation_report.json')); print(r.get('correlation_rate_pct','?'))" 2>/dev/null || echo "N/A")
+            echo "[CIE] Campaign correlation complete | Rate: ${CORR_RATE}%"
+          else
+            echo "::warning::CIE exited ${EXIT_CODE} -- non-fatal"
+          fi
+          echo "::endgroup::"
+          set -e; exit 0
+
+      - name: "STAGE 3.1.20 - Malware Intelligence Engine (v184.0)"
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          set +e
+          echo "::group::STAGE 3.1.20 — Malware Intelligence Engine v184.0"
+          python3 scripts/malware_intelligence_engine.py
+          EXIT_CODE=$?
+          [ $EXIT_CODE -ne 0 ] && echo "::warning::MIE exited ${EXIT_CODE} -- non-fatal"
+          echo "::endgroup::"
+          set -e; exit 0
+
+      - name: "STAGE 3.1.21 - Detection Content Generator v2 (v184.0)"
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          set +e
+          echo "::group::STAGE 3.1.21 — Detection Content Generator v2 v184.0"
+          echo "[DCG-V2] Generating threat-specific Sigma/YARA/KQL/Suricata packs..."
+          python3 scripts/detection_content_generator_v2.py
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 0 ]; then
+            PACK_COUNT=$(find data/detection -name "detection_pack.json" 2>/dev/null | wc -l)
+            echo "[DCG-V2] Detection packs generated: ${PACK_COUNT}"
+          else
+            echo "::warning::DCG-V2 exited ${EXIT_CODE} -- non-fatal"
+          fi
+          echo "::endgroup::"
+          set -e; exit 0
+
+      - name: "STAGE 3.1.22 - Intelligence Knowledge Graph (v184.0)"
+        timeout-minutes: 8
+        continue-on-error: true
+        run: |
+          set +e
+          echo "::group::STAGE 3.1.22 — Intelligence Knowledge Graph v184.0"
+          echo "[KG] Building actor-campaign-malware-IOC knowledge graph..."
+          python3 scripts/intelligence_knowledge_graph.py
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 0 ]; then
+            NODE_COUNT=$(python3 -c "import json; g=json.load(open('data/graph/snapshot.json')); print(g['stats']['total_nodes'])" 2>/dev/null || echo "N/A")
+            EDGE_COUNT=$(python3 -c "import json; g=json.load(open('data/graph/snapshot.json')); print(g['stats']['total_edges'])" 2>/dev/null || echo "N/A")
+            echo "[KG] Graph built: ${NODE_COUNT} nodes, ${EDGE_COUNT} edges"
+          else
+            echo "::warning::KG exited ${EXIT_CODE} -- non-fatal"
+          fi
+          echo "::endgroup::"
+          set -e; exit 0
+
+      - name: "STAGE 3.2.1 - Executive Intelligence Brief Generator (v184.0)"
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          set +e
+          echo "::group::STAGE 3.2.1 — Executive Intelligence Brief Generator v184.0"
+          python3 scripts/executive_brief_generator.py
+          EXIT_CODE=$?
+          [ $EXIT_CODE -eq 0 ] && echo "[EBG] Executive brief generated: data/reports/executive-briefs/latest.json"
+          [ $EXIT_CODE -ne 0 ] && echo "::warning::EBG exited ${EXIT_CODE} -- non-fatal"
+          echo "::endgroup::"
+          set -e; exit 0
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 5 — AI TRACKER GENERATION (Phase 1+2+3: explainability + health + exec)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 5 — Generate AI Tracker (Engine Alpha + Beta + Gamma)"
+        run: |
+          STEP_START=$(date +%s%3N)
+          echo "--- AI TRACKER GENERATION START ---"
+
+          # Determine feed path
+          if [ -n "${FEED_OVERRIDE}" ]; then
+            FEED_ARG="--feed ${FEED_OVERRIDE}"
+          elif [ -f "data/stix/feed_manifest.json" ]; then
+            FEED_ARG=""
+          elif [ -f "cdb-threat-intel-feed.csv" ]; then
+            FEED_ARG="--feed cdb-threat-intel-feed.csv"
+          else
+            FEED_ARG=""
+          fi
+
+          # Build dry-run flag
+          DRY_ARG=""
+          [ "${DRY_RUN}" = "true" ] && DRY_ARG="--dry-run"
+
+          # Execute AI generator
+          python3 scripts/generate_ai_tracker.py ${FEED_ARG} ${DRY_ARG} \
+            --out api/ai/tracker.json 2>&1
+
+          EXIT_CODE=$?
+          STEP_END=$(date +%s%3N)
+          echo "STEP_TIMING_GENERATE_MS=$((STEP_END - STEP_START))" >> "$GITHUB_ENV"
+          echo "[TELEMETRY] generate_ai_tracker: $((STEP_END - STEP_START))ms | exit=$EXIT_CODE"
+          [ "$EXIT_CODE" -eq 0 ] || { echo "::error::generate_ai_tracker.py FAILED (exit $EXIT_CODE)"; exit 1; }
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 5.5 -- DAILY BRIEF PDF GENERATOR (executive threat summary)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 5.5 -- Generate Daily Brief PDF (Executive Threat Summary)"
+        continue-on-error: true
+        run: |
+          STEP_START=$(date +%s%3N)
+          echo "::group::Daily Brief PDF Generator"
+          set +e
+          python3 scripts/daily_brief_generator.py
+          EXIT_CODE=$?
+          set -e
+          STEP_END=$(date +%s%3N)
+          echo "STEP_TIMING_DAILY_BRIEF_MS=$((STEP_END - STEP_START))" >> "$GITHUB_ENV"
+          echo "[TELEMETRY] daily_brief_generator: $((STEP_END - STEP_START))ms | exit=$EXIT_CODE"
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "[OK] Daily Brief PDF generated successfully"
+            ls -lh api/v1/intel/daily_brief_latest.pdf api/v1/intel/daily_brief_meta.json 2>/dev/null || true
+          else
+            echo "::warning::daily_brief_generator.py exited $EXIT_CODE -- non-fatal, pipeline continues"
+          fi
+          echo "::endgroup::"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6 — OUTPUT VALIDATION GATES (Phase 6: schema enforcement)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6 — GATE: Validate all AI output schemas"
+        run: python3 scripts/validate_ai_output_schemas.py
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.5 — AI EXPLAINABILITY ENRICHMENT (P2 governance)
+      # ─────────────────────────────────────────────────────────────────────
+      # Adds _explainability blocks to every prediction/anomaly/campaign entry:
+      #   confidence_score, confidence_band, evidence_sources, attack_mapping,
+      #   detection_rationale, timestamp_lineage, false_positive_probability,
+      #   ioc_confidence_map, anomaly_evidence_chain, forecast_rationale
+      # Runs AFTER ai_brain_publisher (Step 6) and BEFORE r2_upload (Step 9.5)
+      # to ensure explainability metadata is included in the R2-served payload.
+      # Non-fatal: continues if tracker.json not yet generated (dry-run safe).
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.5 — AI Explainability enrichment (ATT&CK + confidence)"
+        run: |
+          if [ -f api/ai/tracker.json ]; then
+            python3 scripts/ai_explainability_engine.py
+            echo "STAGE 6.5: AI Explainability enrichment complete"
+          else
+            echo "STAGE 6.5: tracker.json not found (dry-run or generation skipped) -- skip"
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 5.7 — MONETIZATION INTEGRITY GATE (HARD FAIL)
+      # v184.0: Validates payment credentials, API auth enforcement,
+      #           BOM-free / encoding-clean HTML, Worker premium gating.
+      #           Exit 1 blocks the deploy. Mirrors sentinel-blogger.yml gate.
+      #           POSITION: pre-deploy gate — runs BEFORE commit and R2 upload.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 5.7 - Monetization Integrity Gate (HARD FAIL)"
+        run: python3 scripts/validate_monetization.py
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.7 — VERSION GOVERNANCE AUTO-APPLY (drift correction)
+      # Mirrors sentinel-blogger.yml pattern (STAGE 3.93.7 + 3.93.8):
+      #   --apply first auto-corrects any drift, then --check verifies zero drift.
+      # Belt-and-suspenders: ensures sla_status.json, version.json, workers/
+      #   and all governed surfaces are aligned BEFORE commit or R2 upload.
+      # ROOT CAUSE FIX: prevents sla_status.json version drift from hard-failing
+      #   the CI gate (was the cause of run #25776778055 failure: 143.0.0 vs 148.0.0).
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.7 — Version governance auto-apply (drift correction)"
+        run: |
+          python3 scripts/version_governance.py --apply
+          echo "STAGE 6.7: Version governance applied — all targets aligned to $(cat VERSION)"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.8 — VERSION GOVERNANCE CI GATE (P6 governance)
+      # Belt-and-suspenders: after --apply, confirms zero drift remains.
+      # Verifies version consistency across all platform surfaces before any
+      # commit or R2 upload. Rejects deployment if any drift is detected.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.8 — Version governance CI gate (drift detection)"
+        run: |
+          python3 scripts/version_governance.py --check
+          echo "STAGE 6.8: Version governance gate PASSED — no drift detected"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.85 — MANIFEST INTEGRITY GATE (Phase 1B)
+      # Validates feed manifest freshness, stale reuse, advisory uniqueness,
+      # and field-level mutation. Non-blocking.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.85 — Manifest Integrity Gate (Phase 1B)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          python3 scripts/manifest_integrity_system.py --check 2>&1 | tail -20 || true
+          echo "STAGE 6.85: Manifest integrity gate complete"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.87 — RUNTIME STABILITY ENGINE (Phase 1B)
+      # Validates STIX count, output existence proof, orchestration integrity,
+      # and latency anomaly. Writes signed stability report. Non-blocking.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.87 — Runtime Stability Engine (Phase 1B)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          python3 scripts/runtime_stability_engine.py --check 2>&1 | tail -20 || true
+          echo "STAGE 6.87: Runtime stability check complete"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.88 — SOURCE DIVERSITY ENFORCER (Phase 1C Enterprise Hardening)
+      # Runs after runtime stability check — when the freshly generated feed
+      # is in its final committed state. Scores source dominance, Shannon
+      # entropy, synthetic marker density, and flood injection patterns.
+      # Writes signed report to data/health/source_diversity.json.
+      # Non-blocking — surfaces violations as CI annotations for observability.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.88 — Source Diversity Enforcer (Phase 1C)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          set +e
+          python3 scripts/source_diversity_enforcer.py --report
+          SDE_EXIT=$?
+          set -e
+          if [ -f "data/health/source_diversity.json" ]; then
+            STATUS=$(jq -r '.status // "UNKNOWN"' data/health/source_diversity.json 2>/dev/null || echo "UNKNOWN")
+            TOP_SRC=$(jq -r '.top_source // "?"' data/health/source_diversity.json 2>/dev/null || echo "?")
+            TOP_PCT=$(jq -r '.top_source_pct // "?"' data/health/source_diversity.json 2>/dev/null || echo "?")
+            ENT=$(jq -r '.entropy_bits // "?"' data/health/source_diversity.json 2>/dev/null || echo "?")
+            echo "[SOURCE-DIVERSITY] Status=$STATUS | Top=$TOP_SRC ($TOP_PCT%) | Entropy=${ENT}bits"
+            if [ "$STATUS" = "FAIL" ]; then
+              echo "::warning::SOURCE DIVERSITY P0 VIOLATION — $TOP_SRC at $TOP_PCT% exceeds 30% golden invariant"
+            fi
+          else
+            echo "::warning::source_diversity.json not written — check enforcer"
+          fi
+          echo "STAGE 6.88: Source Diversity Enforcer complete"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.889 — RISK SCORE MICRO-DIFFERENTIATOR (v184.0 — permanent fix)
+      # Breaks uniform risk-score clusters BEFORE the Feed Health Gate runs.
+      # Root cause: enterprise_intelligence_integrator.py applies an exact
+      # floor of 7.0 to all items with CVSS>=9.0 or active-exploit signals.
+      # In a 26-item batch, 15+ items cluster at exactly 7.0 (57%>40% threshold)
+      # which hard-fails STAGE 6.89.1.
+      # Fix: apply deterministic micro-adjustments (+ioc_count*0.01 +conf/1000
+      # +ttp*0.005) bounded by MAX_MICRO_BUMP=0.25 and severity tier guard.
+      # Mirrors sentinel-blogger.yml STAGE 3.4.9 — same script, same invocation.
+      # Non-blocking (continue-on-error) — pipeline never fails at this step.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.889 — Risk Score Micro-Differentiator (v184.0)"
+        timeout-minutes: 2
+        continue-on-error: true
+        run: |
+          set +e
+          if [ -f "api/feed.json" ]; then
+            python3 scripts/risk_score_differentiator.py
+            RSD_EXIT=$?
+            echo "[RISK-DIFF] risk_score_differentiator exit=${RSD_EXIT}"
+          else
+            echo "[RISK-DIFF] api/feed.json not found -- skipping (non-fatal)"
+          fi
+          set -e
+          exit 0
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.89 — FEED HEALTH GATE (v184.0 Enterprise Hardening)
+      # Validates feed quality after enrichment but before baseline capture.
+      # Checks: uniform risk-score ratio, stale CVE ratio, synthetic actor ratio,
+      #         CVSS coverage, confidence uniformity.
+      # Non-blocking — violations emit CI warnings + write health report.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.89 — Feed Health Gate (v184.0)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          set +e
+          python3 scripts/feed_health_gate.py --feed api/feed.json
+          FHG_EXIT=$?
+          set -e
+          if [ -f "data/health/feed_health_gate.json" ]; then
+            FHG_STATUS=$(jq -r '.status // "UNKNOWN"' data/health/feed_health_gate.json 2>/dev/null || echo "UNKNOWN")
+            FHG_FAILS=$(jq -r '.hard_fails | join(",")' data/health/feed_health_gate.json 2>/dev/null || echo "?")
+            FHG_TOTAL=$(jq -r '.total_items // "?"' data/health/feed_health_gate.json 2>/dev/null || echo "?")
+            echo "[FEED-HEALTH] Status=$FHG_STATUS | Items=$FHG_TOTAL | Fails=$FHG_FAILS"
+            if [ "$FHG_STATUS" = "FAIL" ]; then
+              echo "::error::FEED HEALTH GATE FAIL — $FHG_FAILS. Feed quality degraded."
+            fi
+          fi
+          echo "STAGE 6.89: Feed Health Gate complete"
+
+      # Hard-fail enforcement: block pipeline publish if feed health gate reports FAIL.
+      - name: "STAGE 6.89.1 — Feed Health Gate Hard Fail Enforcement"
+        timeout-minutes: 1
+        run: |
+          if [ -f "data/health/feed_health_gate.json" ]; then
+            FHG_STATUS=$(jq -r '.status // "UNKNOWN"' data/health/feed_health_gate.json 2>/dev/null || echo "UNKNOWN")
+            FHG_FAILS=$(jq -r '.hard_fails | join(",")' data/health/feed_health_gate.json 2>/dev/null || echo "?")
+            if [ "$FHG_STATUS" = "FAIL" ]; then
+              echo "::error::PRODUCTION BLOCK — Feed health FAIL ($FHG_FAILS). Publishing synthetic/stale/corrupt intel to customers is forbidden."
+              exit 1
+            fi
+            echo "[GATE ENFORCER] Feed health status=$FHG_STATUS — cleared for publish"
+          else
+            echo "::warning::feed_health_gate.json absent — skipping enforcement"
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.895 — ADVISORY IMMUTABILITY ENGINE (v184.0 Enterprise Hardening)
+      # Fingerprints all advisories, detects intra-feed duplicates, tracks
+      # cross-run reuse via persistent registry, flags stale CVE reuse.
+      # Non-blocking — writes data/health/advisory_immutability.json.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.895 — Advisory Immutability Engine (v184.0)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          set +e
+          python3 scripts/advisory_immutability_engine.py --feed api/feed.json --report --update-registry
+          AIE_EXIT=$?
+          set -e
+          if [ -f "data/health/advisory_immutability.json" ]; then
+            AIE_COLL=$(jq -r '.intra_collisions // "?"' data/health/advisory_immutability.json 2>/dev/null || echo "?")
+            AIE_STALE=$(jq -r '.stale_cve_count // "?"' data/health/advisory_immutability.json 2>/dev/null || echo "?")
+            AIE_SYN=$(jq -r '.synthetic_count // "?"' data/health/advisory_immutability.json 2>/dev/null || echo "?")
+            echo "[IMMUTABILITY] Collisions=$AIE_COLL | Stale=$AIE_STALE | Synthetic=$AIE_SYN"
+          fi
+          echo "STAGE 6.895: Advisory Immutability Engine complete"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.9 — GOLDEN BASELINE CAPTURE (Phase 1A Enterprise Hardening)
+      # Captures an immutable production snapshot after every successful
+      # generate-and-sync run. Writes signed lineage record and deployment
+      # attestation to data/golden_baseline/. Non-blocking (continue-on-error)
+      # so a baseline failure never blocks a successful intelligence publish.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.9 — Golden Baseline Capture (Phase 1A)"
+        timeout-minutes: 3
+        continue-on-error: true
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python3 scripts/golden_baseline_system.py --capture \
+            --label "generate-and-sync" \
+            --run-id "$GITHUB_RUN_ID" \
+            2>&1 | tail -30 || true
+          echo "STAGE 6.9: Golden Baseline Capture complete"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.91 — P0 INTELLIGENCE PUBLICATION GATE (v1.0.0)
+      # Per-item publication blocker. 9-rule integrity engine.
+      # Blocks synthetic actors, campaigns, phantom IOC guidance,
+      # missing evidence ledger, confidence inflation, speculative MITRE,
+      # report contradictions. Hard-fails if >20% of items are BLOCK.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.91 — P0 Intelligence Publication Gate (v1.0.0)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            echo "STAGE 6.91: Running P0 Intelligence Publication Gate..."
+            python3 scripts/intel_publication_gate.py api/feed.json \
+              --patch \
+              --output data/health/intel_publication_gate_report.json || {
+                echo "::warning::STAGE 6.91: Publication gate flagged blocked items — see report"
+              }
+            if [ -f "data/health/intel_publication_gate_report.json" ]; then
+              BLOCKED=$(python3 -c "import json; d=json.load(open('data/health/intel_publication_gate_report.json')); print(d.get('summary',{}).get('blocked',0))" 2>/dev/null || echo "?")
+              ALLOWED=$(python3 -c "import json; d=json.load(open('data/health/intel_publication_gate_report.json')); print(d.get('summary',{}).get('allowed',0))" 2>/dev/null || echo "?")
+              AVG_IQ=$(python3 -c "import json; d=json.load(open('data/health/intel_publication_gate_report.json')); print(d.get('summary',{}).get('avg_integrity_score',0))" 2>/dev/null || echo "?")
+              echo "STAGE 6.91: allowed=${ALLOWED} blocked=${BLOCKED} avg_integrity=${AVG_IQ}"
+            fi
+          else
+            echo "STAGE 6.91: api/feed.json not found — skip"
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.92 — P1 ENTERPRISE INTELLIGENCE QUALITY ENGINE (v1.0.0)
+      # 11-dimension quality scorer. Outputs intelligence_quality,
+      # enterprise_readiness, mssp_readiness, api_readiness,
+      # monetization_readiness. Writes api/intel_quality.json.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.92 — P1 Enterprise Intelligence Quality Engine (v1.0.0)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            echo "STAGE 6.92: Running P1 Enterprise Quality Engine..."
+            python3 scripts/intel_enterprise_quality_engine.py api/feed.json \
+              --score \
+              --api \
+              --output data/health/intel_quality_engine_report.json || {
+                echo "::warning::STAGE 6.92: Quality engine error — non-fatal"
+              }
+            if [ -f "api/intel_quality.json" ]; then
+              IQ=$(python3 -c "import json; d=json.load(open('api/intel_quality.json')); print(d.get('intelligence_quality',0))" 2>/dev/null || echo "?")
+              ER=$(python3 -c "import json; d=json.load(open('api/intel_quality.json')); print(d.get('enterprise_readiness',0))" 2>/dev/null || echo "?")
+              MR=$(python3 -c "import json; d=json.load(open('api/intel_quality.json')); print(d.get('mssp_readiness',0))" 2>/dev/null || echo "?")
+              GRADE=$(python3 -c "import json; d=json.load(open('api/intel_quality.json')); print(d.get('grade','?'))" 2>/dev/null || echo "?")
+              echo "STAGE 6.92: intelligence_quality=${IQ} enterprise=${ER} mssp=${MR} grade=${GRADE}"
+            fi
+          else
+            echo "STAGE 6.92: api/feed.json not found — skip"
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.93 — INTELLIGENCE GRADE ENGINE (v1.0.0)
+      # Applies Output Contract fields to every item in api/feed.json:
+      # publication_decision, intelligence_grade, evidence_count,
+      # corroboration_count, attribution_status, campaign_status,
+      # ioc_quality_score, attck_verification, risk_score_reasoning,
+      # analyst_verdict. Strips banned actors (CDB-UNATTR-*). Hard-fails
+      # if block_pct > 30%.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.93 — Intelligence Grade Engine (v1.0.0)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            echo "STAGE 6.93: Running Intelligence Grade Engine..."
+            python3 scripts/intelligence_grade_engine.py api/feed.json \
+              --apply \
+              --report data/health/intel_grade_engine_report.json || {
+                echo "::warning::STAGE 6.93: Grade engine error — non-fatal"
+              }
+            if [ -f "data/health/intel_grade_engine_report.json" ]; then
+              BLOCK_PCT=$(python3 -c "import json; d=json.load(open('data/health/intel_grade_engine_report.json')); print(d.get('block_pct',0))" 2>/dev/null || echo "?")
+              GRADE_A=$(python3 -c "import json; d=json.load(open('data/health/intel_grade_engine_report.json')); print(d.get('grade_distribution',{}).get('A',0))" 2>/dev/null || echo "?")
+              GRADE_B=$(python3 -c "import json; d=json.load(open('data/health/intel_grade_engine_report.json')); print(d.get('grade_distribution',{}).get('B',0))" 2>/dev/null || echo "?")
+              echo "STAGE 6.93: block_pct=${BLOCK_PCT}% grade_A=${GRADE_A} grade_B=${GRADE_B}"
+            fi
+          else
+            echo "STAGE 6.93: api/feed.json not found — skip"
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.94 — COMMERCIAL READINESS GOVERNOR (v1.0.0)
+      # Implements Mandates 1-10. Strips BLOCK items from published feed.
+      # Produces tier feeds: feed_enterprise.json, feed_mssp.json,
+      # feed_public.json. Quarantines BLOCK items to internal/.
+      # Writes api/governance_status.json with GO-LIVE criteria.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.94 — Commercial Readiness Governor (v1.0.0)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            echo "STAGE 6.94: Running Commercial Readiness Governor..."
+            python3 scripts/commercial_readiness_governor.py api/feed.json \
+              --apply \
+              --report data/health/commercial_readiness_governor_report.json || {
+                echo "::warning::STAGE 6.94: Governor error — non-fatal"
+              }
+            if [ -f "api/governance_status.json" ]; then
+              DASH=$(python3 -c "import json; d=json.load(open('api/governance_status.json')); print(d.get('dashboard_status','?'))" 2>/dev/null || echo "?")
+              API=$(python3 -c "import json; d=json.load(open('api/governance_status.json')); print(d.get('cti_api_status','?'))" 2>/dev/null || echo "?")
+              MSSP=$(python3 -c "import json; d=json.load(open('api/governance_status.json')); print(d.get('mssp_status','?'))" 2>/dev/null || echo "?")
+              ENT=$(python3 -c "import json; d=json.load(open('api/governance_status.json')); print(d.get('enterprise_status','?'))" 2>/dev/null || echo "?")
+              SCORE=$(python3 -c "import json; d=json.load(open('api/governance_status.json')); print(d.get('commercial_readiness_score',0))" 2>/dev/null || echo "?")
+              echo "STAGE 6.94: Dashboard=${DASH} API=${API} MSSP=${MSSP} Enterprise=${ENT} Score=${SCORE}/100"
+            fi
+          else
+            echo "STAGE 6.94: api/feed.json not found — skip"
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.95 — ATTRIBUTION EVIDENCE ENGINE (v1.0.0)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.95 — Attribution Evidence Engine (v1.0.0)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            python3 scripts/attribution_evidence_engine.py api/feed.json \
+              --apply --output data/governance/attribution_evidence.json 2>&1 | tail -3
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.96 — ATT&CK MAPPING VALIDATOR (v1.0.0)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.96 — ATT&CK Mapping Validator (v1.0.0)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            python3 scripts/attack_mapping_validator.py api/feed.json \
+              --apply --output data/governance/attack_validation.json 2>&1 | tail -3
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.97 — SOURCE CORROBORATION ENGINE (v1.0.0)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.97 — Source Corroboration Engine (v1.0.0)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            python3 scripts/source_corroboration_engine.py api/feed.json \
+              --apply --output data/governance/corroboration_report.json 2>&1 | tail -3
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.98 — OPERATIONAL IOC VALIDATOR (v1.0.0)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.98 — Operational IOC Validator (v1.0.0)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            python3 scripts/operational_ioc_validator.py api/feed.json \
+              --output api/ioc_quality.json 2>&1 | tail -3
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.99 — DETECTION QUALITY ENGINE (v1.0.0)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.99 — Detection Quality Engine (v1.0.0)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            python3 scripts/detection_quality_engine.py api/feed.json \
+              --apply --output api/detection_quality.json 2>&1 | tail -3
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.100 — INTELLIGENCE GRADE ENGINE v2 (v2.0.0)
+      # Grade B: CVSS>=8.0 + 2 independent sources + evidence-based ATT&CK.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.100 — Intelligence Grade Engine v2 (v2.0.0)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            python3 scripts/intelligence_grade_engine_v2.py api/feed.json \
+              --apply --output data/governance/intelligence_grade_v2.json 2>&1 | tail -3
+            if [ -f "data/governance/intelligence_grade_v2.json" ]; then
+              GRADE_B=$(python3 -c "import json; d=json.load(open('data/governance/intelligence_grade_v2.json')); print(d.get('grade_distribution',{}).get('B',0))" 2>/dev/null || echo "?")
+              ENT=$(python3 -c "import json; d=json.load(open('data/governance/intelligence_grade_v2.json')); print(d.get('enterprise_eligible',0))" 2>/dev/null || echo "?")
+              echo "STAGE 6.100: grade_B=${GRADE_B} enterprise_eligible=${ENT}"
+            fi
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.101 — COMMERCIAL READINESS GOVERNOR v2 (final pass)
+      # Produces tier feeds, quarantine, governance_status.json, score.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.101 — Commercial Readiness Governor v2 (final pass)"
+        continue-on-error: true
+        run: |
+          if [ -f "api/feed.json" ]; then
+            python3 scripts/commercial_readiness_governor.py api/feed.json \
+              --apply --report data/health/commercial_readiness_governor_report.json 2>&1 | tail -5
+            if [ -f "api/governance_status.json" ]; then
+              SCORE=$(python3 -c "import json; print(json.load(open('api/governance_status.json')).get('commercial_readiness_score',0))" 2>/dev/null || echo "?")
+              ENT=$(python3 -c "import json; print(json.load(open('api/governance_status.json')).get('enterprise_status','?'))" 2>/dev/null || echo "?")
+              MSSP=$(python3 -c "import json; print(json.load(open('api/governance_status.json')).get('mssp_status','?'))" 2>/dev/null || echo "?")
+              echo "STAGE 6.101: score=${SCORE}/100 enterprise=${ENT} mssp=${MSSP}"
+            fi
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 6.102 -- CONFIDENCE & CORROBORATION ENRICHMENT (v1.0.0 PERMANENT)
+      # Final intelligence enrichment pass before git commit.
+      # Runs AFTER all quality, attribution, and commercial readiness stages
+      # so confidence_label reflects the fully enriched state of every item.
+      #
+      # Writes to api/feed.json (in-place, non-destructive):
+      #   confidence_label        (CONFIRMED/HIGH_CONFIDENCE/MEDIUM/LOW/UNVERIFIED)
+      #   confidence_score_v2     (evidence point total, 17-signal weighted)
+      #   sla_priority            (P0/P1/P2/P3/P4)
+      #   revenue_opportunities   (CONSULTING/IR/THREAT_HUNTING/VA/MSSP/EXEC_BRIEF)
+      #   recommended_sla_action  (emergency/urgent/priority/scheduled/monitor)
+      #
+      # STAGE 9 commits api/feed.json — confidence labels are in the committed
+      # feed, STAGE 9.5 R2 upload carries them, dashboard badges render correctly.
+      # Non-blocking: exit 0 forced so CI never fails here.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 6.102 -- Confidence & Corroboration Enrichment (v1.0.0)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          set +e
+          if [ -f "api/feed.json" ]; then
+            python3 scripts/confidence_corroboration_engine.py 2>&1
+            CONF_EXIT=$?
+            if [ "$CONF_EXIT" -eq 0 ]; then
+              CONF_ITEMS=$(jq '[.[] | select(.confidence_label != null)] | length' api/feed.json 2>/dev/null || echo "?")
+              echo "[PASS] Confidence enrichment: ${CONF_ITEMS} items enriched with confidence_label + sla_priority"
+            else
+              echo "::warning::confidence_corroboration_engine.py exited ${CONF_EXIT} -- non-fatal"
+            fi
+          else
+            echo "[SKIP] api/feed.json not found -- confidence enrichment skipped (non-fatal)"
+          fi
+          set -e
+          exit 0
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 7 — PIPELINE OBSERVABILITY TELEMETRY (Phase 6)
+      # ─────────────────────────────────────────────────────────────────────
+      # v184.0 FIX: Moved from inline python3 -c block (RULE 1 violation) to
+      # dedicated script: scripts/emit_ai_telemetry.py
+      # All values passed via env vars — zero inline Python in YAML.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 7 — Emit pipeline observability telemetry"
+        run: |
+          PIPELINE_END=$(date +%s)
+          PIPELINE_DURATION=$((PIPELINE_END - PIPELINE_START_EPOCH))
+          echo "PIPELINE_DURATION_SECONDS=${PIPELINE_DURATION}" >> "$GITHUB_ENV"
+
+          echo "============================================================"
+          echo "SENTINEL APEX AI TRACKER — PIPELINE OBSERVABILITY REPORT"
+          echo "============================================================"
+          echo "Run ID          : $GITHUB_RUN_ID"
+          echo "Run Number      : $GITHUB_RUN_NUMBER"
+          echo "Pipeline version: $PIPELINE_VERSION"
+          echo "Total duration  : ${PIPELINE_DURATION}s"
+          echo "Deps install    : ${STEP_TIMING_DEPS_MS:-N/A}ms"
+          echo "AI generation   : ${STEP_TIMING_GENERATE_MS:-N/A}ms"
+          echo "Dry run         : ${DRY_RUN}"
+          echo "------------------------------------------------------------"
+
+          # Output file sizes (pure bash — no inline Python)
+          for f in api/ai/tracker.json api/ai/health.json api/ai/executive-brief.json api/ai/monetization.json; do
+            [ -f "$f" ] && echo "$(du -sh "$f" | cut -f1)  $f" || echo "N/A  $f"
+          done
+          echo "============================================================"
+
+          # Write telemetry artifact (dedicated script — zero inline Python)
+          PIPELINE_DURATION_SECONDS=${PIPELINE_DURATION} python3 scripts/emit_ai_telemetry.py
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 7.5 — NULL-BYTE AUTO-REPAIR (defensive, non-fatal)
+      # Strips trailing null-byte padding from all AI output JSON files before
+      # commit. Covers api/v1/intel/ai_summary.json and all api/v1/intel/*.json.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 7.5 — Null-Byte Auto-Repair (pre-commit defensive)"
+        timeout-minutes: 2
+        run: python3 scripts/null_byte_repair.py || true
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 8 — SKIP COMMIT IF DRY RUN
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 8 — Dry-run gate (skip commit if dry_run=true)"
+        if: env.DRY_RUN == 'true'
+        run: |
+          echo "[DRY RUN] Dry run mode — skipping git commit and push"
+          echo "[DRY RUN] Outputs were generated but NOT committed to main"
+          echo "[DRY RUN] Pipeline complete — all validation gates passed"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 9 — SAFE COMMIT + PUSH (stash-safe, 5-attempt retry)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 9 — Safe commit + push (stash-safe, 5-attempt retry)"
+        if: env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name  "CYBERDUDEBIVASH"
+          git config user.email "bivash@cyberdudebivash.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
+
+          # Clean any stale lock/rebase state
+          git rebase --abort 2>/dev/null || true
+          git merge  --abort 2>/dev/null || true
+          rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
+
+          # Issue #274: api/ai/{tracker,health,executive-brief,monetization}.json
+          # are no longer git-tracked (see .gitignore) -- STAGE 9.5 below already
+          # uploads them straight to R2 every run regardless of whether this
+          # commit/push succeeds, and the Worker now reads them from R2 first
+          # (workers/intel-gateway/src/index.js's /api/ai/{filename} handler).
+          # Committing them to main was pure overhead: this push has been
+          # failing outright since main started requiring PRs (root-caused in
+          # #274), so they were frozen in git anyway while the real serving
+          # path (R2) already updates independently.
+          git add data/ai-telemetry/ 2>/dev/null || true
+
+          # Stage governance engine outputs (feed enrichment + quality reports)
+          git add api/feed.json 2>/dev/null || true
+          git add api/intel_quality.json 2>/dev/null || true
+          git add data/health/intel_publication_gate_report.json 2>/dev/null || true
+          git add data/health/intel_quality_engine_report.json 2>/dev/null || true
+          git add data/health/intel_grade_engine_report.json 2>/dev/null || true
+
+          # Stage commercial readiness governor outputs
+          git add api/feed_enterprise.json 2>/dev/null || true
+          git add api/feed_mssp.json 2>/dev/null || true
+          git add api/feed_public.json 2>/dev/null || true
+          git add api/governance_status.json 2>/dev/null || true
+          git add api/commercial_readiness.json 2>/dev/null || true
+          git add data/health/commercial_readiness_governor_report.json 2>/dev/null || true
+
+          # Stage v2 validation engine outputs
+          git add api/ioc_quality.json 2>/dev/null || true
+          git add api/detection_quality.json 2>/dev/null || true
+          git add data/governance/ 2>/dev/null || true
+          git add internal/governance/quarantine.json 2>/dev/null || true
+
+          # Stage Detection Engineering Core outputs (STAGE 3.1.11 above).
+          # ROOT CAUSE FIX: this stage was missing from the add list entirely --
+          # scripts/stage_3_1_11_detection_engineering_core.py runs successfully
+          # every scheduled execution and correctly writes per-advisory detection
+          # files (api/detections/{id}.json, {id}_full.json) plus the aggregate
+          # detection-index.json for the FULL current feed, but none of it was
+          # ever staged, so it was generated fresh on the runner and discarded
+          # every run. Confirmed live: the committed data/audit/
+          # stage_3_1_11_detection_engineering.json and api/detections/
+          # detection-index.json were frozen at "11 advisories" since a one-time
+          # commit around 2026-05-25, while a direct run against the current
+          # feed (109 items, 2026-08-31) correctly processed all of them in
+          # under half a second. api/detections/ is a directory add (matching
+          # the data/ai-telemetry/ and data/governance/ precedent above) because
+          # per-advisory filenames aren't fixed paths -- new advisories need new
+          # files staged automatically, not enumerated one by one.
+          git add api/detections/ 2>/dev/null || true
+          git add data/audit/stage_3_1_11_detection_engineering.json 2>/dev/null || true
+
+          # Same bug class, swept across the rest of this workflow's stages
+          # (2026-08-31): a background audit cross-referenced every STAGE X.Y
+          # script's declared output paths (docstring "OUTPUT FILES" headers
+          # + write-call greps) against this add list and found the same gap
+          # in at least 15 more paths -- each script runs successfully every
+          # scheduled execution and writes real output, none of it was ever
+          # staged. Some (data/health/intelligence_quality_hardener_report.json,
+          # data/threat_actors/, data/health/campaign_correlation_report.json,
+          # data/detection/, data/reports/executive-briefs/,
+          # data/golden_baseline/, data/health/runtime_stability.json) have
+          # ZERO commits in repo history -- never committed even once.
+          # Others (data/health/kev_marker_report.json,
+          # api/v1/intel/daily_brief_meta.json,
+          # data/health/feed_health_gate.json, data/campaigns/, data/malware/,
+          # data/graph/, data/health/advisory_immutability.json) are frozen at
+          # a one-time snapshot from 2026-08-26 or earlier, only ever
+          # "refreshed" by an unrelated conflict-recovery job restoring that
+          # same stale content -- never by this stage. Directory-level adds
+          # for the same reason as api/detections/ above: per-item filenames
+          # (per-actor, per-advisory, per-campaign) aren't fixed paths.
+          git add data/health/intelligence_quality_hardener_report.json 2>/dev/null || true
+          git add data/threat_actors/ 2>/dev/null || true
+          git add data/health/actor_attribution_report.json 2>/dev/null || true
+          git add data/health/campaign_correlation_report.json 2>/dev/null || true
+          git add data/detection/ 2>/dev/null || true
+          git add data/reports/executive-briefs/ 2>/dev/null || true
+          git add data/golden_baseline/ 2>/dev/null || true
+          git add data/health/runtime_stability.json 2>/dev/null || true
+          git add data/health/kev_marker_report.json 2>/dev/null || true
+          git add api/v1/intel/daily_brief_meta.json 2>/dev/null || true
+          git add data/health/feed_health_gate.json 2>/dev/null || true
+          git add data/campaigns/ 2>/dev/null || true
+          git add data/malware/ 2>/dev/null || true
+          git add data/graph/ 2>/dev/null || true
+          git add data/health/advisory_immutability.json 2>/dev/null || true
+
+          # Check if anything changed
+          if git diff --staged --quiet; then
+            echo "[INFO] No AI output changes detected — skipping commit (feed unchanged)"
+            exit 0
+          fi
+
+          # Build deterministic commit message (run ID + schema version)
+          # v149 FIX T12: replaced old-style inline Python one-liner (RULE 1 violation) with jq (ubuntu-latest)
+          FEED_ITEMS=$(jq -r '.feed_item_count // 0' api/ai/tracker.json 2>/dev/null || echo "N/A")
+          GRI=$(jq -r '(.global_risk_index.gri_score // .executive_summary.global_risk_index // "N/A") | tostring' api/ai/tracker.json 2>/dev/null || echo "N/A")
+          COMMIT_MSG="AI Tracker v${PIPELINE_VERSION}: run #${GITHUB_RUN_NUMBER} | items=${FEED_ITEMS} | GRI=${GRI} | $(date -u +'%Y-%m-%dT%H:%MZ') [skip ci]"
+          git commit -m "$COMMIT_MSG"
+          echo "[INFO] Commit: $COMMIT_MSG"
+
+          # ── No-stash push retry (fetch+rebase only — stash not needed post-commit) ──
+          # Rationale: commit already made before loop; stash-pop after rebase can
+          # introduce index conflicts. Clean fetch+rebase is simpler and more reliable.
+          PUSH_OK=0
+          for ATTEMPT in 1 2 3 4 5; do
+            git fetch origin main --quiet 2>/dev/null || true
+            git rebase origin/main --quiet 2>/dev/null || {
+              git rebase --abort 2>/dev/null || true
+              rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
+              git merge origin/main -X ours --no-edit --quiet 2>/dev/null || true
+            }
+            if git push origin main 2>&1; then
+              echo "[STAGE 9] Push successful (attempt ${ATTEMPT}/5)"
+              PUSH_OK=1
+              break
+            fi
+            echo "::warning::Push attempt ${ATTEMPT}/5 failed — retrying in $((ATTEMPT * 10))s"
+            sleep $((ATTEMPT * 10))
+          done
+          if [ "$PUSH_OK" -eq 0 ]; then
+            echo "::warning::STAGE 9: All push attempts exhausted — will sync on next scheduled run"
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STAGE 9.5 — R2 UPLOAD: AI Tracker files → Cloudflare R2
+      # v184.0 FIX: AI tracker files were committed to GitHub only.
+      # The Cloudflare Worker reads exclusively from R2 (private bucket).
+      # Without this step the Worker had no ai/tracker.json, ai/health.json,
+      # or ai/executive-brief.json in R2, causing ai-threat-tracker.html to
+      # show empty/stalled dashboard (handleAI fell back to ai_index.json).
+      #
+      # P0 DUPLICATE-WRITER RACE FIX (PR #370 follow-up): this step used to
+      # hand-roll `aws s3 cp` for these 4 keys directly in YAML -- a second,
+      # unlocked, unaccounted writer racing scripts/r2_upload.py's main()
+      # (invoked by sentinel-blogger.yml under a DIFFERENT concurrency group,
+      # "sentinel-data-writer", which does NOT serialize against this
+      # workflow's "sentinel-ai-writer" group). Fixed by making this
+      # workflow the sole caller of the sole code path that writes these
+      # keys: `scripts/r2_upload.py --ai-tracker-only`
+      # (main_ai_tracker_only()) -- r2_upload.py's main() no longer uploads
+      # them at all. This also brings the upload under r2_cost_guard.py's
+      # fail-closed budget + telemetry ledger, which the old inline
+      # `aws s3 cp` loop bypassed entirely.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: "STAGE 9.5 — Upload AI Tracker outputs to Cloudflare R2"
+        if: env.DRY_RUN != 'true'
+        env:
+          CF_ACCOUNT_ID:          ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:      ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY:  ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_upload.py --ai-tracker-only

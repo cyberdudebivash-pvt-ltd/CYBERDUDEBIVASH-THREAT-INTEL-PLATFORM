@@ -1,0 +1,124 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX v184.0 - AUTONOMOUS GUARDIAN AGENT
+# Version: v184.0 - unified platform version
+# NOTE: sync-dashboard.yml DISABLED in v184.0 - removed from workflow_run list.
+#       Guardian still triggers on sentinel-blogger completion + 2x daily schedule.
+#
+# HARDENING (v184.0 - OPTIMIZED DUAL TRIGGER DESIGN):
+#   This workflow has TWO triggers by design:
+#     1. workflow_run (sentinel-blogger completed) - fires immediately after blogger
+#     2. schedule cron '30 0,12 * * *' - 2x daily at 00:30 and 12:30 UTC
+#
+#   CONCURRENCY: cancel-in-progress: true
+#     Guardian runs are idempotent health checks - they read state and write a report.
+#     If sentinel-blogger completes, the post-run guardian fires immediately.
+#     The 2x daily schedule provides fallback coverage.
+#     This prevents guardian queue buildup during high-frequency pipeline runs.
+# =============================================================================
+name: Autonomous Guardian Agent v201.0
+
+on:
+  workflow_run:
+    # v184.0: sync-dashboard removed - it is DISABLED (merged into sentinel-blogger).
+    # Only sentinel-blogger triggers guardian post-run checks.
+    workflows: ["sentinel-blogger"]
+    types: [completed]
+  schedule:
+    - cron: '30 0,12 * * *'   # 2x daily: 00:30 UTC + 12:30 UTC (128 min/day savings)
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: 'Hours to look back for failures'
+        default: '6'
+        required: false
+      force_report:
+        description: 'Force full report even if no failures'
+        default: 'false'
+        required: false
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: autonomous-guardian
+  # cancel-in-progress: true -- Guardian is an idempotent health sweep.
+  # The latest run always has the most current pipeline state.
+  # Cancel stale queued runs to prevent report queue buildup.
+  cancel-in-progress: true
+
+jobs:
+  guardian:
+    name: Autonomous Guardian Cycle v140
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Set up Python 3.12"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: "Install Dependencies"
+        run: pip install requests pyyaml --quiet
+
+      - name: "Bootstrap Critical Files"
+        run: python3 scripts/bootstrap_critical_files.py
+
+      - name: "Run Autonomous Guardian"
+        env:
+          CDB_JWT_SECRET: ${{ secrets.CDB_JWT_SECRET }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '6' }}
+          FORCE_REPORT: ${{ github.event.inputs.force_report || 'false' }}
+          TRIGGER_WORKFLOW: ${{ github.event.workflow_run.name || 'scheduled' }}
+          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion || 'n/a' }}
+        run: python3 agent/autonomous_guardian/guardian.py || true
+
+      - name: "Commit Guardian Report"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --local user.email "bivash@cyberdudebivash.com"
+          git config --local user.name  "CYBERDUDEBIVASH"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
+          git rebase --abort 2>/dev/null || true
+          git merge  --abort 2>/dev/null || true
+          rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
+
+          git add -f data/health/ 2>/dev/null || true
+          # STRICT: do NOT stage feed_manifest.json - sentinel-blogger owns it
+          git restore --staged data/stix/feed_manifest.json 2>/dev/null || true
+
+          if git diff --staged --quiet; then
+            echo "No guardian report changes."
+            exit 0
+          fi
+
+          git commit -m "Guardian report @ $(date -u +'%Y-%m-%d %H:%M UTC') [skip ci]"
+
+          for i in 1 2 3 4; do
+            git fetch origin main --quiet 2>/dev/null || true
+            git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null||true; git merge origin/main -X ours --no-edit --quiet||true; }
+            if git push origin main; then echo "Push OK"; break; fi
+            sleep $((i*10))
+            [ $i -eq 4 ] && echo "Push deferred."
+          done
+
+      - name: "Summary"
+        if: always()
+        run: |
+          [ -f data/health/guardian_report.json ] && \
+            python3 -c "import json; d=json.load(open('data/health/guardian_report.json')); print(f'Guardian: {d.get(\"status\",\"N/A\")} | Failures: {d.get(\"failures_detected\",0)} | Fixes: {d.get(\"fixes_applied\",0)}')" || \
+            echo "No guardian report."

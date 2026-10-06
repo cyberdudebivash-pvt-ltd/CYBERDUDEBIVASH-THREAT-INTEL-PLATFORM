@@ -1,0 +1,10 @@
+{
+  "threat_id": "thr-df86a56ffce0",
+  "title": "CVE-2026-16494: GitLab has remediated an issue in GitLab EE affecting all versio",
+  "scripts": [
+    {
+      "type": "hardening_bash",
+      "content": "#!/bin/bash\n# CDB APEX v37.0 - Emergency Hardening Script\n# Threat: CVE-2026-16494: GitLab has remediated an issue in GitLab EE \n# Generated: 2026-08-15T16:52:27.506977+00:00\n\necho \"[*] Updating system packages...\"\napt-get update && apt-get upgrade -y 2>/dev/null || yum update -y 2>/dev/null\n\necho \"[*] Enabling firewall...\"\nufw enable 2>/dev/null || firewall-cmd --set-default-zone=drop 2>/dev/null\n\necho \"[*] Disabling unnecessary services...\"\nsystemctl disable --now telnet.socket 2>/dev/null\nsystemctl disable --now rsh.socket 2>/dev/null\n\necho \"[*] Setting secure SSH configuration...\"\nsed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config\nsed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config\nsystemctl restart sshd\n\necho \"[+] Hardening complete for threat: thr-df86a56ffce0\"\n"
+    }
+  ]
+}

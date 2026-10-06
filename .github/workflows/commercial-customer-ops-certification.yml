@@ -1,0 +1,1078 @@
+name: "SENTINEL APEX -- Commercial Customer Operations Certification v201.0"
+
+# Mission v185.0 Phase 1/2: controlled, authenticated production acceptance
+# tests against the payment -> subscription -> entitlement -> API key ->
+# customer access lifecycle. Static checks always run. Authenticated checks
+# require ADMIN_SECRET (see SECURITY NOTE below) and are cleanly marked
+# BLOCKED_BY_SECRET when it isn't configured -- never fabricated as passing.
+#
+# SECURITY NOTE -- secret architecture correction (v185.4):
+# The mission brief that requested this workflow assumed WORKER_ADMIN_SECRET
+# is interchangeable with the Worker's ADMIN_SECRET ("documents that it must
+# match"). The live code does not support that: workers/intel-gateway/src/
+# index.js's handleAdmin() gates /api/admin/cache/bust[-prefix] against
+# env.WORKER_ADMIN_SECRET via an "X-Admin-Secret" header, and gates every
+# other /api/admin/* route (including POST /api/admin/keys, which this
+# workflow needs to provision controlled test keys) against a DIFFERENT,
+# independent env.ADMIN_SECRET via an "X-Admin-Key" header. No existing
+# GitHub Actions secret named ADMIN_SECRET was found wired into any workflow
+# in this repository as of this pass -- only WORKER_ADMIN_SECRET is
+# configured today, and it cannot authenticate against /api/admin/keys.
+# This workflow therefore checks presence of `secrets.ADMIN_SECRET`
+# specifically (the correct secret for this purpose) and reports
+# ADMIN_SECRET_PRESENT=true/false. An operator must add that secret (Repo
+# Settings -> Secrets and variables -> Actions -> New repository secret,
+# name ADMIN_SECRET, value must equal the Worker's own ADMIN_SECRET) before
+# any authenticated phase below can run for the first time. Its value is
+# never echoed, logged, printed, or written to any artifact by this
+# workflow -- only the boolean presence flag ever leaves the secret context.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/intel-gateway/src/**'
+      - 'workers/revenue-engine/src/**'
+      - 'deploy/cyber-watchdog/**'
+      - 'scripts/verify_customer_core_flow.py'
+      - 'scripts/verify_commercial_contract.py'
+      - 'scripts/verify_public_claims.py'
+      - 'scripts/entitlement_resource_drift_gate.py'
+      - 'config/**'
+      - 'pricing.html'
+      - 'upgrade.html'
+      - 'get-api-key.html'
+      - 'cyber-watchdog.html'
+      - 'ai-threat-tracker.html'
+      - 'sla.html'
+      - 'contact-enterprise.html'
+      - '.github/workflows/commercial-customer-ops-certification.yml'
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why is this certification being run?"
+        required: false
+        default: "Manual certification run"
+        type: string
+
+concurrency:
+  group: commercial-customer-ops-certification
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  WORKER_BASE: "https://intel.cyberdudebivash.com"
+
+jobs:
+
+  # ---------------------------------------------------------------------
+  # Phase 2: safe secret presence gate. Never echoes a secret value --
+  # only a boolean is ever produced, and it is produced with `set +x` /
+  # no verbose curl so nothing leaks into step logs even accidentally.
+  # ---------------------------------------------------------------------
+  secret-presence-gate:
+    name: "Phase 2 - Secret Presence Gate"
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      admin_secret_present: ${{ steps.check.outputs.present }}
+      watchdog_sink_present: ${{ steps.check.outputs.watchdog_sink_present }}
+    steps:
+      - name: "Check required certification secret presence (values never printed)"
+        id: check
+        env:
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          CDB_WATCHDOG_SINK_URL: ${{ secrets.CDB_WATCHDOG_SINK_URL }}
+          CDB_WATCHDOG_SINK_INSPECT_URL: ${{ secrets.CDB_WATCHDOG_SINK_INSPECT_URL }}
+          CDB_WATCHDOG_SINK_TOKEN: ${{ secrets.CDB_WATCHDOG_SINK_TOKEN }}
+        run: |
+          set +x
+          if [ -n "$ADMIN_SECRET" ]; then
+            echo "ADMIN_SECRET_PRESENT=true"
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ADMIN_SECRET_PRESENT=false"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$CDB_WATCHDOG_SINK_URL" ] && [ -n "$CDB_WATCHDOG_SINK_INSPECT_URL" ] && [ -n "$CDB_WATCHDOG_SINK_TOKEN" ]; then
+            echo "WATCHDOG_SINK_PRESENT=true"
+            echo "watchdog_sink_present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "WATCHDOG_SINK_PRESENT=false"
+            echo "watchdog_sink_present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------
+  # Static checks: run regardless of secret availability. Reuses the same
+  # scripts the main pipeline (sentinel-blogger.yml) already runs, as a
+  # standalone on-demand entry point per Phase 1's own requirement for a
+  # dedicated certification workflow.
+  # ---------------------------------------------------------------------
+  static-checks:
+    name: "Static Certification Checks"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 3
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: "Install dependencies"
+        run: pip install --quiet -r requirements.txt || true
+      - name: "Entitlement resource drift gate"
+        run: python3 scripts/entitlement_resource_drift_gate.py
+      - name: "Worker JS integrity gate"
+        run: python3 scripts/worker_js_integrity_gate.py
+      - name: "Commercial contract drift gate"
+        # Fails when any pricing definition, the Razorpay charging table, the
+        # gateway's enforced quotas, or any buyer page disagrees with
+        # config/commercial-contract.json. Added after an audit found five
+        # disagreeing plan definitions and two official surfaces quoting
+        # different MSSP prices while the gateway charged a third figure.
+        run: python3 scripts/verify_commercial_contract.py
+      - name: "Unsupported social-proof gate"
+        # Fails when a buyer page publishes customer proof with no evidence
+        # source (see config/evidence-register.json).
+        run: python3 scripts/verify_public_claims.py
+      - name: "Platform evidence freshness"
+        # The counts public pages cite must still match this repository.
+        run: python3 scripts/generate_platform_evidence.py --check
+      - name: "Regression test suite"
+        run: python3 scripts/regression_tests.py
+
+  # ---------------------------------------------------------------------
+  # Phase 4 (partial) / 9 / 10-15: controlled authenticated acceptance
+  # tests. Only runs when ADMIN_SECRET is present. Provisions short-lived
+  # (1-day expires_in_days) controlled test keys via the existing
+  # POST /api/admin/keys admin endpoint -- no real payment, no synthetic
+  # customer records outside this mechanism, no uncontrolled charge.
+  # Covers the subset of the mission's lifecycle-state matrix this
+  # codebase can actually exercise today (ANONYMOUS, INVALID_KEY,
+  # ACTIVE_PRO, ACTIVE_ENTERPRISE, ACTIVE_MSSP, REVOKED_KEY): the
+  # remaining states (EXPIRED_*, CANCELLED, REFUNDED, SUSPENDED,
+  # DOWNGRADED) require the normalized subscription_status model designed
+  # in docs/SUBSCRIPTION_STATE_MODEL_V185.md but not yet built -- those
+  # are BLOCKED_BY_MODEL, not BLOCKED_BY_SECRET, and are not silently
+  # skipped here as if they were the same thing.
+  # ---------------------------------------------------------------------
+  authenticated-customer-ops-tests:
+    name: "Authenticated Customer Ops Tests"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+    steps:
+      - name: "Provision + test controlled tier keys, then revoke"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+
+          provision() {
+            local tier="$1"
+            curl -sS -X POST "$BASE/api/admin/keys" \
+              -H "X-Admin-Key: $ADMIN_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"customer_id\":\"ci-test-${tier,,}-$(date +%s)\",\"tier\":\"$tier\",\"label\":\"CI customer-ops cert (auto-expire 1d)\",\"expires_in_days\":1}"
+          }
+
+          revoke() {
+            local key="$1"
+            [ -z "$key" ] && return 0
+            curl -sS -X DELETE "$BASE/api/admin/keys/$key" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null
+          }
+
+          expect_status() {
+            local desc="$1" expected="$2" actual="$3"
+            if [ "$actual" = "$expected" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP $expected, got $actual"
+              FAIL=1
+            fi
+          }
+
+          # Denied-credential checks: 401 is the normal answer, but
+          # resolveAuth() (index.js) calls recordAuthFailure() on every
+          # unresolvable key -- BRUTE_FORCE_MAX=5 failures from the same IP
+          # within BRUTE_FORCE_TTL=900s locks that IP to HTTP 429 instead.
+          # This job produces 2 such failures (INVALID_KEY, REVOKED_KEY)
+          # per run from the runner's shared egress IP, so a few runs within
+          # 15 minutes can legitimately tip into 429 -- still a correct
+          # denial, just a different status. Accept both for the two checks
+          # that present a credential resolveAuth() can't resolve; the
+          # ANONYMOUS check presents no credential at all, so
+          # recordAuthFailure() never runs there and 401 stays deterministic
+          # (kept on expect_status).
+          expect_denied() {
+            local desc="$1" actual="$2"
+            if [ "$actual" = "401" ] || [ "$actual" = "429" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP 401 or 429, got $actual"
+              FAIL=1
+            fi
+          }
+
+          # Cleanup safety net: if any curl below this point fails, `set -e`
+          # aborts the step before its own explicit revoke calls run,
+          # leaving live ENTERPRISE/MSSP test keys until their 1-day
+          # expires_in_days TTL. Record provisioned keys as they're created
+          # and revoke every recorded one on EXIT regardless of how the
+          # step ends -- the explicit revoke calls later in this script
+          # become redundant-but-harmless (revoke() on an already-deleted
+          # key is a no-op) rather than the only cleanup path.
+          PROVISIONED_KEYS=()
+          cleanup_all() {
+            local k
+            for k in "${PROVISIONED_KEYS[@]:-}"; do
+              [ -n "$k" ] && revoke "$k" || true
+            done
+          }
+          trap cleanup_all EXIT
+
+          echo "--- Provisioning controlled test keys (PRO, ENTERPRISE, MSSP) ---"
+          PRO_JSON=$(provision PRO)
+          ENT_JSON=$(provision ENTERPRISE)
+          MSSP_JSON=$(provision MSSP)
+          PRO_KEY=$(echo "$PRO_JSON" | jq -r '.key // empty')
+          ENT_KEY=$(echo "$ENT_JSON" | jq -r '.key // empty')
+          MSSP_KEY=$(echo "$MSSP_JSON" | jq -r '.key // empty')
+
+          if [ -z "$PRO_KEY" ] || [ -z "$ENT_KEY" ] || [ -z "$MSSP_KEY" ]; then
+            echo "FAIL: provisioning did not return a key for one or more tiers -- ADMIN_SECRET likely does not match the Worker's env.ADMIN_SECRET, or /api/admin/keys is unreachable"
+            exit 1
+          fi
+          PROVISIONED_KEYS=("$PRO_KEY" "$ENT_KEY" "$MSSP_KEY")
+          echo "Provisioned 3 controlled test keys (values not printed)."
+
+          # NOTE: handleSLAReport (sla-monitor.js) has its own auth-presence
+          # gate (`!auth.key && !auth.jwt` -> 401 "Authentication required")
+          # that runs BEFORE the tier check. resolveAuth() sets auth.key to
+          # null for both "no credential" and "invalid credential" (only
+          # `error` differs) -- so both ANONYMOUS and INVALID_KEY hit this
+          # same 401 branch on this specific resource, not the 403 tier-gate
+          # branch. Confirmed by reading sla-monitor.js:139 before writing
+          # this test, not assumed.
+          echo "--- ANONYMOUS / FREE: no key on an ENTERPRISE-only resource must be denied ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" "$BASE/api/sla/report")
+          expect_status "anonymous denied on /api/sla/report" "401" "$ST"
+
+          echo "--- INVALID_KEY: garbage key must be denied ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: cdb_invalid_00000000000000000000000000000000000000" "$BASE/api/sla/report")
+          expect_denied "invalid key denied on /api/sla/report" "$ST"
+
+          echo "--- ACTIVE_PRO: PRO key denied on ENTERPRISE-only resource ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $PRO_KEY" "$BASE/api/sla/report")
+          expect_status "PRO denied on /api/sla/report (Enterprise-only)" "403" "$ST"
+
+          echo "--- ACTIVE_ENTERPRISE: ENTERPRISE key allowed on ENTERPRISE-only resource ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $ENT_KEY" "$BASE/api/sla/report")
+          expect_status "ENTERPRISE allowed on /api/sla/report" "200" "$ST"
+
+          echo "--- ACTIVE_MSSP: MSSP key allowed on ENTERPRISE-only resource (Enterprise+MSSP gate) ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $MSSP_KEY" "$BASE/api/sla/report")
+          expect_status "MSSP allowed on /api/sla/report" "200" "$ST"
+
+          # NOTE: /api/feed always returns HTTP 200 (redacted for FREE, full
+          # for PRO+) -- it is not a hard-error resource, so it cannot be
+          # used to test "denied". /api/sla/report is used instead: after
+          # KV deletion, resolveAuth() returns the same auth.key=null shape
+          # as an invalid key, so a revoked key must produce the identical
+          # 401 "Authentication required" this handler gives any key it
+          # can't resolve -- proving revocation takes effect immediately,
+          # not just eventually.
+          echo "--- REVOKED_KEY: PRO key denied immediately after admin revocation ---"
+          revoke "$PRO_KEY"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $PRO_KEY" "$BASE/api/sla/report")
+          expect_denied "revoked PRO key denied on /api/sla/report" "$ST"
+
+          echo "--- Cleanup: revoking remaining test keys ---"
+          revoke "$ENT_KEY"
+          revoke "$MSSP_KEY"
+          echo "Cleanup complete."
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "One or more authenticated customer-ops checks FAILED -- see PASS/FAIL lines above."
+            exit 1
+          fi
+          echo ""
+          echo "All authenticated customer-ops checks PASSED."
+
+  # ---------------------------------------------------------------------
+  # Phase 4 (live): expiry shadow validation. POST /api/admin/keys always
+  # honors an explicit expires_in_days directly (unlike the real customer-
+  # provisioning path in provisionApiKey(), which only sets a real
+  # expires_at when SUBSCRIPTION_EXPIRY_ENABLED=true) -- so a controlled
+  # admin-provisioned key can cross a real expires_at boundary today
+  # without needing that global flag flipped. Provisions a key with a
+  # ~70-second expiry, confirms it is allowed immediately, waits for the
+  # boundary to pass, then confirms resolveAuth() denies it with
+  # key_expired -- the exact "expected vs actual decision around the
+  # expiry boundary" comparison Phase 4 asks for, using a real short-lived
+  # key rather than a simulated clock. 70s (not 15s) because this endpoint
+  # also sets Cloudflare KV's own expirationTtl from the same value, and
+  # KV rejects any expirationTtl below 60 seconds.
+  # ---------------------------------------------------------------------
+  expiry-shadow-validation:
+    name: "Phase 4 - Expiry Boundary Shadow Validation"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+    steps:
+      - name: "Provision a ~70s-lived key, confirm allow-then-deny across its expires_at boundary"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+
+          expect_status() {
+            local desc="$1" expected="$2" actual="$3"
+            if [ "$actual" = "$expected" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP $expected, got $actual"
+              FAIL=1
+            fi
+          }
+
+          revoke() {
+            local key="$1"
+            [ -z "$key" ] && return 0
+            curl -sS -X DELETE "$BASE/api/admin/keys/$key" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null
+          }
+
+          CURRENT_KEY=""
+          cleanup_all() { [ -n "$CURRENT_KEY" ] && revoke "$CURRENT_KEY" || true; }
+          trap cleanup_all EXIT
+
+          echo "--- Provisioning one ENTERPRISE key with expires_in_days=0.0008 (~69s) ---"
+          KEY_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d "{\"customer_id\":\"ci-expiry-$(date +%s)\",\"tier\":\"ENTERPRISE\",\"label\":\"CI expiry boundary (auto-expire ~69s)\",\"expires_in_days\":0.0008}")
+          KEY=$(echo "$KEY_JSON" | jq -r '.key // empty')
+          EXPIRES_AT=$(echo "$KEY_JSON" | jq -r '.expires_at // empty')
+          if [ -z "$KEY" ]; then
+            echo "FAIL: provisioning did not return a key"
+            exit 1
+          fi
+          CURRENT_KEY="$KEY"
+          echo "Provisioned 1 controlled test key (value not printed), expires_at=$EXPIRES_AT"
+
+          echo "--- Before expiry: allowed ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_status "key allowed before its expires_at boundary" "200" "$ST"
+
+          echo "--- Waiting 80s for expires_at to pass ---"
+          sleep 80
+
+          echo "--- After expiry: denied ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          if [ "$ST" = "401" ] || [ "$ST" = "429" ]; then
+            echo "PASS: key denied after its expires_at boundary (HTTP $ST)"
+          else
+            echo "FAIL: expected HTTP 401 or 429 after expiry, got $ST"
+            FAIL=1
+          fi
+
+          echo "--- Cleanup ---"
+          revoke "$KEY"
+          CURRENT_KEY=""
+          echo "Cleanup complete."
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "One or more expiry-shadow-validation checks FAILED -- see PASS/FAIL lines above."
+            exit 1
+          fi
+          echo ""
+          echo "Expiry boundary shadow validation PASSED: expected-vs-actual resolveAuth() decisions"
+          echo "matched exactly across the expires_at boundary, 0 unexpected differences."
+
+  # ---------------------------------------------------------------------
+  # Phase 2 / Phase 12 (live): full six-state subscription lifecycle
+  # matrix plus JWT mid-session invalidation, reactivation, status-field
+  # injection rejection, and rotation (including terminal-state rotation
+  # rejection). v185.6 shipped the normalized subscription_status model
+  # (subscription-lifecycle.js) and its JWT-deny-marker wiring but could
+  # only unit-test it -- ADMIN_SECRET was absent every prior pass. This is
+  # the first live exercise of that model against production.
+  #
+  # Uses a single ENTERPRISE-tier controlled key throughout (so /api/sla/
+  # report, which requires ENTERPRISE, is a valid allow/deny probe for
+  # every state) and drives every transition through the same admin
+  # endpoints a real support action would use -- no direct KV writes.
+  # ---------------------------------------------------------------------
+  lifecycle-state-matrix:
+    name: "Phase 2/12 - Lifecycle State Matrix + JWT + Rotation"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+    steps:
+      - name: "Drive a single key through every lifecycle state"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+
+          expect_status() {
+            local desc="$1" expected="$2" actual="$3"
+            if [ "$actual" = "$expected" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP $expected, got $actual"
+              FAIL=1
+            fi
+          }
+
+          # Same 401/429 acceptance as the Phase 1 job: recordAuthFailure()
+          # runs on every unresolvable key, and this job produces several
+          # such failures from the same runner egress IP.
+          expect_denied() {
+            local desc="$1" actual="$2"
+            if [ "$actual" = "401" ] || [ "$actual" = "429" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP 401 or 429, got $actual"
+              FAIL=1
+            fi
+          }
+
+          patch_status() {
+            local key="$1" status="$2"
+            curl -sS -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/admin/keys/$key/status" \
+              -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+              -d "{\"subscription_status\":\"$status\",\"reason\":\"CI lifecycle matrix\"}"
+          }
+
+          revoke() {
+            local key="$1"
+            [ -z "$key" ] && return 0
+            curl -sS -X DELETE "$BASE/api/admin/keys/$key" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null
+          }
+
+          # Cleanup net: whichever key is live when the step exits (the
+          # original, or its post-rotation replacement) gets revoked.
+          CURRENT_KEY=""
+          cleanup_all() { [ -n "$CURRENT_KEY" ] && revoke "$CURRENT_KEY" || true; }
+          trap cleanup_all EXIT
+
+          echo "--- Provisioning one controlled ENTERPRISE key ---"
+          KEY_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d "{\"customer_id\":\"ci-lifecycle-$(date +%s)\",\"tier\":\"ENTERPRISE\",\"label\":\"CI lifecycle matrix (auto-expire 1d)\",\"expires_in_days\":1}")
+          KEY=$(echo "$KEY_JSON" | jq -r '.key // empty')
+          if [ -z "$KEY" ]; then
+            echo "FAIL: provisioning did not return a key"
+            exit 1
+          fi
+          CURRENT_KEY="$KEY"
+          echo "Provisioned 1 controlled test key (value not printed)."
+
+          echo "--- ACTIVE (implicit, no subscription_status set yet): allowed ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_status "implicit-active key allowed" "200" "$ST"
+
+          echo "--- Login: issue a JWT for this active key ---"
+          JWT=$(curl -sS -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\"}" | jq -r '.token // empty')
+          if [ -z "$JWT" ]; then
+            echo "FAIL: /auth/login did not return a token for an active key"
+            FAIL=1
+          else
+            echo "PASS: login succeeded for active key"
+          fi
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $JWT" "$BASE/api/sla/report")
+          expect_status "JWT (issued while active) allowed" "200" "$ST"
+
+          echo "--- PAST_DUE: grace period, access must remain allowed ---"
+          ST=$(patch_status "$KEY" "past_due"); expect_status "PATCH to past_due accepted" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_status "past_due key still allowed (grace period)" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $JWT" "$BASE/api/sla/report")
+          expect_status "pre-existing JWT still allowed under past_due" "200" "$ST"
+
+          echo "--- SUSPENDED: API key AND the already-issued JWT must both be denied immediately ---"
+          ST=$(patch_status "$KEY" "suspended"); expect_status "PATCH to suspended accepted" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_denied "suspended key denied" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $JWT" "$BASE/api/sla/report")
+          expect_denied "pre-existing JWT denied mid-session after suspension (jwt_deny marker)" "$ST"
+
+          echo "--- Fresh login must also be refused for a suspended key ---"
+          LOGIN_ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\"}")
+          expect_denied "fresh login refused for suspended key" "$LOGIN_ST"
+
+          echo "--- CANCELLED / EXPIRED / REFUNDED: each independently denies ---"
+          for st in cancelled expired refunded; do
+            PST=$(patch_status "$KEY" "$st"); expect_status "PATCH to $st accepted" "200" "$PST"
+            ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+            expect_denied "$st key denied" "$ST"
+          done
+
+          echo "--- Status-field injection: an unrecognized status string must be rejected at the PATCH layer (400), not silently applied ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/admin/keys/$KEY/status" \
+            -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d '{"subscription_status":"totally_made_up_status","reason":"CI injection probe"}')
+          expect_status "bogus subscription_status rejected" "400" "$ST"
+
+          echo "--- AUTHZ: reactivation PATCH without a valid admin key must be denied, not silently reactivate the key ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/admin/keys/$KEY/status" \
+            -H "Content-Type: application/json" \
+            -d '{"subscription_status":"active","reason":"CI unauthorized reactivation probe"}')
+          expect_status "reactivation PATCH without X-Admin-Key rejected" "403" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_denied "key still denied after the unauthorized reactivation attempt (still refunded)" "$ST"
+
+          echo "--- REACTIVATED: admin can restore access from any deny state ---"
+          ST=$(patch_status "$KEY" "active"); expect_status "PATCH to active accepted" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_status "reactivated key allowed again" "200" "$ST"
+          FRESH_LOGIN_ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\"}")
+          expect_status "fresh login succeeds again after reactivation" "200" "$FRESH_LOGIN_ST"
+
+          echo "--- ROTATED: new key works immediately, old key denied immediately, no overlap ---"
+          ROTATE_JSON=$(curl -sS -X POST "$BASE/api/admin/keys/$KEY/rotate" -H "X-Admin-Key: $ADMIN_SECRET")
+          NEW_KEY=$(echo "$ROTATE_JSON" | jq -r '.new_key // empty')
+          if [ -z "$NEW_KEY" ]; then
+            echo "FAIL: rotation did not return a new_key"
+            FAIL=1
+          else
+            echo "PASS: rotation returned a new key"
+            CURRENT_KEY="$NEW_KEY"
+          fi
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          expect_denied "old (pre-rotation) key denied immediately" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $NEW_KEY" "$BASE/api/sla/report")
+          expect_status "new (post-rotation) key allowed, tier carried forward" "200" "$ST"
+
+          echo "--- TERMINAL-STATE ROTATION: rotating a suspended key must be refused (409), not silently reactivate it ---"
+          PST=$(patch_status "$NEW_KEY" "suspended"); expect_status "PATCH new key to suspended accepted" "200" "$PST"
+          ROTATE_DENY_ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/api/admin/keys/$NEW_KEY/rotate" -H "X-Admin-Key: $ADMIN_SECRET")
+          expect_status "rotation of a suspended (terminal-state) key rejected" "409" "$ROTATE_DENY_ST"
+
+          echo "--- Cleanup: revoking final live key ---"
+          revoke "$NEW_KEY"
+          CURRENT_KEY=""
+          echo "Cleanup complete."
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "One or more lifecycle-state-matrix checks FAILED -- see PASS/FAIL lines above."
+            exit 1
+          fi
+          echo ""
+          echo "All lifecycle-state-matrix checks PASSED."
+
+  # ---------------------------------------------------------------------
+  # Phase 7 (live): two real MSSP identities, cross-tenant access denied,
+  # own-tenant access allowed, and a legacy key (no managed_tenants) kept
+  # unrestricted per the documented backward-compatible default.
+  # ---------------------------------------------------------------------
+  mssp-tenant-isolation:
+    name: "Phase 7 - MSSP Two-Tenant Isolation"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+    steps:
+      - name: "Two-tenant BOLA probe against /api/mssp/tenants/{tenant_id}/feed"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+          TENANT_A="ci-tenant-a-$(date +%s)"
+          TENANT_B="ci-tenant-b-$(date +%s)"
+
+          expect_status() {
+            local desc="$1" expected="$2" actual="$3"
+            if [ "$actual" = "$expected" ]; then
+              echo "PASS: $desc (HTTP $actual)"
+            else
+              echo "FAIL: $desc -- expected HTTP $expected, got $actual"
+              FAIL=1
+            fi
+          }
+
+          revoke() {
+            local key="$1"
+            [ -z "$key" ] && return 0
+            curl -sS -X DELETE "$BASE/api/admin/keys/$key" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null
+          }
+
+          PROVISIONED_KEYS=()
+          cleanup_all() {
+            local k
+            for k in "${PROVISIONED_KEYS[@]:-}"; do
+              [ -n "$k" ] && revoke "$k" || true
+            done
+          }
+          trap cleanup_all EXIT
+
+          echo "--- Provisioning MSSP key A (managed_tenants=[TENANT_A]) ---"
+          A_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d "{\"customer_id\":\"ci-mssp-a-$(date +%s)\",\"tier\":\"MSSP\",\"label\":\"CI tenant isolation A\",\"expires_in_days\":1,\"managed_tenants\":[\"$TENANT_A\"]}")
+          A_KEY=$(echo "$A_JSON" | jq -r '.key // empty')
+          # Recorded immediately, not after all three provisioning calls
+          # complete -- otherwise a failure on B or L would exit 1 with
+          # PROVISIONED_KEYS still empty, leaking an already-provisioned
+          # A key until its 1-day TTL (CodeRabbit review finding on
+          # PR #256, confirmed real).
+          [ -n "$A_KEY" ] && PROVISIONED_KEYS+=("$A_KEY")
+
+          echo "--- Provisioning MSSP key B (managed_tenants=[TENANT_B]) ---"
+          B_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d "{\"customer_id\":\"ci-mssp-b-$(date +%s)\",\"tier\":\"MSSP\",\"label\":\"CI tenant isolation B\",\"expires_in_days\":1,\"managed_tenants\":[\"$TENANT_B\"]}")
+          B_KEY=$(echo "$B_JSON" | jq -r '.key // empty')
+          [ -n "$B_KEY" ] && PROVISIONED_KEYS+=("$B_KEY")
+
+          # managed_tenants:null is now the explicit legacy opt-in: an MSSP key
+          # created without a list starts self-service with zero tenants.
+          echo "--- Provisioning legacy MSSP key (no managed_tenants) ---"
+          L_JSON=$(curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+            -d "{\"customer_id\":\"ci-mssp-legacy-$(date +%s)\",\"tier\":\"MSSP\",\"label\":\"CI tenant isolation legacy\",\"expires_in_days\":1,\"managed_tenants\":null}")
+          L_KEY=$(echo "$L_JSON" | jq -r '.key // empty')
+          [ -n "$L_KEY" ] && PROVISIONED_KEYS+=("$L_KEY")
+
+          if [ -z "$A_KEY" ] || [ -z "$B_KEY" ] || [ -z "$L_KEY" ]; then
+            echo "FAIL: provisioning did not return a key for one or more MSSP identities"
+            exit 1
+          fi
+          echo "Provisioned 3 controlled MSSP test keys (values not printed)."
+
+          echo "--- TENANT_A key on its own tenant: allowed ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $A_KEY" "$BASE/api/mssp/tenants/$TENANT_A/feed")
+          expect_status "key A allowed on tenant A" "200" "$ST"
+
+          echo "--- TENANT_A key on TENANT_B: denied (cross-tenant BOLA) ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $A_KEY" "$BASE/api/mssp/tenants/$TENANT_B/feed")
+          expect_status "key A denied on tenant B" "403" "$ST"
+
+          echo "--- TENANT_B key on its own tenant: allowed ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $B_KEY" "$BASE/api/mssp/tenants/$TENANT_B/feed")
+          expect_status "key B allowed on tenant B" "200" "$ST"
+
+          echo "--- TENANT_B key on TENANT_A: denied (cross-tenant BOLA) ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $B_KEY" "$BASE/api/mssp/tenants/$TENANT_A/feed")
+          expect_status "key B denied on tenant A" "403" "$ST"
+
+          echo "--- Legacy key (no managed_tenants) on TENANT_A: allowed (documented backward-compatible default) ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $L_KEY" "$BASE/api/mssp/tenants/$TENANT_A/feed")
+          expect_status "legacy key unrestricted on tenant A" "200" "$ST"
+
+          echo "--- Legacy key (no managed_tenants) on TENANT_B: allowed (same documented default) ---"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $L_KEY" "$BASE/api/mssp/tenants/$TENANT_B/feed")
+          expect_status "legacy key unrestricted on tenant B" "200" "$ST"
+
+          echo "--- Cleanup: revoking all 3 MSSP test keys ---"
+          revoke "$A_KEY"; revoke "$B_KEY"; revoke "$L_KEY"
+          PROVISIONED_KEYS=()
+          echo "Cleanup complete."
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "One or more MSSP tenant-isolation checks FAILED -- see PASS/FAIL lines above."
+            exit 1
+          fi
+          echo ""
+          echo "All MSSP tenant-isolation checks PASSED."
+
+  # ---------------------------------------------------------------------
+  # Phase 7b (live): MSSP self-service tenants (tenant_auth_version 2).
+  # ADMIN_SECRET is used only to issue and delete the two test keys, the
+  # way a payment would issue them. Every tenant call uses the customer's
+  # own key. No key, tenant id or name is printed.
+  # ---------------------------------------------------------------------
+  mssp-self-service-tenants:
+    name: "Phase 7b - MSSP Self-Service Tenant Lifecycle"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+    steps:
+      - name: "Create, isolate, use and revoke a tenant with the customer's own key"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+          expect_status() {
+            if [ "$3" = "$2" ]; then echo "PASS: $1 (HTTP $3)"; else echo "FAIL: $1 -- expected HTTP $2, got $3"; FAIL=1; fi
+          }
+          KEYS=()
+          cleanup() {
+            local k
+            for k in "${KEYS[@]:-}"; do
+              [ -n "$k" ] && curl -sS -X DELETE "$BASE/api/admin/keys/$k" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null || true
+            done
+          }
+          trap cleanup EXIT
+          mk() {
+            curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" \
+              -d "{\"customer_id\":\"ci-mssp-ss-$1-$(date +%s)\",\"tier\":\"MSSP\",\"label\":\"CI self-service $1\",\"expires_in_days\":1}" | jq -r '.key // empty'
+          }
+          A=$(mk a); [ -n "$A" ] && KEYS+=("$A")
+          B=$(mk b); [ -n "$B" ] && KEYS+=("$B")
+          if [ -z "$A" ] || [ -z "$B" ]; then echo "FAIL: could not issue test MSSP keys"; exit 1; fi
+
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $A" "$BASE/api/mssp/tenants/anything/feed")
+          expect_status "new MSSP key has zero tenants (fail-closed, not unrestricted)" "403" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H "X-API-Key: $A" -H "Content-Type: application/json" \
+            -d '{"name":"CI tenant","customer_id":"someone-else"}' "$BASE/api/mssp/tenants")
+          expect_status "owner fields in the body are rejected" "400" "$ST"
+
+          OUT=$(curl -sS -w "\n%{http_code}" -X POST -H "X-API-Key: $A" -H "Content-Type: application/json" -d '{"name":"CI tenant"}' "$BASE/api/mssp/tenants")
+          expect_status "customer creates a tenant with its own key" "201" "$(echo "$OUT" | tail -1)"
+          T=$(echo "$OUT" | head -n -1 | jq -r '.tenant.tenant_id // empty')
+          if [ -z "$T" ]; then echo "FAIL: no tenant_id returned"; exit 1; fi
+
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $A" "$BASE/api/mssp/tenants/$T/feed")
+          expect_status "owner reads its tenant feed" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $A" -H "X-CDB-Watchdog-Tenant: $T" "$BASE/api/watchdog/watches")
+          expect_status "Cyber Watchdog recognizes the tenant" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $B" "$BASE/api/mssp/tenants/$T/feed")
+          expect_status "another MSSP customer cannot read it" "403" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $B" "$BASE/api/mssp/tenants/$T")
+          expect_status "another MSSP customer cannot see it" "404" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE -H "X-API-Key: $B" "$BASE/api/mssp/tenants/$T")
+          expect_status "another MSSP customer cannot revoke it" "404" "$ST"
+
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE -H "X-API-Key: $A" "$BASE/api/mssp/tenants/$T")
+          expect_status "owner revokes the tenant" "200" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $A" "$BASE/api/mssp/tenants/$T/feed")
+          expect_status "revoked tenant feed denied immediately" "403" "$ST"
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $A" -H "X-CDB-Watchdog-Tenant: $T" "$BASE/api/watchdog/watches")
+          expect_status "revoked tenant Watchdog access denied immediately" "403" "$ST"
+
+          cleanup; KEYS=()
+          if [ "$FAIL" -ne 0 ]; then echo "One or more MSSP self-service checks FAILED."; exit 1; fi
+          echo "All MSSP self-service tenant checks PASSED."
+
+  # ---------------------------------------------------------------------
+  # Phases 8-15 (live): Cyber Watchdog + MSSP canaries through the existing
+  # canary tool (deploy/cyber-watchdog/canary.mjs). ADMIN_SECRET only issues,
+  # rotates and deletes the short-lived canary keys, as a payment would; every
+  # customer action uses the customer's own key. Keys are masked; tenant ids
+  # are never printed. The Enterprise webhook canary needs an owner-controlled
+  # receiver (CDB_WATCHDOG_SINK_* secrets) and reports
+  # OPERATOR_WEBHOOK_SINK_REQUIRED instead of passing without one.
+  # ---------------------------------------------------------------------
+  watchdog-mssp-live-canaries:
+    name: "Phases 8-15 - Watchdog + MSSP Live Canaries"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+      CDB_WATCHDOG_SINK_URL: ${{ secrets.CDB_WATCHDOG_SINK_URL }}
+      CDB_WATCHDOG_SINK_INSPECT_URL: ${{ secrets.CDB_WATCHDOG_SINK_INSPECT_URL }}
+      CDB_WATCHDOG_SINK_TOKEN: ${{ secrets.CDB_WATCHDOG_SINK_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: "PRO, autonomous scheduler, MSSP self-service, rotation, Enterprise webhook, operator metrics"
+        run: |
+          set +x
+          set -o pipefail
+          BASE="$WORKER_BASE"
+          export CDB_WATCHDOG_BASE="$BASE"
+          FAIL=0
+          BLOCKED=0
+          RESULTS=()
+          KEYS=()
+          cleanup() {
+            local k
+            for k in "${KEYS[@]:-}"; do
+              [ -n "$k" ] && curl -sS -X DELETE "$BASE/api/admin/keys/$k" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null || true
+            done
+          }
+          trap cleanup EXIT
+          mk() {
+            local body="{\"customer_id\":\"ci-canary-$1-$(date +%s)\",\"tier\":\"$2\",\"label\":\"CI canary $1\",\"expires_in_days\":1}"
+            curl -sS -X POST "$BASE/api/admin/keys" -H "X-Admin-Key: $ADMIN_SECRET" -H "Content-Type: application/json" -d "$body" | jq -r '.key // empty'
+          }
+          record() {
+            RESULTS+=("$1: $2")
+            echo "$1: $2"
+            [ "${3:-}" = "fail" ] && FAIL=1
+            [ "${3:-}" = "blocked" ] && BLOCKED=1
+            return 0
+          }
+          canary() {
+            local name="$1" mode="$2" out rc
+            # F28: under `bash -e`, `out=$(...); rc=$?` aborted the step on any
+            # non-zero canary exit before the result below was recorded.
+            out=$(node deploy/cyber-watchdog/canary.mjs "$mode" 2>/dev/null) && rc=0 || rc=$?
+            echo "$out" | jq -c '{result, evidence: (.evidence | {mode, result, checks: (.checks // .steps // null | if type=="array" then length else . end), isolation: (.isolation.result // null), cross_tenant_probes: ((.isolation.cross_tenant_probes // []) | length)})}' 2>/dev/null || true
+            case "$rc" in
+              0) record "$name" PASS ;;
+              11) record "$name" OPERATOR_WEBHOOK_SINK_REQUIRED blocked ;;
+              *) record "$name" "FAIL ($(echo "$out" | jq -r '.result + " " + (.step // "") + " " + (.error // "")' 2>/dev/null | head -c 200))" fail ;;
+            esac
+          }
+
+          PRO=$(mk pro PRO); [ -n "$PRO" ] && KEYS+=("$PRO") && echo "::add-mask::$PRO"
+          ENT=$(mk ent ENTERPRISE); [ -n "$ENT" ] && KEYS+=("$ENT") && echo "::add-mask::$ENT"
+          MSSP=$(mk mssp MSSP); [ -n "$MSSP" ] && KEYS+=("$MSSP") && echo "::add-mask::$MSSP"
+          if [ -z "$PRO" ] || [ -z "$ENT" ] || [ -z "$MSSP" ]; then echo "FAIL: could not issue canary keys"; exit 1; fi
+
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H "X-API-Key: $PRO" -H "Content-Type: application/json" -d '{"name":"x"}' "$BASE/api/mssp/tenants")
+          [ "$ST" = "403" ] && record "PRO denied MSSP tenant management" PASS || record "PRO denied MSSP tenant management" "FAIL (HTTP $ST)" fail
+          ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H "X-API-Key: $ENT" -H "Content-Type: application/json" -d '{"name":"x"}' "$BASE/api/mssp/tenants")
+          [ "$ST" = "403" ] && record "ENTERPRISE denied MSSP tenant management" PASS || record "ENTERPRISE denied MSSP tenant management" "FAIL (HTTP $ST)" fail
+
+          CDB_WATCHDOG_CANARY_PRO_KEY="$PRO" canary "PRO canary (auth, session, watch, event, dedupe, ack, disable, delete, webhook denial)" pro
+          CDB_WATCHDOG_CANARY_MSSP_KEY="$MSSP" canary "MSSP self-service canary (create A+B, isolation, revoke B, sessions)" mssp-self-service
+
+          # Rotation: tenant A (left active by the canary) must survive; nothing added.
+          A=$(curl -sS -H "X-API-Key: $MSSP" "$BASE/api/mssp/tenants" | jq -r '[.tenants[] | select(.status=="active")][0].tenant_id // empty')
+          if [ -z "$A" ]; then
+            record "MSSP rotation preserves membership" "FAIL (no active tenant before rotation)" fail
+          else
+            # Status and reason are kept so a failure says why (it used to
+            # say only "no key"). The body never contains the new key when
+            # there is none; the old key is masked above and scrubbed here.
+            ROT=$(curl -sS -w "\n%{http_code}" -X POST "$BASE/api/admin/keys/$MSSP/rotate" -H "X-Admin-Key: $ADMIN_SECRET")
+            ROT_STATUS=$(echo "$ROT" | tail -n 1)
+            NEW=$(echo "$ROT" | sed '$d' | jq -r '.new_key // empty' 2>/dev/null)
+            if [ -z "$NEW" ]; then
+              ROT_REASON=$(echo "$ROT" | sed '$d' | jq -r '[.error, .reason] | map(select(. != null)) | join(": ")' 2>/dev/null | head -c 160)
+              ROT_REASON="${ROT_REASON//$MSSP/[key]}"
+              record "MSSP rotation preserves membership" "FAIL (rotation returned no key: HTTP $ROT_STATUS $ROT_REASON)" fail
+            else
+              echo "::add-mask::$NEW"; KEYS+=("$NEW")
+              sleep 2
+              O=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $MSSP" "$BASE/api/mssp/tenants/$A/feed")
+              N=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $NEW" "$BASE/api/mssp/tenants/$A/feed")
+              C=$(curl -sS -H "X-API-Key: $NEW" "$BASE/api/mssp/tenants" | jq -r '.active_count // -1')
+              if [ "$N" = "200" ] && [ "$C" = "1" ] && { [ "$O" = "401" ] || [ "$O" = "429" ]; }; then
+                record "MSSP rotation preserves membership (old key denied, new key allowed, 1 active tenant)" PASS
+              else
+                record "MSSP rotation preserves membership" "FAIL (old=$O new=$N active=$C)" fail
+              fi
+              curl -sS -o /dev/null -X DELETE -H "X-API-Key: $NEW" "$BASE/api/mssp/tenants/$A" || true
+            fi
+          fi
+
+          if [ -n "$CDB_WATCHDOG_SINK_URL" ]; then
+            CDB_WATCHDOG_CANARY_ENT_KEY="$ENT" canary "ENTERPRISE signed webhook canary" enterprise
+          else
+            record "ENTERPRISE signed webhook canary" OPERATOR_WEBHOOK_SINK_REQUIRED blocked
+          fi
+
+          # Autonomous: no browser, no poller. Waits for the 15-minute cron.
+          CDB_WATCHDOG_CANARY_PRO_KEY="$PRO" canary "Autonomous scheduler canary (event created by cron, no evaluate request)" autonomous
+
+          echo "--- Operator metrics (aggregates only) ---"
+          curl -sS -H "X-Admin-Key: $ADMIN_SECRET" "$BASE/api/watchdog/ops" \
+            | jq -c 'with_entries(select(.value | type == "number" or type == "boolean" or type == "string" and (test("^[0-9TZ:.-]+$") or test("^[a-z_]+$"))))' || true
+
+          echo ""
+          echo "=== Canary summary ==="
+          printf '%s\n' "${RESULTS[@]}"
+          cleanup; KEYS=()
+          [ "$FAIL" -ne 0 ] && { echo "One or more live canaries FAILED."; exit 1; }
+          [ "$BLOCKED" -ne 0 ] && { echo "One or more mandatory live canaries are BLOCKED; production customer certification cannot pass."; exit 1; }
+          echo "Live canaries: PASS -- every mandatory canary completed successfully."
+
+  # ---------------------------------------------------------------------
+  # P0 customer-facing core-flow contract: prove every capability we quote
+  # to SOC/MSSP customers is still wired into the production implementation.
+  # This is deliberately fail-closed. It validates implementation contracts
+  # without requiring third-party customer credentials or sending data to a
+  # real customer's SIEM.
+  # ---------------------------------------------------------------------
+  customer-core-flow-contract:
+    name: "P0 - Customer Core Flow Contract"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 3
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: "Verify customer-facing SOC/MSSP capability contract"
+        run: python3 scripts/verify_customer_core_flow.py
+
+  # ---------------------------------------------------------------------
+  # Phase 8 (partial, deliberately conservative): live boundary check for
+  # the FREE tier only (limit 30/min, the cheapest tier to verify). This
+  # job does NOT flood-test PRO(120)/ENTERPRISE(600)/MSSP(1200) live --
+  # checkRateLimit() (index.js) applies the exact same code path per tier
+  # with no special-casing, and driving 600-1200 requests/min at
+  # production to "prove" that would be the abusive load this mission
+  # explicitly warns against for marginal additional evidence. Runs on a
+  # fresh runner (fresh egress IP), independent of the other jobs' rate-
+  # limit counters, and does not require ADMIN_SECRET (unauthenticated =
+  # FREE tier) -- kept behind the same secret gate anyway so it only
+  # fires alongside the rest of the authenticated certification pass.
+  # ---------------------------------------------------------------------
+  rate-limit-boundary:
+    name: "Phase 8 - Rate Limit Boundary (FREE tier)"
+    needs: secret-presence-gate
+    if: needs.secret-presence-gate.outputs.admin_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: "Send 33 unauthenticated requests, expect the 31st+ to 429 with Retry-After"
+        run: |
+          set +x
+          set -eo pipefail
+          BASE="$WORKER_BASE"
+          FAIL=0
+          FIRST_429=0
+          RETRY_AFTER_SEEN=""
+
+          # NOTE: the first attempt at this test used /api/feed, which
+          # carries `Cache-Control: public, max-age=120` -- Cloudflare's
+          # edge cache served every repeat request within that window
+          # without ever re-invoking the Worker, so checkRateLimit()
+          # never ran and no 429 ever appeared (confirmed live: 0/33
+          # requests hit 429 against /api/feed). /api/sla/status returns
+          # no Cache-Control header at all (confirmed live via curl -D-),
+          # so every request is a fresh Worker invocation that actually
+          # exercises the rate limiter.
+          #
+          # checkRateLimit() (index.js) buckets by Math.floor(Date.now()
+          # / 60000) -- a wall-clock minute boundary, not a rolling
+          # window. If this 33-request burst happens to start late enough
+          # in a minute that the boundary falls mid-burst, the counter
+          # resets and no 429 appears within 33 requests even though the
+          # limiter is working correctly (CodeRabbit review finding on
+          # PR #256, confirmed real against the actual bucketing logic).
+          # One bounded retry after a 65s wait (long enough to guarantee
+          # landing inside a single fresh minute) distinguishes that
+          # boundary case from an actual limiter regression without
+          # masking a real failure -- if the retry also fails to see a
+          # 429 in the 31-33 range, that's reported as a real FAIL.
+          # Every status is recorded, not only the first 429: until
+          # 2026-09-30 the limiter's deny branch threw (undefined resetAtMs)
+          # and answered 500, which this check could not see. A 5xx during
+          # the burst is now its own FAIL.
+          SERVER_ERRORS=0
+          burst() {
+            FIRST_429=0
+            RETRY_AFTER_SEEN=""
+            STATUSES=""
+            for i in $(seq 1 33); do
+              RESP=$(curl -sS --max-time 15 -D - -o /dev/null "$BASE/api/sla/status")
+              ST=$(echo "$RESP" | awk 'NR==1{print $2}')
+              STATUSES="$STATUSES ${ST:-none}"
+              case "$ST" in 5??) SERVER_ERRORS=$((SERVER_ERRORS + 1)) ;; esac
+              if [ "$ST" = "429" ] && [ "$FIRST_429" -eq 0 ]; then
+                FIRST_429=$i
+                RETRY_AFTER_SEEN=$(echo "$RESP" | grep -i '^retry-after:' | tr -d '\r' || true)
+              fi
+            done
+            echo "burst statuses (status x count): $(echo $STATUSES | tr ' ' '\n' | sort | uniq -c | awk '{printf "%sx%s ", $2, $1}')"
+          }
+
+          burst
+          if [ "$FIRST_429" -eq 0 ]; then
+            echo "No 429 in the first burst (possible rate-limit minute-boundary reset mid-burst). Waiting 65s and retrying once."
+            sleep 65
+            burst
+          fi
+
+          if [ "$FIRST_429" -ge 31 ] && [ "$FIRST_429" -le 33 ]; then
+            echo "PASS: FREE tier (limit 30/min) started returning 429 at request #$FIRST_429"
+          else
+            echo "FAIL: expected the 31st-33rd request to be the first 429, first 429 was at request #$FIRST_429 (0 = never seen)"
+            FAIL=1
+          fi
+
+          if [ -n "$RETRY_AFTER_SEEN" ]; then
+            echo "PASS: Retry-After header present on 429 ($RETRY_AFTER_SEEN)"
+          else
+            echo "FAIL: no Retry-After header seen on the 429 response"
+            FAIL=1
+          fi
+
+          if [ "$SERVER_ERRORS" -ne 0 ]; then
+            echo "FAIL: $SERVER_ERRORS request(s) answered 5xx during the burst -- the limiter must deny with 429, never a server error"
+            FAIL=1
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "One or more rate-limit-boundary checks FAILED -- see PASS/FAIL lines above."
+            exit 1
+          fi
+          echo ""
+          echo "FREE-tier rate-limit boundary check PASSED. PRO/ENTERPRISE/MSSP boundaries are not"
+          echo "live flood-tested (see job header comment) -- verified by code inspection only:"
+          echo "checkRateLimit() applies the same RATE_LIMITS[tier] lookup with no tier-specific branch."
+
+  summary:
+    name: "Certification Summary"
+    needs: [secret-presence-gate, static-checks, authenticated-customer-ops-tests, expiry-shadow-validation, lifecycle-state-matrix, mssp-tenant-isolation, mssp-self-service-tenants, watchdog-mssp-live-canaries, customer-core-flow-contract, rate-limit-boundary]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: "Report outcome (fail closed)"
+        run: |
+          set -euo pipefail
+          ADMIN_PRESENT="${{ needs.secret-presence-gate.outputs.admin_secret_present }}"
+          WATCHDOG_SINK_PRESENT="${{ needs.secret-presence-gate.outputs.watchdog_sink_present }}"
+          echo "ADMIN_SECRET_PRESENT=$ADMIN_PRESENT"
+          echo "WATCHDOG_SINK_PRESENT=$WATCHDOG_SINK_PRESENT"
+
+          FAIL=0
+          check_required() {
+            local name="$1" result="$2"
+            echo "$name: $result"
+            if [ "$result" != "success" ]; then
+              echo "::error::$name did not succeed (result=$result)"
+              FAIL=1
+            fi
+          }
+
+          check_required "secret-presence-gate" "${{ needs.secret-presence-gate.result }}"
+          check_required "static-checks" "${{ needs.static-checks.result }}"
+          check_required "authenticated-customer-ops-tests" "${{ needs.authenticated-customer-ops-tests.result }}"
+          check_required "expiry-shadow-validation" "${{ needs.expiry-shadow-validation.result }}"
+          check_required "lifecycle-state-matrix" "${{ needs.lifecycle-state-matrix.result }}"
+          check_required "mssp-tenant-isolation" "${{ needs.mssp-tenant-isolation.result }}"
+          check_required "mssp-self-service-tenants" "${{ needs.mssp-self-service-tenants.result }}"
+          check_required "watchdog-mssp-live-canaries" "${{ needs.watchdog-mssp-live-canaries.result }}"
+          check_required "customer-core-flow-contract" "${{ needs.customer-core-flow-contract.result }}"
+          check_required "rate-limit-boundary" "${{ needs.rate-limit-boundary.result }}"
+
+          if [ "$ADMIN_PRESENT" != "true" ]; then
+            echo "::error::Authenticated certification phases are BLOCKED_BY_SECRET; this run cannot certify production customer operations."
+            FAIL=1
+          fi
+          if [ "$WATCHDOG_SINK_PRESENT" != "true" ]; then
+            echo "::error::Enterprise signed-webhook certification is BLOCKED_BY_SINK; configure the owner-controlled CDB_WATCHDOG_SINK_* secrets before global customer release."
+            FAIL=1
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo "CERTIFICATION: FAILED/BLOCKED -- one or more mandatory phases are not successful."
+            exit 1
+          fi
+          echo "CERTIFICATION: PASS -- every mandatory production customer-operations phase succeeded."

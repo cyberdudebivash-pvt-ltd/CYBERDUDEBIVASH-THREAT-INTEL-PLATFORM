@@ -1,0 +1,136 @@
+{
+  "type": "bundle",
+  "id": "bundle--f16d273e-07ed-45fe-9b82-35a5c29a67dd",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "name": "CyberDudeBivash SENTINEL APEX",
+      "description": "CyberDudeBivash Pvt. Ltd. - Global Cybersecurity Intelligence Infrastructure",
+      "identity_class": "organization",
+      "sectors": [
+        "technology"
+      ],
+      "contact_information": "enterprise@cyberdudebivash.com",
+      "created": "2024-01-01T00:00:00Z",
+      "modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "type": "marking-definition",
+      "spec_version": "2.1",
+      "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+      "created": "2017-01-20T00:00:00.000Z",
+      "definition_type": "tlp",
+      "definition": {
+        "tlp": "amber"
+      }
+    },
+    {
+      "type": "intrusion-set",
+      "spec_version": "2.1",
+      "id": "intrusion-set--9b33fb30-d397-4cbb-a880-f46d4013c65f",
+      "name": "CDB-UNATTR-RAN Campaign",
+      "description": "ShieldBreak: New Windows Zero-Day Bypasses Microsofts RoguePlanet Patch",
+      "created": "2026-08-12T09:17:57Z",
+      "modified": "2026-08-12T09:17:57Z",
+      "confidence": 54,
+      "aliases": [
+        "CDB-UNATTR-RAN"
+      ],
+      "extensions": {
+        "x-cdb-apex-1": {
+          "predictive_score": 7.5,
+          "campaign_id": "CDB-CONTI",
+          "campaign_confidence": 7.5,
+          "threat_category": "Remote Code Execution",
+          "behavioral_tags": [
+            "registry_persistence"
+          ],
+          "ai_summary": "Initial access via rce → execution chain: privilege escalation → lateral movement → impact → malware behaviors: registry persistence",
+          "risk_factors": [
+            "EPSS_score",
+            "IOC_density",
+            "MITRE_coverage",
+            "exploitation_context"
+          ],
+          "soc_priority": "P2",
+          "threat_level": "HIGH",
+          "recommended_action": "High severity threat (score 7.5/10) — limited technical indicators in source data",
+          "x_cdb_published_at": "2026-08-12T08:07:15Z"
+        }
+      },
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--8d40d7b2-09a7-4f71-b67d-ff38e12e47d2",
+      "name": "Malicious Artifact: mpengine.dll",
+      "pattern": "[file:name = 'mpengine.dll']",
+      "pattern_type": "stix",
+      "valid_from": "2026-08-12T09:17:57Z",
+      "created": "2026-08-12T09:17:57Z",
+      "modified": "2026-08-12T09:17:57Z",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "confidence": 54,
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--0108ea67-fd93-4777-87eb-7c9b089bdafe",
+      "relationship_type": "indicates",
+      "source_ref": "indicator--8d40d7b2-09a7-4f71-b67d-ff38e12e47d2",
+      "target_ref": "intrusion-set--9b33fb30-d397-4cbb-a880-f46d4013c65f",
+      "created": "2026-08-12T09:17:57Z",
+      "modified": "2026-08-12T09:17:57Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--bce0d7fd-4efa-4cdc-8cf1-f2f290f98fbd",
+      "name": "Command and Scripting Interpreter",
+      "created": "2026-08-12T09:17:57Z",
+      "modified": "2026-08-12T09:17:57Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1059",
+          "url": "https://attack.mitre.org/techniques/T1059/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--a5883b53-7486-48da-b202-edb65f9d97f4",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--9b33fb30-d397-4cbb-a880-f46d4013c65f",
+      "target_ref": "attack-pattern--bce0d7fd-4efa-4cdc-8cf1-f2f290f98fbd",
+      "created": "2026-08-12T09:17:57Z",
+      "modified": "2026-08-12T09:17:57Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    }
+  ]
+}
