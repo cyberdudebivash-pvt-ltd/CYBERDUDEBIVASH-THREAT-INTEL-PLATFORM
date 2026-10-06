@@ -18,10 +18,10 @@ from enum import Enum
 from typing import Any, Optional
 
 import httpx
+import jwt
 import structlog
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 from pydantic import BaseModel, Field
 
 log = structlog.get_logger("sentinel.auth")
@@ -247,6 +247,25 @@ class CurrentUser(BaseModel):
 # ---------------------------------------------------------------------------
 # Auth Service
 # ---------------------------------------------------------------------------
+def _decode_rs256_token(token: str, jwks: dict) -> dict:
+    """Select a signing key locally and enforce RS256 independently of headers."""
+    header = jwt.get_unverified_header(token)
+    if header.get("alg") != "RS256":
+        raise jwt.InvalidTokenError("Only RS256 signing is accepted")
+    kid = header.get("kid")
+    candidates = [key for key in jwks.get("keys", [])
+                  if key.get("kty") == "RSA"
+                  and key.get("alg", "RS256") == "RS256"
+                  and key.get("use", "sig") == "sig"
+                  and "verify" in key.get("key_ops", ["verify"])
+                  and (kid is None or key.get("kid") == kid)]
+    if len(candidates) != 1:
+        raise jwt.InvalidTokenError("Unknown or ambiguous signing key")
+    key = jwt.PyJWK.from_dict(candidates[0], algorithm="RS256").key
+    return jwt.decode(token, key, algorithms=["RS256"],
+                      options={"verify_aud": False, "require": ["exp", "sub"]})
+
+
 class AuthService:
     _jwks: dict = {}
     _http_client: httpx.AsyncClient = None
@@ -281,13 +300,8 @@ class AuthService:
         """Verify JWT, extract claims, resolve permissions."""
         try:
             # Decode + verify signature against Keycloak JWKS
-            payload = jwt.decode(
-                token,
-                cls._jwks,
-                algorithms=["RS256"],
-                options={"verify_aud": False},
-            )
-        except JWTError as exc:
+            payload = _decode_rs256_token(token, cls._jwks)
+        except (jwt.InvalidTokenError, jwt.PyJWKError, ValueError, TypeError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Invalid token: {exc}",

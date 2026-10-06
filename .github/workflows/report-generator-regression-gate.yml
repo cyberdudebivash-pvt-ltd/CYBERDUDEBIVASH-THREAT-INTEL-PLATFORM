@@ -154,7 +154,7 @@ jobs:
           cache: 'pip'
 
       - name: Install test dependencies
-        run: pip install pytest pyyaml requests==2.34.2 --quiet
+        run: pip install pytest pyyaml requests==2.34.2 'PyJWT[crypto]==2.15.1' --quiet
 
       - name: Scan malware customer release Python surfaces
         run: |
@@ -181,7 +181,7 @@ jobs:
 
       - name: Run git-sync artifact-recovery regression tests
         run: |
-          python -m pytest tests/test_safe_git_commit_artifact_recovery.py -v --tb=short
+          python -m pytest tests/test_safe_git_commit_artifact_recovery.py tests/test_certification_key_cleanup.py -v --tb=short
 
       - name: Run pre-deploy gate script-tag-balance regression tests
         run: |
@@ -271,3 +271,9 @@ jobs:
       - name: Run pipeline-staleness alert diagnostics regression tests (P0 2026-09-18 staleness incident)
         run: |
           python -m pytest tests/test_pipeline_staleness_diagnostics.py -v --tb=short
+
+      - name: Reject OIDC algorithm confusion and invalid signing keys
+        run: python -m pytest tests/test_oidc_rs256_migration.py -v --tb=short
+
+      - name: Git metadata persistence and bounded pipeline regression
+        run: python -m pytest tests/test_pipeline_p0_persistence_and_budget.py -v --tb=short
