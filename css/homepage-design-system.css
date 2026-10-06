@@ -4575,3 +4575,28 @@
     overflow-x: auto;
   }
 }
+
+/* Latest advisories: complete titles, isolated seamless track, readable pace. */
+#cdb-map-attack-ticker { min-width: 0; flex-wrap: wrap; }
+.cdb-advisory-viewport { flex: 1 1 160px; min-width: 0; overflow: hidden; }
+#cdb-ticker-text {
+  display: inline-flex; width: max-content; white-space: nowrap;
+  animation: cdb-advisory-scroll var(--advisory-cycle, 160s) linear infinite;
+}
+.cdb-advisory-copy { flex: none; padding-right: 48px; }
+@keyframes cdb-advisory-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+#cdb-map-attack-ticker:hover #cdb-ticker-text,
+#cdb-map-attack-ticker:focus-within #cdb-ticker-text,
+#cdb-map-attack-ticker.cdb-advisory-paused #cdb-ticker-text { animation-play-state: paused; }
+.cdb-advisory-pause {
+  flex: none; color: #cbd5e1; background: transparent; border: 1px solid #64748b;
+  border-radius: 3px; padding: 4px 8px; font: inherit; cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cdb-advisory-viewport { overflow-x: auto; }
+  #cdb-ticker-text { animation: none !important; transform: none !important; }
+  .cdb-advisory-copy[aria-hidden="true"], .cdb-advisory-pause { display: none; }
+}

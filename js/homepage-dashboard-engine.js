@@ -3072,7 +3072,13 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
          */
         function renderMapTicker(data) {
             var tickerEl = document.getElementById('cdb-ticker-text');
-            if (!tickerEl || !data || !data.length) return;
+            if (!tickerEl) return;
+            if (!Array.isArray(data) || !data.length) {
+                tickerEl.textContent = 'Waiting for the live feed…';
+                tickerEl.style.animation = 'none';
+                return;
+            }
+            tickerEl.style.animation = '';
             var sevColors = { CRITICAL:'#ff5050', HIGH:'#ffa000', MEDIUM:'#ffdc00', LOW:'#00b4ff' };
             var sorted = [...data].sort(function(a,b) {
                 return parseFloat(b.risk_score||0) - parseFloat(a.risk_score||0);
@@ -3083,7 +3089,7 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
                 var cves = extractCVEs(d.title);
                 // STAGE 3 FIX: same unescaped-title-into-innerHTML issue as
                 // renderTicker() above -- reuses the same _cdbEsc() helper.
-                var label = cves[0] ? cves[0] : _cdbEsc((d.title || '').slice(0, 28)) + '…';
+                var label = _cdbEsc(d.title || cves.join(', ') || 'Source-linked advisory');
                 // P0 FIX (zero-fabrication): a geo label here used to be a
                 // canned GEO_PAIRS constant selected by ticker position
                 // (i % GEO_PAIRS.length) -- no relationship to the item at
@@ -3109,7 +3115,12 @@ ${item.stix_object_count != null ? `<div class="apex-kv" style="margin-top:4px;"
             });
             var html = parts.join(' &nbsp;<span style="color:rgba(0,212,170,0.35);">&middot;</span>&nbsp; ');
             // Duplicate for seamless loop
-            tickerEl.innerHTML = html + ' &nbsp;&nbsp; ' + html;
+            tickerEl.innerHTML = '<span class="cdb-advisory-copy">' + html + '</span>'
+                + '<span class="cdb-advisory-copy" aria-hidden="true">' + html + '</span>';
+            // Read one loop's width once per feed update: a stable 18px/s,
+            // with a minimum 160s cycle. No timer, polling or extra requests.
+            var loopWidth = tickerEl.scrollWidth / 2;
+            tickerEl.style.setProperty('--advisory-cycle', Math.max(160, Math.ceil(loopWidth / 18)) + 's');
         }
 
         // ── MISP Export ──
