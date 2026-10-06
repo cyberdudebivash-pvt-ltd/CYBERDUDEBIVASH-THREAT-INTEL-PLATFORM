@@ -148,6 +148,8 @@ class TestGeneratedArtifactSurvivesConflictRecovery(unittest.TestCase):
 
     def _run_script(self):
         env = dict(os.environ)
+        # These fixtures exercise local bare-remotes, not authenticated CI PRs.
+        env["GITHUB_ACTIONS"] = "false"
         env.pop("GH_TOKEN", None)
         env.pop("GITHUB_REPOSITORY", None)
         env["PIPELINE_VERSION"] = "test"
@@ -333,6 +335,8 @@ class TestHtmlReportContentReversionSurvivesConflictRecovery(unittest.TestCase):
 
     def _run_script(self):
         env = dict(os.environ)
+        # These fixtures exercise local bare-remotes, not authenticated CI PRs.
+        env["GITHUB_ACTIONS"] = "false"
         env.pop("GH_TOKEN", None)
         env.pop("GITHUB_REPOSITORY", None)
         env["PIPELINE_VERSION"] = "test"
