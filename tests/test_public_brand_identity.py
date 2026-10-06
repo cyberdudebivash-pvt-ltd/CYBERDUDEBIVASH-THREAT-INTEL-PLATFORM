@@ -73,3 +73,11 @@ def test_homepage_public_identity_is_canonical_everywhere():
     assert "trading as cyberdudebivash" not in folded
     # Two JSON-LD identities + visible footer identity + builder attribution.
     assert homepage.count("CYBERDUDEBIVASH ECOSYSTEM&reg;") >= 4
+
+
+def test_homepage_structured_data_uses_canonical_organization_entity():
+    homepage = (ROOT / "index.html").read_text(encoding="utf-8")
+    assert '"@id": "https://www.cyberdudebivash.com/#organization"' in homepage
+    assert '"name": "CYBERDUDEBIVASH ECOSYSTEM®"' in homepage
+    assert '"name": "CYBERDUDEBIVASH ECOSYSTEM&reg;"' not in homepage
+    assert '"@id": "https://intel.cyberdudebivash.com/#website"' in homepage
