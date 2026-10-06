@@ -492,47 +492,53 @@ def generate_genesis(items: List[Dict]) -> Dict:
 # ════════════════════════════════════════════════════════════════════════════
 
 def generate_cortex(items: List[Dict]) -> Dict:
-    """Generate cortex_output.json — update node count from live feed."""
-    # Try to preserve existing cortex data and update what we can derive
-    cortex_path = os.path.join(ROOT, "data", "cortex", "cortex_output.json")
-    try:
-        with open(cortex_path) as f:
-            existing = json.load(f)
-    except Exception:
-        existing = {}
-
-    # Update knowledge graph node count from feed
-    actor_set = set(_extract_actor(i) for i in items if _extract_actor(i) != "UNK")
-    cve_set = set()
-    ttp_set = set()
+    """Count unique, explicit feed relationships; never estimate events or edges."""
+    nodes, edges = set(), set()
+    actor_advisories = {}
+    advisory_ids = set()
     for item in items:
-        cves = re.findall(r"CVE-\d{4}-\d{4,7}", (item.get("title") or "") + " " + (item.get("description") or ""))
-        cve_set.update(cves)
-        ttp_set.update(_extract_ttps(item))
-
-    total_nodes = len(items) + len(actor_set) + len(cve_set) + len(ttp_set)
-    total_edges = total_nodes * 3
-
-    kg = existing.get("knowledge_graph", {})
-    kg["total_nodes"]  = total_nodes
-    kg["total_edges"]  = total_edges
-    kg["density"]      = round(total_edges / max(total_nodes ** 2, 1), 4)
-    kg["updated_at"]   = NOW_ISO
-
-    cluster_count = len(actor_set) + len(ttp_set) // 5
-
-    result = dict(existing)
-    result["version"]         = "40.1.0"
-    result["generated_at"]    = NOW_ISO
-    result["knowledge_graph"] = kg
-    result["cluster_count"]   = cluster_count
-    result["top_influencers"] = list(actor_set)[:5]
-    result["stream"]          = {
-        "event_count": len(items) * 8,
-        "events_per_sec": round(len(items) * 8 / 86400, 2),
-        "last_event": NOW_ISO,
+        if not isinstance(item, dict):
+            continue
+        identity = next((str(item[key]).strip() for key in ("id", "source_url", "url", "title")
+                         if isinstance(item.get(key), (str, int)) and str(item[key]).strip()), "")
+        if not identity:
+            continue
+        advisory = "advisory:" + hashlib.sha256(identity.encode()).hexdigest()
+        nodes.add(advisory)
+        advisory_ids.add(advisory)
+        actor = next((item[key].strip() for key in ("actor_tag", "actor", "threat_actor")
+                      if isinstance(item.get(key), str) and item[key].strip() and item[key].strip() not in _GENERIC_ACTOR_TAGS), "")
+        if actor and actor.upper() not in {"UNK", "UNKNOWN"}:
+            target = "actor:" + actor.casefold()
+            nodes.add(target)
+            edges.add((advisory, "attributed_in_feed", target))
+            actor_advisories.setdefault(target, set()).add(advisory)
+        text = " ".join(item.get(key, "") for key in ("title", "description", "cve_id") if isinstance(item.get(key), str))
+        for cve in set(re.findall(r"CVE-\d{4}-\d{4,7}", text, re.IGNORECASE)):
+            target = "cve:" + cve.upper()
+            nodes.add(target)
+            edges.add((advisory, "references_cve", target))
+        raw = item.get("mitre_techniques") or item.get("ttps") or []
+        if isinstance(raw, list):
+            for technique in raw:
+                code = technique.get("id") or technique.get("technique_id") if isinstance(technique, dict) else technique
+                if isinstance(code, str) and re.fullmatch(r"T\d{4}(?:\.\d{3})?", code):
+                    target = "technique:" + code
+                    nodes.add(target)
+                    edges.add((advisory, "references_technique", target))
+    n, e = len(nodes), len(edges)
+    return {
+        "version": "40.2.0", "generated_at": NOW_ISO,
+        "evidence_type": "explicit_feed_relationships",
+        "knowledge_graph": {"total_nodes": n, "total_edges": e,
+                            "density": round(e / (n * (n - 1)), 8) if n > 1 else 0,
+                            "unique_advisories": len(advisory_ids),
+                            "relationship_counts": {kind: sum(1 for edge in edges if edge[1] == kind)
+                                for kind in ("attributed_in_feed", "references_cve", "references_technique")},
+                            "relationship_sha256": hashlib.sha256(json.dumps(sorted(edges)).encode()).hexdigest()},
+        "actor_groups": sum(1 for group in actor_advisories.values() if len(group) >= 2),
+        "methodology": "Unique directed advisory-to-explicit-actor/CVE/technique relationships; actor groups require two unique advisories. No event-rate telemetry inferred.",
     }
-    return result
 
 
 # ════════════════════════════════════════════════════════════════════════════
