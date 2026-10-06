@@ -6197,39 +6197,29 @@ function renderTopThreats(data) {
             // ── SOVEREIGN RENDERER ──────────────────────────────────────────
             function renderSovereignEngine(data) {
                 try {
-                    const compliance = data.compliance || {};
-                    const soc2 = compliance.soc2_score || 0;
-                    const nist = compliance.nist_score || 0;
-                    const avgScore = Math.round((soc2 + nist) / 2);
-                    const sovEl = document.getElementById('sovereign-compliance');
-                    if (sovEl) {
-                        sovEl.textContent = avgScore + '%';
-                        sovEl.style.color = avgScore >= 80 ? '#00d4aa' : avgScore >= 65 ? '#d97706' : '#ef4444';
-                    }
-
-                    // Compliance breakdown
-                    if (soc2 && nist && sovEl) {
-                        const breakdownEl = document.createElement('div');
-                        breakdownEl.style.cssText = 'font-size:8px;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono);line-height:1.6;';
-                        breakdownEl.innerHTML = `SOC2: <span style="color:#00d4aa">${soc2}%</span> | NIST: <span style="color:#3b82f6">${nist}%</span>`;
-                        if (!sovEl.parentNode.querySelector('.sovereign-breakdown')) {
-                            breakdownEl.className = 'sovereign-breakdown';
-                            sovEl.parentNode.appendChild(breakdownEl);
-                        }
-                    }
-
-                    // Tenant count
-                    const tenants = data.tenants || {};
-                    if (tenants.total) {
-                        const tEl = document.createElement('div');
-                        tEl.style.cssText = 'font-size:8px;color:var(--accent);margin-top:2px;font-family:var(--font-mono);letter-spacing:1px;';
-                        tEl.textContent = tenants.total + ' ACTIVE TENANTS';
-                        if (sovEl && !sovEl.parentNode.querySelector('.sovereign-tenants')) {
-                            tEl.className = 'sovereign-tenants';
-                            sovEl.parentNode.appendChild(tEl);
-                        }
-                    }
-
+                    const el = document.getElementById('sovereign-compliance');
+                    if (!el) return;
+                    // Remove historical compliance/tenant decorations on refresh.
+                    ['.sovereign-breakdown', '.sovereign-tenants'].forEach(function(selector) {
+                        const old = el.parentNode && el.parentNode.querySelector(selector);
+                        if (old) old.remove();
+                    });
+                    el.textContent = 'Coverage pending';
+                    el.style.color = 'var(--text-muted)';
+                    const coverage = data && data.evidence_type === 'feed_coverage' && data.feed_coverage;
+                    if (!coverage || !Number.isSafeInteger(coverage.total_records) || coverage.total_records < 0) return;
+                    const total = coverage.total_records;
+                    const summaries = coverage.executive_summary_records;
+                    const nvd = coverage.nvd_confirmed_records;
+                    if (!Number.isSafeInteger(summaries) || summaries < 0 || summaries > total ||
+                        !Number.isSafeInteger(nvd) || nvd < 0 || nvd > total) return;
+                    el.textContent = total.toLocaleString() + ' records';
+                    const detail = document.createElement('div');
+                    detail.className = 'sovereign-breakdown';
+                    detail.style.cssText = 'font-size:8px;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono);line-height:1.6;';
+                    detail.textContent = 'Executive summaries: ' + summaries.toLocaleString() + ' / ' + total.toLocaleString() +
+                        ' | NVD confirmed: ' + nvd.toLocaleString() + ' / ' + total.toLocaleString() + '. Feed coverage; not a compliance assessment.';
+                    if (el.parentNode) el.parentNode.appendChild(detail);
                 } catch(e) { console.warn('[SOVEREIGN ENGINE]', e); }
             }
 
