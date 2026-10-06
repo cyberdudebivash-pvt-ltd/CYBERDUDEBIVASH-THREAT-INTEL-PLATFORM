@@ -650,8 +650,21 @@ async function checkRateLimit(env, ip, tier) {
       resetAtMs,
     };
   } catch (_) {
+    if (strongRateConsistencyEnabled(env)) {
+      // Once explicitly selected, this authority must not silently fall
+      // back to permissive or eventually-consistent enforcement on failure.
+      return { allowed: false, unavailable: true, limit, resetAtMs };
+    }
     return { allowed: true, count: 0, limit, remaining: limit, resetAtMs };
   }
+}
+
+function rateLimitUnavailableResponse() {
+  return jsonResp(
+    { error: "Service Unavailable", reason: "rate_limit_service_unavailable", retry_after: 10 },
+    503,
+    { "Retry-After": "10", "Cache-Control": "no-store" }
+  );
 }
 
 const SWARM_PREFLIGHT_RATE_LIMIT_PER_MINUTE = 60;
@@ -6790,6 +6803,10 @@ async function handleRequest(request, env, ctx) {
     && await isVerifiedPaymentWebhook(request, env, path);
   if (!firstPartyRead && !operatorPlane && !paymentWebhook && path !== "/api/health" && path !== "/api/health/" && path !== "/api/health/live") {
     const rl = await checkRateLimit(env, ip, auth.tier);
+    if (rl.unavailable) {
+      auditLog(ctx, env, { action: "rate_limit_service_unavailable", ip, path, method, tier: auth.tier });
+      return rateLimitUnavailableResponse();
+    }
     if (!rl.allowed) {
       auditLog(ctx, env, { action: "rate_limited", ip, path, method, tier: auth.tier });
       // Real conversion-funnel gap: this was the one live, customer-facing
@@ -6943,6 +6960,7 @@ async function handleRequest(request, env, ctx) {
   // rate-limiting mechanism introduced.
   if (path === "/api/leads/capture" && method === "POST") {
     const rl = await checkRateLimit(env, ip, "FREE");
+    if (rl.unavailable) return rateLimitUnavailableResponse();
     if (!rl.allowed) return jsonResp({ error: "rate_limited", retry_after_seconds: 60 }, 429);
     return await handleLeadCapture(request, env, crypto.randomUUID());
   }
