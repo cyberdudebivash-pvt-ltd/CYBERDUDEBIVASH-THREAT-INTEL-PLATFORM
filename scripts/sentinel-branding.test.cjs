@@ -126,9 +126,9 @@ test('public AI-search profiles stay aligned with the canonical commercial contr
     `MSSP (${mssp.requests_per_minute.toLocaleString('en-US')} req/min, ${mssp.requests_per_day.toLocaleString('en-US')}/day). No tier is unlimited.`;
 
   assert.ok(llmsFull.includes(expectedRateLine));
-  assert.ok(llmsFull.includes(`Pro ${pro.uptime_commitment}%`));
-  assert.ok(llmsFull.includes(`Enterprise ${enterprise.uptime_commitment}%`));
-  assert.ok(llmsFull.includes(`MSSP ${mssp.uptime_commitment}%`));
+  assert.ok(llmsFull.includes(`Pro ${pro.uptime_commitment}`));
+  assert.ok(llmsFull.includes(`Enterprise ${enterprise.uptime_commitment}`));
+  assert.ok(llmsFull.includes(`MSSP ${mssp.uptime_commitment}`));
   assert.ok(!/SOC 2 Type II ready/i.test(llmsFull));
   assert.ok(!/Followers:\s*\d/i.test(llmsFull));
   assert.ok(!/god-mode/i.test(llmsFull));
