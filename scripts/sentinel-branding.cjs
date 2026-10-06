@@ -4,17 +4,24 @@
 // technical identifiers, URLs, scripts, code examples and seller records are not brands.
 const fs = require('node:fs');
 const path = require('node:path');
-const BRAND = /(?<![\w@./-])CYBERDUDEBIVASH(?!(?:\.(?:com|in))|[\w/-])(?:®|&reg;|&#174;|\(R\))?/gi;
-const ATTRIBUTION = '<div data-sentinel-attribution="true" style="display:flex;justify-content:center;flex-wrap:wrap;padding:20px 16px;background:#070d18"><a data-sentinel-parent="true" href="https://www.cyberdudebivash.com/" style="display:inline-flex;align-items:center;min-height:44px;padding:10px 16px;border:1px solid #67e8f9;border-radius:8px;color:#ffffff;background:#101c2e;font:700 16px/1.5 system-ui,sans-serif;text-decoration:underline;text-underline-offset:4px">Powered By CYBERDUDEBIVASH</a></div>';
+const BRAND = /(?<![\\w@./-])CYBERDUDEBIVASH(?!(?:\\.(?:com|in))|[\\w/-])(?:®|&reg;|&#174;|\\(R\\))?/gi;\nconst PARENT_BRAND = /CYBERDUDEBIVASH\\s+ECOSYSTEM(?:®|&reg;|&#174;|\\(R\\))?/gi;
+const ATTRIBUTION = '<div data-sentinel-attribution="true" style="display:flex;justify-content:center;flex-wrap:wrap;padding:20px 16px;background:#070d18"><a data-sentinel-parent="true" href="https://www.cyberdudebivash.com/" style="display:inline-flex;align-items:center;min-height:44px;padding:10px 16px;border:1px solid #67e8f9;border-radius:8px;color:#ffffff;background:#101c2e;font:700 16px/1.5 system-ui,sans-serif;text-decoration:underline;text-underline-offset:4px">Powered By CYBERDUDEBIVASH ECOSYSTEM&reg;</a></div>';
 const FOCUS_STYLE = '<style data-sentinel-branding="true">a[data-sentinel-parent]:focus-visible{outline:3px solid #67e8f9;outline-offset:4px}a[data-sentinel-parent]:hover{background:#183048!important}</style>';
 const RAW = new Set(['script', 'style', 'code', 'pre', 'svg', 'textarea']);
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 const SELLER = /\b(?:GSTIN|PAN:|seller.of.record|legal.entity|beneficiary|trademarks?|proprietorship|licensor|copyright holder|operated by|trading as|payee|Pvt\.?\s+Ltd\.?|Private\s+Limited)\b/i;
 
 function displayName(value) {
-  return value.replace(BRAND, 'SENTINEL APEX')
+  const protectedParent = [];
+  const protectedValue = value.replace(PARENT_BRAND, (match) => {
+    const token = `__CDB_PARENT_BRAND_${protectedParent.length}__`;
+    protectedParent.push(match);
+    return token;
+  });
+  const branded = protectedValue.replace(BRAND, 'SENTINEL APEX')
     .replace(/SENTINEL APEX\s+(?:SENTINEL\s+APEX)(?:™|&trade;)?/gi, 'SENTINEL APEX')
     .replace(/Sentinel Apex/gi, 'SENTINEL APEX');
+  return branded.replace(/__CDB_PARENT_BRAND_(\d+)__/g, (_, index) => protectedParent[Number(index)] || '');
 }
 
 function canonicalPlatformName(value) {
