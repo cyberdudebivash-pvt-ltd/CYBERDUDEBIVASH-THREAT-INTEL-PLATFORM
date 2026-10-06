@@ -634,70 +634,36 @@ def generate_sovereign(items: List[Dict]) -> Dict:
 # ════════════════════════════════════════════════════════════════════════════
 
 def generate_bughunter(items: List[Dict], existing_path: str) -> Dict:
+    """Preserve scan evidence; advisory ingestion cannot create a recon scan.
+
+    A stale snapshot keeps its original scan timestamp and findings. Only the
+    authorized scanner may replace it. No endpoint, host, exposure or ROI
+    measurement is inferred from threat-advisory counts.
+    """
     try:
         with open(existing_path, encoding="utf-8") as f:
             existing = json.load(f)
-        ts_str = existing.get("timestamp", "")
-        if ts_str:
-            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-            age_h = (NOW_UTC - ts).total_seconds() / 3600
-            if age_h < 72:
-                existing["last_regen"] = NOW_ISO
-                log.info(f"BugHunter: keeping real scan data (age={age_h:.1f}h)")
-                return existing
-    except Exception:
+        if isinstance(existing, dict) and isinstance(existing.get("metrics"), dict):
+            ts = datetime.fromisoformat(str(existing.get("timestamp", "")).replace("Z", "+00:00"))
+            # A timestamp must carry an offset and cannot be in the future.
+            if ts.tzinfo is not None and ts <= NOW_UTC:
+                findings = existing.get("findings_summary", [])
+                synthetic = not isinstance(findings, list) or any(
+                    isinstance(finding, dict) and finding.get("type") in
+                    {"CRITICAL_THREAT_ADVISORY", "HIGH_SEVERITY_ADVISORY"}
+                    for finding in findings
+                )
+                if not synthetic:
+                    log.info("BugHunter: preserving saved scan timestamp %s", ts.isoformat())
+                    return existing
+    except (OSError, ValueError, TypeError):
         pass
-
-    critical_items = [i for i in items if _safe_float(i.get("risk_score")) >= 9.0]
-    high_items     = [i for i in items if 7.0 <= _safe_float(i.get("risk_score")) < 9.0]
-    risk_exposure  = len(critical_items) * 18000 + len(items) * 150
-    rosi           = round(min(99.5, 85 + len(items) / 50), 1)
-
-    findings = []
-    for i, item in enumerate(critical_items[:8]):
-        findings.append({
-            "id":        f"F-{i+1:04d}",
-            "type":      "CRITICAL_THREAT_ADVISORY",
-            "target":    (item.get("title",""))[:60],
-            "severity":  "CRITICAL",
-            "evidence":  f"Risk Score {_safe_float(item.get('risk_score')):.1f}/10 | KEV: {item.get('kev', False)}",
-            "timestamp": NOW_ISO,
-        })
-    for i, item in enumerate(high_items[:5]):
-        findings.append({
-            "id":       f"F-{len(critical_items)+i+1:04d}",
-            "type":     "HIGH_SEVERITY_ADVISORY",
-            "target":   (item.get("title",""))[:60],
-            "severity": "HIGH",
-            "evidence": f"Risk Score {_safe_float(item.get('risk_score')):.1f}/10",
-            "timestamp": NOW_ISO,
-        })
-
     return {
-        "subsystem":       "v54_bughunter_resilience",
-        "version":         "54.1.0",
-        "codename":        "BUG HUNTER RESILIENCE",
-        "scan_id":         f"BH-{int(NOW_UTC.timestamp())}",
-        "domain":          "cyberdudebivash.com",
-        "status":          "COMPLETED",
-        "timestamp":       NOW_ISO,
-        "duration_seconds": 18.7,
-        "metrics": {
-            "subdomains":       4,
-            "live_hosts":       4,
-            "api_endpoints":    12,
-            "total_findings":   len(findings),
-            "critical_findings": len(critical_items),
-            "high_findings":    len(high_items),
-            "risk_exposure":    risk_exposure,
-            "rosi":             rosi,
-        },
-        "findings_summary": findings,
-        "engine_status": {k: "ACTIVE" for k in [
-            "subdomain_intel","http_probe","tech_fingerprint","js_extractor",
-            "bola_agent","cloud_hunter","port_scanner","takeover_detect",
-            "asset_delta","roi_engine","recon_pipeline","report_generator",
-        ]},
+        "subsystem": "bughunter_scan_evidence",
+        "status": "AWAITING_SCAN",
+        "metrics": {},
+        "findings_summary": [],
+        "note": "An authorized scan is required; advisories are not recon findings.",
     }
 
 

@@ -6249,9 +6249,9 @@ function renderTopThreats(data) {
                     }
                     // Top metrics
                     const subEl = document.getElementById('bh-subdomain-count');
-                    if (subEl) subEl.textContent = (m.subdomains || 0).toLocaleString();
+                    if (subEl) subEl.textContent = scanCount(m.subdomains);
                     const liveEl = document.getElementById('bh-livehost-count');
-                    if (liveEl) liveEl.textContent = (m.live_hosts || 0).toLocaleString();
+                    if (liveEl) liveEl.textContent = scanCount(m.live_hosts);
                     const apiEl = document.getElementById('bh-api-count');
                     if (apiEl) apiEl.textContent = scanCount(m.api_endpoints);
                     const critEl = document.getElementById('bh-critical-count');
@@ -6260,27 +6260,33 @@ function renderTopThreats(data) {
                         critEl.textContent = scanCount(m.critical_findings);
                         critEl.style.color = c > 0 ? '#ef4444' : '#00d4aa';
                     }
-                    // ROI
+                    // Scan provenance, not assumed financial benefit.
                     const riskEl = document.getElementById('bh-risk-exposure');
-                    if (riskEl) riskEl.textContent = '$' + (m.risk_exposure || 0).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0});
+                    if (riskEl) riskEl.textContent = String(data.domain || 'Scope pending');
                     const mitEl = document.getElementById('bh-mitigated');
-                    if (mitEl) mitEl.textContent = '$' + ((m.risk_exposure || 0) * 0.95).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0});
+                    var completedAt = Date.parse(data.timestamp || '');
+                    if (mitEl) mitEl.textContent = Number.isFinite(completedAt)
+                        ? new Date(completedAt).toISOString() : 'Timestamp pending';
                     const rosiEl = document.getElementById('bh-rosi');
-                    if (rosiEl) rosiEl.textContent = (m.rosi || 0).toFixed(1) + '%';
-                    // Findings Feed
+                    if (rosiEl) rosiEl.textContent = scanCount(m.total_findings);
+                    // Finding evidence is untrusted text. Cap DOM work per snapshot.
                     const feedEl = document.getElementById('bh-findings-feed');
-                    const findings = data.findings_summary || [];
+                    const findings = Array.isArray(data.findings_summary)
+                        ? data.findings_summary.filter(f => f && typeof f === 'object').slice(0, 50) : [];
+                    const escapeFinding = value => String(value == null ? '' : value)
+                        .replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
                     if (feedEl && findings.length > 0) {
                         feedEl.innerHTML = findings.map(function(f) {
                             var sevColor = f.severity === 'CRITICAL' ? '#ef4444' : f.severity === 'HIGH' ? '#f59e0b' : '#00d4aa';
                             return '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);">'
-                                + '<span style="color:' + sevColor + ';font-weight:700;font-size:9px;">[' + (f.severity || 'N/A') + ']</span> '
-                                + '<span style="color:var(--white);font-size:10px;">' + (f.type || 'UNKNOWN') + '</span> '
-                                + '<span style="color:var(--text-muted);font-size:9px;">→ ' + (f.target || '').substring(0,60) + '</span>'
+                                + '<span style="color:' + sevColor + ';font-weight:700;font-size:9px;">[' + escapeFinding(String(f.severity || 'UNCLASSIFIED').slice(0, 40)) + ']</span> '
+                                + '<span style="color:var(--white);font-size:10px;">' + escapeFinding(String(f.type || 'Finding').slice(0, 100)) + '</span> '
+                                + '<span style="color:var(--text-muted);font-size:9px;">→ ' + escapeFinding(String(f.target || '').slice(0, 120)) + '</span>'
                                 + '</div>';
                         }).join('');
                     } else if (feedEl) {
-                        feedEl.innerHTML = '<span style="color:var(--text-muted);font-size:10px;">All 12 engines online \u2014 run a scan to populate findings.</span>';
+                        feedEl.textContent = data.status === 'COMPLETED' && Array.isArray(data.findings_summary)
+                            ? 'No findings recorded in this scan snapshot.' : 'Awaiting validated scan findings.';
                     }
                     // Health badge
                     var bhHeader = document.querySelector('#bughunter-section h2');
