@@ -137,9 +137,11 @@ def run_validation(expected_version: str) -> dict:
         "feed_json":     f"{WORKER_BASE}/api/feed.json",
     }
     ep_results = {}
+    endpoint_probes = {}
     all_endpoints_ok = True
     for name, url in endpoints.items():
         r = probe_json(url, timeout=20)
+        endpoint_probes[name] = r
         ep_results[name] = {
             "url": url, "ok": r["ok"], "status": r["status"],
             "latency_ms": r["latency_ms"], "error": r["error"]
@@ -182,7 +184,7 @@ def run_validation(expected_version: str) -> dict:
     health_r = probe_json(f"{WORKER_BASE}/api/health/live", timeout=15)
     live_version = ""
     if health_r["ok"] and health_r["body"]:
-        live_version = health_r["body"].get("version", "")
+        live_version = health_r["body"].get("version", "") if isinstance(health_r["body"], dict) else ""
     version_ok = bool(live_version and live_version == expected_version)
     print(f"  Expected: {expected_version}")
     print(f"  Live:     {live_version if live_version else '(not found)'}")
@@ -194,11 +196,13 @@ def run_validation(expected_version: str) -> dict:
 
     # GATE C: Manifest Freshness
     print("GATE C: Manifest Freshness")
-    latest_r = probe_json(f"{WORKER_BASE}/api/v1/intel/latest.json", timeout=20)
+    # Evaluate freshness and count from the exact response already checked by Gate A.
+    latest_r = endpoint_probes["latest_json"]
+    latest_body = latest_r["body"] if isinstance(latest_r["body"], dict) else {}
     manifest_fresh = False
     manifest_age_h = None
-    if latest_r["ok"] and latest_r["body"]:
-        fresh = _freshness.classify_manifest_freshness(latest_r["body"].get("generated_at"))
+    if latest_r["ok"] and latest_body:
+        fresh = _freshness.classify_manifest_freshness(latest_body.get("generated_at"))
         if fresh["age_seconds"] is not None:
             manifest_age_h = round(fresh["age_seconds"] / 3600, 1)
         manifest_fresh = fresh["state"] == _freshness.FRESH
@@ -209,13 +213,16 @@ def run_validation(expected_version: str) -> dict:
 
     # GATE D: Advisory Count
     print("GATE D: Advisory Count")
-    advisory_count = 0
-    if latest_r["ok"] and latest_r["body"]:
-        advisory_count = latest_r["body"].get("count", 0)
-    count_ok = advisory_count >= MIN_ADVISORY_COUNT
-    print(f"  Count: {advisory_count} (minimum: {MIN_ADVISORY_COUNT})")
+    raw_count = latest_body.get("count") if latest_r["ok"] else None
+    # JSON booleans, strings, fractional/negative numbers are not measured counts.
+    count_valid = type(raw_count) is int and raw_count >= 0
+    advisory_count = raw_count if count_valid else None
+    count_ok = count_valid and advisory_count >= MIN_ADVISORY_COUNT
+    print(f"  Count: {advisory_count if count_valid else 'measurement unavailable'} (minimum: {MIN_ADVISORY_COUNT})")
     print(f"  GATE D: {'PASS' if count_ok else 'WARN (soft)'}")
-    gate_results["D"] = {"passed": count_ok, "count": advisory_count, "minimum": MIN_ADVISORY_COUNT}
+    gate_results["D"] = {"passed": count_ok, "minimum": MIN_ADVISORY_COUNT, "measurement_valid": count_valid,
+                         "measurement_state": "MEASURED" if count_valid else "INVALID_OR_UNAVAILABLE",
+                         **({"count": advisory_count} if count_valid else {})}
     print()
 
     # GATE E: JWT Configured
@@ -230,7 +237,9 @@ def run_validation(expected_version: str) -> dict:
         op_body = op_r["body"] if isinstance(op_r["body"], dict) else {}
     else:
         print("  ADMIN_SECRET not set -- cannot read the operator health view")
-    jwt_ok = op_body.get("checks", {}).get("jwt_configured", False) is True
+    op_checks = op_body.get("checks", {})
+    op_checks = op_checks if isinstance(op_checks, dict) else {}
+    jwt_ok = op_checks.get("jwt_configured", False) is True
     print(f"  JWT configured: {jwt_ok}")
     if not jwt_ok:
         print(f"  FIX: openssl rand -hex 32 | npx wrangler secret put CDB_JWT_SECRET"
@@ -245,7 +254,7 @@ def run_validation(expected_version: str) -> dict:
     r2_ok = False
     r2_status = "unknown"
     if op_body:
-        r2_status = op_body.get("checks", {}).get("r2_intel", "unknown")
+        r2_status = op_checks.get("r2_intel", "unknown")
         r2_ok = r2_status == "ok"
     print(f"  R2 intel status: {r2_status}")
     print(f"  GATE F: {'PASS' if r2_ok else 'WARN (soft)'}")
