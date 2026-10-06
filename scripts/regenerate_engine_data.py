@@ -26,6 +26,7 @@ import re
 import sys
 import hashlib
 import logging
+import math
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlsplit
@@ -133,6 +134,9 @@ def _load_feed() -> List[Dict]:
                 items = raw.get("items", raw.get("data", []))
             else:
                 items = []
+            if not isinstance(items, list):
+                continue
+            items = [item for item in items if isinstance(item, dict)]
             if items:
                 log.info(f"Loaded {len(items)} items from {os.path.relpath(path, ROOT)}")
                 return items
@@ -147,7 +151,7 @@ def _safe_write(path: str, obj: Any) -> bool:
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(obj, f, indent=2, ensure_ascii=False)
+            json.dump(obj, f, indent=2, ensure_ascii=False, allow_nan=False)
         os.replace(tmp, path)
         log.info(f"✅ {os.path.relpath(path, ROOT)}")
         return True
@@ -175,16 +179,17 @@ def _extract_ttps(item: Dict) -> List[str]:
         if isinstance(t, dict):
             # Dict format — read .id or .technique_id
             code = t.get("id") or t.get("technique_id") or ""
-            if code and re.match(r"T\d{4}", code):
+            if isinstance(code, str) and re.fullmatch(r"T\d{4}(?:\.\d{3})?", code):
                 result.append(code.split(".")[0])
                 continue
             # Fallback: name field
-            name = (t.get("name") or "").lower()
+            name = t.get("name")
+            name = name.lower() if isinstance(name, str) else ""
             code = _TTP_NAME_TO_CODE.get(name)
             if code:
                 result.append(code)
         elif isinstance(t, str):
-            if re.match(r"T\d{4}", t):
+            if re.fullmatch(r"T\d{4}(?:\.\d{3})?", t):
                 result.append(t.split(".")[0])
             else:
                 code = _TTP_NAME_TO_CODE.get(t.lower())
@@ -201,12 +206,13 @@ def _extract_actor(item: Dict) -> str:
     """
     # Direct actor_tag / actor fields
     for field in ("actor_tag", "actor", "threat_actor", "actor_fingerprint"):
-        val = (item.get(field) or "").strip()
+        val = item.get(field)
+        val = val.strip() if isinstance(val, str) else ""
         if val and val not in _GENERIC_ACTOR_TAGS:
             return val
 
     # Keyword matching fallback
-    text = ((item.get("title") or "") + " " + (item.get("description") or "")).lower()
+    text = " ".join(item.get(key, "") for key in ("title", "description") if isinstance(item.get(key), str)).lower()
     for actor, keywords in ACTOR_KEYWORDS.items():
         if any(k in text for k in keywords):
             return actor
@@ -219,8 +225,11 @@ def _short_id(seed: str, prefix: str) -> str:
 
 def _safe_float(v) -> float:
     try:
-        return float(v) if v is not None else 0.0
-    except (TypeError, ValueError):
+        if isinstance(v, bool):
+            return 0.0
+        number = float(v) if v is not None else 0.0
+        return number if math.isfinite(number) else 0.0
+    except (TypeError, ValueError, OverflowError):
         return 0.0
 
 
