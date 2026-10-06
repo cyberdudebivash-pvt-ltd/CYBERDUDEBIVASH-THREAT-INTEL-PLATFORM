@@ -28,6 +28,7 @@ import hashlib
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
+from urllib.parse import urlsplit
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [ENGINE-REGEN] %(message)s")
 log = logging.getLogger("ENGINE-REGEN")
@@ -546,54 +547,37 @@ def generate_cortex(items: List[Dict]) -> Dict:
 # ════════════════════════════════════════════════════════════════════════════
 
 def generate_quantum(items: List[Dict]) -> Dict:
-    """Generate quantum_output.json — live feed trust and anomaly scores."""
-    quantum_path = os.path.join(ROOT, "data", "quantum", "quantum_output.json")
-    try:
-        with open(quantum_path) as f:
-            existing = json.load(f)
-    except Exception:
-        existing = {}
-
-    # Feed trust: based on KEV confirmations, NVD status, source diversity
-    kev_count     = sum(1 for i in items if i.get("kev") is True)
-    nvd_confirmed = sum(1 for i in items if str(i.get("nvd_status","")).upper() == "CONFIRMED")
-    sources       = len({i.get("source_url","").split("/")[2] for i in items if i.get("source_url")})
-    trust_score   = round(min(99.0, 80.0 + kev_count * 0.5 + nvd_confirmed * 0.1 + sources * 0.2), 1)
-
-    # Anomalies: items with very high risk but no CVE
-    anomalies = []
-    for item in items:
-        r = _safe_float(item.get("risk_score"))
-        if r >= 9.0 and not re.search(r"CVE-\d{4}-\d{4,7}", item.get("title","") or ""):
-            anomalies.append({
-                "id":          _short_id(item.get("id","") or item.get("title",""), "ANML"),
-                "title":       (item.get("title",""))[:60],
-                "risk_score":  r,
-                "anomaly_type": "HIGH_RISK_NO_CVE",
-                "confidence":  round(min(99, 70 + r * 3), 1),
-                "detected_at": NOW_ISO,
-            })
-
-    # False positive reduction
-    fp_rate = round(max(0.3, 3.5 - kev_count * 0.1 - nvd_confirmed * 0.05), 2)
-
-    result = dict(existing)
-    result["version"]      = "41.1.0"
-    result["generated_at"] = NOW_ISO
-    result["feed_trust"]   = {
-        "overall":        trust_score,
-        "kev_confirmed":  kev_count,
-        "nvd_confirmed":  nvd_confirmed,
-        "source_count":   sources,
-        "alerts":         max(0, len(anomalies)),
+    """Source-link coverage is measurable; trust/false-positive rates are not."""
+    records = [item for item in items if isinstance(item, dict)]
+    sources, linked, review = set(), 0, []
+    for item in records:
+        source = item.get("source_url") or item.get("url")
+        if isinstance(source, str):
+            try:
+                parsed = urlsplit(source.strip())
+                host = parsed.hostname
+                parsed.port  # reject malformed/out-of-range ports
+                if parsed.scheme.lower() in {"http", "https"} and host and not any(c.isspace() for c in host):
+                    sources.add(host.lower().rstrip("."))
+                    linked += 1
+            except ValueError:
+                pass
+        title = item.get("title") if isinstance(item.get("title"), str) else ""
+        if _safe_float(item.get("risk_score")) >= 9 and not re.search(r"CVE-\d{4}-\d{4,7}", title, re.IGNORECASE):
+            review.append({"id": _short_id(str(item.get("id") or title), "REVIEW"),
+                           "title": title[:120], "rule": "HIGH_RISK_TITLE_WITHOUT_CVE",
+                           "status": "ANALYST_REVIEW_REQUIRED"})
+    return {
+        "version": "41.2.0", "generated_at": NOW_ISO,
+        "evidence_type": "source_link_coverage",
+        "source_coverage": {"total_records": len(records), "source_link_records": linked,
+                            "distinct_sources": len(sources),
+                            "kev_marked_records": sum(1 for item in records if item.get("kev") is True or item.get("kev_present") is True),
+                            "nvd_confirmed_records": sum(1 for item in records if str(item.get("nvd_status", "")).upper() == "CONFIRMED"),
+                            "review_candidate_count": len(review)},
+        "review_candidates": review[:20],
+        "methodology": "Valid HTTP(S) source-link presence and feed metadata counts. Source links are not credibility validation; review candidates are not confirmed anomalies or false positives.",
     }
-    result["anomalies"]    = anomalies[:20]
-    result["false_positives"] = {
-        "fp_rate": fp_rate,
-        "items_reviewed": len(items),
-        "false_positives_removed": round(len(items) * fp_rate / 100),
-    }
-    return result
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1069,7 +1053,7 @@ def main():
     # see comment above; no other consumer in this script)
     quantum = generate_quantum(items)
     ft = quantum.get("feed_trust", {})
-    log.info(f"QUANTUM: trust={ft.get('overall')}% anomalies={len(quantum.get('anomalies',[]))}")
+    log.info(f"QUANTUM: source coverage={quantum.get('source_coverage', {})}")
 
     # 6. SOVEREIGN (no longer written to data/sovereign/sovereign_output.json
     # -- see comment above; no other consumer in this script)
