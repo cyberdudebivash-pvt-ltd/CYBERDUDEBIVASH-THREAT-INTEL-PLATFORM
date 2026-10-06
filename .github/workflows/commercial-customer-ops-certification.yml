@@ -462,15 +462,34 @@ jobs:
           }
 
           revoke() {
-            local key="$1"
+            local key="$1" status
             [ -z "$key" ] && return 0
-            curl -sS -X DELETE "$BASE/api/admin/keys/$key" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null
+            if ! status=$(curl -sS -X DELETE "$BASE/api/admin/keys/$key" \
+              -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null -w "%{http_code}" 2>/dev/null); then
+              echo "FAIL: controlled test-key cleanup transport failed (key not printed)"
+              return 1
+            fi
+            case "$status" in
+              200|204|404) return 0 ;;
+              *) echo "FAIL: controlled test-key cleanup rejected (HTTP $status; key not printed)"; return 1 ;;
+            esac
           }
 
           # Cleanup net: whichever key is live when the step exits (the
           # original, or its post-rotation replacement) gets revoked.
           CURRENT_KEY=""
-          cleanup_all() { [ -n "$CURRENT_KEY" ] && revoke "$CURRENT_KEY" || true; }
+          cleanup_all() {
+            local original_status=$?
+            if [ -n "$CURRENT_KEY" ]; then
+              if revoke "$CURRENT_KEY"; then
+                CURRENT_KEY=""
+              else
+                original_status=1
+              fi
+            fi
+            trap - EXIT
+            exit "$original_status"
+          }
           trap cleanup_all EXIT
 
           echo "--- Provisioning one controlled ENTERPRISE key ---"
@@ -566,7 +585,9 @@ jobs:
           expect_status "rotation of a suspended (terminal-state) key rejected" "409" "$ROTATE_DENY_ST"
 
           echo "--- Cleanup: revoking final live key ---"
-          revoke "$NEW_KEY"
+          # On failed rotation, CURRENT_KEY still identifies the original.
+          # Never clear it until the server confirms idempotent revocation.
+          revoke "$CURRENT_KEY"
           CURRENT_KEY=""
           echo "Cleanup complete."
 
