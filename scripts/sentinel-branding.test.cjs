@@ -104,6 +104,7 @@ test('public non-HTML metadata uses canonical SENTINEL APEX Threat Intel identit
   assert.ok(!llms.includes('# CYBERDUDEBIVASH® SENTINEL APEX'));
   assert.ok(llmsFull.startsWith('# SENTINEL APEX Threat Intel Platform — Full AI Search & LLM Profile'));
   assert.ok(llmsFull.includes('Primary Platform: SENTINEL APEX Threat Intel Platform'));
+  assert.ok(llmsFull.includes('Parent Attribution: Powered By CYBERDUDEBIVASH'));
   assert.ok(!llmsFull.includes('Primary Platform: CYBERDUDEBIVASH® SENTINEL APEX'));
   assert.equal(manifest.name, NAME);
   assert.equal(manifest.short_name, 'SENTINEL APEX');
