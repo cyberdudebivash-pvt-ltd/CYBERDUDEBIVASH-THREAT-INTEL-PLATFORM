@@ -5084,11 +5084,18 @@ function renderTopThreats(data) {
 
         // ── 7-SECTION AI-POWERED RENDERER ────────────────────────────────────
         function _cdbRenderAIResult(item, ai, rules, container) {
-            var risk = parseFloat(ai.ai_risk_score || item.risk_score || 0);
-            var conf = parseFloat(ai.ai_confidence || 0.5);
+            // AI measurements must come from AI evidence, never general risk or defaults.
+            var validMeasurement = function(value, max) {
+                if (typeof value !== 'number' && typeof value !== 'string') return null;
+                if (typeof value === 'string' && !value.trim()) return null;
+                var measured = Number(value);
+                return Number.isFinite(measured) && measured >= 0 && measured <= max ? measured : null;
+            };
+            var risk = validMeasurement(ai.ai_risk_score, 10);
+            var conf = validMeasurement(ai.ai_confidence, 1);
             var priority = ai.priority || 'MEDIUM';
             var priColor = priority === 'CRITICAL' ? 'var(--critical)' : priority === 'HIGH' ? 'var(--high)' : priority === 'MEDIUM' ? 'var(--medium)' : 'var(--accent)';
-            var riskPct = Math.min(risk * 10, 100);
+            var riskPct = risk === null ? null : Math.min(risk * 10, 100);
             var html = '';
 
             // ── HEADER: AI Badge + Risk Score ──────────────────────────────
@@ -5097,7 +5104,7 @@ function renderTopThreats(data) {
             html += '<div style="display:flex;flex-direction:column;gap:6px;">';
             html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
             html += '<span style="font-family:var(--font-mono);font-size:18px;font-weight:900;color:' + priColor + ';">' + priority + '</span>';
-            html += '<span style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;padding:2px 8px;border-radius:3px;background:rgba(0,212,170,0.1);color:var(--accent);border:1px solid rgba(0,212,170,0.25);">🧠 AI ASSESSED</span>';
+            html += '<span style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;padding:2px 8px;border-radius:3px;background:rgba(0,212,170,0.1);color:var(--accent);border:1px solid rgba(0,212,170,0.25);">' + (risk === null || conf === null ? '🧠 ASSESSMENT PENDING' : '🧠 AI ASSESSED') + '</span>';
             if (ai.exploit_tier) {
                 var etColor = ai.exploit_tier === 'IMMINENT' ? '#ff3b3b' : ai.exploit_tier === 'LIKELY' ? '#ff8c00' : ai.exploit_tier === 'ELEVATED' ? '#ffd600' : 'var(--text-muted)';
                 html += '<span style="font-family:var(--font-mono);font-size:9px;letter-spacing:1.5px;padding:2px 8px;border-radius:3px;background:rgba(255,59,59,0.08);color:' + etColor + ';border:1px solid ' + etColor + '30;">⚡ ' + ai.exploit_tier + '</span>';
@@ -5115,12 +5122,12 @@ function renderTopThreats(data) {
             html += '</div>';
             // AI Risk Score + Confidence
             html += '<div style="text-align:right;flex-shrink:0;">';
-            html += '<div style="font-family:var(--font-mono);font-size:28px;font-weight:900;color:' + priColor + ';line-height:1;">' + risk.toFixed(1) + '</div>';
+            html += '<div style="font-family:var(--font-mono);font-size:28px;font-weight:900;color:' + priColor + ';line-height:1;">' + (risk === null ? 'Assessment pending' : risk.toFixed(1)) + '</div>';
             html += '<div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);letter-spacing:2px;">AI RISK</div>';
-            html += '<div style="font-family:var(--font-mono);font-size:9px;color:var(--accent);margin-top:4px;">CONF ' + (conf * 100).toFixed(0) + '%</div>';
+            html += '<div style="font-family:var(--font-mono);font-size:9px;color:var(--accent);margin-top:4px;">CONF ' + (conf === null ? 'Assessment pending' : (conf * 100).toFixed(0) + '%') + '</div>';
             html += '</div>';
             html += '</div>';
-            html += '<div class="cdb-agent-risk-bar" style="margin-top:10px;"><div class="cdb-agent-risk-fill" style="width:' + riskPct + '%;background:' + priColor + ';"></div></div>';
+            if (risk !== null) html += '<div class="cdb-agent-risk-bar" style="margin-top:10px;"><div class="cdb-agent-risk-fill" style="width:' + riskPct + '%;background:' + priColor + ';"></div></div>';
             html += '</div>';
 
             // ── SECTION 1: Executive Summary ───────────────────────────────
