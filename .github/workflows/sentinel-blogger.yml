@@ -1,0 +1,1794 @@
+Warning: truncated output (original token count: 77279)
+Total output lines: 5037
+
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX v184.0 - SOVEREIGN INTELLIGENCE PIPELINE
+# Version    : v184.0 (GOD MODE PRODUCTION HARDENING RELEASE)
+# Rebuilt    : 2026-05-16 - v184.0 GOD MODE HARDENING:
+#              RULE 1:  Zero inline Python in YAML (all here-doc blocks removed)
+#              RULE 2:  All logic in dedicated scripts/ only
+#              RULE 3:  encoding_guard.py runs FIRST on every execution
+#              RULE 4:  Pure ASCII in this file (no smart quotes, em dashes)
+#              RULE 5:  Zero heredoc blocks (no inline-shell Python or ENDJSON)
+#              RULE 6:  All bash run blocks are simple 1-line script calls
+#              RULE 7:  Unquoted here-doc at line 1002 (run 793 root cause) FIXED
+#              RULE 8:  YAML calls only: python3 scripts/<name>.py
+#              RULE 9:  validate_repo.py is final gate - enforces all rules
+#              RULE 10: All errors wrapped in try/except in Python; YAML stays
+#                       clean and simple.
+# Author     : CYBERDUDEBIVASH Pvt. Ltd.
+# =============================================================================
+# ARCHITECTURE (v184.0 - canonical):
+#
+#   encoding_guard.py  (Stage 0)    - strip BOM, CRLF, smart quotes, mojibake
+#   sanitize_repo.py   (Stage 0.1)  - JSON self-healing engine
+#   validate_env.py    (Stage 0.2)  - validate required secrets
+#   run_pipeline.py    (Stage 1-3)  - master orchestrator:
+#       Stage 0.5  purge_publish_queue
+#       Stage 1    bootstrap_critical_files
+#       Stage 1.1  validate_bootstrap
+#       Stage 1.2  inject_sovereign_key
+#       Stage 1.3  validate_jwt_secret  (HARD FAIL if missing)
+#       Stage 2    sentinel_blogger engine
+#       Stage 1.5  pre_v70_manifest_sync
+#       Stage 2.1  v70_apex_upgrade orchestrator
+#       Stage 2.2  manifest_stabilisation
+#       Stage 2.5  freshness_gate  (HARD FAIL if < 10 entries)
+#       Stage 3    schema_validation  (HARD FAIL)
+#       Stage 3.1  manifest_cleanup
+#       Stage 3.6  html_reports  (HARD FAIL if 0 reports)
+#       Stage 3.6a manifest_integrity_check  (HARD FAIL on write_error)
+#       Stage 3.6b refresh_embedded_intel + version_sync
+#       Stage 3.6c prune_stix_bundles
+#   r2_upload.py       (Stage 3.5) - Cloudflare R2 upload (mandatory)
+#   bust_kv_cache.py   (Stage 3.7) - Worker KV cache invalidation
+#   safe_git_commit.py (Stage 4)   - git commit + push (always runs)
+#   GitHub Pages       (Stage 5)   - deploy action
+#   validate_repo.py   (Stage 5.5) - final validation gate
+#
+# =============================================================================
+# P0 FIXES HISTORY:
+#   v134.0: Blogger removed, queue bomb neutralised, bootstrap fixed
+#   v134.0: Manifest Stabilisation, R2 upload guard, stale-backup guard
+#   v134.0: LIST format manifest normalisation
+#   v134.0: Pre-v70 manifest sync, schema_version added, EMBEDDED_INTEL refresh
+#   v134.0: JSON sanitizer, bool published_date guard (run #793)
+#   v134.0: ARCHITECTURAL FIX - all inline Python moved to scripts/
+#           encoding_guard.py enforces pure ASCII in YAML/shell
+#           validate_repo.py is final gate ensuring no regression
+#   v184.0: pricing.html CTA fix -- /upgrade.html links restored (5a7d24b2)
+#           dashboard.html -- brand always visible on mobile, god mode UI/UX
+#           STAGE 5.7 Monetization Integrity Gate: 46 passed, 0 warnings, 0 errors
+# =============================================================================
+
+name: sentinel-blogger v201.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/**.py'
+      - 'agent/**.py'
+      - '.github/workflows/sentinel-blogger.yml'
+      - '.github/workflows/generate-and-sync.yml'
+      - 'index.html'
+      - 'feed_manifest.json'
+  # SCHEDULE CADENCE -- MADE PERMANENT 2026-08-04 (GitHub Actions cost audit):
+  # Originally ran every 4 hours (6x/day). Cut to a deterministic 3x/day
+  # schedule (00:00, 08:00, 16:00 UTC) on 2026-07-29 at the founder's explicit
+  # direction, as an "emergency conservation window" originally intended to
+  # revert on the Aug 1 2026 quota reset (see prior revision of this comment).
+  #
+  # That reset came and went with no revert. On 2026-08-04 the org hit
+  # 2,755/3,000 monthly Actions minutes in ~3-4 days (SEV-1 cost audit),
+  # driven mainly by cron sprawl across this repo. Reverting to every-4-hours
+  # now would add back ~3 runs/day at this workflow's measured real cost of
+  # ~44 billable min/run (~132 min/day) -- the platform cannot currently
+  # afford that, so this is no longer a temporary measure.
+  #
+  # DECISION: 3x/day is the standing cadence going forward. ONLY this
+  # schedule trigger is affected -- push, workflow_dispatch, and all
+  # publishing/deployment/data-processing logic in this file are unchanged.
+  #
+  # Tightening this cadence again in the future requires a deliberate
+  # decision backed by confirmed Actions-minutes headroom (check current org
+  # usage first) -- not a mechanical revert of this comment.
+  #
+  # P0 2026-09-26 -- EVERY 4 HOURS (the headroom condition above is met):
+  # the repository is PUBLIC (GitHub API: "visibility": "public") and this
+  # job runs on ubuntu-latest, and standard GitHub-hosted runners are free
+  # for public repositories, so the billed-minutes basis of the 3x/day
+  # decision no longer applies. And 3x/day cannot satisfy the platform's own
+  # freshness contract (config/public_freshness_contract.json: 6h): an 8h
+  # cadence plus a ~80 min run plus GitHub's cron start delays (4h-4.7h
+  # observed 2026-09-25/26) left the public feed stale for hours every day.
+  # Minute 17, not 0: top-of-hour cron is GitHub's most congested slot.
+  # scripts/intel_freshness_guard.py (intel-freshness-guard.yml) re-dispatches
+  # this workflow when a scheduled run is delayed or displaced from the
+  # shared sentinel-data-writer queue.
+  schedule:
+    - cron: '17 */4 * * *'
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+    inputs:
+      force_full_sync:
+        description: 'Force full sync even if no new data'
+        required: false
+        type: boolean
+        default: false
+      skip_ai:
+        description: 'Skip AI enrichment phases (faster run)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  pull-requests: write
+  contents: write
+  pages: write
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PIPELINE_VERSION: "201.0"
+  PYTHONIOENCODING: "utf-8"
+  PYTHONUTF8: "1"
+
+# ENTERPRISE DEPLOYMENT GOVERNANCE (v184.0 P0 FIX):
+# Serialized production deployments — only ONE data-writing pipeline runs at a time.
+# cancel-in-progress: false ensures in-flight deploys are NEVER interrupted.
+# This prevents manifest corruption, artifact races, and partial deploys.
+#
+# P0 RACE CONDITION FIX (v184.0):
+#   PREVIOUS BUG: group was 'sentinel-apex-production' — a unique group that did NOT
+#   serialize sentinel-blogger with the 21 other sentinel-data-writer workflows
+#   (multi-source-intel, genesis-powerhouse, nexus-intelligence, etc.).
+#   This allowed sentinel-blogger to run SIMULTANEOUSLY with those workflows,
+#   causing git push conflicts and R2 write races on feed_manifest.json / api/feed.json.
+#
+#   FIX: Use 'sentinel-data-writer' — the shared concurrency group used by all
+#   data-writing workflows. This guarantees at most ONE data-writing pipeline
+#   runs at any time across the entire platform.
+concurrency:
+  group: sentinel-data-writer
+  cancel-in-progress: false
+
+jobs:
+  generate-and-sync:
+    runs-on: ubuntu-latest
+    # v184.1: raised 90->130. STAGE 3.5's own timeout-minutes went 12->50 (see
+    # that step's comment) to match r2_upload.py's documented 45-min internal
+    # budget; pre-3.5 stages alone observed at ~27min (run 31389394501), so a
+    # 90min cap left too little room for 3.5's worst case plus every
+    # downstream gate (STAGE 3.5.1 through 5.9.6). Per-step timeouts remain
+    # the primary zombie-run guard; this is just the ceiling that must
+    # accommodate their sum.
+    timeout-minutes: 130
+    # CI LOOP GUARD (v184.0): Prevent github-actions[bot] push-triggered runs
+    # from spawning a new pipeline cycle. schedule + workflow_dispatch always run.
+    # This eliminates the CI self-trigger feedback loop on Stage-4 git commits.
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.actor != 'github-actions[bot]')
+
+    env:
+      # All secrets at job level - accessible to Python scripts via os.environ
+      CDB_JWT_SECRET:          ${{ secrets.CDB_JWT_SECRET }}
+      CDB_SOVEREIGN_KEY:       ${{ secrets.CDB_SOVEREIGN_KEY }}
+      NVD_API_KEY:             ${{ secrets.NVD_API_KEY }}
+      GUMROAD_ACCESS_TOKEN:    ${{ secrets.GUMROAD_ACCESS_TOKEN }}
+      TELEGRAM_BOT_TOKEN:      ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:        ${{ secrets.TELEGRAM_CHAT_ID }}
+      # PRIVATE operations destination. pipeline_alert.py consumes only these.
+      # Public TELEGRAM_* above remains exclusively for subscriber intelligence alerts.
+      TELEGRAM_OPS_BOT_TOKEN:  ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+      TELEGRAM_OPS_CHAT_ID:    ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
+      CF_ACCOUNT_ID:           ${{ secrets.CF_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID:       ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY:   ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+      WORKER_ADMIN_SECRET:     ${{ secrets.WORKER_ADMIN_SECRET }}
+      GH_TOKEN:                ${{ secrets.GITHUB_TOKEN }}
+      SKIP_AI:                 ${{ github.event.inputs.skip_ai }}
+      FORCE_FULL_SYNC:         ${{ github.event.inputs.force_full_sync }}
+      PYTHONPATH:              ${{ github.workspace }}
+      GITHUB_REPOSITORY:       ${{ github.repository }}
+      GITHUB_RUN_ID:           ${{ github.run_id }}
+      TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
+      TOKENIZERS_PARALLELISM:  "false"
+      # Suppress RequestsDependencyWarning from requests/urllib3 version mismatch
+      PYTHONWARNINGS:          "ignore::Warning:urllib3,ignore::Warning:requests"
+
+      # ---------------------------------------------------------------------
+      # P0 R2 COST INCIDENT FIX (2026-09) -- pre-revenue cost-bounded config.
+      # See docs/P0_R2_COST_CONTAINMENT.md for the full incident writeup.
+      # PRE_REVENUE_COST_MODE=true is the standing posture while CYBERDUDEBIVASH
+      # is pre-revenue (scripts/r2_cost_guard.py::is_pre_revenue_cost_mode()) --
+      # flip to "false" only once real revenue changes the cost calculus, never
+      # as a workaround for a budget ceiling being hit.
+      PRE_REVENUE_COST_MODE:   "true"
+      # Rolling hot-report window (hours). Drives scripts/generate_intel_reports.py's
+      # --since-hours (all 4 call sites), scripts/build_reports_index.py, and
+      # scripts/r2_report_publisher.py's publish/retire decisions -- one value,
+      # one source of truth.
+      REPORT_WINDOW_HOURS:     "24"
+      # Emergency kill switch for scripts/r2_report_publisher.py. Default true:
+      # the new architecture is safe-by-construction (bounded, zero LIST,
+      # budget-enforced) and the dashboard must keep showing current reports.
+      R2_REPORT_PUBLISHING_ENABLED: "true"
+      # Evidence-based hard ceilings (scripts/r2_cost_guard.py::R2Budgets) --
+      # see that module's docstring for the observed-volume evidence behind
+      # these numbers. Exceeding any of these aborts BEFORE any R2 mutation.
+      MAX_REPORT_UPLOADS_PER_RUN:   "500"
+      MAX_REPORT_DELETIONS_PER_RUN: "500"
+      MAX_R2_LIST_CALLS_PER_RUN:    "0"
+      MAX_R2_DATA_WRITES_PER_RUN:   "200"
+
+    steps:
+
+      # -----------------------------------------------------------------------
+      # STAGE 0: RUNNER DISK SOVEREIGNTY (v184.0 P0 — PERMANENT FIX)
+      # ROOT CAUSE (run #1384): Runner starts at 4.39 GB free (94.3% used).
+      # dist/ build copies 81k reports (~7 GB) but only ~7.37 GB was available
+      # before that stage -> 0 GB left -> GitHub Actions agent IOException crash.
+      #
+      # FIX: Remove pre-installed OS tools not needed by this pipeline BEFORE
+      # checkout. This frees 15-20 GB permanently on every ubuntu-latest runner:
+      #   Android SDK  : ~10 GB
+      #   .NET runtime : ~2.5 GB
+      #   Haskell/GHC  : ~5 GB
+      #   CodeQL tools : ~1.5 GB
+      #   Swift        : ~2 GB
+      #   TOTAL        : ~20+ GB freed before any pipeline work begins
+      #
+      # This runs BEFORE checkout so the freed space is available for the full
+      # pipeline including the 81k-file dist/ build and GitHub Pages upload.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0: Free Runner Disk Space (v184.0 P0 PERMANENT FIX)"
+        timeout-minutes: 5
+        run: |
+          echo "======================================================================"
+          echo "  SENTINEL APEX — RUNNER DISK SOVEREIGNTY v184.0"
+          echo "======================================================================"
+          df -h /
+          echo ""
+          echo "Removing unused OS pre-installed tools..."
+
+          # v184.0 P1 FIX: each cleanup command is wrapped in `timeout Ns` so that
+          # a single hung command (e.g. apt-get clean blocked on the dpkg/apt lock
+          # held by unattended-upgrades — a known GitHub-hosted-runner flake) can no
+          # longer consume the entire 5-minute step budget, skip checkout, and
+          # cascade-fail the whole 150+ stage pipeline. Worst case now: 11 commands
+          # x 15s = 165s, well inside the step's timeout-minutes: 5.
+
+          # Remove Android SDK (~10 GB)
+          timeout 15s sudo rm -rf /usr/local/lib/android 2>/dev/null || true
+
+          # Remove .NET runtime (~2.5 GB)
+          timeout 15s sudo rm -rf /usr/share/dotnet 2>/dev/null || true
+
+          # Remove Haskell / GHC (~5 GB)
+          timeout 15s sudo rm -rf /usr/local/.ghcup 2>/dev/null || true
+          timeout 15s sudo rm -rf /opt/ghc 2>/dev/null || true
+
+          # Remove Swift (~2 GB)
+          timeout 15s sudo rm -rf /usr/share/swift 2>/dev/null || true
+
+          # Remove CodeQL tools (~1.5 GB)
+          timeout 15s sudo rm -rf /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+
+          # Remove Mono (~1 GB)
+          timeout 15s sudo rm -rf /usr/share/mono 2>/dev/null || true
+
+          # Remove Go toolchain (pipeline uses Python only)
+          timeout 15s sudo rm -rf /usr/local/go 2>/dev/null || true
+
+          # Remove Julia
+          timeout 15s sudo rm -rf /usr/local/julia* 2>/dev/null || true
+
+          # Remove unnecessary man pages / docs
+          timeout 15s sudo rm -rf /usr/share/man /usr/share/doc 2>/dev/null || true
+
+          # Purge apt cache (skipped outright if apt/dpkg lock is held — best-effort only)
+          timeout 15s sudo apt-get clean -qq 2>/dev/null || true
+
+          echo ""
+          echo "Disk after OS cleanup:"
+          df -h /
+          FREE_GB=$(df / --output=avail | tail -1 | awk '{print $1/1024/1024}')
+          echo "Free: ${FREE_GB} GB"
+          echo "======================================================================"
+
+      # -----------------------------------------------------------------------
+      # STAGE 0: CHECKOUT
+      # v184.0 PERFORMANCE GOVERNANCE — SHALLOW CLONE (fetch-depth: 1)
+      #
+      # ARCHITECTURE (71k-file repo, large-scale):
+      #   fetch-depth: 1   -- shallow clone, tip commit only
+      #   Checkout target  : ~71,213 files (~20-40s on ubuntu-latest)
+      #   Full-history cost: +60-90s fetch + all branch/tag objects
+      #
+      # ORIG_HEAD COMPATIBILITY (safe_git_commit.py stash recovery):
+      #   ORIG_HEAD is set by "git reset --hard origin/main" which runs
+      #   INSIDE the workflow (not at checkout time). It points to the
+      #   LOCAL pre-reset commit, which is already in the shallow object
+      #   store. fetch-depth has NO effect on ORIG_HEAD availability.
+      #   "git checkout ORIG_HEAD -- reports/" is safe with depth: 1.
+      #
+      # SELECTIVE DEEP FETCH (where needed):
+      #   Any stage requiring additional history runs its own targeted:
+      #     git fetch --depth=N origin <ref>
+      #   No global full-history clone needed for any current pipeline stage.
+      #
+      # REGRESSION GUARD: T20_safe_push_ps1_deployed in regression_tests.py
+      #   enforces fetch-depth: 1. Do NOT increase depth to 0 (full history).
+      # -----------------------------------------------------------------------
+      - name: "Checkout repository"
+        timeout-minutes: 20   # v184.0: raised 8->20min; 71k-file shallow clone safely fits well under this ceiling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.2   # v6.0.2 — native Node 24 (v6 series; upgraded from v4.3.1 May-23-2026)
+        with:
+          fetch-depth: 1
+          ref: "${{ github.ref }}"
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # STAGE 0: PYTHON SETUP
+      # v184.0 FIX: timeout raised 5->15min (runner downloads ~3.2GB toolchain
+      # at 6-7 MB/s on slow days -- 5min was guaranteed to timeout).
+      # setup-python pinned to v5.3.0 (v5.4.0 bypasses pre-installed Python
+      # and forces a full toolchain re-download every run -- confirmed GitHub
+      # Actions regression). check-latest:false ensures pre-cached toolchain
+      # is preferred. update-environment:true keeps PATH correct.
+      #
+      # v184.0 FIX: cache: 'pip' REMOVED permanently.
+      # ROOT CAUSE: actions/setup-python restores a 3 GB pip cache at job
+      # start. runner_disk_governor.py --predist then runs 'pip cache purge'
+      # (step 2/6 in reclaim sequence) which deletes /home/runner/.cache/pip.
+      # The Post Setup Python 3.12 post-step then fails trying to re-save the
+      # deleted cache directory → exit code 1 → entire job marked FAILED even
+      # though all 70+ pipeline stages passed.
+      # Removing cache: 'pip' eliminates the post-step error AND saves the
+      # 3 GB cache restore download at job start (wasted bandwidth since the
+      # governor deletes it anyway). No functional impact: pip installs from
+      # requirements.txt are fast regardless of cache on ubuntu-latest runners.
+      # -----------------------------------------------------------------------
+      - name: "Setup Python 3.12"
+        timeout-minutes: 15
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.2.0   # v6.2.0 — native Node 24 (v6 series; upgraded from v5.5.0 May-23-2026; v5.4.0 cache regression fixed in v5.5.0 and v6.x)
+        with:
+          python-version: '3.12'
+          # cache: 'pip' intentionally omitted — see v184.0 FIX comment above
+          check-latest: false
+          update-environment: true
+
+      # -----------------------------------------------------------------------
+      # STAGE 0: INSTALL DEPENDENCIES  (v184.0 — P0.3 FIX: pip → uv)
+      # uv is pre-installed on ubuntu-latest (2024+). It resolves and installs
+      # the same packages as pip but 10-100× faster (Rust resolver + parallel
+      # downloads). Eliminates the ~90-119s pip dead time per run.
+      # Fallback: if uv is unavailable, falls back to pip automatically.
+      # -----------------------------------------------------------------------
+      - name: "Install pipeline dependencies"
+        timeout-minutes: 5
+        run: |
+          # Core imports must exist before the larger resolver/download operation.
+          # Keep both operations inside the existing five-minute step budget.
+          # Do not reinstall the obsolete urllib3<2 constraint: requirements.txt
+          # explicitly requires the security-fixed >=2.7 floor.
+          if command -v uv &>/dev/null; then
+            installer=(uv pip install --system --quiet)
+          else
+            installer=(python -m pip install --quiet --disable-pip-version-check --timeout 20 --retries 1)
+          fi
+          timeout --kill-after=5s 50s "${installer[@]}" PyYAML==6.0.1 requests==2.34.2 feedparser==6.0.10
+          test -f requirements.txt
+          timeout --kill-after=5s 230s "${installer[@]}" -r requirements.txt
+          python -c "import yaml, requests, feedparser, bs4, pydantic, dotenv, psutil, cryptography, jwt, reportlab, fpdf"
+
+      # -----------------------------------------------------------------------
+      # STAGE 0: ENSURE REQUIRED DIRECTORIES
+      # -----------------------------------------------------------------------
+      - name: "Ensure required directories"
+        timeout-minutes: 2
+        run: |
+          mkdir -p data/stix data/nexus data/genesis data/cortex data/quantum
+          mkdir -p data/sovereign data/playbooks/scripts data/premium_packs
+          mkdir -p data/enterprise_kits data/enrichment data/status data/logs
+          mkdir -p data/remediation data/health data/ai_predictions data/bughunter
+          mkdir -p data/analyst data/arsenal data/convergence data/incidents
+          mkdir -p data/intelligence/detection_rules secrets api data/ai_intelligence
+
+      # -----------------------------------------------------------------------
+      # P0 FIX: Download Intel State from R2 (runtime-authoritative)
+      # data/stix/feed_manifest.json / data/cache/feed_state.json /
+      # data/processed_intel.json are cross-workflow state also written by
+      # multi-source-intel.yml's "True Incremental Intel Ingestion" (every
+      # ~4h). Both workflows' direct `git push origin main` for these files
+      # has been rejected by main's branch ruleset since ~2026-08-26
+      # ("Changes must be made through a pull request", confirmed live via
+      # job logs) -- this pipeline's OWN git checkout has therefore been
+      # seeing the same frozen 2026-08-26 copy on every run regardless of
+      # what multi-source-intel.yml ingested in between. R2 is now the
+      # cross-run/cross-workflow authority for these three files (see
+      # scripts/r2_state_sync.py); this step downloads the latest copy
+      # BEFORE STAGE 1-3 (run_pipeline.py) reads data/stix/feed_manifest.json
+      # as its Single Source of Truth. Hard-fails on a genuine R2 read error
+      # (not on the object simply not existing yet) -- see r2_state_sync.py's
+      # own docstring for the full bootstrap contract. Deliberately placed
+      # this early: essentially no pipeline work has happened yet, so
+      # hard-failing here (unlike a hard-fail mid-pipeline) does not discard
+      # any already-completed work.
+      # -----------------------------------------------------------------------
+      - name: "Download Intel State from R2"
+        timeout-minutes: 5
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/r2_state_sync.py --download
+
+      # -----------------------------------------------------------------------
+      # -----------------------------------------------------------------------
+      # STAGE 0.00: PIPELINE LOCK CHECK (v184.0)
+      # If .PIPELINE_LOCK exists, operator is doing manual god mode work.
+      # Skip pipeline run gracefully to prevent overwriting god mode reports.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.00 - Pipeline Lock Check"
+        timeout-minutes: 1
+        run: |
+          if [ -f ".PIPELINE_LOCK" ]; then
+            echo "======================================================"
+            echo "  PIPELINE LOCKED - Manual god mode work in progress"
+            cat .PIPELINE_LOCK 2>/dev/null || true
+            echo "======================================================"
+            echo "  Skipping pipeline run. Remove .PIPELINE_LOCK to resume."
+            # v184.3 FIX: 'exit 0' here only ended this one step -- every
+            # subsequent stage (including Stage 1-3's real data mutation and
+            # Stage 4's git push, the exact "overwrite god mode reports" this
+            # lock exists to prevent) ran anyway regardless of the lock. This
+            # env var is checked by those two gateway steps to actually skip.
+            echo "PIPELINE_LOCKED=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "[OK] No pipeline lock active. Proceeding."
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.00b - RUNNER DISK PRE-FLIGHT CHECK (v184.0 P0 HARD FAIL)
+      # Fails FAST if the runner does not have sufficient free disk space.
+      # Root cause of #1199: 64K reports + dist/ copy exceeded 14GB runner disk.
+      # This gate prevents that failure class from ever reaching dist-build stage.
+      #
+      # THRESHOLDS:
+      #   FAIL    < 6 GB free  — insufficient for dist/ build + pages deploy
+      #   WARN    < 8 GB free  — tight; emit warning annotation for ops visibility
+      #   OK     >= 8 GB free  — safe to proceed
+      #
+      # ACTIONS ON LOW DISK:
+      #   Clears pip cache, __pycache__, apt cache, /tmp/*, Docker layers (if any)
+      #   before hard-failing, to maximise reclaim before operator intervenes.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.00b - Runner Disk Pre-flight Check (v184.0 P0 HARD FAIL)"
+        timeout-minutes: 3
+        env:
+          STIX_MAX_BUNDLES: "50"
+          TELEMETRY_MAX_DAYS: "7"
+        run: |
+          EXIT_CODE=0
+          python3 scripts/runner_disk_governor.py --preflight || EXIT_CODE=$?
+          if [ "$EXIT_CODE" = "1" ]; then
+            echo "::error::RUNNER DISK PRE-FLIGHT HARD FAIL -- disk critically low even after reclaim. Pipeline aborted."
+            exit 1
+          fi
+          if [ "$EXIT_CODE" = "2" ]; then
+            echo "::warning::Runner disk low -- proceeding with caution after reclaim."
+          fi
+
+      - name: "STAGE 0.04a - God Mode Report Protection Check"
+        timeout-minutes: 1
+        run: |
+          for f in "reports/2026/05/intel--c687f56fd93c6ea6d1e3dd6a.html" "reports/2026/05/intel--1e41dd3a24f78d6ae239f84a.html"; do
+            if [ -f "$f" ]; then
+              size=$(wc -c < "$f")
+              kb=$((size / 1024))
+              if [ $kb -ge 60 ]; then
+                echo "[PROTECTED] $f (${kb} KB) - god mode quality confirmed, pipeline will not overwrite"
+              else
+                echo "[WARN] $f is only ${kb} KB - may be a pipeline placeholder"
+              fi
+            fi
+          done
+
+      # STAGE 0.05: PRE-FLIGHT FILE INTEGRITY CHECK (v184.0)
+      # Validates critical pipeline scripts exist and are not truncated.
+      # Hard fail if any critical file is below minimum byte threshold.
+      # Prevents the recurring pattern of silent 3-minute pipeline exits.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.05 - Pre-flight: Validate critical script integrity"
+        timeout-minutes: 3
+        run: python3 scripts/ci_preflight_check.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.06: VERSION GOVERNANCE CI GATE (P6 -- PERMANENT)
+      # v184.0 FIX: Changed from --check to --apply.
+      #
+      # ROOT CAUSE OF RECURRING FAILURES: --check ran BEFORE --apply (STAGE
+      # 3.93.7). Any runtime-generated file with a stale version field
+      # (e.g. data/health/sla_status.json regenerated by sla_engine.py at its
+      # own version) would hard-fail the pipeline BEFORE it could self-correct.
+      # The early --check was architecturally inverted: it blocked the pipeline
+      # instead of fixing it.
+      #
+      # --apply is idempotent: if no drift exists it is a clean no-op.
+      # If drift exists (e.g. sla_status.json regenerated at old version) it
+      # auto-corrects immediately and the pipeline continues.
+      # The authoritative --check still runs at STAGE 3.93.8 (end of pipeline)
+      # after --apply at STAGE 3.93.7, providing the final zero-drift guarantee.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.06 - Version governance auto-apply (drift correction + consistency)"
+        timeout-minutes: 2
+        run: |
+          python3 scripts/version_governance.py --apply
+          echo "STAGE 0.06: Version governance applied -- all surfaces aligned to $(cat VERSION)"
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.05b: CRITICAL SCRIPT RESTORE GUARD (v184.0)
+      # Guards against partial checkout caused by timeout or network hiccup.
+      # If any critical script is missing after checkout, restores it from the
+      # git object DB before the pipeline proceeds.
+      # Root cause of sentinel-blogger #1138: 8-min checkout timeout on 63k-file
+      # repo left safe_git_commit.py absent -> STAGE 4 ENOENT -> pipeline fail.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.05b - Critical script restore guard (post-checkout resilience)"
+        timeout-minutes: 2
+        run: |
+          CRITICAL="scripts/safe_git_commit.py scripts/run_pipeline.py scripts/generate_intel_reports.py scripts/intel_dedup_engine.py scripts/severity_epss_truth.py scripts/source_publication_age.py scripts/stale_source_guard.py"
+          RESTORED=0
+          MISSING=0
+          for f in $CRITICAL; do
+            if [ ! -f "$f" ]; then
+              echo "::warning::$f missing from checkout -- restoring from git HEAD"
+              git checkout HEAD -- "$f" 2>/dev/null && RESTORED=$((RESTORED+1)) || MISSING=$((MISSING+1))
+            fi
+          done
+          [ "$RESTORED" -gt 0 ] && echo "[RESTORED] $RESTORED critical script(s) restored from git HEAD"
+          [ "$MISSING" -gt 0 ] && echo "::error::$MISSING critical script(s) could not be restored" && exit 1
+          echo "[OK] All critical scripts present"
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.06a: NULL-BYTE INTEGRITY GUARD (v1.0 — P0 PERMANENT)
+      # ROOT CAUSE FIXED HERE:
+      #   Cross-OS mount writes (Linux tmpfs → Windows NTFS via sandbox) using
+      #   Python open(path,'w').write() do NOT truncate correctly — residual
+      #   bytes are zero-padded → SyntaxError: source code string cannot contain
+      #   null bytes → Stage 0.06b HARD-FAILS → entire pipeline BLOCKED.
+      # THIS STAGE:
+      #   1. Scans ALL scripts/*.py for null bytes (\x00)
+      #   2. Auto-repairs via binary-mode write with explicit fsync (bypasses OS
+      #      text-mode buffering that causes the corruption)
+      #   3. Quarantines corrupt originals to data/quarantine/integrity/
+      #   4. Emits corruption telemetry to data/health/integrity_events.json
+      #   5. Re-validates repaired files with AST parse before continuing
+      # MUST RUN BEFORE Stage 0.06b — repairs files so governance gate passes.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.06a - Null-Byte Integrity Guard (P0 PERMANENT FIX v1.0)"
+        timeout-minutes: 3
+        run: python3 scripts/null_byte_guard.py --fix
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.06b: PYTHON GOVERNANCE IMMUNITY ENGINE (v184.0)
+      # Forensic-grade syntax + encoding guardian. Hard-fails the pipeline
+      # before ANY execution if any script has: syntax errors, BOM, CRLF,
+      # smart-quotes, invisible chars, Unicode corruption, or truncation.
+      # Outputs: exact filename, line number, traceback, and code snippet
+      # for every violation found.
+      # DO NOT disable, bypass, or weaken this stage.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.06b - Python Governance Immunity Engine (forensic syntax + encoding guard)"
+        timeout-minutes: 5
+        run: python3 scripts/python_governance_immunity_engine.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.0: ENCODING GUARD -- MUST RUN BEFORE EVERYTHING
+      # Strips BOM, CRLF, smart quotes, mojibake from all YAML/shell files.
+      # Ensures this file and all scripts are ASCII-safe on every run.
+      # Exit 0 guaranteed by script.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.0 - Encoding Guard (BOM / CRLF / smart-quote / mojibake)"
+        timeout-minutes: 5
+        run: python3 scripts/encoding_guard.py --fix
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.1: JSON SANITIZER + SELF-HEALING ENGINE
+      # Validates/heals all .json files. Exit 0 guaranteed.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.1 - JSON Sanitizer and Self-Healing Engine"
+        timeout-minutes: 3
+        run: python3 scripts/sanitize_repo.py || true
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.2: ENVIRONMENT VALIDATION
+      # Hard fail if CDB_JWT_SECRET is missing.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.2 - Validate required secrets"
+        timeout-minutes: 2
+        run: python3 scripts/validate_env.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.03: BASELINE STABILITY LOCK PRE-FLIGHT (HARDENING -- HARD FAIL)
+      # Validates golden-build baseline contract BEFORE pipeline touches anything:
+      #   1. config/version.json readable with valid version
+      #   2. config/stability_lock.json present with all required sections
+      #   3. index.html EMBEDDED_INTEL declaration intact
+      #   4. index.html Top-Threats computed dynamically in JS (not overwritten)
+      #   5. No pipeline injection markers in frontend files
+      # HARD FAIL: blocks pipeline if any baseline invariant is violated.
+      # RULE: Pipeline MUST NOT modify frontend files. This gate enforces that.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.03 - Baseline Stability Lock Pre-flight (HARD FAIL)"
+        timeout-minutes: 3
+        run: python3 scripts/apex_stability_lock.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.04: PRE-PIPELINE SCHEMA VALIDATION (HARDENING -- SOFT GATE)
+      # Validates existing manifest schema BEFORE the pipeline overwrites it.
+      # Purpose: detect any pre-existing schema degradation from previous runs.
+      # Runs --backfill to restore any missing optional fields before pipeline.
+      # Does NOT hard-fail on empty manifest (CI generates it from scratch).
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.04 - Pre-pipeline Schema Validation (backfill missing fields)"
+        timeout-minutes: 3
+        run: python3 scripts/validate_manifest_schema.py --backfill || true
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.07: v149 P0 — PUBLISHED FIELD TYPE FIXER (PERMANENT)
+      # ROOT CAUSE: 446 items failed ingestion because 'published' field was
+      # boolean True/False instead of ISO-8601 string. Ingestion rate was 30.5%
+      # (should be 60%+). This stage scans all manifest/feed JSON files and
+      # replaces boolean 'published' values with the item's timestamp fields.
+      # Always exits 0 (pipeline-safe). Writes audit to data/governance/.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.07 - v149 P0: Published field type fixer (446-item ingestion fix)"
+        timeout-minutes: 3
+        run: python3 scripts/v149_published_field_fixer.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.08: v149 P0/P1 — INTELLIGENCE HARDENING ENGINE (PERMANENT)
+      # Runs BEFORE the main pipeline so data enters clean:
+      #   Fix 1: false CRITICAL suppression (pre-pipeline C4 logic)
+      #   Fix 2: NONE threat_level normalization via risk_score bands
+      #   Fix 3: threat_category resolution from actor codes (67-entry map)
+      #   Fix 4: confidence gate — quarantines items below APEX_CONFIDENCE_GATE_MIN
+      #   Fix 5: source trust differentiation (6 tiers, 60-95% range)
+      # Always exits 0. Writes audit to data/governance/.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.08 - v149 P0/P1: Intelligence hardening engine (false CRITICAL + UNKNOWN fixes)"
+        timeout-minutes: 5
+        run: python3 scripts/v149_intelligence_hardening.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 0.09: v149 P1 — FRONTEND DEDUP PATCH (PERMANENT)
+      # Patches index.html to eliminate duplicate advisory card rendering:
+      #   - Deduplication guard on EMBEDDED_INTEL before first render
+      #   - Unified avgRisk calculation (single source of truth)
+      #   - Container clear guard before renderTable() call
+      # Idempotent: safe to run on every pipeline run. Backs up index.html.
+      # Always exits 0.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 0.09 - v149 P1: Frontend dedup patch (eliminate duplicate advisory cards)"
+        timeout-minutes: 3
+        run: python3 scripts/v149_frontend_dedup_patch.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 1-3: MASTER PIPELINE ORCHESTRATOR
+      # Runs ALL pipeline logic. Zero inline Python in this YAML.
+      # Stages: pre-flight, intel engine, manifest processing,
+      #         HTML reports, integrity checks, embedded intel refresh.
+      # Hard fails on: missing JWT, freshness gate, schema, integrity.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 1-3 - Master Pipeline Orchestrator"
+        id: pipeline_stage_1_3
+        timeout-minutes: 40
+        # v184.0 P0 FIX: continue-on-error allows the deploy chain (5.4.5c→Stage 5) to
+        # run even when intelligence generation fails (e.g. stix feed_manifest missing,
+        # freshness gate fail, API timeout). Existing committed reports in the working
+        # tree are always deployed. Hard-fail gates in 5.4.6 and 5.4.7 still block
+        # deployment if the dist/ artifact itself is corrupt or incomplete.
+        #
+        # v184.3 FIX: skip entirely when STAGE 0.00 detected .PIPELINE_LOCK -- see
+        # that step's comment. This is the actual data-mutating stage the lock exists
+        # to protect against.
+        if: env.PIPELINE_LOCKED != 'true'
+        continue-on-error: true
+        run: python3 scripts/run_pipeline.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 1-3 STATUS GATE (RC-6 FIX v184.0)
+      # Captures Stage 1-3 pipeline health into PIPELINE_HEALTH env var so every
+      # downstream step can distinguish DEGRADED from HEALTHY deploys.
+      # When DEGRADED: emits GitHub Actions warning annotation and writes
+      # data/status/pipeline_health.json with degraded=true for telemetry.
+      # Does NOT block deployment — existing committed content still deploys.
+      # Prevents SILENT degraded deploys: all consumers see explicit health state.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 1-3 STATUS GATE (RC-6 FIX — pipeline health capture)"
+        if: always()
+        run: |
+          OUTCOME="${{ steps.pipeline_stage_1_3.outcome }}"
+          if [ "$OUTCOME" = "failure" ] || [ "$OUTCOME" = "cancelled" ]; then
+            echo "PIPELINE_HEALTH=DEGRADED" >> $GITHUB_ENV
+            echo "[STATUS-GATE] Stage 1-3 outcome=$OUTCOME — marking PIPELINE_HEALTH=DEGRADED"
+            echo "::error::Stage 1-3 pipeline FAILED (outcome=$OUTCOME) — deploying existing committed content only. New intel was NOT generated this run. This run WILL fail at the terminal health gate."
+            mkdir -p data/status
+            python3 -c "
+          import json, pathlib, datetime
+          pathlib.Path('data/status/pipeline_health.json').write_text(json.dumps({
+            'pipeline_health': 'DEGRADED',
+            'stage_1_3_outcome': '$OUTCOME',
+            'degraded_at': datetime.datetime.utcnow().isoformat() + 'Z',
+            'note': 'Stage 1-3 failed; deploying existing committed content only'
+          }, indent=2))
+          print('[STATUS-GATE] Wrote data/status/pipeline_health.json')
+          " 2>/dev/null || true
+          else
+            echo "PIPELINE_HEALTH=HEALTHY" >> $GITHUB_ENV
+            echo "[STATUS-GATE] Stage 1-3 outcome=$OUTCOME — PIPELINE_HEALTH=HEALTHY"
+            mkdir -p data/status
+            python3 -c "
+          import json, pathlib, datetime
+          pathlib.Path('data/status/pipeline_health.json').write_text(json.dumps({
+            'pipeline_health': 'HEALTHY',
+            'stage_1_3_outcome': '$OUTCOME',
+            'healthy_at': datetime.datetime.utcnow().isoformat() + 'Z'
+          }, indent=2))
+          " 2>/dev/null || true
+          fi
+
+      # -----------------------------------------------------------------------
+      # STAGE 1-3 MANIFEST CENSUS (observability only, never blocks)
+      # Surfaces run_pipeline.py's per-stage manifest/feed counts, written by
+      # record_manifest_census() at each _stage_done() boundary.
+      #
+      # WHY A SEPARATE STEP: the counts are logged inside the orchestrator
+      # step, whose log is far too large to retrieve by tail -- which is
+      # exactly why the 162 -> 40 feed drop could not be attributed after the
+      # fact. Echoing the summary here puts it in a small, reachable step.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 1-3 CENSUS - Per-stage manifest attribution (observability)"
+        if: always()
+        run: |
+          python3 - <<'CENSUS_EOF' || true
+          import json, pathlib
+          p = pathlib.Path("data/quality/manifest_stage_census.json")
+          if not p.exists():
+              print("[census] no census written this run (pipeline may not have reached a stage boundary)")
+              raise SystemExit(0)
+          d = json.loads(p.read_text(encoding="utf-8"))
+          print(f"[census] stages recorded : {d.get('stages_recorded')}")
+          print(f"[census] manifest        : {d.get('first_manifest_count')} -> {d.get('last_manifest_count')}")
+          print(f"[census] api/feed.json   : {d.get('first_feed_count')} -> {d.get('last_feed_count')}")
+          big = d.get("largest_manifest_drop") or {}
+          if big.get("manifest_delta", 0) < 0:
+              print(f"[census] LARGEST DROP    : {big.get('stage')} ({big.get('manifest_delta')} items)")
+          print("[census] per-stage deltas (non-zero only):")
+          for row in d.get("census", []):
+              if row.get("manifest_delta") or row.get("feed_delta"):
+                  print(f"    {row.get('stage'):<32} manifest={row.get('manifest_items'):>5} "
+                        f"({row.get('manifest_delta'):+d})  feed={row.get('feed_items'):>5} "
+                        f"({row.get('feed_delta'):+d})")
+          CENSUS_EOF
+
+      # -----------------------------------------------------------------------
+      # STAGE 1-3b - Stale Source Guard (2026-09-26)
+      # Production latest.json (06:28Z): 12 of 42 items were articles their
+      # sources published 2026-01-14 .. 2026-08-07, ingested as new intel and
+      # leading the newest-first feed. Removes items whose SOURCE publication
+      # date is older than INTEL_MAX_SOURCE_AGE_DAYS (default 14) unless KEV
+      # confirmed / exploitation signalled; keeps undated items; never leaves
+      # fewer than 10. Runs before enrichment, reports and R2 uploads, so no
+      # report or R2 write is spent on them. Non-blocking (exit 0).
+      # See scripts/source_publication_age.py, scripts/stale_source_guard.py.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 1-3b - Stale Source Guard (post-ingest)"
+        timeout-minutes: 2
+        continue-on-error: true
+        run: python3 scripts/stale_source_guard.py post-ingest
+
+      # STAGE 1-3c - OpenPhish source links (2026-09-26): 47 of 50 live
+      # OpenPhish items used the phishing URL itself as source_url, so source
+      # links sent customers to live phishing sites. Points them at the
+      # OpenPhish feed before the evidence chain, reports and R2 uploads read
+      # them. See scripts/openphish_source_link_guard.py. Non-blocking.
+      - name: "STAGE 1-3c - OpenPhish Source Link Guard"
+        timeout-minutes: 2
+        continue-on-error: true
+        run: python3 scripts/openphish_source_link_guard.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 3.1: APEX AI ENRICHMENT ENGINE (PERMANENT -- DO NOT REMOVE)
+      # Injects apex_ai, updates apex, and adds ioc_paywall into ALL items in
+      # api/feed.json immediately after run_pipeline generates it.
+      # The Cloudflare Worker computes apex_ai on live API calls but NEVER
+      # writes back to the static feed -- this step fills that gap so
+      # EMBEDDED_INTEL (Stage 3.93) carries full apex_ai for instant render.
+      # Safe: deterministic, idempotent, non-destructive to existing fields.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.1 - APEX AI Feed Enrichment (inject apex_ai into all items)"
+        timeout-minutes: 8
+        run: python3 scripts/enrich_feed_apex.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 3.1.0b: QUALITY FIELD BACKFILL (v184.0 — PERMANENT, NON-BLOCKING)
+      # Promotes raw feed fields to quality-gate-passable top-level fields in
+      # data/feed_manifest.json so Stage 5.8.5 reports meaningful publishability.
+      #   raw.risk_level  → tlp          (TLP:RED/AMBER/GREEN/CLEAR)
+      #   raw.published   → processed_ts (ISO 8601 timestamp)
+      #   raw.ai_summary  → executive_summary (for GATE-06 entropy check)
+      # Idempotent: fields already present are NEVER overwritten.
+      # Root-cause fix for persistent "Publishable 0/497" in Stage 5.8.5.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.1.0b - Quality Field Backfill (v184.0 — tlp/processed_ts/exec_summary)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          python3 scripts/apex_quality_field_backfill.py 2>&1 && \
+            echo "[PASS] Quality field backfill complete" || \
+            echo "::warning::Quality field backfill failed — Stage 5.8.5 may show reduced publishability"
+
+      # -----------------------------------------------------------------------
+      # STAGE 3.1.1: v149 P4 — SIEM + ENTERPRISE WEBHOOK DELIVERY (PERMANENT)
+      # Delivers enriched threat intel (post apex_ai injection) to configured
+      # enterprise SIEM endpoints:
+      #   - Splunk HTTP Event Collector (HEC)
+      #   - Microsoft Sentinel (Log Analytics Workspace)
+      #   - Generic JSON Webhooks (HMAC-SHA256 signed)
+      # Includes replay queue for failed deliveries. Non-fatal (continue-on-error).
+      # Writes delivery audit to data/governance/ and registry to data/siem/.
+      # Requires secrets: SPLUNK_HEC_URL, SPLUNK_HEC_TOKEN, SENTINEL_WORKSPACE_ID,
+      #                   SENTINEL_WORKSPACE_KEY, CDB_WEBHOOK_SECRET
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.1.1 - v149 P4: SIEM + Enterprise webhook delivery"
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          SPLUNK_HEC_URL:          ${{ secrets.SPLUNK_HEC_URL }}
+          SPLUNK_HEC_TOKEN:        ${{ secrets.SPLUNK_HEC_TOKEN }}
+          SENTINEL_WORKSPACE_ID:   ${{ secrets.SENTINEL_WORKSPACE_ID }}
+          SENTINEL_WORKSPACE_KEY:  ${{ secrets.SENTINEL_WORKSPACE_KEY }}
+          CDB_WEBHOOK_SECRET:      ${{ secrets.CDB_WEBHOOK_SECRET }}
+        run: python3 scripts/v149_siem_webhook_provisioner.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 3.1.1b: CVE ID BACKFILL (v184.0 — P1.3/P1.4/P1.5 ROOT CAUSE FIX)
+      # ROOT CAUSE FIX: All items in api/feed.json and data/feed_manifest.json
+      # have cve_id=None even when the title contains "CVE-XXXX-XXXXX".
+      # This means enrich_cvss_epss_batch.py (Stage 3.1.2) cannot look up CVSS/EPSS,
+      # and kev_feed_marker.py (Stage 3.1.3) finds 0 KEV matches.
+      #
+      # This stage runs BEFORE 3.1.2 and 3.1.3 to pre-populate the cve_id field
+      # by regex-extracting CVE IDs from item titles, descriptions, and source_urls.
+      # Idempotent: items that already have cve_id are never overwritten.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.1.1b - CVE ID Backfill (v184.0 — P1.3/P1.4/P1.5 root cause fix)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          python3 scripts/cve_id_backfill.py 2>&1 && \
+            echo "[PASS] CVE ID backfill complete — downstream CVSS/KEV/EPSS enrichment unlocked" || \
+            echo "::warning::CVE ID backfill failed — CVSS/KEV/EPSS enrichment may have reduced coverage"
+
+      # -----------------------------------------------------------------------
+      # STAGE 3.1.2: CVSS / EPSS BATCH ENRICHMENT (v185.0 -- PERMANENT P0 FIX)
+      # ROOT CAUSE FIX: api/feed.json had cvss_score: null on ALL 207 items
+      # because cve_scanner.py was never called in the pipeline. Intel reports
+      # therefore displayed "CVSS: Pending" and "EPSS: Pending" for every CVE.
+      #
+      # This step:
+      #   1. Identifies CVE items in api/feed.json with missing CVSS/EPSS
+      #   2. Batch-fetches EPSS from FIRST.org (single call, all CVEs)
+      #   3. Fetches CVSS v3.1 from NVD API v2.0 (per-CVE, rate-limited)
+      #   4. Writes enriched values back to api/feed.json (atomic swap)
+      #
+      # v185.0 PERMANENT TIMEOUT FIX:
+      #   - timeout-minutes raised 12→20 (NVD 503-storms with 89 CVEs took 14+min)
+      #   - WALL_CLOCK_BUDGET=1080 (18 min): script flushes PARTIAL enrichment
+      #     before step timeout kills the process — partial work is NEVER lost.
+      #   - NVD per-request timeout reduced 20s→8s: no more 20s per 503/timeout
+      #   - continue-on-error: true — NVD unavailability never fails the pipeline
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.1.2 - CVSS/EPSS Batch Enrichment (NVD + FIRST.org)"
+        timeout-minutes: 20
+        continue-on-error: true
+        env:
+          NVD_API_KEY:       ${{ secrets.NVD_API_KEY }}
+          MAX_ENRICH:        "100"
+          FEED_PATH:         "api/feed.json"
+          WALL_CLOCK_BUDGET: "1080"
+        run: python3 scripts/enrich_cvss_epss_batch.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 3.1.3: CISA KEV FEED MARKER (v184.0 — PERMANENT)
+      # Fetches the live CISA Known Exploited Vulnerabilities (KEV) catalog and
+      # marks all matching CVEs in api/feed.json with kev=true, kev_date,
+      # kev_product, severity=CRITICAL, risk_score≥9.0, confidence≥90.
+      # Runs AFTER CVSS/EPSS enrichment so KEV overrides take precedence.
+      # Non-blocking — KEV catalog unavailability is logged but does not fail CI.
+      # Writes report to data/health/kev_marker_r…51279 tokens truncated… Runs the permanent anti-regression test battery.
+      # Hard fail on regression detection.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.6 - Regression Test Suite"
+        # v184.2 (2026-09-21): runs even when an EARLIER step failed.
+        # STAGE 5.4.9.1 (Pages Freshness Gate) hard-fails on a GitHub Pages
+        # publish/CDN problem -- external infrastructure this repo does not
+        # control. Without this guard that failure SKIPPED this gate, which
+        # validates the repository and its data and has nothing to do with
+        # whether Pages published. Observed live in run #2324 (2026-09-21):
+        # one stuck Pages deploy silently disabled five HARD FAIL gates.
+        # Matches the guard STAGE 5.4.9 and STAGE 5.6.0 already carry.
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: python3 scripts/regression_tests.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.6.0: FEED SYNC GATE (v184.0 -- PERMANENT FIX P0)
+      # ROOT CAUSE FIX: Check 4 (Regression Immunity System) fails because
+      # api/feed.json (enriched by 15+ pipeline stages) and root feed.json
+      # drift apart — api gains items from APEX AI, CVSS, KEV, Quality
+      # Hardener, Actor Attribution stages that never sync back to feed.json.
+      # FIX: Sync api/feed.json -> feed.json right before the regression
+      # check so Check 4 is permanently satisfied on every pipeline run.
+      # api/feed.json is the single authoritative source of truth.
+      # PERMANENT: This stage must never be removed or made continue-on-error.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.6.0 - Feed Sync Gate (v184.0 -- PERMANENT FIX P0)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 2
+        run: |
+          python3 scripts/feed_sync_gate.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.6.1: REGRESSION IMMUNITY SYSTEM (v184.0 -- HARD FAIL GATE)
+      # 10-check final assertion battery:
+      #   1. Duplicate stix_id detection (feed + manifest)
+      #   2. Duplicate title detection
+      #   3. Encoding scan (mojibake patterns across all files)
+      #   4. API vs Dashboard top-50 stix_id match
+      #   5. Single render path (EMBEDDED_INTEL=[], render guards)
+      #   6. Sort order (published_at DESC in feed.json)
+      #   7. Python syntax (all scripts/*.py via py_compile)
+      #   8. Feed count bounds (1<=feed<=500, manifest>=100)
+      #   9. Version lock (config/version.json readable)
+      # Exit 0 = PASS. Exit 1 = FAIL -- BLOCKS DEPLOYMENT.
+      # Platform is ONLY deployable when all 10 invariants hold.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.6.1 - Regression Immunity System (HARD FAIL)"
+        # v184.2 (2026-09-21): runs even when an EARLIER step failed.
+        # STAGE 5.4.9.1 (Pages Freshness Gate) hard-fails on a GitHub Pages
+        # publish/CDN problem -- external infrastructure this repo does not
+        # control. Without this guard that failure SKIPPED this gate, which
+        # validates the repository and its data and has nothing to do with
+        # whether Pages published. Observed live in run #2324 (2026-09-21):
+        # one stuck Pages deploy silently disabled five HARD FAIL gates.
+        # Matches the guard STAGE 5.4.9 and STAGE 5.6.0 already carry.
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: python3 scripts/regression_immunity.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.6.2: STALE-FEED RECURRENCE GUARD (Phase 2 -- HARD FAIL)
+      # Root cause this guards against: p33_production_certification.py
+      # (PR #219) and 12 sibling certification/quality/validator scripts
+      # (Phase 2) were each independently found silently measuring the
+      # stale root feed.json / data/feed.json snapshot instead of the live
+      # api/feed.json, producing false certification verdicts. AST-based
+      # static scan -- fails the build if any production certification
+      # script reintroduces a direct Path()/open() dependency on the stale
+      # feed instead of resolving it via
+      # scripts/p38_shared_validators.get_certification_feed('live').
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.6.2 - Stale-Feed Recurrence Guard (HARD FAIL)"
+        # v184.2 (2026-09-21): runs even when an EARLIER step failed.
+        # STAGE 5.4.9.1 (Pages Freshness Gate) hard-fails on a GitHub Pages
+        # publish/CDN problem -- external infrastructure this repo does not
+        # control. Without this guard that failure SKIPPED this gate, which
+        # validates the repository and its data and has nothing to do with
+        # whether Pages published. Observed live in run #2324 (2026-09-21):
+        # one stuck Pages deploy silently disabled five HARD FAIL gates.
+        # Matches the guard STAGE 5.4.9 and STAGE 5.6.0 already carry.
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        run: python3 scripts/certification_feed_guard.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.7-PRE: HTML ENCODING AUTO-FIX (v184.0 -- HARD FAIL)
+      # Runs fix_all_html_encoding.py BEFORE the integrity gate so that any
+      # mojibake, BOM, or double-encoded sequences are eliminated before
+      # validate_monetization.py runs.  Idempotent -- safe to run every deploy.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.7-PRE - HTML Encoding Auto-Fix (pre-flight)"
+        if: always()  # v184.0: must run even when upstream stages fail/cancel
+        timeout-minutes: 5
+        run: python3 scripts/fix_all_html_encoding.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.7: MONETIZATION INTEGRITY GATE (v184.0 -- HARD FAIL)
+      # Validates all payment pages, real credentials, CTAs, encoding.
+      # Blocks deploy if: BOM present, junk chars, wrong/placeholder UPI IDs,
+      # wrong crypto wallet, missing NEFT details, broken payment links,
+      # mojibake in ANY HTML file (18-file sweep).
+      # Ensures 100% payment + encoding integrity on every deploy.
+      # v184.0: if:always() -- MONETIZATION GATE MUST NEVER BE SKIPPED.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.7 - Monetization Integrity Gate (HARD FAIL)"
+        if: always()  # v184.0: monetization integrity must run on EVERY pipeline execution
+        timeout-minutes: 5
+        run: python3 scripts/validate_monetization.py
+
+      # -----------------------------------------------------------------------
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.7.1 - MANIFEST INTEGRITY GATE (Phase 1B — NON-BLOCKING)
+      # Validates feed manifest freshness, stale reuse, advisory uniqueness,
+      # and field-level mutation. Writes signed proof to data/health/.
+      # Non-blocking: manifest integrity failure is observable but never gates deploy.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.7.1 - Manifest Integrity Gate (Phase 1B)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          python3 scripts/manifest_integrity_system.py --check 2>&1 | tail -20 || true
+          echo "STAGE 5.7.1: Manifest integrity gate complete"
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.7.2 - RUNTIME STABILITY ENGINE (Phase 1B — NON-BLOCKING)
+      # Validates STIX count, output existence proof, orchestration integrity,
+      # and latency anomaly. Writes signed stability report to data/health/.
+      # Non-blocking: stability degradation is observable but never gates deploy.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.7.2 - Runtime Stability Engine (Phase 1B)"
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          python3 scripts/runtime_stability_engine.py --check 2>&1 | tail -20 || true
+          echo "STAGE 5.7.2: Runtime stability check complete"
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.8 - INTELLIGENCE QUALITY GATE (v184.0 ENTERPRISE)
+      # v184.0 FIND-007: Removed || true mask. Hard-fail below --min-items 5.
+      # Feed volume naturally varies; threshold of 5 allows sparse ingestion days
+      # while catching true pipeline failures. Phase 8 assert must be observable.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.8 - Intelligence Quality Gate"
+        # v184.2 (2026-09-21): runs even when a LATER-stage failure would
+        # otherwise skip it -- see the four gates above. Observed live in
+        # run #2324: one stuck GitHub Pages deploy (STAGE 5.4.9.1, external
+        # infrastructure) silently disabled five HARD FAIL gates.
+        #
+        # Unlike those four, this one is NOT guarded with a bare
+        # !cancelled(): intel_quality_engine.py hard-exits with "manifest
+        # not found" when data/stix/feed_manifest.json is absent (verified
+        # by running it against a checkout without it). That file is
+        # R2-authoritative and restored early in the job, so it exists
+        # whenever Stage 1-3 succeeded -- but on an EARLY failure it may not,
+        # and a bare !cancelled() would then add a second, misleading
+        # failure to an already-red run. Conditioning on Stage 1-3 success
+        # gives the Pages-failure coverage without inventing that new
+        # failure mode. Reuses the exact guard form already used twice in
+        # this workflow for the same "only if the pipeline produced data"
+        # requirement.
+        if: ${{ always() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' }}
+        timeout-minutes: 5
+        run: python3 scripts/intel_quality_engine.py --report --min-items 5
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.8.05 - ENTERPRISE MONETIZATION FRAMEWORK (v184.0 -- NON-BLOCKING)
+      # Produces product catalog, SOC readiness score, MSSP packages, ROI report,
+      # and sellability health check. Outputs to data/monetization/*.json.
+      # These files are consumed by sales deck generation and API endpoints.
+      # Non-blocking: exit 1 logs warning but does not abort deployment.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.8.05 - Enterprise Monetization Framework (v184.0)"
+        timeout-minutes: 3
+        run: |
+          set +e
+          python3 scripts/enterprise_monetization_framework.py --all
+          MON_EXIT=$?
+          set -e
+          if [ "$MON_EXIT" -eq 0 ]; then
+            echo "[PASS] Monetization Framework: catalog + SOC readiness + ROI generated"
+            [ -f "data/monetization/soc_readiness.json" ] && \
+              echo "[INFO] SOC score: $(jq -r '"\(.score)/100 (\(.tier))"' data/monetization/soc_readiness.json 2>/dev/null || echo '?')"
+            [ -f "data/monetization/sellability_score.json" ] && \
+              echo "[INFO] Sellability: $(jq -r '"\(.sellability_score)/100 (\(.sellability_tier))"' data/monetization/sellability_score.json 2>/dev/null || echo '?')"
+          else
+            echo "::warning::Enterprise Monetization Framework failed (exit $MON_EXIT) -- non-blocking"
+          fi
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.8.1 - DEPLOYMENT CANARY VALIDATION (v184.0 ENTERPRISE)
+      # Post-deploy smoke test: 5 canary endpoints validated.
+      # Non-blocking.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.8.1 - Deployment Canary Validation"
+        timeout-minutes: 5
+        run: python3 scripts/deployment_canary.py || true
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.8.1b - REPORT URL CANARY (v184.0 CDN-HARDENED — RETAINED)
+      # Retained as a lightweight pre-convergence spot check.
+      # Non-blocking in v184.0 — full convergence governance is in STAGE 5.8.1c.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.8.1b - Report URL Canary (v184.0 — Pre-Convergence Spot Check)"
+        timeout-minutes: 10
+        env:
+          CANARY_WAIT_SECS: "60"
+          CANARY_RETRY_COUNT: "2"
+          CANARY_RETRY_WAIT: "30"
+        run: |
+          set -e
+          # v174 P0-2 (BLOCKING): fail-closed pre-deploy existence + body gate.
+          # Every report_url in the CURRENT feed must resolve to a valid on-disk
+          # artifact (blocks publish-before-persist and soft-404 stubs).
+          python3 scripts/report_url_canary.py --local
+          # Non-blocking live spot-check of the deployed site (CDN-propagation tolerant).
+          python3 scripts/report_url_canary.py --live || true
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.8.1c - DEPLOYMENT CONVERGENCE ENGINE (v184.0 ENTERPRISE GRADE)
+      # ═══════════════════════════════════════════════════════════════════════
+      # ROOT CAUSE: GitHub Pages + CDN + custom domain propagation requires
+      # 2-10 minutes after gh-pages push. Previous canary executed at ~120s,
+      # causing systematic false-positive P0 failures when CDN was still in
+      # partial propagation state.
+      #
+      # THIS STAGE IMPLEMENTS:
+      #   Phase 1 — Pages push detection + initial CDN stabilization window (90s)
+      #   Phase 2 — Active CDN readiness probing w/ exponential backoff + jitter
+      #   Phase 3 — Incremental per-URL retry w/ transient/permanent discrimination
+      #   Phase 4 — 3x consecutive clean-pass convergence confirmation (30s gap)
+      #   Phase 5 — Historical report continuity audit
+      #
+      # TIMING (worst-case):
+      #   Phase 1 stabilization   :  0s when reachable (90s only if not; 2026-09-26)
+      #   Phase 2 CDN readiness   : up to 8 retries × backoff(30-180s) ≈ 10 min
+      #   Phase 3 URL validation  : up to 8 retries × backoff            ≈ 10 min
+      #   Phase 4 confirmation    : 3 back-to-back passes (30s pause only after a failed pass)
+      #   Phase 5 historical audit:  ~30s
+      #   Total worst-case        : ~25 minutes (timeout-minutes: 30)  [actual: ~2m36s in prod]
+      #
+      # EXIT CODES:
+      #   0 = DEPLOYMENT_STABLE  (confidence ≥ 80) → pipeline continues
+      #   1 = DEPLOYMENT_FAILED  (confidence < 60) → hard fail
+      #   2 = DEPLOYMENT_DEGRADED (60-79)          → warning, not fail
+      #
+      # CONVERGENCE SIGNALS WEIGHTED:
+      #   CDN readiness           → 20 pts
+      #   Report URL validation   → 35 pts
+      #   Convergence confirmation→ 30 pts
+      #   Historical continuity   → 10 pts
+      #   Data availability       →  5 pts
+      #
+      # Outputs: deployment_confidence_score.json
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.8.1c - Deployment Convergence Engine (v184.0 Enterprise Grade)"
+        timeout-minutes: 30
+        if: always()  # v184.0 FIX: Run even when Stage 1-3 fails so deployment_confidence_score.json is always written and Domain 4 governance WARN is eliminated
+        env:
+          PAGES_BASE_URL: "https://intel.cyberdudebivash.com"
+          CONVERGENCE_PHASE1_WAIT: "90"
+          CONVERGENCE_PHASE2_WAIT: "45"
+          CONVERGENCE_MAX_RETRIES: "8"
+          CONVERGENCE_BACKOFF_BASE: "30"
+          CONVERGENCE_BACKOFF_MAX: "180"
+          CONVERGENCE_JITTER_MAX: "15"
+          CONVERGENCE_CONFIRM_RUNS: "3"
+          CONVERGENCE_TIMEOUT: "20"
+          CONVERGENCE_CONFIDENCE_THRESHOLD: "80"
+          CONVERGENCE_FAIL_THRESHOLD: "60"
+          MAX_REPORT_PROBES: "15"
+          HISTORICAL_PROBE_COUNT: "5"
+        run: |
+          set +e
+          # v184.0 FIX: 28-min hard deadline — prevents GitHub Actions from killing
+          # the process at the 30-min step timeout (unhandled exit → hard fail).
+          # GNU timeout exit 124 = unverified convergence; fail closed.
+          # Genuine DEPLOYMENT_FAILED (exit 1 within budget) still hard-fails.
+          timeout 1680 python3 scripts/deployment_convergence_validator.py
+          CONVERGENCE_EXIT=$?
+          if [ "$CONVERGENCE_EXIT" -eq "124" ]; then
+            echo "::warning::CONVERGENCE_TIMEOUT — CDN probe ran 28min without STABLE. Convergence unverified; blocking release acceptance."
+            CONVERGENCE_EXIT=1
+          fi
+          echo "CONVERGENCE_EXIT_CODE=${CONVERGENCE_EXIT}" >> $GITHUB_ENV
+
+          # Surface confidence score in GitHub step summary
+          if [ -f deployment_confidence_score.json ]; then
+            python3 -c "
+          import json, pathlib
+          d = json.loads(pathlib.Path('deployment_confidence_score.json').read_text())
+          score = d.get('confidence_score', 0)
+          cls   = d.get('classification', 'UNKNOWN')
+          conv  = d.get('convergence_achieved', False)
+          print(f'[CONVERGENCE] Score={score}/100 | Class={cls} | Converged={conv}')
+          for sig, info in d.get('signals', {}).items():
+              print(f'  Signal [{sig}]: {info.get(\"status\",\"?\")} ({info.get(\"score\",0)} pts) — {str(info.get(\"message\",\"\"))[:80]}')
+          " 2>/dev/null || true
+          fi
+
+          # DEGRADED (exit 2) = warn but do not fail pipeline
+          if [ "$CONVERGENCE_EXIT" -eq "2" ]; then
+            echo "::warning::DEPLOYMENT_DEGRADED — convergence score below STABLE threshold. Investigate deployment_confidence_score.json."
+            exit 0
+          fi
+          exit $CONVERGENCE_EXIT
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.8.2 - ENTERPRISE GOVERNANCE ENGINE (v184.0 -- NON-BLOCKING)
+      # Phases 1+2: Duplicate suppression + Confidence inflation governance.
+      # Writes data/governance/governance_report.json.
+      # Non-blocking: || true ensures pipeline never hard-fails here.
+      # HARD violations are surfaced as annotations; tracked asynchronously
+      # by the enterprise-governance.yml dedicated governance workflow.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.8.2 - Enterprise Governance Engine (Phases 1+2)"
+        timeout-minutes: 4
+        if: always()
+        run: |
+          mkdir -p data/governance
+          python3 scripts/enterprise_governance_engine.py 2>&1 | tail -30 || true
+          if [ -f data/governance/governance_report.json ]; then
+            python3 -c "
+          import json, pathlib
+          r = json.loads(pathlib.Path('data/governance/governance_report.json').read_text())
+          g = r.get('governance_grade','?')
+          d = len(r.get('duplicate_violations',[]))
+          i = len(r.get('inflation_violations',[]))
+          p = r.get('overall_pass', False)
+          print(f'[GOVERNANCE] Grade={g} Duplicates={d} Inflation={i} Pass={p}')
+          " 2>/dev/null || true
+          fi
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.8.3 - FEED CONTRACT VALIDATOR (v184.0 -- NON-BLOCKING)
+      # Phase 3: Validates Worker/API response envelope against registered
+      # contracts. Prevents canary false-negatives from schema drift.
+      # Static analysis only (no live network hits in main pipeline).
+      # Writes data/governance/contract_report.json.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.8.3 - Feed Contract Validator (Phase 3)"
+        timeout-minutes: 3
+        if: always()
+        run: |
+          mkdir -p data/governance
+          python3 scripts/feed_contract_validator.py \
+            --repo-root . \
+            --report data/governance/contract_report.json 2>&1 | tail -20 || true
+          if [ -f data/governance/contract_report.json ]; then
+            python3 -c "
+          import json, pathlib
+          r = json.loads(pathlib.Path('data/governance/contract_report.json').read_text())
+          ok = r.get('overall_pass', False)
+          passed = r.get('checks_passed', 0)
+          failed = r.get('checks_failed', 0)
+          summary = r.get('summary','')
+          print(f'[CONTRACT] Pass={ok} Passed={passed} Failed={failed}')
+          print(f'[CONTRACT] {summary}')
+          " 2>/dev/null || true
+          fi
+
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.8.3b - DIST ARTIFACT BUILDER + API MANIFEST PREP (v184.0)
+      # ROOT CAUSE FIX for recurring STAGE 5.8.4 RELEASE_BLOCKED HARD_FAILs:
+      #   HARD_FAIL #1: dist/ directory never exists → check_artifact_sync fires
+      #   HARD_FAIL #2: api/latest.json missing → actual file is at api/v1/intel/latest.json
+      # This stage resolves both before the governance engine runs:
+      #   1. Creates dist/ with copies of the 4 DIST_REQUIRED artifacts from repo root
+      #   2. Creates api/latest.json from api/v1/intel/latest.json if missing
+      # Non-blocking: errors here are logged but never block the pipeline.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.8.3b - Dist Artifact Builder + API Manifest Prep (v184.0)"
+        timeout-minutes: 3
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "=== STAGE 5.8.3b: Dist Artifact Builder + API Manifest Prep ==="
+
+          # ── Fix #1: Build dist/ artifact ──────────────────────────────────
+          # v184.0 P0-FIX: Guard against overwriting a full dist/ artifact that
+          # Stage 5.4.6 already built with reports. If reports are present, only
+          # copy the 4 root files (update-in-place). Never wipe existing reports.
+          EXISTING_REPORTS=$(find dist/reports -name "*.html" 2>/dev/null | wc -l || echo 0)
+          echo "[DIST-BUILDER] Existing reports in dist/: ${EXISTING_REPORTS}"
+
+          if [ "${EXISTING_REPORTS}" -gt "0" ]; then
+            echo "[DIST-BUILDER] Stage 5.4.6 already built dist/ with ${EXISTING_REPORTS} reports — updating root files only (not wiping)"
+          else
+            echo "[DIST-BUILDER] No reports found in dist/ — creating dist/ artifact from repo root..."
+          fi
+          mkdir -p dist
+
+          DIST_OK=true
+          for f in index.html service-worker.js version.json PAYMENT-GATEWAY.html; do
+            if [ -f "$f" ]; then
+              cp -f "$f" dist/
+              echo "[DIST-BUILDER] Copied $f → dist/$f ($(wc -c < "$f") bytes)"
+            else
+              echo "[DIST-BUILDER] WARN: $f not found in repo root — skipping"
+              DIST_OK=false
+            fi
+          done
+          # index.html loads these by ?v=<content hash> (scripts/homepage_source.py);
+          # refresh them together with index.html so dist/ never pairs a new
+          # index.html with an older engine or stylesheet.
+          for f in js/homepage-dashboard-engine.js css/homepage-design-system.css; do
+            if [ -f "$f" ]; then
+              mkdir -p "dist/$(dirname "$f")"
+              cp -f "$f" "dist/$f"
+              echo "[DIST-BUILDER] Copied $f → dist/$f ($(wc -c < "$f") bytes)"
+            else
+              echo "[DIST-BUILDER] WARN: $f not found — homepage would load without it"
+              DIST_OK=false
+            fi
+          done
+
+          if [ "$DIST_OK" = "true" ]; then
+            echo "[DIST-BUILDER] dist/ root files synced — $(ls dist/ 2>/dev/null | wc -l) total files/dirs present"
+          else
+            echo "[DIST-BUILDER] dist/ artifact partial — some files missing from root"
+          fi
+          ls -la dist/ 2>/dev/null || echo "[DIST-BUILDER] dist/ listing failed"
+
+          # ── Fix #2: Ensure api/latest.json exists and is populated ──────────
+          echo ""
+          echo "[API-PREP] Checking api/latest.json..."
+          if [ -f "api/latest.json" ]; then
+            ITEMS=$(jq 'if type=="array" then length else (.items // [] | length) end' api/latest.json 2>/dev/null || echo "?")
+            echo "[API-PREP] api/latest.json exists — $ITEMS items"
+            # RC-3 FIX v184.0: file-existence check is insufficient — a 0-item stub
+            # satisfies the -f guard but leaves api/latest.json empty on Pages deploy.
+            # If item count is 0 or unparseable, overwrite from the authoritative v1 endpoint.
+            if [ "$ITEMS" = "0" ] || [ "$ITEMS" = "?" ]; then
+              echo "[API-PREP] api/latest.json is empty or invalid — overwriting from primary source"
+              if [ -f "api/v1/intel/latest.json" ]; then
+                cp -f api/v1/intel/latest.json api/latest.json
+                ITEMS=$(jq 'if type=="array" then length else (.items // [] | length) end' api/latest.json 2>/dev/null || echo "?")
+                echo "[API-PREP] api/latest.json replaced from api/v1/intel/latest.json ($ITEMS items)"
+              elif [ -f "api/feed.json" ]; then
+                python3 -c "
+          import json, pathlib
+          feed = json.loads(pathlib.Path('api/feed.json').read_text())
+          items = feed if isinstance(feed, list) else feed.get('items', [])
+          latest = sorted(items, key=lambda x: x.get('timestamp', x.get('published_at', '')), reverse=True)[:10]
+          pathlib.Path('api/latest.json').write_text(json.dumps(latest, indent=2))
+          print(f'[API-PREP] api/latest.json replaced from feed.json top-10 ({len(latest)} items)')
+          " 2>/dev/null || echo "[API-PREP] WARN: fallback generation from feed.json failed"
+              else
+                echo "[API-PREP] WARN: api/latest.json is empty and no source available to populate it"
+              fi
+            fi
+          else
+            echo "[API-PREP] api/latest.json missing — searching for source..."
+            # Try v1 intel endpoint first (primary source)
+            if [ -f "api/v1/intel/latest.json" ]; then
+              cp -f api/v1/intel/latest.json api/latest.json
+              ITEMS=$(jq 'if type=="array" then length else (.items // [] | length) end' api/latest.json 2>/dev/null || echo "?")
+              echo "[API-PREP] api/latest.json created from api/v1/intel/latest.json ($ITEMS items)"
+            elif [ -f "api/feed.json" ]; then
+              # Fallback: slice top 10 from feed.json as latest
+              python3 -c "
+          import json, pathlib
+          feed = json.loads(pathlib.Path('api/feed.json').read_text())
+          items = feed if isinstance(feed, list) else feed.get('items', [])
+          latest = sorted(items, key=lambda x: x.get('timestamp', x.get('published_at', '')), reverse=True)[:10]
+          pathlib.Path('api/latest.json').write_text(json.dumps(latest, indent=2))
+          print(f'[API-PREP] api/latest.json created from feed.json top-10 ({len(latest)} items)')
+          " 2>/dev/null || echo "[API-PREP] fallback generation failed"
+            else
+              echo "[API-PREP] WARN: no source found for api/latest.json — creating empty stub"
+              echo "[]" > api/latest.json
+            fi
+          fi
+
+          echo ""
+          echo "=== STAGE 5.8.3b COMPLETE ==="
+          echo "[STATUS] dist/ contents: $(ls dist/ 2>/dev/null | wc -l) files"
+          echo "[STATUS] api/latest.json: $([ -f api/latest.json ] && echo 'EXISTS' || echo 'MISSING')"
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.8.4 - GLOBAL RELEASE ORCHESTRATION ENGINE (v184.0 -- NON-BLOCKING)
+      # Runs the 8-domain governance gate suite:
+      #   1. Release Identity Governance   — SSOT version sync
+      #   2. Release Manifest Validation   — all critical files present
+      #   3. Artifact Synchronization      — dist/ integrity (STAGE 5.8.3b ensures dist/ exists)
+      #   4. Deployment Convergence        — confidence score assessment
+      #   5. Rollback Governance           — git history + lock state
+      #   6. Concurrency Governance        — serial deploy verification
+      #   7. Cache Propagation             — service-worker version alignment
+      #   8. Synchronization Validation    — frontend/API/manifest consistency
+      # Writes: data/telemetry/global_release_governance.json
+      # STAGE 5.8.3b now guarantees dist/ and api/latest.json exist before this runs.
+      - name: "STAGE 5.8.4 - Global Release Orchestration Engine (v184.0)"
+        timeout-minutes: 5
+        if: always()
+        env:
+          CI: "true"
+        run: |
+          python3 scripts/global_release_orchestrator.py
+        continue-on-error: true
+
+      # -----------------------------------------------------------------------
+
+      # P0 production-architecture-transformation mission (2026-09-08): this
+      # step used to `git add`/`git commit`/`git push origin HEAD` directly
+      # inline in this YAML -- a SECOND, independent runtime-git-persistence
+      # site that bypassed safe_git_commit.py's guards entirely and hit the
+      # exact same main branch ruleset rejection (GH013) as every other
+      # runtime push has since 2026-08-26, silently (all three git commands
+      # above were `|| true`, so this step showed green while never actually
+      # persisting anything). global_release_governance.json is genuinely
+      # two things at once: the CURRENT run's grade (Class A -- latest
+      # operational state, read by nothing else in this repo today but
+      # legitimately "current state" in shape) and, per run, real historical
+      # evidence of what grade THIS release run received (Class D -- audit
+      # evidence, previously overwritten and lost every run). Now persists
+      # both correctly instead of neither.
+      - name: "STAGE 5.8.4b - Governance Telemetry Persistence (v184.0)"
+        timeout-minutes: 3
+        if: always()
+        continue-on-error: true
+        run: |
+          GOVERNANCE_FILE="data/telemetry/global_release_governance.json"
+          if [ -f "$GOVERNANCE_FILE" ]; then
+            GRADE=$(jq -r '.overall_grade // "?"' "$GOVERNANCE_FILE" 2>/dev/null || echo "?")
+            BLOCKED=$(jq -r '.release_blocked // "false"' "$GOVERNANCE_FILE" 2>/dev/null || echo "false")
+            echo "[GOVERNANCE] Grade=$GRADE | RELEASE_BLOCKED=$BLOCKED"
+            python3 scripts/r2_upload.py --governance-telemetry-only \
+              || echo "::warning::STAGE 5.8.4b: latest-state R2 publish failed for $GOVERNANCE_FILE -- see error above."
+            python3 scripts/audit_snapshot_store.py --family global_release_governance \
+              --source "$GOVERNANCE_FILE" --run-id "$GITHUB_RUN_ID" --source-sha "$GITHUB_SHA" \
+              || echo "::warning::STAGE 5.8.4b: versioned Class-D audit snapshot failed for $GOVERNANCE_FILE -- see error above."
+            echo "[GOVERNANCE] Telemetry persisted to R2 (latest-state + versioned audit snapshot)"
+          else
+            echo "[GOVERNANCE] $GOVERNANCE_FILE not found -- orchestrator may have skipped"
+          fi
+
+      # STAGE 5.8.5 - ENTERPRISE INTELLIGENCE ENGINE INTEGRATION AUDIT (v1.0)
+      # Verifies all 7 enterprise intelligence engines are importable and
+      # runs the EII self-test + manifest quality gate audit.
+      # Non-blocking: intelligence failures are logged, not pipeline-blocking.
+      # The per-report quality gate runs inline via STEP 7g in process_entry().
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.8.5 - Enterprise Intelligence Integration Audit (v1.0)"
+        timeout-minutes: 5
+        if: always()
+        run: |
+          echo "=== STAGE 5.8.5: Enterprise Intelligence Engine Integration Audit ==="
+          cd $GITHUB_WORKSPACE
+
+          # Step 1: Verify all 7 engines are importable
+          python3 -c "
+          import sys, os
+          sys.path.insert(0, 'scripts')
+          engines = [
+              'anti_hallucination_engine',
+              'apex_risk_scoring_engine',
+              'apex_confidence_engine',
+              'apex_ioc_intelligence_pipeline',
+              'apex_mitre_attack_engine',
+              'apex_narrative_engine',
+              'apex_intelligence_quality_gates',
+              'enterprise_intelligence_integrator',
+          ]
+          passed = 0
+          failed = 0
+          for eng in engines:
+              try:
+                  __import__(eng)
+                  print(f'  [OK] {eng}')
+                  passed += 1
+              except Exception as e:
+                  print(f'  [FAIL] {eng}: {e}')
+                  failed += 1
+          print(f'Engine audit: {passed} importable / {failed} failed')
+          if failed > 0:
+              print('WARNING: Some engines failed import — check scripts/ directory')
+          sys.exit(0)  # Non-blocking
+          " 2>&1 || true
+
+          # Step 2: Run EII self-test (synthetic item through all 7 engines)
+          python3 scripts/enterprise_intelligence_integrator.py --test 2>&1 | head -40 || true
+
+          # Step 3: Run quality gate audit against live manifest (advisory only)
+          python3 -c "
+          import sys, os, json
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          # v184.0 FIX: Use the ENRICHED feed manifest (data/feed_manifest.json) not
+          # the raw STIX bundle manifest (data/stix/feed_manifest.json). The STIX
+          # manifest contains raw indicator-- objects without enrichment fields
+          # (executive_summary, apex_risk, confidence_rationale, ttps, etc.), causing
+          # the quality gate to block 100% of entries. The enriched manifest has all
+          # EII fields and gives a meaningful publishability signal.
+          manifest_path = Path('data/feed_manifest.json')
+          if not manifest_path.exists():
+              # Fallback to STIX manifest only if enriched feed is absent
+              manifest_path = Path('data/stix/feed_manifest.json')
+          if not manifest_path.exists():
+              print('Manifest not found — skipping quality gate audit')
+              sys.exit(0)
+          print(f'Quality gate source: {manifest_path}')
+          try:
+              from apex_intelligence_quality_gates import QualityGateSystem
+              with open(manifest_path, encoding='utf-8') as f:
+                  data = json.load(f)
+              items = data if isinstance(data, list) else data.get('advisories', data.get('entries', []))
+              if not items:
+                  print('No entries in manifest — skipping')
+                  sys.exit(0)
+              # Filter out raw STIX indicator objects (no enrichment fields — would always fail)
+              enriched = [e for e in items if isinstance(e, dict) and (
+                  e.get('title') or e.get('executive_summary') or e.get('apex_risk')
+              )]
+              if not enriched:
+                  print(f'No enriched entries found in {manifest_path} — skipping quality gate')
+                  sys.exit(0)
+              # Audit last 10 enriched entries (performance)
+              sample = enriched[-10:]
+              qgs = QualityGateSystem()
+              batch = qgs.evaluate_batch(sample)
+              print(f'Quality gate audit: {len(sample)} entries sampled')
+              print(f'  Publishable: {batch[\"publishable\"]} / {batch[\"total\"]}')
+              print(f'  Blocked:     {batch[\"blocked\"]}')
+              if batch.get('blocked_ids'):
+                  print(f'  Blocked IDs: {batch[\"blocked_ids\"]}')
+              # Write audit telemetry
+              out_path = Path('data/telemetry/intelligence_quality_audit.json')
+              out_path.parent.mkdir(parents=True, exist_ok=True)
+              out_path.write_text(json.dumps(batch, indent=2, default=str), encoding='utf-8')
+              print(f'  Telemetry written: {out_path}')
+          except Exception as e:
+              print(f'Quality gate audit failed (non-critical): {e}')
+          sys.exit(0)  # Always non-blocking
+          " 2>&1 || true
+
+          echo "=== STAGE 5.8.5 COMPLETE ==="
+        continue-on-error: true
+
+      # =====================================================================
+      # STAGE 5.9 — v184.0 ENTERPRISE TRANSFORMATION STAGES
+      # All stages: continue-on-error: true (non-blocking, zero regression)
+      # =====================================================================
+
+      - name: "Stage 5.9.1 - Manifest URL Repair (P1-004)"
+        continue-on-error: true
+        run: python3 scripts/manifest_url_repair.py
+
+      # -----------------------------------------------------------------------
+      # CodeRabbit review finding on this migration (verified and fixed):
+      # manifest_url_repair.py patches data/stix/feed_manifest.json (syncing
+      # report_url from api/feed.json) at TWO points in this pipeline --
+      # STAGE 5.4.9 above and this step's "Stage 5.9.1" right above -- and
+      # BOTH run after "Upload Intel State to R2 (final, post-enrichment)"
+      # (~line 2996). That upload's own STATE_FILES-timing test asserted 6
+      # writer scripts run before it but never checked this one -- a real
+      # gap, not just a missed comment: every run's report_url fix was being
+      # silently discarded, not merely delayed, since nothing re-uploaded
+      # this file again afterward. Same idempotent-late-resync pattern this
+      # file already uses for STAGE 4.1 (API manifests) -- r2_state_sync.py
+      # --upload is safe to call again; it just republishes current disk
+      # state under the same keys. if:always() + continue-on-error so this
+      # runs regardless of STAGE 5.9.2's hard-fail-capable gate right below.
+      # -----------------------------------------------------------------------
+      - name: "Upload Intel State to R2 (post-manifest-repair, final)"
+        timeout-minutes: 5
+        if: ${{ always() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: |
+          if ! python3 scripts/r2_state_sync.py --upload; then
+            echo "::warning::Upload Intel State to R2 (post-manifest-repair): publish failed -- manifest_url_repair.py's report_url fixes from this run may not have persisted. See error annotation above for file-level detail."
+          fi
+
+      # =====================================================================
+      # STAGE 5.9.2 - PRODUCTION RELEASE GATES (v184.0 - HARD FAIL)
+      # RC-GATE-1 FIX v184.0: Extracted to scripts/production_release_gates.py
+      # (inline heredoc was banned by validate_repo.py workflow_clean check).
+      # ANY failure = deployment BLOCKED. No continue-on-error.
+      # =====================================================================
+      - name: "STAGE 5.9.2 - Production Release Gates (v184.0 HARD FAIL)"
+        run: python3 scripts/production_release_gates.py
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.3 — PIPELINE HEALTH TERMINAL GATE (v184.0 HARD FAIL)
+      # Fails the CI job if Stage 1-3 produced no new intel (DEGRADED).
+      # Runs AFTER gh-pages deploy so existing content continues to serve.
+      # A red CI run ensures PagerDuty/alerting fires; operators investigate.
+      # Root-cause fix: previously DEGRADED runs showed green CI, masking
+      # complete intel generation failures for up to 4-hour pipeline cycles.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.3 - Pipeline Health Terminal Gate (v184.0)"
+        if: always()
+        run: |
+          if [ "${PIPELINE_HEALTH}" = "DEGRADED" ]; then
+            echo "::error::PIPELINE HEALTH TERMINAL GATE FAILED — Stage 1-3 did not generate new intel this run."
+            echo "::error::Action required: check Stage 1-3 logs for root cause. Existing committed content was deployed."
+            exit 1
+          else
+            echo "[PASS] Pipeline health terminal gate: PIPELINE_HEALTH=${PIPELINE_HEALTH:-HEALTHY}"
+          fi
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.4 - PROJECT TITAN ARCHITECTURE GOVERNANCE CHECK (advisory)
+      # Added Project TITAN Stage 6, Task 6. CLAUDE.md's CI STAGE NUMBERING table
+      # names "STAGE 3.99" as next-available for future layers; that table itself
+      # predates STAGE 4.00-4.04/4.1/5.8.5/5.9-5.9.3 and is stale (see
+      # TITAN_TECH_DEBT_REGISTER.md DEBT-011) — this step uses the real next slot
+      # after the true last stage instead of the documented-but-wrong one.
+      # Checks docs/adr/0007-0011 and TITAN_OWNERSHIP_MATRIX.md against the live
+      # tree for broken references and un-reviewed new confidence/evidence/
+      # reliability-shaped functions. Non-blocking (continue-on-error + explicit
+      # exit 0) until proven stable across a few real drift cycles, matching the
+      # STAGE 4.04 schema-mirror-drift-check rollout precedent. `if: always()` so
+      # it still reports when STAGE 5.9.2's hard gate has already failed the job.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.4 - Project TITAN Architecture Governance Check (advisory)"
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          python3 scripts/titan_architecture_governance_check.py || true
+          exit 0
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.5 - P40.0 Global Intelligence Source Fabric Certification
+      # Chains from P38 (P39 is deliberately internal-only, no cert report to
+      # chain from — see workers/intel-gateway/src/p39-handlers.js header).
+      # Refreshes source_fabric_health.json against the current manifest/
+      # feed_state (this pipeline run's real freshness signal), then runs the
+      # 22-gate certification. data/registry/source_registry.json itself is a
+      # maintained, checked-in artifact (regenerated manually via
+      # scripts/build_source_registry.py when sources are added/changed, not
+      # every pipeline run — its generated_at timestamp would otherwise churn
+      # every run for zero data change). Non-blocking (continue-on-error:
+      # true) — CI helper only, matching every other P-layer cert stage.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.5 - P40.0 Global Intelligence Source Fabric Certification"
+        if: always()
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          python3 scripts/source_fabric_health.py || true
+          python3 scripts/p40_production_certification.py
+          if [ -f "data/quality/p40_certification_report.json" ]; then
+            read -r TIER BLOCKERS WARNINGS PASSED TOTAL SOURCES <<< "$(python3 scripts/ci_stats_extract.py p40 2>/dev/null || echo 'UNKNOWN 0 0 0 0 0')"
+            echo "P40 Source Fabric: tier=${TIER} passed=${PASSED}/${TOTAL} blockers=${BLOCKERS} warnings=${WARNINGS} sources=${SOURCES}"
+            if [ "${BLOCKERS}" = "0" ]; then
+              echo "::notice::P40.0 WORLDWIDE_RELEASE — ${PASSED}/${TOTAL} gates passed. ${SOURCES} sources registered."
+            else
+              echo "::warning::P40.0 BLOCKED — ${BLOCKERS} blocker(s). Gates: ${PASSED}/${TOTAL}. See data/quality/p40_certification_report.json."
+            fi
+          fi
+          exit 0
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.6 - P40.0 Late R2 Sync (closes the cert/health staleness gap)
+      # ROOT CAUSE: STAGE 3.5 (r2_upload.py, full run) uploads the P40 registry/
+      # health/certification artifacts EARLY in this pipeline, before STAGE 5.9.5
+      # above regenerates source_fabric_health.json and p40_certification_report.json
+      # fresh for THIS run. STAGE 4.1's later "final R2 sync" (r2_resync_manifests.py)
+      # never touches the P40 R2 keys either. Net effect: /api/v1/p40/certification
+      # and /api/v1/p40/source-health served data that was permanently one full
+      # pipeline cycle (~8h, this workflow's cron cadence) behind what was already
+      # generated and committed. This step re-uploads just the 3 P40 artifacts
+      # (r2_upload.py --p40-only, see its docstring) now that they're fresh.
+      # Non-blocking, matching STAGE 5.9.5 -- P40 R2 sync failure must never fail
+      # the pipeline (existing R2 data remains valid; next run retries).
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.6 - P40.0 Late R2 Sync"
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        run: python3 scripts/r2_upload.py --p40-only || true
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.7 - Capability Coverage Audit (observability only)
+      # Static grep-based check (scripts/capability_coverage_audit.py) for
+      # backend /api/v1/pXX/* routes with no frontend file referencing them
+      # anywhere in the repo -- the generalized version of the manual audit
+      # that found P34/P36/P37/P38 fully unwired. Writes
+      # data/quality/capability_coverage_report.json every run so drift is
+      # visible without waiting for another manual sweep. Pure text
+      # analysis, no network calls, no dependency on this run's ingested
+      # data -- cannot itself go stale or time out on a slow external call.
+      # Explicitly non-blocking (continue-on-error + its own script always
+      # exits 0 + || true here as a third layer): this is a candidate list
+      # for human triage, not an automatic verdict (many backend-only
+      # routes are correctly API-only/internal/admin-only by design -- see
+      # the script's own header), and per this same pipeline's STAGE 3.6a
+      # incident earlier the same day, a new check that can fail the job
+      # over something it was never meant to gate is worse than the drift
+      # it would catch.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.7 - Capability Coverage Audit (observability only)"
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        run: python3 scripts/capability_coverage_audit.py || true
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.8 - P41.0 Live Capability Discovery Certification
+      # Chains from P40 (matching the "chain from the latest fully-live
+      # numbered layer" precedent P40 itself set chaining from P38). Verifies
+      # the #340 capability registry is still fully classified, the P41
+      # worker handler + index.js wiring are intact, the security boundary
+      # (ADMIN/INTERNAL exclusion, no `notes` leakage) has not regressed, and
+      # the frontend consumer (js/capability-discovery.js +
+      # capability-directory.html) still exists and avoids innerHTML DOM
+      # construction. Non-blocking (continue-on-error: true) -- CI helper
+      # only, matching every other P-layer cert stage (STAGE 5.9.5/5.9.7).
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.8 - P41.0 Live Capability Discovery Certification"
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          python3 scripts/p41_production_certification.py
+          if [ -f "data/quality/p41_certification_report.json" ]; then
+            read -r TIER BLOCKERS WARNINGS PASSED TOTAL CUSTOMER_UI_COUNT <<< "$(python3 scripts/ci_stats_extract.py p41 2>/dev/null || echo 'UNKNOWN 0 0 0 0 0')"
+            echo "P41 Capability Discovery: tier=${TIER} passed=${PASSED}/${TOTAL} blockers=${BLOCKERS} warnings=${WARNINGS} public_capabilities=${CUSTOMER_UI_COUNT}"
+            if [ "${BLOCKERS}" = "0" ]; then
+              echo "::notice::P41.0 WORLDWIDE_RELEASE — ${PASSED}/${TOTAL} gates passed. ${CUSTOMER_UI_COUNT} public capabilities discoverable via /api/v1/p41/capabilities."
+            else
+              echo "::warning::P41.0 BLOCKED — ${BLOCKERS} blocker(s). Gates: ${PASSED}/${TOTAL}. See data/quality/p41_certification_report.json."
+            fi
+          fi
+          exit 0
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.9 - Capability Runtime Disposition Gate (P0 Dynamic Capability
+      # Runtime Convergence). Blocking on GATE 1 only (every CUSTOMER_UI
+      # capability must have an explicit runtime disposition); BROKEN/ORPHANED
+      # counts are observability-only on this first run -- see scripts/
+      # capability_runtime_gate.py's own docstring for the full rationale
+      # (same "bake-in first" rollout pattern already established twice in
+      # this workflow by frontend_api_coverage_gate.py and metric_integrity_
+      # contract_gate.py). Runs the offline static auditor unconditionally;
+      # the live-HTTP probe (network-dependent, ~1-2 min against production)
+      # runs best-effort so a transient network blip here can never fail this
+      # stage -- non-blocking either way, matching the gate's own design.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.9 - Capability Runtime Disposition Gate"
+        if: always()
+        timeout-minutes: 8
+        continue-on-error: true
+        run: |
+          python3 scripts/capability_runtime_auditor.py
+          python3 scripts/capability_live_probe.py || echo "::warning::capability_live_probe.py failed or timed out (network-dependent, non-blocking) -- reconcile will run on static evidence only where live data is missing."
+          python3 scripts/capability_runtime_reconcile.py || true
+          python3 scripts/capability_runtime_gate.py
+          exit 0
+
+
+      # -----------------------------------------------------------------------
+      # STAGE 5.9.10 - Public Feed Freshness Gate (HARD FAIL)
+      # External, customer-view assertion: GETs the LIVE public
+      # /api/v1/intel/latest.json and /api/health (cache-busted) and fails the
+      # run if the customer feed is not fresh under the ONE canonical contract
+      # (config/public_freshness_contract.json -- the same
+      # MAX_PUBLIC_MANIFEST_AGE_HOURS PR #485's upload guard uses), or if
+      # /api/health reports "ok" for a feed that is not fresh.
+      # Why: on 2026-09-24 production served a feed generated 2026-08-26
+      # while /api/health returned 200 {"status":"ok"} and runs certified
+      # green. Deliberately NOT continue-on-error: a stale customer feed is a
+      # release failure. Only customer-critical freshness/availability is
+      # checked here -- optional enrichment providers are not. Read-only: two
+      # HTTPS GETs, no R2/KV operations.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 5.9.10 - Public Feed Freshness Gate (HARD FAIL)"
+        if: ${{ !cancelled() && env.PIPELINE_LOCKED != 'true' }}
+        timeout-minutes: 3
+        run: python3 scripts/public_feed_freshness_gate.py
