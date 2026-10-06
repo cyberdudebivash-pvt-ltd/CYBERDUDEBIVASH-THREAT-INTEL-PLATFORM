@@ -63,3 +63,13 @@ def test_retired_personal_identity_is_absent_from_customer_capable_surfaces():
 def test_canonical_public_identity_is_defined_in_commercial_contract():
     contract = (ROOT / "config/commercial-contract.json").read_text(encoding="utf-8")
     assert f'"seller_display_name": "{CANONICAL}"' in contract
+
+
+def test_homepage_public_identity_is_canonical_everywhere():
+    homepage = (ROOT / "index.html").read_text(encoding="utf-8")
+    folded = homepage.casefold()
+    assert _PERSONAL.casefold() not in folded
+    assert _PERSONAL_MIXED.casefold() not in folded
+    assert "trading as cyberdudebivash" not in folded
+    # Two JSON-LD identities + visible footer identity + builder attribution.
+    assert homepage.count("CYBERDUDEBIVASH ECOSYSTEM&reg;") >= 4
