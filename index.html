@@ -2244,7 +2244,7 @@
         </style>
 
         <!-- ── 5. EICC DATA ENGINE (non-blocking, idle-priority) ─────────────── -->
-        <script src="/js/apex-dashboard-snapshot.js"></script>
+        <script src="/js/apex-dashboard-snapshot.js?v=d1cf00cac4e1"></script>
         <script>
         (function eiccEngine(){
             'use strict';
@@ -2396,7 +2396,7 @@
                 if (!el) return;
                 if (state.mode === 'unavailable') {
                     emptyBox(el, SNAP.MESSAGES.unavailable);
-                    if (ts) ts.textContent = 'N/A';
+                    if (ts) ts.textContent = 'FEED CONNECTION PENDING';
                     return;
                 }
                 var items = state.feed.items;
@@ -2410,7 +2410,7 @@
                 if (attributed) {
                     mode = 'origin';
                     rows = origins;
-                    if (title) title.textContent = '🌍 ATTACK ORIGIN ATTRIBUTION';
+                    if (title) title.textContent = '🌍 THREAT-ACTOR COUNTRY ATTRIBUTION';
                     if (sub) sub.textContent = attributed + ' of ' + items.length + ' advisories carry threat-actor country attribution';
                 } else {
                     mode = 'coverage';
@@ -2421,7 +2421,7 @@
                 el.setAttribute('data-geo-mode', mode);
                 var keys = Object.keys(rows).sort(function(a,b){ return rows[b]-rows[a]; }).slice(0,6);
                 clear(el);
-                if (!keys.length) { emptyBox(el, 'NO AUTHORITATIVE ORIGIN ATTRIBUTION AVAILABLE'); if (ts) ts.textContent = SNAP.lastSyncView(state).utc || 'N/A'; return; }
+                if (!keys.length) { emptyBox(el, 'NO AUTHORITATIVE ORIGIN ATTRIBUTION AVAILABLE'); if (ts) ts.textContent = SNAP.lastSyncView(state).utc || 'FEED TIMESTAMP PENDING'; return; }
                 if (mode === 'coverage') el.appendChild(node('div', 'NO AUTHORITATIVE ORIGIN ATTRIBUTION · ADVISORY SOURCES IN CURRENT FEED:', 'font-family:var(--font-mono);font-size:8px;color:var(--text-muted);letter-spacing:1px;'));
                 var maxV = Math.max.apply(null, keys.map(function(k){ return rows[k]; }));
                 keys.forEach(function(k){
@@ -5125,7 +5125,7 @@
         </footer>
     </div>
 
-    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script src="/js/homepage-dashboard-engine.js?v=6c088b3e073d"></script>
+    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script src="/js/homepage-dashboard-engine.js?v=b8e43b3a25c5"></script>
 
     <!-- ── v122.0.0: UPGRADE MODAL ─────────────────────────────────────────── -->
     <div id="upgrade-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(4px);" onclick="if(event.target===this)window.closeUpgradeModal()">
@@ -5648,7 +5648,7 @@
 
         var stats = [
             { id: 'ts-advisories', val: null, suffix: '+', label: 'Threat Advisories' },
-            { id: 'ts-iocs',       val: null, suffix: '+', label: 'IOCs Tracked' },
+            { id: 'ts-iocs',       val: null, suffix: '+', label: 'IOC Records in Live Feed' },
             { id: 'ts-feeds',      val: null, suffix: '',  label: 'Live Intel Feeds' },
         ];
 
@@ -5667,19 +5667,24 @@
         function start() {
             if (started) return;
             started = true;
-            fetch('/api/platform/stats', { cache: 'no-store' })
-                .then(function(r) { return r.ok ? r.json() : null; })
-                .then(function(d) {
-                    var intel = d && d.intel;
-                    if (!intel) return;
-                    stats[0].val = intel.total_advisories != null ? intel.total_advisories : intel.total_reports;
-                    stats[1].val = intel.ioc_count;
-                    stats[2].val = intel.active_feeds != null ? intel.active_feeds : intel.feed_count;
-                    stats.forEach(function(s) {
-                        var el = document.getElementById(s.id);
-                        if (el && s.val != null) _animCount(el, s.val, s.suffix, 1800);
-                    });
-                }).catch(function() {});
+            var snapshot = window.ApexDashboardSnapshot;
+            if (!snapshot) return;
+            function renderCounts(state) {
+                if (!state || state.mode !== 'live' || !state.intelligence) return;
+                var intel = state.intelligence;
+                stats[0].val = intel.total;
+                stats[1].val = intel.iocs;
+                stats[1].suffix = '';
+                stats[1].label = 'IOC Records in Live Feed';
+                stats[2].val = intel.source_count;
+                stats.forEach(function(s) {
+                    var el = document.getElementById(s.id);
+                    if (el && s.val != null) _animCount(el, s.val, s.suffix, 1800);
+                });
+            }
+            snapshot.subscribe(renderCounts);
+            snapshot.load().then(renderCounts).catch(function() {});
+
         }
 
         /* Animate counters using IntersectionObserver */
