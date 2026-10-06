@@ -1029,12 +1029,12 @@ function _ttpDensityFromVisibleTtps(item) {
 function computeApexAIGated(item, tier) {
   const isFree = normalizeRevenueTier(tier) === "FREE";
   const base = {
-    predictive_risk: typeof item.risk_score === "number" ? Math.min(10, item.risk_score) : 0,
-    // 50 is the canonical unknown-confidence default (0-100 scale) -- see
-    // CONFIDENCE_FRAMEWORK_DISCOVERY.md Part A7. Already correct here; kept
-    // as-is, tagged for discoverability alongside the other sites that used
-    // to disagree with it.
-    ai_confidence:   typeof item.confidence === "number" ? Math.min(100, item.confidence * 100) : 50,
+    // Missing or malformed measurements remain unavailable. Do not turn
+    // absent evidence into a measured zero risk or 50% confidence.
+    predictive_risk: Number.isFinite(item.risk_score) && item.risk_score >= 0 && item.risk_score <= 10
+      ? item.risk_score : null,
+    ai_confidence: Number.isFinite(item.confidence) && item.confidence >= 0 && item.confidence <= 1
+      ? item.confidence * 100 : null,
     ttp_density:     _ttpDensityFromVisibleTtps(item),
   };
   if (isFree) {
