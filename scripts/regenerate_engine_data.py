@@ -595,38 +595,22 @@ def generate_quantum(items: List[Dict]) -> Dict:
 # ════════════════════════════════════════════════════════════════════════════
 
 def generate_sovereign(items: List[Dict]) -> Dict:
-    """Generate sovereign_output.json — update compliance from live data."""
-    sovereign_path = os.path.join(ROOT, "data", "sovereign", "sovereign_output.json")
-    try:
-        with open(sovereign_path) as f:
-            existing = json.load(f)
-    except Exception:
-        existing = {}
-
-    # Compute compliance score from platform data quality
-    kev_count     = sum(1 for i in items if i.get("kev") is True)
-    nvd_confirmed = sum(1 for i in items if str(i.get("nvd_status","")).upper() == "CONFIRMED")
-    has_exec_sum  = sum(1 for i in items if i.get("exec_summary"))
-    total = len(items) or 1
-    data_quality = round(min(100, (has_exec_sum / total * 40 + nvd_confirmed / total * 30 + min(kev_count, 10) * 3)), 1)
-
-    soc2_score = min(100, 28 + round(data_quality * 0.5))
-    nist_score = min(100, 48 + round(data_quality * 0.4))
-    avg_compliance = round((soc2_score + nist_score) / 2)
-
-    result = dict(existing)
-    result["version"]      = "42.1.0"
-    result["generated_at"] = NOW_ISO
-    result["compliance"]   = {
-        "soc2_score":       soc2_score,
-        "nist_score":       nist_score,
-        "iso27001_aligned": True,
-        "gdpr_ready":       True,
-        "tlp_compliant":    True,
-        "overall_score":    avg_compliance,
+    """Report feed coverage only; advisories cannot attest audits or revenue."""
+    records = [item for item in items if isinstance(item, dict)]
+    summaries = sum(1 for item in records if isinstance(item.get("exec_summary"), str) and item["exec_summary"].strip())
+    nvd = sum(1 for item in records if str(item.get("nvd_status", "")).upper() == "CONFIRMED")
+    return {
+        "version": "42.2.0",
+        "codename": "SOVEREIGN",
+        "generated_at": NOW_ISO,
+        "evidence_type": "feed_coverage",
+        "assessment_status": "FEED_COVERAGE_ONLY",
+        "feed_coverage": {
+            "total_records": len(records),
+            "executive_summary_records": summaries,
+            "nvd_confirmed_records": nvd,
+        },
     }
-    result["tenants"] = result.get("tenants") or {"total": 3}
-    return result
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1085,7 +1069,7 @@ def main():
     # -- see comment above; no other consumer in this script)
     sovereign = generate_sovereign(items)
     comp = sovereign.get("compliance", {})
-    log.info(f"SOVEREIGN: soc2={comp.get('soc2_score')}% nist={comp.get('nist_score')}%")
+    log.info(f"SOVEREIGN: feed coverage={sovereign.get('feed_coverage', {})}")
 
     # 7. BUGHUNTER
     bh_path = os.path.join(ROOT, "data", "bughunter", "bughunter_output.json")
