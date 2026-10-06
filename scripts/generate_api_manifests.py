@@ -45,11 +45,8 @@ try:
     from public_api_sanitizer import sanitize_feed as _sanitize_feed, audit_leakage as _audit_leakage, sanitize_feed_pro as _sanitize_feed_pro
     _SANITIZER_AVAILABLE = True
 except ImportError:
-    _SANITIZER_AVAILABLE = False
-    def _sanitize_feed(items): return items
-    def _sanitize_feed_pro(items): return items
-    def _audit_leakage(items): return {"PASS": True, "leaking_items": 0, "field_counts": {}}
-    print("[WARN] public_api_sanitizer not found", flush=True)
+    print("[FATAL] Mandatory public API sanitizer could not load; publication refused.", file=sys.stderr, flush=True)
+    raise SystemExit(1)
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 FEED_PATH    = 'api/feed.json'
