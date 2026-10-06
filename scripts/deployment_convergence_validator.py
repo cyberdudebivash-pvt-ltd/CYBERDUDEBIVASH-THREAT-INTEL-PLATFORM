@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import logging
 import math
 import os
@@ -168,14 +169,50 @@ class ConvergenceReport:
 # HTTP probing utilities
 # ---------------------------------------------------------------------------
 
+# Shared bounds cover HEAD probes and publication-status GETs across all phases.
+MAX_TOTAL_REQUESTS = 80
+MAX_PROTOCOL_SECONDS = 600
+_REQUESTS_USED = 0
+_PROTOCOL_STARTED = None
+_RETRY_NOT_BEFORE = 0.0
+
+
+def _claim_request():
+    global _REQUESTS_USED, _PROTOCOL_STARTED
+    now = time.monotonic()
+    if _PROTOCOL_STARTED is None:
+        _PROTOCOL_STARTED = now
+    remaining = MAX_PROTOCOL_SECONDS - (now - _PROTOCOL_STARTED)
+    cooldown = max(0.0, _RETRY_NOT_BEFORE - now)
+    if _REQUESTS_USED >= MAX_TOTAL_REQUESTS or remaining <= cooldown:
+        return False
+    if cooldown:
+        time.sleep(cooldown)
+    _REQUESTS_USED += 1
+    return True
+
+
+def _bounded_wait(seconds):
+    if _PROTOCOL_STARTED is None:
+        time.sleep(seconds)
+        return
+    remaining = max(0.0, MAX_PROTOCOL_SECONDS - (time.monotonic() - _PROTOCOL_STARTED))
+    time.sleep(min(seconds, remaining))
+
+
 def _http_probe(url: str, timeout: int = HTTP_TIMEOUT) -> ProbeResult:
     """Single HTTP HEAD probe with latency measurement."""
+    global _RETRY_NOT_BEFORE
     t0 = time.monotonic()
+    if not _claim_request():
+        return ProbeResult(url=url, status_code=0, latency_ms=0, success=False,
+                           is_transient=False, error="NOT_PROBED: shared request/time budget exhausted")
     try:
         req = urllib.request.Request(url, method="HEAD")
         req.add_header("User-Agent", "CDB-Sentinel-Convergence/184.0")
         req.add_header("Cache-Control", "no-cache")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        remaining = MAX_PROTOCOL_SECONDS - (time.monotonic() - _PROTOCOL_STARTED)
+        with urllib.request.urlopen(req, timeout=max(0.1, min(timeout, remaining))) as resp:
             elapsed = (time.monotonic() - t0) * 1000
             return ProbeResult(
                 url=url,
@@ -203,6 +240,19 @@ def _http_probe(url: str, timeout: int = HTTP_TIMEOUT) -> ProbeResult:
             )
         # 404 = structural failure (file not in dist/); 5xx/timeout = transient CDN issue.
         # 429 = rate limited: the page is served, the probe was too fast -- transient.
+        if exc.code == 429:
+            from email.utils import parsedate_to_datetime
+            raw_retry = exc.headers.get("Retry-After", "60") if exc.headers else "60"
+            try:
+                delay = max(0.0, float(raw_retry))
+                if not math.isfinite(delay):
+                    delay = 60.0
+            except (ValueError, TypeError):
+                try:
+                    delay = max(0.0, parsedate_to_datetime(raw_retry).timestamp() - time.time())
+                except Exception:
+                    delay = 60.0
+            _RETRY_NOT_BEFORE = max(_RETRY_NOT_BEFORE, time.monotonic() + delay)
         is_transient = exc.code >= 500 or exc.code == 429
         return ProbeResult(
             url=url,
@@ -249,6 +299,10 @@ def _probe_batch(urls: List[str], label: str = "") -> Tuple[List[ProbeResult], i
         if i and PROBE_INTERVAL > 0:
             time.sleep(PROBE_INTERVAL)
         r = _http_probe(url)
+        if r.error and r.error.startswith("NOT_PROBED:"):
+            results.append(r)
+            fail += 1
+            break
         if not r.success and r.status_code == 404 and _gate_rejected(url):
             r.success = True
             r.gate_rejected = True
@@ -529,9 +583,11 @@ def phase2_cdn_readiness_probe(feed: List[dict], manifest: dict) -> PhaseResult:
             log.warning("Phase 2: remaining failures are permanent (404) after %d rounds -- not retrying.", attempt + 1)
             break
 
+        if attempt + 1 >= MAX_RETRIES:
+            break
         wait = _backoff_wait(attempt)
         log.info("Phase 2: CDN not ready. Backoff %.1fs before retry...", wait)
-        time.sleep(wait)
+        _bounded_wait(wait)
 
     duration = time.monotonic() - t0
     log.warning("Phase 2: CDN readiness not achieved after %d retries.", MAX_RETRIES)
@@ -613,14 +669,16 @@ def phase3_incremental_retry(feed: List[dict], manifest: dict) -> PhaseResult:
                 log.error("Phase 3: only permanent failures remain -- not retrying.")
                 break
 
+        if attempt + 1 >= MAX_RETRIES:
+            break
         wait = _backoff_wait(attempt)
         log.info("Phase 3: Waiting %.1fs before next retry round...", wait)
-        time.sleep(wait)
+        _bounded_wait(wait)
 
     confirmed = sum(url_status.values())
     total = len(url_status)
     success_rate = confirmed / total if total else 0
-    phase_success = success_rate >= 0.9   # 90% threshold for Phase 3 pass
+    phase_success = confirmed == total and total > 0  # Every sampled report must resolve.
 
     duration = time.monotonic() - t0
     return PhaseResult(
@@ -676,7 +734,8 @@ def phase4_convergence_confirmation(feed: List[dict], manifest: dict) -> PhaseRe
 
         if consecutive_clean == 0 and RETRY_WAIT > 0:
             log.info("Phase 4: Waiting %ds before the next confirmation pass...", RETRY_WAIT)
-            time.sleep(RETRY_WAIT)
+            if run + 1 < CONFIRM_RUNS * 3:
+                _bounded_wait(RETRY_WAIT)
 
     convergence_confirmed = consecutive_clean >= CONFIRM_RUNS
     duration = time.monotonic() - t0
@@ -724,8 +783,10 @@ def query_publication_status(report_id: str) -> Optional[dict]:
         return None
     try:
         req = urllib.request.Request(status_url, headers={"User-Agent": "SentinelApex-ConvergenceValidator/1.0"})
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
+        if not _claim_request():
+            return None
+        with urllib.request.urlopen(req, timeout=max(0.1, min(HTTP_TIMEOUT, MAX_PROTOCOL_SECONDS - (time.monotonic() - _PROTOCOL_STARTED)))) as resp:
+            return json.loads(resp.read(1024 * 1024).decode("utf-8", errors="replace"))
     except Exception:
         return None
 
@@ -791,11 +852,11 @@ def phase5_historical_report_audit(feed: List[dict], manifest: dict) -> PhaseRes
     effective_total = len(historical_urls) - gate_rejected
     effective_ok = ok - gate_rejected
     success_rate = (effective_ok / effective_total) if effective_total else 1.0
-    phase_success = success_rate >= 0.8   # 80% threshold  -  some historical loss is alert, not hard-fail
+    phase_success = effective_ok == effective_total  # No sampled historical loss is accepted.
 
     duration = time.monotonic() - t0
     if not phase_success:
-        log.error("Phase 5: HISTORICAL CONTINUITY BREACH  -  %d/%d historical reports inaccessible (excluding %d expected gate rejections)!",
+        log.error("Phase 5: HISTORICAL VERIFICATION INCOMPLETE  -  %d/%d historical report probes failed (excluding %d expected gate rejections)!",
                    fail, effective_total, gate_rejected)
     else:
         log.info("Phase 5: Historical continuity OK  -  %d/%d accessible (%.0f%%), %d expected gate rejections excluded",
@@ -809,7 +870,7 @@ def phase5_historical_report_audit(feed: List[dict], manifest: dict) -> PhaseRes
         duration_s=round(duration, 1),
         message=f"{effective_ok}/{effective_total} historical reports accessible ({success_rate:.0%}), "
                 f"{gate_rejected} excluded as expected publication-gate rejections. "
-                f"{'PASS' if phase_success else 'HISTORICAL CONTINUITY BREACH'}",
+                f"{'PASS' if phase_success else 'HISTORICAL VERIFICATION INCOMPLETE'}",
     )
 
 
@@ -1022,6 +1083,9 @@ def run_convergence_protocol() -> int:
     # ── Confidence scoring ────────────────────────────────────────────────
     score, signals = _compute_confidence_score(phases, feed, manifest)
     classification = _classify_deployment(score)
+    # Weighted points must not conceal failed report continuity or budget exhaustion.
+    if not all(phase.success for phase in (p2, p3, p4, p5)):
+        classification = "DEPLOYMENT_FAILED"
     convergence_achieved = p4.success and p3.success
 
     total_duration = round(time.monotonic() - wall_start, 1)
@@ -1071,7 +1135,7 @@ def run_convergence_protocol() -> int:
     log.info("╚══════════════════════════════════════════════════════════════════════╝")
 
     if exit_code == 0:
-        log.info("🟢 DEPLOYMENT CONVERGENCE CONFIRMED  -  Platform is customer-safe.")
+        log.info("🟢 DEPLOYMENT CONVERGENCE CONFIRMED  -  Sampled deployment checks passed; full customer readiness requires separate evidence.")
     elif exit_code == 2:
         log.warning("🟡 DEPLOYMENT DEGRADED  -  Investigate signals. Platform partially available.")
     else:

@@ -185,3 +185,23 @@ test("firstPartyPlaneObservability exposes the live plane for drift detection", 
   assert.equal(o.commercial_plane_unchanged, true);
   assert.deepEqual(o.admission.methods, ["GET", "HEAD"]);
 });
+
+
+test("public report reads use the protected web budget without changing paid quotas", () => {
+  const paths = ["/reports/2026/10/intel--0123456789abcdef01234567.html",
+    "/reports/intel--0123456789abcdef.html", "/reports/intel--0123456789abcdef/",
+    "/api/v1/reports/intel--0123456789abcdef01234567/publication-status"];
+  for (const path of paths) {
+    for (const method of ["GET", "HEAD"]) {
+      assert.equal(isFirstPartyRead({ path, method, hasCredential: false }), true);
+      assert.equal(isFirstPartyRead({ path, method, hasCredential: true }), false);
+    }
+    assert.equal(isFirstPartyRead({ path, method: "POST", hasCredential: false }), false);
+  }
+  for (const path of ["/reports/2026/13/intel--0123456789abcdef.html", "/reports/admin",
+    "/reports/2026/10/intel--0123456789abcdef.html/extra", "/reports/2026/10/evil.html",
+    "/api/v1/reports/intel--0123456789abcdef/delete"]) {
+    assert.equal(isFirstPartyRead({ path, method: "GET", hasCredential: false }), false);
+  }
+  assert.deepEqual(DAILY_QUOTAS.FREE, { limit: 50, alertAt: 40 });
+});

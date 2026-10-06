@@ -207,7 +207,14 @@ export function isFirstPartyRead(req) {
   if (req.hasCredential) return false;
   const method = String(req.method || "").toUpperCase();
   if (method !== "GET" && method !== "HEAD") return false;
-  return FIRST_PARTY_READ_PATHS.has(normalizePlanePath(req.path));
+  const path = normalizePlanePath(req.path);
+  // Canonical public report HTML and its read-only publication verdict are
+  // customer web surfaces, not consumption of the commercial API product.
+  // Strict shapes only; credentials and mutations still use commercial gates.
+  const publicReport = /^\/reports\/\d{4}\/(?:0[1-9]|1[0-2])\/intel--[a-f0-9]{16,64}\.html$/i.test(path);
+  const legacyReport = /^\/reports\/intel--[a-f0-9]{16,64}(?:\.html)?$/i.test(path);
+  const publicationVerdict = /^\/api\/v1\/reports\/intel--[a-f0-9]{16,64}\/publication-status$/i.test(path);
+  return FIRST_PARTY_READ_PATHS.has(path) || publicReport || legacyReport || publicationVerdict;
 }
 
 /**

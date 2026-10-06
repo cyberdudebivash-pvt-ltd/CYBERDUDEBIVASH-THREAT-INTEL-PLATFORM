@@ -121,6 +121,7 @@ on:
         default: false
 
 permissions:
+  pull-requests: write
   contents: write
   pages: write
   id-token: write
@@ -3426,10 +3427,10 @@ jobs:
 
       # -----------------------------------------------------------------------
       # STAGE 4: GIT SYNC -- ALWAYS RUNS
-      # Commits non-sensitive metadata and HTML reports. 4-attempt push retry.
-      # Exit 0 guaranteed - never kills pipeline.
+      # Persists generated metadata and HTML reports on a review branch + draft PR.
+      # Never pushes main; persistence failures are blocking and explicit.
       # -----------------------------------------------------------------------
-      - name: "STAGE 4 - Git Sync (commit + push metadata)"
+      - name: "STAGE 4 - Git Sync (persist metadata review PR)"
         timeout-minutes: 8
         # v184.3 FIX: also skip when STAGE 0.00 detected .PIPELINE_LOCK -- this is
         # the actual git-push mechanism that would overwrite an operator's in-flight
@@ -4434,13 +4435,13 @@ jobs:
           set +e
           # v184.0 FIX: 28-min hard deadline — prevents GitHub Actions from killing
           # the process at the 30-min step timeout (unhandled exit → hard fail).
-          # GNU timeout exit 124 = deadline → remap to DEGRADED (non-blocking).
+          # GNU timeout exit 124 = unverified convergence; fail closed.
           # Genuine DEPLOYMENT_FAILED (exit 1 within budget) still hard-fails.
           timeout 1680 python3 scripts/deployment_convergence_validator.py
           CONVERGENCE_EXIT=$?
           if [ "$CONVERGENCE_EXIT" -eq "124" ]; then
-            echo "::warning::CONVERGENCE_TIMEOUT — CDN probe ran 28min without STABLE. Treating as DEPLOYMENT_DEGRADED (non-blocking)."
-            CONVERGENCE_EXIT=2
+            echo "::warning::CONVERGENCE_TIMEOUT — CDN probe ran 28min without STABLE. Convergence unverified; blocking release acceptance."
+            CONVERGENCE_EXIT=1
           fi
           echo "CONVERGENCE_EXIT_CODE=${CONVERGENCE_EXIT}" >> $GITHUB_ENV
 

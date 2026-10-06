@@ -114,6 +114,63 @@ def count_manifest() -> str:
     return "N/A"
 
 
+def publish_metadata_pr(token: str, repository: str) -> dict:
+    """Persist the exact generated commit on a unique branch; never push main.
+
+    A reviewable PR is durable evidence, not proof that main was updated.
+    GITHUB_RUN_ID/ATTEMPT make retries idempotent without force-pushing.
+    """
+    import re
+    import urllib.request
+    import urllib.error
+    if not token or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise RuntimeError("Metadata PR requires GH_TOKEN and a valid GITHUB_REPOSITORY")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
+    if not run_id.isdigit() or not attempt.isdigit():
+        raise RuntimeError("Metadata PR requires numeric run identity")
+    branch = f"sentinel-generated/run-{run_id}-{attempt}"
+    push = run_git("push", "origin", f"HEAD:refs/heads/{branch}")
+    if push.returncode:
+        raise RuntimeError("Generated metadata branch push rejected; no main write attempted")
+
+    def api(method, path, payload=None):
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{repository}/{path}",
+            data=json.dumps(payload).encode() if payload is not None else None,
+            method=method,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+                     "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                return json.loads(response.read(1024 * 1024))
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"Metadata PR API rejected ({exc.code}); check token PR permission") from None
+
+    owner = repository.split('/')[0]
+    from urllib.parse import urlencode
+    prs = api("GET", "pulls?" + urlencode({"state": "open", "head": f"{owner}:{branch}", "base": "main"}))
+    if not isinstance(prs, list):
+        raise RuntimeError("Invalid metadata PR lookup response")
+    pr = prs[0] if prs else api("POST", "pulls", {
+        "head": branch, "base": "main", "draft": True,
+        "title": f"chore: generated intel metadata from run {run_id}",
+        "body": f"Generated artifacts preserved from workflow run {run_id}, attempt {attempt}. "
+                "Requires review and merge under main protection. R2 remains the runtime state authority. "
+                "This PR does not certify production deployment or customer readiness."})
+    if not isinstance(pr, dict) or not isinstance(pr.get("number"), int):
+        raise RuntimeError("Metadata PR creation returned no PR identity")
+    state = {"state": "PERSISTED_REVIEW_PENDING", "branch": branch, "pr_number": pr["number"],
+             "main_updated": False, "run_id": run_id}
+    health = REPO_ROOT / "data" / "health"
+    health.mkdir(parents=True, exist_ok=True)
+    (health / "git_sync_state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+            summary.write(f"\nGenerated metadata: PR #{pr['number']} on `{branch}`. Review pending; main not updated.\n")
+    return state
+
+
 def main() -> None:
     log.info("=" * 60)
     log.info("SENTINEL APEX v%s -- Safe Git Commit & Push", PIPELINE_VERSION)
@@ -474,13 +531,13 @@ def main() -> None:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         commit_msg = (
             f"SENTINEL APEX v{PIPELINE_VERSION} -- "
-            f"{entry_count} advisories @ {ts} [P0-FIXED] [skip ci]"
+            f"{entry_count} advisories @ {ts} [GENERATED METADATA]"
         )
         result = run_git("commit", "-m", commit_msg)
         if result.returncode == 0:
             log.info("Committed: %s", commit_msg[:80])
         else:
-            log.warning("Commit failed: %s", result.stderr.strip()[:200])
+            raise RuntimeError("Generated metadata commit failed; publication stopped")
 
     # --- v141.7.0 Post-commit: verify key files are in git index ---
     _verify_files = ["index.html", "feed.json"]
@@ -490,6 +547,16 @@ def main() -> None:
             log.info("[post-commit] git index verify: %s -- IN INDEX", _vf)
         else:
             log.warning("[post-commit] git index verify: %s -- NOT TRACKED (new file?)", _vf)
+
+    # GitHub production main requires PRs (ruleset 21556637). Keep the
+    # existing local recovery path for offline tooling, never use it in CI.
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        if diff_result.returncode == 0:
+            log.info("No generated metadata changes; no persistence PR required.")
+            return
+        state = publish_metadata_pr(gh_token, gh_repo)
+        log.info("Generated metadata persisted for review: PR #%s; main unchanged", state["pr_number"])
+        return
 
     # --- Push with 4-attempt retry ---
     for attempt in range(1, 5):
@@ -985,5 +1052,5 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         import traceback
-        log.warning("safe_git_commit.py error (non-fatal): %s\n%s", e, traceback.format_exc())
-        sys.exit(0)  # Git sync must never kill pipeline
+        log.error("safe_git_commit.py failed: %s\n%s", e, traceback.format_exc())
+        sys.exit(1)
