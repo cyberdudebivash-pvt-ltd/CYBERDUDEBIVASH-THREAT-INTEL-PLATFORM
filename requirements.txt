@@ -104,14 +104,8 @@ opentelemetry-exporter-otlp-proto-grpc==1.44.0
 
 # Structured output & password hashing
 passlib[bcrypt]==1.7.4      # Secure password hashing for RBAC user accounts
-python-jose[cryptography]==3.5.0  # RS256 JWT for OIDC federation; v184.7 FIX: 3.3.0 had 5 CVEs, fixed in 3.4.0+
-# v184.7 NOTE: python-jose[cryptography]'s transitive `ecdsa` dependency
-# (CVE-2024-23342, Minerva timing attack on P-256 ECDSA) has NO fix at any
-# ecdsa version -- upstream: "the python-ecdsa project considers side
-# channel attacks out of scope... there is no planned fix." Not a
-# version-bump problem; suppressed explicitly in
-# .github/workflows/sast-security-scan.yml's pip-audit invocation with
-# this same justification, not silently ignored.
+# OIDC verification uses PyJWT (pinned above), not python-jose.
+# GHSA-3qf3-8w2g-rqmx has no patched python-jose release; remove it.
 
 # CodeRabbit finding on PR #336 (plausible, added defensively): several
 # tests (tests/test_r2_reports_verifier.py, tests/test_frontend_api_coverage_gate.py,
@@ -123,4 +117,3 @@ python-jose[cryptography]==3.5.0  # RS256 JWT for OIDC federation; v184.7 FIX: 3
 # CI Python environment (actions/setup-python, uv). Declaring it here
 # costs nothing if already present and closes a plausible real gap if not.
 PyYAML==6.0.1
-
