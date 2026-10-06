@@ -204,7 +204,7 @@
         </style>
 
         <!-- ── 5. EICC DATA ENGINE (non-blocking, idle-priority) ─────────────── -->
-        <script src="/js/apex-dashboard-snapshot.js"></script>
+        <script src="/js/apex-dashboard-snapshot.js?v=d1cf00cac4e1"></script>
         <script>
         (function eiccEngine(){
             'use strict';
@@ -356,7 +356,7 @@
                 if (!el) return;
                 if (state.mode === 'unavailable') {
                     emptyBox(el, SNAP.MESSAGES.unavailable);
-                    if (ts) ts.textContent = 'N/A';
+                    if (ts) ts.textContent = 'FEED CONNECTION PENDING';
                     return;
                 }
                 var items = state.feed.items;
@@ -370,7 +370,7 @@
                 if (attributed) {
                     mode = 'origin';
                     rows = origins;
-                    if (title) title.textContent = '🌍 ATTACK ORIGIN ATTRIBUTION';
+                    if (title) title.textContent = '🌍 THREAT-ACTOR COUNTRY ATTRIBUTION';
                     if (sub) sub.textContent = attributed + ' of ' + items.length + ' advisories carry threat-actor country attribution';
                 } else {
                     mode = 'coverage';
@@ -381,7 +381,7 @@
                 el.setAttribute('data-geo-mode', mode);
                 var keys = Object.keys(rows).sort(function(a,b){ return rows[b]-rows[a]; }).slice(0,6);
                 clear(el);
-                if (!keys.length) { emptyBox(el, 'NO AUTHORITATIVE ORIGIN ATTRIBUTION AVAILABLE'); if (ts) ts.textContent = SNAP.lastSyncView(state).utc || 'N/A'; return; }
+                if (!keys.length) { emptyBox(el, 'NO AUTHORITATIVE ORIGIN ATTRIBUTION AVAILABLE'); if (ts) ts.textContent = SNAP.lastSyncView(state).utc || 'FEED TIMESTAMP PENDING'; return; }
                 if (mode === 'coverage') el.appendChild(node('div', 'NO AUTHORITATIVE ORIGIN ATTRIBUTION · ADVISORY SOURCES IN CURRENT FEED:', 'font-family:var(--font-mono);font-size:8px;color:var(--text-muted);letter-spacing:1px;'));
                 var maxV = Math.max.apply(null, keys.map(function(k){ return rows[k]; }));
                 keys.forEach(function(k){

@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import vm from "node:vm";
+import { createHash } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // P0 regression suite -- CYBERDUDEBIVASH SENTINEL APEX
@@ -41,7 +42,8 @@ const homepageSource = (repo) => execFileSync("python3", [path.join(repo, "scrip
 const SNAPSHOT_JS = path.join(__dirname, "..", "apex-dashboard-snapshot.js");
 function loadIocContribution() {
   const html = homepageSource(path.join(__dirname, "..", ".."));
-  assert.ok(html.includes('<script src="/js/apex-dashboard-snapshot.js"></script>'), "index.html must load the dashboard snapshot");
+  const version = createHash("sha256").update(readFileSync(SNAPSHOT_JS)).digest("hex").slice(0, 12);
+  assert.ok(html.includes(`<script src="/js/apex-dashboard-snapshot.js?v=${version}"></script>`), "index.html must load the content-versioned dashboard snapshot");
   assert.ok(!html.includes("function _iocContribution(it){"), "a second IOC summing copy is back in index.html");
   const context = { module: { exports: {} } };
   context.globalThis = context;
