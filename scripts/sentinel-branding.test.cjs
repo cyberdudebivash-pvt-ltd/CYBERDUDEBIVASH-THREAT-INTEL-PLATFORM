@@ -1,6 +1,8 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { brandHtml, displayName, canonicalPlatformName } = require('./sentinel-branding.cjs');
 
 const NAME = "SENTINEL APEX Threat Intel Platform";
@@ -73,4 +75,18 @@ test('literal dynamic display tags change; operational/payment scripts remain by
   assert.ok(brandHtml(ui, NAME).includes('<span>'+NAME+'</span>'));
   const payment = '<script>const payment={name:"CYBERDUDEBIVASH"};const template=\`<span>'+LEGACY_NAME+'</span>\`;</script>';
   assert.equal(brandHtml(payment, NAME), payment);
+});
+
+test('production dist builder brands before manifest and checksum provenance generation', () => {
+  const builder = fs.readFileSync(path.join(__dirname, 'build_dist_artifact.py'), 'utf8');
+  const brandCall = builder.indexOf('"sentinel-branding.cjs"');
+  const canonicalName = builder.indexOf('"SENTINEL APEX Threat Intel Platform"', brandCall);
+  const manifestCall = builder.indexOf('manifest = build_manifest(', canonicalName);
+
+  assert.ok(brandCall >= 0, 'dist builder must invoke the SENTINEL APEX branding transformer');
+  assert.ok(canonicalName > brandCall, 'dist builder must pass the canonical Threat Intel platform name');
+  assert.ok(
+    manifestCall > canonicalName,
+    'branding must complete before deployment manifest/checksum provenance is generated',
+  );
 });
