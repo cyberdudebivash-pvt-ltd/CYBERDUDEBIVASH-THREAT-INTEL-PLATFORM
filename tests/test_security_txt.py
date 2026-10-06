@@ -67,13 +67,13 @@ def test_policy_url_anchor_exists():
     assert page == "https://intel.cyberdudebivash.com/security-compliance.html"
     html = (REPO / "security-compliance.html").read_text(encoding="utf-8")
     assert f'id="{anchor}"' in html
-    assert "security@cyberdudebivash.com" in html, "policy page must name the same contact"
+    assert "bivash@cyberdudebivash.com" in html, "policy page must name the same contact"
 
 
 def test_contact_matches_the_published_policy():
     text = (REPO / ".well-known" / "security.txt").read_text(encoding="utf-8")
-    assert "Contact: mailto:security@cyberdudebivash.com" in text
-    assert "security@cyberdudebivash.com" in (REPO / "SECURITY.md").read_text(encoding="utf-8")
+    assert "Contact: mailto:bivash@cyberdudebivash.com" in text
+    assert "bivash@cyberdudebivash.com" in (REPO / "SECURITY.md").read_text(encoding="utf-8")
 
 
 def test_site_links_resolve_to_a_published_location():
