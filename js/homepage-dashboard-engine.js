@@ -6309,21 +6309,35 @@ function renderTopThreats(data) {
             }
 
             // ── TIP+SOAR RENDERERS (v60-v63) ────────────────────────────
+            // Treat artifact fields as untrusted text; bound work before rendering.
+            function tipText(value, limit) {
+                var text = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+                return text.substring(0, limit || 120).replace(/[&<>"']/g, function(ch) {
+                    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+                });
+            }
+            function tipRows(value, limit) {
+                return Array.isArray(value) ? value.slice(0, limit).filter(function(row) {
+                    return row && typeof row === 'object' && !Array.isArray(row);
+                }) : [];
+            }
             function renderIncidentEngine(data) {
+                data = data && typeof data === 'object' ? data : {};
                 try {
                     var total = data.total_incidents || 0;
                     var el = document.getElementById('ts-incident-count');
                     if (el) el.textContent = total.toLocaleString();
 
-                    var incidents = data.incidents || [];
+                    var incidents = tipRows(data.incidents, 12);
                     var feed = document.getElementById('ts-incident-feed');
+                    if (feed) feed.textContent = 'Awaiting validated records.';
                     if (feed && incidents.length > 0) {
                         feed.innerHTML = incidents.slice(0, 12).map(function(inc) {
                             var sevColor = inc.severity === 'CRITICAL' ? '#ef4444' : inc.severity === 'HIGH' ? '#f97316' : '#22c55e';
                             return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">'
-                                + '<span style="color:' + sevColor + ';font-weight:700;font-size:8px;">[' + inc.severity + ']</span> '
-                                + '<span style="color:var(--white);font-size:10px;">' + (inc.title || '').substring(0,55) + '</span> '
-                                + '<span style="color:var(--text-muted);font-size:8px;">→ ' + (inc.threat_actor || '') + '</span>'
+                                + '<span style="color:' + sevColor + ';font-weight:700;font-size:8px;">[' + tipText(inc.severity, 24) + ']</span> '
+                                + '<span style="color:var(--white);font-size:10px;">' + tipText(inc.title, 55) + '</span> '
+                                + '<span style="color:var(--text-muted);font-size:8px;">→ ' + tipText(inc.threat_actor, 80) + '</span>'
                                 + '</div>';
                         }).join('');
                     }
@@ -6334,21 +6348,23 @@ function renderTopThreats(data) {
             }
 
             function renderResponseEngine(data) {
+                data = data && typeof data === 'object' ? data : {};
                 try {
                     var total = data.total_actions || 0;
                     var el = document.getElementById('ts-response-count');
                     if (el) el.textContent = total.toLocaleString();
 
-                    var actions = data.response_actions || [];
+                    var actions = tipRows(data.response_actions, 500);
                     var feed = document.getElementById('ts-response-feed');
+                    if (feed) feed.textContent = 'Awaiting validated records.';
                     if (feed && actions.length > 0) {
-                        var byType = {};
-                        actions.forEach(function(a) { byType[a.action_type] = (byType[a.action_type] || 0) + 1; });
+                        var byType = Object.create(null);
+                        actions.forEach(function(a) { if (typeof a.action_type !== 'string' || !a.action_type || a.action_type.length > 80) return; byType[a.action_type] = (byType[a.action_type] || 0) + 1; });
                         feed.innerHTML = Object.entries(byType).map(function(pair) {
                             var colors = {block_ip:'#ef4444',quarantine_host:'#f97316',disable_account:'#eab308',remove_phishing_email:'#8b5cf6',patch_vulnerability:'#22c55e',block_domain:'#f472b6',isolate_network_segment:'#3b82f6'};
-                            var c = colors[pair[0]] || '#22c55e';
+                            var c = Object.prototype.hasOwnProperty.call(colors, pair[0]) ? colors[pair[0]] : '#22c55e';
                             return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">'
-                                + '<span style="color:' + c + ';font-size:10px;">' + pair[0].replace(/_/g,' ').toUpperCase() + '</span>'
+                                + '<span style="color:' + c + ';font-size:10px;">' + tipText(pair[0].replace(/_/g,' ').toUpperCase(), 80) + '</span>'
                                 + '<span style="color:var(--white);font-weight:700;font-size:11px;">' + pair[1] + '</span>'
                                 + '</div>';
                         }).join('');
@@ -6357,6 +6373,7 @@ function renderTopThreats(data) {
             }
 
             function renderHuntEngine(data) {
+                data = data && typeof data === 'object' ? data : {};
                 try {
                     var huntTotal = data.total_hunts || 0;
                     var el = document.getElementById('ts-hunt-count');
@@ -6371,29 +6388,30 @@ function renderTopThreats(data) {
                     }
 
                     // Hunt hypotheses feed
-                    var hunts = data.hunt_hypotheses || [];
+                    var hunts = tipRows(data.hunt_hypotheses, 8);
                     var feed = document.getElementById('ts-hunt-feed');
+                    if (feed) feed.textContent = 'Awaiting validated records.';
                     if (feed && hunts.length > 0) {
                         feed.innerHTML = hunts.slice(0, 8).map(function(h) {
                             var prioColor = h.priority === 'CRITICAL' ? '#ef4444' : h.priority === 'HIGH' ? '#f59e0b' : '#22c55e';
                             return '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">'
-                                + '<span style="color:' + prioColor + ';font-weight:700;font-size:8px;">[' + h.priority + ']</span> '
-                                + '<span style="color:var(--white);font-size:10px;">' + h.technique + '</span> '
-                                + '<span style="color:var(--text-muted);font-size:9px;">' + (h.hypothesis || '').substring(0,50) + '\u2026</span> '
-                                + '<span style="font-size:8px;color:#f59e0b;">CONF ' + h.confidence + '%</span>'
+                                + '<span style="color:' + prioColor + ';font-weight:700;font-size:8px;">[' + tipText(h.priority, 24) + ']</span> '
+                                + '<span style="color:var(--white);font-size:10px;">' + tipText(h.technique, 80) + '</span> '
+                                + '<span style="color:var(--text-muted);font-size:9px;">' + tipText(h.hypothesis, 50) + '\u2026</span> '
+                                + '<span style="font-size:8px;color:#f59e0b;">CONF ' + tipText(h.confidence, 16) + '%</span>'
                                 + '</div>';
                         }).join('');
                     }
 
                     // Campaign intelligence feed
-                    var campaigns = data.campaign_intelligence || [];
+                    var campaigns = tipRows(data.campaign_intelligence, 12);
                     var cFeed = document.getElementById('ts-campaign-feed');
                     if (cFeed && campaigns.length > 0) {
                         cFeed.innerHTML = campaigns.map(function(c) {
                             return '<div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);">'
-                                + '<div style="color:#ec4899;font-weight:700;font-size:10px;">' + c.campaign_name.replace(/_/g,' ').toUpperCase() + ' <span style="color:var(--text-muted);font-weight:400;">' + c.campaign_id + '</span></div>'
-                                + '<div style="color:var(--text-muted);font-size:9px;margin-top:2px;">Actors: ' + c.actors_involved.join(', ') + ' | Incidents: ' + c.incident_count + ' | Risk: ' + c.avg_risk + '</div>'
-                                + '<div style="margin-top:3px;">' + c.techniques_observed.slice(0,5).map(function(t) { return '<span style="display:inline-block;background:rgba(139,92,246,0.12);color:#a78bfa;padding:1px 6px;border-radius:3px;font-size:8px;margin:1px;">' + t + '</span>'; }).join('') + '</div>'
+                                + '<div style="color:#ec4899;font-weight:700;font-size:10px;">' + tipText(typeof c.campaign_name === 'string' ? c.campaign_name.replace(/_/g,' ').toUpperCase() : '', 100) + ' <span style="color:var(--text-muted);font-weight:400;">' + tipText(c.campaign_id, 80) + '</span></div>'
+                                + '<div style="color:var(--text-muted);font-size:9px;margin-top:2px;">Actors: ' + (Array.isArray(c.actors_involved) ? c.actors_involved.slice(0, 10).map(function(actor) { return tipText(actor, 80); }).join(', ') : 'Awaiting attribution') + ' | Incidents: ' + tipText(c.incident_count, 16) + ' | Risk: ' + tipText(c.avg_risk, 16) + '</div>'
+                                + '<div style="margin-top:3px;">' + (Array.isArray(c.techniques_observed) ? c.techniques_observed.slice(0,5) : []).map(function(t) { return '<span style="display:inline-block;background:rgba(139,92,246,0.12);color:#a78bfa;padding:1px 6px;border-radius:3px;font-size:8px;margin:1px;">' + tipText(t, 80) + '</span>'; }).join('') + '</div>'
                                 + '</div>';
                         }).join('');
                     } else if (cFeed) {
