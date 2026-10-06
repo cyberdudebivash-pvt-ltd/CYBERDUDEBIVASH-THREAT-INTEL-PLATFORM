@@ -6350,16 +6350,20 @@ function renderTopThreats(data) {
             function renderResponseEngine(data) {
                 data = data && typeof data === 'object' ? data : {};
                 try {
-                    var total = data.total_actions || 0;
+                    var actions = tipRows(data.response_actions, 500);
+                    // Historical artifacts also represented recommendations, never execution receipts.
+                    var total = actions.filter(function(a) { return typeof a.action_type === 'string' && a.action_type.length > 0 && a.action_type.length <= 80; }).length;
                     var el = document.getElementById('ts-response-count');
                     if (el) el.textContent = total.toLocaleString();
 
-                    var actions = tipRows(data.response_actions, 500);
                     var feed = document.getElementById('ts-response-feed');
-                    if (feed) feed.textContent = 'Awaiting validated records.';
+                    if (feed) feed.textContent = 'Awaiting validated response proposals.';
+                    var typeCount = document.getElementById('ts-playbook-count');
+                    if (typeCount) typeCount.textContent = 'Awaiting proposals';
                     if (feed && actions.length > 0) {
                         var byType = Object.create(null);
                         actions.forEach(function(a) { if (typeof a.action_type !== 'string' || !a.action_type || a.action_type.length > 80) return; byType[a.action_type] = (byType[a.action_type] || 0) + 1; });
+                        if (typeCount) typeCount.textContent = Object.keys(byType).length.toLocaleString();
                         feed.innerHTML = Object.entries(byType).map(function(pair) {
                             var colors = {block_ip:'#ef4444',quarantine_host:'#f97316',disable_account:'#eab308',remove_phishing_email:'#8b5cf6',patch_vulnerability:'#22c55e',block_domain:'#f472b6',isolate_network_segment:'#3b82f6'};
                             var c = Object.prototype.hasOwnProperty.call(colors, pair[0]) ? colors[pair[0]] : '#22c55e';
@@ -6378,14 +6382,6 @@ function renderTopThreats(data) {
                     var huntTotal = data.total_hunts || 0;
                     var el = document.getElementById('ts-hunt-count');
                     if (el) el.textContent = huntTotal.toLocaleString();
-
-                    // Playbook count from incident count (1:1 mapping)
-                    var pbEl = document.getElementById('ts-playbook-count');
-                    if (pbEl) {
-                        // Playbooks are generated per-incident, so count matches incidents
-                        var incEl = document.getElementById('ts-incident-count');
-                        if (incEl && incEl.textContent !== '\u2014') pbEl.textContent = incEl.textContent;
-                    }
 
                     // Hunt hypotheses feed
                     var hunts = tipRows(data.hunt_hypotheses, 8);
