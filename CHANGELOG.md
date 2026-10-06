@@ -1,0 +1,195 @@
+# Changelog — CYBERDUDEBIVASH® Sentinel APEX ULTRA
+
+All notable changes to this project are documented in this file.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [200.0.0-rc] — 2026-08-07 Project TITAN Stage 22 — Commercial Release Certification (Unreleased)
+
+This entry documents the certification work itself, not a code release — `config/version.json`
+remains at `184.0`/`v185` pending an explicit release decision (see `V200_EXECUTIVE_RELEASE_REPORT.md`).
+Recorded here per this file's own Keep-a-Changelog convention so the certification's existence and
+findings are discoverable from the same place as every other change.
+
+### Added
+- Full v200 GA readiness certification: `TITAN_V200_RELEASE_AUDIT.md`,
+  `COMMERCIAL_QUALITY_CERTIFICATION_REPORT.md`, `UI_FREEZE_POLICY.md`,
+  `PERFORMANCE_CERTIFICATION.md`, `SECURITY_CERTIFICATION.md`, `OPERATIONAL_READINESS.md`,
+  `COMMERCIAL_READINESS.md`, `V200_RELEASE_GATE.md`, `V200_EXECUTIVE_RELEASE_REPORT.md`, plus the
+  release documentation set (`V200_UPGRADE_GUIDE.md`, `V200_API_REFERENCE.md`,
+  `V200_CUSTOMER_GUIDE.md`, `V200_ADMINISTRATOR_GUIDE.md`, `V200_OPERATIONS_RUNBOOK.md`,
+  `V200_ARCHITECTURE_OVERVIEW.md`).
+- A current SBOM (`data/sbom/sbom-latest.spdx.json`, `sbom-latest.cyclonedx.json`), generated via
+  the platform's existing `scripts/enterprise_sbom_generator.py`.
+
+### Found, not yet fixed (see `V200_EXECUTIVE_RELEASE_REPORT.md` for full risk register)
+- `docs/BCP_DISASTER_RECOVERY.md` describes infrastructure (AWS multi-region, ClickHouse HA, Redis
+  Cluster, Kubernetes, PagerDuty) not evidenced in the actual single-Worker deployment.
+- `workers/revenue-engine/src/index.js` duplicates tier pricing with a ~2x mismatch against the
+  canonical `config/subscription_tiers.json` (PRO $99 vs. $49).
+- ~~12 `/api/v1/p34/*` "engineering assurance" endpoints have no authentication.~~ **RE-AUDITED
+  2026-09-10 — AUTH POSTURE NOT A DEFECT.** All 12 routes (`index.js:6861-6872`) are the confirmed
+  live data source for `enterprise-assurance-center.html` — a public enterprise trust-center page
+  (Security Posture / SBOM / Compliance / Reliability tabs, linked from
+  `enterprise-knowledge-center.html`) that prospects review pre-sale during vendor security due
+  diligence, the same unauthenticated-by-design pattern used by any vendor trust/security page.
+  Gating these behind auth would break the trust center for anonymous prospects — the audience it
+  exists to serve — so the *auth* posture was not changed. **CORRECTION, same day:** the original
+  re-audit's claim that `handleP34Sbom` returns only "aggregate posture/SBOM-status data" was
+  wrong — it, and `handleP34Contracts`, each spread a complete raw internal report object
+  (`sbom_data`, `drift_report`) into the public response, unfiltered. Caught by CodeRabbit on
+  PR #407 (CWE-200) and verified: `data/governance/contract_drift_report.json` genuinely contains
+  internal schema field names and per-entry violation detail, and neither raw field was ever read
+  by `enterprise-assurance-center.html`'s `renderSbom()` (confirmed via grep — zero consumers of
+  either field anywhere in the repo). **Fixed** in `workers/intel-gateway/src/p34-handlers.js`:
+  both handlers now return status/format/count fields only — the same fields the trust-center UI
+  already renders — never the raw report object.
+- CORS wildcard (`Access-Control-Allow-Origin: "*"`) on every response.
+- 219 known dependency vulnerabilities (4 critical) across the repository.
+- `provisionApiKey()`'s revenue-integrity fix (`SUBSCRIPTION_EXPIRY_ENABLED`) ships disabled by
+  default.
+- Confidence scoring fragmented across 116 files / 5+ non-reconciled systems; ADR-0007 unresolved.
+
+---
+
+## [1.0.0] — 2026-02-25 🎉 First Public Release
+
+### 🆕 Added — Test Suite & CI/CD
+- **`tests/conftest.py`** — Pytest shared fixtures: `sample_text`, `sample_iocs`, `empty_iocs`, `minimal_stix_bundle`
+- **`tests/test_ioc_extraction.py`** — 30+ unit tests for `agent/enricher.py`
+  - IPv4 extraction including private/loopback/Google DNS exclusion
+  - Domain extraction and false-positive filtering
+  - SHA256 / MD5 hash extraction with length validation
+  - URL, email, CVE, registry key, artifact filename extraction
+  - IOC dict structure, deduplication, empty-input safety
+  - Confidence scoring range, empty vs. rich IOC comparison, actor-mapped boost
+- **`tests/test_risk_engine.py`** — 25+ unit tests for `agent/risk_engine.py`
+  - Score range [0.0, 10.0] and type enforcement
+  - Dynamic (not hardcoded) scoring assertion
+  - Individual signal contributions: KEV, CVSS, EPSS, MITRE, actor attribution, supply chain, nation-state
+  - Severity label mapping for CRITICAL / HIGH / MEDIUM / LOW / INFO
+  - TLP label mapping for all score ranges
+  - Extended metrics (Sentinel Momentum Index™, exploit velocity, intel confidence)
+  - Determinism — same inputs always produce same output
+- **`tests/test_stix_export.py`** — 30+ unit tests for `agent/export_stix.py`
+  - Bundle structure: type, ID prefix, spec_version, objects list
+  - Required objects: identity, TLP marking-definition, indicators
+  - Object field compliance: all required STIX fields present, ID prefixes correct
+  - Indicator pattern syntax, valid_from, pattern_type
+  - `validate_bundle()` contract — valid bundles pass, invalid bundles fail
+  - MISP export dict structure
+- **`tests/test_stix_schema.py`** — STIX 2.1 spec + schema validation
+  - All object types against the STIX 2.1 vocabulary
+  - UUID4 format validation for bundle ID and all object IDs
+  - ISO 8601 UTC timestamp format
+  - STIX pattern syntax validation
+  - No duplicate IDs within a bundle
+  - Relationship source_ref / target_ref referential integrity
+  - identity_class vocabulary compliance
+  - Optional deep validation via `stix2` library (`pip install stix2==3.0.1`)
+  - `feed_manifest.json` schema validation (structure, score range, severity vocab, stix_id format)
+- **`tests/test_detection_engine.py`** — 25+ unit tests for `agent/integrations/detection_engine.py`
+  - Sigma rule YAML validity, required fields, level, CDB ID, references
+  - Ransomware-specific rule content (shadow copy deletion)
+  - YARA rule structural validity (rule keyword, meta/strings/condition sections)
+  - Actual IOC string embedding in YARA rules
+  - filesize constraint presence
+  - Edge cases: special chars, very long titles
+- **`tests/test_deduplication.py`** — 8 unit tests for `agent/deduplication.py`
+  - New entry not flagged as duplicate
+  - Same entry correctly flagged on second call
+  - Processed count increment and type
+  - Empty string and very long titles do not crash
+- **`pytest.ini`** — Pytest configuration: testpaths, markers, log settings, strict mode
+- **`.github/workflows/test-suite.yml`** — Full CI/CD pipeline
+  - **Job 1: Unit Tests** — runs on Python 3.10, 3.11, 3.12 in parallel
+    - Excludes network/stix2_lib tests for offline CI
+    - Coverage report generated and uploaded as artifact
+  - **Job 2: STIX 2.1 Schema Validation** — deep validation with `stix2` library
+    - Validates all existing bundles in `data/stix/` directory
+  - **Job 3: Feed Manifest Integrity** — validates `feed_manifest.json` structure
+  - **Job 4: Pre-Flight Diagnostic** — runs existing `tests/verify_pipeline.py`
+  - **All-checks-pass gate** — single job to gate merges
+  - Triggers: push to main/develop/feature/*, PRs, daily schedule (06:00 UTC), manual dispatch
+
+### 🔧 Enhanced — STIX 2.1 Schema Validation
+- **`agent/export_stix.py`** — `validate_bundle()` now integrates optional `stix2` library
+  - `try/import stix2` at module level (graceful fallback when not installed)
+  - `validate_bundle()` enhanced: runs `stix2.parse()` deep validation when library available
+  - Result dict extended with `stix2_validated` (bool) and `stix2_errors` (list) fields
+  - All existing functionality and signatures fully preserved (backward compatible)
+
+### 📦 Dependencies Added (optional)
+```
+stix2==3.0.1          # Deep STIX 2.1 schema validation (optional)
+pytest>=7.0           # Test runner
+pytest-cov>=4.0       # Coverage reporting
+pytest-timeout>=2.0   # Test timeout protection
+```
+Install test dependencies: `pip install pytest pytest-cov pytest-timeout stix2`
+
+---
+
+## Pre-Release History (v1.0.0 — internal development)
+
+### [v23.0] — Internal — REST API + Billing Layer
+- FastAPI REST API server (`agent/api/api_server.py`)
+- JWT authentication and RBAC (`agent/api/auth.py`, `agent/api/enterprise_api.py`)
+- Rate limiting: public (60/min), pro (300/min), enterprise (1000/min)
+- Stripe subscription billing gateway (`agent/api/stripe_gateway.py`)
+- Public and enterprise API endpoint separation
+
+### [v22.0] — Internal — STIX 2.1 Identity, TLP, MISP Bridge
+- Full STIX 2.1 Identity object for CYBERDUDEBIVASH GOC as data producer
+- Official OASIS TLP Marking Definitions (CLEAR/GREEN/AMBER/RED)
+- `object_marking_refs` and `created_by_ref` on all STIX objects
+- CourseOfAction objects with CVSS-based remediation guidance
+- Note objects for AI-generated threat narratives
+- MISP bridge: `export_to_misp()` for MISP-compatible JSON event output
+- Internal `validate_bundle()` method added
+- Deduplication guard in `_update_manifest()`
+
+### [v17.0] — Internal — Core Intelligence Platform
+- Dynamic Risk Scoring Engine with KEV, EPSS, supply chain signals
+- Sentinel Momentum Index™ (SMI) composite threat acceleration score
+- MITRE ATT&CK technique mapping
+- Actor attribution matrix (`agent/integrations/actor_matrix.py`)
+- Auto-generated Sigma and YARA detection rules
+- Multi-source RSS feed ingestion (15 high-authority sources)
+- NVD CVE feed with EPSS enrichment (current + 7d delta + 24h acceleration)
+- GitHub Actions workflows: daily intel, weekly digest, social syndication
+- Premium 16-section HTML report generator
+
+---
+
+## Roadmap — Upcoming Releases
+
+### [1.1.0] — Planned
+- [ ] Async feed pipeline with `asyncio` + `aiohttp` for parallel ingestion
+- [ ] Retry logic with exponential backoff on feed fetch failures
+- [ ] Feed health dashboard endpoint (`/api/v1/health/feeds`)
+- [ ] TAXII 2.1 server interface (serve STIX bundles to OpenCTI / MISP)
+- [ ] Real-time Celery/Redis task queue for feed processing
+
+### [1.2.0] — Planned
+- [ ] Entity resolution across multiple intel sources
+- [ ] Graph relationship enrichment (attacker infrastructure clusters)
+- [ ] Webhook alerts on CRITICAL threats (Slack, Teams, PagerDuty)
+- [ ] Python SDK client (`cdb_sdk`) for enterprise API access
+- [ ] SAST/DAST pipeline integration (Bandit, Safety, Semgrep)
+- [ ] Secrets scanning workflow (TruffleHog)
+
+### [2.0.0] — Vision
+- [ ] Neo4j / TigerGraph knowledge graph integration
+- [ ] KQL detection rule auto-generation (Microsoft Sentinel)
+- [ ] SOC playbook auto-generation from MITRE ATT&CK chains
+- [ ] Multi-tenant enterprise deployment with isolated data planes
+- [ ] Rust/Go SDK clients for high-performance integrations
+
+---
+
+*CYBERDUDEBIVASH® Sentinel APEX ULTRA — Global Cybersecurity Intelligence Platform*
+*Maintained by: CyberDudeBivash Global Operations Center (GOC)*
+*Website: https://cyberdudebivash.com | Intel: https://intel.cyberdudebivash.com*

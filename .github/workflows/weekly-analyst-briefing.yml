@@ -1,0 +1,101 @@
+name: CDB Weekly Analyst Briefing v201.0
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'   # Every Monday at 8am UTC  -  Weekly briefing
+  workflow_dispatch:
+    inputs:
+      week_override:
+        description: 'Override week number (e.g., 2026-W08)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Resource-scoped lock: this workflow reads shared intelligence but writes only
+# its own derived namespace. A global sentinel-data-writer lock can starve or
+# cancel pending jobs because GitHub concurrency retains only one pending run.
+concurrency:
+  group: sentinel-data-writer-weekly-analyst
+  cancel-in-progress: false
+
+jobs:
+  weekly-briefing:
+    name: Generate & Publish Weekly Threat Briefing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip --quiet
+          pip install requests feedparser --quiet
+          [ -f requirements-ci-light.txt ] && pip install -r requirements-ci-light.txt --quiet || true
+
+      - name: Ensure output directories
+        run: |
+          mkdir -p data/weekly_briefings
+          mkdir -p data/stix
+
+      - name: Generate Weekly Threat Intelligence Briefing
+        env:
+          CDB_JWT_SECRET:   ${{ secrets.CDB_JWT_SECRET }}
+          BLOG_ID:          ${{ secrets.BLOG_ID }}
+          REFRESH_TOKEN:    ${{ secrets.REFRESH_TOKEN }}
+          CLIENT_ID:        ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET:    ${{ secrets.CLIENT_SECRET }}
+          NVD_API_KEY:      ${{ secrets.NVD_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}
+          CI: true
+        run: python3 scripts/generate_weekly_briefing.py
+
+      - name: Run AI Predictive Analysis on Weekly Threats
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python3 scripts/run_weekly_ai_predictions.py
+
+      - name: Validate and stage weekly briefing publication
+        run: |
+          set -euo pipefail
+          test -d data/weekly_briefings
+          if ! find data/weekly_briefings -type f -size +0c -print -quit | grep -q .; then
+            echo "::error::No non-empty weekly briefing artifacts were generated"
+            exit 1
+          fi
+
+          rm -rf .publish
+          mkdir -p .publish/data/weekly_briefings
+          cp -a data/weekly_briefings/. .publish/data/weekly_briefings/
+
+          echo "Publication manifest:"
+          find .publish/data/weekly_briefings -type f -print0 \
+            | sort -z \
+            | xargs -0 sha256sum
+
+      - name: Publish weekly briefing to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4.9.0
+        with:
+          folder: .publish
+          branch: gh-pages
+          clean: false
+          single-commit: false
+          token: ${{ secrets.GH_TOKEN || github.token }}
+          git-config-name: 'github-actions[bot]'
+          git-config-email: 'github-actions[bot]@users.noreply.github.com'
+          commit-message: 'deploy(analyst-briefing): Weekly Analyst Briefing [skip ci]'

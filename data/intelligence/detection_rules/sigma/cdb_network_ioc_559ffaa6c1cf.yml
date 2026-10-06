@@ -1,0 +1,46 @@
+title: CDB SENTINEL APEX - Network Threat Intel [559ffaa6c1cf]
+id: cdb-net-559ffaa6c1cf
+status: production
+description: >
+    Auto-generated detection rule for 4 malicious IPs and 14 malicious domains
+    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.
+author: CyberDudeBivash SENTINEL APEX v51
+date: 2026-08-16
+modified: 2026-08-16
+tags:
+    - attack.command_and_control
+    - attack.t1071
+    - attack.t1090
+logsource:
+    category: firewall
+    product: any
+detection:
+    selection:
+        DestinationIp:
+            - '11.0.0.0'
+            - '11.0.0.1'
+            - '1.1.2.0'
+            - '1.1.9.13'
+        DestinationHostname|contains:
+            - 'crisp.call-whatapp.com.cn'
+            - 'www.wellsfargo.com'
+            - 'kraj9370392-alt.github.io'
+            - 'duckroblox.com'
+            - 'dyrews.github.io'
+            - 'dynnhost.com'
+            - 'www.robiox.com'
+            - 'badge-auth.com'
+            - 'mobilehsbccprivateonline.com'
+            - 'www.roblox.com'
+            - 'napervillautohaus.com'
+            - 'www.instagramloginp.blogspot.com'
+            - 'syeda-javeria-naqvi-8.github.io'
+            - 'metacpan.org'
+    condition: selection
+level: medium
+falsepositives:
+    - Shared hosting infrastructure
+    - CDN/cloud provider IP overlap
+references:
+    - https://intel.cyberdudebivash.com
+    - https://cyberdudebivash.com/threat-intel

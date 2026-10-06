@@ -1,0 +1,142 @@
+{
+  "platform": "CYBERDUDEBIVASH SENTINEL APEX",
+  "module": "v51_detection_engine",
+  "version": "51.0.0",
+  "batch_id": "e4a5db6171fa",
+  "generated_at": "2026-08-26T02:37:55.075048+00:00",
+  "ioc_count": 102,
+  "ioc_type_breakdown": {
+    "domain": 10,
+    "url": 60,
+    "cve": 24,
+    "sha1": 5,
+    "ipv4": 3
+  },
+  "rules_generated": {
+    "sigma": 2,
+    "yara": 1,
+    "suricata": 1,
+    "total": 4
+  },
+  "rules": [
+    {
+      "rule_id": "cdb-net-e4a5db6171fa",
+      "rule_type": "sigma",
+      "title": "Network IOC Detection [e4a5db6171fa]",
+      "content": "title: CDB SENTINEL APEX - Network Threat Intel [e4a5db6171fa]\nid: cdb-net-e4a5db6171fa\nstatus: production\ndescription: >\n    Auto-generated detection rule for 3 malicious IPs and 10 malicious domains\n    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-08-26\nmodified: 2026-08-26\ntags:\n    - attack.command_and_control\n    - attack.t1071\n    - attack.t1090\nlogsource:\n    category: firewall\n    product: any\ndetection:\n    selection:\n        DestinationIp:\n            - '0.0.0.0'\n            - '169.254.169.254'\n            - '6.0.3.1'\n        DestinationHostname|contains:\n            - 'www.roblox.com'\n            - 'coinbase-lidiya.com'\n            - 'instagramfollowers7894.blogspot.com'\n            - 'facebooklogincc.blogspot.com'\n            - 'www.pastijosjis.blogspot.com'\n            - 'bah5szv.myrdbx.io'\n            - 'localhost.evil.com'\n            - 'localhost.attacker.com'\n            - '127.0.0.1.nip.io'\n            - 'yootheme.com'\n    condition: selection\nlevel: medium\nfalsepositives:\n    - Shared hosting infrastructure\n    - CDN/cloud provider IP overlap\nreferences:\n    - https://intel.cyberdudebivash.com\n    - https://cyberdudebivash.com/threat-intel",
+      "ioc_count": 13,
+      "ioc_types": [
+        "ipv4",
+        "domain"
+      ],
+      "severity": "medium",
+      "mitre_techniques": [
+        "T1071",
+        "T1090"
+      ],
+      "generated_at": "2026-08-26T02:37:55.146146+00:00",
+      "source_advisories": [
+        "CVE-2026-23501: Dell RecoverPoint for VMs, versions 6.0.3 and 6.0.3.1, contains an Improper Neutralization of Special Elements used in a",
+        "utcp-gql SSRF: CVE-2026-44661 fix not applied to the GraphQL and WebSocket plugins",
+        "praisonaiagents has an SSRF protection bypass in spider_tools._host_is_blocked() via DNS-resolved hostnames (127.0.0.1.nip.io)",
+        "[OpenPhish] Phishing URL: https://instagramfollowers7894.blogspot.com/",
+        "PraisonAI serve agents --api-key is ignored, allowing unauthenticated remote agent execution",
+        "[OpenPhish] Phishing URL: https://coinbase-lidiya.com/",
+        "CVE-2026-45741: Gotenberg is a Docker-powered stateless API for PDF files. In 8.32.0 and earlier, the IsPublicIP function in pkg/gotenbe",
+        "PraisonAI: Origin-validation bypass (startswith prefix match) enables unauthenticated cross-site request forgery against the PraisonAI MCP HTTP server",
+        "CVE-2026-75114: Joomla Extension - yootheme.com - Open redirect in CommentController::twitterAuthenticate() in Zoo < 4.1.64 - The refere",
+        "[OpenPhish] Phishing URL: https://www.pastijosjis.blogspot.com/"
+      ],
+      "filename": "cdb_network_ioc_e4a5db6171fa.yml"
+    },
+    {
+      "rule_id": "cdb-hash-e4a5db6171fa",
+      "rule_type": "sigma",
+      "title": "File Hash Detection [e4a5db6171fa]",
+      "content": "title: CDB SENTINEL APEX - Malicious File Hash Detection [e4a5db6171fa]\nid: cdb-hash-e4a5db6171fa\nstatus: production\ndescription: >\n    Auto-generated detection rule for 5 malicious file hashes\n    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.\nauthor: CyberDudeBivash SENTINEL APEX v51\ndate: 2026-08-26\ntags:\n    - attack.execution\n    - attack.t1204\n    - attack.defense_evasion\nlogsource:\n    category: file_event\n    product: any\ndetection:\n    selection:\n        Hashes|contains:\n            - '17ac0eef5c9a5a42b8fb132d3d034973d55a5433'\n            - 'ce97667156a116c50b4a3d1aa21e09f048903fda'\n            - 'd5f1114aaf1a2e9f121a6e66b929149ca2201f1d'\n            - 'e5928449f73f66cc8af1de61621aa974ab255133'\n            - '2d08d0d8b4563212175212f9db0e69f6e68c9619'\n    condition: selection\nlevel: critical\nfalsepositives:\n    - Hash collision (negligible probability)\nreferences:\n    - https://intel.cyberdudebivash.com",
+      "ioc_count": 5,
+      "ioc_types": [
+        "sha256",
+        "sha1",
+        "md5"
+      ],
+      "severity": "critical",
+      "mitre_techniques": [
+        "T1204",
+        "T1059"
+      ],
+      "generated_at": "2026-08-26T02:37:55.146177+00:00",
+      "source_advisories": [
+        "CVE-2026-71694: An issue in Berkeley Out-of-Order Machine (BOOM) / BoomTile RTL benchmark v1.2 2d08d0d8b4563212175212f9db0e69f6e68c9619",
+        "PraisonAI serve agents --api-key is ignored, allowing unauthenticated remote agent execution",
+        "mcp-shell \u2014 Security Disabled by Default in Bare-Binary Deploy Path + Shell Interpreter in Secure-Mode Allowlist",
+        "praisonaiagents: ast_grep_rewrite rewrites arbitrary files without the @require_approval gate enforced on every sibling mutation tool"
+      ],
+      "filename": "cdb_file_hash_e4a5db6171fa.yml"
+    },
+    {
+      "rule_id": "yara-net-e4a5db6171fa",
+      "rule_type": "yara",
+      "title": "Network Intel YARA [e4a5db6171fa]",
+      "content": "rule CDB_SENTINEL_Network_Intel_e4a5db6171fa\n{\n    meta:\n        author = \"CyberDudeBivash SENTINEL APEX v51\"\n        description = \"Detects network IOCs from threat intelligence feeds\"\n        date = \"2026-08-26\"\n        severity = \"high\"\n        reference = \"https://intel.cyberdudebivash.com\"\n        batch_id = \"e4a5db6171fa\"\n        ioc_count = 13\n\n    strings:\n        $ip_0 = \"0.0.0.0\" ascii wide nocase\n        $ip_1 = \"169.254.169.254\" ascii wide nocase\n        $ip_2 = \"6.0.3.1\" ascii wide nocase\n        $dom_3 = \"www.roblox.com\" ascii wide nocase\n        $dom_4 = \"coinbase-lidiya.com\" ascii wide nocase\n        $dom_5 = \"instagramfollowers7894.blogspot.com\" ascii wide nocase\n        $dom_6 = \"facebooklogincc.blogspot.com\" ascii wide nocase\n        $dom_7 = \"www.pastijosjis.blogspot.com\" ascii wide nocase\n        $dom_8 = \"bah5szv.myrdbx.io\" ascii wide nocase\n        $dom_9 = \"localhost.evil.com\" ascii wide nocase\n        $dom_10 = \"localhost.attacker.com\" ascii wide nocase\n        $dom_11 = \"127.0.0.1.nip.io\" ascii wide nocase\n        $dom_12 = \"yootheme.com\" ascii wide nocase\n\n    condition:\n        filesize < 100MB and any of them\n}",
+      "ioc_count": 13,
+      "ioc_types": [
+        "ipv4",
+        "domain"
+      ],
+      "severity": "high",
+      "mitre_techniques": [
+        "T1071",
+        "T1090"
+      ],
+      "generated_at": "2026-08-26T02:37:55.146553+00:00",
+      "source_advisories": [
+        "CVE-2026-23501: Dell RecoverPoint for VMs, versions 6.0.3 and 6.0.3.1, contains an Improper Neutralization of Special Elements used in a",
+        "utcp-gql SSRF: CVE-2026-44661 fix not applied to the GraphQL and WebSocket plugins",
+        "praisonaiagents has an SSRF protection bypass in spider_tools._host_is_blocked() via DNS-resolved hostnames (127.0.0.1.nip.io)",
+        "[OpenPhish] Phishing URL: https://instagramfollowers7894.blogspot.com/",
+        "PraisonAI serve agents --api-key is ignored, allowing unauthenticated remote agent execution",
+        "[OpenPhish] Phishing URL: https://coinbase-lidiya.com/",
+        "CVE-2026-45741: Gotenberg is a Docker-powered stateless API for PDF files. In 8.32.0 and earlier, the IsPublicIP function in pkg/gotenbe",
+        "PraisonAI: Origin-validation bypass (startswith prefix match) enables unauthenticated cross-site request forgery against the PraisonAI MCP HTTP server",
+        "CVE-2026-75114: Joomla Extension - yootheme.com - Open redirect in CommentController::twitterAuthenticate() in Zoo < 4.1.64 - The refere",
+        "[OpenPhish] Phishing URL: https://www.pastijosjis.blogspot.com/"
+      ],
+      "filename": "cdb_network_intel_e4a5db6171fa.yar"
+    },
+    {
+      "rule_id": "suricata-e4a5db6171fa",
+      "rule_type": "suricata",
+      "title": "Suricata Threat Intel [e4a5db6171fa]",
+      "content": "# CDB SENTINEL APEX v51 - Auto-Generated Suricata Rules\n# Batch: e4a5db6171fa | Generated: 2026-08-26\n# IOC Count: 102\n# Source: https://intel.cyberdudebivash.com\n\nalert ip any any -> 0.0.0.0 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 0.0.0.0\"; sid:9876774; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 169.254.169.254 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 169.254.169.254\"; sid:9876775; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert ip any any -> 6.0.3.1 any (msg:\"CDB SENTINEL v51 - Threat Intel IP: 6.0.3.1\"; sid:9876776; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: www.roblox.com\"; dns.query; content:\"www.roblox.com\"; nocase; sid:9877774; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: coinbase-lidiya.com\"; dns.query; content:\"coinbase-lidiya.com\"; nocase; sid:9877775; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: instagramfollowers7894.blogspot.com\"; dns.query; content:\"instagramfollowers7894.blogspot.com\"; nocase; sid:9877776; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: facebooklogincc.blogspot.com\"; dns.query; content:\"facebooklogincc.blogspot.com\"; nocase; sid:9877777; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: www.pastijosjis.blogspot.com\"; dns.query; content:\"www.pastijosjis.blogspot.com\"; nocase; sid:9877778; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: bah5szv.myrdbx.io\"; dns.query; content:\"bah5szv.myrdbx.io\"; nocase; sid:9877779; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: localhost.evil.com\"; dns.query; content:\"localhost.evil.com\"; nocase; sid:9877780; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: localhost.attacker.com\"; dns.query; content:\"localhost.attacker.com\"; nocase; sid:9877781; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: 127.0.0.1.nip.io\"; dns.query; content:\"127.0.0.1.nip.io\"; nocase; sid:9877782; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert dns any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel Domain: yootheme.com\"; dns.query; content:\"yootheme.com\"; nocase; sid:9877783; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, severity high, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"users/8294879321/profile\"; nocase; sid:9878774; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"msn/\"; nocase; sid:9878775; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878776; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878777; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878778; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878779; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878780; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878781; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878782; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878783; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878784; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878785; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878786; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878787; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878788; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878789; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878790; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878791; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878792; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878793; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878794; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878795; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878796; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878797; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878798; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878799; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878800; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878801; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878802; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878803; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878804; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878805; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878806; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878807; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878808; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878809; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878810; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878811; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878812; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878813; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878814; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878815; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"GKAgu\"; nocase; sid:9878816; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878817; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878818; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878819; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878820; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878821; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"wp-content/themes/ar24/24AR24/ar24/\"; nocase; sid:9878822; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"\"; nocase; sid:9878823; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"127.0.0.1.attacker.example\"; nocase; sid:9878824; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"localhost.evil.com\"; nocase; sid:9878825; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"un\"; nocase; sid:9878826; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"localhost\"; nocase; sid:9878827; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"127.0.0.1\"; nocase; sid:9878828; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"localhost.attacker.com.\"; nocase; sid:9878829; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"secret\"; nocase; sid:9878830; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"MervinPraison/PraisonAI\"; nocase; sid:9878831; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"localhost,\"; nocase; sid:9878832; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)\nalert http any any -> any any (msg:\"CDB SENTINEL v51 - Threat Intel URL\"; http.uri; content:\"localhost.evil.example\"; nocase; sid:9878833; rev:1; classtype:trojan-activity; metadata:created_at 2026-08-26, source CDB_SENTINEL_APEX_v51;)",
+      "ioc_count": 73,
+      "ioc_types": [
+        "domain",
+        "url",
+        "cve",
+        "sha1",
+        "ipv4"
+      ],
+      "severity": "high",
+      "mitre_techniques": [
+        "T1071",
+        "T1090",
+        "T1568"
+      ],
+      "generated_at": "2026-08-26T02:37:55.146856+00:00",
+      "source_advisories": [
+        "[OpenPhish] Phishing URL: https://en-ledgr-hardware-shop.pages.dev/",
+        "[OpenPhish] Phishing URL: http://doc-ythvvbc.vercel.app/",
+        "CVE-2024-4040-SSTI-LFI-PoC exploit",
+        "OpenSSL Security Advisory [25th August 2026]",
+        "[OpenPhish] Phishing URL: http://en-download-ledgrr.pages.dev/",
+        "[OpenPhish] Phishing URL: http://doc-desktop--ledgr.pages.dev/",
+        "[OpenPhish] Phishing URL: https://eng-ledgr-hardware-io.pages.dev/",
+        "praisonaiagents: AgentServer declares auth_token but never enforces it on any route",
+        "PraisonAI serve agents --api-key is ignored, allowing unauthenticated remote agent execution",
+        "[OpenPhish] Phishing URL: http://destops-ledgers-lived-us.pages.dev/"
+      ],
+      "filename": "cdb_threat_intel_e4a5db6171fa.rules"
+    }
+  ]
+}

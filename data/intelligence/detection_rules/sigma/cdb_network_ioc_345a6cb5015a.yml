@@ -1,0 +1,67 @@
+title: CDB SENTINEL APEX - Network Threat Intel [345a6cb5015a]
+id: cdb-net-345a6cb5015a
+status: production
+description: >
+    Auto-generated detection rule for 35 malicious IPs and 4 malicious domains
+    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.
+author: CyberDudeBivash SENTINEL APEX v51
+date: 2026-08-01
+modified: 2026-08-01
+tags:
+    - attack.command_and_control
+    - attack.t1071
+    - attack.t1090
+logsource:
+    category: firewall
+    product: any
+detection:
+    selection:
+        DestinationIp:
+            - '3.7.8.1'
+            - '2.9.9.6'
+            - '9.7.2.1'
+            - '9.7.2.11'
+            - '9.6.1.1'
+            - '9.6.1.13'
+            - '1.3.5.0'
+            - '1.3.5.1'
+            - '1.3.5.2'
+            - '1.3.5.3'
+            - '1.3.6.0'
+            - '1.3.6.1'
+            - '1.3.7.0'
+            - '1.3.7.1'
+            - '1.3.7.2'
+            - '1.3.8.0'
+            - '1.3.8.1'
+            - '1.3.8.2'
+            - '1.3.8.3'
+            - '1.3.8.4'
+            - '17.0.0.3'
+            - '26.0.0.7'
+            - '2.2.1.4'
+            - '0.0.0.0'
+            - '13.0.1.0'
+            - '13.0.7.2'
+            - '12.0.1.0'
+            - '12.0.12.27'
+            - '26.0.0.8'
+            - '6.2.2.0'
+            - '6.1.2.0'
+            - '6.2.0.0'
+            - '6.2.1.0'
+            - '5.03.01.49'
+            - '1.1.24.2'
+        DestinationHostname|contains:
+            - 'discuss.rubyonrails.org'
+            - 'cve.org'
+            - 'WordPress.org'
+            - 'ci.eclipse.org'
+    condition: selection
+level: medium
+falsepositives:
+    - Shared hosting infrastructure
+    - CDN/cloud provider IP overlap
+references:
+    - https://intel.cyberdudebivash.com
+    - https://cyberdudebivash.com/threat-intel

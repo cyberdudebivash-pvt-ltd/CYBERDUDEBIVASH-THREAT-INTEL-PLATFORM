@@ -1,0 +1,94 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX -- Repository Integrity Check
+# =============================================================================
+# Non-blocking, informational check that the canonical production
+# documentation (production_manifest.yaml, COMPONENT_REGISTRY.json, and the
+# 5 canonical markdown docs -- see GOVERNANCE.md) still matches the actual
+# repository, and that no new production-shaped component has appeared
+# without being documented.
+#
+# This workflow is deliberately isolated from every existing deployment
+# pipeline: it does not build, test, or deploy anything, it has no
+# `needs:` relationship with deploy-worker.yml or deploy-revenue-engine.yml,
+# and it is not registered as a required status check anywhere. A failure
+# here means the documentation has drifted from reality -- it does not mean
+# production is broken, and it must never be wired to block a deploy.
+#
+# validate_canonical_docs.py enforces (non-zero exit on failure): every
+# documented path/workflow/Worker actually exists, no duplicate registry
+# entries, all internal markdown links resolve.
+#
+# detect_repository_drift.py reports only (always exits 0): production-shaped
+# components found in the repository that aren't yet in the canonical docs.
+# Findings here are not auto-classified -- they're a prompt for a human to
+# look, in a future batch, with evidence.
+# =============================================================================
+
+name: repository-integrity-check v201.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'production_manifest.yaml'
+      - 'COMPONENT_REGISTRY.json'
+      - 'REPOSITORY_STATUS.md'
+      - 'PRODUCTION_RUNTIME.md'
+      - 'LEGACY_COMPONENTS.md'
+      - 'TRANSFORMATION_STATUS.md'
+      - 'ARCHITECTURE_DECISIONS.md'
+      - 'workers/**/wrangler.toml'
+      - '.github/workflows/**'
+      - 'scripts/validate_canonical_docs.py'
+      - 'scripts/detect_repository_drift.py'
+  workflow_dispatch: {}
+  schedule:
+    - cron: '17 6 * * 1'  # weekly safety net, catches drift not tied to one of the paths above
+
+# v184.9 FIX: no concurrency group existed. This workflow triggers on push to
+# .github/workflows/** among other paths, so a burst of workflow-file pushes
+# in a short window (e.g. several hardening PRs merging back to back) queues
+# multiple overlapping runs. Both jobs are read-only (validate + drift-detect,
+# no git writes) so cancelling a superseded run is safe -- unlike the
+# sentinel-data-writer group used by write-side workflows, which needs
+# cancel-in-progress: false to avoid racing mid-write state.
+concurrency:
+  group: repository-integrity-check
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-canonical-docs:
+    name: Validate canonical documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: repository-integrity-validate-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install pyyaml
+      - run: python3 scripts/validate_canonical_docs.py
+
+  detect-repository-drift:
+    name: Detect repository drift (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: repository-integrity-drift-${{ github.ref }}
+      cancel-in-progress: true
+    needs: []  # deliberately independent of the job above -- a validation failure should not hide the drift report
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install pyyaml
+      - run: python3 scripts/detect_repository_drift.py

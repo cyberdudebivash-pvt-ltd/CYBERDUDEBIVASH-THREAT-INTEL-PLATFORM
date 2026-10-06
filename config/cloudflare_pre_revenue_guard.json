@@ -1,0 +1,35 @@
+{
+  "mode": "pre_revenue_cost_guard",
+  "production_strong_consistency_must_remain_disabled": true,
+  "approved_durable_object_bindings": [
+    "GUMROAD_PROVISIONING_LOCK",
+    "WATCHDOG_LEDGER",
+    "WATCHDOG_SCHEDULER"
+  ],
+  "approved_r2_bindings": [
+    "INTEL_R2",
+    "REPORTS_R2"
+  ],
+  "approved_kv_bindings": [
+    "API_KEYS_KV",
+    "RATE_LIMIT_KV",
+    "ANALYTICS_KV",
+    "SECURITY_HUB_KV",
+    "REVENUE_CRM_KV"
+  ],
+  "approved_crons": [
+    "*/15 * * * *",
+    "0 */6 * * *"
+  ],
+  "policy": "No new Cloudflare binding, scheduled trigger, strong-consistency runtime activation, or recurring Cloudflare workload may be introduced without explicit founder approval and a separately reviewed usage/cost impact.",
+  "dormant_recurring_workloads_pending_approval": [
+    {
+      "flag": "FRESHNESS_GUARD_DISPATCH_ENABLED",
+      "secret": "FRESHNESS_GUARD_DISPATCH_TOKEN",
+      "code": "workers/intel-gateway/src/freshness-guard-dispatch.js",
+      "workload": "One GitHub workflow_dispatch of intel-freshness-guard.yml on the :00 and :30 ticks of the existing 15-minute cron (48 per day). No new binding, trigger, KV, R2 or Durable Object operation in the Worker.",
+      "usage_when_enabled": "48 outbound subrequests/day inside cron invocations that already run. The dispatched guard then reads the public /api/health about 48 times/day: at most ~1,500 Worker requests and ~1,500 R2 Class B reads per month, fewer when the healthy response is edge-cached.",
+      "approval_required": "Explicit founder approval after verifying current plan usage and headroom; then set the secret, flip the flag in both wrangler.toml var blocks and update tests/test_cloudflare_pre_revenue_guard.py. Runbook: docs/CUSTOMER_RELEASE_LEDGER.md (R01)."
+    }
+  ]
+}

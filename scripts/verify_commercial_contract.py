@@ -1,0 +1,683 @@
+#!/usr/bin/env python3
+"""
+scripts/verify_commercial_contract.py
+CYBERDUDEBIVASH(R) SENTINEL APEX -- Commercial Contract Drift Gate
+==================================================================================
+Rebuilt 2026-09-19 after the original implementation was silently dropped by a
+`.gitignore` rule (`verify*.py`) that pre-dated this file and was never scoped to
+exclude it -- it was written, run green, and never actually committed. See
+scripts/verify_public_claims.py for the sibling gate with the same history.
+
+config/commercial-contract.json is canonical. Every other place a price, quota
+or forbidden claim is defined MUST agree with it. This script fails the build
+on drift between:
+
+  C01-C16   config/pricing.json               tiers vs canon (4 tiers x 4 fields)
+  C17-C32   config/subscription_tiers.json     tiers vs canon (4 tiers x 4 fields)
+  C33-C38   workers/intel-gateway/src/pricing-data.json (paise) vs canon x 100,
+            plus its usd_monthly/usd_annual display fields vs canon
+  C39-C42   RATE_LIMITS (index.js)             requests_per_minute vs canon
+  C43-C46   DAILY_QUOTAS (daily-quota.js)       requests_per_day vs canon
+  C47-C58   pricing.html PRICES table (USD/INR, monthly/annual, 3 paid tiers)
+  C59+      revenue/operator dashboards' own TIER_PRICES-style constants
+  C59a+     lowercase pricing_tiers-style dashboard constants
+  C59b+     workers/revenue-engine/src/index.js TIERS/PLANS/DEAL_VALUES_INR
+  C59c+     mssp.html partner break-even/profit calculator
+  C60+      every buyer-facing HTML page, scanned for superseded price literals
+  C61+      _forbidden_claims (commercial-contract.json) not present unnegated
+  C62+      runtime quota tables: revenue-enforcement.js REVENUE_CONFIG.LIMITS
+            (rpm, api_calls_day) and revenue-engine TIERS (req_day, req_min),
+            revenue-engine DEAL_VALUES_INR PRO values
+  C63+      no-trial policy: POST /api/leads/trial answers 410 on both Workers,
+            and the page sweep (C60) rejects trial offers and the superseded
+            FREE 100/day quota and INR 2,499 PRO price
+  C64+      keyless Free tier: when FREE api_keys is 0, POST /api/keys/free
+            and revenue-engine POST /api/apikeys/request-free answer 410
+  C65+      AI tracker customer-trust contract: no fabricated uptime/count/
+            confidence/version fallbacks and quota copy matches canonical limits
+
+Exit codes:
+  0 = ALL PASS
+  1 = ONE OR MORE FAIL (drift detected)
+
+(c) 2026 CyberDudeBivash Pvt. Ltd. All Rights Reserved. CONFIDENTIAL.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+import sys
+from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [commercial-contract] %(levelname)s: %(message)s",
+    stream=sys.stdout,
+)
+log = logging.getLogger("sentinel.verify_commercial_contract")
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CONTRACT_PATH = REPO_ROOT / "config" / "commercial-contract.json"
+PRICING_JSON_PATH = REPO_ROOT / "config" / "pricing.json"
+SUBSCRIPTION_TIERS_PATH = REPO_ROOT / "config" / "subscription_tiers.json"
+PRICING_DATA_PATH = REPO_ROOT / "workers" / "intel-gateway" / "src" / "pricing-data.json"
+GATEWAY_INDEX_PATH = REPO_ROOT / "workers" / "intel-gateway" / "src" / "index.js"
+DAILY_QUOTA_PATH = REPO_ROOT / "workers" / "intel-gateway" / "src" / "daily-quota.js"
+PRICING_HTML_PATH = REPO_ROOT / "pricing.html"
+
+# Directories excluded from the buyer-surface sweep: dated historical records,
+# not live offers (matches config/evidence-register.json's stated audit scope).
+EXCLUDED_DIRS = {"blog", "threat", "reports", "node_modules", ".git", "dist", "data"}
+
+# Superseded literal values that must never reappear on a buyer-facing page.
+# Each entry: (human label, compiled regex). Matching is case-insensitive.
+FORBIDDEN_PRICE_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("old MSSP monthly USD $1,999", re.compile(r"\$\s?1,?999\b")),
+    ("old MSSP annual USD $19,190/$19,188", re.compile(r"\$\s?19,?19[08]\b")),
+    ("old MSSP monthly INR (Western grouping) 166,600", re.compile(r"166,600\b")),
+    ("old MSSP monthly INR (Indian grouping) 1,66,600", re.compile(r"1,66,600\b")),
+    ("old MSSP annual INR (Western grouping) 1,666,000", re.compile(r"1,666,000\b")),
+    ("old MSSP annual INR (Indian grouping) 16,66,000", re.compile(r"16,66,000\b")),
+    ("old MSSP paise (unformatted) 16660000/166600000", re.compile(r"\b16660000\b|\b166600000\b")),
+    ("old Enterprise annual USD $4,790", re.compile(r"\$\s?4,?790\b")),
+    ("old Enterprise annual USD $4,788", re.compile(r"\$\s?4,?788\b")),
+    ("old PRO annual USD $470", re.compile(r"\$\s?470\b(?!\d)")),
+    ("wrong legal entity name", re.compile(r"CYBERDUDEBIVASH\s+PRIVATE\s+LIMITED", re.IGNORECASE)),
+    # Bare JS-object-literal forms, e.g. `usd_annual:4790` / `usdAnnual:1999` --
+    # these carry no `$`/comma formatting and slipped past the display-string
+    # patterns above in upgrade.html's two embedded Razorpay/PLANS tables
+    # (found during this gate's own rebuild: the price *text* on the page had
+    # been corrected but the JS object feeding two on-page payment panels
+    # still held the pre-owner-decision numbers). Scoped to a `key:value`
+    # shape so a coincidental bare "1999" (e.g. a year) elsewhere isn't hit.
+    ("old MSSP monthly USD (JS literal) usd(_monthly)?:1999", re.compile(r"usd(?:_monthly)?\s*:\s*1999\b")),
+    ("old MSSP annual USD (JS literal) usd(_a|A)nnual:19190/19188", re.compile(r"usd(?:_a|A)nnual\s*:\s*19,?19[08]\b")),
+    ("old MSSP monthly INR-rupees (JS literal) inr(_monthly)?:166600/166500", re.compile(r"inr(?:_monthly)?\s*:\s*166[56]00\b")),
+    ("old MSSP annual INR-rupees (JS literal) inr(_a|A)nnual:1666000/1600000", re.compile(r"inr(?:_a|A)nnual\s*:\s*1,?[67]00,?000\b")),
+    ("old Enterprise annual USD (JS literal) usd(_a|A)nnual:4790/4788", re.compile(r"usd(?:_a|A)nnual\s*:\s*47[89]0\b")),
+    # P0 2026-09-24 commercial convergence. INR 2,499 was never a contract
+    # price (PRO is INR 4,100) but was still quoted in trial emails.
+    ("superseded PRO price INR 2,499", re.compile(r"\u20b9\s?2,?499\b")),
+    # FREE requests_per_day is 50 (contract + DAILY_QUOTAS); 100/day was
+    # published on 8 pages while the limiter denied at 50.
+    ("superseded FREE daily quota 100/day",
+     re.compile(r"(?<![\d,.])100\s*(?:free\s+)?(?:api\s+)?(?:req|reqs|requests|calls)?\s*(?:/|per\s+)\s*day", re.IGNORECASE)),
+    # trial_policy is "No free trial" for every tier (owner decision
+    # 2026-09-19); POST /api/leads/trial is 410 Gone. A page must not offer one.
+    ("free-trial offer (N-day trial)",
+     re.compile(r"\b\d{1,2}[- ]day\s+(?:free\s+|pro\s+|enterprise\s+)?trial\b", re.IGNORECASE)),
+    ("free-trial CTA (start ... trial)",
+     re.compile(r"\bstart\s+(?:a\s+|your\s+|the\s+)?(?:free\s+|pro\s+|enterprise\s+)?trial\b", re.IGNORECASE)),
+    ("free-trial modal/route wiring (openTrialModal, /api/leads/trial)",
+     re.compile(r"openTrialModal|/api/leads/trial")),
+]
+
+REVENUE_ENFORCEMENT_PATH = REPO_ROOT / "workers" / "intel-gateway" / "src" / "revenue-enforcement.js"
+REVENUE_ENGINE_PATH = REPO_ROOT / "workers" / "revenue-engine" / "src" / "index.js"
+
+
+def check_runtime_quota_tables(canon: dict) -> None:
+    """C62+: quota tables that reach customers outside index.js/daily-quota.js.
+
+    revenue-enforcement.js LIMITS feeds buildUpgradeTrigger()/getUpgradeFeatures()
+    copy returned to FREE/PRO API callers; revenue-engine TIERS drives the
+    customer portal, FREE-key issuance and /api/apikeys/validate. Both drifted
+    (FREE 100 and 25/day, ENTERPRISE/MSSP "unlimited", MSSP 200000/day).
+    """
+    enf_src = REVENUE_ENFORCEMENT_PATH.read_text(encoding="utf-8")
+    limits_m = re.search(r"LIMITS:\s*\{(.*?)\n  \},", enf_src, re.DOTALL)
+    check(limits_m is not None, "revenue-enforcement.js REVENUE_CONFIG.LIMITS located")
+    for tier_id, tier in canon.items():
+        key = tier_id.upper()
+        row = re.search(rf"^\s*{key}:\s*\{{([^}}]*)\}}", limits_m.group(1), re.MULTILINE) if limits_m else None
+        rpm = re.search(r"\brpm:\s*(-?\d+)", row.group(1)) if row else None
+        day = re.search(r"\bapi_calls_day:\s*(-?\d+)", row.group(1)) if row else None
+        got_rpm = int(rpm.group(1)) if rpm else None
+        got_day = int(day.group(1)) if day else None
+        check(got_rpm == tier["requests_per_minute"],
+              f"revenue-enforcement LIMITS.{key}.rpm == {tier['requests_per_minute']} (got {got_rpm})")
+        check(got_day == tier["requests_per_day"],
+              f"revenue-enforcement LIMITS.{key}.api_calls_day == {tier['requests_per_day']} (got {got_day})")
+    check("Unlimited API calls" not in enf_src,
+          "revenue-enforcement.js upgrade copy does not claim Unlimited API calls")
+
+    re_src = REVENUE_ENGINE_PATH.read_text(encoding="utf-8")
+    tiers_m = re.search(r"const TIERS\s*=\s*\{(.*?)\n\};", re_src, re.DOTALL)
+    check(tiers_m is not None, "revenue-engine TIERS located for quota checks")
+    for tier_id, tier in canon.items():
+        key = tier_id.upper()
+        row = re.search(rf"^\s*{key}:\s*\{{(.*?)\}},?\s*$", tiers_m.group(1), re.MULTILINE) if tiers_m else None
+        day = re.search(r"\breq_day:\s*(\d+)", row.group(1)) if row else None
+        rpm = re.search(r"\breq_min:\s*(\d+)", row.group(1)) if row else None
+        got_day = int(day.group(1)) if day else None
+        got_rpm = int(rpm.group(1)) if rpm else None
+        check(got_day == tier["requests_per_day"],
+              f"revenue-engine TIERS.{key}.req_day == {tier['requests_per_day']} (got {got_day})")
+        check(got_rpm == tier["requests_per_minute"],
+              f"revenue-engine TIERS.{key}.req_min == {tier['requests_per_minute']} (got {got_rpm})")
+    # FREE-key issuance must read TIERS, not a literal that can drift again.
+    check(re.search(r"tier:\s*\"FREE\"[^\n]*req_day:\s*\d", re_src) is None,
+          "revenue-engine FREE-key issuance uses TIERS.FREE.req_day, not a literal")
+    deal = re.search(r"DEAL_VALUES_INR:\s*\{([^}]*)\}", re_src)
+    for field, expected in (("pro_monthly", canon["pro"]["inr_monthly"]), ("pro_annual", canon["pro"]["inr_annual"])):
+        m = re.search(rf"{field}\s*:\s*(\d+)", deal.group(1)) if deal else None
+        check(m is not None and int(m.group(1)) == expected,
+              f"revenue-engine DEAL_VALUES_INR.{field} == {expected} (got {m.group(1) if m else None})")
+
+
+def check_no_trial_routes() -> None:
+    """C63+: POST /api/leads/trial is 410 Gone on both Workers (no free trial)."""
+    gw_src = GATEWAY_INDEX_PATH.read_text(encoding="utf-8")
+    gw = re.search(r'path === "/api/leads/trial"[^\n]*\{(.*?)\n  \}', gw_src, re.DOTALL)
+    check(gw is not None and "410" in gw.group(1) and "handleTrialIssuance(" not in gw.group(1),
+          "intel-gateway POST /api/leads/trial answers 410 and never calls handleTrialIssuance")
+    re_src = REVENUE_ENGINE_PATH.read_text(encoding="utf-8")
+    rev = re.search(r'path === "/api/leads/trial"[^\n]*\n\s*(return[^\n]*)', re_src)
+    check(rev is not None and "410" in rev.group(1) and "handleTrialRequest(" not in rev.group(1),
+          "revenue-engine POST /api/leads/trial answers 410 and never calls handleTrialRequest")
+    check("\u20b92,499" not in re_src and "https://intel.cyberdudebivash.com/trial\"" not in re_src
+          and "https://intel.cyberdudebivash.com/trial\">" not in re_src,
+          "revenue-engine email copy quotes no INR 2,499 price and links no /trial page")
+
+
+def check_no_free_key_routes(canon: dict) -> None:
+    """C64+: Free tier is keyless (FREE api_keys == 0): both free-key routes answer 410."""
+    if canon["free"].get("api_keys") != 0:
+        return  # the contract grants free keys; nothing to enforce
+    gw_src = GATEWAY_INDEX_PATH.read_text(encoding="utf-8")
+    gw = re.search(r'path === "/api/keys/free"[^\n]*\{(.*?)\n  \}', gw_src, re.DOTALL)
+    check(gw is not None and "410" in gw.group(1) and "handleFreeKeyRequest(" not in gw.group(1),
+          "intel-gateway POST /api/keys/free answers 410 and never calls handleFreeKeyRequest (FREE api_keys == 0)")
+    re_src = REVENUE_ENGINE_PATH.read_text(encoding="utf-8")
+    rev = re.search(r'path === "/api/apikeys/request-free"[^\n]*\n\s*(return[^\n]*)', re_src)
+    check(rev is not None and "410" in rev.group(1) and "handleFreeKeyRequest(" not in rev.group(1),
+          "revenue-engine POST /api/apikeys/request-free answers 410 and never calls handleFreeKeyRequest (FREE api_keys == 0)")
+
+
+FAILURES: list[str] = []
+CHECK_COUNT = 0
+
+
+def check(condition: bool, description: str) -> None:
+    global CHECK_COUNT
+    CHECK_COUNT += 1
+    if condition:
+        log.info("PASS C%03d: %s", CHECK_COUNT, description)
+    else:
+        FAILURES.append(f"C{CHECK_COUNT:03d}: {description}")
+        log.error("FAIL C%03d: %s", CHECK_COUNT, description)
+
+
+def load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def iter_buyer_html_files():
+    for path in sorted(REPO_ROOT.rglob("*.html")):
+        rel = path.relative_to(REPO_ROOT)
+        if any(part in EXCLUDED_DIRS for part in rel.parts[:-1]):
+            continue
+        yield rel, path
+
+
+# Partner-facing and sales documents (markdown) that quote MSSP terms to
+# buyers. Swept for superseded prices like the buyer HTML pages.
+BUYER_FACING_DOCS = [
+    # The public repository's landing page: it quoted MSSP $1,999, FREE
+    # 100/day and "Unlimited" Enterprise/MSSP calls until 2026-09-30.
+    "README.md",
+    "MSSP_PARTNER_PROGRAM.md",
+    "MSSP_OPERATIONAL_RUNBOOK.md",
+    "mssp-onboarding-kit/MSSP_DEMO_SCRIPT.md",
+    "mssp-onboarding-kit/MSSP_WHITE_LABEL_KIT.md",
+    "mssp-onboarding-kit/MSSP_TENANT_PROVISIONING.md",
+]
+
+# While the contract defines no MSSP tenant allowance (owner decision
+# pending: OWNER_DECISION_REQUIRED_MSSP_TENANT_QUOTA), no buyer-facing copy
+# may promise one. The 100-tenant technical bound in mssp-tenants.js is not a
+# commercial allowance.
+TENANT_ALLOWANCE_CLAIMS = [
+    ("tenant count allowance", re.compile(r"\b(?:up to|includes?|included:?)\s+\d+\s+(?:managed\s+)?(?:client\s+|sub-?)?tenants?\b", re.I)),
+    ("tenant range allowance", re.compile(r"\b\d+\s*[\u2013-]\s*\d+\s+(?:client\s+|sub-?)?tenants?\b", re.I)),
+    ("tenant count allowance", re.compile(r"\b100\s+sub-?tenants?\b", re.I)),
+    ("unlimited tenants/clients", re.compile(r"\bunlimited\s+(?:client\s+|sub-?)?(?:tenants?|clients|sub-?keys)\b", re.I)),
+]
+
+
+def check_mssp_tenant_claims(canon):
+    mssp = canon.get("mssp", {})
+    if any(k in mssp for k in ("tenants_included", "tenant_quota", "max_tenants")):
+        return  # an owner-approved allowance exists; claims are judged against it elsewhere
+    targets = [(rel, path) for rel, path in iter_buyer_html_files()]
+    targets += [(Path(d), REPO_ROOT / d) for d in BUYER_FACING_DOCS if (REPO_ROOT / d).exists()]
+    for rel, path in targets:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        text = re.sub(r"<!--.*?-->", " ", text, flags=re.S)
+        for label, pattern in TENANT_ALLOWANCE_CLAIMS:
+            m = pattern.search(text)
+            check(m is None, f"{rel} makes no MSSP {label} claim without a contract allowance"
+                  + (f" (found '{m.group(0)}')" if m else ""))
+
+
+# Table rows end with this mark, so the last cell of one row never reads
+# as the start of the next ("API keys ... 100" + "Seats ..." is not "100 Seats").
+ROW_END = " \u00b6 "
+
+
+def visible_text(html: str) -> str:
+    """Tag-stripped text, so a claim split across table cells or stat
+    widgets reads as one line: "API requests/day 100 5,000 Unlimited"."""
+    t = re.sub(r"<!--.*?-->", " ", html, flags=re.S)
+    t = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ", t, flags=re.S | re.I)
+    t = re.sub(r"</tr\s*>", ROW_END, t, flags=re.I)
+    t = re.sub(r"<[^>]+>", " ", t)
+    for entity, char in (("&nbsp;", " "), ("&middot;", "·"), ("&mdash;", "—"), ("&amp;", "&")):
+        t = t.replace(entity, char)
+    return re.sub(r"\s+", " ", t)
+
+
+def markdown_text(md: str) -> str:
+    """Markdown with table pipes removed, one row per claim line: a row such
+    as "API calls/day | 100 | Unlimited" reads as one phrase."""
+    lines = [line.replace("|", " ") + ROW_END if line.lstrip().startswith("|") else line
+             for line in md.splitlines()]
+    return re.sub(r"\s+", " ", " ".join(lines))
+
+
+# 2026-09-30 claim classes the literal sweep above did not cover. Each was
+# live on a buyer page while the contract said otherwise.
+SEAT_CLAIM = re.compile(r"(?<![\d,.])(\d+)\s+(?:named\s+)?(?:seats?|named\s+users?)\b", re.I)
+# The contract's highest uptime commitment is 99.9%; 99.95%/99.99% SLA or
+# uptime figures were published for MSSP/Enterprise. A figure attributed to
+# a third party ("99.99% Cloudflare Uptime") is not our commitment.
+UPTIME_ABOVE_CONTRACT = re.compile(r"\b99\.9[5-9]\d*\s*%", re.I)
+# MSSP incident response is "1h dedicated"; "15-min SLA" was published.
+SUB_HOUR_RESPONSE = re.compile(r"\b15[- ]?min(?:ute)?s?\s+(?:SLA|response)\b", re.I)
+UNLIMITED_QUOTA = [
+    re.compile(r"\bunlimited\s+(?:api\s+)?(?:calls|requests|queries)\b", re.I),
+    re.compile(r"(?:calls|requests|req)\s*/\s*day\s+(?:[\d,]+\s+){0,4}unlimited\b", re.I),
+    re.compile(r"\bquota:?\s*unlimited\b", re.I),
+]
+
+
+def check_contract_claim_classes(canon: dict) -> None:
+    seats = {t["seats"] for t in canon.values()}
+    targets = []
+    for rel, path in iter_buyer_html_files():
+        raw = path.read_text(encoding="utf-8", errors="ignore")
+        targets.append((rel, raw, visible_text(raw)))
+    for d in BUYER_FACING_DOCS:
+        if (REPO_ROOT / d).exists():
+            raw = (REPO_ROOT / d).read_text(encoding="utf-8", errors="ignore")
+            targets.append((Path(d), raw, markdown_text(raw)))
+    for rel, raw, text in targets:
+        bad_seats = sorted({m.group(0) for m in SEAT_CLAIM.finditer(text) if int(m.group(1)) not in seats})
+        check(not bad_seats, f"{rel} quotes only contract seat counts {sorted(seats)}"
+              + (f" (found {bad_seats})" if bad_seats else ""))
+        above = [m.group(0) for m in UPTIME_ABOVE_CONTRACT.finditer(text)
+                 if "cloudflare" not in text[m.end():m.end() + 30].lower()]
+        check(not above, f"{rel} promises no uptime above the contract's 99.9%"
+              + (f" (found {above})" if above else ""))
+        # Raw source too: this copy has shipped inside a JS string
+        # (get-api-key.html's plan modal), which visible_text() drops.
+        fast = SUB_HOUR_RESPONSE.search(text) or SUB_HOUR_RESPONSE.search(raw)
+        check(fast is None, f"{rel} promises no sub-hour response (MSSP contract: 1h dedicated)"
+              + (f" (found '{fast.group(0)}')" if fast else ""))
+        unl = next((m.group(0) for p in UNLIMITED_QUOTA for m in p.finditer(text)), None)
+        check(unl is None, f"{rel} publishes no unlimited API quota"
+              + (f" (found '{unl}')" if unl else ""))
+
+
+def main() -> int:
+    if not CONTRACT_PATH.exists():
+        log.error("Canonical contract missing: %s", CONTRACT_PATH)
+        return 1
+    canon = load_json(CONTRACT_PATH)["tiers"]
+
+    # --- C01-C16: config/pricing.json ------------------------------------
+    pricing = load_json(PRICING_JSON_PATH)["tiers"]
+    for tier_id, tier in canon.items():
+        p = pricing.get(tier_id, {})
+        check(p.get("monthly_usd") == tier["usd_monthly"],
+              f"pricing.json {tier_id}.monthly_usd == {tier['usd_monthly']} (got {p.get('monthly_usd')})")
+        check(p.get("annual_usd") == tier["usd_annual"],
+              f"pricing.json {tier_id}.annual_usd == {tier['usd_annual']} (got {p.get('annual_usd')})")
+        check(p.get("monthly_inr") == tier["inr_monthly"],
+              f"pricing.json {tier_id}.monthly_inr == {tier['inr_monthly']} (got {p.get('monthly_inr')})")
+        check(p.get("annual_inr") == tier["inr_annual"],
+              f"pricing.json {tier_id}.annual_inr == {tier['inr_annual']} (got {p.get('annual_inr')})")
+
+    # --- C17-C32: config/subscription_tiers.json --------------------------
+    sub_tiers = load_json(SUBSCRIPTION_TIERS_PATH)
+    for tier_id, tier in canon.items():
+        s = sub_tiers.get(tier_id, {})
+        check(s.get("price_usd") == tier["usd_monthly"],
+              f"subscription_tiers.json {tier_id}.price_usd == {tier['usd_monthly']} (got {s.get('price_usd')})")
+        check(s.get("price_usd_annual") == tier["usd_annual"],
+              f"subscription_tiers.json {tier_id}.price_usd_annual == {tier['usd_annual']} (got {s.get('price_usd_annual')})")
+        check(s.get("price_inr") == tier["inr_monthly"],
+              f"subscription_tiers.json {tier_id}.price_inr == {tier['inr_monthly']} (got {s.get('price_inr')})")
+        check(s.get("price_inr_annual") == tier["inr_annual"],
+              f"subscription_tiers.json {tier_id}.price_inr_annual == {tier['inr_annual']} (got {s.get('price_inr_annual')})")
+
+    # --- C33-C38: Razorpay charging table (paise), PRO/ENTERPRISE/MSSP only
+    pricing_data = load_json(PRICING_DATA_PATH)["tiers"]
+    for tier_id in ("pro", "enterprise", "mssp"):
+        tier = canon[tier_id]
+        key = tier_id.upper()
+        pd = pricing_data.get(key, {})
+        check(pd.get("monthly") == tier["inr_monthly"] * 100,
+              f"pricing-data.json {key}.monthly paise == {tier['inr_monthly'] * 100} (got {pd.get('monthly')})")
+        check(pd.get("annual") == tier["inr_annual"] * 100,
+              f"pricing-data.json {key}.annual paise == {tier['inr_annual'] * 100} (got {pd.get('annual')})")
+        # Display USD on the same runtime provider (Cyber Watchdog, /api/pricing).
+        check(pd.get("usd_monthly") == tier["usd_monthly"],
+              f"pricing-data.json {key}.usd_monthly == {tier['usd_monthly']} (got {pd.get('usd_monthly')})")
+        check(pd.get("usd_annual") == tier["usd_annual"],
+              f"pricing-data.json {key}.usd_annual == {tier['usd_annual']} (got {pd.get('usd_annual')})")
+
+    # --- C39-C42: RATE_LIMITS (requests/minute) ----------------------------
+    gateway_src = GATEWAY_INDEX_PATH.read_text(encoding="utf-8")
+    rl_match = re.search(r"RATE_LIMITS\s*=\s*\{([^}]*)\}", gateway_src)
+    check(rl_match is not None, "RATE_LIMITS constant found in intel-gateway/src/index.js")
+    rate_limits = {}
+    if rl_match:
+        for m in re.finditer(r"(FREE|PRO|ENTERPRISE|MSSP)\s*:\s*(\d+)", rl_match.group(1)):
+            rate_limits[m.group(1)] = int(m.group(2))
+    for tier_id, tier in canon.items():
+        key = tier_id.upper()
+        check(rate_limits.get(key) == tier["requests_per_minute"],
+              f"RATE_LIMITS.{key} == {tier['requests_per_minute']} req/min (got {rate_limits.get(key)})")
+
+    # --- C43-C46: DAILY_QUOTAS (requests/day) ------------------------------
+    quota_src = DAILY_QUOTA_PATH.read_text(encoding="utf-8")
+    daily_quotas = {}
+    for m in re.finditer(r"(FREE|PRO|ENTERPRISE|MSSP)\s*:\s*Object\.freeze\(\{\s*limit:\s*(\d+)", quota_src):
+        daily_quotas[m.group(1)] = int(m.group(2))
+    for tier_id, tier in canon.items():
+        key = tier_id.upper()
+        check(daily_quotas.get(key) == tier["requests_per_day"],
+              f"DAILY_QUOTAS.{key}.limit == {tier['requests_per_day']} req/day (got {daily_quotas.get(key)})")
+
+    # --- C47-C58: pricing.html PRICES table (USD/INR, monthly/annual) -----
+    pricing_html = PRICING_HTML_PATH.read_text(encoding="utf-8")
+    price_block_match = re.search(r"var PRICES\s*=\s*\{(.*?)\n  \};", pricing_html, re.DOTALL)
+    check(price_block_match is not None, "pricing.html PRICES table located")
+    price_block = price_block_match.group(1) if price_block_match else ""
+
+    def html_price(currency: str, billing: str, tier_key: str) -> str | None:
+        # Scope to this currency/billing sub-block first, then pull the tier's price.
+        cur_match = re.search(rf"{currency}:\s*\{{(.*?)\n    \}},?\n    (?:INR|EUR|GBP|\}})", price_block + "\n  }", re.DOTALL)
+        if not cur_match:
+            return None
+        billing_match = re.search(rf"{billing}:\s*\{{(.*?)\n      \}}", cur_match.group(1), re.DOTALL)
+        if not billing_match:
+            return None
+        tier_match = re.search(rf"{tier_key}:\s*\{{[^}}]*?price:\s*'([\d,]+)'", billing_match.group(1))
+        return tier_match.group(1).replace(",", "") if tier_match else None
+
+    expected_usd_monthly = {"pro": "49", "ent": "499", "mssp": "999"}
+    expected_usd_annual_per_month = {  # displayed as a per-month equivalent of the annual total
+        "pro": str(round(canon["pro"]["usd_annual"] / 12)),
+        "ent": str(round(canon["enterprise"]["usd_annual"] / 12)),
+        "mssp": str(round(canon["mssp"]["usd_annual"] / 12)),
+    }
+    expected_inr_monthly = {"pro": "4100", "ent": "41600", "mssp": "83300"}
+
+    for tier_key, expected in expected_usd_monthly.items():
+        got = html_price("USD", "monthly", tier_key)
+        check(got == expected, f"pricing.html USD monthly {tier_key} == {expected} (got {got})")
+    for tier_key, expected in expected_inr_monthly.items():
+        got = html_price("INR", "monthly", tier_key)
+        check(got == expected, f"pricing.html INR monthly {tier_key} == {expected} (got {got})")
+    # Annual totals are asserted via the prose in the `period` field rather than
+    # the per-month figure alone, so a stale total can't hide behind a correct
+    # per-month rounding.
+    check(f"${canon['pro']['usd_annual']}" in price_block or f"${canon['pro']['usd_annual']:,}" in price_block,
+          f"pricing.html states PRO annual total ${canon['pro']['usd_annual']}")
+    check(f"${canon['enterprise']['usd_annual']:,}" in price_block,
+          f"pricing.html states Enterprise annual total ${canon['enterprise']['usd_annual']:,}")
+    check(f"${canon['mssp']['usd_annual']:,}" in price_block,
+          f"pricing.html states MSSP annual total ${canon['mssp']['usd_annual']:,}")
+
+    # --- C59+: revenue/operator dashboard TIER_PRICES-style constants -----
+    dashboard_candidates = list(REPO_ROOT.glob("*.html")) + list((REPO_ROOT / "dashboard").glob("*.html"))
+    tier_price_pattern = re.compile(
+        r"(?:TIER_PRICES|PLAN_PRICES|PRICE_MAP)\s*=\s*\{([^}]*)\}"
+    )
+    # Expected monthly USD per recognized key, including the *_ANNUAL variants
+    # this exact bug historically hid behind (a dashboard naming a variable
+    # "ENTERPRISE_ANNUAL" but assigning it MSSP's annual figure -- the P0
+    # mismatch this whole gate exists to prevent recurring).
+    expected_dashboard_values = {
+        "FREE": canon["free"]["usd_monthly"],
+        "PRO": canon["pro"]["usd_monthly"],
+        "ENTERPRISE": canon["enterprise"]["usd_monthly"],
+        "MSSP": canon["mssp"]["usd_monthly"],
+        "PRO_ANNUAL": canon["pro"]["usd_annual"],
+        "ENTERPRISE_ANNUAL": canon["enterprise"]["usd_annual"],
+        "MSSP_ANNUAL": canon["mssp"]["usd_annual"],
+    }
+    dashboards_checked = 0
+    for path in dashboard_candidates:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        m = tier_price_pattern.search(text)
+        if not m:
+            continue
+        dashboards_checked += 1
+        rel = path.relative_to(REPO_ROOT)
+        values = {k: int(v) for k, v in re.findall(
+            r"(FREE|PRO_ANNUAL|PRO|ENTERPRISE_ANNUAL|ENTERPRISE|MSSP_ANNUAL|MSSP)\s*:\s*'?(\d+)'?", m.group(1)
+        )}
+        # Only assert on keys this particular object actually defines -- not
+        # every dashboard tracks every tier (e.g. an enterprise-onboarding
+        # page may only carry ENTERPRISE/MSSP/ENTERPRISE_ANNUAL).
+        for key, expected in expected_dashboard_values.items():
+            if key in values:
+                check(values[key] == expected, f"{rel} {{{key}}} == {expected} (got {values[key]})")
+    log.info("Scanned %d dashboard file(s) with a TIER_PRICES-style constant.", dashboards_checked)
+
+    # --- lowercase-keyed `pricing_tiers: {free:0, pro:49, enterprise:499,
+    # mssp:999}` shape, found (still stale) in dashboard/revenue_acceleration
+    # .html and dashboard/revenue_dashboard.html during this gate's rebuild --
+    # distinct from the TIER_PRICES-style constant above (different variable
+    # name, lowercase keys, no *_ANNUAL variant).
+    lowercase_tier_pattern = re.compile(r"pricing_tiers\s*:\s*\{([^}]*)\}")
+    lowercase_expected = {
+        "free": canon["free"]["usd_monthly"], "pro": canon["pro"]["usd_monthly"],
+        "enterprise": canon["enterprise"]["usd_monthly"], "mssp": canon["mssp"]["usd_monthly"],
+    }
+    lowercase_checked = 0
+    for path in dashboard_candidates:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for m in lowercase_tier_pattern.finditer(text):
+            lowercase_checked += 1
+            rel = path.relative_to(REPO_ROOT)
+            values = {k: int(v) for k, v in re.findall(r"(free|pro|enterprise|mssp)\s*:\s*'?(\d+)'?", m.group(1))}
+            for key, expected in lowercase_expected.items():
+                if key in values:
+                    check(values[key] == expected, f"{rel} pricing_tiers.{key} == {expected} (got {values[key]})")
+    log.info("Scanned %d pricing_tiers-style constant(s).", lowercase_checked)
+
+    # --- workers/revenue-engine/src/index.js: TIERS, PLANS, DEAL_VALUES_INR -
+    # A second, independently deployed Worker (own Razorpay/Stripe secrets,
+    # D1 CRM, live route on intel.cyberdudebivash.com/api/v2/billing/*) with
+    # its own three price tables, found still stale during this gate's
+    # rebuild -- TIERS feeds real key entitlements, a persisted revenue:mrr_usd
+    # KV ledger, and (via DEAL_VALUES_INR) live outbound/upsell/contract email
+    # copy actually sent to leads and customers. See PLANS' own comment for
+    # why it's checked even though it's confirmed dead code: cheap insurance
+    # against it becoming live again with stale numbers still in it.
+    revenue_engine_path = REPO_ROOT / "workers" / "revenue-engine" / "src" / "index.js"
+    if revenue_engine_path.exists():
+        re_src = revenue_engine_path.read_text(encoding="utf-8", errors="ignore")
+        tiers_m = re.search(r"const TIERS\s*=\s*\{(.*?)\n\};", re_src, re.DOTALL)
+        check(tiers_m is not None, "workers/revenue-engine/src/index.js TIERS constant located")
+        if tiers_m:
+            for tier_id, key in (("pro", "PRO"), ("enterprise", "ENTERPRISE"), ("mssp", "MSSP")):
+                tier_m = re.search(rf"{key}:\s*\{{([^}}]*)\}}", tiers_m.group(1))
+                check(tier_m is not None, f"revenue-engine TIERS.{key} defined")
+                if tier_m:
+                    usd_m = re.search(r"price_usd\s*:\s*(\d+)", tier_m.group(1))
+                    inr_m = re.search(r"price_inr\s*:\s*(\d+)", tier_m.group(1))
+                    check(usd_m is not None and int(usd_m.group(1)) == canon[tier_id]["usd_monthly"],
+                          f"revenue-engine TIERS.{key}.price_usd == {canon[tier_id]['usd_monthly']} "
+                          f"(got {usd_m.group(1) if usd_m else None})")
+                    check(inr_m is not None and int(inr_m.group(1)) == canon[tier_id]["inr_monthly"],
+                          f"revenue-engine TIERS.{key}.price_inr == {canon[tier_id]['inr_monthly']} "
+                          f"(got {inr_m.group(1) if inr_m else None})")
+                    # S19: the annual figure the revenue engine verifies each
+                    # Razorpay Plan's amount against before any checkout.
+                    ann_m = re.search(r"price_inr_annual\s*:\s*(\d+)", tier_m.group(1))
+                    check(ann_m is not None and int(ann_m.group(1)) == canon[tier_id]["inr_annual"],
+                          f"revenue-engine TIERS.{key}.price_inr_annual == {canon[tier_id]['inr_annual']} "
+                          f"(got {ann_m.group(1) if ann_m else None})")
+
+        plans_m = re.search(r"PLANS:\s*\{(.*?)\n  \},", re_src, re.DOTALL)
+        if plans_m:
+            for tier_id in ("pro", "enterprise", "mssp"):
+                tier_m = re.search(rf"{tier_id}:\s*\{{([^}}]*)\}}", plans_m.group(1))
+                if tier_m:
+                    usd_m = re.search(r"(?<!annual_)usd\s*:\s*(\d+)", tier_m.group(1))
+                    annual_usd_m = re.search(r"annual_usd\s*:\s*(\d+)", tier_m.group(1))
+                    check(usd_m is not None and int(usd_m.group(1)) == canon[tier_id]["usd_monthly"],
+                          f"revenue-engine PLANS.{tier_id}.usd == {canon[tier_id]['usd_monthly']} "
+                          f"(got {usd_m.group(1) if usd_m else None})")
+                    check(annual_usd_m is not None and int(annual_usd_m.group(1)) == canon[tier_id]["usd_annual"],
+                          f"revenue-engine PLANS.{tier_id}.annual_usd == {canon[tier_id]['usd_annual']} "
+                          f"(got {annual_usd_m.group(1) if annual_usd_m else None})")
+
+        deal_values_m = re.search(r"DEAL_VALUES_INR:\s*\{([^}]*)\}", re_src)
+        check(deal_values_m is not None, "revenue-engine DEAL_VALUES_INR constant located")
+        if deal_values_m:
+            em_m = re.search(r"enterprise_monthly\s*:\s*(\d+)", deal_values_m.group(1))
+            ea_m = re.search(r"enterprise_annual\s*:\s*(\d+)", deal_values_m.group(1))
+            check(em_m is not None and int(em_m.group(1)) == canon["enterprise"]["inr_monthly"],
+                  f"revenue-engine DEAL_VALUES_INR.enterprise_monthly == {canon['enterprise']['inr_monthly']} "
+                  f"(got {em_m.group(1) if em_m else None})")
+            check(ea_m is not None and int(ea_m.group(1)) == canon["enterprise"]["inr_annual"],
+                  f"revenue-engine DEAL_VALUES_INR.enterprise_annual == {canon['enterprise']['inr_annual']} "
+                  f"(got {ea_m.group(1) if ea_m else None})")
+        # No email template in this file may fall back to the old bare 14999
+        # placeholder this gate's rebuild found and replaced with a reference
+        # to DEAL_VALUES_INR.enterprise_monthly.
+        check("14999" not in re_src, "workers/revenue-engine/src/index.js contains no bare 14999 fallback")
+        check("Unlimited API calls" not in re_src,
+              "workers/revenue-engine/src/index.js email copy does not claim Unlimited API calls")
+
+    # --- mssp.html partner break-even calculator -- bare arithmetic
+    # literals, not an object, so checked as exact known-good expressions
+    # rather than a general numeric sweep (a bare "999"/"1999" elsewhere on
+    # the page is too easily a coincidental, unrelated number to regex for
+    # safely; these two expressions are the specific historical bug).
+    mssp_html_path = REPO_ROOT / "mssp.html"
+    if mssp_html_path.exists():
+        mssp_src = mssp_html_path.read_text(encoding="utf-8", errors="ignore")
+        check(f"({canon['mssp']['usd_monthly']} / (" in mssp_src.replace(" ", "") or
+              f"({canon['mssp']['usd_monthly']}/(" in mssp_src.replace(" ", ""),
+              f"mssp.html break-even calculator uses {canon['mssp']['usd_monthly']}, not a superseded MSSP cost")
+        check(f"commission - {canon['mssp']['usd_monthly']}" in mssp_src.replace(";", ""),
+              f"mssp.html profit calculator subtracts {canon['mssp']['usd_monthly']}, not a superseded MSSP cost")
+
+    # --- C62+/C63+: runtime quota tables and the no-trial route contract ---
+    check_runtime_quota_tables(canon)
+    check_no_trial_routes()
+    check_no_free_key_routes(canon)
+
+    # --- C60+: sweep every buyer-facing HTML page for superseded literals --
+    scanned = 0
+    for rel, path in iter_buyer_html_files():
+        scanned += 1
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for label, pattern in FORBIDDEN_PRICE_PATTERNS:
+            check(not pattern.search(text), f"{rel} does not contain {label}")
+    log.info("Swept %d buyer-facing HTML page(s) for superseded price/legal-entity literals.", scanned)
+    for rel in BUYER_FACING_DOCS:
+        path = REPO_ROOT / rel
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for label, pattern in FORBIDDEN_PRICE_PATTERNS:
+            check(not pattern.search(text), f"{rel} does not contain {label}")
+    check_mssp_tenant_claims(canon)
+    check_contract_claim_classes(canon)
+
+    # --- Forbidden quota claims ---------------------------------------------
+    # commercial-contract.json's _forbidden_claims also lists compliance-
+    # framework names (SOC 2, ISO 27001, ISO 42001, FedRAMP, PCI DSS).
+    # Deliberately NOT enforced here as a bare substring ban: compliance.html
+    # and trust-center.html already describe these honestly as in-progress
+    # readiness programmes ("SOC 2 Type II -- READINESS IN PROGRESS, formal
+    # audit planned H2 2026"), which is a legitimate maturity narrative, not
+    # the kind of unconditional false claim "unlimited API calls" is against
+    # an enforced 50,000/day cap. A substring ban can't distinguish "pursuing
+    # certification" from "certified" without the same false-positive risk
+    # verify_public_claims.py's negation window exists to avoid, and PR #435's
+    # own verification never claimed to have audited compliance-posture
+    # wording -- only customer-proof claims and prices. Flagged as a follow-up
+    # in the mission report rather than mis-enforced here.
+    absolute_quota_claims = [
+        c for c in load_json(CONTRACT_PATH).get("_forbidden_claims", [])
+        if c.lower() in ("unlimited api calls", "unlimited requests", "no rate limit")
+    ]
+    for rel, path in iter_buyer_html_files():
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        lower = text.lower()
+        for claim in absolute_quota_claims:
+            if claim.lower() in lower:
+                check(False, f"{rel} does not contain forbidden claim '{claim}'")
+
+    # --- C65+: AI tracker customer-trust / no-fabrication contract ----------
+    # This page is directly customer-facing and previously published fixed
+    # telemetry ("99.99% UPTIME", fixed anomaly/campaign counts), stale v148
+    # fallbacks, and an "Enterprise unlimited" quota even though the gateway
+    # enforces finite limits. Pin the page to evidence-backed rendering and
+    # the canonical commercial contract so those claims cannot regress.
+    ai_tracker_path = REPO_ROOT / "ai-threat-tracker.html"
+    if ai_tracker_path.exists():
+        ai_src = ai_tracker_path.read_text(encoding="utf-8", errors="ignore")
+        ai_compact = re.sub(r"\s+", "", ai_src)
+        check("99.99% UPTIME" not in ai_src,
+              "ai-threat-tracker.html does not hardcode a 99.99% uptime metric")
+        check("18 anomalies, 22 campaigns, 12 sector forecasts" not in ai_src,
+              "ai-threat-tracker.html does not hardcode AI telemetry counts")
+        check("Enterprise unlimited" not in ai_src,
+              "ai-threat-tracker.html does not claim unlimited Enterprise requests")
+        check("overall||89" not in ai_compact,
+              "ai-threat-tracker.html does not invent 89% confidence when telemetry is absent")
+        check("pipeline_version||'148.0.0'" not in ai_compact,
+              "ai-threat-tracker.html does not fall back to stale v148 runtime identity")
+        check("feed_freshness_hours||'<1'" not in ai_compact,
+              "ai-threat-tracker.html does not invent <1h feed freshness")
+        expected_rate_copy = (
+            f"FREE {canon['free']['requests_per_minute']} req/min ({canon['free']['requests_per_day']}/day) · "
+            f"PRO {canon['pro']['requests_per_minute']} req/min ({canon['pro']['requests_per_day']:,}/day) · "
+            f"ENTERPRISE {canon['enterprise']['requests_per_minute']} req/min ({canon['enterprise']['requests_per_day']:,}/day) · "
+            f"MSSP {canon['mssp']['requests_per_minute']:,} req/min ({canon['mssp']['requests_per_day']:,}/day)"
+        )
+        check(expected_rate_copy in ai_src,
+              "ai-threat-tracker.html rate-limit copy matches canonical per-minute/per-day limits")
+        check('id="es-system"' in ai_src and "HEALTH UNVERIFIED" in ai_src,
+              "ai-threat-tracker.html system-health state is runtime-bound and fail-closed")
+    else:
+        check(False, "ai-threat-tracker.html exists for commercial integrity validation")
+
+    print()
+    print(f"verify_commercial_contract.py: {CHECK_COUNT} checks, {len(FAILURES)} failed.")
+    if FAILURES:
+        print("\nFAILURES:")
+        for f in FAILURES:
+            print(f"  - {f}")
+        return 1
+    print("ALL COMMERCIAL CONTRACT CHECKS PASS.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

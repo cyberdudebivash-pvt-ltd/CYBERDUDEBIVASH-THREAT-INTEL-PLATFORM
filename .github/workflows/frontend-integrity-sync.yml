@@ -1,0 +1,213 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX -- Frontend Integrity Registry Sync
+# =============================================================================
+# ROOT CAUSE FIX (P0, 2026-08-11): scripts/frontend_integrity.py's `verify`
+# mode (GATE E "Frontend integrity", in post-deploy-validation.yml,
+# master-deployment-orchestrator.yml, and self-healing.yml) has always
+# compared the 6 TIER-3 protected assets against config/frontend_checksums.json
+# -- but nothing in any workflow ever called `frontend_integrity.py generate`
+# to keep that registry in sync. Every legitimate, reviewed, merged PR that
+# touches index.html or any protected js/css file has silently made the
+# registry stale, so GATE E hard-fails with a false "TAMPERED" verdict against
+# content that was never actually compromised. This recurred at least twice
+# (PR #150 regenerated the registry manually once; it went stale again the
+# moment the next protected-asset PR merged, because no automation existed).
+#
+# ROOT CAUSE FIX #2 (P0, 2026-09-01): the original push-to-main design below
+# (regenerate after merge, commit, push directly to main) broke the moment a
+# repository ruleset started requiring all changes to main go through a pull
+# request (GH013) -- direct push started failing deterministically on every
+# run (#12 through #19, 8 consecutive failures). A same-day patch added a
+# PR-opening fallback for that case, but it fails too: `gh pr create` errors
+# with "GitHub Actions is not permitted to create or approve pull requests",
+# a separate, org-level restriction on GITHUB_TOKEN that no workflow-level
+# `permissions:` block can grant around. Confirmed live impact from run #19
+# (2026-09-01): config/frontend_checksums.json sat stale on main long enough
+# that `frontend_integrity.py verify` reported a false "TAMPERED: index.html"
+# against #305's legitimately merged change -- exactly the false-positive
+# GATE E exists to avoid, and exactly what this workflow exists to prevent.
+# Manually resynced via #306 to clear that specific false positive; this
+# revision is the structural fix so it can't recur.
+#
+# FIX: stop trying to write to protected main after the fact. Regenerate and
+# commit the registry onto the PR's OWN branch instead, before merge --
+# `contents: write` is enough for that (branch protection on main is never
+# touched, so GH013 never fires; no PR is created, so the disabled
+# Actions-can't-create-PRs restriction never applies either). By the time a
+# PR merges, the registry is already correct as part of that same merge,
+# which is strictly better than racing a post-merge sync: GATE E can never
+# observe a stale registry in the gap between merge and sync.
+#
+# The original push-triggered job is kept, narrowed to a read-only backstop:
+# verify (never write) that whatever landed on main is still in sync. This
+# catches anything that reaches main outside normal PR flow (there
+# shouldn't be one, given the ruleset above, but this is a cheap, minutes-
+# faster early warning for the exact thing GATE E checks downstream in the
+# full deploy pipeline) -- and fails loudly rather than attempting a doomed
+# push-to-main or PR-creation call.
+#
+# Deliberately a separate, minimal-permission workflow rather than an
+# addition to deploy-worker.yml: deploy-worker.yml handles CF_API_TOKEN/
+# CDB_JWT_SECRET and is intentionally `permissions: contents: read` with "no
+# git commit/push step" (its own header comment) -- bolting write access onto
+# that pipeline to fix an unrelated registry-staleness problem would expand
+# its blast radius for no reason. This workflow's only job is generate+commit;
+# it never touches Worker deployment, secrets, or the protected files' content.
+# =============================================================================
+
+name: frontend-integrity-sync v201.0
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'js/api_adapter.js'
+      - 'js/card_renderer.js'
+      - 'js/card_renderer_integration.js'
+      - 'js/sla-monitor.js'
+      - 'css/card_renderer_styles.css'
+      - 'css/homepage-design-system.css'
+      - 'js/homepage-dashboard-engine.js'
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'js/api_adapter.js'
+      - 'js/card_renderer.js'
+      - 'js/card_renderer_integration.js'
+      - 'js/sla-monitor.js'
+      - 'css/card_renderer_styles.css'
+      - 'css/homepage-design-system.css'
+      - 'js/homepage-dashboard-engine.js'
+  workflow_dispatch: {}
+
+permissions:
+  # P0 (2026-09-10, public-repo zero-trust): narrowed from a workflow-wide
+  # contents: write. Only `sync-on-pr` commits+pushes the regenerated
+  # registry back onto the PR branch; `verify-on-push-to-main` is already
+  # documented above (see its own header comment) as a deliberately
+  # read-only backstop that "never attempts to write". sync-on-pr now
+  # declares its own job-level contents: write below instead.
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Primary path: regenerate the registry on the PR's own branch, before
+  # merge. Runs on every push to a PR touching a protected asset.
+  # ---------------------------------------------------------------------------
+  sync-on-pr:
+    name: Regenerate frontend checksum registry (pre-merge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    # Same-repo PRs only: a fork's GITHUB_TOKEN can't push back to the fork's
+    # branch (GitHub's own security default), and this repo doesn't take
+    # fork contributions today -- fails clean (skipped) rather than red for
+    # the one case this can't fix. Also: never react to its own push, or a
+    # commit made with GITHUB_TOKEN would retrigger this job forever.
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'github-actions[bot]'
+    concurrency:
+      # Per-PR, not global: a newer push to THIS PR should supersede an
+      # in-flight sync of an older commit on it, but must never block (or be
+      # blocked by) another PR's own sync.
+      group: frontend-integrity-sync-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout PR head branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 1
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Regenerate and verify registry
+        run: |
+          python3 scripts/frontend_integrity.py generate
+          python3 scripts/frontend_integrity.py verify
+
+      - name: Commit and push onto this PR's own branch if the registry changed
+        run: |
+          git config user.name "CYBERDUDEBIVASH"
+          git config user.email "bivash@cyberdudebivash.com"
+
+          git add config/frontend_checksums.json
+          if git diff --cached --quiet config/frontend_checksums.json; then
+            echo "Registry already up to date -- nothing to commit."
+            exit 0
+          fi
+          # P0 FIX (release convergence): deliberately no [skip ci] here.
+          # GitHub's skip-ci commit-message scan applies to push AND
+          # pull_request events, and on a squash-merge every constituent
+          # commit's message -- including this one -- is concatenated into
+          # the single merge commit landing on main. A tag meant only to
+          # silence a second CI pass on THIS open PR was therefore also
+          # silencing pages-fast-publish.yml's push/pull_request(closed)
+          # deploy triggers on every merge whose PR happened to touch a
+          # protected frontend asset (confirmed: PR #325 and #323 both
+          # carry this exact sub-commit and both silently failed to deploy).
+          # config/frontend_checksums.json alone doesn't match any other
+          # workflow's path filter except two intentionally-unfiltered
+          # governance gates that are *supposed* to run on every push to
+          # main, so there is no expensive pipeline left to protect here.
+          git commit -m "ci(frontend-integrity): resync checksum registry"
+
+          # The PR branch itself (not main) is the push target, so GH013
+          # never applies here -- the only reason to retry is an ordinary
+          # push race against a human pushing to the same PR branch at the
+          # same time, not a rejected-by-ruleset push.
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${{ github.head_ref }}"; then
+              echo "Pushed onto ${{ github.head_ref }} on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push attempt ${attempt} failed (branch moved) -- rebasing onto the latest and retrying."
+            git fetch origin "${{ github.head_ref }}"
+            git rebase "origin/${{ github.head_ref }}" || {
+              echo "FATAL: rebase conflict resyncing the registry -- resolve manually." >&2
+              exit 1
+            }
+            sleep $((attempt * 2))
+          done
+
+          echo "FATAL: could not push the regenerated registry after 3 attempts." >&2
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Backstop: read-only. Confirms whatever just landed on main is still in
+  # sync. Never attempts to write -- direct push to main is blocked by the
+  # GH013 ruleset and Actions can't open PRs in this repo (see header), so a
+  # write attempt here could only ever fail; a clear, actionable failure from
+  # `verify` is strictly more useful than a doomed remediation attempt.
+  # ---------------------------------------------------------------------------
+  verify-on-push-to-main:
+    name: Verify registry is in sync (post-merge backstop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Verify registry matches current main
+        run: python3 scripts/frontend_integrity.py verify
+
+      - name: Remediation guidance
+        if: failure()
+        run: |
+          echo "::error::Registry drift reached main outside a synced PR -- open any PR touching a protected asset (or an empty commit re-touching one) to let sync-on-pr above resync it, then merge." >&2

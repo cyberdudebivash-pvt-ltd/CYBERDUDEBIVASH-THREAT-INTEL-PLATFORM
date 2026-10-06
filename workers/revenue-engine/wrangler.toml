@@ -1,0 +1,142 @@
+name              = "sentinel-revenue-engine"
+main              = "src/production-entry.js"
+compatibility_date = "2025-09-01"
+
+# Production security entrypoint:
+# src/production-entry.js fail-closes the retired legacy manual-payment submission
+# and approval mutations before they can reach persistence/provisioning. All other
+# Revenue Engine routes and scheduled jobs delegate unchanged to src/index.js.
+
+# Worker Routes
+#
+# 1) revenue.intel.cyberdudebivash.com (Custom Domain -- whole subdomain,
+#    dedicated to this Worker). This is the domain this Worker's OWN code
+#    header, revenue-crm/DEPLOY.md, and 14 existing customer-facing pages
+#    (payment-submission.html, customer/api-keys.html, subscription-
+#    management.html, revenue-dashboard.html, etc.) already assume as its
+#    base URL -- but nothing in this repo ever actually declared it, and
+#    DEPLOY.md documents it as a manual "configure DNS" step. Verified live
+#    (2026-07-17): intel.cyberdudebivash.com resolves (HTTP 200); this
+#    subdomain does not resolve at all (proxy CONNECT failure) -- meaning
+#    every one of those customer-facing pages has been calling a hostname
+#    with no DNS record. `custom_domain = true` auto-provisions the DNS
+#    record and certificate on deploy (Cloudflare's documented behavior:
+#    "without having to make changes to your DNS settings"), fixing this
+#    without any manual dashboard step.
+#    NOTE: a real `wrangler deploy` against this exact config on 2026-07-17
+#    rejected "revenue.intel.cyberdudebivash.com/*" outright: "Wildcard
+#    operators (*) are not allowed in Custom Domains / Paths are not allowed
+#    in Custom Domains" -- a Custom Domain claims the whole bare hostname,
+#    no path or wildcard suffix. Fixed below to the bare hostname.
+# 2) intel.cyberdudebivash.com/api/v2/billing/* -- more specific than
+#    intel-gateway's "intel.cyberdudebivash.com/api/*" catch-all
+#    (Cloudflare Workers routing is most-specific-match-wins), so this
+#    Worker's new Razorpay Subscriptions routes live on the same primary
+#    domain intel-gateway already uses, without touching intel-gateway's
+#    route table. Same proven pattern already used by intel-retention-
+#    engine's "intel.cyberdudebivash.com/api/v2/repository/*" (see
+#    workers/intel-retention-engine/wrangler.toml). Both routes are
+#    additive and target different hostnames, so they cannot conflict with
+#    each other.
+routes = [
+  { pattern = "revenue.intel.cyberdudebivash.com", custom_domain = true },
+  { pattern = "intel.cyberdudebivash.com/api/v2/billing/*", zone_name = "cyberdudebivash.com" },
+]
+
+[vars]
+ENGINE_VERSION = "183.0"
+
+# ── KV Namespaces ──────────────────────────────────────────────────────────────
+# Create: npx wrangler kv namespace create "REVENUE_CRM_KV"
+# Create: npx wrangler kv namespace create "EMAIL_QUEUE_KV"
+
+[[kv_namespaces]]
+binding = "REVENUE_CRM_KV"
+id      = "1740d5dba5e74c3aafff1c683588395b"
+
+[[kv_namespaces]]
+binding = "EMAIL_QUEUE_KV"
+id      = "769edd785fbe4c67b878c113d46ff895"
+
+# API_KEYS_KV: same namespace intel-gateway's live auth path (resolveAuth() in
+# workers/intel-gateway/src/index.js) reads on every request. Bound here so
+# provisionCustomer() and the Razorpay Subscriptions webhook handler can write
+# real entitlement records directly into the namespace the live auth check
+# actually consumes — closing the gap where provisionCustomer() previously
+# wrote only to REVENUE_CRM_KV, a namespace intel-gateway never reads.
+# Zero change to the namespace's structure/keys — additive binding only.
+[[kv_namespaces]]
+binding = "API_KEYS_KV"
+id      = "ca786702c6df47b7a95d9777536c7cfb"
+
+# ── D1 Database (CRM) ─────────────────────────────────────────────────────────
+# Create: npx wrangler d1 create sentinel-crm
+# Apply schema: npx wrangler d1 execute sentinel-crm --file=../../revenue-crm/schema.sql
+
+[[d1_databases]]
+binding      = "CRM_DB"
+database_name = "sentinel-crm"
+database_id  = "76bd245d-3c30-4e7f-b33d-9f643c0c3fa5"
+
+# ── Secrets ────────────────────────────────────────────────────────────────────
+# npx wrangler secret put REVENUE_ADMIN_SECRET   → admin API access
+# npx wrangler secret put SENDGRID_API_KEY       → email delivery
+# npx wrangler secret put RAZORPAY_KEY_ID        → INR billing
+# npx wrangler secret put RAZORPAY_KEY_SECRET
+# npx wrangler secret put STRIPE_SECRET_KEY      → USD billing
+# npx wrangler secret put SLACK_WEBHOOK_URL      → deal alerts to Slack
+# npx wrangler secret put AIRTABLE_API_KEY       → optional Airtable CRM sync
+# npx wrangler secret put AIRTABLE_BASE_ID
+#
+# Razorpay Subscriptions (subscription-engine.js) — additive, only required to
+# actually create/verify subscriptions; the routes 503 cleanly if unset.
+# npx wrangler secret put RAZORPAY_WEBHOOK_SECRET     → Subscriptions webhook signing secret
+#                                                        (Razorpay Dashboard -> Webhooks; separate
+#                                                        from the payment webhook secret already
+#                                                        used by workers/intel-gateway)
+# Razorpay Plans must be created ahead of time (Dashboard -> Subscriptions ->
+# Plans, or the Plans API) — a one-time manual step outside what this session
+# can do without live Razorpay credentials. One plan_id per tier/cycle:
+# npx wrangler secret put RAZORPAY_PLAN_ID_PRO_MONTHLY
+# npx wrangler secret put RAZORPAY_PLAN_ID_PRO_ANNUAL
+# npx wrangler secret put RAZORPAY_PLAN_ID_ENTERPRISE_MONTHLY
+# npx wrangler secret put RAZORPAY_PLAN_ID_ENTERPRISE_ANNUAL
+# npx wrangler secret put RAZORPAY_PLAN_ID_MSSP_MONTHLY
+# npx wrangler secret put RAZORPAY_PLAN_ID_MSSP_ANNUAL
+
+[env.production]
+name = "sentinel-revenue-engine"
+
+# wrangler warns "vars exists at the top level, but not on env.production" --
+# vars are not inherited by named environments, so this was silently unset
+# under `wrangler deploy --env production` (the exact command DEPLOY.md and
+# deploy-revenue-engine.yml both use). Non-fatal (a warning, not the error
+# that blocked deploy) but real -- fixed alongside the routes fix above.
+[env.production.vars]
+ENGINE_VERSION = "183.0"
+
+[[env.production.kv_namespaces]]
+binding = "REVENUE_CRM_KV"
+id      = "1740d5dba5e74c3aafff1c683588395b"
+
+[[env.production.kv_namespaces]]
+binding = "EMAIL_QUEUE_KV"
+id      = "769edd785fbe4c67b878c113d46ff895"
+
+[[env.production.kv_namespaces]]
+binding = "API_KEYS_KV"
+id      = "ca786702c6df47b7a95d9777536c7cfb"
+
+[[env.production.d1_databases]]
+binding      = "CRM_DB"
+database_name = "sentinel-crm"
+database_id  = "76bd245d-3c30-4e7f-b33d-9f643c0c3fa5"
+
+# ── Cron Triggers ─────────────────────────────────────────────────────────────
+# Outbound email sends + deal follow-up + trial expiry nudges
+[triggers]
+crons = [
+  "0 9 * * *",    # Daily 9AM UTC: send queued outreach emails
+  "0 14 * * *",   # Daily 2PM UTC: follow-up + trial nudges
+  "0 18 * * 1",   # Every Monday 6PM UTC: weekly threat digest to subscribers
+]

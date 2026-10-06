@@ -1,0 +1,107 @@
+rule CDB_SENTINEL_Network_Intel_df4af1497c18
+{
+    meta:
+        author = "CyberDudeBivash SENTINEL APEX v51"
+        description = "Detects network IOCs from threat intelligence feeds"
+        date = "2026-08-25"
+        severity = "high"
+        reference = "https://intel.cyberdudebivash.com"
+        batch_id = "df4af1497c18"
+        ioc_count = 91
+
+    strings:
+        $ip_0 = "1.8.5.5" ascii wide nocase
+        $ip_1 = "1.0.0.1" ascii wide nocase
+        $ip_2 = "2.6.0.1" ascii wide nocase
+        $ip_3 = "11.2.25.0" ascii wide nocase
+        $ip_4 = "12.2.1.4" ascii wide nocase
+        $ip_5 = "14.1.2.0" ascii wide nocase
+        $ip_6 = "8.0.8.2" ascii wide nocase
+        $ip_7 = "8.1.2.11" ascii wide nocase
+        $ip_8 = "14.1.2.1" ascii wide nocase
+        $ip_9 = "11.2.23.0" ascii wide nocase
+        $ip_10 = "13.3.0.1" ascii wide nocase
+        $ip_11 = "21.8.1.0" ascii wide nocase
+        $ip_12 = "12.2.1.19" ascii wide nocase
+        $dom_13 = "java.net" ascii wide nocase
+        $dom_14 = "securin.io" ascii wide nocase
+        $dom_15 = "allura.apache.org" ascii wide nocase
+        $dom_16 = "www.cve.org" ascii wide nocase
+        $dom_17 = "ogs.secure-nexo.com" ascii wide nocase
+        $dom_18 = "wzebq.xyz" ascii wide nocase
+        $dom_19 = "www.robiox.com" ascii wide nocase
+        $dom_20 = "rbcode.net" ascii wide nocase
+        $dom_21 = "listing-3504791.sagehilltechnologies.com" ascii wide nocase
+        $dom_22 = "update.craigslist.org" ascii wide nocase
+        $dom_23 = "d2nl8fijhv6iw0.cloudfront.net" ascii wide nocase
+        $dom_24 = "p2j3l2g67po7.shares.zrok.io" ascii wide nocase
+        $dom_25 = "bet365koreaapp.com" ascii wide nocase
+        $dom_26 = "apinchofjoy.com" ascii wide nocase
+        $dom_27 = "moonlaunch.top" ascii wide nocase
+        $dom_28 = "www.my-aol-account.blogspot.com" ascii wide nocase
+        $dom_29 = "webdeohemn.github.io" ascii wide nocase
+        $dom_30 = "rahulroman322-jpg.github.io" ascii wide nocase
+        $dom_31 = "tarunpurohit11.github.io" ascii wide nocase
+        $dom_32 = "sankouh.pivac.com" ascii wide nocase
+        $dom_33 = "mypost.drclp.top" ascii wide nocase
+        $dom_34 = "menchinarlizator.top" ascii wide nocase
+        $dom_35 = "kuforijastop.top" ascii wide nocase
+        $dom_36 = "www.ch136645.tw1.ru" ascii wide nocase
+        $dom_37 = "fortpeach.top" ascii wide nocase
+        $dom_38 = "www.cccomcassstiniffty.weebly.com" ascii wide nocase
+        $dom_39 = "www.click" ascii wide nocase
+        $dom_40 = "www.clientes-banamex.webcindario.com" ascii wide nocase
+        $dom_41 = "x9noticia.com" ascii wide nocase
+        $dom_42 = "www.roblox.com" ascii wide nocase
+        $dom_43 = "www.ptesm.com" ascii wide nocase
+        $dom_44 = "www.gttyour-robloxrbx.blogspot.com" ascii wide nocase
+        $dom_45 = "shopee0488.blogspot.com" ascii wide nocase
+        $dom_46 = "waves-whatapp.hl.cn" ascii wide nocase
+        $dom_47 = "dialogue-whatapp.com.cn" ascii wide nocase
+        $dom_48 = "pehsad.com" ascii wide nocase
+        $dom_49 = "www.roblox.com.ml" ascii wide nocase
+        $dom_50 = "h5.ring-whatapp.com.cn" ascii wide nocase
+        $dom_51 = "17534.xyz" ascii wide nocase
+        $dom_52 = "www.17575.xyz" ascii wide nocase
+        $dom_53 = "www.17556.xyz" ascii wide nocase
+        $dom_54 = "www.17557.xyz" ascii wide nocase
+        $dom_55 = "www.17552.xyz" ascii wide nocase
+        $dom_56 = "www.17558.xyz" ascii wide nocase
+        $dom_57 = "ronitkp06-proj.github.io" ascii wide nocase
+        $dom_58 = "www.infoundianshopee40.blogspot.com" ascii wide nocase
+        $dom_59 = "cipher.rosakyiv.com" ascii wide nocase
+        $dom_60 = "d30sec8k5ond2x.cloudfront.net" ascii wide nocase
+        $dom_61 = "lisadrosss-lang.github.io" ascii wide nocase
+        $dom_62 = "maps-icloud.com" ascii wide nocase
+        $dom_63 = "www.robIox.com" ascii wide nocase
+        $dom_64 = "gitweb.gentoo.org" ascii wide nocase
+        $dom_65 = "acrobatreaderonline.com" ascii wide nocase
+        $dom_66 = "resi.com" ascii wide nocase
+        $dom_67 = "metacpan.org" ascii wide nocase
+        $dom_68 = "8788.site" ascii wide nocase
+        $dom_69 = "www.instagram-login-authentication.duckdns.org" ascii wide nocase
+        $dom_70 = "www.shopeejkt4782.blogspot.com" ascii wide nocase
+        $dom_71 = "trustwalletmycard.com" ascii wide nocase
+        $dom_72 = "www.shopifyweins.com" ascii wide nocase
+        $dom_73 = "www.shopifybeltd.com" ascii wide nocase
+        $dom_74 = "www.policy-violation-center.com" ascii wide nocase
+        $dom_75 = "infoundianshopee37.blogspot.com" ascii wide nocase
+        $dom_76 = "trezorsuitev2.com" ascii wide nocase
+        $dom_77 = "shopeejkt717.blogspot.com" ascii wide nocase
+        $dom_78 = "site-3da5qr19c.godaddysites.com" ascii wide nocase
+        $dom_79 = "infohadiahshopee2.blogspot.com" ascii wide nocase
+        $dom_80 = "infoundianshopee55.blogspot.com" ascii wide nocase
+        $dom_81 = "shopee-282.blogspot.com" ascii wide nocase
+        $dom_82 = "pemenangshopee13.blogspot.com" ascii wide nocase
+        $dom_83 = "galery-shopee77.blogspot.com" ascii wide nocase
+        $dom_84 = "www.pemenang67.blogspot.com" ascii wide nocase
+        $dom_85 = "www.pestashopee-47.blogspot.com" ascii wide nocase
+        $dom_86 = "www.facebook-247-support.blogspot.com" ascii wide nocase
+        $dom_87 = "wasil-se.github.io" ascii wide nocase
+        $dom_88 = "compendiumusa.net" ascii wide nocase
+        $dom_89 = "j2commerce.com" ascii wide nocase
+        $dom_90 = "yootheme.com" ascii wide nocase
+
+    condition:
+        filesize < 100MB and any of them
+}

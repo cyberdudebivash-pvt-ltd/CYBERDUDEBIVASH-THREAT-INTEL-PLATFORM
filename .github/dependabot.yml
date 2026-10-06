@@ -1,0 +1,26 @@
+# SENTINEL APEX -- Dependabot version updates
+#
+# Scoped to the github-actions ecosystem only (P0 public-repo Zero-Trust
+# hardening, 2026-09-10): every third-party Action reference in
+# .github/workflows/*.yml is now pinned to a full commit SHA with a
+# trailing "# vX.Y.Z" comment (GitHub's documented convention for
+# SHA-pinned Actions). Dependabot recognizes that convention and opens a
+# PR to bump the SHA (updating the comment to match) whenever a pinned
+# action publishes a new release -- so the pin stays current without
+# reverting to a floating, mutable tag.
+#
+# Deliberately does NOT add npm/pip/etc. ecosystems here: those already
+# have Dependabot security alerts (a separate, config-free GitHub
+# feature) and this repo has at least one deliberate, evidence-backed
+# version pin (workers/intel-gateway's wrangler, held below v4 for its
+# live deploy path -- see deploy-worker.yml's header comment) that an
+# automated version-bump PR could silently fight. Adding another
+# ecosystem here is a separate decision, not a side effect of this one.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(actions)"

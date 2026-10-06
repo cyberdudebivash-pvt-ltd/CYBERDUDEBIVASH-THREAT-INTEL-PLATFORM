@@ -1,0 +1,83 @@
+# =============================================================================
+# CYBERDUDEBIVASH(R) SENTINEL APEX -- Intel Freshness Guard (P0 2026-09-26)
+#
+# Self-heals a stale PUBLIC feed. The public feed went 9h+ stale (contract
+# 6h) although ingestion worked: the sentinel-blogger run queued at 19:57Z
+# was cancelled while PENDING when another sentinel-data-writer workflow
+# queued behind it (a concurrency group keeps one pending run; the newer one
+# wins), and nothing re-queued it. See scripts/intel_freshness_guard.py.
+#
+# Every 30 min: read the published feed's age from the public /api/health
+# (canonical contract) and, when it is >= 4h old with no sentinel-blogger run
+# active or queued, dispatch one. Never publishes or writes data itself; not
+# in the sentinel-data-writer group (it writes nothing). Seconds per run.
+#
+# F3 (2026-10-02): GitHub delivers about 4 of this cron's 48 daily slots, so
+# a 4h-old feed usually reached the 6h breach before the guard looked (4
+# breaches 09-30 to 10-02). The guard therefore also runs whenever one of the
+# workflows below completes on main. GitHub delivers each about 3-5 times a
+# day at different times. Replaying 09-28 to 10-02 run history:
+#   - guard runs rise from 4.4/day to about 52/day, near the 48/day this
+#     cron was sized for;
+#   - the chance that a 75-minute dispatch window passes with no guard run
+#     falls from 76% to about 5%;
+#   - a guard run would have fallen 4.0-4.7h into each of the 4 breaches,
+#     early enough for a dispatched run to publish before 6h. The set was
+#     chosen from the same history, so this replay is in-sample.
+# Names must match each workflow's `name:` exactly.
+# tests/test_intel_freshness_guard_triggers.py fails if one drifts, for
+# example at a version bump. The durable fix is the Worker-cron dispatch,
+# R01 in docs/CUSTOMER_RELEASE_LEDGER.md, which awaits owner approval.
+# =============================================================================
+name: Intel Freshness Guard v201.0
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch: {}
+  workflow_run:
+    workflows:
+      - "SENTINEL APEX Enterprise Governance v201.0"
+      - "SENTINEL APEX -- Enterprise Alert Monitor v201.0"
+      - "Pipeline Staleness Monitor v201.0"
+      - "SENTINEL APEX -- Self-Healing Engine v201.0"
+      - "CDB Platform Status Monitor v201.0"
+      - "SENTINEL APEX — Dashboard Feeds Sync v201.0"
+      - "SENTINEL APEX Enterprise Intelligence Quality v201.0"
+      - "SENTINEL APEX — Engine Smoke Evidence v201.0"
+      - "CDB Multi-Source Intelligence Enrichment v201.0"
+      - "UI File Guardian — SENTINEL APEX Card System v201.0"
+      - "CDB Sentinel APEX -- Precognition Engine v201.0"
+      - "SENTINEL APEX — Generate & Sync AI Tracker v201.0"
+      - "SLA Heartbeat v201.0"
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: intel-freshness-guard
+  cancel-in-progress: true
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  guard:
+    name: Published feed freshness guard
+    # A workflow_run trigger counts only for runs of this repository's own
+    # code. The guard reads nothing from the triggering run.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          sparse-checkout: scripts/intel_freshness_guard.py
+          sparse-checkout-cone-mode: false
+      - name: Guard the published feed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: python3 scripts/intel_freshness_guard.py

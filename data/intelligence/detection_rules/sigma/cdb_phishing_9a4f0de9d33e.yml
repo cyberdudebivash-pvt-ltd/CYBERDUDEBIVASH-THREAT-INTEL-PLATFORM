@@ -1,0 +1,24 @@
+title: CDB SENTINEL APEX - Phishing Sender Detection [9a4f0de9d33e]
+id: cdb-phish-9a4f0de9d33e
+status: production
+description: Detects emails from known malicious senders
+author: CyberDudeBivash SENTINEL APEX v51
+date: 2026-08-23
+tags:
+    - attack.initial_access
+    - attack.t1566
+logsource:
+    category: email
+    product: any
+detection:
+    selection:
+        SenderAddress:
+            - 'unknown@gendigital.invalid'
+            - 'serorlab@d8a101bb9109701ffcc4b0ffa87eaa6accea.com'
+            - 'security@wagtail.org'
+    condition: selection
+level: high
+falsepositives:
+    - Spoofed sender addresses
+references:
+    - https://intel.cyberdudebivash.com

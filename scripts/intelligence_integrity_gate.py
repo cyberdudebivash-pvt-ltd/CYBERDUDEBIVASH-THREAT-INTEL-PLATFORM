@@ -1,0 +1,1327 @@
+#!/usr/bin/env python3
+"""
+===============================================================================
+CYBERDUDEBIVASH(R) SENTINEL APEX
+INTELLIGENCE INTEGRITY GATE v158.5
+===============================================================================
+PURPOSE:
+  Comprehensive pre-deployment intelligence quality enforcement engine.
+  Implements all 8 mandatory integrity safeguards to prevent synthetic CVE
+  flooding, entropy collapse, feed diversity failure, and stale deployment.
+
+SAFEGUARDS IMPLEMENTED:
+  A. Synthetic CVE Detector        — sequential flood + fake CVE detection
+  B. Entropy Gate                  — Shannon entropy + semantic diversity
+  C. Feed Diversity Validator      — multi-source, multi-actor, multi-vendor
+  D. KEV Health Gate               — CISA KEV enrichment continuity
+  E. Runtime Integrity Baseline    — orchestration timing + stage execution
+  F. Advisory Authenticity Scoring — realism, IOC richness, ATT&CK depth
+  G. Manifest Mutation Validator   — stale payload + frozen dashboard detect
+  H. Synthetic Flood Circuit Breaker — quarantine + alert on spike
+
+MODES:
+  --check    Full integrity check. Exit 1 on any HARD_FAIL.
+  --report   Generate human-readable integrity report. Always exits 0.
+  --apply    Same as check but also writes quarantine manifest on failure.
+
+EXIT CODES:
+  0 -- All integrity gates passed
+  1 -- One or more HARD_FAIL violations detected
+  2 -- Runtime error (cannot parse feed/manifest)
+
+(c) 2026 CyberDudeBivash Pvt. Ltd. All Rights Reserved. CONFIDENTIAL.
+===============================================================================
+"""
+
+import argparse
+import json
+import logging
+import math
+import re
+import sys
+from collections import Counter, defaultdict
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [intelligence_integrity_gate] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("CDB-IIG")
+
+GATE_VERSION = "158.5"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+
+# A. Synthetic CVE Detector thresholds
+# v166.8 FIX (GAP-014): NVD assigns sequential CVE IDs for bulk vulnerability reports
+# (e.g. CVE-2026-10190 through CVE-2026-10194 are all real Tenda W12 CVEs from NVD).
+# Old threshold=5 caused false HARD_FAIL on every run with real multi-CVE product advisories.
+# New threshold=25: catches genuine synthetic generators (which produce 50-200+ sequential IDs)
+# while passing real batch NVD advisories which typically have <20 sequential IDs.
+# v160.2 FIX (run #1562 false HARD_FAIL): Threshold raised 25→40.
+# The sequential check now uses PRIMARY cve_id only (not text-extracted CVEs), which
+# eliminates the main inflation vector (description text citing many adjacent CVEs).
+# Belt-and-suspenders: 40 catches synthetic generators (50-200+ sequential IDs) while
+# passing real NVD batch pulls which produce <30 sequential primary IDs even in large runs.
+SYNTHETIC_CVE_YEAR_FUTURE   = 2027        # CVEs from future years need NVD validation
+SYNTHETIC_SEQUENTIAL_WINDOW = 40          # >=40 primary sequential CVEs = flood alert (was 25; primary-only since v160.2)
+SYNTHETIC_FLEET_THRESHOLD   = 0.40        # >40% CDB-*-GEN actors = synthetic dominance
+SYNTHETIC_HARD_FAIL_RATIO   = 0.60        # >60% synthetic actors = HARD_FAIL
+
+# B. Entropy Gate thresholds
+# v166.8 FIX (GAP-011): Actor entropy minimum lowered to reflect real CTI platform reality.
+# 64% CDB-UNATTR-CVE is expected when CVE feeds dominate — unattributed vulnerability data
+# is the norm, not evidence of synthetic generation. Genuine synthetic generators produce
+# single-actor dominance >95%. HARD_FAIL threshold lowered to 0.5 bits (near-zero diversity).
+# Near-duplicate Jaccard check moved to WARN-only (CVE titles naturally share "CVE-2026-" prefix).
+ENTROPY_TITLE_MIN            = 3.5        # Shannon bits — below this = repetitive titles
+ENTROPY_ACTOR_MIN            = 0.5        # Actor diversity minimum (was 1.5 — too strict for CVE feeds)
+ENTROPY_TECHNIQUE_MIN        = 2.0        # MITRE technique diversity minimum
+SIMILARITY_DEDUP_THRESHOLD   = 0.80       # Jaccard similarity — above = near-duplicate (now WARN-only)
+
+# C. Feed Diversity thresholds
+# v166.8 FIX (GAP-002/C): Actor monoculture threshold raised — a platform ingesting CVE feeds
+# + multi-source intel legitimately has CDB-UNATTR-CVE as the dominant actor. The monoculture
+# check should fire only when ALL actors (including attributed ones) are the same single code.
+# FEED_MIN_UNIQUE_ACTORS reduced from 3 to 2 — even 2 distinct actors (unattr + one real) is
+# meaningful differentiation. True monoculture = single actor on ALL items with any actor set.
+FEED_MIN_SOURCES             = 2          # Minimum distinct source domains
+FEED_MAX_SINGLE_SOURCE_RATIO = 0.85       # >85% single source = dominance warning
+FEED_MAX_SINGLE_ACTOR_RATIO  = 0.90       # >90% single actor = diversity failure (was 0.70)
+FEED_MIN_UNIQUE_ACTORS       = 2          # Minimum distinct actor IDs (was 3)
+
+# D. KEV Health thresholds
+KEV_EXPECTED_RATIO           = 0.02       # Expect >=2% of advisories to have KEV=True
+                                          # (realistic for a 100-item feed)
+
+# E. Runtime Integrity thresholds
+RUNTIME_MIN_MINUTES          = 8          # Pipeline should run >=8 minutes (not collapsed)
+RUNTIME_MAX_MINUTES          = 120        # >120 min = hung pipeline warning
+STAGE_REQUIRED               = ["2", "3", "3.5", "5"]  # must appear in timing
+
+# F. Authenticity Scoring thresholds
+AUTH_SCORE_MIN               = 40         # /100 — items below this flagged as low-quality
+AUTH_SCORE_HARD_FAIL         = 20         # /100 — items below this = HARD_FAIL
+AUTH_POOR_ITEM_RATIO         = 0.50       # >50% items below AUTH_SCORE_MIN = gate fail
+
+# G. Manifest Mutation thresholds
+MANIFEST_STALE_HOURS         = 12         # Manifest older than 12h = stale warning
+MANIFEST_FROZEN_HOURS        = 48         # Manifest older than 48h = HARD_FAIL
+MANIFEST_MIN_MUTATION        = 0.05       # <5% items different from last manifest = frozen
+
+# H. Flood Circuit Breaker
+FLOOD_SYNTHETIC_SPIKE        = 0.75       # >75% synthetic in current run = circuit break
+FLOOD_QUARANTINE_PATH        = REPO_ROOT / "data" / "quarantine" / "synthetic_flood_quarantine.json"
+
+# Known synthetic/generic actor patterns (must stay in sync with AHE)
+SYNTHETIC_ACTOR_RE = re.compile(
+    r"(cdb-apt-gen|cdb-cve-gen|cdb-ran-gen|cdb-phi-gen|cdb-sup-gen|"
+    r"cdb-mob-gen|cdb-bot-gen|cdb-cry-gen|cdb-mal-gen|cdb-rat-gen|"
+    r"apex-cluster-unattributed|unc-unknown|advanced persistent threat cluster|"
+    r"generic (apt|ransomware|threat) cluster)",
+    re.IGNORECASE,
+)
+
+CVE_YEAR_RE  = re.compile(r"CVE-(\d{4})-(\d{4,7})", re.IGNORECASE)
+CVE_ID_RE    = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
+
+# v184.0 FIX (GAP-A-KERNEL): NVD bulk-assigns sequential CVE IDs to Linux kernel maintenance
+# patches (e.g. CVE-2026-52952 through CVE-2026-53027 are 75+ real NVD kernel bugfix entries).
+# These are genuine CVEs from kernel.org/NVD — NOT synthetic. Excluding them from the sequential
+# flood counter prevents false HARD_FAIL while still catching synthetic generators whose titles
+# are not Linux kernel maintenance strings.
+LINUX_KERNEL_CVE_RE = re.compile(
+    r"in the linux kernel.*(?:resolved|vulnerability has been resolved)|"
+    r"linux kernel.*(?:fix|fixes|fixed)\s+(?:a\s+)?(?:potential\s+)?"
+    r"(?:double.free|use.after.free|null.pointer|null-pointer-deref|"
+    r"race\s+condition|memory\s+leak|buffer\s+overflow|uaf|dangling\s+pointer|"
+    r"use-after-free|double_free|null_deref|oob\s+read|out.of.bounds)|"
+    r"(?:net|drm|mm|fs|ipc|block|crypto|usb|pci|arm|x86|powerpc|s390|"
+    r"tipc|sctp|ice|nfs|ext4|btrfs|xfs|vfs|sched|cgroup|perf|kvm|nvme|"
+    r"amdgpu|i915|nouveau|vmware|virtio|bluetooth|wifi|mac80211|cfg80211):"
+    r"\s+fix\s+",
+    re.IGNORECASE,
+)
+
+# PRODUCTION-VERIFICATION FIX (2026-08-24, GAP-A-ORACLE-CPU): same class of false
+# HARD_FAIL as GAP-A-KERNEL above, for Oracle's quarterly Critical Patch Update
+# (CPU) instead of Linux kernel maintenance. Confirmed live: CVE-2026-62582
+# through CVE-2026-62640 (47 primary IDs, gaps <=3) are genuine, individually
+# distinct NVD entries -- different attack vectors and CVSS scores per CVE (e.g.
+# CVE-2026-62636 network/SOAP CVSS 8.6, CVE-2026-62637 adjacent-network CVSS 9.3,
+# CVE-2026-62638 network/HTTP CVSS 9.1) sharing only Oracle's own boilerplate
+# opening sentence, which NVD publishes verbatim for every Oracle CPU CVE. Oracle
+# bulk-discloses 100+ CVEs on CPU day, all NVD-assigned in one sequential block --
+# not a synthetic generator. Matches on that exact boilerplate (which a generator
+# would have no reason to reproduce) so genuine synthetic floods with unrelated
+# titles are still caught.
+ORACLE_CPU_CVE_RE = re.compile(
+    r"vulnerability in the .+? product of oracle .+?\(component:",
+    re.IGNORECASE,
+)
+
+
+# ── Data Loading ──────────────────────────────────────────────────────────────
+
+def load_feed(path: Path) -> List[Dict]:
+    """Load api/feed.json or data/stix/feed_manifest.json."""
+    if not path.exists():
+        log.error("[load] Feed not found: %s", path)
+        sys.exit(2)
+    try:
+        blob = path.read_bytes()
+        nul = blob.count(b"\x00")
+        if nul:
+            # P0-3 fix (v174): feed.json carries NUL-byte padding corruption that
+            # made strict json.loads raise "Extra data" -> sys.exit(2) on EVERY run,
+            # so the gate never executed. Strip padding (same guard as certifier/canary).
+            log.warning("[load] Feed contains %d NUL byte(s) -- stripping corruption padding", nul)
+            blob = blob.rstrip(b"\x00").replace(b"\x00", b"")
+        raw = json.loads(blob.decode("utf-8", errors="replace"))
+    except Exception as e:
+        log.error("[load] Cannot parse %s: %s", path, e)
+        sys.exit(2)
+
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        for key in ("advisories", "reports", "items", "data", "feed"):
+            if key in raw and isinstance(raw[key], list):
+                return raw[key]
+        # Try values
+        for v in raw.values():
+            if isinstance(v, list) and v:
+                return v
+    return []
+
+
+def _actor_id(item: Dict) -> str:
+    actor = item.get("actor_cluster") or item.get("actor") or ""
+    if isinstance(actor, dict):
+        actor = actor.get("tracking_id") or actor.get("id") or ""
+    return str(actor).strip()
+
+
+def _title(item: Dict) -> str:
+    return str(item.get("title") or item.get("headline") or item.get("name") or "").strip()
+
+
+def _source(item: Dict) -> str:
+    return str(item.get("source_url") or item.get("source") or
+               item.get("feed_source") or item.get("url") or "").lower()
+
+
+def _risk(item: Dict) -> Optional[float]:
+    r = item.get("risk_score") or item.get("composite_risk") or item.get("risk")
+    try:
+        return float(r) if r is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _kev(item: Dict) -> bool:
+    v = item.get("kev") or item.get("kev_confirmed") or item.get("kev_present") or False
+    if isinstance(v, str):
+        return v.lower() in ("true", "yes", "1", "confirmed")
+    return bool(v)
+
+
+def _techniques(item: Dict) -> List[str]:
+    raw = item.get("mitre_techniques") or item.get("techniques") or []
+    if isinstance(raw, str):
+        raw = [raw]
+    result = []
+    for t in raw:
+        if isinstance(t, dict):
+            result.append(str(t.get("id") or t.get("technique_id") or ""))
+        else:
+            result.append(str(t))
+    return [t for t in result if t]
+
+
+def _cves(item: Dict) -> List[str]:
+    # Structured CVE fields — full field-parity with kev_feed_marker._extract_cve().
+    # v160.2 FIX (run #1562 Gate D false HARD_FAIL): Prior code only checked
+    # cve_ids and cves (plural). kev_feed_marker._extract_cve() checks cve_id,
+    # cve_ids, cves, and cve (all four canonical field names). The divergence was
+    # the exact mechanism of the run #1562 INFLATION HARD_FAIL:
+    #   marker extracted CVE-2026-3055 from item["cve_id"] → found in KEV catalog
+    #   → set item["kev"] = True.
+    #   gate saw item["kev"] = True but _cves() returned only {CVE-2022-28368}
+    #   (from item["title"]) because cve_id was not scanned → {CVE-2022-28368} &
+    #   catalog = {} → flagged as INFLATION HARD_FAIL.
+    # Fix: scan all four structured field names before text fallback.
+    cve_list: list = []
+    for field in ("cve_id", "cve_ids", "cves", "cve"):
+        val = item.get(field)
+        if val is None:
+            continue
+        if isinstance(val, str):
+            cid = val.upper().strip()
+            if CVE_ID_RE.search(cid) and cid not in cve_list:
+                cve_list.append(cid)
+        elif isinstance(val, list):
+            for c in val:
+                cid = str(c).upper().strip()
+                if CVE_ID_RE.search(cid) and cid not in cve_list:
+                    cve_list.append(cid)
+    # Text fallback (parity with kev_feed_marker._extract_cve text pass):
+    text_cves: list = []
+    for field in ("title", "headline", "name", "id", "source_url", "description"):
+        val = item.get(field) or ""
+        text_cves += CVE_ID_RE.findall(str(val))
+    return list(set(str(c) for c in cve_list + text_cves if c))
+
+
+def _iocs(item: Dict) -> Dict:
+    raw = item.get("iocs") or item.get("indicators") or {}
+    if isinstance(raw, list):
+        by_type: Dict[str, List] = defaultdict(list)
+        for ioc in raw:
+            if isinstance(ioc, dict):
+                t = ioc.get("type", "unknown")
+                by_type[t].append(ioc.get("value") or ioc.get("indicator") or "")
+        return dict(by_type)
+    return raw if isinstance(raw, dict) else {}
+
+
+# ── Safeguard A: Synthetic CVE Detector ──────────────────────────────────────
+
+class SyntheticCVEDetector:
+    """Detects sequential CVE floods, fake CVEs, and synthetic actor dominance."""
+
+    def check(self, items: List[Dict]) -> Tuple[bool, List[str]]:
+        findings: List[str] = []
+        hard_fail = False
+
+        # Collect all CVE IDs (full text extraction for future-year check)
+        all_cves: List[Tuple[int, int]] = []  # (year, number)
+        all_cve_strs: List[str] = []
+        for item in items:
+            for cve in _cves(item):
+                m = CVE_YEAR_RE.search(cve)
+                if m:
+                    all_cves.append((int(m.group(1)), int(m.group(2))))
+                    all_cve_strs.append(cve.upper())
+
+        # v160.2 FIX (run #1562 Gate A false HARD_FAIL): Sequential CVE flood check
+        # MUST use PRIMARY cve_id only — NOT text-extracted CVEs from all fields.
+        # Root cause of false HARD_FAIL: _cves() extracts CVEs from title+description;
+        # cross-item aggregation across 118 real advisories produces a large pool of
+        # sequential 2026 CVEs (normal for NVD batch releases). 26 sequential numbers
+        # triggered SYNTHETIC_SEQUENTIAL_WINDOW=25. Using only the item's primary
+        # cve_id (one per advisory) correctly detects synthetic generators that create
+        # advisories with sequential primary IDs, without false-triggering on real feeds.
+        primary_cves: List[Tuple[int, int]] = []
+        kernel_excluded = 0
+        oracle_cpu_excluded = 0
+        for item in items:
+            # v184.0 FIX: exclude Linux kernel maintenance CVEs (NVD bulk-assigns sequential IDs)
+            item_title = _title(item)
+            item_desc  = str(item.get("description", "") or "")
+            if LINUX_KERNEL_CVE_RE.search(item_title) or LINUX_KERNEL_CVE_RE.search(item_desc):
+                kernel_excluded += 1
+                continue
+            # GAP-A-ORACLE-CPU FIX (2026-08-24): same exclusion for Oracle's quarterly
+            # Critical Patch Update -- see ORACLE_CPU_CVE_RE definition above.
+            if ORACLE_CPU_CVE_RE.search(item_title) or ORACLE_CPU_CVE_RE.search(item_desc):
+                oracle_cpu_excluded += 1
+                continue
+            for field in ("cve_id", "cve_ids", "cves", "cve"):
+                val = item.get(field)
+                if not val:
+                    continue
+                cve_str = (val[0] if isinstance(val, list) and val else str(val))
+                pm = CVE_YEAR_RE.search(str(cve_str).upper().strip())
+                if pm:
+                    primary_cves.append((int(pm.group(1)), int(pm.group(2))))
+                    break  # first structured field with a valid CVE per item only
+        if kernel_excluded:
+            findings.append(
+                f"[A] INFO: {kernel_excluded} Linux kernel maintenance CVE(s) excluded from "
+                f"sequential flood check (NVD bulk-assigns sequential IDs to kernel patches — not synthetic)."
+            )
+        if oracle_cpu_excluded:
+            findings.append(
+                f"[A] INFO: {oracle_cpu_excluded} Oracle Critical Patch Update CVE(s) excluded from "
+                f"sequential flood check (NVD bulk-assigns sequential IDs to Oracle CPU releases — not synthetic)."
+            )
+
+        # Check sequential flood (primary CVE IDs only)
+        if primary_cves:
+            by_year: Dict[int, List[int]] = defaultdict(list)
+            for year, num in primary_cves:
+                by_year[year].append(num)
+
+            for year, nums in by_year.items():
+                nums_sorted = sorted(nums)
+                max_seq = 1
+                cur_seq = 1
+                for i in range(1, len(nums_sorted)):
+                    if nums_sorted[i] - nums_sorted[i-1] <= 3:  # allow small gaps
+                        cur_seq += 1
+                        max_seq = max(max_seq, cur_seq)
+                    else:
+                        cur_seq = 1
+                if max_seq >= SYNTHETIC_SEQUENTIAL_WINDOW:
+                    findings.append(
+                        f"[A] SYNTHETIC CVE FLOOD: {max_seq} sequential CVE-{year}-xxxx primary IDs. "
+                        f"Sequential primary CVE IDs are a hallmark of synthetic generator output. "
+                        f"Expected: diverse primary CVE IDs from real feeds."
+                    )
+                    hard_fail = True
+
+        if all_cves:
+            # Future-year CVEs (needs NVD validation flag)
+            current_year = datetime.now(timezone.utc).year
+            future_cves = [f"CVE-{y}-{n}" for y, n in all_cves if y > current_year]
+            if len(future_cves) > 3:
+                findings.append(
+                    f"[A] FUTURE-YEAR CVEs: {len(future_cves)} CVEs from years > {current_year} "
+                    f"({', '.join(future_cves[:5])}...). These may not exist in NVD. "
+                    f"Validate against NVD API before publishing."
+                )
+
+        # Check synthetic actor dominance
+        actors = [_actor_id(item) for item in items if _actor_id(item)]
+        if actors:
+            synthetic_count = sum(1 for a in actors if SYNTHETIC_ACTOR_RE.search(a))
+            ratio = synthetic_count / len(actors)
+            if ratio > SYNTHETIC_HARD_FAIL_RATIO:
+                findings.append(
+                    f"[A] SYNTHETIC ACTOR DOMINANCE: {synthetic_count}/{len(actors)} items "
+                    f"({ratio:.0%}) have synthetic/generic actor labels. "
+                    f"Hard-fail threshold: {SYNTHETIC_HARD_FAIL_RATIO:.0%}. "
+                    f"Root cause: fallback generator flooding or AHE false-positive rejection of real intel."
+                )
+                hard_fail = True
+            elif ratio > SYNTHETIC_FLEET_THRESHOLD:
+                findings.append(
+                    f"[A] WARN — Synthetic actor ratio elevated: {ratio:.0%} "
+                    f"(warn threshold: {SYNTHETIC_FLEET_THRESHOLD:.0%}). Review actor attribution pipeline."
+                )
+
+        # Check risk score uniformity (all 7.5 = synthetic signature)
+        risks = [_risk(item) for item in items if _risk(item) is not None]
+        if risks:
+            unique_risks = len(set(risks))
+            if unique_risks == 1 and len(risks) > 5:
+                findings.append(
+                    f"[A] ZERO RISK DIVERSITY: All {len(risks)} advisories have identical risk score "
+                    f"({risks[0]}/10). Real intelligence produces varied risk scores. "
+                    f"This indicates hardcoded fallback scoring."
+                )
+                hard_fail = True
+
+        if not findings:
+            findings.append("[A] Synthetic CVE Detector: PASSED")
+
+        return hard_fail, findings
+
+
+# ── Safeguard B: Entropy Gate ─────────────────────────────────────────────────
+
+class EntropyGate:
+    """Shannon entropy + semantic diversity scoring."""
+
+    @staticmethod
+    def _shannon_entropy(values: List[str]) -> float:
+        if not values:
+            return 0.0
+        counts = Counter(values)
+        total = len(values)
+        entropy = -sum((c / total) * math.log2(c / total) for c in counts.values())
+        return round(entropy, 3)
+
+    @staticmethod
+    def _word_tokens(text: str) -> set:
+        return set(re.findall(r"\b[a-z]{3,}\b", text.lower()))
+
+    @staticmethod
+    def _jaccard(a: set, b: set) -> float:
+        if not a or not b:
+            return 0.0
+        return len(a & b) / len(a | b)
+
+    def check(self, items: List[Dict]) -> Tuple[bool, List[str]]:
+        findings: List[str] = []
+        hard_fail = False
+
+        titles = [_title(item) for item in items if _title(item)]
+        # v166.8 FIX (GAP-011): Exclude empty/None actors from entropy calculation.
+        # Items from multi-source collectors (BleepingComputer, MalwareBazaar) may have
+        # no actor set yet — blank strings cause entropy=0 (single-value distribution)
+        # even when attributed items are diverse. Only measure diversity on items that
+        # HAVE an actor assigned. "CDB-UNATTR-CVE" IS a valid distinct actor code.
+        _BLANK_ACTORS = {"", "none", "null", "unknown", "n/a"}
+        actors = [
+            _actor_id(item) for item in items
+            if _actor_id(item) and _actor_id(item).lower() not in _BLANK_ACTORS
+        ]
+        techniques_flat = []
+        for item in items:
+            techniques_flat.extend(_techniques(item))
+
+        # Title entropy
+        if titles:
+            # Normalize: extract first 5 words to catch cloned titles
+            title_prefixes = [" ".join(t.split()[:5]).lower() for t in titles]
+            te = self._shannon_entropy(title_prefixes)
+            if te < ENTROPY_TITLE_MIN:
+                findings.append(
+                    f"[B] LOW TITLE ENTROPY: Shannon entropy={te:.3f} bits "
+                    f"(minimum: {ENTROPY_TITLE_MIN}). Titles are highly repetitive — "
+                    f"strong indicator of templated or cloned advisory generation."
+                )
+                hard_fail = True
+            else:
+                findings.append(f"[B] Title entropy: {te:.3f} bits (OK, min={ENTROPY_TITLE_MIN})")
+
+        # Actor entropy
+        # 2026-09-26: low entropy is a HARD_FAIL only when a *named* label (a real
+        # actor, or a synthetic CDB-*-GEN one) dominates -- the templated-generation
+        # signature this check exists for. When the platform's own unattributed
+        # placeholder (CDB-UNATTR-*) dominates, it is a WARN: a CVE-heavy window
+        # routinely reaches ~90% CDB-UNATTR-CVE (~0.4 bits), which blocked the
+        # 18:30 and 22:11 publish runs on 2026-09-26 with gates A/C/F/H all passing.
+        # Synthetic labels are still caught by gate A regardless.
+        if actors:
+            ae = self._shannon_entropy(actors)
+            if ae < ENTROPY_ACTOR_MIN:
+                top_actor = Counter(actors).most_common(1)[0][0]
+                if top_actor.upper().startswith("CDB-UNATTR"):
+                    findings.append(
+                        f"[B] WARN — Low actor diversity: Shannon entropy={ae:.3f} bits "
+                        f"(minimum: {ENTROPY_ACTOR_MIN}), dominated by the unattributed "
+                        f"placeholder {top_actor}. Attribution coverage is low; not a "
+                        f"synthetic-generation signal."
+                    )
+                else:
+                    findings.append(
+                        f"[B] LOW ACTOR DIVERSITY: Shannon entropy={ae:.3f} bits "
+                        f"(minimum: {ENTROPY_ACTOR_MIN}). Single or very few actors dominate the feed."
+                    )
+                    hard_fail = True
+            else:
+                findings.append(f"[B] Actor diversity entropy: {ae:.3f} bits (OK, min={ENTROPY_ACTOR_MIN})")
+
+        # Technique entropy
+        if techniques_flat:
+            te2 = self._shannon_entropy(techniques_flat)
+            if te2 < ENTROPY_TECHNIQUE_MIN:
+                findings.append(
+                    f"[B] LOW TECHNIQUE DIVERSITY: MITRE ATT&CK entropy={te2:.3f} bits "
+                    f"(minimum: {ENTROPY_TECHNIQUE_MIN}). "
+                    f"Cloned ATT&CK mappings indicate templated advisory generation."
+                )
+            else:
+                findings.append(f"[B] Technique diversity entropy: {te2:.3f} bits (OK, min={ENTROPY_TECHNIQUE_MIN})")
+
+        # Near-duplicate detection (Jaccard similarity)
+        # v166.8 FIX (GAP-014): CVE advisory titles naturally share "CVE-YYYY-NNNNN" tokens,
+        # causing Jaccard similarity to be high (e.g. "CVE-2026-10190 denial of service" vs
+        # "CVE-2026-10191 stack overflow" share "CVE-2026" prefix tokens -> high similarity).
+        # This is NOT near-duplication — these are distinct CVEs for distinct vulnerabilities.
+        # Fix: exclude the CVE ID token itself from Jaccard comparison. Only warn, not hard-fail.
+        if len(titles) > 2:
+            dup_pairs = 0
+            # Strip CVE IDs before token comparison to avoid false positives
+            _cve_strip = re.compile(r'cve-\d{4}-\d+', re.I)
+            token_sets = [self._word_tokens(_cve_strip.sub('', t)) for t in titles]
+            for i in range(len(token_sets)):
+                for j in range(i + 1, len(token_sets)):
+                    if token_sets[i] and token_sets[j]:  # skip empty token sets
+                        if self._jaccard(token_sets[i], token_sets[j]) >= SIMILARITY_DEDUP_THRESHOLD:
+                            dup_pairs += 1
+            if dup_pairs > 0:
+                findings.append(
+                    f"[B] NEAR-DUPLICATE TITLES: {dup_pairs} title pairs exceed "
+                    f"{SIMILARITY_DEDUP_THRESHOLD:.0%} Jaccard similarity (CVE tokens excluded). "
+                    f"Feed may contain near-clones."
+                )
+                # WARN-only — do NOT hard-fail on title similarity (false positive rate too high)
+            else:
+                findings.append("[B] Near-duplicate check: PASSED (0 cloned title pairs)")
+
+        return hard_fail, findings
+
+
+# ── Safeguard C: Feed Diversity Validator ────────────────────────────────────
+
+class FeedDiversityValidator:
+    """Multi-source, multi-actor, multi-vendor diversity enforcement."""
+
+    def check(self, items: List[Dict]) -> Tuple[bool, List[str]]:
+        findings: List[str] = []
+        hard_fail = False
+
+        if not items:
+            findings.append("[C] WARN — Empty feed, diversity check skipped.")
+            return False, findings
+
+        # Source diversity
+        sources = [_source(item) for item in items]
+        source_domains = []
+        for s in sources:
+            m = re.search(r"https?://([^/]+)", s)
+            if m:
+                source_domains.append(m.group(1).lower().replace("www.", ""))
+
+        if source_domains:
+            domain_counts = Counter(source_domains)
+            top_domain, top_count = domain_counts.most_common(1)[0]
+            top_ratio = top_count / len(source_domains)
+            unique_domains = len(domain_counts)
+
+            if unique_domains < FEED_MIN_SOURCES:
+                findings.append(
+                    f"[C] SINGLE-SOURCE DOMINANCE: Only {unique_domains} distinct source domain(s). "
+                    f"Minimum required: {FEED_MIN_SOURCES}. "
+                    f"Enterprise-grade CTI requires multi-source validation."
+                )
+                hard_fail = True
+            elif top_ratio > FEED_MAX_SINGLE_SOURCE_RATIO:
+                findings.append(
+                    f"[C] WARN — Source concentration: {top_domain} accounts for "
+                    f"{top_ratio:.0%} of feed. Maximum: {FEED_MAX_SINGLE_SOURCE_RATIO:.0%}."
+                )
+            else:
+                findings.append(
+                    f"[C] Source diversity: {unique_domains} domains, "
+                    f"top={top_domain} ({top_ratio:.0%}) — OK"
+                )
+
+        # Actor diversity
+        actors = [_actor_id(item) for item in items if _actor_id(item)]
+        if actors:
+            actor_counts = Counter(actors)
+            top_actor, top_actor_count = actor_counts.most_common(1)[0]
+            top_actor_ratio = top_actor_count / len(actors)
+            unique_actors = len(actor_counts)
+
+            if unique_actors < FEED_MIN_UNIQUE_ACTORS:
+                findings.append(
+                    f"[C] ACTOR MONOCULTURE: Only {unique_actors} distinct actor(s) across {len(actors)} items. "
+                    f"Minimum: {FEED_MIN_UNIQUE_ACTORS}. Real threat landscapes involve multiple actors."
+                )
+                hard_fail = True
+            elif top_actor_ratio > FEED_MAX_SINGLE_ACTOR_RATIO:
+                findings.append(
+                    f"[C] WARN — Actor concentration: {top_actor} = {top_actor_ratio:.0%} of feed. "
+                    f"Threshold: {FEED_MAX_SINGLE_ACTOR_RATIO:.0%}."
+                )
+            else:
+                findings.append(
+                    f"[C] Actor diversity: {unique_actors} actors, "
+                    f"top={top_actor} ({top_actor_ratio:.0%}) — OK"
+                )
+
+        # Severity distribution (0 critical = suspicious for large feed)
+        severities = Counter(str(item.get("severity") or item.get("threat_level") or "").upper()
+                             for item in items)
+        total_sev = sum(severities.values())
+        if total_sev >= 20 and severities.get("CRITICAL", 0) == 0:
+            findings.append(
+                f"[C] WARN — Zero CRITICAL advisories in {total_sev}-item feed. "
+                f"Real threat landscapes include critical severity events. "
+                f"Check CVSS scoring and KEV enrichment pipelines."
+            )
+
+        if not any("[C] SINGLE-SOURCE" in f or "[C] ACTOR MONOCULTURE" in f for f in findings):
+            if not any("[C] WARN" in f for f in findings):
+                findings.append("[C] Feed Diversity Validator: PASSED")
+
+        return hard_fail, findings
+
+
+# ── Safeguard D: KEV Health Gate ──────────────────────────────────────────────
+
+_KEV_CATALOG_PATHS = [
+    REPO_ROOT / "data" / "kev" / "kev_catalog.json",
+    REPO_ROOT / "data" / "correlation" / "kev_catalog.json",
+]
+_KEV_LIVE_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+_KEV_CATALOG_MAX_AGE_DAYS = 1    # v184.0 FIX: fetch live if catalog >1 day old.
+# Root cause: kev_feed_marker fetches LIVE catalog; gate used 3-day-old LOCAL
+# cache -> CVE-2026-28318 (added 2026-06-05) not found -> false INFLATION HARD_FAIL.
+# Reducing from 30->1 ensures gate always validates against the same-day catalog.
+
+
+def _catalog_age_days(data: dict) -> float:
+    """Return age of catalog in days based on catalogVersion or fetched_at field."""
+    for key in ("catalogVersion", "fetched_at", "updated_at"):
+        val = data.get(key)
+        if not val:
+            continue
+        try:
+            # Handle ISO-8601 timestamps
+            if "T" in str(val):
+                dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+                return (datetime.now(timezone.utc) - dt).days
+            # Handle YYYY.MM.DD version strings (e.g. "2026.04.02")
+            parts = str(val).split(".")
+            if len(parts) == 3:
+                dt = datetime(int(parts[0]), int(parts[1]), int(parts[2]), tzinfo=timezone.utc)
+                return (datetime.now(timezone.utc) - dt).days
+        except Exception:
+            continue
+    return float("inf")
+
+
+def _fetch_live_kev_catalog() -> Tuple[Optional[set], str]:
+    """Fetch CISA KEV catalog live and optionally refresh local cache. Returns (set|None, version)."""
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            _KEV_LIVE_URL,
+            headers={"User-Agent": "SENTINEL-APEX-IIG/175.0 (KEV-CrossValidation)"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        vulns = data.get("vulnerabilities", [])
+        ids = set()
+        for v in vulns:
+            cid = str(v.get("cveID") or "")
+            m = CVE_ID_RE.search(cid)
+            if m:
+                ids.add(m.group(0).upper())
+        ver = data.get("catalogVersion", "live")
+        log.info("[D] KEV catalog fetched live from CISA: %d CVEs (version %s)", len(ids), ver)
+        # Refresh the local cache so the next run is fast
+        for p in _KEV_CATALOG_PATHS:
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                import copy
+                cached = copy.deepcopy(data)
+                cached["fetched_at"] = datetime.now(timezone.utc).isoformat()
+                p.write_text(json.dumps(cached, indent=2), encoding="utf-8")
+                log.info("[D] KEV catalog cache refreshed: %s", p)
+                break
+            except Exception as cache_e:
+                log.debug("[D] KEV cache write failed (%s): %s", p, cache_e)
+        return ids, ver
+    except Exception as e:
+        log.warning("[D] Live KEV fetch failed: %s", e)
+        return None, "fetch-failed"
+
+
+def _load_kev_catalog() -> Tuple[Optional[set], str]:
+    """Load the CISA KEV CVE-ID set.
+    Priority:
+      1. Local catalog file (if fresh, i.e. age <= _KEV_CATALOG_MAX_AGE_DAYS)
+      2. Live CISA fetch (if local is stale or missing) — refreshes local cache
+    Returns (set|None, version).
+    P0-FIX v184.0: Added live-fetch fallback so the gate never cross-validates
+    against a stale catalog. Stale catalog was causing false INFLATION HARD_FAIL
+    for legitimate KEV entries added after the local catalog's cutoff date
+    (confirmed: CVE-2026-0257 added 2026-05-29, local catalog was 2026.04.02).
+    """
+    for p in _KEV_CATALOG_PATHS:
+        if not p.exists():
+            continue
+        try:
+            data = json.loads(p.read_bytes().rstrip(b"\x00").decode("utf-8", "replace"))
+        except Exception:
+            continue
+        vulns = data.get("vulnerabilities") if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        ids = set()
+        for v in (vulns or []):
+            cid = str((v.get("cveID") or v.get("cve_id") or v.get("cve") or "") if isinstance(v, dict) else v)
+            m = CVE_ID_RE.search(cid)
+            if m:
+                ids.add(m.group(0).upper())
+        ver = (data.get("catalogVersion") or data.get("updated_at") or "unknown") if isinstance(data, dict) else "unknown"
+        age = _catalog_age_days(data) if isinstance(data, dict) else float("inf")
+        if age > _KEV_CATALOG_MAX_AGE_DAYS:
+            log.warning(
+                "[D] Local KEV catalog is %.0f days old (version %s) — fetching live from CISA "
+                "to prevent false INFLATION alerts from catalog version skew.", age, ver
+            )
+            live_ids, live_ver = _fetch_live_kev_catalog()
+            if live_ids is not None:
+                return live_ids, live_ver
+            log.warning("[D] Live fetch failed — falling back to stale local catalog (%s).", ver)
+        return ids, ver
+    # No local file found — try live fetch
+    log.warning("[D] No local KEV catalog found — attempting live CISA fetch.")
+    return _fetch_live_kev_catalog()
+
+
+class KEVHealthGate:
+    """CISA KEV enrichment continuity enforcement."""
+
+    def check(self, items: List[Dict]) -> Tuple[bool, List[str]]:
+        findings: List[str] = []
+        hard_fail = False
+
+        if not items:
+            return False, ["[D] KEV Health Gate: no items to check."]
+
+        # ── v174 P0-3: cross-validate against the REAL CISA KEV catalog ─────────
+        # The prior heuristic HARD_FAILed on "0 KEV" for any feed with >=10 CVEs.
+        # That is a FALSE POSITIVE for fresh feeds whose CVEs CISA has not yet
+        # KEV-listed. We now enforce CORRECTNESS: KEV inflation (claimed but not in
+        # catalog) and missed enrichment (in catalog but unflagged) HARD_FAIL.
+        kev_items = [item for item in items if _kev(item)]
+        cve_items = [item for item in items if _cves(item)]
+        kev_ratio = len(kev_items) / len(items)
+        findings.append(
+            f"[D] KEV: {len(kev_items)}/{len(items)} items KEV-confirmed "
+            f"({kev_ratio:.1%}), CVE-linked items: {len(cve_items)}"
+        )
+
+        catalog_kev, catalog_ver = _load_kev_catalog()
+        if catalog_kev is None:
+            findings.append(
+                "[D] WARN — KEV catalog not found (data/kev/ or data/correlation/); "
+                "cannot cross-validate KEV markers. Review catalog ingestion."
+            )
+            return hard_fail, findings
+
+        findings.append(f"[D] KEV catalog: {catalog_ver} ({len(catalog_kev)} CVEs)")
+
+        inflated, missed, overlap = [], [], set()
+        for item in items:
+            cves = {c.upper() for c in _cves(item)}
+            hit = cves & catalog_kev
+            overlap |= hit
+            marked = _kev(item)
+            if marked and cves and not hit:
+                inflated.append(sorted(cves)[0])
+            elif hit and not marked:
+                missed.append(sorted(hit)[0])
+
+        findings.append(
+            f"[D] KEV cross-check: feed_cap_catalog={len(overlap)}, "
+            f"inflated(claimed!=catalog)={len(inflated)}, missed(catalog!=flagged)={len(missed)}"
+        )
+        if inflated:
+            findings.append(
+                f"[D] KEV INFLATION HARD_FAIL: {len(inflated)} item(s) flagged KEV-true with no "
+                f"CISA KEV match (fabricated urgency): {inflated[:8]}"
+            )
+            hard_fail = True
+        if missed:
+            findings.append(
+                f"[D] KEV ENRICHMENT GAP HARD_FAIL: {len(missed)} CVE(s) present in the CISA KEV "
+                f"catalog were NOT flagged KEV in the feed: {missed[:8]}. Fix kev ingestion."
+            )
+            hard_fail = True
+        if not overlap and not inflated:
+            findings.append(
+                "[D] KEV CORRECT: 0 feed CVEs are in the current CISA KEV catalog and 0 are "
+                "falsely flagged -- truthful absence (fresh advisories not yet KEV-listed)."
+            )
+
+        return hard_fail, findings
+
+
+
+# ── Safeguard E: Runtime Integrity Baseline ───────────────────────────────────
+
+class RuntimeIntegrityBaseline:
+    """Orchestration timing and stage execution monitoring."""
+
+    def check(self, telemetry_path: Optional[Path] = None) -> Tuple[bool, List[str]]:
+        findings: List[str] = []
+        hard_fail = False
+
+        if telemetry_path is None:
+            telemetry_path = REPO_ROOT / "data" / "telemetry" / "runtime_telemetry.json"
+
+        if not telemetry_path.exists():
+            findings.append("[E] Runtime telemetry not found — first run or clean state. SKIP.")
+            return False, findings
+
+        try:
+            tel = json.loads(telemetry_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            findings.append(f"[E] WARN — Cannot parse telemetry: {e}")
+            return False, findings
+
+        # Duration check
+        duration = tel.get("duration_seconds") or tel.get("runtime_seconds") or 0
+        duration_min = duration / 60 if duration else 0
+
+        if duration_min > 0:
+            if duration_min < RUNTIME_MIN_MINUTES:
+                findings.append(
+                    f"[E] RUNTIME COLLAPSE: Pipeline completed in {duration_min:.1f} min "
+                    f"(minimum: {RUNTIME_MIN_MINUTES} min). "
+                    f"Short runtime indicates stage skipping or silent failure. "
+                    f"Check orchestrator logs for skipped stages."
+                )
+                hard_fail = True
+            elif duration_min > RUNTIME_MAX_MINUTES:
+                findings.append(
+                    f"[E] WARN — Pipeline runtime excessive: {duration_min:.1f} min "
+                    f"(max expected: {RUNTIME_MAX_MINUTES} min). May indicate hung stage."
+                )
+            else:
+                findings.append(f"[E] Runtime: {duration_min:.1f} min — OK")
+        else:
+            findings.append("[E] WARN — Runtime duration not recorded in telemetry.")
+
+        # Advisory count check
+        advisory_count = (tel.get("pipeline", {}) or {}).get("advisory_count") or \
+                          tel.get("advisory_count") or 0
+        if advisory_count == 0:
+            findings.append(
+                "[E] WARN — Zero advisory count in telemetry. "
+                "Pipeline may have produced no output."
+            )
+        else:
+            findings.append(f"[E] Advisory count (telemetry): {advisory_count}")
+
+        return hard_fail, findings
+
+
+# ── Safeguard F: Advisory Authenticity Scoring ───────────────────────────────
+
+# v186.0 P0 FIX: this scoring rubric applied one CVE/malware-shaped 100-point
+# scale to EVERY intel type. A bare phishing-URL advisory can never carry
+# CVSS/EPSS/KEV (20 pts) or 3-5 MITRE techniques (a phishing URL has exactly
+# one applicable technique, T1566) -- so ~35 of 100 points were structurally
+# unreachable regardless of how legitimate the entry was. A 08:44-09:18 UTC
+# production run confirmed this: 52 real OpenPhish advisories (verified
+# against the actual feed export) averaged 51.6/100 and hard-failed the
+# batch purely from this type mismatch, not from genuine data quality
+# problems. Fix: classify intel type and exclude non-applicable categories
+# from the denominator (score is renormalized to the applicable-points
+# subset), instead of lowering AUTH_SCORE_MIN/AUTH_SCORE_HARD_FAIL/
+# AUTH_POOR_ITEM_RATIO -- those thresholds are unchanged. An item that is
+# genuinely low-quality for ITS OWN type (e.g. an OpenPhish entry missing
+# even its source_url) still scores low and still hard-fails.
+_PHISHING_TYPE_HINTS = ("openphish", "phishtank", "phishing url", "phishing")
+_MALWARE_TYPE_HINTS  = ("malwarebazaar", "urlhaus", "threatfox", "malware",
+                        "ransomware", "trojan", "botnet", "infostealer")
+
+
+def _classify_intel_type(item: Dict) -> str:
+    """Content-derived classification only -- never inferred beyond what the
+    item itself asserts. One of: CVE, PHISHING_URL, MALWARE, GENERIC."""
+    if _cves(item) or item.get("cvss_score") or item.get("cvss"):
+        return "CVE"
+    title = _title(item).lower()
+    feed_source = str(item.get("feed_source") or item.get("source") or "").lower()
+    hay = f"{title} {feed_source}"
+    if any(h in hay for h in _PHISHING_TYPE_HINTS):
+        return "PHISHING_URL"
+    if any(h in hay for h in _MALWARE_TYPE_HINTS):
+        return "MALWARE"
+    return "GENERIC"
+
+
+class AdvisoryAuthenticityScoring:
+    """
+    100-point authenticity scoring per advisory, renormalized per intel type
+    to only the categories that type can legitimately carry.
+    Penalizes synthetic markers; rewards real-world signals.
+    """
+
+    def _score_item(self, item: Dict) -> Tuple[int, List[str], str]:
+        score = 0
+        possible = 0
+        notes = []
+        intel_type = _classify_intel_type(item)
+
+        # Title quality (max 15 pts) -- applies to every intel type
+        possible += 15
+        title = _title(item)
+        words = len(title.split()) if title else 0
+        if words >= 8:
+            score += 15
+        elif words >= 5:
+            score += 8
+        elif words >= 3:
+            score += 4
+        else:
+            notes.append("WEAK: Title too short")
+
+        # Source attribution (max 15 + 5 bonus) -- applies to every intel type
+        possible += 15
+        source = _source(item)
+        if source and len(source) > 10:
+            score += 15
+            if any(d in source for d in [
+                "thehackernews", "krebs", "darkreading", "cisa.gov",
+                "microsoft.com", "mandiant", "crowdstrike", "paloalto",
+                "recordedfuture", "secureworks", "unit42", "talos"
+            ]):
+                score += 5  # Premium trusted source bonus
+                notes.append(f"BONUS: Premium source ({source[:40]})")
+        else:
+            notes.append("WEAK: Missing source URL")
+
+        # CVE/CVSS enrichment (max 20 pts) -- CVE type only. Not applicable to
+        # PHISHING_URL/MALWARE/GENERIC (Section 9: NOT_APPLICABLE, never a
+        # fabricated or penalized absence).
+        if intel_type == "CVE":
+            possible += 20
+            cves = _cves(item)
+            cvss = item.get("cvss_score") or item.get("cvss")
+            epss = item.get("epss_score") or item.get("epss")
+            kev  = _kev(item)
+            if cves:
+                score += 5
+            if cvss and str(cvss) not in ("None", "N/A", "", "Pending"):
+                score += 8
+                notes.append(f"CVSS={cvss}")
+            if epss and str(epss) not in ("None", "N/A", "", "Pending", "0"):
+                score += 5
+                notes.append(f"EPSS={epss}")
+            if kev:
+                score += 7
+                notes.append("KEV=CONFIRMED")
+        else:
+            notes.append(f"NOT_APPLICABLE: {intel_type} intel does not carry CVE/CVSS/EPSS/KEV data")
+
+        # IOC richness (max 15 pts) -- applies to every intel type
+        possible += 15
+        iocs = _iocs(item)
+        total_iocs = sum(len(v) if isinstance(v, list) else 1
+                         for v in iocs.values() if v)
+        if total_iocs >= 5:
+            score += 15
+        elif total_iocs >= 3:
+            score += 10
+        elif total_iocs >= 1:
+            score += 5
+        else:
+            notes.append("WEAK: No IOCs enriched")
+
+        # MITRE ATT&CK depth (max 15 pts) -- ceiling is type-aware. A bare
+        # phishing URL has exactly one legitimately applicable technique
+        # (T1566); demanding 3-5 techniques for full marks would require
+        # fabricating unrelated techniques, which Section 9 explicitly
+        # forbids. CVE/MALWARE/GENERIC keep the original 5/3/1 ladder.
+        possible += 15
+        techniques = _techniques(item)
+        if intel_type == "PHISHING_URL":
+            if len(techniques) >= 1:
+                score += 15
+            else:
+                notes.append("WEAK: No MITRE technique mapped (expected T1566)")
+        else:
+            if len(techniques) >= 5:
+                score += 15
+            elif len(techniques) >= 3:
+                score += 10
+            elif len(techniques) >= 1:
+                score += 6
+            else:
+                notes.append("WEAK: No MITRE techniques mapped")
+
+        # Actor attribution (max 10 pts) -- applies to every intel type
+        possible += 10
+        actor = _actor_id(item)
+        if actor and not SYNTHETIC_ACTOR_RE.search(actor) and actor not in ("UNC-UNKNOWN", ""):
+            score += 10
+        elif actor == "UNC-UNKNOWN":
+            score += 3  # Honest unattributed is better than fake actor
+            notes.append("INFO: Actor unattributed")
+        else:
+            notes.append("WEAK: Generic/synthetic actor label")
+
+        # Risk score diversity (max 10 pts) -- applies to every intel type
+        possible += 10
+        risk = _risk(item)
+        if risk is not None:
+            # Non-bucket scores = evidence-derived
+            static_buckets = {10.0, 7.5, 5.5, 5.0, 4.8, 2.8, 2.3}
+            if risk not in static_buckets:
+                score += 10
+            else:
+                score += 4
+                notes.append(f"INFO: Risk score at static bucket value ({risk})")
+
+        score = min(score, possible)
+        normalized = round((score / possible) * 100) if possible else 0
+        return normalized, notes, intel_type
+
+    def check(self, items: List[Dict]) -> Tuple[bool, List[str]]:
+        findings: List[str] = []
+        hard_fail = False
+
+        if not items:
+            return False, ["[F] Authenticity Scoring: no items."]
+
+        scores = []
+        hard_fail_items = []
+        poor_items = []
+        by_type: Dict[str, List[int]] = defaultdict(list)
+
+        for item in items:
+            s, notes, intel_type = self._score_item(item)
+            scores.append(s)
+            by_type[intel_type].append(s)
+            if s < AUTH_SCORE_HARD_FAIL:
+                hard_fail_items.append((_title(item)[:50], s, notes, intel_type))
+            elif s < AUTH_SCORE_MIN:
+                poor_items.append((_title(item)[:50], s, notes, intel_type))
+
+        avg_score = sum(scores) / len(scores) if scores else 0
+        poor_ratio = (len(hard_fail_items) + len(poor_items)) / len(items)
+
+        findings.append(
+            f"[F] Authenticity scores — avg: {avg_score:.1f}/100, "
+            f"poor (<{AUTH_SCORE_MIN}): {len(poor_items)}, "
+            f"hard-fail (<{AUTH_SCORE_HARD_FAIL}): {len(hard_fail_items)}"
+        )
+        findings.append(
+            "[F] By intel type — " + ", ".join(
+                f"{t}: n={len(v)} avg={sum(v)/len(v):.1f}"
+                for t, v in sorted(by_type.items())
+            )
+        )
+
+        if hard_fail_items:
+            for title, score, notes, intel_type in hard_fail_items[:5]:
+                findings.append(
+                    f"[F] HARD-FAIL item (score={score}/100, type={intel_type}): '{title}' — "
+                    f"{'; '.join(notes[:3])}"
+                )
+            hard_fail = True
+
+        if poor_ratio > AUTH_POOR_ITEM_RATIO:
+            findings.append(
+                f"[F] HIGH POOR-QUALITY RATIO: {poor_ratio:.0%} of items score below "
+                f"{AUTH_SCORE_MIN}/100 authenticity threshold. "
+                f"Feed quality is insufficient for enterprise deployment."
+            )
+            hard_fail = True
+
+        if avg_score < 30:
+            findings.append(
+                f"[F] CRITICALLY LOW avg authenticity score: {avg_score:.1f}/100. "
+                f"Feed does not meet minimum enterprise quality standard."
+            )
+            hard_fail = True
+        elif avg_score >= 50:
+            findings.append(f"[F] Authenticity Gate: PASSED (avg={avg_score:.1f}/100)")
+
+        return hard_fail, findings
+
+
+# ── Safeguard G: Manifest Mutation Validator ──────────────────────────────────
+
+class ManifestMutationValidator:
+    """Detects stale manifest reuse and frozen dashboard payloads."""
+
+    def check(self, items: List[Dict], manifest_path: Optional[Path] = None) -> Tuple[bool, List[str]]:
+        findings: List[str] = []
+        hard_fail = False
+
+        if manifest_path is None:
+            manifest_path = REPO_ROOT / "data" / "stix" / "feed_manifest.json"
+
+        # Check manifest file age
+        if manifest_path.exists():
+            mtime = datetime.fromtimestamp(manifest_path.stat().st_mtime, tz=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - mtime).total_seconds() / 3600
+
+            if age_hours > MANIFEST_FROZEN_HOURS:
+                findings.append(
+                    f"[G] FROZEN MANIFEST: feed_manifest.json is {age_hours:.1f}h old "
+                    f"(threshold: {MANIFEST_FROZEN_HOURS}h). "
+                    f"Pipeline has not updated the manifest. "
+                    f"Dashboard is serving stale intelligence."
+                )
+                hard_fail = True
+            elif age_hours > MANIFEST_STALE_HOURS:
+                findings.append(
+                    f"[G] WARN — Stale manifest: {age_hours:.1f}h old "
+                    f"(warn threshold: {MANIFEST_STALE_HOURS}h)."
+                )
+            else:
+                findings.append(f"[G] Manifest age: {age_hours:.1f}h — OK")
+
+        # Check for duplicate advisory IDs
+        if items:
+            ids = []
+            for item in items:
+                aid = str(item.get("id") or item.get("stix_id") or item.get("advisory_id") or "")
+                if aid:
+                    ids.append(aid)
+
+            if ids:
+                dup_ids = [k for k, v in Counter(ids).items() if v > 1]
+                if dup_ids:
+                    findings.append(
+                        f"[G] DUPLICATE ADVISORY IDs: {len(dup_ids)} duplicate IDs detected "
+                        f"({', '.join(dup_ids[:3])}...). "
+                        f"Manifest contains recycled items — dedup pipeline may be bypassed."
+                    )
+                    hard_fail = True
+                else:
+                    findings.append(f"[G] Advisory ID uniqueness: PASSED ({len(ids)} unique IDs)")
+
+            # Check title duplication (even without ID dedup)
+            titles = [_title(item) for item in items if _title(item)]
+            dup_titles = [k for k, v in Counter(titles).items() if v > 1]
+            if dup_titles:
+                findings.append(
+                    f"[G] DUPLICATE TITLES: {len(dup_titles)} advisory titles appear more than once. "
+                    f"Dashboard will show identical cards — dedup failure confirmed."
+                )
+                hard_fail = True
+            else:
+                findings.append(f"[G] Title uniqueness: PASSED (no duplicate titles)")
+
+        return hard_fail, findings
+
+
+# ── Safeguard H: Synthetic Flood Circuit Breaker ─────────────────────────────
+
+class SyntheticFloodCircuitBreaker:
+    """Quarantine advisories and block Pages deployment on synthetic spike."""
+
+    def check(self, items: List[Dict], apply: bool = False) -> Tuple[bool, List[str]]:
+        findings: List[str] = []
+        hard_fail = False
+
+        if not items:
+            return False, ["[H] Circuit Breaker: no items to evaluate."]
+
+        synthetic_count = sum(
+            1 for item in items
+            if SYNTHETIC_ACTOR_RE.search(_actor_id(item))
+            or str(item.get("_synthetic") or "").lower() == "true"
+        )
+        ratio = synthetic_count / len(items)
+
+        findings.append(
+            f"[H] Synthetic ratio: {synthetic_count}/{len(items)} items ({ratio:.0%})"
+        )
+
+        if ratio > FLOOD_SYNTHETIC_SPIKE:
+            findings.append(
+                f"[H] CIRCUIT BREAKER TRIPPED: {ratio:.0%} synthetic ratio exceeds "
+                f"threshold ({FLOOD_SYNTHETIC_SPIKE:.0%}). "
+                f"BLOCKING Pages deployment. Preserving last healthy feed. "
+                f"Root cause: real feed rejection or fallback generator runaway."
+            )
+            hard_fail = True
+
+            if apply:
+                # Quarantine synthetic items
+                synthetic_items = [
+                    item for item in items
+                    if SYNTHETIC_ACTOR_RE.search(_actor_id(item))
+                    or str(item.get("_synthetic") or "").lower() == "true"
+                ]
+                FLOOD_QUARANTINE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                quarantine = {
+                    "quarantined_at": datetime.now(timezone.utc).isoformat(),
+                    "reason": "SYNTHETIC_FLOOD_CIRCUIT_BREAKER",
+                    "synthetic_ratio": ratio,
+                    "item_count": len(synthetic_items),
+                    "items": synthetic_items,
+                }
+                FLOOD_QUARANTINE_PATH.write_text(
+                    json.dumps(quarantine, indent=2, ensure_ascii=False),
+                    encoding="utf-8"
+                )
+                findings.append(
+                    f"[H] Quarantine written: {FLOOD_QUARANTINE_PATH} "
+                    f"({len(synthetic_items)} items isolated)"
+                )
+
+        return hard_fail, findings
+
+
+# ── Master Gate Runner ────────────────────────────────────────────────────────
+
+# workaround for F: expose buckets at module level for import
+SYNTHETIC_CVEDetector_STATIC_BUCKETS = {10.0, 7.5, 5.5, 5.0, 4.8, 2.8, 2.3}
+
+
+def run_all_gates(items: List[Dict], mode: str) -> int:
+    """
+    Run all 8 safeguards. Returns 0 (pass) or 1 (fail).
+    mode: "check" | "report" | "apply"
+    """
+    apply = mode == "apply"
+    any_hard_fail = False
+    all_findings: List[str] = []
+
+    log.info("=" * 70)
+    log.info("SENTINEL APEX Intelligence Integrity Gate v%s", GATE_VERSION)
+    log.info("Mode: %s | Items: %d", mode.upper(), len(items))
+    log.info("=" * 70)
+
+    gates = [
+        ("A — Synthetic CVE Detector",       SyntheticCVEDetector().check(items)),
+        ("B — Entropy Gate",                  EntropyGate().check(items)),
+        ("C — Feed Diversity Validator",   FeedDiversityValidator().check(items)),
+        ("D — KEV Health Gate",               KEVHealthGate().check(items)),
+        ("E — Runtime Integrity Baseline",    RuntimeIntegrityBaseline().check()),
+        ("F — Advisory Authenticity Scoring", AdvisoryAuthenticityScoring().check(items)),
+        ("G — Manifest Mutation Validator",   ManifestMutationValidator().check(items)),
+        ("H — Synthetic Flood Circuit Breaker", SyntheticFloodCircuitBreaker().check(items)),
+    ]
+
+    report_rows = []
+    for gate_name, (fail, findings) in gates:
+        status = "HARD_FAIL" if fail else "PASS"
+        if fail:
+            any_hard_fail = True
+        report_rows.append((gate_name, status, findings))
+        all_findings.extend(findings)
+
+    # Print summary table
+    log.info("")
+    log.info("%-45s  %s", "GATE", "STATUS")
+    log.info("-" * 60)
+    for gate_name, status, _ in report_rows:
+        flag = "✗" if status == "HARD_FAIL" else "✓"
+        log.info("  %s  %-43s  %s", flag, gate_name, status)
+
+    log.info("")
+    log.info("DETAILED FINDINGS:")
+    log.info("-" * 60)
+    for finding in all_findings:
+        level = logging.ERROR if "HARD_FAIL" in finding or "CIRCUIT BREAKER" in finding else \
+                logging.WARNING if "WARN" in finding else logging.INFO
+        log.log(level, "  %s", finding)
+
+    log.info("")
+    overall = "HARD_FAIL" if any_hard_fail else "PASS"
+    log.info("=" * 70)
+    log.info("INTELLIGENCE INTEGRITY GATE RESULT: %s", overall)
+    log.info("=" * 70)
+
+    if mode == "report":
+        return 0
+    return 1 if any_hard_fail else 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="SENTINEL APEX Intelligence Integrity Gate")
+    ap.add_argument("--feed",   default="api/feed.json", help="Path to feed JSON")
+    grp = ap.add_mutually_exclusive_group()
+    grp.add_argument("--check",  action="store_true", help="Exit 1 on HARD_FAIL")
+    grp.add_argument("--report", action="store_true", help="Always exit 0")
+    grp.add_argument("--apply",  action="store_true", help="Gates + write quarantine")
+    args = ap.parse_args()
+
+    feed_path = REPO_ROOT / args.feed
+    items = load_feed(feed_path)
+    log.info("[IIG] Loaded %d items from %s", len(items), feed_path)
+
+    if args.report:
+        mode = "report"
+    elif args.apply:
+        mode = "apply"
+    else:
+        mode = "check"
+
+    return run_all_gates(items, mode)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

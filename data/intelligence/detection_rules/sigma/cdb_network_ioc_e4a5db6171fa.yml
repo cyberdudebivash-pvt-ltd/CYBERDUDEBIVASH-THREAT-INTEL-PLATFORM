@@ -1,0 +1,41 @@
+title: CDB SENTINEL APEX - Network Threat Intel [e4a5db6171fa]
+id: cdb-net-e4a5db6171fa
+status: production
+description: >
+    Auto-generated detection rule for 3 malicious IPs and 10 malicious domains
+    from CYBERDUDEBIVASH SENTINEL APEX threat intelligence feeds.
+author: CyberDudeBivash SENTINEL APEX v51
+date: 2026-08-26
+modified: 2026-08-26
+tags:
+    - attack.command_and_control
+    - attack.t1071
+    - attack.t1090
+logsource:
+    category: firewall
+    product: any
+detection:
+    selection:
+        DestinationIp:
+            - '0.0.0.0'
+            - '169.254.169.254'
+            - '6.0.3.1'
+        DestinationHostname|contains:
+            - 'www.roblox.com'
+            - 'coinbase-lidiya.com'
+            - 'instagramfollowers7894.blogspot.com'
+            - 'facebooklogincc.blogspot.com'
+            - 'www.pastijosjis.blogspot.com'
+            - 'bah5szv.myrdbx.io'
+            - 'localhost.evil.com'
+            - 'localhost.attacker.com'
+            - '127.0.0.1.nip.io'
+            - 'yootheme.com'
+    condition: selection
+level: medium
+falsepositives:
+    - Shared hosting infrastructure
+    - CDN/cloud provider IP overlap
+references:
+    - https://intel.cyberdudebivash.com
+    - https://cyberdudebivash.com/threat-intel

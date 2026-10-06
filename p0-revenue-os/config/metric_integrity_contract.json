@@ -1,0 +1,34 @@
+{
+  "contract_id": "APEX-METRIC-INTEGRITY-v1",
+  "product": "SENTINEL APEX",
+  "canonical_version": "200.0",
+  "version_sources": ["VERSION", "version.json"],
+  "generated_at_policy": "Every public number on intel.cyberdudebivash.com MUST be rendered from this contract or from GET /api/metrics. Hardcoded marketing numbers are a P0 defect.",
+  "public_endpoint": "/api/metrics",
+  "static_fallback": "/metrics/canonical.json",
+  "legal": {
+    "entity": "CYBERDUDEBIVASH PRIVATE LIMITED",
+    "gstin": "21ARKPN8270G1ZP",
+    "pan": "ARKPN8270G",
+    "hq": "29, Korai-Sukinda-Ramchandrapur Rd, Ragadi, Jajpur Road, Odisha 755019, India",
+    "product_url": "https://intel.cyberdudebivash.com"
+  },
+  "fields": {
+    "version": { "type": "string", "source": "VERSION", "example": "200.0" },
+    "advisory_count_live": { "type": "integer", "source": "feed store count where status=published", "display": "Current advisories" },
+    "feed_source_count": { "type": "integer", "source": "enabled collectors", "display": "Intel sources" },
+    "ioc_count_unique_30d": { "type": "integer", "source": "deduped IOC store last 30 days", "display": "Unique IOCs (30d)" },
+    "stix_bundles_available": { "type": "boolean", "source": "export service health" },
+    "last_feed_sync_utc": { "type": "datetime", "source": "collector heartbeat" },
+    "api_uptime_30d_pct": { "type": "number", "source": "status page / health checks", "precision": 2 },
+    "preview_item_limit": { "type": "integer", "value": 10 },
+    "forbidden_hardcodes": ["77+", "115+", "508", "43K+", "2,600+", "500K+", "72% faster", "50+ countries protected"]
+  },
+  "rate_limits_canonical": {
+    "community": { "req_per_day": 100, "burst_per_min": 10, "advisory_window": 10 },
+    "pro_analyst": { "req_per_day": 5000, "burst_per_min": 100 },
+    "pro_api": { "req_per_day": 15000, "burst_per_min": 200 },
+    "enterprise": { "req_per_day": 50000, "burst_per_min": 500 },
+    "mssp": { "req_per_day": null, "burst_per_min": 1000, "note": "unlimited daily with fair-use and tenant caps" }
+  }
+}

@@ -1,0 +1,275 @@
+# SENTINEL APEX -- Swarm Live Worker Auto-Deploy
+#
+# workers/swarm-live has real, tested, merged code (PRs #423/#425/#426/#427)
+# but has never had a CI deploy path -- every prior PR in this worker's
+# history explicitly flagged "actually deploying this worker (a separate,
+# deliberate decision)" as out of scope, and it shows: the live
+# intel.cyberdudebivash.com/swarm/ page is still running the PR #425
+# snapshot (2 DERIVED VIEW agents, no AI narrative) even though #426 made
+# every agent real and #427 added LLM-powered synthesis, both merged to
+# main hours ago. Confirmed by comparing the Cloudflare script's
+# modified_on timestamp against each PR's merge time, and by fetching the
+# live page directly.
+#
+# This workflow closes that gap the same way workers/intel-gateway's own
+# deploy-worker.yml already does for its worker: deploy on push to main,
+# verify live via a real health check, degrade gracefully (not silently)
+# on the same CF_API_TOKEN Workers-Routes-scope gap deploy-worker.yml
+# already diagnosed and documented for this exact zone
+# (cyberdudebivash.com), and alert on real failure. Reused directly, not
+# re-implemented: the pinned checkout/setup-node action SHAs, the bot-push
+# guard, the routes-only-failure/verify_live resilience pattern, and
+# scripts/pipeline_alert.py's send_telegram() for failure notification.
+#
+# Deliberately NOT copied from deploy-worker.yml: the intel-gateway-specific
+# data-integrity gates (encoding_validator.py, output_validation_gate.py,
+# api_dashboard_contract_validator.py, feed_sync_gate.py,
+# regression_immunity.py, pricing_consistency_gate.py,
+# version_governance.py, CDB_JWT_SECRET check) and the esbuild bundle
+# pre-flight -- none apply here. workers/swarm-live is a single dependency-
+# free file with no pricing/version-governance/JWT surface and nothing to
+# bundle; `npm run check` (already in package.json) covers syntax, and this
+# worker's own swarm-live-regression-gate.yml already covers `npm test` on
+# every push/PR. A repo-wide secret scan (TruffleHog) already runs
+# elsewhere in this repo's PR checks, so it is not duplicated here either
+# (Reuse Report: duplicate gates introduced must be 0, same as duplicate
+# engines/routes).
+#
+# No wrangler --env flag: unlike intel-gateway's wrangler.toml,
+# workers/swarm-live/wrangler.toml defines no [env.*] block, so
+# `wrangler deploy --env production` would fail here -- plain
+# `wrangler deploy` is this worker's correct invocation.
+
+name: deploy-swarm-live v201.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/swarm-live/src/**'
+      - 'workers/swarm-live/wrangler.toml'
+      - 'workers/swarm-live/package.json'
+      - 'workers/swarm-live/package-lock.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  WORKER_DIR: workers/swarm-live
+
+concurrency:
+  group: swarm-live-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Same defense-in-depth as deploy-worker.yml: no automated bot commit
+    # should ever be able to trigger a production redeploy.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.actor != 'github-actions[bot]')
+
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: "Setup Node.js 22"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: "Install locked worker dependencies"
+        working-directory: ${{ env.WORKER_DIR }}
+        run: npm ci --ignore-scripts
+
+      - name: "Syntax check (npm run check)"
+        working-directory: ${{ env.WORKER_DIR }}
+        run: npm run check
+
+      - name: "Regression suite (npm test)"
+        working-directory: ${{ env.WORKER_DIR }}
+        run: npm test
+
+      - name: "Wrangler production bundle dry-run (HARD GATE)"
+        working-directory: ${{ env.WORKER_DIR }}
+        run: npm run deploy:dry -- --config wrangler.toml
+
+      - name: "Wrangler version"
+        working-directory: ${{ env.WORKER_DIR }}
+        run: npx wrangler --version
+
+      - name: "Deploy Worker to Cloudflare (with retry)"
+        working-directory: ${{ env.WORKER_DIR }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          echo "=== Deploying sentinel-apex-swarm-live ==="
+
+          LOG=/tmp/wrangler_deploy.log
+
+          # Same root cause as deploy-worker.yml's identical helper: the
+          # CLOUDFLARE_API_TOKEN has Account -> Workers Scripts: Edit but
+          # not Zone -> Workers Routes: Edit for cyberdudebivash.com. The
+          # script itself uploads and activates fine; wrangler's attempt to
+          # re-assert the two already-existing static routes in
+          # wrangler.toml is what fails. Detect exactly that case and
+          # verify liveness independently instead of trusting wrangler's
+          # exit code alone.
+          is_routes_only_failure() {
+            grep -q "Uploaded sentinel-apex-swarm-live" "$LOG" && \
+            grep -q "workers/routes" "$LOG" && \
+            grep -q "code: 10000" "$LOG"
+          }
+
+          verify_live() {
+            echo "--- Verifying worker is live via /api/swarm/health ---"
+            for attempt in 1 2 3 4 5 6; do
+              sleep 10
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+                "https://intel.cyberdudebivash.com/api/swarm/health" 2>/dev/null || echo "000")
+              echo "  health probe ${attempt}/6 -> HTTP ${STATUS}"
+              if [ "$STATUS" = "200" ]; then
+                echo "OK: Worker is live and serving (HTTP 200)."
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          handle_routes_gap() {
+            echo ""
+            echo "NOTICE: wrangler exited non-zero, but the worker SCRIPT uploaded"
+            echo "        successfully. The only error is the Zone Workers Routes"
+            echo "        reconciliation (token lacks 'Workers Routes: Edit')."
+            echo "        Routes are static and already exist -- verifying live deploy..."
+            if verify_live; then
+              echo "DEPLOY SUCCESS (verified live): route reconciliation was skipped"
+              echo "due to token scope -- this does NOT affect the deployed code."
+              return 0
+            fi
+            echo "FATAL: Routes step failed AND worker is not responding 200 -- real failure."
+            return 1
+          }
+
+          echo "Deploy attempt 1/2..."
+          if npx wrangler deploy > "$LOG" 2>&1; then
+            cat "$LOG"
+            echo "Deploy successful"
+            exit 0
+          fi
+          cat "$LOG"
+          if is_routes_only_failure; then
+            handle_routes_gap && exit 0 || exit 1
+          fi
+
+          echo "First attempt failed -- retrying once..."
+          sleep 5
+
+          if npx wrangler deploy > "$LOG" 2>&1; then
+            cat "$LOG"
+            echo "Deploy successful (retry)"
+            exit 0
+          fi
+          cat "$LOG"
+          if is_routes_only_failure; then
+            handle_routes_gap && exit 0 || exit 1
+          fi
+
+          echo "FATAL: Both deploy attempts failed"
+          exit 1
+
+      - name: "Post-deploy certification (V4.47.0 + capabilities + UI)"
+        run: |
+          set -euo pipefail
+          echo "=== Swarm Live Post-Deploy Certification ==="
+
+          HEALTH=/tmp/swarm_health.json
+          OK=0
+          for attempt in 1 2 3 4 5 6; do
+            sleep 10
+            if curl -sf --max-time 15 "https://intel.cyberdudebivash.com/api/swarm/health" -o "$HEALTH"; then
+              if python3 - "$HEALTH" <<'PY'
+          import json, sys
+          path = sys.argv[1]
+          with open(path, encoding='utf-8') as f:
+              d = json.load(f)
+          
+          required_caps = [
+              'mission_readiness',
+              'mission_quality',
+              'evidence_graph',
+              'adaptive_specialists',
+              'agent_semantics_v2',
+              'credential_scoped_metrics',
+              'mission_profiles',
+          ]
+          assert d.get('status') == 'ok', d
+          assert d.get('service') == 'sentinel-apex-swarm-live', d
+          assert d.get('version') == '4.47.0', d
+          assert d.get('protocol') == 'cdb.swarm.v1', d
+          assert d.get('agents') == 8, d
+          assert d.get('persistence', {}).get('kv_bound') is True, d
+          assert d.get('production', {}).get('canonical_gateway_bound') is True, d
+          for cap in required_caps:
+              assert d.get('capabilities', {}).get(cap) is True, f'missing capability: {cap}'
+          profiles = {p.get('id') for p in d.get('mission_profiles', [])}
+          assert 'AUTO' in profiles and 'FULL_CTI_FABRIC' in profiles, profiles
+          print('PASS: exact V4.47.0 runtime contract is live')
+          PY
+                        then
+                OK=1
+                break
+              fi
+            fi
+            echo "Runtime contract not converged yet (attempt ${attempt}/6)"
+          done
+
+          [ "$OK" = "1" ] || {
+            echo "FATAL: production did not converge to the V4.47.0 runtime contract"
+            cat "$HEALTH" 2>/dev/null || true
+            exit 1
+          }
+
+          echo "--- /swarm UI contract ---"
+          UI=/tmp/swarm_ui.html
+          curl -sf --max-time 15 "https://intel.cyberdudebivash.com/swarm/" -o "$UI"
+          grep -q 'V4.47.0 PRODUCTION' "$UI"
+          grep -q 'id="readinessPanel"' "$UI"
+          grep -q 'id="profile"' "$UI"
+          grep -q 'id="viewMode"' "$UI"
+          grep -q 'id="missionQuality"' "$UI"
+          grep -q 'id="evidenceGraphState"' "$UI"
+          grep -q 'id="loadMetrics"' "$UI"
+
+          echo "POST-DEPLOY CERTIFICATION: PASS"
+
+  # Same pattern as deploy-worker.yml's notify-on-failure: a separate job so
+  # this can never perturb the deploy job it reports on, reusing the exact
+  # same alerting engine (scripts/pipeline_alert.py) rather than a new one.
+  notify-on-failure:
+    name: "Notify on deploy failure"
+    needs: deploy
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Send failure alert
+        env:
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
+        run: |
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "Production deploy (deploy-swarm-live.yml) FAILED -- intel.cyberdudebivash.com/swarm/ may be running a stale or broken Worker version." \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

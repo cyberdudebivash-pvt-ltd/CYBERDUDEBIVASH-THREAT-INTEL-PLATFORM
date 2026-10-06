@@ -1,0 +1,369 @@
+name: Automated Backup — Encrypted / Versioned v201.0
+
+on:
+  schedule:
+    # Full backup: daily at 01:00 UTC
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      backup_type:
+        description: "Backup type to run"
+        required: true
+        default: "full"
+        type: choice
+        options: [full, incremental, verify]
+      backup_id:
+        description: "Backup ID (required for verify)"
+        required: false
+        type: string
+
+concurrency:
+  group: backup-${{ github.workflow }}
+  cancel-in-progress: false  # Never cancel in-flight backups
+
+permissions:
+  # P0 (2026-09-10, public-repo zero-trust): actions: write removed --
+  # verified via repo-wide grep that no step in this file calls the
+  # Actions API (no run re-trigger, no artifact/run deletion, no cache
+  # management) across all 4 jobs (setup, full-backup, cf-data-backup,
+  # verify-backup). None of them write to git either. A stale permission
+  # from this workflow's original authoring that granted a capability
+  # nothing here has ever used.
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHON_VERSION: "3.11"
+
+jobs:
+
+  # ── Determine backup type from schedule/input ────────────────────────────
+  setup:
+    name: Determine Backup Type
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backup_type: ${{ steps.decide.outputs.backup_type }}
+
+    steps:
+      - name: Decide backup type
+        id: decide
+        run: |
+          # Manual dispatch takes priority
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "backup_type=${{ github.event.inputs.backup_type }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Schedule: cron "0 1 * * *" (01:00) = full only
+          echo "backup_type=full" >> $GITHUB_OUTPUT
+
+  # ── Full Backup ───────────────────────────────────────────────────────────
+  full-backup:
+    name: Full Encrypted Backup
+    needs: setup
+    runs-on: ubuntu-latest
+    if: needs.setup.outputs.backup_type == 'full'
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install cryptography boto3 --quiet
+
+      - name: Run full backup
+        env:
+          CDB_BACKUP_ENABLED:          "true"
+          CDB_BACKUP_DESTINATION:      ${{ vars.CDB_BACKUP_DESTINATION || 'local' }}
+          CDB_BACKUP_ENCRYPTION_KEY:   ${{ secrets.CDB_BACKUP_ENCRYPTION_KEY }}
+          CDB_BACKUP_S3_BUCKET:        ${{ secrets.CDB_BACKUP_S3_BUCKET }}
+          CDB_BACKUP_S3_PREFIX:        ${{ vars.CDB_BACKUP_S3_PREFIX || 'sentinel-apex/backups' }}
+          CDB_BACKUP_R2_ENDPOINT:      ${{ secrets.CDB_BACKUP_R2_ENDPOINT }}
+          CDB_BACKUP_R2_BUCKET:        ${{ secrets.CDB_BACKUP_R2_BUCKET }}
+          CDB_BACKUP_LOCAL_PATH:       "data/backups"
+          AWS_ACCESS_KEY_ID:           ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY:       ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION:          ${{ vars.AWS_DEFAULT_REGION || 'us-east-1' }}
+          PLATFORM_VERSION:            ${{ vars.PLATFORM_VERSION || '201.0' }}
+        run: |
+          python -m agent.backup.backup_engine --full | tee backup-manifest.json
+          STATUS=$(python3 -c "import json; d=json.load(open('backup-manifest.json')); print(d.get('status','unknown'))")
+          echo "Backup status: $STATUS"
+          if [[ "$STATUS" != "success" ]]; then
+            echo "::error::Full backup failed with status: $STATUS"
+            exit 1
+          fi
+          BACKUP_ID=$(python3 -c "import json; print(json.load(open('backup-manifest.json'))['backup_id'])")
+          echo "BACKUP_ID=$BACKUP_ID" >> $GITHUB_ENV
+
+      - name: Upload backup manifest artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backup-manifest-full-${{ github.run_id }}
+          path: backup-manifest.json
+          retention-days: 90
+
+      - name: Notify on failure
+        if: failure()
+        # FIX (P0, 2026-09-10, operational-readiness audit): this step
+        # previously only ever emitted a ::error:: annotation, visible
+        # solely inside the Actions UI -- the commented-out curl example
+        # below it had never actually been wired to a real secret. Reuses
+        # scripts/pipeline_alert.py's send_telegram(), already proven live
+        # in enterprise-governance.yml/self-healing.yml, rather than
+        # inventing a new notification path. Exits 0 (never fails this
+        # already-failing job further) when TELEGRAM_BOT_TOKEN/CHAT_ID
+        # aren't configured, matching that script's own established
+        # skip-gracefully convention.
+        env:
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
+        run: |
+          echo "::error::Full backup FAILED. Platform data at risk. Investigate immediately."
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "Full encrypted backup (automated-backup.yml) FAILED. Platform data at risk."
+
+  # ── Cloudflare KV + R2 Data Backup (v184.0 - enterprise hardening) ─────────
+  cf-data-backup:
+    name: Cloudflare KV + R2 Backup
+    needs: setup
+    runs-on: ubuntu-latest
+    if: needs.setup.outputs.backup_type == 'full'
+    timeout-minutes: 30
+    continue-on-error: true  # Don't block main backup if CF creds not configured
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install boto3 requests --quiet
+
+      - name: Backup KV namespaces to R2
+        env:
+          CF_API_TOKEN:            ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID:           ${{ secrets.CF_ACCOUNT_ID }}
+          CF_R2_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_ENDPOINT:          ${{ secrets.CF_R2_ENDPOINT }}
+          CF_R2_BUCKET:            sentinel-apex-data
+          # P0 FIX: this job has been silently timing out at 30min every day
+          # for 13+ days (confirmed live: job log shows zero output between
+          # env setup and "The operation was canceled" at the exact
+          # timeout-minutes boundary) -- backup_kv_to_r2.py's own print()
+          # calls were real but invisible: piped/non-interactive stdout is
+          # fully-buffered by default in Python, so nothing reached the CI
+          # log until the buffer flushed or the process exited, neither of
+          # which happened before the timeout killed it. This alone doesn't
+          # fix the slowness (see backup_kv_to_r2.py's parallelized fetch),
+          # but without it this job would still be undiagnosable if it ever
+          # times out again.
+          PYTHONUNBUFFERED: "1"
+          KV_BACKUP_WORKERS: "32"
+          KV_BACKUP_MAX_RETRIES: "5"
+          KV_BACKUP_RETRY_BASE_SECONDS: "0.5"
+        # P0 FIX (2026-09-18, Telegram staleness-alert incident): the two fixes
+        # above (unbuffered output, 10-way parallel fetch) made this step
+        # diagnosable and faster, but not fast enough. Confirmed live across
+        # every run of this workflow from 2026-09-11 to 2026-09-18 (8/8 days):
+        # SECURITY_HUB_KV alone now holds ~92,400 keys (50x+ every other
+        # namespace here combined) and at ~38 keys/sec with 10 workers needs
+        # ~40min to export -- still past this job's 30min timeout-minutes.
+        #
+        # That alone would be harmless (this job has had continue-on-error:
+        # true since it was authored, specifically so an optional mirror never
+        # blocks the real backup above). But a RUNNER-enforced timeout-minutes
+        # kill produces conclusion "cancelled", and continue-on-error only
+        # absorbs "failure" -- confirmed live that a cancelled cf-data-backup
+        # dragged the WHOLE workflow run's conclusion to "cancelled" on all 8
+        # of those days, even though full-backup (the actual encrypted backup)
+        # succeeded in under a minute every single time. check_pipeline_
+        # staleness.py only asks for the most recent status=success run, so it
+        # has correctly (on objectively wrong input) been telling Telegram
+        # this platform's backup is down for over a week, 4x/day, when it
+        # never was. Same reason "Notify on CF backup failure" (if: failure())
+        # below never fired either -- cancelled isn't failure -- so nobody got
+        # a specific alert about the real, narrow issue, only a misleading one
+        # about the whole pipeline.
+        #
+        # This exact "timeout-minutes kill bypasses continue-on-error" class
+        # of bug was already found and fixed at STEP granularity in
+        # sentinel-blogger.yml (see its "Upload Intel State to R2 (final,
+        # post-enrichment)" and "STAGE 5.4.0b" step comments); this reuses
+        # that same fix at JOB granularity, since GitHub Actions has no "job
+        # timeout continue-on-error actually absorbs" primitive: `timeout`
+        # self-terminates well inside the job's own 30min budget, so the
+        # runner's own timeout-minutes can never fire here again, whatever
+        # SECURITY_HUB_KV grows to. 1200s (20min) keeps ~9-10min margin for
+        # setup plus the 3 steps after this one (which, cancelled at the
+        # 30min mark every day for over a week, likely never got to run).
+        #
+        # Raising max_workers or adding a retention/TTL policy for
+        # SECURITY_HUB_KV could close the remaining throughput gap, but both
+        # need live Cloudflare access this sandbox doesn't have to size
+        # safely -- flagged as follow-ups, not guessed at here.
+        run: |
+          if [[ -z "$CF_API_TOKEN" || -z "$CF_ACCOUNT_ID" ]]; then
+            echo "SKIP: CF_API_TOKEN or CF_ACCOUNT_ID not configured"
+            exit 0
+          fi
+          timeout 1200 python3 scripts/backup_kv_to_r2.py
+          STATUS=$?
+          if [ "$STATUS" -eq 124 ]; then
+            echo "::warning::Backup KV namespaces to R2 did not finish within the 20min self-terminating safety window (SECURITY_HUB_KV has grown to ~92K+ keys; export is currently slower than that budget) -- partial or no snapshot for today. See P0 FIX comment above. This is a normal, continue-on-error-absorbed step outcome, not a runner cancellation, so it will never mark the overall workflow run as failed/stale."
+          fi
+          exit "$STATUS"
+
+      - name: Backup R2 buckets (manifest + integrity check)
+        env:
+          CF_R2_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_ENDPOINT:          ${{ secrets.CF_R2_ENDPOINT }}
+        run: |
+          if [[ -z "$CF_R2_ACCESS_KEY_ID" ]]; then
+            echo "SKIP: CF R2 credentials not configured"
+            exit 0
+          fi
+          python3 scripts/backup_r2.py
+
+      - name: "P0 FinOps -- verify R2 lifecycle safety-net policy is live"
+        # docs/P0_R2_COST_CONTAINMENT.md Section 8d has, since 2026-09-05,
+        # explicitly disclosed that whether config/r2_lifecycle_policy.json's
+        # permanent 7-day ephemeral-retention backstop (built in PR #377) was
+        # ever actually applied to production R2 has never been verified --
+        # no sandboxed Claude Code session has ever had CF_ACCOUNT_ID/R2
+        # credentials, and this read-only check (r2_lifecycle_manager.py
+        # --verify: GET bucket-lifecycle-configuration only, never a PUT --
+        # see that script's own cmd_verify docstring) was never wired into
+        # any workflow that does. Reuses the exact CF_R2_* secrets this job
+        # already fetches for backup_r2.py above, aliased to the
+        # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/CF_ACCOUNT_ID names
+        # r2_lifecycle_manager.py expects (get_credentials(), imported from
+        # r2_upload.py) -- the same alias sentinel-blogger.yml's STAGE 3.5
+        # already uses for this identical underlying secret. Zero new
+        # secrets. This step only reports drift; it never applies or
+        # mutates the policy -- doing so remains a deliberate, separate,
+        # human-operator action per that document's own instruction.
+        #
+        # FIX (P0, 2026-09-10, CodeRabbit review on PR #407): `|| echo`
+        # below used to swallow --verify's real exit code -- the step
+        # always exited 0, so drift/not-yet-applied could never actually
+        # trip failure() for "Notify on CF backup failure" below (the job
+        # already has continue-on-error: true at the job level, so letting
+        # this step genuinely fail doesn't block the rest of the daily
+        # backup run). The `&&`/`||` capture keeps the same human-readable
+        # remediation message while preserving the real exit code.
+        env:
+          CF_ACCOUNT_ID:         ${{ secrets.CF_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+        run: |
+          if [[ -z "$AWS_ACCESS_KEY_ID" || -z "$CF_ACCOUNT_ID" ]]; then
+            echo "SKIP: CF_ACCOUNT_ID or R2 credentials not configured"
+            exit 0
+          fi
+          python3 scripts/r2_lifecycle_manager.py --verify && VERIFY_EXIT=0 || VERIFY_EXIT=$?
+          if [ "$VERIFY_EXIT" -ne 0 ]; then
+            echo "::warning::R2 lifecycle safety-net policy drift or not-yet-applied -- see uploaded r2-lifecycle-verify artifact. Run 'python3 scripts/r2_lifecycle_manager.py --apply --execute --confirm-bucket sentinel-apex-reports' from an environment with production R2 credentials to arm it (docs/P0_R2_COST_CONTAINMENT.md Section 8b)."
+          fi
+          exit "$VERIFY_EXIT"
+
+      - name: Upload R2 lifecycle verification report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: r2-lifecycle-verify-${{ github.run_id }}
+          path: data/quality/r2_lifecycle_report.json
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Notify on CF backup failure
+        if: failure()
+        # FIX (P0, 2026-09-10, operational-readiness audit): previously
+        # ::warning:: only, visible solely inside the Actions UI -- same
+        # fix as "Notify on failure" above, reusing pipeline_alert.py.
+        env:
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
+        run: |
+          echo "::warning::Cloudflare KV/R2 backup job failed. Inspect the failed step and exit code; do not assume a credential fault."
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "Cloudflare KV/R2 backup control (automated-backup.yml cf-data-backup) FAILED. This does not by itself mean the live threat-intel platform is stale. Inspect the failed step and exit code; exit 124 means the KV export exceeded its safety window, not a credential failure."
+
+  # ── Backup Integrity Verify ───────────────────────────────────────────────
+  verify-backup:
+    name: Verify Backup Integrity
+    needs: setup
+    runs-on: ubuntu-latest
+    if: needs.setup.outputs.backup_type == 'verify'
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install cryptography boto3 --quiet
+
+      - name: Verify backup integrity
+        # v184.8 FIX: backup_id (free-text workflow_dispatch input) previously
+        # template-spliced into BACKUP_ID="..." before the shell parsed it, in
+        # the same step as CDB_BACKUP_ENCRYPTION_KEY/CDB_BACKUP_S3_BUCKET.
+        # Passed through env: (BACKUP_ID_INPUT) instead.
+        env:
+          CDB_BACKUP_ENABLED:        "true"
+          CDB_BACKUP_DESTINATION:    ${{ vars.CDB_BACKUP_DESTINATION || 'local' }}
+          CDB_BACKUP_ENCRYPTION_KEY: ${{ secrets.CDB_BACKUP_ENCRYPTION_KEY }}
+          CDB_BACKUP_S3_BUCKET:      ${{ secrets.CDB_BACKUP_S3_BUCKET }}
+          CDB_BACKUP_LOCAL_PATH:     "data/backups"
+          BACKUP_ID_INPUT:           ${{ github.event.inputs.backup_id }}
+        run: |
+          BACKUP_ID="${BACKUP_ID_INPUT}"
+          if [[ -z "$BACKUP_ID" ]]; then
+            echo "::error::backup_id input is required for verify operation"
+            exit 1
+          fi
+          python -m agent.backup.backup_engine --verify "$BACKUP_ID"
+
+      - name: Notify on verify failure
+        if: failure()
+        # FIX (P0, 2026-09-10, operational-readiness audit): this job had
+        # no failure-notification step at all -- a failed verify was only
+        # ever visible as a red status in the Actions UI. Same fix as the
+        # other two jobs in this file, reusing pipeline_alert.py.
+        #
+        # FIX (P0, 2026-09-10, CodeRabbit review on PR #407): backup_id is
+        # a free-text workflow_dispatch input -- template-splicing it
+        # straight into --message below (as this step originally did)
+        # interpolates it into the shell command line before bash parses
+        # it, the exact injection class this same file's own v184.8 FIX
+        # comment (a few lines up) already root-caused and fixed once for
+        # a different step. Passed through env: instead, matching that
+        # established pattern.
+        env:
+          TELEGRAM_OPS_BOT_TOKEN: ${{ secrets.TELEGRAM_OPS_BOT_TOKEN }}
+          TELEGRAM_OPS_CHAT_ID: ${{ secrets.TELEGRAM_OPS_CHAT_ID }}
+          BACKUP_ID_INPUT: ${{ github.event.inputs.backup_id }}
+        run: |
+          python3 scripts/pipeline_alert.py --status failure \
+            --message "Backup integrity verify (automated-backup.yml verify-backup) FAILED for backup_id=${BACKUP_ID_INPUT}."
