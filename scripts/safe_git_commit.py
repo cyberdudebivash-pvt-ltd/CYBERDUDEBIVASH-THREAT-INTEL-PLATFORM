@@ -114,6 +114,26 @@ def count_manifest() -> str:
     return "N/A"
 
 
+def _write_metadata_sync_state(state: dict) -> None:
+    """Record recovery evidence without publishing it as production success."""
+    health = REPO_ROOT / "data" / "health"
+    health.mkdir(parents=True, exist_ok=True)
+    target = health / "git_sync_state.json"
+    temporary = target.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    temporary.replace(target)
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+            summary.write(
+                f"\nGenerated metadata: **{state['state']}**; main not updated. "
+                f"Commit `{state['commit_sha']}` on `{state['branch']}`. "
+                f"[Review preserved diff]({state['compare_url']}).\n")
+            if state.get("reason"):
+                summary.write(f"PR blocker: `{state['reason']}`. {state['operator_action']}\n")
+            if state.get("pr_number"):
+                summary.write(f"Draft PR #{state['pr_number']}; review pending.\n")
+
+
 def publish_metadata_pr(token: str, repository: str) -> dict:
     """Persist the exact generated commit on a unique branch; never push main.
 
@@ -130,9 +150,29 @@ def publish_metadata_pr(token: str, repository: str) -> dict:
     if not run_id.isdigit() or not attempt.isdigit():
         raise RuntimeError("Metadata PR requires numeric run identity")
     branch = f"sentinel-generated/run-{run_id}-{attempt}"
+    head = run_git("rev-parse", "HEAD")
+    commit_sha = (head.stdout or "").strip()
+    if head.returncode or not re.fullmatch(r"[a-f0-9]{40}", commit_sha):
+        raise RuntimeError("Cannot establish generated commit identity; publication stopped")
     push = run_git("push", "origin", f"HEAD:refs/heads/{branch}")
     if push.returncode:
         raise RuntimeError("Generated metadata branch push rejected; no main write attempted")
+
+    state = {"state": "PERSISTED_BRANCH_ONLY", "branch": branch, "commit_sha": commit_sha,
+             "main_updated": False, "run_id": run_id, "run_attempt": attempt,
+             "compare_url": f"https://github.com/{repository}/compare/main...{commit_sha}"}
+    _write_metadata_sync_state(state)
+
+    def blocked(reason, status=None):
+        state.update(state="PERSISTED_PR_BLOCKED", reason=reason)
+        if status is not None:
+            state["http_status"] = status
+        state["operator_action"] = (
+            "Check repository/organization Actions PR-creation policy and the token's "
+            "pull-request permission. Review the preserved commit; do not bypass main protection.")
+        _write_metadata_sync_state(state)
+        return RuntimeError(f"Metadata PR blocked: {reason}; generated commit {commit_sha} "
+                            f"preserved on {branch}; main unchanged")
 
     def api(method, path, payload=None):
         req = urllib.request.Request(
@@ -145,13 +185,30 @@ def publish_metadata_pr(token: str, repository: str) -> dict:
             with urllib.request.urlopen(req, timeout=30) as response:
                 return json.loads(response.read(1024 * 1024))
         except urllib.error.HTTPError as exc:
-            raise RuntimeError(f"Metadata PR API rejected ({exc.code}); check token PR permission") from None
+            # Never echo GitHub's raw body, token, request headers or transport
+            # diagnostics. Only allowlisted classifications enter logs/evidence.
+            reason = "GITHUB_API_REJECTED"
+            if exc.code == 403:
+                reason = "TOKEN_OR_POLICY_FORBIDDEN"
+                try:
+                    message = json.loads(exc.read(8192)).get("message", "")
+                    if message == "GitHub Actions is not permitted to create or approve pull requests.":
+                        reason = "ACTIONS_PR_CREATION_DISABLED"
+                except (ValueError, AttributeError, OSError):
+                    pass
+            elif exc.code == 401:
+                reason = "TOKEN_AUTHENTICATION_REJECTED"
+            raise blocked(reason, exc.code) from None
+        except urllib.error.URLError:
+            raise blocked("GITHUB_TRANSPORT_UNAVAILABLE") from None
+        except (ValueError, UnicodeError):
+            raise blocked("INVALID_GITHUB_RESPONSE") from None
 
     owner = repository.split('/')[0]
     from urllib.parse import urlencode
     prs = api("GET", "pulls?" + urlencode({"state": "open", "head": f"{owner}:{branch}", "base": "main"}))
     if not isinstance(prs, list):
-        raise RuntimeError("Invalid metadata PR lookup response")
+        raise blocked("INVALID_PR_LOOKUP_RESPONSE")
     pr = prs[0] if prs else api("POST", "pulls", {
         "head": branch, "base": "main", "draft": True,
         "title": f"chore: generated intel metadata from run {run_id}",
@@ -159,15 +216,9 @@ def publish_metadata_pr(token: str, repository: str) -> dict:
                 "Requires review and merge under main protection. R2 remains the runtime state authority. "
                 "This PR does not certify production deployment or customer readiness."})
     if not isinstance(pr, dict) or not isinstance(pr.get("number"), int):
-        raise RuntimeError("Metadata PR creation returned no PR identity")
-    state = {"state": "PERSISTED_REVIEW_PENDING", "branch": branch, "pr_number": pr["number"],
-             "main_updated": False, "run_id": run_id}
-    health = REPO_ROOT / "data" / "health"
-    health.mkdir(parents=True, exist_ok=True)
-    (health / "git_sync_state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
-    if os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-            summary.write(f"\nGenerated metadata: PR #{pr['number']} on `{branch}`. Review pending; main not updated.\n")
+        raise blocked("MISSING_PR_IDENTITY")
+    state.update(state="PERSISTED_REVIEW_PENDING", pr_number=pr["number"])
+    _write_metadata_sync_state(state)
     return state
 
 
