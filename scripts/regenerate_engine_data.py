@@ -714,7 +714,7 @@ def generate_incidents(items: List[Dict]) -> Dict:
 def generate_response_log(items: List[Dict]) -> Dict:
     actions = []
     for item in items[:150]:
-        risk = _safe_float(item.get("risk_score")) or 5.0
+        risk = _safe_float(item.get("risk_score"))
         if risk < 5.0:
             continue
         title_l = (item.get("title","") or "").lower()
@@ -736,25 +736,24 @@ def generate_response_log(items: List[Dict]) -> Dict:
             "action_id":       _short_id(item.get("id","") or item.get("title",""), "ACT"),
             "action_type":     action_type,
             "trigger_incident": _short_id(item.get("id","") or item.get("title",""), "INC"),
-            "status":          "COMPLETED",
+            "status":          "PROPOSED",
+            "evidence_type":   "advisory_derived_recommendation",
+            "source_url":      item.get("source_url") or item.get("url") or "",
             "risk_score":      round(risk, 1),
-            "executed_at":     NOW_ISO,
-            "automated":       True,
+            "proposed_at":     NOW_ISO,
+            "requires_approval": True,
         })
     by_type: Dict[str, int] = {}
     for a in actions:
         by_type[a["action_type"]] = by_type.get(a["action_type"], 0) + 1
     return {
         "engine":        "v61_response_engine",
-        "version":       "61.1.0",
+        "version":       "61.2.0",
+        "mode":          "recommendations_only",
+        "evidence_type": "advisory_derived_recommendation",
         "generated_at":  NOW_ISO,
         "total_actions": len(actions),
         "action_breakdown": by_type,
-        "automation_stats": {
-            "automated_pct": 94.2,
-            "avg_response_time_sec": 8.3,
-            "false_positive_rate": 1.7,
-        },
         "response_actions": actions,
     }
 

@@ -47,3 +47,11 @@ test('empty refresh clears old records rather than retaining stale customer evid
  ctx.renderHuntEngine({hunt_hypotheses:[{hypothesis:'old'}]});ctx.renderHuntEngine({hunt_hypotheses:'bad'});
  assert.equal(nodes['ts-hunt-feed'].innerHTML,'');
 });
+test('legacy completed actions display as proposals and type counts never copy incidents',()=>{
+ const {nodes,ctx}=harness();nodes['ts-incident-count'].textContent='999';
+ ctx.renderResponseEngine({total_actions:999,response_actions:[{action_type:'block_ip',status:'COMPLETED',automated:true},{action_type:'block_ip'},{action_type:'patch_vulnerability'}]});
+ assert.equal(nodes['ts-response-count'].textContent,'3');
+ assert.equal(nodes['ts-playbook-count'].textContent,'2');
+ ctx.renderHuntEngine({hunt_hypotheses:[]});
+ assert.equal(nodes['ts-playbook-count'].textContent,'2');
+});
