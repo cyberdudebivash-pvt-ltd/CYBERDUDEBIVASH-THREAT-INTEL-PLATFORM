@@ -64,7 +64,17 @@ export async function getStrongAuthState(env, identity) {
 
 export async function incrementStrongRate(env, identity, limit, resetAt) {
   const stub = await authorityStub(env, "rate", identity);
-  return postJson(stub, { action: "rate_increment", limit, resetAt });
+  const data = await postJson(stub, { action: "rate_increment", limit, resetAt });
+  // An HTTP-success response is insufficient authority to permit a request.
+  // Accept only an internally consistent decision for the requested ceiling.
+  if (data.ok !== true || typeof data.allowed !== "boolean"
+      || !Number.isSafeInteger(data.count) || data.count < 1
+      || data.limit !== limit
+      || data.allowed !== (data.count <= limit)
+      || data.remaining !== Math.max(0, limit - data.count)) {
+    throw new Error("strong_rate_invalid_decision");
+  }
+  return data;
 }
 
 export function authStateDenies(state) {
