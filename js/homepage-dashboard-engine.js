@@ -6591,23 +6591,37 @@ function renderTopThreats(data) {
                 }
             }
 
+            function aiMetric(value, decimals) {
+                if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return 'Assessment pending';
+                var n = Number(value);
+                if (!Number.isFinite(n) || n < 0 || (decimals === undefined && !Number.isSafeInteger(n))) return 'Assessment pending';
+                return decimals === undefined ? n.toLocaleString() : n.toFixed(decimals);
+            }
+            function aiTechniques(value) {
+                return Array.isArray(value) ? value.slice(0, 3).map(function(v) { return tipText(v, 80); }).join(' ') : '';
+            }
             function renderAIAnalysis(analyze, respond, correlate) {
                 try {
+                    // Clear previous evidence when a partial/malformed refresh arrives.
+                    ['ai-summary-grid','ai-top-threats','ai-response-queue','ai-correlate-summary'].forEach(function(id) {
+                        var node = document.getElementById(id);
+                        if (node) node.textContent = 'Assessment pending';
+                    });
                     // ── Summary grid ──
                     const sg = document.getElementById('ai-summary-grid');
                     if (sg && analyze && analyze.summary) {
                         const s = analyze.summary;
                         const cells = [
-                            { label: 'ANALYZED',  val: (s.total_analyzed||0).toLocaleString(), color: '#a855f7' },
-                            { label: 'CRITICAL',  val: s.critical_count||0,  color: '#ef4444' },
-                            { label: 'HIGH',      val: s.high_count||0,      color: '#f97316' },
-                            { label: 'KEV LIVE',  val: s.kev_active||0,      color: '#ef4444' },
-                            { label: 'ACTORS',    val: s.unique_actors||0,   color: '#8b5cf6' },
-                            { label: 'AVG RISK',  val: (s.avg_risk_score||0).toFixed(1), color: '#f59e0b' },
+                            { label: 'ANALYZED',  val: aiMetric(s.total_analyzed), color: '#a855f7' },
+                            { label: 'CRITICAL',  val: aiMetric(s.critical_count),  color: '#ef4444' },
+                            { label: 'HIGH',      val: aiMetric(s.high_count),      color: '#f97316' },
+                            { label: 'KEV LIVE',  val: aiMetric(s.kev_active),      color: '#ef4444' },
+                            { label: 'ACTORS',    val: aiMetric(s.unique_actors),   color: '#8b5cf6' },
+                            { label: 'AVG RISK',  val: aiMetric(s.avg_risk_score, 1), color: '#f59e0b' },
                         ];
                         sg.innerHTML = cells.map(c =>
                             `<div style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.06);border-radius:4px;padding:10px;text-align:center;">
-                                <div style="font-size:18px;font-weight:900;color:${c.color};font-family:var(--font-mono);">${c.val}</div>
+                                <div style="font-size:18px;font-weight:900;color:${c.color};font-family:var(--font-mono);">${tipText(c.val, 40)}</div>
                                 <div style="font-size:7px;color:var(--text-muted);letter-spacing:1.5px;margin-top:2px;">${c.label}</div>
                             </div>`
                         ).join('');
@@ -6616,7 +6630,7 @@ function renderTopThreats(data) {
                     // ── Top threats \u2014 ISSUE 2 FIX: use computePriority() ──
                     const tt = document.getElementById('ai-top-threats');
                     if (tt && analyze && analyze.top_threats) {
-                        tt.innerHTML = analyze.top_threats.slice(0, 8).map(t => {
+                        tt.innerHTML = tipRows(analyze.top_threats, 8).map(t => {
                             // P0 FIX: t.priority was already resolved via
                             // window.CDB_NORMALIZE.priority() against the full raw item
                             // when `analyze` was built above -- do not recompute from `t`
@@ -6625,17 +6639,17 @@ function renderTopThreats(data) {
                             // silently lose the KEV signal since t only carries `kev`, not
                             // `kev_present`). Never fall back to 'P4'.
                             const pri = t.priority || 'UNKNOWN';
-                            const priColor = (window.PRIORITY_COLORS && window.PRIORITY_COLORS[pri]) ||
+                            const priColor =
                                 (pri==='P1'?'#ef4444':pri==='P2'?'#f97316':pri==='P3'?'#fbbf24':'#4ade80');
                             const kevBadge = t.kev ? ' <span style="background:#ef444422;color:#ef4444;font-size:7px;padding:1px 4px;border-radius:2px;">⚡ KEV</span>' : '';
                             return `<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;">
-                                <span style="color:${priColor};font-weight:900;font-size:10px;min-width:32px;">${t.risk_score}</span>
+                                <span style="color:${priColor};font-weight:900;font-size:10px;min-width:32px;">${tipText(aiMetric(t.risk_score, 1), 40)}</span>
                                 <div style="flex:1;">
-                                    <div style="color:var(--white);font-size:10px;">${(t.title||'').substring(0,90)}${kevBadge}</div>
+                                    <div style="color:var(--white);font-size:10px;">${tipText(t.title, 90)}${kevBadge}</div>
                                     <div style="color:var(--text-muted);font-size:8px;margin-top:2px;">
-                                        ${t.actor && t.actor !== 'UNKNOWN' ? '<span style="color:#8b5cf6;">'+t.actor+'</span> \u00b7 ' : ''}
-                                        <span style="color:${priColor};font-weight:700;">${pri}</span>
-                                        ${t.ttps && t.ttps.length ? ' \u00b7 ' + t.ttps.slice(0,3).join(' ') : ''}
+                                        ${t.actor && t.actor !== 'UNKNOWN' ? '<span style="color:#8b5cf6;">'+tipText(t.actor, 80)+'</span> \u00b7 ' : ''}
+                                        <span style="color:${priColor};font-weight:700;">${tipText(pri, 24)}</span>
+                                        ${Array.isArray(t.ttps) && t.ttps.length ? ' \u00b7 ' + aiTechniques(t.ttps) : ''}
                                     </div>
                                 </div>
                             </div>`;
@@ -6645,20 +6659,20 @@ function renderTopThreats(data) {
                     // ── SOAR response queue \u2014 ISSUE 2 FIX: use computePriority() ──
                     const rq = document.getElementById('ai-response-queue');
                     if (rq && respond && respond.response_queue) {
-                        rq.innerHTML = respond.response_queue.slice(0, 6).map(a => {
+                        rq.innerHTML = tipRows(respond.response_queue, 6).map(a => {
                             // P0 FIX: a.priority was already resolved via
                             // window.CDB_NORMALIZE.priority() when `respond` was built
                             // above -- never fall back to 'P4'.
                             const pri = a.priority || 'UNKNOWN';
-                            const pColor = (window.PRIORITY_COLORS && window.PRIORITY_COLORS[pri]) ||
+                            const pColor =
                                 (pri==='P1'?'#ef4444':pri==='P2'?'#f97316':'#fbbf24');
                             return `<div style="padding:6px;margin-bottom:4px;background:rgba(249,115,22,0.06);border:1px solid rgba(249,115,22,0.12);border-radius:3px;">
                                 <div style="display:flex;justify-content:space-between;align-items:center;">
-                                    <span style="color:${pColor};font-weight:900;font-size:9px;">${pri}</span>
-                                    <span style="color:var(--text-muted);font-size:8px;">SLA: ${a.sla_hours||24}h</span>
+                                    <span style="color:${pColor};font-weight:900;font-size:9px;">${tipText(pri, 24)}</span>
+                                    <span style="color:var(--text-muted);font-size:8px;">SLA: ${tipText(aiMetric(a.sla_hours), 40)}h</span>
                                 </div>
-                                <div style="color:var(--white);font-size:10px;margin-top:2px;">${(a.incident_title||'').substring(0,80)}</div>
-                                <div style="color:var(--text-muted);font-size:8px;margin-top:2px;">▶ ${a.playbook||'GENERAL RESPONSE'}</div>
+                                <div style="color:var(--white);font-size:10px;margin-top:2px;">${tipText(a.incident_title, 80)}</div>
+                                <div style="color:var(--text-muted);font-size:8px;margin-top:2px;">▶ ${tipText(a.playbook || 'GENERAL RESPONSE', 120)}</div>
                             </div>`;
                         }).join('');
                     }
@@ -6669,22 +6683,22 @@ function renderTopThreats(data) {
                         const s = correlate.summary;
                         cs.innerHTML = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
                             ${[
-                                ['CLUSTERS', s.threat_clusters||0, '#3b82f6'],
-                                ['ACTORS',   s.unique_actors||0,   '#8b5cf6'],
-                                ['TTPs',     s.unique_ttps||0,     '#ec4899'],
-                                ['CVEs SHARED', s.shared_cves||0, '#ef4444'],
+                                ['CLUSTERS', aiMetric(s.threat_clusters), '#3b82f6'],
+                                ['ACTORS',   aiMetric(s.unique_actors),   '#8b5cf6'],
+                                ['TTPs',     aiMetric(s.unique_ttps),     '#ec4899'],
+                                ['CVEs SHARED', aiMetric(s.shared_cves), '#ef4444'],
                             ].map(([l,v,c]) => `<div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:3px;padding:8px;text-align:center;">
-                                <div style="font-size:16px;font-weight:900;color:${c};font-family:var(--font-mono);">${v}</div>
+                                <div style="font-size:16px;font-weight:900;color:${c};font-family:var(--font-mono);">${tipText(v, 40)}</div>
                                 <div style="font-size:7px;color:var(--text-muted);letter-spacing:1px;">${l}</div>
                             </div>`).join('')}
                         </div>
                         ${correlate.threat_clusters && correlate.threat_clusters.length ? `<div style="margin-top:10px;">` +
-                            correlate.threat_clusters.slice(0,4).map(c =>
+                            tipRows(correlate.threat_clusters, 4).map(c =>
                                 `<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;gap:8px;">
-                                    <span style="color:#8b5cf6;font-weight:700;font-size:10px;min-width:100px;">${c.actor}</span>
-                                    <span style="color:#ef4444;font-size:9px;">${c.incident_count} incidents</span>
-                                    <span style="color:#f59e0b;font-size:9px;">risk ${c.avg_risk}</span>
-                                    <span style="color:var(--text-muted);font-size:8px;">${(c.ttps||[]).slice(0,3).join(' ')}</span>
+                                    <span style="color:#8b5cf6;font-weight:700;font-size:10px;min-width:100px;">${tipText(c.actor, 80)}</span>
+                                    <span style="color:#ef4444;font-size:9px;">${tipText(aiMetric(c.incident_count), 40)} incidents</span>
+                                    <span style="color:#f59e0b;font-size:9px;">risk ${tipText(aiMetric(c.avg_risk, 1), 40)}</span>
+                                    <span style="color:var(--text-muted);font-size:8px;">${aiTechniques(c.ttps)}</span>
                                 </div>`
                             ).join('') + `</div>` : ''}`;
                     }
