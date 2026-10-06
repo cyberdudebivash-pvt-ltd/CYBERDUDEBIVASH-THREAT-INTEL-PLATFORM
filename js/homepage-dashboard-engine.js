@@ -6142,37 +6142,25 @@ function renderTopThreats(data) {
             // ── QUANTUM RENDERER ────────────────────────────────────────────
             function renderQuantumEngine(data) {
                 try {
-                    const feedTrust = data.feed_trust || {};
-                    const trustScore = feedTrust.overall != null ? Math.round(feedTrust.overall) : null;
-                    const quantumEl = document.getElementById('quantum-trust');
-                    if (quantumEl && trustScore != null) {
-                        quantumEl.textContent = trustScore + '%';
-                        quantumEl.style.color = trustScore >= 90 ? '#00d4aa' : trustScore >= 75 ? '#d97706' : '#ef4444';
-                    }
-
-                    // Anomaly count
-                    const anomalies = data.anomalies || [];
-                    if (anomalies.length && quantumEl) {
-                        const aEl = document.createElement('div');
-                        aEl.style.cssText = 'font-size:9px;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono);';
-                        aEl.textContent = anomalies.length + ' ANOMALIES DETECTED';
-                        if (!quantumEl.parentNode.querySelector('.quantum-anomaly')) {
-                            aEl.className = 'quantum-anomaly';
-                            quantumEl.parentNode.appendChild(aEl);
-                        }
-                    }
-
-                    // Feed trust alerts
-                    if (feedTrust.alerts) {
-                        const alertEl = document.createElement('div');
-                        alertEl.style.cssText = 'font-size:8px;color:#f59e0b;margin-top:2px;font-family:var(--font-mono);letter-spacing:1px;';
-                        alertEl.textContent = feedTrust.alerts + ' TRUST ALERTS';
-                        if (quantumEl && !quantumEl.parentNode.querySelector('.quantum-alerts')) {
-                            alertEl.className = 'quantum-alerts';
-                            quantumEl.parentNode.appendChild(alertEl);
-                        }
-                    }
-
+                    const el = document.getElementById('quantum-trust');
+                    if (!el) return;
+                    ['.quantum-anomaly', '.quantum-alerts'].forEach(function(selector) {
+                        const old = el.parentNode && el.parentNode.querySelector(selector);
+                        if (old) old.remove();
+                    });
+                    el.textContent = 'Coverage pending';
+                    el.style.color = 'var(--text-muted)';
+                    const c = data && data.evidence_type === 'source_link_coverage' && data.source_coverage;
+                    if (!c || ![c.total_records, c.source_link_records, c.distinct_sources, c.review_candidate_count].every(function(n) {
+                        return Number.isSafeInteger(n) && n >= 0;
+                    }) || c.source_link_records > c.total_records || c.distinct_sources > c.source_link_records || c.review_candidate_count > c.total_records) return;
+                    el.textContent = c.total_records ? (100 * c.source_link_records / c.total_records).toFixed(1) + '%' : 'Awaiting feed';
+                    const hint = document.createElement('div');
+                    hint.className = 'quantum-alerts';
+                    hint.style.cssText = 'font-size:8px;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono);';
+                    hint.textContent = c.source_link_records.toLocaleString() + ' / ' + c.total_records.toLocaleString() + ' records with source links | ' +
+                        c.distinct_sources.toLocaleString() + ' source hosts | ' + c.review_candidate_count.toLocaleString() + ' review candidates. Link coverage is not trust validation.';
+                    if (el.parentNode) el.parentNode.appendChild(hint);
                 } catch(e) { console.warn('[QUANTUM ENGINE]', e); }
             }
 
