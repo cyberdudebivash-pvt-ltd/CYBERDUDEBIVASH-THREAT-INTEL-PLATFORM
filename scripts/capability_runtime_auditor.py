@@ -206,6 +206,17 @@ _KNOWN_ADDITIONAL_VALID_ROUTES = frozenset({
     "/api/ai/tracker.json", "/api/ai/health.json", "/api/ai/executive-brief.json",
 })
 
+# Frontend code sometimes stores a route-family base string and appends the
+# actual endpoint at call time. Treating that base as a direct HTTP call
+# produces a false BROKEN verdict. Keep this list intentionally tiny and
+# evidence-backed: billing.html declares API="/api/v2/billing", while the
+# revenue Worker owns concrete /api/v2/billing/* routes on the same public
+# host. A base is accepted only if the loaded route table contains at least
+# one strict child route; this does not make arbitrary missing prefixes valid.
+_KNOWN_FRONTEND_ROUTE_BASES = frozenset({
+    "/api/v2/billing",
+})
+
 
 def _load_route_table() -> list[str]:
     """Every literal '/api/...' path string used as a `path === "X"` or
@@ -275,13 +286,20 @@ def _api_exists(dep: str, route_table: list[str]) -> bool:
         return True
     if _static_json_exists(dep):
         return True
+
+    dep_norm = dep.rstrip("/")
+    if dep_norm in _KNOWN_FRONTEND_ROUTE_BASES:
+        child_prefix = dep_norm + "/"
+        if any(route.rstrip("/").startswith(child_prefix) for route in route_table):
+            return True
+        # Fail closed if the owning Worker's concrete children disappear.
+        return False
     # {id}-style path params in the registered route table never appear
     # literally in frontend code (frontend interpolates a real id) -- strip
     # the templated segment and compare prefixes so e.g. frontend's
     # "/api/mssp/tenants/abc123/feed" matches route table's
     # "/api/mssp/tenants/{id}/feed" (segment-count + prefix match), not just
     # a literal string.
-    dep_norm = dep.rstrip("/")
     for route in route_table:
         route_norm = route.rstrip("/")
         if dep_norm == route_norm:
