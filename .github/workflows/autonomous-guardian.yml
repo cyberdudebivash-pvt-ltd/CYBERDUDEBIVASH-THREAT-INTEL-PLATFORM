@@ -38,6 +38,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
   actions: read
 
 env:
@@ -86,35 +87,24 @@ jobs:
           TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion || 'n/a' }}
         run: python3 agent/autonomous_guardian/guardian.py || true
 
-      - name: "Commit Guardian Report"
+      - name: "Preserve Guardian report for review"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          git config --local user.email "bivash@cyberdudebivash.com"
-          git config --local user.name  "CYBERDUDEBIVASH"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
-          git rebase --abort 2>/dev/null || true
-          git merge  --abort 2>/dev/null || true
-          rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
-
-          git add -f data/health/ 2>/dev/null || true
-          # STRICT: do NOT stage feed_manifest.json - sentinel-blogger owns it
-          git restore --staged data/stix/feed_manifest.json 2>/dev/null || true
-
+          set -euo pipefail
+          git config user.email "bivash@cyberdudebivash.com"
+          git config user.name "CYBERDUDEBIVASH"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"
+          git diff --cached --quiet
+          test -s data/health/guardian_report.json
+          git add -f -- data/health/
+          # sentinel-blogger retains ownership of feed_manifest.json.
           if git diff --staged --quiet; then
             echo "No guardian report changes."
-            exit 0
+          else
+            git commit -m "Guardian report for run ${GITHUB_RUN_ID} [skip ci]"
+            python scripts/publish_generated_commit.py
           fi
-
-          git commit -m "Guardian report @ $(date -u +'%Y-%m-%d %H:%M UTC') [skip ci]"
-
-          for i in 1 2 3 4; do
-            git fetch origin main --quiet 2>/dev/null || true
-            git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null||true; git merge origin/main -X ours --no-edit --quiet||true; }
-            if git push origin main; then echo "Push OK"; break; fi
-            sleep $((i*10))
-            [ $i -eq 4 ] && echo "Push deferred."
-          done
 
       - name: "Summary"
         if: always()

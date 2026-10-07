@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -34,25 +35,20 @@ jobs:
           ANALYST_DIR: data/analyst
           PYTHONPATH: ${{ github.workspace }}
         run: python -m agent.v37_analyst.analyst_engine
-      - name: Commit
+      - name: Preserve generated analyst outputs for review
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           git config user.name "CYBERDUDEBIVASH"
           git config user.email "bivash@cyberdudebivash.com"
-          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}
-          git add -f data/analyst/ 2>/dev/null || true
-          git diff --cached --quiet && echo "No changes" || {
-            THREATS=$(python3 -c "import json; d=json.load(open('data/analyst/analyst_report.json')); print(d['pipeline_stats']['threats_monitored'])" 2>/dev/null || echo "0")
-            RULES=$(python3 -c "import json; d=json.load(open('data/analyst/analyst_report.json')); print(d['pipeline_stats']['total_detection_rules'])" 2>/dev/null || echo "0")
-            git commit -m " AI ANALYST v37.0  -  ${THREATS} threats analyzed | ${RULES} detection rules [skip ci]"
-            git rebase --abort 2>/dev/null || true; git merge --abort 2>/dev/null || true
-            rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
-            for i in 1 2 3 4; do
-              git fetch origin main --quiet 2>/dev/null || true
-              git rebase origin/main --quiet 2>/dev/null || { git rebase --abort 2>/dev/null||true; git merge origin/main -X ours --no-edit --quiet||true; }
-              if git push origin main; then echo "Push OK ($i/4)"; break; fi
-              sleep $((i*15))
-              [ $i -eq 4 ] && echo "Push deferred."
-            done
-          }
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"
+          git diff --cached --quiet
+          test -s data/analyst/analyst_report.json
+          git add -f -- data/analyst/
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "AI Analyst generated outputs for run ${GITHUB_RUN_ID} [skip ci]"
+            python scripts/publish_generated_commit.py
+          fi

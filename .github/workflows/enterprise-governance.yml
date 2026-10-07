@@ -119,6 +119,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+      pull-requests: write
 
     outputs:
       governance_grade:    ${{ steps.gov_engine.outputs.grade }}
@@ -618,12 +619,20 @@ jobs:
       # ── Commit governance outputs ──────────────────────────────────────────
       - name: "Commit governance outputs"
         if: ${{ success() && github.event.inputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOVERNANCE_GRADE: ${{ steps.gov_engine.outputs.grade }}
+          GOVERNANCE_CONTRACT: ${{ steps.contract_check.outputs.status }}
+          GOVERNANCE_SLA: ${{ steps.sla_check.outputs.sla_status }}
         run: |
+          set -euo pipefail
           git config user.name  "SENTINEL-APEX-GOVERNANCE[bot]"
           git config user.email "governance@cyberdudebivash.in"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"
+          git diff --cached --quiet
+          test -s data/governance/governance_report.json
 
           # Stage governance output files (never stage production data paths)
-          STAGED=0
           for f in \
             data/governance/governance_report.json \
             data/governance/contract_report.json \
@@ -646,19 +655,18 @@ jobs:
             data/commercial/monetization_status.json \
             .github/sparse-checkout-hints.txt; do
             if [ -f "$f" ]; then
-              git add "$f"
-              STAGED=$((STAGED + 1))
+              git add -f -- "$f"
             fi
           done
 
-          if [ "$STAGED" -eq 0 ]; then
-            echo "[COMMIT] No governance outputs to commit — all clean or skipped."
+          if git diff --staged --quiet; then
+            echo "[COMMIT] No governance output changes detected — review publication not required."
             exit 0
           fi
 
-          GRADE="${{ steps.gov_engine.outputs.grade }}"
-          CONTRACT="${{ steps.contract_check.outputs.status }}"
-          SLA_ST="${{ steps.sla_check.outputs.sla_status }}"
+          GRADE="${GOVERNANCE_GRADE:-UNKNOWN}"
+          CONTRACT="${GOVERNANCE_CONTRACT:-UNKNOWN}"
+          SLA_ST="${GOVERNANCE_SLA:-UNKNOWN}"
           TS=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
           COMMIT_MSG=$(printf '%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n\n%s\n  %s\n  %s\n  %s\n  %s\n\n%s' \
@@ -676,39 +684,8 @@ jobs:
             "data/health/sla_status.json" \
             "governance-auto: No production data touched. Zero regression.")
 
-          git commit -m "$COMMIT_MSG" || \
-            echo "[COMMIT] Nothing to commit (outputs unchanged)."
-
-          # ── Push with resilient retry (handles concurrent pipeline pushes) ──
-          # ROOT CAUSE FIX: git pull --rebase exits 128 when governance scripts
-          # leave unstaged files in the working tree (phases 1-14 write JSON
-          # output files to disk; these are not staged before the push retry).
-          # Fix: stash all working-tree changes before rebase, pop after.
-          PUSH_OK=0
-          for ATTEMPT in 1 2 3 4 5; do
-            if git push origin main; then
-              echo "[PUSH] Governance outputs pushed on attempt ${ATTEMPT}."
-              PUSH_OK=1
-              break
-            fi
-            echo "::warning::Governance push attempt ${ATTEMPT}/5 rejected — remote ahead. Rebasing..."
-            # Stash unstaged/untracked working-tree files so rebase can proceed
-            git stash --include-untracked --quiet 2>/dev/null || true
-            git fetch origin main --quiet
-            if git rebase origin/main --quiet 2>/dev/null; then
-              echo "[REBASE] Rebase onto origin/main succeeded."
-            else
-              echo "::warning::Rebase conflict — aborting, using merge strategy."
-              git rebase --abort 2>/dev/null || true
-              git merge origin/main -X ours --no-edit --quiet 2>/dev/null || true
-            fi
-            # Restore stashed working-tree files (non-fatal if stash was empty)
-            git stash pop --quiet 2>/dev/null || true
-            sleep $((ATTEMPT * 5))
-          done
-          if [ "$PUSH_OK" -eq 0 ]; then
-            echo "::warning::Governance outputs not persisted after 5 attempts — will commit next run. Non-blocking."
-          fi
+          git commit -m "$COMMIT_MSG"
+          python scripts/publish_generated_commit.py
 
       # ── Telegram alert on hard failure ────────────────────────────────────
       - name: "Governance Hard-Fail Alert"

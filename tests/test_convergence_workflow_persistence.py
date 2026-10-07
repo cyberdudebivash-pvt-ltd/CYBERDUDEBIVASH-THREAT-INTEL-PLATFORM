@@ -98,6 +98,10 @@ class ConvergenceWorkflowContractTests(unittest.TestCase):
 WORKFLOWS = {
     "bughunter-resilient.yml": "data/bughunter/bughunter_output.json",
     "omnishield.yml": "data/omnishield/omnishield_report.json",
+    "ai-threat-analyst.yml": "data/analyst/analyst_report.json",
+    "autonomous-guardian.yml": "data/health/guardian_report.json",
+    "generate-and-sync.yml": "api/feed.json",
+    "enterprise-governance.yml": "data/governance/governance_report.json",
 }
 
 
@@ -124,6 +128,10 @@ def _fixture(tmp_path, workflow, *, changed=True, branch_rejected=False):
     artifact = root / WORKFLOWS[workflow]
     artifact.parent.mkdir(parents=True)
     artifact.write_text('{"generation": 1}\n', encoding="utf-8")
+    if workflow == "generate-and-sync.yml":
+        tracker = root / "api/ai/tracker.json"
+        tracker.parent.mkdir(parents=True)
+        tracker.write_text('{"feed_item_count": 1}\n', encoding="utf-8")
     (root / "unrelated.txt").write_text("baseline\n", encoding="utf-8")
     _git(root, "add", ".")
     _git(root, "commit", "-m", "offline baseline")
@@ -171,6 +179,7 @@ urllib.request.urlopen = offline_urlopen
     sleep.chmod(0o755)
     env = dict(os.environ, GH_TOKEN="offline-token", GITHUB_REPOSITORY="offline/repo",
                GITHUB_RUN_ID="42", GITHUB_RUN_ATTEMPT="1",
+               GITHUB_RUN_NUMBER="42", PIPELINE_VERSION="201.0",
                PYTHONPATH=str(mock_dir), OFFLINE_API_CALLS=str(tmp_path / "api.jsonl"),
                GITHUB_STEP_SUMMARY=str(tmp_path / "summary.md"),
                PATH=str(bin_dir) + os.pathsep + os.environ["PATH"])
@@ -285,6 +294,35 @@ def test_generated_workflows_never_bypass_main_and_are_selected_by_ci():
         assert "python scripts/publish_generated_commit.py" in source
     gate = (REPO_ROOT / ".github/workflows/intel-gateway-regression-gate.yml").read_text(encoding="utf-8")
     assert "tests/test_convergence_workflow_persistence.py" in gate
+
+
+def test_tracker_missing_r2_output_never_publishes_other_outputs(tmp_path):
+    root, remote, env, base, _ = _fixture(tmp_path, "generate-and-sync.yml")
+    (root / "api/ai/tracker.json").unlink()
+    result = _run_step(root, "generate-and-sync.yml", env)
+    assert result.returncode != 0
+    assert _git(root, "rev-parse", "HEAD") == base
+    assert _git(remote, "rev-parse", "refs/heads/main") == base
+    assert not Path(env["OFFLINE_API_CALLS"]).exists()
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        "ai-threat-analyst.yml",
+        "autonomous-guardian.yml",
+        "generate-and-sync.yml",
+        "enterprise-governance.yml",
+    ],
+)
+def test_new_generated_writers_reject_pre_staged_unrelated_content(tmp_path, workflow):
+    root, remote, env, base, _ = _fixture(tmp_path, workflow)
+    _git(root, "add", "unrelated.txt")
+    result = _run_step(root, workflow, env)
+    assert result.returncode != 0
+    assert _git(root, "rev-parse", "HEAD") == base
+    assert _git(remote, "rev-parse", "refs/heads/main") == base
+    assert not Path(env["OFFLINE_API_CALLS"]).exists()
 
 
 if __name__ == "__main__":
