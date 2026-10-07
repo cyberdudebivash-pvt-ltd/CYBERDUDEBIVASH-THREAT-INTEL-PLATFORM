@@ -176,6 +176,50 @@ def test_confirmation_pauses_only_after_a_failed_pass(clock):
     assert [s for s in clock if s > dcv.PROBE_INTERVAL] == [30]
 
 
+def test_r2_backed_reports_catalog_supplies_historical_evidence_when_pages_manifest_is_empty(monkeypatch, tmp_path):
+    monkeypatch.setattr(dcv, "REPO_ROOT", tmp_path)
+    catalog = tmp_path / "api" / "reports" / "index.json"
+    catalog.parent.mkdir(parents=True)
+    # build_reports_index.py writes newest-first. Sixteen entries are enough
+    # for the existing 15 latest probes plus the oldest retained continuity
+    # sample. Paths are intentionally the only trusted locator.
+    reports = [
+        {
+            "path": f"/reports/2026/10/intel--{i:024x}.html",
+            "url": f"https://attacker.invalid/ignored-{i}.html",
+        }
+        for i in range(16, 0, -1)
+    ]
+    catalog.write_text(__import__("json").dumps({"reports": reports}), encoding="utf-8")
+    monkeypatch.setattr(dcv, "REPORTS_CATALOG_PATH", catalog)
+
+    latest, historical = dcv._extract_report_urls([], {"files": {}})
+    assert len(latest) == dcv.MAX_REPORT_PROBES
+    assert len(historical) == dcv.HIST_PROBE_COUNT
+    assert all(url.startswith(BASE + "/reports/") for url in latest + historical)
+    assert all("attacker.invalid" not in url for url in latest + historical)
+    # Oldest retained entries are continuity evidence; newest are latest.
+    assert historical[0].endswith("000000000000000000000001.html")
+    assert latest[-1].endswith("000000000000000000000010.html")
+
+
+def test_malformed_reports_catalog_cannot_create_synthetic_history(monkeypatch, tmp_path):
+    monkeypatch.setattr(dcv, "REPO_ROOT", tmp_path)
+    catalog = tmp_path / "api" / "reports" / "index.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(__import__("json").dumps({
+        "reports": [
+            {"path": "https://attacker.invalid/reports/x.html"},
+            {"path": "/reports/../../admin.html"},
+            {"path": "/api/feed.json"},
+        ]
+    }), encoding="utf-8")
+    monkeypatch.setattr(dcv, "REPORTS_CATALOG_PATH", catalog)
+    latest, historical = dcv._extract_report_urls([], {"files": {}})
+    assert latest == []
+    assert historical == []
+
+
 def test_missing_historical_evidence_fails_without_requests(monkeypatch):
     monkeypatch.setattr(dcv, "_extract_report_urls", lambda *a: ([OK_REPORTS[0]], []))
     monkeypatch.setattr(dcv, "_probe_batch", lambda *a: pytest.fail("no history must not probe"))
