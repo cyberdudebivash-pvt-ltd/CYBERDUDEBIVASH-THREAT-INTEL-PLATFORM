@@ -52,6 +52,32 @@ def test_rejected_metadata_branch_fails_without_api_or_false_success(tmp_path, m
     assert not (tmp_path/'data/health/git_sync_state.json').exists()
 
 
+def test_remote_branch_sha_mismatch_fails_before_pr_lookup(tmp_path, monkeypatch):
+    monkeypatch.setattr(git_sync, 'REPO_ROOT', tmp_path)
+    monkeypatch.setenv('GITHUB_RUN_ID', '123')
+    monkeypatch.setenv('GITHUB_RUN_ATTEMPT', '1')
+    calls = []
+    def run_git(*args):
+        calls.append(args)
+        if args[0] == 'rev-parse':
+            return subprocess.CompletedProcess(args, 0, 'a'*40)
+        if args[0] == 'push':
+            return subprocess.CompletedProcess(args, 0, '')
+        if args[0] == 'ls-remote':
+            return subprocess.CompletedProcess(args, 0, 'b'*40 + '\trefs/heads/sentinel-generated/run-123-1\n')
+        raise AssertionError(args)
+    monkeypatch.setattr(git_sync, 'run_git', run_git)
+    monkeypatch.setattr(
+        urllib.request,
+        'urlopen',
+        lambda *a, **k: pytest.fail('GitHub PR API must not run when remote SHA is unverified'),
+    )
+    with pytest.raises(RuntimeError, match='remote verification failed'):
+        git_sync.publish_metadata_pr('offline-token', 'owner/repo')
+    assert calls[-1] == ('ls-remote', '--exit-code', 'origin', 'refs/heads/sentinel-generated/run-123-1')
+    assert not (tmp_path/'data/health/git_sync_state.json').exists()
+
+
 @pytest.mark.parametrize('method,status,message,reason', [
     ('POST', 403, 'GitHub Actions is not permitted to create or approve pull requests.', 'ACTIONS_PR_CREATION_DISABLED'),
     ('POST', 403, 'Resource not accessible by integration', 'TOKEN_OR_POLICY_FORBIDDEN'),
