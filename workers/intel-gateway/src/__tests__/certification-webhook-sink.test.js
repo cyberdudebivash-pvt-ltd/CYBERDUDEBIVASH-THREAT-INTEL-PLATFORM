@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CERTIFICATION_SINK_MAX_BODY_BYTES,
+  certificationWebhookSinkFetch,
   createCertificationWebhookSink,
   deleteCertificationWebhookSink,
   routeCertificationWebhookSink,
@@ -33,6 +34,44 @@ test("creates a short-lived capability sink without embedding inspect token in s
   assert.equal(c.sink_url.includes(c.inspect_token), false);
   assert.equal(c.ttl_seconds, 900);
   assert.equal(c.settle_ms, 65000);
+});
+
+
+test("internal fetch adapter handles only a live same-origin certification capability and delegates everything else", async () => {
+  const c = await created();
+  const delegated = [];
+  const fallback = async (input, init) => {
+    const req = input instanceof Request ? new Request(input, init) : new Request(input, init);
+    delegated.push(req.url);
+    return new Response("delegated", { status: 418 });
+  };
+  const sinkFetch = certificationWebhookSinkFetch(c.env, fallback);
+
+  const challenge = "adapter-challenge";
+  const internal = await sinkFetch(c.sink_url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "watchdog.verification", challenge }),
+  });
+  assert.equal(internal.status, 200);
+  assert.deepEqual(await internal.json(), { challenge });
+  assert.equal(delegated.length, 0);
+
+  const external = await sinkFetch("https://example.com/webhook", {
+    method: "POST",
+    body: "{}",
+  });
+  assert.equal(external.status, 418);
+  assert.equal(delegated.length, 1);
+
+  const samePathWrongOrigin = new URL(c.sink_url);
+  samePathWrongOrigin.hostname = "example.com";
+  const wrongOrigin = await sinkFetch(samePathWrongOrigin.toString(), {
+    method: "POST",
+    body: "{}",
+  });
+  assert.equal(wrongOrigin.status, 418);
+  assert.equal(delegated.length, 2);
 });
 
 test("verification challenge is answered and bounded evidence is inspectable only with bearer token", async () => {
