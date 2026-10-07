@@ -4,21 +4,23 @@
         <!-- Live Ticker · AI Predictions · Metrics · Heatmap · SOC · Revenue  -->
         <!-- Phase 2 enterprise module mandate — minimally invasive injection   -->
         <!-- ═══════════════════════════════════════════════════════════════════ -->
-        <section id="enterprise-intel-command" style="margin:40px 0 48px;padding:0;">
+<section id="enterprise-intel-command" style="margin:40px 0 48px;padding:0;">
 
         <!-- ── 1. LIVE THREAT TICKER ─────────────────────────────────────────── -->
         <div style="background:linear-gradient(90deg,#020a14,#030e1a,#020a14);border:1px solid rgba(0,212,170,0.18);border-radius:4px;padding:0;overflow:hidden;margin-bottom:16px;position:relative;">
-            <div style="display:flex;align-items:stretch;">
+            <div id="eicc-ticker-strip" role="region" aria-label="Live intelligence advisories">
                 <div style="background:linear-gradient(135deg,#00d4aa,#0097a7);padding:6px 14px;display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0;">
                     <span style="width:6px;height:6px;border-radius:50%;background:#fff;animation:cdb-pulse-dot 1.2s ease-in-out infinite;display:inline-block;"></span>
                     <span style="font-family:var(--font-mono);font-size:9px;font-weight:800;color:#020a14;letter-spacing:2px;">LIVE INTEL</span>
                 </div>
-                <div style="flex:1;overflow:hidden;display:flex;align-items:center;">
-                    <div id="eicc-ticker-inner" style="display:flex;gap:48px;white-space:nowrap;animation:eicc-ticker-scroll 60s linear infinite;padding:8px 0;font-family:var(--font-mono);font-size:10px;color:rgba(0,212,170,0.75);">
+                <div class="eicc-ticker-viewport" tabindex="0" aria-label="Live CVE details; pause scrolling to read">
+                    <div id="eicc-ticker-inner">
                         <span>⏳ Syncing live threat feed...</span>
                     </div>
                 </div>
-                <div style="background:rgba(0,212,170,0.06);border-left:1px solid rgba(0,212,170,0.15);padding:6px 14px;display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                <button type="button" class="cdb-advisory-pause eicc-ticker-pause" aria-pressed="false"
+                    onclick="var strip=this.closest('#eicc-ticker-strip');var paused=strip.classList.toggle('cdb-advisory-paused');this.setAttribute('aria-pressed',String(paused));this.textContent=paused?'Resume':'Pause';">Pause</button>
+                <div class="eicc-ticker-count" style="background:rgba(0,212,170,0.06);border-left:1px solid rgba(0,212,170,0.15);padding:6px 14px;display:flex;align-items:center;gap:6px;flex-shrink:0;">
                     <span style="font-family:var(--font-mono);font-size:9px;color:var(--accent);letter-spacing:1px;">FEED:</span>
                     <span id="eicc-ticker-count" style="font-family:var(--font-mono);font-size:9px;font-weight:700;color:var(--accent);">—</span>
                     <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">ADVISORIES</span>
@@ -255,33 +257,50 @@
             function sevOf(it){ return String(it.severity||it.risk_level||'INFO').toUpperCase(); }
 
             // ── Ticker ──────────────────────────────────────────────────────
+            var lastTickerSignature = '';
             function buildTicker(state){
                 var ticker = document.getElementById('eicc-ticker-inner');
                 var cnt = document.getElementById('eicc-ticker-count');
                 if (!ticker) return;
-                var view = SNAP.tickerView(state, 30);
+                var view = SNAP.tickerView(state, state && state.feed ? Math.max(1, state.feed.items.length) : 30);
+                // Snapshot refreshes must not restart a long, slow cycle when
+                // its actual headlines/mode/count have not changed.
+                var signature = JSON.stringify([view.mode, view.message, view.count,
+                    view.items.map(function(it){ return [sevOf(it), it.title||it.name||it.id||'UNTITLED']; })]);
+                if (signature === lastTickerSignature) return;
+                lastTickerSignature = signature;
                 clear(ticker);
                 ticker.setAttribute('data-feed-mode', view.mode);
                 if (cnt) cnt.textContent = view.count == null ? 'N/A' : String(view.count);
-                if (view.message) {
-                    var m = node('span', view.message, 'color:' + (view.mode === 'empty' ? 'rgba(0,212,170,0.8)' : '#f59e0b') + ';font-weight:700;');
-                    m.setAttribute('data-feed-message', view.mode);
-                    ticker.appendChild(m);
+                if (!view.items.length) {
+                    ticker.appendChild(node('span', view.message || 'Waiting for the live feed…', 'color:#f59e0b;font-weight:700;'));
+                    ticker.style.animation = 'none'; return;
                 }
-                if (!view.items.length) { ticker.style.animation = 'none'; return; }
                 ticker.style.animation = '';
-                // Two copies for a seamless loop.
+                // The complete animation lives in CSS: clearing the loading
+                // override must not erase its only animation declaration.
+                // Equal grouped copies keep the -50% endpoint seamless.
                 for (var copy = 0; copy < 2; copy++) {
+                    var group = node('span');
+                    group.className = 'eicc-ticker-copy';
+                    if (copy) group.setAttribute('aria-hidden', 'true');
+                    if (view.message) {
+                        var m = node('span', view.message, 'color:#f59e0b;font-weight:700;');
+                        m.setAttribute('data-feed-message', view.mode);
+                        group.appendChild(m);
+                    }
                     view.items.forEach(function(it){
                         var sev = sevOf(it);
                         var wrap = node('span');
                         if (copy) wrap.setAttribute('aria-hidden', 'true'); else wrap.setAttribute('data-ticker-item', '');
                         wrap.appendChild(node('span', sev, 'color:' + (SEV_COLOR[sev] || 'rgba(0,212,170,0.7)') + ';font-weight:700;'));
-                        wrap.appendChild(node('span', ' ' + String(it.title||it.name||it.id||'UNTITLED').substring(0,60), 'color:rgba(0,212,170,0.8);'));
+                        wrap.appendChild(node('span', ' ' + String(it.title||it.name||it.id||'UNTITLED'), 'color:rgba(0,212,170,0.8);'));
                         wrap.appendChild(node('span', '◆', 'color:rgba(100,120,140,0.6);margin:0 12px;'));
-                        ticker.appendChild(wrap);
+                        group.appendChild(wrap);
                     });
+                    ticker.appendChild(group);
                 }
+                ticker.style.setProperty('--eicc-cycle', Math.max(160, Math.ceil(ticker.scrollWidth / 2 / 18)) + 's');
             }
 
             // ── Metrics + Last Sync + API/INTEL status ─────────────────────
