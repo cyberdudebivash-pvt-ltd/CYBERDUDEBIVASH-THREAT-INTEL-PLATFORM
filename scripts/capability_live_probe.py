@@ -27,7 +27,10 @@ TWO TIERS
             mechanical existence check).
   Tier 2 -- every unique api_dependency extracted by capability_runtime_
             auditor.py (deduplicated once per literal path, not once per
-            page): GET, record HTTP status. 200/401/403/404/405/429 are
+            page): GET, record HTTP status. Revenue-engine-only route
+            families are probed against the dedicated production revenue
+            hostname used by their customer pages; all others stay on the
+            primary intel hostname. 200/401/403/404/405/429 are
             all "the route exists and answered" in different postures
             (401/403 = exists, auth required; 405 = exists, wrong method --
             several dependencies here, e.g. /api/checkout/session, are
@@ -57,8 +60,30 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_REPORT_PATH = REPO_ROOT / "data" / "quality" / "capability_runtime_report.json"
 OUTPUT_PATH = REPO_ROOT / "data" / "quality" / "capability_live_probe_report.json"
 PRODUCTION_BASE = "https://intel.cyberdudebivash.com"
+REVENUE_BASE = "https://revenue.intel.cyberdudebivash.com"
 TIMEOUT_S = 10
 MAX_WORKERS = 8
+
+# These families are implemented only by revenue-engine and the affected
+# customer pages explicitly set API_BASE to REVENUE_BASE. Do not broaden
+# this into a generic "/api/*" fallback: the primary intel gateway remains
+# authoritative for threat-intelligence, Watchdog and security APIs.
+_REVENUE_ONLY_PREFIXES = (
+    "/api/apikeys/",
+    "/api/crm/",
+    "/api/customers",
+    "/api/deals",
+    "/api/payments",
+    "/api/revenue/",
+    "/api/subscriptions",
+    "/api/success/",
+)
+
+
+def _dependency_base(dep: str) -> str:
+    if any(dep == prefix.rstrip("/") or dep.startswith(prefix) for prefix in _REVENUE_ONLY_PREFIXES):
+        return REVENUE_BASE
+    return PRODUCTION_BASE
 
 
 def _probe(url: str) -> dict:
@@ -68,14 +93,14 @@ def _probe(url: str) -> dict:
         with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
             body = resp.read(2048)
             elapsed_ms = round((time.monotonic() - t0) * 1000)
-            return {"status": resp.status, "elapsed_ms": elapsed_ms, "error": None,
+            return {"url": url, "status": resp.status, "elapsed_ms": elapsed_ms, "error": None,
                      "looks_like_html": body.lstrip()[:15].lower().startswith((b"<!doctype", b"<html"))}
     except urllib.error.HTTPError as e:
         elapsed_ms = round((time.monotonic() - t0) * 1000)
-        return {"status": e.code, "elapsed_ms": elapsed_ms, "error": None, "looks_like_html": False}
+        return {"url": url, "status": e.code, "elapsed_ms": elapsed_ms, "error": None, "looks_like_html": False}
     except Exception as e:
         elapsed_ms = round((time.monotonic() - t0) * 1000)
-        return {"status": None, "elapsed_ms": elapsed_ms, "error": str(e), "looks_like_html": False}
+        return {"url": url, "status": None, "elapsed_ms": elapsed_ms, "error": str(e), "looks_like_html": False}
 
 
 def main() -> int:
@@ -87,7 +112,7 @@ def main() -> int:
 
     routes = [(c["capability_id"], PRODUCTION_BASE + c["frontend_route"]) for c in capabilities]
     dep_set = sorted({d for c in capabilities for d in c["api_dependencies"]})
-    deps = [(d, PRODUCTION_BASE + d) for d in dep_set]
+    deps = [(d, _dependency_base(d) + d) for d in dep_set]
 
     print(f"Tier 1: probing {len(routes)} CUSTOMER_UI routes against {PRODUCTION_BASE} ...")
     route_results = {}
@@ -114,6 +139,7 @@ def main() -> int:
         "schema_version": "1",
         "generated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
         "production_base": PRODUCTION_BASE,
+        "revenue_base": REVENUE_BASE,
         "routes_probed": len(routes),
         "routes_unreachable": len(route_unreachable),
         "api_dependencies_probed": len(deps),
