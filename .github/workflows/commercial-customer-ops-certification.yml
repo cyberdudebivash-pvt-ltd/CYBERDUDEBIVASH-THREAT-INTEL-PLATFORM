@@ -963,6 +963,7 @@ jobs:
             export CDB_WATCHDOG_SINK_URL=$(echo "$SINK_JSON" | jq -r '.sink_url // empty')
             export CDB_WATCHDOG_SINK_INSPECT_URL=$(echo "$SINK_JSON" | jq -r '.inspect_url // empty')
             export CDB_WATCHDOG_SINK_TOKEN=$(echo "$SINK_JSON" | jq -r '.inspect_token // empty')
+            SINK_SETTLE_MS=$(echo "$SINK_JSON" | jq -r '.settle_ms // 0')
             if [ -z "$CERT_SINK_ID" ] || [ -z "$CDB_WATCHDOG_SINK_URL" ] || [ -z "$CDB_WATCHDOG_SINK_INSPECT_URL" ] || [ -z "$CDB_WATCHDOG_SINK_TOKEN" ]; then
               record "Enterprise webhook proof sink" "FAIL (ephemeral sink provisioning failed)" fail
             else
@@ -970,6 +971,13 @@ jobs:
               echo "::add-mask::$CDB_WATCHDOG_SINK_URL"
               echo "::add-mask::$CDB_WATCHDOG_SINK_INSPECT_URL"
               echo "::add-mask::$CDB_WATCHDOG_SINK_TOKEN"
+              if [ "$SINK_SETTLE_MS" -gt 0 ] 2>/dev/null; then
+                if [ "$SINK_SETTLE_MS" -gt 75000 ]; then
+                  record "Enterprise webhook proof sink" "FAIL (unsafe propagation interval)" fail
+                else
+                  sleep $(( (SINK_SETTLE_MS + 999) / 1000 ))
+                fi
+              fi
               record "Enterprise webhook proof sink" "PASS (ephemeral first-party sink)"
             fi
           else
