@@ -3364,6 +3364,30 @@ function getThreatPriorityScore(item) {
 // the exact same severity badge as the report itself, rather than being
 // re-derived from a numeric risk_score threshold like an un-normalized
 // feed item would be.
+function _cdbSocThreatContext(item) {
+    // Source-linked advisory context is not threat-actor attribution. Never
+    // turn a generic CVE classification or a paywall into a named attacker.
+    const text = value => typeof value === 'string' ? value.trim() : '';
+    const placeholder = value => !value || /^(?:CDB-UNATTR(?:-.*)?|UNC-(?:UNKNOWN|CDB-99)|unknown(?:\s.*)?|unattributed(?:\s.*)?|unclassified|n\/a|none|null|-)$/i.test(value);
+    const restricted = item.actor_paywall && item.actor_paywall.allowed === false;
+    const actor = restricted ? '' : [item.actor_display_name, item.mitre_group_name, item.actor_tag, item.actor]
+        .map(text).find(value => !placeholder(value)) || '';
+    const fields = [item.cve_id, ...(Array.isArray(item.cve_ids) ? item.cve_ids : []),
+        ...(Array.isArray(item.cve) ? item.cve : [item.cve])];
+    const cves = [...new Set(fields.map(text).filter(value => /^CVE-\d{4}-\d{4,}$/i.test(value))
+        .concat(text(item.title).match(/CVE-\d{4}-\d{4,}/gi) || []).map(value => value.toUpperCase()))];
+    const source = [item.evidence_chain && item.evidence_chain.source_name, item.feed_source, item.source]
+        .map(text).find(value => !placeholder(value)) || '';
+    return {
+        actor, cves,
+        label: actor ? 'ACTOR · ' + actor : source ? 'SOURCE · ' + source
+            : cves.length || /vulnerabilit/i.test(text(item.threat_type)) ? 'VULNERABILITY ADVISORY' : 'THREAT ADVISORY',
+        description: actor ? 'Actor identity reported in this advisory; not inferred from the CVE or vendor.'
+            : restricted ? 'Advisory context. Actor details are restricted on this plan; no attribution is inferred.'
+                : 'Advisory context. No named actor attribution is provided; publisher/vendor is not the attacker.',
+    };
+}
+
 function _cdbReportPoolItem(r) {
     return {
         id: r.id, stix_id: r.id,
@@ -3375,12 +3399,23 @@ function _cdbReportPoolItem(r) {
         epss_score: r.epss_score,
         kev_present: !!r.kev_present,
         actor_tag: r.actor_tag || '',
+        actor: r.actor || '',
+        actor_display_name: r.actor_display_name || '',
+        mitre_group_name: r.mitre_group_name || '',
+        actor_paywall: r.actor_paywall,
+        evidence_chain: r.evidence_chain,
+        source: r.source || '',
+        feed_source: r.feed_source || '',
+        threat_type: r.threat_type || '',
+        cve_id: r.cve_id || '',
+        cve_ids: Array.isArray(r.cve_ids) ? r.cve_ids : [],
+        cve: r.cve,
         mitre_tactics: [],
         ioc_count: 0,
         timestamp: r.timestamp || r.published || '',
         processed_at: r.timestamp || r.published || '',
         internal_report_url: r.url || '',
-        source_url: r.url || '',
+        source_url: r.source_url || r.url || '',
         validation_status: 'ok',
     };
 }
@@ -3525,9 +3560,10 @@ function renderTopThreats(data) {
     const cards = top.map((item,idx) => {
         const sc = parseFloat(item.risk_score)||0;
         const sv = sevInfo(item.__norm ? item.__norm.severity : null, sc);
-        const cve = (item.title||'').match(/CVE-\d{4}-\d{4,}/i);
+        const context = _cdbSocThreatContext(item);
+        const cve = context.cves.length ? context.cves : null;
         const tacs = (item.mitre_tactics||[]).slice(0,3);
-        const actor = (item.actor_tag&&item.actor_tag!=='UNC-CDB-99'&&item.actor_tag!=='UNC-UNKNOWN')?item.actor_tag:null;
+        const actor = context.actor;
         const kev = item.kev_present;
         const epss = ((typeof window!=='undefined'&&window.CDB_NORMALIZE&&typeof window.CDB_NORMALIZE.epss==='function')?(window.CDB_NORMALIZE.epss(item.epss_score).percent||0):(parseFloat(item.epss_score)||0));
         const cvss = parseFloat(item.cvss_score)||0;
@@ -3600,11 +3636,11 @@ function renderTopThreats(data) {
                 '<div style="margin-left:auto;text-align:right;">'+
                     (actor?
                         (idx<3?
-                            '<div style="font-family:var(--font-mono);font-size:9px;color:'+sv.c+';font-weight:700;">'+_tt(actor)+'</div>':
+                            '<div class="cdb-soc-context" title="'+_tt(context.description)+'" style="color:'+sv.c+';font-weight:700;">'+_tt(context.label)+'</div>':
                             '<div style="font-family:var(--font-mono);font-size:9px;color:#3a4a5a;background:rgba(255,255,255,0.03);padding:2px 6px;border-radius:2px;border:1px solid #2a3340;">'+
                                 '<span style="color:#5a6578;">&#128274; ACTOR:</span> <a href="/upgrade.html?plan=pro&utm_source=actor-gate" target="_blank" style="color:#8b5cf6;text-decoration:none;font-weight:700;">PRO ONLY</a></div>'
                         ):
-                        '<div style="font-family:var(--font-mono);font-size:9px;color:#3a4a5a;">UNATTRIBUTED</div>'
+                        '<div class="cdb-soc-context" title="'+_tt(context.description)+'">'+_tt(context.label)+'</div>'
                     )+
                 '</div>'+
             '</div>'+
@@ -3672,7 +3708,7 @@ function renderTopThreats(data) {
             '<div style="background:linear-gradient(90deg,rgba(139,92,246,0.08),rgba(0,212,170,0.04));border:1px solid rgba(139,92,246,0.2);border-radius:4px;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">' +
                 '<div style="font-family:var(--font-mono);font-size:9px;color:#a78bfa;letter-spacing:1px;">' +
                     '&#128204; FREE TIER: 3 Threats visible \u00b7 Rank \u00b7 Severity \u00b7 CVE \u00b7 MITRE &nbsp;&#183;&nbsp; ' +
-                    '<span style="color:#5a6578;">PRO unlocks all 10: Actor Attribution \u00b7 Full IOC List \u00b7 STIX Export \u00b7 Threat History</span>' +
+                    '<span style="color:#5a6578;">PRO unlocks all 10: Reported Actor Context \u00b7 Full IOC List \u00b7 STIX Export \u00b7 Threat History</span>' +
                 '</div>' +
                 '<a href="/upgrade.html?plan=pro&utm_source=tier-banner" target="_blank" ' +
                    'style="font-family:var(--font-mono);font-size:9px;color:#8b5cf6;border:1px solid rgba(139,92,246,0.3);padding:4px 10px;border-radius:3px;text-decoration:none;white-space:nowrap;">' +
@@ -3683,7 +3719,8 @@ function renderTopThreats(data) {
         // TOP 3 \u2014 fully visible
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:16px;">' +
             top.slice(0,3).map(function(item,idx){
-                var sc=parseFloat(item.risk_score)||0,sv=sevInfo(item.__norm?item.__norm.severity:null,sc),cve=(item.title||'').match(/CVE-\d{4}-\d{4,}/i),tacs=(item.mitre_tactics||[]).slice(0,3),actor=(item.actor_tag&&item.actor_tag!=='UNC-CDB-99'&&item.actor_tag!=='UNC-UNKNOWN')?item.actor_tag:null,kev=item.kev_present,epss=((typeof window!=='undefined'&&window.CDB_NORMALIZE&&typeof window.CDB_NORMALIZE.epss==='function')?(window.CDB_NORMALIZE.epss(item.epss_score).percent||0):(parseFloat(item.epss_score)||0)),cvss=parseFloat(item.cvss_score)||0,pr=prio(item),prC=prioColor(pr),iocCount=item.ioc_count||(item.ioc_counts?Object.values(item.ioc_counts).reduce(function(a,b){return a+b;},0):0),barW=Math.min(sc*10,100),kcPhase=(item.mitre_tactics&&item.mitre_tactics.length)?(item.mitre_tactics[0]||'').toUpperCase().split('.')[0]:'',_its2=item.processed_at||item.timestamp||'',_iD2=_its2?new Date(_its2):null,_iyr2=_iD2?_iD2.getFullYear():'',_imo2=_iD2?String(_iD2.getMonth()+1).padStart(2,'0'):'',_sid2=item.stix_id||item.id||'',_verifiedReportUrl2=cdbBuildReportUrl(item),hasVerifiedReport2=!!_verifiedReportUrl2,intelUrl2=_verifiedReportUrl2||(item.source_url||'https://intel.cyberdudebivash.com');
+                var context=_cdbSocThreatContext(item);
+                var sc=parseFloat(item.risk_score)||0,sv=sevInfo(item.__norm?item.__norm.severity:null,sc),cve=context.cves.length?context.cves:null,tacs=(item.mitre_tactics||[]).slice(0,3),actor=context.actor,kev=item.kev_present,epss=((typeof window!=='undefined'&&window.CDB_NORMALIZE&&typeof window.CDB_NORMALIZE.epss==='function')?(window.CDB_NORMALIZE.epss(item.epss_score).percent||0):(parseFloat(item.epss_score)||0)),cvss=parseFloat(item.cvss_score)||0,pr=prio(item),prC=prioColor(pr),iocCount=item.ioc_count||(item.ioc_counts?Object.values(item.ioc_counts).reduce(function(a,b){return a+b;},0):0),barW=Math.min(sc*10,100),kcPhase=(item.mitre_tactics&&item.mitre_tactics.length)?String(item.mitre_tactics[0]||'').toUpperCase().split('.')[0]:'',_its2=item.processed_at||item.timestamp||'',_iD2=_its2?new Date(_its2):null,_iyr2=_iD2?_iD2.getFullYear():'',_imo2=_iD2?String(_iD2.getMonth()+1).padStart(2,'0'):'',_sid2=item.stix_id||item.id||'',_verifiedReportUrl2=cdbBuildReportUrl(item),hasVerifiedReport2=!!_verifiedReportUrl2,intelUrl2=_verifiedReportUrl2||(item.source_url||'https://intel.cyberdudebivash.com');
                 return '<div style="position:relative;background:linear-gradient(135deg,var(--bg-card) 0%,rgba(220,38,38,0.03) 100%);border:1px solid '+sv.c+'44;overflow:hidden;transition:all 0.25s;border-radius:4px;box-shadow:0 0 16px '+sv.glow+';" onmouseover="this.style.borderColor=\''+sv.c+'66\';this.style.transform=\'translateY(-3px)\';this.style.boxShadow=\'0 8px 32px '+sv.glow+'\'" onmouseout="this.style.borderColor=\''+sv.c+'44\';this.style.transform=\'none\';this.style.boxShadow=\'0 0 16px '+sv.glow+'\'">'+
                 '<div style="height:3px;background:linear-gradient(90deg,'+sv.c+' '+barW+'%,rgba(255,255,255,0.04) '+barW+'%);"></div>'+
                 '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px 6px;">'+
@@ -3703,7 +3740,7 @@ function renderTopThreats(data) {
                     (cvss>0?'<div style="text-align:center;padding:4px 8px;background:rgba(255,255,255,0.03);border-radius:3px;border:1px solid rgba(255,255,255,0.06);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">CVSS</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:'+(cvss>=9?'#dc2626':cvss>=7?'#ea580c':'#d97706')+';">'+cvss.toFixed(1)+'</div></div>':'')+
                     (epss>0?'<div style="text-align:center;padding:4px 8px;background:rgba(255,255,255,0.03);border-radius:3px;border:1px solid rgba(255,255,255,0.06);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">EPSS</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:'+(epss>=50?'#dc2626':epss>=10?'#ea580c':'#d97706')+';">'+epss.toFixed(1)+'%</div></div>':'')+
                     (iocCount>0?'<div style="text-align:center;padding:4px 8px;background:rgba(0,212,170,0.06);border-radius:3px;border:1px solid rgba(0,212,170,0.2);"><div style="font-family:var(--font-mono);font-size:7px;color:#5a6578;letter-spacing:1px;">IOCs</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:900;color:#00d4aa;">'+iocCount+'</div></div>':'')+
-                    (actor?'<div style="font-family:var(--font-mono);font-size:9px;color:'+sv.c+';font-weight:700;margin-left:auto;">'+_tt(actor)+'</div>':'<div style="font-family:var(--font-mono);font-size:9px;color:#3a4a5a;margin-left:auto;">UNATTRIBUTED</div>')+
+                    '<div class="cdb-soc-context" title="'+_tt(context.description)+'"'+(actor?' style="color:'+sv.c+';font-weight:700;"':'')+'>'+_tt(context.label)+'</div>'+
                 '</div>'+
                 '<div style="padding:0 14px 8px;display:flex;gap:4px;flex-wrap:wrap;">'+
                     (cve?'<span style="background:rgba(59,130,246,.12);color:#3b82f6;padding:2px 7px;border-radius:3px;font-size:9px;font-family:var(--font-mono);font-weight:700;border:1px solid rgba(59,130,246,.2);">'+cve[0]+'</span>':'')+
@@ -6037,7 +6074,7 @@ function renderTopThreats(data) {
                          valFn: s => (s.total_exposures||0) + ' SIGNALS', descFn: s => (s.critical_exposures||0) + ' RCE / unauthenticated'},
                         // No attack geodata exists in the feed (G11 produces no flows).
                         {key:'G11_GlobalAttackMap', id:'G11', name:'Attack Map',      icon:'🗺️', color:'#e11d48',
-                         valFn: s => 'CONNECT', descFn: s => 'Connect source/target attack telemetry'},
+                         valFn: s => 'TELEMETRY REQUIRED', descFn: s => 'No source/target event collector connected'},
                         {key:'G12_AIThreatHunter', id:'G12', name:'Threat Clusters', icon:'🤖', color:'#7c3aed',
                          valFn: s => (s.clusters_identified||0) + ' CLUSTERS', descFn: s => (s.trending_techniques||0) + ' techniques trending (7d)'},
                     ];
@@ -6050,7 +6087,7 @@ function renderTopThreats(data) {
                             const summary = eng.summary || {};
                             const status = eng.status || 'OK';
                             const hasData = Object.keys(summary).length > 0;
-                            const notOperated = summary.operated === false;
+                            const notOperated = summary.operated === false || def.id === 'G11';
                             const statusColor = status === 'OK' ? def.color : '#6b7280';
                             const dotColor = status === 'OK' && !notOperated ? def.color : '#6b7280';
                             const tip = esc(summary.note || summary.method || '');
@@ -6064,7 +6101,7 @@ function renderTopThreats(data) {
                                 <div style="position:absolute;top:6px;right:6px;width:5px;height:5px;border-radius:50%;background:${dotColor};${dotColor!=='#6b7280'?'box-shadow:0 0 4px '+dotColor:''}"></div>
                                 <div style="font-size:18px;margin-bottom:4px;">${def.icon}</div>
                                 <div style="font-family:var(--font-mono);font-size:7px;letter-spacing:2px;color:${statusColor};margin-bottom:4px;">${def.id} ${def.name.toUpperCase()}</div>
-                                <div style="font-size:20px;font-weight:900;color:${statusColor};font-family:var(--font-mono);">${esc(val)}</div>
+                                <div data-engine-value="${def.id}" style="font-size:20px;font-weight:900;color:${statusColor};font-family:var(--font-mono);">${esc(val)}</div>
                                 <div style="font-size:8px;color:var(--text-muted);margin-top:2px;">${esc(desc)}</div>
                             </div>`;
                         }).join('');
@@ -6194,9 +6231,18 @@ function renderTopThreats(data) {
             }
 
             // ── BUG HUNTER ENGINE ──────────────────────────────────────────
+            function bugHunterScanView(data, nowMs) {
+                var timestamp = Date.parse(data.timestamp || '');
+                var age = (typeof nowMs === 'number' ? nowMs : Date.now()) - timestamp;
+                var valid = Number.isFinite(timestamp) && age >= 0;
+                var recent = valid && age <= 86400000 && data.status === 'COMPLETED';
+                return { recent: recent, timestamp: valid ? new Date(timestamp).toISOString() : '',
+                    label: recent ? 'RECENT SCAN SNAPSHOT' : valid ? 'HISTORICAL SCAN · RE-VALIDATION REQUIRED' : 'SCAN PROVENANCE REQUIRED' };
+            }
             function renderBugHunterEngine(data) {
                 try {
                     const m = data.metrics || {};
+                    const scanView = bugHunterScanView(data);
                     function measuredCount(value) {
                         if (typeof value !== 'number' && typeof value !== 'string') return null;
                         if (typeof value === 'string' && !value.trim()) return null;
@@ -6205,7 +6251,8 @@ function renderTopThreats(data) {
                     }
                     function scanCount(value) {
                         var count = measuredCount(value);
-                        return count === null ? 'Awaiting scan' : count === 0 ? 'None detected' : count.toLocaleString();
+                        return count === null ? 'Awaiting scan' : !scanView.recent ? 'Re-scan required'
+                            : count === 0 ? 'No observations in scan' : count.toLocaleString();
                     }
                     // Top metrics
                     const subEl = document.getElementById('bh-subdomain-count');
@@ -6218,7 +6265,7 @@ function renderTopThreats(data) {
                     if (critEl) {
                         const c = measuredCount(m.critical_findings);
                         critEl.textContent = scanCount(m.critical_findings);
-                        critEl.style.color = c > 0 ? '#ef4444' : '#00d4aa';
+                        critEl.style.color = scanView.recent && c > 0 ? '#ef4444' : '#f59e0b';
                     }
                     // Scan provenance, not assumed financial benefit.
                     const riskEl = document.getElementById('bh-risk-exposure');
@@ -6260,9 +6307,8 @@ function renderTopThreats(data) {
                     var scanBadge = document.getElementById('bh-health-badge');
                     if (scanBadge) {
                         var scanTime = Date.parse(data.timestamp || '');
-                        scanBadge.textContent = Number.isFinite(scanTime)
-                            ? '● SCAN SNAPSHOT · ' + new Date(scanTime).toISOString()
-                            : '● SCAN TIMESTAMP UNAVAILABLE';
+                        scanBadge.textContent = '● ' + scanView.label + (scanView.timestamp ? ' · ' + scanView.timestamp : '');
+                        scanBadge.style.color = scanView.recent ? '#00d4aa' : '#f59e0b';
                         scanBadge.title = 'Saved scan evidence' + (data.domain ? ' for ' + String(data.domain) : '') + '; not continuous monitoring';
                     }
                 } catch(e) { console.warn('[BUG HUNTER ENGINE]', e); }

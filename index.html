@@ -110,7 +110,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;600;700&family=Outfit:wght@300;400;600;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/css/homepage-design-system.css?v=621d73240e8f">
+    <link rel="stylesheet" href="/css/homepage-design-system.css?v=c88748f069d7">
     <!-- Homepage design system: css/homepage-design-system.css (edit it there; ?v= is its
          sha256[:12], enforced by tests/test_homepage_stylesheet_extraction.py).
          The IOC paywall rules and everything after them stay inline below, in their
@@ -1125,19 +1125,6 @@
                     <div class="cdb-board-empty">Loading the live, evidence-ranked threat board&hellip;</div>
                 </div>
                 <div class="cdb-board-foot">Ranked from the live Sentinel APEX feed by CISA KEV, CVSS, EPSS, severity and exploitation evidence; reports of one story are grouped. No attack geography is shown: the feed carries no attack geolocation. <a href="/cyber-watchdog.html#intelligence">Full brief &rarr;</a></div>
-                <div id="cdb-map-attack-ticker" style="
-                    background:rgba(2,10,20,0.92);border-top:1px solid rgba(0,212,170,0.12);
-                    padding:5px 14px;font-family:var(--font-mono);font-size:9px;
-                    color:rgba(0,212,170,0.7);display:flex;align-items:center;gap:8px;
-                    overflow:hidden;min-height:22px;letter-spacing:0.5px;
-                ">
-                    <span style="color:rgba(255,68,68,0.8);font-weight:700;flex-shrink:0;">⚡ LATEST ADVISORIES:</span>
-                    <div class="cdb-advisory-viewport" tabindex="0" aria-label="Latest advisories; pause scrolling to read">
-                        <span id="cdb-ticker-text">Waiting for the live feed&hellip;</span>
-                    </div>
-                    <button type="button" class="cdb-advisory-pause" aria-pressed="false"
-                        onclick="var strip=this.closest('#cdb-map-attack-ticker');var paused=strip.classList.toggle('cdb-advisory-paused');this.setAttribute('aria-pressed',String(paused));this.textContent=paused?'Resume':'Pause';">Pause</button>
-                </div>
             </div>
             <style>
             @keyframes ticker-scroll {
@@ -1271,6 +1258,16 @@
                 </button>
             </div>
         </header>
+
+        <!-- Full-width row: never nest this strip in the width-capped threat-board column. -->
+        <div id="cdb-map-attack-ticker" role="region" aria-labelledby="cdb-advisory-label">
+            <span id="cdb-advisory-label">⚡ LATEST ADVISORIES:</span>
+            <div class="cdb-advisory-viewport" tabindex="0" aria-label="Latest advisories; pause scrolling to read">
+                <span id="cdb-ticker-text">Waiting for the live feed&hellip;</span>
+            </div>
+            <button type="button" class="cdb-advisory-pause" aria-pressed="false"
+                onclick="var strip=this.closest('#cdb-map-attack-ticker');var paused=strip.classList.toggle('cdb-advisory-paused');this.setAttribute('aria-pressed',String(paused));this.textContent=paused?'Resume':'Pause';">Pause</button>
+        </div>
 
         <!-- ═══ STATUS STRIP v73.0 ═══ -->
         <div class="status-strip">
@@ -2048,17 +2045,19 @@
 
         <!-- ── 1. LIVE THREAT TICKER ─────────────────────────────────────────── -->
         <div style="background:linear-gradient(90deg,#020a14,#030e1a,#020a14);border:1px solid rgba(0,212,170,0.18);border-radius:4px;padding:0;overflow:hidden;margin-bottom:16px;position:relative;">
-            <div style="display:flex;align-items:stretch;">
+            <div id="eicc-ticker-strip" role="region" aria-label="Live intelligence advisories">
                 <div style="background:linear-gradient(135deg,#00d4aa,#0097a7);padding:6px 14px;display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0;">
                     <span style="width:6px;height:6px;border-radius:50%;background:#fff;animation:cdb-pulse-dot 1.2s ease-in-out infinite;display:inline-block;"></span>
                     <span style="font-family:var(--font-mono);font-size:9px;font-weight:800;color:#020a14;letter-spacing:2px;">LIVE INTEL</span>
                 </div>
-                <div style="flex:1;overflow:hidden;display:flex;align-items:center;">
-                    <div id="eicc-ticker-inner" style="display:flex;gap:48px;white-space:nowrap;animation:eicc-ticker-scroll 60s linear infinite;padding:8px 0;font-family:var(--font-mono);font-size:10px;color:rgba(0,212,170,0.75);">
+                <div class="eicc-ticker-viewport" tabindex="0" aria-label="Live CVE details; pause scrolling to read">
+                    <div id="eicc-ticker-inner">
                         <span>⏳ Syncing live threat feed...</span>
                     </div>
                 </div>
-                <div style="background:rgba(0,212,170,0.06);border-left:1px solid rgba(0,212,170,0.15);padding:6px 14px;display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                <button type="button" class="cdb-advisory-pause eicc-ticker-pause" aria-pressed="false"
+                    onclick="var strip=this.closest('#eicc-ticker-strip');var paused=strip.classList.toggle('cdb-advisory-paused');this.setAttribute('aria-pressed',String(paused));this.textContent=paused?'Resume':'Pause';">Pause</button>
+                <div class="eicc-ticker-count" style="background:rgba(0,212,170,0.06);border-left:1px solid rgba(0,212,170,0.15);padding:6px 14px;display:flex;align-items:center;gap:6px;flex-shrink:0;">
                     <span style="font-family:var(--font-mono);font-size:9px;color:var(--accent);letter-spacing:1px;">FEED:</span>
                     <span id="eicc-ticker-count" style="font-family:var(--font-mono);font-size:9px;font-weight:700;color:var(--accent);">—</span>
                     <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">ADVISORIES</span>
@@ -2295,33 +2294,50 @@
             function sevOf(it){ return String(it.severity||it.risk_level||'INFO').toUpperCase(); }
 
             // ── Ticker ──────────────────────────────────────────────────────
+            var lastTickerSignature = '';
             function buildTicker(state){
                 var ticker = document.getElementById('eicc-ticker-inner');
                 var cnt = document.getElementById('eicc-ticker-count');
                 if (!ticker) return;
-                var view = SNAP.tickerView(state, 30);
+                var view = SNAP.tickerView(state, state && state.feed ? Math.max(1, state.feed.items.length) : 30);
+                // Snapshot refreshes must not restart a long, slow cycle when
+                // its actual headlines/mode/count have not changed.
+                var signature = JSON.stringify([view.mode, view.message, view.count,
+                    view.items.map(function(it){ return [sevOf(it), it.title||it.name||it.id||'UNTITLED']; })]);
+                if (signature === lastTickerSignature) return;
+                lastTickerSignature = signature;
                 clear(ticker);
                 ticker.setAttribute('data-feed-mode', view.mode);
                 if (cnt) cnt.textContent = view.count == null ? 'N/A' : String(view.count);
-                if (view.message) {
-                    var m = node('span', view.message, 'color:' + (view.mode === 'empty' ? 'rgba(0,212,170,0.8)' : '#f59e0b') + ';font-weight:700;');
-                    m.setAttribute('data-feed-message', view.mode);
-                    ticker.appendChild(m);
+                if (!view.items.length) {
+                    ticker.appendChild(node('span', view.message || 'Waiting for the live feed…', 'color:#f59e0b;font-weight:700;'));
+                    ticker.style.animation = 'none'; return;
                 }
-                if (!view.items.length) { ticker.style.animation = 'none'; return; }
                 ticker.style.animation = '';
-                // Two copies for a seamless loop.
+                // The complete animation lives in CSS: clearing the loading
+                // override must not erase its only animation declaration.
+                // Equal grouped copies keep the -50% endpoint seamless.
                 for (var copy = 0; copy < 2; copy++) {
+                    var group = node('span');
+                    group.className = 'eicc-ticker-copy';
+                    if (copy) group.setAttribute('aria-hidden', 'true');
+                    if (view.message) {
+                        var m = node('span', view.message, 'color:#f59e0b;font-weight:700;');
+                        m.setAttribute('data-feed-message', view.mode);
+                        group.appendChild(m);
+                    }
                     view.items.forEach(function(it){
                         var sev = sevOf(it);
                         var wrap = node('span');
                         if (copy) wrap.setAttribute('aria-hidden', 'true'); else wrap.setAttribute('data-ticker-item', '');
                         wrap.appendChild(node('span', sev, 'color:' + (SEV_COLOR[sev] || 'rgba(0,212,170,0.7)') + ';font-weight:700;'));
-                        wrap.appendChild(node('span', ' ' + String(it.title||it.name||it.id||'UNTITLED').substring(0,60), 'color:rgba(0,212,170,0.8);'));
+                        wrap.appendChild(node('span', ' ' + String(it.title||it.name||it.id||'UNTITLED'), 'color:rgba(0,212,170,0.8);'));
                         wrap.appendChild(node('span', '◆', 'color:rgba(100,120,140,0.6);margin:0 12px;'));
-                        ticker.appendChild(wrap);
+                        group.appendChild(wrap);
                     });
+                    ticker.appendChild(group);
                 }
+                ticker.style.setProperty('--eicc-cycle', Math.max(160, Math.ceil(ticker.scrollWidth / 2 / 18)) + 's');
             }
 
             // ── Metrics + Last Sync + API/INTEL status ─────────────────────
@@ -3651,10 +3667,10 @@
                 <div class="cdb-gadget-card g-amber" id="cdb-g-apt">
                     <div class="cdb-gadget-label">
                         <span>&#128373; APT ACTOR RADAR</span>
-                        <span style="font-size:8px;color:#f59e0b;letter-spacing:1px;">NATION-STATE</span>
+                        <span id="cdb-apt-status" style="font-size:8px;color:#f59e0b;letter-spacing:1px;">FEED EVIDENCE</span>
                     </div>
                     <div style="margin-top:8px;" id="cdb-apt-list">
-                        <div style="font-family:var(--font-mono);font-size:9px;color:#3a4a5a;padding:8px 0;letter-spacing:1px;">SCANNING ACTOR INFRASTRUCTURE...</div>
+                        <div style="font-family:var(--font-mono);font-size:9px;color:#94a3b8;padding:8px 0;letter-spacing:1px;">Loading source-linked APT reporting…</div>
                     </div>
                     <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
                         <div style="text-align:center;padding:6px 2px;background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.12);border-radius:3px;">
@@ -5041,7 +5057,7 @@
         </section>
 
         <!-- ═══ SENTINEL APEX FOOTER v123.0 &mdash; BRAND DOMINANCE ═══ -->
-        <footer style="border-top:2px solid rgba(0,212,170,0.25);padding:36px 24px 28px;text-align:center;background:linear-gradient(180deg,var(--bg) 0%,rgba(0,212,170,0.03) 100%);">
+        <footer class="cdb-customer-footer" style="border-top:2px solid rgba(0,212,170,0.25);padding:36px 24px 28px;text-align:center;background:linear-gradient(180deg,var(--bg) 0%,rgba(0,212,170,0.03) 100%);">
             <div style="max-width:1100px;margin:0 auto;">
                 <!-- Brand identity block -->
                 <div style="margin-bottom:20px;">
@@ -5125,7 +5141,7 @@
         </footer>
     </div>
 
-    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script src="/js/homepage-dashboard-engine.js?v=a0d2143cd29e"></script>
+    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script src="/js/homepage-dashboard-engine.js?v=0a9bac85f0b5"></script>
 
     <!-- ── v122.0.0: UPGRADE MODAL ─────────────────────────────────────────── -->
     <div id="upgrade-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(4px);" onclick="if(event.target===this)window.closeUpgradeModal()">
@@ -5717,7 +5733,7 @@
 <!-- /5-SYSTEM PRODUCTION UPGRADE v184.0 -->
 
 <!-- CDB-PAYMENT-GATEWAY-STRIP v149 -->
-<div style="background:#080c14;border-top:1px solid rgba(0,212,255,0.1);padding:16px 24px;text-align:center;">
+<div class="cdb-payment-footer" style="background:#080c14;border-top:1px solid rgba(0,212,255,0.1);padding:16px 24px;text-align:center;">
   <div style="font-size:9px;font-weight:700;letter-spacing:2px;color:#374151;text-transform:uppercase;margin-bottom:10px;">ACCEPTED PAYMENT METHODS</div>
   <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:10px;">
     <span style="background:#0f1420;border:1px solid #1e2a3a;border-radius:5px;padding:4px 10px;font-size:10px;font-weight:700;color:#e6edf3;">Razorpay (primary): UPI AutoPay &middot; Cards &middot; Net banking e-mandate</span>
@@ -7264,7 +7280,7 @@ a:focus-visible {
 </script>
 
 
-<script src="/js/sentinel-live-feeds.js"></script>
+<script src="/js/sentinel-live-feeds.js?v=2b48ab08b759"></script>
 
 
 <!-- DEPLOY-TRIGGER v184.0: re-trigger sentinel-blogger after smoke-fix -->
@@ -8731,4 +8747,3 @@ a:focus-visible {
 <script src="/js/apex-track.js"></script>
 </body>
 </html>
-

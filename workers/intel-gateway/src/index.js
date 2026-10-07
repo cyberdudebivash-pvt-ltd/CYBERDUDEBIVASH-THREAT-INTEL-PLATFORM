@@ -160,6 +160,7 @@ import { SESSION_POLICY as WATCHDOG_SESSION_POLICY, webhookDeliveryEnabled } fro
 // MSSP tenant self-service (tenant_auth_version 2); see mssp-tenants.js.
 import { TENANT_AUTH_VERSION, TENANT_DO_PREFIX, isTenantId, newTenantId, requestSelectsTenant, routeMsspTenants } from './mssp-tenants.js';
 import { buildCampaignsPayload, buildRansomwarePayload, geoAttributionCoverage, DASHBOARD_CONTRACT_VERSION, THREAT_LEVEL_FORMULA, THREAT_LEVEL_FORMULA_VERSION } from './dashboard-contract.js';
+import { buildAPTPayload } from './apt-contract.js';
 import { normalizeBuyerTaxId } from './tax-id.js';
 import { resolveGumroadProduct, checkGumroadSalePrice, looksLikePlatformProduct, gumroadPermalinkFrom, GUMROAD_CONTENT_PRODUCTS } from './gumroad-products.js';
 import { routeAiFeed, AI_FEED_CATALOG_KEY } from './ai-threat-feed.js';
@@ -2219,34 +2220,10 @@ function computeRansomware(items) {
 }
 
 function computeAPT(items) {
-  const aptItems = items.filter(i => {
-    const t = itemBlob(i);
-    return t.includes("apt") || t.includes("nation-state") || t.includes("state-sponsored") ||
-           t.includes("lazarus") || t.includes("sandworm") || t.includes("fancy bear") ||
-           (i.threat_type || "").toLowerCase().includes("apt");
-  });
-  const blobs = items.map(itemBlob);
-  const mentioned = APT_PROFILES.filter(p => blobs.some(b => {
-    const id = String(p.id || "").toLowerCase();
-    const alias = String(p.alias || "").toLowerCase();
-    return (id && b.includes(id)) || (alias.length >= 5 && b.includes(alias));
-  }));
-  let measuredTtps = 0;
-  for (const item of aptItems) {
-    measuredTtps += (item.mitre_techniques || item.mitre_ttps || []).length;
-  }
-  return {
-    tracked_apts: mentioned.length,
-    active_sectors: 0,
-    total_ttps: measuredTtps,
-    recent_activity: aptItems.slice(0, 5).map(i => ({
-      title: i.title, severity: i.severity, source: i.source, published: i.published,
-    })),
-    top_actors: mentioned.slice(0, 5).map(p => ({
-      id: p.id, alias: p.alias, nation: p.nation,
-    })),
-    generated_at: now(),
-  };
+  // This payload is served anonymously and cached publicly. Actor-level
+  // metadata remains on the entitled feed; raw legacy `actor` fields must
+  // not circumvent the attribution gate via this aggregation endpoint.
+  return buildAPTPayload(items, APT_PROFILES, now(), { includeAttribution: false });
 }
 
 function computeEPSS(items) {
@@ -7456,7 +7433,10 @@ async function handleRequest(request, env, ctx) {
   // --- /api/v1/intel/apt ------------------------------------------------------
   if (path === "/api/v1/intel/apt") {
     const feedData = await loadFeedItems(env);
-    return jsonResp({ ...computeAPT(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
+    // Public/cacheable gadget: retain the existing actor entitlement gate.
+    // Named paid-only attribution must not become public via aggregation.
+    const publicItems = (feedData.items || []).map(item => applyTierGateV2(item, TIERS.FREE, null));
+    return jsonResp({ ...computeAPT(publicItems), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
   }
 
   // --- /api/v1/intel/epss -----------------------------------------------------

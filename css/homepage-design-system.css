@@ -4564,7 +4564,26 @@
 /* Customer-facing brand spacing and slow live intelligence motion. */
 .brand-mark h1 { word-spacing: 0.24em !important; }
 .threat-ticker-inner { animation-duration: 160s; }
-#eicc-ticker-inner { animation-duration: 160s !important; }
+#eicc-ticker-strip {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+  align-items: stretch; width: 100%; min-width: 0;
+}
+.eicc-ticker-viewport { min-width: 0; overflow: hidden; align-self: center; }
+#eicc-ticker-inner {
+  display: flex; width: max-content; white-space: nowrap; padding: 8px 0;
+  font-family: var(--font-mono); font-size: 11px; color: rgba(0,212,170,0.75);
+  animation: eicc-ticker-scroll var(--eicc-cycle, 160s) linear infinite;
+}
+.eicc-ticker-copy { display: flex; flex: none; gap: 48px; padding-right: 48px; }
+.eicc-ticker-pause { align-self: center; margin: 4px 8px; }
+#eicc-ticker-strip:focus-within #eicc-ticker-inner,
+#eicc-ticker-strip.cdb-advisory-paused #eicc-ticker-inner { animation-play-state: paused; }
+@media (max-width: 640px) {
+  #eicc-ticker-strip { grid-template-columns: minmax(0, 1fr) max-content; }
+  .eicc-ticker-viewport { grid-column: 1 / -1; grid-row: 2; }
+  .eicc-ticker-count { grid-column: 1 / -1; grid-row: 3; justify-content: center; }
+  .eicc-ticker-pause { grid-column: 2; grid-row: 1; min-height: 44px; }
+}
 .threat-ticker-wrap:focus-within .threat-ticker-inner,
 #eicc-ticker-inner:hover,
 #eicc-ticker-inner:focus-within { animation-play-state: paused; }
@@ -4574,11 +4593,59 @@
     transform: none !important;
     overflow-x: auto;
   }
+  .eicc-ticker-viewport { overflow-x: auto; }
+  .eicc-ticker-copy[aria-hidden="true"], .eicc-ticker-pause { display: none; }
 }
 
-/* Latest advisories: complete titles, isolated seamless track, readable pace. */
-#cdb-map-attack-ticker { min-width: 0; flex-wrap: wrap; }
-.cdb-advisory-viewport { flex: 1 1 160px; min-width: 0; overflow: hidden; }
+/* Latest advisories: full shell-width row, complete titles and readable pace.
+   Only the viewport clips the moving track; the label/control stay visible. */
+#cdb-map-attack-ticker {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center; gap: 8px; width: 100%; min-width: 0; box-sizing: border-box;
+  margin: 0 0 16px; padding: 6px 14px; min-height: 44px;
+  background: rgba(2,10,20,0.92); border: 1px solid rgba(0,212,170,0.2);
+  border-radius: 4px; font-family: var(--font-mono); font-size: 11px;
+  line-height: 1.5; letter-spacing: 0.5px; color: rgba(0,212,170,0.7);
+}
+#cdb-advisory-label {
+  color: #ff7070; font-weight: 700; font-size: 10px; white-space: nowrap;
+}
+.cdb-advisory-viewport { min-width: 0; overflow: hidden; }
+.cdb-soc-context {
+  font-family: var(--font-mono); font-size: 9px; color: #94a3b8;
+  margin-left: auto; max-width: 100%; text-align: right; overflow-wrap: anywhere;
+}
+
+/* Customer footer: readable legal/support/payment text, including inline
+   legacy muted colors and microtype. Scope avoids changing intelligence cards. */
+.cdb-customer-footer, .cdb-payment-footer,
+.cdb-customer-footer *, .cdb-payment-footer * {
+  color: #cbd5e1 !important; line-height: 1.65 !important;
+  overflow-wrap: anywhere;
+}
+.cdb-customer-footer [style*="font-size:8px"],
+.cdb-customer-footer [style*="font-size:9px"],
+.cdb-customer-footer [style*="font-size:10px"],
+.cdb-customer-footer [style*="font-size:11px"],
+.cdb-payment-footer div, .cdb-payment-footer span {
+  font-size: 12px !important; letter-spacing: 0.06em !important;
+}
+.cdb-customer-footer a { color: #7dd3fc !important; }
+.cdb-customer-footer a:focus-visible, .cdb-payment-footer a:focus-visible {
+  outline: 2px solid #00d4aa; outline-offset: 4px;
+}
+.cdb-payment-footer > a { background: #00d4aa !important; color: #020a14 !important; }
+.cdb-payment-footer a { font-size: 12px !important; }
+.cdb-trust-stat-label { color: #cbd5e1 !important; font-size: 12px !important; }
+#genesis-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+#genesis-grid > div { min-width: 0; overflow-wrap: anywhere; }
+#genesis-grid [data-engine-value="G11"] { font-size: 14px !important; color: #cbd5e1 !important; }
+@media (max-width: 900px) {
+  #genesis-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 420px) {
+  #genesis-grid { grid-template-columns: minmax(0, 1fr) !important; }
+}
 #cdb-ticker-text {
   display: inline-flex; width: max-content; white-space: nowrap;
   animation: cdb-advisory-scroll var(--advisory-cycle, 160s) linear infinite;
@@ -4593,7 +4660,16 @@
 #cdb-map-attack-ticker.cdb-advisory-paused #cdb-ticker-text { animation-play-state: paused; }
 .cdb-advisory-pause {
   flex: none; color: #cbd5e1; background: transparent; border: 1px solid #64748b;
-  border-radius: 3px; padding: 4px 8px; font: inherit; cursor: pointer;
+  border-radius: 3px; padding: 4px 8px; min-width: 60px; min-height: 32px;
+  font: inherit; cursor: pointer;
+}
+.cdb-advisory-viewport:focus-visible, .cdb-advisory-pause:focus-visible {
+  outline: 2px solid #00d4aa; outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  #cdb-map-attack-ticker { grid-template-columns: minmax(0, 1fr) max-content; padding: 6px 10px; }
+  .cdb-advisory-viewport { grid-column: 1 / -1; grid-row: 2; }
+  .cdb-advisory-pause { grid-column: 2; grid-row: 1; min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .cdb-advisory-viewport { overflow-x: auto; }

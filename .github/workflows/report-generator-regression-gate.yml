@@ -156,6 +156,14 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest pyyaml requests==2.34.2 'PyJWT[crypto]==2.15.1' --quiet
 
+      - name: Homepage ticker, SOC context and APT evidence regressions (offline)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Run homepage ticker, SOC context and APT evidence regressions (offline)
+        run: node --test tests/latest-advisory-ticker.test.cjs tests/top-threat-context.test.cjs workers/intel-gateway/src/__tests__/apt-contract.test.js
+
       - name: Scan malware customer release Python surfaces
         run: |
           python -m pip install bandit==1.7.8 --quiet
