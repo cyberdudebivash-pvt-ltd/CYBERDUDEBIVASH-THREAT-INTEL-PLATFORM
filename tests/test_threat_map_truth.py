@@ -66,7 +66,10 @@ def test_board_reads_only_the_freshness_contracted_brief():
 
 
 def test_ticker_ships_no_invented_attributions():
-    ticker = _block(PANEL, 'id="cdb-ticker-text"', "</span>")
+    # The readable ticker is now a full-width shell sibling of the header,
+    # not part of the capped Live Threat Board. Keep the same truth checks.
+    ticker = _block(INDEX, 'id="cdb-ticker-text"', "</span>")
+    assert INDEX.count('id="cdb-ticker-text"') == 1
     assert not re.search(r"[A-Z]{2}\s*(→|->|&rarr;)\s*[A-Z]{2}", ticker), ticker
     assert "Waiting for the live feed" in ticker
 
@@ -80,7 +83,9 @@ def test_genesis_attack_map_does_not_guess_flows():
     assert ENGINE.count('href="#eicc-heatmap"') == 2
     # The G11 tile is drawn by the engine renderer only; the fallback
     # (renderGenesis) draws no tiles since tests/test_genesis_truth.py.
-    assert ENGINE.count("Connect source/target attack telemetry") == 1
+    assert ENGINE.count("valFn: s => 'TELEMETRY REQUIRED'") == 1
+    assert ENGINE.count("No source/target event collector connected") == 1
+    assert "summary.operated === false || def.id === 'G11'" in ENGINE
     assert 'id="eicc-heatmap"' in INDEX
 
 

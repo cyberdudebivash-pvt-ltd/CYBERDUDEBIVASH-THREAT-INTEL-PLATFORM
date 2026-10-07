@@ -94,7 +94,7 @@ const CONTROLS = [
   ["unescaped malicious title in the preview renderer", LF,
     '${esc(item.title || "Untitled Advisory")}', '${item.title || "Untitled Advisory"}'],
   ["EICC ticker writes a title through innerHTML", "index.html",
-    "                        ticker.appendChild(wrap);", "                        ticker.innerHTML += '<span>' + it.title + '</span>';"],
+    "                        group.appendChild(wrap);", "                        group.innerHTML += '<span>' + it.title + '</span>';"],
   ["a second script writes an EICC metric", LF,
     "    window._apexStats = stats;", "    setText(\"eicc-m-total\", stats.total, true);\n    window._apexStats = stats;"],
   ["frozen GitHub mirror added as a snapshot fallback", SNAP,

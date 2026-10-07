@@ -459,30 +459,47 @@
   async function loadAPT() {
     const data = await apiFetch("/api/v1/intel/apt");
     if (!data) {
-      setUnavailable("cdb-apt-count", "N/A");
-      setUnavailable("cdb-apt-sectors", "N/A");
-      setUnavailable("cdb-apt-ttps", "N/A");
+      setText('cdb-apt-status', 'FEED UNAVAILABLE', true);
+      setUnavailable("cdb-apt-count", "Unavailable");
+      setUnavailable("cdb-apt-sectors", "Unavailable");
+      setUnavailable("cdb-apt-ttps", "Unavailable");
       setUnavailable("cdb-apt-list", "APT DATA UNAVAILABLE");
       return;
     }
 
     // Real DOM ids (see GADGET 8, index.html)
-    setText("cdb-apt-count", data.tracked_apts || 0, true);
-    setText("cdb-apt-sectors", data.active_sectors || 0, true);
-    setText("cdb-apt-ttps", data.total_ttps || 0, true);
+    const actors = (Array.isArray(data.top_actors) ? data.top_actors : []).filter(a => a && typeof a === 'object').slice(0, 5);
+    const activity = (Array.isArray(data.recent_activity) ? data.recent_activity : []).filter(a => a && typeof a === 'object');
+    const saved = data.publication && (data.publication.fresh === false || /^(stale|degraded|unavailable)$/i.test(data.publication.status || ''));
+    setText('cdb-apt-status', saved ? 'SAVED FEED · NOT LIVE' : 'FEED EVIDENCE', true);
+    const positive = value => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 'Not reported';
+    // If no identity is supplied, show measured coverage, not three empty
+    // actor metrics or a claim that no APT-related intelligence exists.
+    const label = (id, value) => { const e = el(id); if (e?.previousElementSibling) e.previousElementSibling.textContent = value; };
+    label('cdb-apt-count', actors.length ? 'REPORTED ACTORS' : 'ADVISORIES');
+    label('cdb-apt-sectors', actors.length ? 'SECTORS' : 'SOURCES');
+    label('cdb-apt-ttps', 'TECHNIQUES');
+    setText("cdb-apt-count", positive(actors.length ? data.tracked_apts : data.apt_advisories ?? activity.length), true);
+    setText("cdb-apt-sectors", positive(actors.length ? data.active_sectors : data.sources_reporting), true);
+    setText("cdb-apt-ttps", positive(data.total_ttps), true);
 
     const container = el("cdb-apt-list");
     if (container) {
-      const actors = (data.top_actors || []).slice(0, 5);
       container.innerHTML = actors.length ? actors.map(a => `
         <div style="display:flex; justify-content:space-between; align-items:center;
           padding:5px 8px; margin-bottom:4px; background:rgba(0,212,170,0.05);
           border-left:2px solid #00d4aa; border-radius:3px; font-size:12px;">
           <span style="font-weight:bold; color:#00d4aa; width:90px;">${esc(a.id)}</span>
           <span style="color:#888; font-size:11px; flex:1;">${esc(a.alias)}</span>
-          <span style="color:#ff8800; font-size:11px; width:24px; text-align:center;">${getFlagEmoji(a.nation)}</span>
+          ${a.nation ? `<span style="color:#ff8800; font-size:11px; text-align:center;">${esc(a.nation)}</span>` : ''}
         </div>
-      `).join("") : `<div style="color:#888; font-size:11px; padding:8px 0;">No tracked APT activity</div>`;
+      `).join("") : `<div style="color:#94a3b8;font-size:11px;padding:8px 0;">${activity.length
+        ? 'APT-related reporting; named attribution is not provided. Not confirmed nation-state activity.'
+        : 'No APT-classified reporting in this feed window. General CVEs are not attributed to APTs.'}</div>`;
+      // Source-linked reporting is useful even when a source names no actor.
+      container.innerHTML += activity.slice(0, 3).map(a => `<div style="padding:6px 0;border-top:1px solid rgba(245,158,11,.15);font-size:11px;overflow-wrap:anywhere;">${safeUrl(a.source_url)
+        ? `<a href="${esc(safeUrl(a.source_url))}" target="_blank" rel="noopener noreferrer" style="color:#fbbf24;">${esc(a.title)}</a>`
+        : esc(a.title)}<div style="color:#94a3b8;font-size:9px;">${esc(a.source || '')}${a.published ? ' · ' + esc(fmtRelTime(a.published)) : ''}</div></div>`).join('');
     }
   }
 

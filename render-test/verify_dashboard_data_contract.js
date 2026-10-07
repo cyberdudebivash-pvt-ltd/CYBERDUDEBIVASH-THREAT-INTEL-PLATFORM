@@ -166,7 +166,7 @@ async function canonical(browser, contract, vpName) {
   const { context, page, errors, seen } = await openPage(browser, fx, VIEWPORTS[vpName]);
   const s = await snapshot(page);
   const tag = `[canonical/${vpName}]`;
-  record(`${tag} ticker renders real items and count == feed total (44)`, s.tickerMode === 'live' && s.tickerItems === 30 && s['eicc-ticker-count'] === '44', JSON.stringify({ mode: s.tickerMode, items: s.tickerItems, count: s['eicc-ticker-count'] }));
+  record(`${tag} ticker renders every real item and count == feed total (44)`, s.tickerMode === 'live' && s.tickerItems === 44 && s['eicc-ticker-count'] === '44', JSON.stringify({ mode: s.tickerMode, items: s.tickerItems, count: s['eicc-ticker-count'] }));
   record(`${tag} metric total == ticker total == health advisory_count`, s['eicc-m-total'] === '44' && s['eicc-m-critical'] === '11' && s['eicc-m-iocs'] === '33', JSON.stringify({ total: s['eicc-m-total'], critical: s['eicc-m-critical'], iocs: s['eicc-m-iocs'] }));
   record(`${tag} Last Sync is the feed generation time, with UTC`, /^2[0-9]m ago$/.test(s['eicc-m-sync']) && /UTC$/.test(s['eicc-m-sync-utc']), JSON.stringify({ sync: s['eicc-m-sync'], utc: s['eicc-m-sync-utc'] }));
   record(`${tag} API and INTEL statuses are separate and both healthy`, s['eicc-m-api'] === 'API ● LIVE' && s['eicc-m-intel'] === 'INTEL ● FRESH', `${s['eicc-m-api']} / ${s['eicc-m-intel']}`);
@@ -190,7 +190,7 @@ async function canonical(browser, contract, vpName) {
     const r = await snapshot(page);
     const keys = ['eicc-ticker-count', 'eicc-m-total', 'eicc-m-sync-utc', 'eicc-m-intel', 'cdb-gauge-val', 'cdb-rw-victims', 'cdb-kc-campaigns', 'nexus-killchain-meta'];
     const drift = keys.filter(k => r[k] !== s[k]);
-    record(`${tag} values stay consistent through one refresh cycle`, drift.length === 0 && r.tickerItems === 30, drift.map(k => `${k}: ${s[k]} -> ${r[k]}`).join('; '));
+    record(`${tag} values stay consistent through one refresh cycle`, drift.length === 0 && r.tickerItems === 44, drift.map(k => `${k}: ${s[k]} -> ${r[k]}`).join('; '));
     record(`${tag} refresh re-used the snapshot contract (no errors)`, errors.length === 0, errors.slice(0, 2).join(' | '));
   }
   await context.close();
