@@ -99,6 +99,7 @@ PAGES_BASE_URL = os.environ.get("PAGES_BASE_URL", "https://intel.cyberdudebivash
 DIST_DIR       = REPO_ROOT / "dist"
 MANIFEST_PATH  = DIST_DIR / "deployment_manifest.json"
 FEED_PATHS     = [REPO_ROOT / "api" / "feed.json", REPO_ROOT / "feed.json"]
+REPORTS_CATALOG_PATH = REPO_ROOT / "api" / "reports" / "index.json"
 CONFIDENCE_OUT = REPO_ROOT / "deployment_confidence_score.json"
 
 # Phase timings
@@ -352,14 +353,17 @@ def _extract_report_urls(feed: List[dict], manifest: dict) -> Tuple[List[str], L
     """
     Extract latest and historical report URLs for convergence probing.
 
-    SOURCE PRIORITY (v156.1 fix):
-      1. PRIMARY   -  deployment_manifest.json["files"] filtered for reports/*.html
-         These are the ONLY files guaranteed to exist in dist/ and therefore on the
-         CDN. When REPORT_RETENTION_DAYS > 0 the dist/ artifact contains only HOT-tier
-         reports. Using feed.json as the source in that mode produces stale/archived
-         URLs that are not in dist/ → permanent 404s → convergence never achieved.
-      2. FALLBACK  -  feed.json report_url fields (used only when manifest has no files,
-         e.g. first-boot or manifest generation failure).
+    SOURCE PRIORITY:
+      1. Pages deployment manifest reports/*.html when the deployment actually carries
+         report artifacts.
+      2. R2-backed api/reports/index.json when reports are served by the Worker/R2
+         architecture instead of Pages. build_reports_index.py constructs this catalog
+         from the successful R2 publish state and canonical timestamps before this gate.
+      3. feed.json report_url fields.
+      4. local reports/ scan as last-resort evidence.
+
+    The catalog path is never trusted as an arbitrary probe target: only canonical
+    root-relative /reports/*.html paths are accepted and re-based onto PAGES_BASE_URL.
 
     Returns (latest_urls, historical_urls):
       latest     -  most-recent MAX_REPORT_PROBES reports (newest filenames = last alpha)
@@ -385,11 +389,52 @@ def _extract_report_urls(feed: List[dict], manifest: dict) -> Tuple[List[str], L
                 "(%d HOT-tier reports, REPORT_RETENTION_DAYS-aware)", len(urls)
             )
 
+    # ── SECONDARY: authoritative R2-backed reports catalog ─────────────────
+    # R2-first production runs intentionally omit historical reports from the
+    # Pages dist artifact. build_reports_index.py has already rebuilt
+    # api/reports/index.json from data/cache/r2_report_publish_state.json and
+    # canonical timestamps before convergence runs, and STAGE 3.5 uploads the
+    # same catalog to R2. Use only its canonical path field so a malformed or
+    # compromised absolute URL can never turn this validator into an SSRF
+    # client. Catalog entries are newest-first; reverse to the oldest-first
+    # ordering expected by the latest/historical split below.
+    if not urls and REPORTS_CATALOG_PATH.exists():
+        try:
+            catalog = json.loads(REPORTS_CATALOG_PATH.read_text("utf-8"))
+            entries = catalog.get("reports") if isinstance(catalog, dict) else None
+            if isinstance(entries, list):
+                catalog_urls = []
+                for entry in reversed(entries):
+                    rel = entry.get("path") if isinstance(entry, dict) else None
+                    if not isinstance(rel, str):
+                        continue
+                    rel = rel.strip()
+                    if (
+                        rel.startswith("/reports/")
+                        and rel.endswith(".html")
+                        and ".." not in rel.split("/")
+                        and "\\" not in rel
+                    ):
+                        catalog_urls.append(PAGES_BASE_URL.rstrip("/") + rel)
+                if catalog_urls:
+                    urls.extend(catalog_urls)
+                    log.info(
+                        "Report URLs sourced from R2-backed api/reports/index.json "
+                        "(%d retained published reports)", len(catalog_urls)
+                    )
+                else:
+                    log.warning("Reports catalog contained no canonical /reports/*.html paths.")
+            else:
+                log.warning("Reports catalog is missing a valid reports list.")
+        except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+            log.warning("Reports catalog parse error: %s", exc)
+
     # ── FALLBACK: feed.json report_url fields ─────────────────────────────────
     if not urls:
         log.warning(
-            "Manifest 'files' has no reports/ entries  -  falling back to feed.json. "
-            "NOTE: under REPORT_RETENTION_DAYS>0 this may produce stale 404 URLs."
+            "Deployment manifest and R2-backed reports catalog contain no report URLs; "
+            "falling back to feed.json. Historical continuity will remain fail-closed "
+            "unless enough independently published report URLs are present."
         )
         for item in feed:
             url = item.get("report_url") or item.get("internal_report_url")
@@ -435,7 +480,7 @@ def _extract_report_urls(feed: List[dict], manifest: dict) -> Tuple[List[str], L
             deduped.append(u)
 
     if not deduped:
-        log.warning("No report URLs found in manifest, feed, or reports/ dir.")
+        log.warning("No report URLs found in manifest, R2-backed catalog, feed, or reports/ dir.")
         return [], []
 
     # latest  = newest MAX_REPORT_PROBES reports (last entries after alpha sort)
