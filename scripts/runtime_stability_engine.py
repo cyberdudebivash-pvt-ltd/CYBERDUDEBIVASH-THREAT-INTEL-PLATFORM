@@ -72,7 +72,7 @@ WARN_LATENCY_MS = 1000          # Warn above 1000ms p95
 MAX_LATENCY_MS = 2000           # Hard fail above 2000ms p95
 
 # ── Required pipeline output files (Stage 2 execution proof) ────────────────
-REQUIRED_OUTPUTS: List[Dict] = [
+DEFAULT_REQUIRED_OUTPUTS: List[Dict] = [
     {"path": "data/feed.json",              "min_bytes": 1000,  "label": "Feed JSON"},
     {"path": "data/feed_manifest.json",     "min_bytes": 500,   "label": "Feed Manifest"},
     {"path": "data/health/latest.json",     "min_bytes": 100,   "label": "Health Latest"},
@@ -80,6 +80,17 @@ REQUIRED_OUTPUTS: List[Dict] = [
     {"path": "version.json",                "min_bytes": 50,    "label": "Platform Version"},
     {"path": "config/version.json",         "min_bytes": 50,    "label": "Config Version"},
 ]
+
+AI_TRACKER_REQUIRED_OUTPUTS: List[Dict] = [
+    {"path": "api/ai/tracker.json",         "min_bytes": 1000,  "label": "AI Tracker"},
+    {"path": "api/ai/health.json",          "min_bytes": 100,   "label": "AI Health"},
+    {"path": "api/ai/executive-brief.json", "min_bytes": 100,   "label": "Executive Brief"},
+]
+
+OUTPUT_PROFILES: Dict[str, List[Dict]] = {
+    "default": DEFAULT_REQUIRED_OUTPUTS,
+    "ai-tracker": AI_TRACKER_REQUIRED_OUTPUTS,
+}
 
 # ── Required health/governance files (Orchestration Integrity) ───────────────
 REQUIRED_HEALTH_FILES: List[str] = [
@@ -208,12 +219,15 @@ class StixBundleCounter:
 class OutputExistenceProof:
     """Proves that required pipeline outputs exist and are fresh."""
 
+    def __init__(self, required_outputs: Optional[List[Dict]] = None):
+        self.required_outputs = required_outputs or DEFAULT_REQUIRED_OUTPUTS
+
     def validate(self) -> Dict:
         results = []
         hard_fail = False
         any_warn = False
 
-        for spec in REQUIRED_OUTPUTS:
+        for spec in self.required_outputs:
             path = REPO_ROOT / spec["path"]
             label = spec["label"]
             min_bytes = spec.get("min_bytes", 0)
@@ -434,9 +448,12 @@ class RuntimeStabilityReport:
 
     OUTPUT_FILE = HEALTH_DIR / "runtime_stability.json"
 
-    def __init__(self):
+    def __init__(self, profile: str = "default"):
+        if profile not in OUTPUT_PROFILES:
+            raise ValueError(f"Unknown output profile: {profile}")
+        self.profile = profile
         self.stix = StixBundleCounter()
-        self.outputs = OutputExistenceProof()
+        self.outputs = OutputExistenceProof(OUTPUT_PROFILES[profile])
         self.orchestration = OrchestrationIntegrity()
         self.latency = LatencyAnomalyDetector()
 
@@ -478,6 +495,7 @@ class RuntimeStabilityReport:
             "status": overall,
             "hard_fail": hard_fail,
             "strict_mode": strict,
+            "output_profile": self.profile,
             "stability_score": score,
             "stability_grade": "A" if score >= 90 else
                                "B" if score >= 75 else
@@ -536,9 +554,15 @@ def main() -> int:
                      help="Print stability report, always exit 0")
     parser.add_argument("--strict", action="store_true",
                         help="Elevate WARN conditions to HARD FAIL")
+    parser.add_argument(
+        "--profile",
+        choices=sorted(OUTPUT_PROFILES),
+        default="default",
+        help="Select the output contract for the invoking pipeline",
+    )
     args = parser.parse_args()
 
-    engine = RuntimeStabilityReport()
+    engine = RuntimeStabilityReport(profile=args.profile)
     apply = not args.report
     report = engine.run(apply=apply, strict=args.strict)
     print_report(report)

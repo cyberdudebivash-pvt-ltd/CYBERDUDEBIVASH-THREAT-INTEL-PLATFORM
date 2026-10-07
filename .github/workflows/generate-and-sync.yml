@@ -635,13 +635,14 @@ jobs:
       # ─────────────────────────────────────────────────────────────────────
       # STAGE 6.87 — RUNTIME STABILITY ENGINE (Phase 1B)
       # Validates STIX count, output existence proof, orchestration integrity,
-      # and latency anomaly. Writes signed stability report. Non-blocking.
+      # and latency anomaly. Writes signed stability report. Fail closed when
+      # the engine returns FAIL; WARN remains non-fatal because the engine exits 0.
       # ─────────────────────────────────────────────────────────────────────
       - name: "STAGE 6.87 — Runtime Stability Engine (Phase 1B)"
         timeout-minutes: 3
-        continue-on-error: true
         run: |
-          python3 scripts/runtime_stability_engine.py --check 2>&1 | tail -20 || true
+          set -o pipefail
+          python3 scripts/runtime_stability_engine.py --check --profile ai-tracker 2>&1 | tail -20
           echo "STAGE 6.87: Runtime stability check complete"
 
       # ─────────────────────────────────────────────────────────────────────
