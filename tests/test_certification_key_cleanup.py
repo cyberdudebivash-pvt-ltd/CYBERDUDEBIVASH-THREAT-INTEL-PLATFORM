@@ -17,7 +17,7 @@ def cleanup_scenario(tmp_path, *, rotation='missing', status='200', workflow=WOR
     # excluded: this test is about revoking whichever controlled key remains.
     prefix = run[:run.index('echo "--- Provisioning')]
     start = run.index('echo "--- ROTATED:')
-    end = run.index('ST=$(curl', start)
+    end = run.index('ST=$(wait_key_state "$KEY" denied)', start)
     footer = run[run.index('echo "--- Cleanup:'):]
     shell = prefix + 'KEY="fixture-original"\nCURRENT_KEY="$KEY"\n' + run[start:end] + footer
     bin_dir = tmp_path / 'bin'
