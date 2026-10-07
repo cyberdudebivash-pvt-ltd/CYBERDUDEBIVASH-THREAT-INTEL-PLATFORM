@@ -280,7 +280,12 @@ def _load_urlhaus_feed() -> List[Dict]:
     raw = _http_get(URLHAUS_RECENT_CSV, timeout=20)
     if not raw or not isinstance(raw, str):
         log.warning("URLhaus feed unavailable — using empty cache")
-        return []
+        # Memoize the outage for the existing in-process TTL. Otherwise every
+        # advisory repeats the same 20-second failed request until CI times out.
+        # Do not write failed fetches to disk or refresh old source evidence.
+        _urlhaus_cache = []
+        _urlhaus_cache_ts = now
+        return _urlhaus_cache
 
     entries = []
     try:
