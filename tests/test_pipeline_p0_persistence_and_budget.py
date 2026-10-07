@@ -30,8 +30,13 @@ def test_ci_metadata_is_persisted_via_review_pr_not_direct_main(tmp_path, monkey
         return Response([{'number': 701}] if existing else []) if req.method == 'GET' else Response({'number': 701})
     monkeypatch.setattr(urllib.request, 'urlopen', urlopen)
     result = git_sync.publish_metadata_pr('offline-token', 'owner/repo')
-    assert calls == [('rev-parse', 'HEAD'), ('push', 'origin', 'HEAD:refs/heads/sentinel-generated/run-37490666334-1')]
+    assert calls == [
+        ('rev-parse', 'HEAD'),
+        ('push', 'origin', 'HEAD:refs/heads/sentinel-generated/run-37490666334-1'),
+        ('ls-remote', '--exit-code', 'origin', 'refs/heads/sentinel-generated/run-37490666334-1'),
+    ]
     assert result['state'] == 'PERSISTED_REVIEW_PENDING' and result['main_updated'] is False
+    assert result['remote_verified'] is True
     assert len(http) == (1 if existing else 2)
     if not existing:
         assert json.loads(http[-1].data)['draft'] is True
@@ -54,7 +59,7 @@ def test_rejected_metadata_branch_fails_without_api_or_false_success(tmp_path, m
     ('POST', 401, 'Bad credentials', 'TOKEN_AUTHENTICATION_REJECTED'),
     ('POST', 422, 'Validation failed', 'GITHUB_API_REJECTED'),
 ])
-def test_pr_rejection_preserves_commit_evidence_and_remains_blocking(tmp_path, monkeypatch, method, status, message, reason):
+def test_pr_rejection_preserves_commit_evidence_and_only_owner_policy_can_continue(tmp_path, monkeypatch, method, status, message, reason):
     monkeypatch.setattr(git_sync, 'REPO_ROOT', tmp_path)
     monkeypatch.setenv('GITHUB_RUN_ID', '123')
     monkeypatch.setenv('GITHUB_RUN_ATTEMPT', '2')
@@ -68,16 +73,34 @@ def test_pr_rejection_preserves_commit_evidence_and_remains_blocking(tmp_path, m
             raise urllib.error.HTTPError(req.full_url, status, 'forbidden', {}, io.BytesIO(body))
         return Response([])
     monkeypatch.setattr(urllib.request, 'urlopen', urlopen)
-    with pytest.raises(RuntimeError, match=reason) as error:
-        git_sync.publish_metadata_pr('offline-secret-token', 'owner/repo')
+
+    if reason == 'ACTIONS_PR_CREATION_DISABLED':
+        result = git_sync.publish_metadata_pr('offline-secret-token', 'owner/repo')
+        assert result['state'] == 'PERSISTED_REVIEW_BLOCKED'
+        assert result['remote_verified'] is True
+        assert result['review_required'] is True
+        error_text = ''
+    else:
+        with pytest.raises(RuntimeError, match=reason) as error:
+            git_sync.publish_metadata_pr('offline-secret-token', 'owner/repo')
+        result = None
+        error_text = str(error.value)
+
     state = json.loads((tmp_path/'data/health/git_sync_state.json').read_text())
-    assert state['state'] == 'PERSISTED_PR_BLOCKED'
+    expected_state = 'PERSISTED_REVIEW_BLOCKED' if reason == 'ACTIONS_PR_CREATION_DISABLED' else 'PERSISTED_PR_BLOCKED'
+    assert state['state'] == expected_state
+    assert state['reason'] == reason
     assert state['commit_sha'] == commit_sha and state['http_status'] == status
+    assert state['remote_verified'] is True
     assert state['main_updated'] is False and 'pr_number' not in state
     assert state['branch'] == 'sentinel-generated/run-123-2'
     assert state['compare_url'] == f'https://github.com/owner/repo/compare/main...{commit_sha}'
-    assert calls == [('rev-parse', 'HEAD'), ('push', 'origin', 'HEAD:refs/heads/sentinel-generated/run-123-2')]
-    evidence = (tmp_path/'summary.md').read_text() + json.dumps(state) + str(error.value)
+    assert calls == [
+        ('rev-parse', 'HEAD'),
+        ('push', 'origin', 'HEAD:refs/heads/sentinel-generated/run-123-2'),
+        ('ls-remote', '--exit-code', 'origin', 'refs/heads/sentinel-generated/run-123-2'),
+    ]
+    evidence = (tmp_path/'summary.md').read_text() + json.dumps(state) + error_text
     assert 'offline-secret-token' not in evidence and 'private_debug' not in evidence
     assert 'main not updated' in evidence and 'do not bypass main protection' in evidence
 
