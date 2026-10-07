@@ -22,6 +22,7 @@ import {
   toPersisted,
 } from "./cyber-watchdog.js";
 import { attemptDelivery } from "./watchdog-webhook.js";
+import { certificationWebhookSinkFetch } from "./certification-webhook-sink.js";
 import { webhookDeliveryEnabled } from "./watchdog-policy.js";
 import { runTenantMembershipOp } from "./mssp-tenants.js";
 
@@ -108,7 +109,11 @@ export class WatchdogLedger {
       subject: meta.subject,
       now: new Date().toISOString(),
       attempt: attemptDelivery,
-      fetchImpl: fetch,
+      // Certification-only destinations are admin-created, TTL-bounded
+      // capabilities on this same Worker. Avoid a Worker-to-self network
+      // subrequest; real customer webhook URLs still delegate to fetch().
+      fetchImpl: certificationWebhookSinkFetch(this.env, fetch),
+      dnsFetch: fetch,
     });
     if (run.next_delivery_due_at) await this.arm(run.next_delivery_due_at);
     const m = run.metrics;

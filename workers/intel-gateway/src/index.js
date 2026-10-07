@@ -144,6 +144,7 @@ import { strongConsistencyEnabled, strongRateConsistencyEnabled, putStrongAuthSt
 import {
   isCertificationWebhookSinkPath,
   routeCertificationWebhookSink,
+  certificationWebhookSinkFetch,
   createCertificationWebhookSink,
   deleteCertificationWebhookSink,
 } from './certification-webhook-sink.js';
@@ -9330,7 +9331,14 @@ function watchdogDeps(env, ctx) {
     scheduler,
     webhookDeliveryEnabled: webhookDeliveryEnabled(env),
     resolveDestination: (hostname) => resolveAndValidate(hostname, fetch),
-    verifyDestination: ({ destination, nonce }) => runVerificationChallenge({ destination, nonce, fetchImpl: fetch }),
+    verifyDestination: ({ destination, nonce }) => runVerificationChallenge({
+      destination,
+      nonce,
+      // Keep the short-lived first-party certification sink inside this
+      // Worker; all customer destinations still use the real network fetch.
+      fetchImpl: certificationWebhookSinkFetch(env, fetch),
+      dnsFetch: fetch,
+    }),
   };
 }
 
