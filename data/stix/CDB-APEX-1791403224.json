@@ -1,0 +1,138 @@
+{
+  "type": "bundle",
+  "id": "bundle--0339bd34-0e59-4f2d-86ff-97eaca0eb09f",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "name": "CyberDudeBivash SENTINEL APEX",
+      "description": "CyberDudeBivash Pvt. Ltd. - Global Cybersecurity Intelligence Infrastructure",
+      "identity_class": "organization",
+      "sectors": [
+        "technology"
+      ],
+      "contact_information": "enterprise@cyberdudebivash.com",
+      "created": "2024-01-01T00:00:00Z",
+      "modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "type": "marking-definition",
+      "spec_version": "2.1",
+      "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+      "created": "2017-01-20T00:00:00.000Z",
+      "definition_type": "tlp",
+      "definition": {
+        "tlp": "amber"
+      }
+    },
+    {
+      "type": "intrusion-set",
+      "spec_version": "2.1",
+      "id": "intrusion-set--cd2b3a94-58b4-46c3-93c4-097274d2c5a7",
+      "name": "CDB-UNATTR-RAN Campaign",
+      "description": "PoC Exploit Released for Critical Atlassian Flaw That Can Lead to Jira Admin Access",
+      "created": "2026-10-07T20:00:24Z",
+      "modified": "2026-10-07T20:00:24Z",
+      "confidence": 52,
+      "aliases": [
+        "CDB-UNATTR-RAN"
+      ],
+      "extensions": {
+        "x-cdb-apex-1": {
+          "predictive_score": 7.5,
+          "campaign_id": "UNCLASSIFIED",
+          "campaign_confidence": 7.5,
+          "threat_category": "Web Application Attack",
+          "behavioral_tags": [
+            "registry_persistence"
+          ],
+          "ai_summary": "Initial access via web app → execution chain: initial access → command and control → impact → malware behaviors: registry persistence",
+          "risk_factors": [
+            "EPSS_score",
+            "IOC_density",
+            "MITRE_coverage",
+            "exploitation_context"
+          ],
+          "soc_priority": "P2",
+          "threat_level": "MEDIUM",
+          "recommended_action": "High severity threat (score 7.5/10) — limited technical indicators in source data",
+          "x_cdb_published_at": "2026-10-07T13:30:35Z",
+          "x_cdb_source_url": "https://cybersecuritynews.com/poc-exploit-released-for-atlassian-flaw/"
+        }
+      },
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "vulnerability",
+      "spec_version": "2.1",
+      "id": "vulnerability--20803a4a-7531-4b0a-9418-2bb531003fd0",
+      "name": "CVE-2026-21589",
+      "created": "2026-10-07T20:00:24Z",
+      "modified": "2026-10-07T20:00:24Z",
+      "external_references": [
+        {
+          "source_name": "cve",
+          "external_id": "CVE-2026-21589",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-21589"
+        }
+      ],
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "x_cdb_epss_score": 1.75
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--7a56d27a-ef9f-4cc0-bc58-9f93b0dfb8c4",
+      "relationship_type": "exploits",
+      "source_ref": "intrusion-set--cd2b3a94-58b4-46c3-93c4-097274d2c5a7",
+      "target_ref": "vulnerability--20803a4a-7531-4b0a-9418-2bb531003fd0",
+      "created": "2026-10-07T20:00:24Z",
+      "modified": "2026-10-07T20:00:24Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--de7a81df-5599-4768-80f9-f56fdbaba77c",
+      "name": "File and Directory Discovery",
+      "created": "2026-10-07T20:00:24Z",
+      "modified": "2026-10-07T20:00:24Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1083",
+          "url": "https://attack.mitre.org/techniques/T1083/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--218cbb1f-796e-43b4-b362-bfd2c06c3e96",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--cd2b3a94-58b4-46c3-93c4-097274d2c5a7",
+      "target_ref": "attack-pattern--de7a81df-5599-4768-80f9-f56fdbaba77c",
+      "created": "2026-10-07T20:00:24Z",
+      "modified": "2026-10-07T20:00:24Z",
+      "object_marking_refs": [
+        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    }
+  ]
+}
