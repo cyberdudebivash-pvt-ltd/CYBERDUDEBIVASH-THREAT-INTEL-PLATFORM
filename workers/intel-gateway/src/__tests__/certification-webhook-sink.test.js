@@ -143,3 +143,44 @@ test("explicit cleanup removes state and evidence", async () => {
   const after = await routeCertificationWebhookSink(new Request(c.sink_url, { method: "POST", body: "{}" }), c.env, new URL(c.sink_url).pathname);
   assert.equal(after.status, 404);
 });
+
+
+test("internal fetch adapter fails closed after capability deletion and on stored-origin tampering", async () => {
+  const c = await created();
+  const delegated = [];
+  const fallback = async (input, init) => {
+    const req = input instanceof Request ? new Request(input, init) : new Request(input, init);
+    delegated.push(req.url);
+    return new Response("delegated", { status: 418 });
+  };
+  const sinkFetch = certificationWebhookSinkFetch(c.env, fallback);
+
+  const id = c.sink_id;
+  const stateKey = "cert:webhook-sink:" + id;
+  const original = JSON.parse(await c.env.SECURITY_HUB_KV.get(stateKey));
+
+  // A capability whose persisted origin no longer matches the request must
+  // never be internally dispatched.
+  await c.env.SECURITY_HUB_KV.put(stateKey, JSON.stringify({ ...original, origin: "https://tampered.example" }));
+  const tampered = await sinkFetch(c.sink_url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "watchdog.verification", challenge: "tampered-origin" }),
+  });
+  assert.equal(tampered.status, 418);
+  assert.equal(delegated.length, 1);
+
+  // Restore state, delete the capability through the supported cleanup path,
+  // then prove the adapter delegates rather than resurrecting stale state.
+  await c.env.SECURITY_HUB_KV.put(stateKey, JSON.stringify(original));
+  const deleted = await deleteCertificationWebhookSink(c.env, id);
+  assert.equal(deleted.status, 200);
+
+  const expired = await sinkFetch(c.sink_url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "watchdog.verification", challenge: "deleted-capability" }),
+  });
+  assert.equal(expired.status, 418);
+  assert.equal(delegated.length, 2);
+});
