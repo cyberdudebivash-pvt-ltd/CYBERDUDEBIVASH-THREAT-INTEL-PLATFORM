@@ -101,3 +101,19 @@ test('LIVE INTEL stops on missing feed and resumes CSS motion on recovery; stale
  assert.equal(ticker.children[0].children[1].children[1].textContent,' <img src=x>');
  assert.equal(ticker.children[1].children.length,ticker.children[0].children.length);
 });
+test('ticker XSS negative control still mutates exactly one live rendering anchor',()=>{
+ const script=fs.readFileSync(path.join(root,'workers/intel-gateway/scripts/dashboard-negative-controls.mjs'),'utf8');
+ const a=script.indexOf('const CONTROLS = ['),b=script.indexOf('\nfunction stage()',a);
+ assert.ok(a>=0&&b>a);
+ const context={LF:'feeds',SNAP:'snapshot',DC:'contract',WI:'worker'};
+ vm.runInNewContext(script.slice(a,b)+';this.controls=CONTROLS;',context);
+ const control=context.controls.find(c=>c[0]==='EICC ticker writes a title through innerHTML');
+ assert.ok(control);assert.equal(control[1],'index.html');
+ assert.equal(html.split(control[2]).length-1,1,'mutation must be applied, not silently skipped');
+ const mutated=html.replace(control[2],control[3]);
+ const scriptStart=html.indexOf('(function eiccEngine(){');
+ const scriptEnd=html.indexOf('</script>',scriptStart);
+ assert.ok(!/\.innerHTML\s*[+]?=/.test(html.slice(scriptStart,scriptEnd)));
+ assert.match(mutated.slice(scriptStart,mutated.indexOf('</script>',scriptStart)),/group\.innerHTML\s*\+=.*it\.title/);
+ assert.equal(context.controls.length,31,'keep every original negative control');
+});
