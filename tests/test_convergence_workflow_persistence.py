@@ -27,6 +27,8 @@ class PublishGeneratedCommitTests(unittest.TestCase):
             "branch": "sentinel-generated/run-37566281335-1",
             "commit_sha": "a" * 40,
             "pr_number": 703,
+            "remote_verified": True,
+            "review_required": True,
             "main_updated": False,
         }
         environment = {
@@ -49,6 +51,7 @@ class PublishGeneratedCommitTests(unittest.TestCase):
             "state": "PERSISTED_BRANCH_ONLY",
             "branch": "sentinel-generated/run-1-1",
             "commit_sha": "b" * 40,
+            "remote_verified": False,
             "main_updated": False,
         }
         environment = {
@@ -58,8 +61,27 @@ class PublishGeneratedCommitTests(unittest.TestCase):
         with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
             publisher, "publish_metadata_pr", return_value=state
         ):
-            with self.assertRaisesRegex(RuntimeError, "reviewable PR"):
+            with self.assertRaisesRegex(RuntimeError, "remotely verified"):
                 publisher.publish()
+
+    def test_owner_pr_policy_block_is_success_only_when_remote_commit_is_verified(self):
+        state = {
+            "state": "PERSISTED_REVIEW_BLOCKED",
+            "branch": "sentinel-generated/run-1-1",
+            "commit_sha": "c" * 40,
+            "remote_verified": True,
+            "review_required": True,
+            "reason": "ACTIONS_PR_CREATION_DISABLED",
+            "main_updated": False,
+        }
+        environment = {
+            "GH_TOKEN": "offline-token",
+            "GITHUB_REPOSITORY": "owner/repo",
+        }
+        with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
+            publisher, "publish_metadata_pr", return_value=state
+        ):
+            self.assertEqual(publisher.publish(), state)
 
 
 class ConvergenceWorkflowContractTests(unittest.TestCase):
@@ -191,14 +213,16 @@ def test_generated_workflow_preserves_exact_scoped_commit_for_review(tmp_path, w
 
 
 @pytest.mark.parametrize("workflow", WORKFLOWS)
-def test_generated_workflow_pr_policy_rejection_is_nonzero_and_recoverable(tmp_path, workflow):
+def test_generated_workflow_pr_policy_rejection_preserves_verified_branch_and_continues(tmp_path, workflow):
     root, remote, env, base, _ = _fixture(tmp_path, workflow)
     env["OFFLINE_PR_BLOCKED"] = "1"
     result = _run_step(root, workflow, env)
-    assert result.returncode != 0, result.stdout
-    assert "ACTIONS_PR_CREATION_DISABLED" in result.stderr
+    assert result.returncode == 0, result.stderr
     state = json.loads((root / "data/health/git_sync_state.json").read_text())
-    assert state["state"] == "PERSISTED_PR_BLOCKED"
+    assert state["state"] == "PERSISTED_REVIEW_BLOCKED"
+    assert state["reason"] == "ACTIONS_PR_CREATION_DISABLED"
+    assert state["remote_verified"] is True
+    assert state["review_required"] is True
     assert state["main_updated"] is False
     assert state["commit_sha"] == _git(root, "rev-parse", "HEAD")
     assert _git(remote, "rev-parse", "refs/heads/sentinel-generated/run-42-1") == state["commit_sha"]
