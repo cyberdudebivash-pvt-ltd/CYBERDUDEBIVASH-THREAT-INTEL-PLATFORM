@@ -24,13 +24,14 @@ def test_customer_certification_runs_automatically_on_release_surfaces():
         assert required_path in text
 
 
-def test_watchdog_sink_is_mandatory_for_global_customer_certification():
+def test_watchdog_delivery_proof_is_mandatory_and_has_first_party_fallback():
     text = _read(WORKFLOW)
-    assert "watchdog_sink_present:" in text
+    assert "watchdog_sink_present:" in text  # external sink remains supported
     assert "WATCHDOG_SINK_PRESENT" in text
-    assert 'BLOCKED_BY_SINK' in text
-    assert '[ "${3:-}" = "blocked" ] && BLOCKED=1' in text
-    assert '[ "$BLOCKED" -ne 0 ]' in text
+    assert "/api/admin/certification/webhook-sink" in text
+    assert "ephemeral first-party sink" in text
+    assert 'record "ENTERPRISE signed webhook canary" "FAIL (no usable proof sink)" fail' in text
+    assert '[ "$FAIL" -ne 0 ]' in text
     assert "every mandatory canary completed successfully" in text
 
 
