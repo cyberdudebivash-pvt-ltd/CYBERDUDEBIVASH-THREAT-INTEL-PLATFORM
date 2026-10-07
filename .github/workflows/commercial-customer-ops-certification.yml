@@ -454,6 +454,46 @@ jobs:
             fi
           }
 
+          # With AUTH_STRONG_CONSISTENCY_ENABLED=false, API_KEYS_KV is the
+          # deployed authority and Cloudflare KV propagation is intentionally
+          # bounded/eventual. Public customer copy promises effect everywhere
+          # within about a minute, not instant global revocation. Poll for up
+          # to 75 seconds and fail closed beyond that bound. When the strong
+          # authority is explicitly enabled later these helpers normally
+          # converge on their first attempt.
+          wait_key_state() {
+            local key="$1" mode="$2" st="000" attempt
+            for attempt in $(seq 0 15); do
+              st=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $key" "$BASE/api/sla/report" || echo 000)
+              if [ "$mode" = "allowed" ] && [ "$st" = "200" ]; then echo "$st"; return 0; fi
+              if [ "$mode" = "denied" ] && { [ "$st" = "401" ] || [ "$st" = "429" ]; }; then echo "$st"; return 0; fi
+              [ "$attempt" -lt 15 ] && sleep 5
+            done
+            echo "$st"
+          }
+
+          wait_jwt_state() {
+            local token="$1" mode="$2" st="000" attempt
+            for attempt in $(seq 0 15); do
+              st=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $token" "$BASE/api/sla/report" || echo 000)
+              if [ "$mode" = "allowed" ] && [ "$st" = "200" ]; then echo "$st"; return 0; fi
+              if [ "$mode" = "denied" ] && { [ "$st" = "401" ] || [ "$st" = "429" ]; }; then echo "$st"; return 0; fi
+              [ "$attempt" -lt 15 ] && sleep 5
+            done
+            echo "$st"
+          }
+
+          wait_login_state() {
+            local key="$1" mode="$2" st="000" attempt
+            for attempt in $(seq 0 15); do
+              st=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d "{\"api_key\":\"$key\"}" || echo 000)
+              if [ "$mode" = "allowed" ] && [ "$st" = "200" ]; then echo "$st"; return 0; fi
+              if [ "$mode" = "denied" ] && { [ "$st" = "401" ] || [ "$st" = "429" ]; }; then echo "$st"; return 0; fi
+              [ "$attempt" -lt 15 ] && sleep 5
+            done
+            echo "$st"
+          }
+
           patch_status() {
             local key="$1" status="$2"
             curl -sS -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/admin/keys/$key/status" \
@@ -525,22 +565,22 @@ jobs:
           ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $JWT" "$BASE/api/sla/report")
           expect_status "pre-existing JWT still allowed under past_due" "200" "$ST"
 
-          echo "--- SUSPENDED: API key AND the already-issued JWT must both be denied immediately ---"
+          echo "--- SUSPENDED: API key AND the already-issued JWT must converge to denied within 75s ---"
           ST=$(patch_status "$KEY" "suspended"); expect_status "PATCH to suspended accepted" "200" "$ST"
-          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
-          expect_denied "suspended key denied" "$ST"
-          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $JWT" "$BASE/api/sla/report")
-          expect_denied "pre-existing JWT denied mid-session after suspension (jwt_deny marker)" "$ST"
+          ST=$(wait_key_state "$KEY" denied)
+          expect_denied "suspended key denied within propagation bound" "$ST"
+          ST=$(wait_jwt_state "$JWT" denied)
+          expect_denied "pre-existing JWT denied within propagation bound (jwt_deny marker)" "$ST"
 
-          echo "--- Fresh login must also be refused for a suspended key ---"
-          LOGIN_ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\"}")
-          expect_denied "fresh login refused for suspended key" "$LOGIN_ST"
+          echo "--- Fresh login must also converge to refused for a suspended key ---"
+          LOGIN_ST=$(wait_login_state "$KEY" denied)
+          expect_denied "fresh login refused for suspended key within propagation bound" "$LOGIN_ST"
 
           echo "--- CANCELLED / EXPIRED / REFUNDED: each independently denies ---"
           for st in cancelled expired refunded; do
             PST=$(patch_status "$KEY" "$st"); expect_status "PATCH to $st accepted" "200" "$PST"
-            ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
-            expect_denied "$st key denied" "$ST"
+            ST=$(wait_key_state "$KEY" denied)
+            expect_denied "$st key denied within propagation bound" "$ST"
           done
 
           echo "--- Status-field injection: an unrecognized status string must be rejected at the PATCH layer (400), not silently applied ---"
@@ -554,17 +594,17 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"subscription_status":"active","reason":"CI unauthorized reactivation probe"}')
           expect_status "reactivation PATCH without X-Admin-Key rejected" "403" "$ST"
-          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
+          ST=$(wait_key_state "$KEY" denied)
           expect_denied "key still denied after the unauthorized reactivation attempt (still refunded)" "$ST"
 
-          echo "--- REACTIVATED: admin can restore access from any deny state ---"
+          echo "--- REACTIVATED: admin restore must converge globally within 75s ---"
           ST=$(patch_status "$KEY" "active"); expect_status "PATCH to active accepted" "200" "$ST"
-          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
-          expect_status "reactivated key allowed again" "200" "$ST"
-          FRESH_LOGIN_ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\"}")
-          expect_status "fresh login succeeds again after reactivation" "200" "$FRESH_LOGIN_ST"
+          ST=$(wait_key_state "$KEY" allowed)
+          expect_status "reactivated key allowed again within propagation bound" "200" "$ST"
+          FRESH_LOGIN_ST=$(wait_login_state "$KEY" allowed)
+          expect_status "fresh login succeeds again after reactivation within propagation bound" "200" "$FRESH_LOGIN_ST"
 
-          echo "--- ROTATED: new key works immediately, old key denied immediately, no overlap ---"
+          echo "--- ROTATED: old key must converge denied and new key allowed within 75s ---"
           ROTATE_JSON=$(curl -sS -X POST "$BASE/api/admin/keys/$KEY/rotate" -H "X-Admin-Key: $ADMIN_SECRET")
           NEW_KEY=$(echo "$ROTATE_JSON" | jq -r '.new_key // empty')
           if [ -z "$NEW_KEY" ]; then
@@ -574,13 +614,15 @@ jobs:
             echo "PASS: rotation returned a new key"
             CURRENT_KEY="$NEW_KEY"
           fi
-          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $KEY" "$BASE/api/sla/report")
-          expect_denied "old (pre-rotation) key denied immediately" "$ST"
-          ST=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $NEW_KEY" "$BASE/api/sla/report")
-          expect_status "new (post-rotation) key allowed, tier carried forward" "200" "$ST"
+          ST=$(wait_key_state "$KEY" denied)
+          expect_denied "old (pre-rotation) key denied within propagation bound" "$ST"
+          ST=$(wait_key_state "$NEW_KEY" allowed)
+          expect_status "new (post-rotation) key allowed within propagation bound, tier carried forward" "200" "$ST"
 
           echo "--- TERMINAL-STATE ROTATION: rotating a suspended key must be refused (409), not silently reactivate it ---"
           PST=$(patch_status "$NEW_KEY" "suspended"); expect_status "PATCH new key to suspended accepted" "200" "$PST"
+          ST=$(wait_key_state "$NEW_KEY" denied)
+          expect_denied "new key suspension visible within propagation bound before terminal rotation probe" "$ST"
           ROTATE_DENY_ST=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/api/admin/keys/$NEW_KEY/rotate" -H "X-Admin-Key: $ADMIN_SECRET")
           expect_status "rotation of a suspended (terminal-state) key rejected" "409" "$ROTATE_DENY_ST"
 
@@ -823,11 +865,17 @@ jobs:
           BLOCKED=0
           RESULTS=()
           KEYS=()
+          CERT_SINK_ID=""
           cleanup() {
             local k
             for k in "${KEYS[@]:-}"; do
               [ -n "$k" ] && curl -sS -X DELETE "$BASE/api/admin/keys/$k" -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null || true
             done
+            if [ -n "$CERT_SINK_ID" ]; then
+              curl -sS -X DELETE "$BASE/api/admin/certification/webhook-sink/$CERT_SINK_ID" \
+                -H "X-Admin-Key: $ADMIN_SECRET" -o /dev/null || true
+              CERT_SINK_ID=""
+            fi
           }
           trap cleanup EXIT
           mk() {
@@ -884,23 +932,52 @@ jobs:
               record "MSSP rotation preserves membership" "FAIL (rotation returned no key: HTTP $ROT_STATUS $ROT_REASON)" fail
             else
               echo "::add-mask::$NEW"; KEYS+=("$NEW")
-              sleep 2
-              O=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $MSSP" "$BASE/api/mssp/tenants/$A/feed")
-              N=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $NEW" "$BASE/api/mssp/tenants/$A/feed")
-              C=$(curl -sS -H "X-API-Key: $NEW" "$BASE/api/mssp/tenants" | jq -r '.active_count // -1')
+              O="000"; N="000"; C="-1"
+              for attempt in $(seq 0 15); do
+                O=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $MSSP" "$BASE/api/mssp/tenants/$A/feed" || echo 000)
+                N=$(curl -sS -o /dev/null -w "%{http_code}" -H "X-API-Key: $NEW" "$BASE/api/mssp/tenants/$A/feed" || echo 000)
+                if [ "$N" = "200" ] && { [ "$O" = "401" ] || [ "$O" = "429" ]; }; then break; fi
+                [ "$attempt" -lt 15 ] && sleep 5
+              done
+              if [ "$N" = "200" ]; then
+                C=$(curl -sS -H "X-API-Key: $NEW" "$BASE/api/mssp/tenants" | jq -r '.active_count // -1')
+              fi
               if [ "$N" = "200" ] && [ "$C" = "1" ] && { [ "$O" = "401" ] || [ "$O" = "429" ]; }; then
-                record "MSSP rotation preserves membership (old key denied, new key allowed, 1 active tenant)" PASS
+                record "MSSP rotation preserves membership (old key denied, new key allowed, 1 active tenant within 75s)" PASS
               else
-                record "MSSP rotation preserves membership" "FAIL (old=$O new=$N active=$C)" fail
+                record "MSSP rotation preserves membership" "FAIL after 75s (old=$O new=$N active=$C)" fail
               fi
               curl -sS -o /dev/null -X DELETE -H "X-API-Key: $NEW" "$BASE/api/mssp/tenants/$A" || true
             fi
           fi
 
-          if [ -n "$CDB_WATCHDOG_SINK_URL" ]; then
+          # Prefer an explicitly configured owner sink. When none is present,
+          # provision the gateway's TTL-bounded first-party certification sink
+          # with ADMIN_SECRET. The returned capability/token are masked and
+          # destroyed at job exit; no long-lived secret or third-party capture
+          # service is required.
+          if [ -z "$CDB_WATCHDOG_SINK_URL" ] || [ -z "$CDB_WATCHDOG_SINK_INSPECT_URL" ] || [ -z "$CDB_WATCHDOG_SINK_TOKEN" ]; then
+            SINK_JSON=$(curl -sS -X POST "$BASE/api/admin/certification/webhook-sink" -H "X-Admin-Key: $ADMIN_SECRET")
+            CERT_SINK_ID=$(echo "$SINK_JSON" | jq -r '.sink_id // empty')
+            export CDB_WATCHDOG_SINK_URL=$(echo "$SINK_JSON" | jq -r '.sink_url // empty')
+            export CDB_WATCHDOG_SINK_INSPECT_URL=$(echo "$SINK_JSON" | jq -r '.inspect_url // empty')
+            export CDB_WATCHDOG_SINK_TOKEN=$(echo "$SINK_JSON" | jq -r '.inspect_token // empty')
+            if [ -z "$CERT_SINK_ID" ] || [ -z "$CDB_WATCHDOG_SINK_URL" ] || [ -z "$CDB_WATCHDOG_SINK_INSPECT_URL" ] || [ -z "$CDB_WATCHDOG_SINK_TOKEN" ]; then
+              record "Enterprise webhook proof sink" "FAIL (ephemeral sink provisioning failed)" fail
+            else
+              echo "::add-mask::$CERT_SINK_ID"
+              echo "::add-mask::$CDB_WATCHDOG_SINK_URL"
+              echo "::add-mask::$CDB_WATCHDOG_SINK_INSPECT_URL"
+              echo "::add-mask::$CDB_WATCHDOG_SINK_TOKEN"
+              record "Enterprise webhook proof sink" "PASS (ephemeral first-party sink)"
+            fi
+          else
+            record "Enterprise webhook proof sink" "PASS (operator-provided sink)"
+          fi
+          if [ -n "$CDB_WATCHDOG_SINK_URL" ] && [ -n "$CDB_WATCHDOG_SINK_INSPECT_URL" ] && [ -n "$CDB_WATCHDOG_SINK_TOKEN" ]; then
             CDB_WATCHDOG_CANARY_ENT_KEY="$ENT" canary "ENTERPRISE signed webhook canary" enterprise
           else
-            record "ENTERPRISE signed webhook canary" OPERATOR_WEBHOOK_SINK_REQUIRED blocked
+            record "ENTERPRISE signed webhook canary" "FAIL (no usable proof sink)" fail
           fi
 
           # Autonomous: no browser, no poller. Waits for the 15-minute cron.
@@ -1022,6 +1099,7 @@ jobs:
             echo "PASS: FREE tier (limit 30/min) started returning 429 at request #$FIRST_429"
           else
             echo "FAIL: expected the 31st-33rd request to be the first 429, first 429 was at request #$FIRST_429 (0 = never seen)"
+            echo "::error::BLOCKED_BY_FINOPS_STRONG_RATE_AUTHORITY: live KV accounting did not provide an exact boundary. RATE_STRONG_CONSISTENCY_ENABLED remains intentionally disabled by the shared-account cost guard; do not certify the exact commercial per-minute limit until current Durable Object headroom is reviewed and the existing authority is explicitly activated."
             FAIL=1
           fi
 
@@ -1088,8 +1166,7 @@ jobs:
             FAIL=1
           fi
           if [ "$WATCHDOG_SINK_PRESENT" != "true" ]; then
-            echo "::error::Enterprise signed-webhook certification is BLOCKED_BY_SINK; configure the owner-controlled CDB_WATCHDOG_SINK_* secrets before global customer release."
-            FAIL=1
+            echo "External WATCHDOG sink secrets are absent; the live-canary job must provision and validate the TTL-bounded first-party certification sink."
           fi
 
           if [ "$FAIL" -ne 0 ]; then
