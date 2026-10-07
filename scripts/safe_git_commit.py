@@ -158,7 +158,24 @@ def publish_metadata_pr(token: str, repository: str) -> dict:
     if push.returncode:
         raise RuntimeError("Generated metadata branch push rejected; no main write attempted")
 
+    # A successful push process is not sufficient persistence evidence. Read
+    # the remote ref back and require the exact generated commit. This closes
+    # the gap where transport/proxy behavior could report a successful command
+    # while the intended review branch was not durably updated.
+    remote = run_git("ls-remote", "--exit-code", "origin", f"refs/heads/{branch}")
+    remote_sha = ""
+    if remote.returncode == 0:
+        first = (remote.stdout or "").strip().splitlines()
+        if first:
+            remote_sha = first[0].split()[0].strip()
+    if remote_sha != commit_sha:
+        raise RuntimeError(
+            "Generated metadata remote verification failed; review branch identity is unproven; "
+            "main unchanged"
+        )
+
     state = {"state": "PERSISTED_BRANCH_ONLY", "branch": branch, "commit_sha": commit_sha,
+             "remote_verified": True, "review_required": True,
              "main_updated": False, "run_id": run_id, "run_attempt": attempt,
              "compare_url": f"https://github.com/{repository}/compare/main...{commit_sha}"}
     _write_metadata_sync_state(state)
@@ -206,18 +223,39 @@ def publish_metadata_pr(token: str, repository: str) -> dict:
 
     owner = repository.split('/')[0]
     from urllib.parse import urlencode
-    prs = api("GET", "pulls?" + urlencode({"state": "open", "head": f"{owner}:{branch}", "base": "main"}))
-    if not isinstance(prs, list):
-        raise blocked("INVALID_PR_LOOKUP_RESPONSE")
-    pr = prs[0] if prs else api("POST", "pulls", {
-        "head": branch, "base": "main", "draft": True,
-        "title": f"chore: generated intel metadata from run {run_id}",
-        "body": f"Generated artifacts preserved from workflow run {run_id}, attempt {attempt}. "
-                "Requires review and merge under main protection. R2 remains the runtime state authority. "
-                "This PR does not certify production deployment or customer readiness."})
-    if not isinstance(pr, dict) or not isinstance(pr.get("number"), int):
-        raise blocked("MISSING_PR_IDENTITY")
-    state.update(state="PERSISTED_REVIEW_PENDING", pr_number=pr["number"])
+    try:
+        prs = api("GET", "pulls?" + urlencode({"state": "open", "head": f"{owner}:{branch}", "base": "main"}))
+        if not isinstance(prs, list):
+            raise blocked("INVALID_PR_LOOKUP_RESPONSE")
+        pr = prs[0] if prs else api("POST", "pulls", {
+            "head": branch, "base": "main", "draft": True,
+            "title": f"chore: generated intel metadata from run {run_id}",
+            "body": f"Generated artifacts preserved from workflow run {run_id}, attempt {attempt}. "
+                    "Requires review and merge under main protection. R2 remains the runtime state authority. "
+                    "This PR does not certify production deployment or customer readiness."})
+        if not isinstance(pr, dict) or not isinstance(pr.get("number"), int):
+            raise blocked("MISSING_PR_IDENTITY")
+    except RuntimeError:
+        # Repository policy can intentionally disallow PR creation by
+        # GITHUB_TOKEN. At this point the exact generated commit has already
+        # been read back from the remote review branch, so persistence is
+        # proven. Treat only this explicit owner-policy condition as
+        # "persisted, manual review required"; every other API/auth/transport
+        # failure remains blocking and is re-raised.
+        if state.get("reason") == "ACTIONS_PR_CREATION_DISABLED" and state.get("remote_verified") is True:
+            state.update(
+                state="PERSISTED_REVIEW_BLOCKED",
+                review_required=True,
+                operator_action=(
+                    "Generated commit is remotely verified on the preserved branch. "
+                    "Open/review a PR manually or enable Actions PR creation; do not bypass main protection."
+                ),
+            )
+            _write_metadata_sync_state(state)
+            return state
+        raise
+
+    state.update(state="PERSISTED_REVIEW_PENDING", pr_number=pr["number"], review_required=True)
     _write_metadata_sync_state(state)
     return state
 
@@ -606,7 +644,16 @@ def main() -> None:
             log.info("No generated metadata changes; no persistence PR required.")
             return
         state = publish_metadata_pr(gh_token, gh_repo)
-        log.info("Generated metadata persisted for review: PR #%s; main unchanged", state["pr_number"])
+        if state.get("state") == "PERSISTED_REVIEW_PENDING":
+            log.info("Generated metadata persisted for review: PR #%s; main unchanged", state["pr_number"])
+        elif state.get("state") == "PERSISTED_REVIEW_BLOCKED":
+            log.warning(
+                "Generated metadata remotely persisted on %s at %s; repository policy blocks "
+                "Actions PR creation, so manual review/PR creation is required; main unchanged",
+                state["branch"], state["commit_sha"],
+            )
+        else:
+            raise RuntimeError("Generated metadata persistence ended in an unrecognized state")
         return
 
     # --- Push with 4-attempt retry ---
