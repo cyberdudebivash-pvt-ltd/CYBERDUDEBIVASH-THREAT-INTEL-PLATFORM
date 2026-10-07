@@ -85,14 +85,17 @@ ENTITLEMENT_ENFORCEMENT_RESOURCES = "cve_detail_full"
 # all customer webhook traffic without a code rollback.
 WATCHDOG_WEBHOOK_DELIVERY_ENABLED = "true"
 
-# P0 #596 strong-consistency authority. OFF by default to preserve the
-# no-new-spend/no-surprise-runtime-cost mandate. When enabled, commercial
-# rate enforcement and auth deny-state checks use the already-existing
-# GUMROAD_PROVISIONING_LOCK Durable Object binding for serialized state.
-# Enable only after reviewing Durable Object request volume and live canaries.
-AUTH_STRONG_CONSISTENCY_ENABLED = "false"
-RATE_STRONG_CONSISTENCY_ENABLED = "false"
-AUTH_STRONG_CONSISTENCY_CANARY_ENABLED = "false"
+# P0 commercial certification: strong-consistency authority is enabled after
+# explicit founder approval on 2026-10-07. It reuses the already-existing
+# GUMROAD_PROVISIONING_LOCK Durable Object binding: no new namespace, binding,
+# migration, cron, KV namespace, or R2 bucket is introduced. Auth lifecycle
+# reads/writes and commercial per-minute rate accounting now use serialized
+# state so revocation/reactivation/rotation and 429 boundaries are globally
+# read-after-write consistent. The dedicated canary remains admin-confirmed
+# and does not create recurring traffic by itself.
+AUTH_STRONG_CONSISTENCY_ENABLED = "true"
+RATE_STRONG_CONSISTENCY_ENABLED = "true"
+AUTH_STRONG_CONSISTENCY_CANARY_ENABLED = "true"
 
 # R01 freshness self-heal trigger (src/freshness-guard-dispatch.js). OFF under
 # config/cloudflare_pre_revenue_guard.json: turning it on is a new recurring
@@ -334,9 +337,9 @@ ENTITLEMENT_ENFORCEMENT_RESOURCES = "cve_detail_full"
 # challenges; absent or any other value disables them. Set "false" to stop
 # all customer webhook traffic without a code rollback.
 WATCHDOG_WEBHOOK_DELIVERY_ENABLED = "true"
-AUTH_STRONG_CONSISTENCY_ENABLED = "false"
-RATE_STRONG_CONSISTENCY_ENABLED = "false"
-AUTH_STRONG_CONSISTENCY_CANARY_ENABLED = "false"
+AUTH_STRONG_CONSISTENCY_ENABLED = "true"
+RATE_STRONG_CONSISTENCY_ENABLED = "true"
+AUTH_STRONG_CONSISTENCY_CANARY_ENABLED = "true"
 FRESHNESS_GUARD_DISPATCH_ENABLED = "false"
 
 [[env.production.kv_namespaces]]
