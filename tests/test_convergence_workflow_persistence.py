@@ -101,6 +101,7 @@ WORKFLOWS = {
     "ai-threat-analyst.yml": "data/analyst/analyst_report.json",
     "autonomous-guardian.yml": "data/health/guardian_report.json",
     "generate-and-sync.yml": "api/feed.json",
+    "enterprise-governance.yml": "data/governance/governance_report.json",
 }
 
 
@@ -305,7 +306,15 @@ def test_tracker_missing_r2_output_never_publishes_other_outputs(tmp_path):
     assert not Path(env["OFFLINE_API_CALLS"]).exists()
 
 
-@pytest.mark.parametrize("workflow", ["ai-threat-analyst.yml", "autonomous-guardian.yml", "generate-and-sync.yml"])
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        "ai-threat-analyst.yml",
+        "autonomous-guardian.yml",
+        "generate-and-sync.yml",
+        "enterprise-governance.yml",
+    ],
+)
 def test_new_generated_writers_reject_pre_staged_unrelated_content(tmp_path, workflow):
     root, remote, env, base, _ = _fixture(tmp_path, workflow)
     _git(root, "add", "unrelated.txt")
