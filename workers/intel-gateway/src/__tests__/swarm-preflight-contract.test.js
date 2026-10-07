@@ -62,7 +62,7 @@ test('mesh admission and preflight share one paid-tier/capability policy', () =>
 
 test('resolved auth carries only safe lifecycle metadata needed by preflight', () => {
   assert.ok(indexSource.includes('credential_type: "api_key"'));
-  assert.ok(indexSource.includes('subscription_status: record.subscription_status || "active"'));
+  assert.ok(indexSource.includes('subscription_status: effectiveRecord.subscription_status || "active"'));
   assert.ok(indexSource.includes('expires_at: record.expires_at || null'));
   assert.ok(indexSource.includes('credential_type: "bearer"'));
 });
