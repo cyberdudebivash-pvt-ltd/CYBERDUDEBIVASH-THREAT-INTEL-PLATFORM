@@ -835,9 +835,10 @@ jobs:
   # canary tool (deploy/cyber-watchdog/canary.mjs). ADMIN_SECRET only issues,
   # rotates and deletes the short-lived canary keys, as a payment would; every
   # customer action uses the customer's own key. Keys are masked; tenant ids
-  # are never printed. The Enterprise webhook canary needs an owner-controlled
-  # receiver (CDB_WATCHDOG_SINK_* secrets) and reports
-  # OPERATOR_WEBHOOK_SINK_REQUIRED instead of passing without one.
+  # are never printed. The Enterprise webhook canary prefers an owner-provided
+  # CDB_WATCHDOG_SINK_* receiver, but when those secrets are absent it creates
+  # a 15-minute first-party proof sink through the authenticated admin API,
+  # validates the same signature/retry contract, and deletes it on exit.
   # ---------------------------------------------------------------------
   watchdog-mssp-live-canaries:
     name: "Phases 8-15 - Watchdog + MSSP Live Canaries"
