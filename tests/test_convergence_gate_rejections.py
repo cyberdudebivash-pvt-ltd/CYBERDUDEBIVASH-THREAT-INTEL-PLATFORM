@@ -174,3 +174,60 @@ def test_confirmation_pauses_only_after_a_failed_pass(clock):
         p4 = dcv.phase4_convergence_confirmation([], MANIFEST)
     assert p4.success
     assert [s for s in clock if s > dcv.PROBE_INTERVAL] == [30]
+
+
+def test_missing_historical_evidence_fails_without_requests(monkeypatch):
+    monkeypatch.setattr(dcv, "_extract_report_urls", lambda *a: ([OK_REPORTS[0]], []))
+    monkeypatch.setattr(dcv, "_probe_batch", lambda *a: pytest.fail("no history must not probe"))
+    result = dcv.phase5_historical_report_audit([], {})
+    assert not result.success
+    assert result.probes == []
+    assert "HISTORICAL EVIDENCE MISSING" in result.message
+
+
+def test_small_catalog_cannot_certify_history_or_spend_extra_budget(monkeypatch, tmp_path):
+    monkeypatch.setattr(dcv, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(dcv, "_REQUESTS_USED", 23)
+    monkeypatch.setattr(dcv, "_probe_batch", lambda *a: pytest.fail("no history must not probe"))
+    manifest = {"files": {u[len(BASE) + 1:]: {} for u in OK_REPORTS[:2]}}
+    result = dcv.phase5_historical_report_audit([], manifest)
+    assert not result.success
+    assert result.probes == []
+    assert dcv._REQUESTS_USED == 23
+
+
+def test_missing_historical_evidence_blocks_high_score_protocol(monkeypatch, tmp_path):
+    for number, name in enumerate(("phase1_pages_push_detection",
+                                   "phase2_cdn_readiness_probe",
+                                   "phase3_incremental_retry",
+                                   "phase4_convergence_confirmation"), 1):
+        phase = dcv.PhaseResult(phase=number, name=name, success=True,
+                                probes=[], duration_s=0, message="offline healthy fixture")
+        monkeypatch.setattr(dcv, name, lambda *a, result=phase: result)
+    monkeypatch.setattr(dcv, "_load_feed", lambda: [{"title": "offline fixture"}])
+    monkeypatch.setattr(dcv, "_load_manifest", lambda: {"files": {}})
+    monkeypatch.setattr(dcv, "_extract_report_urls", lambda *a: (OK_REPORTS[:2], []))
+    monkeypatch.setattr(dcv, "_probe_batch", lambda *a: pytest.fail("no HTTP expected"))
+    target = tmp_path / "confidence.json"
+    monkeypatch.setattr(dcv, "CONFIDENCE_OUT", target)
+    assert dcv.run_convergence_protocol() == 1
+    import json
+    report = json.loads(target.read_text())
+    assert report["confidence_score"] >= dcv.CONFIDENCE_STABLE
+    assert report["classification"] == "DEPLOYMENT_FAILED"
+    assert report["signals"]["historical_continuity"]["status"] == "FAIL"
+    assert report["signals"]["historical_continuity"]["score"] == 0
+    assert report["phases"][-1]["success"] is False
+    assert report["phases"][-1]["probe_count"] == 0
+
+
+def test_complete_historical_sample_still_passes(monkeypatch):
+    history = OK_REPORTS[:dcv.HIST_PROBE_COUNT]
+    net = FakeNet({})
+    monkeypatch.setattr(dcv, "_extract_report_urls", lambda *a: ([], history))
+    monkeypatch.setattr(dcv, "_http_probe", net.probe)
+    monkeypatch.setattr(dcv.time, "sleep", lambda *a: None)
+    result = dcv.phase5_historical_report_audit([], {})
+    assert result.success
+    assert net.calls == history
+    assert len(result.probes) == dcv.HIST_PROBE_COUNT

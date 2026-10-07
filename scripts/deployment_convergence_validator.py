@@ -863,14 +863,15 @@ def phase5_historical_report_audit(feed: List[dict], manifest: dict) -> PhaseRes
     _, historical_urls = _extract_report_urls(feed, manifest)
 
     if not historical_urls:
-        # No historical reports to check  -  skip with warning
-        log.warning("Phase 5: No historical report URLs available to audit. Skipping.")
+        # Missing audit evidence cannot establish historical continuity. Do not
+        # spend extra shared-plan requests or award a synthetic successful phase.
+        log.error("Phase 5: HISTORICAL EVIDENCE MISSING - no historical report URLs available to audit.")
         duration = time.monotonic() - t0
         return PhaseResult(
             phase=5, name="Historical Report Audit",
-            success=True,  # soft pass when no historical data available
+            success=False,
             probes=[], duration_s=round(duration, 1),
-            message="No historical URLs available  -  audit skipped (soft pass).",
+            message="HISTORICAL EVIDENCE MISSING - no historical report URLs available; continuity unverified.",
         )
 
     log.info("Phase 5: Probing %d historical report URLs...", len(historical_urls))
