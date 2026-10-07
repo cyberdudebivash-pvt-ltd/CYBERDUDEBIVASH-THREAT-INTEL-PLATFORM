@@ -6608,14 +6608,33 @@ async function handleIncidentResponse(request, env, auth, method, path, url, ctx
 }
 
 // =============================================================================
+// CUSTOMER READ-ROUTE COMPATIBILITY
+// =============================================================================
+// A small number of v201 customer pages retained suffixless read paths after
+// the canonical JSON endpoints moved to explicit .json names. Canonicalize
+// before auth/rate/tier classification so aliases inherit *exactly* the same
+// premium gates, CORS posture, cache policy and response shaping. This is not
+// a generic extension fallback: only evidence-backed, read-only aliases are
+// accepted.
+const READ_ROUTE_ALIASES = new Map([
+  ["/api/ai/tracker", "/api/ai/tracker.json"],
+  ["/api/ai/health", "/api/ai/health.json"],
+  ["/api/v1/intel/ai_summary", "/api/v1/intel/ai_summary.json"],
+  ["/api/v1/intel/apex", "/api/v1/intel/apex.json"],
+]);
+
+// =============================================================================
 // MAIN REQUEST HANDLER
 // =============================================================================
 
 async function handleRequest(request, env, ctx) {
   const url      = new URL(request.url);
-  const path     = url.pathname;
-  const pathname = path; // gate-required alias: PREMIUM_INTEL_PATHS.has(pathname)
   const method   = request.method.toUpperCase();
+  let path       = url.pathname;
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+    path = READ_ROUTE_ALIASES.get(path) || path;
+  }
+  const pathname = path; // gate-required alias: PREMIUM_INTEL_PATHS.has(pathname)
 
   // CORS preflight -- SENTINEL APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this
   // used to unconditionally return 204 + wildcard CORS_HEADERS for every
@@ -8614,6 +8633,9 @@ async function handleRequest(request, env, ctx) {
   // handleAlertHistory enforces a *stricter*, different rule (Enterprise/MSSP
   // only) that "alerts" does not represent -- both intentionally left off
   // this resource rather than forcing an incorrect canonical mapping.
+  if (path === "/api/alerts/subscribe" && method !== "POST") {
+    return jsonResp({ error: "method_not_allowed", allowed: ["POST"] }, 405, { "Allow": "POST", "Cache-Control": "no-store" });
+  }
   if (path === "/api/alerts/subscribe" && method === "POST") {
     const alertsEnt = resolveEntitlement(ctx, env, "alerts", auth, auth.tier !== TIERS.FREE);
     if (alertsEnt.enforced && !alertsEnt.allowed) {
@@ -8628,6 +8650,9 @@ async function handleRequest(request, env, ctx) {
     }
     return await handleAlertSubscriptions(request, env, auth, crypto.randomUUID());
   }
+  if (path === "/api/alerts/test" && method !== "POST") {
+    return jsonResp({ error: "method_not_allowed", allowed: ["POST"] }, 405, { "Allow": "POST", "Cache-Control": "no-store" });
+  }
   if (path === "/api/alerts/test" && method === "POST") {
     const alertsEnt = resolveEntitlement(ctx, env, "alerts", auth, auth.tier !== TIERS.FREE);
     if (alertsEnt.enforced && !alertsEnt.allowed) {
@@ -8637,6 +8662,9 @@ async function handleRequest(request, env, ctx) {
   }
   if (path === "/api/alerts/dispatch" && method === "POST")       return await handleAlertDispatch(request, env, auth, crypto.randomUUID());
   if (path === "/api/alerts/history")                             return await handleAlertHistory(request, env, auth, crypto.randomUUID());
+  if (path === "/api/alerts/unsubscribe" && method !== "DELETE") {
+    return jsonResp({ error: "method_not_allowed", allowed: ["DELETE"] }, 405, { "Allow": "DELETE", "Cache-Control": "no-store" });
+  }
   if (path === "/api/alerts/unsubscribe" && method === "DELETE") {
     // Unlike the 3 routes above, handleAlertUnsubscribe's own ad-hoc gate has
     // no tier restriction at all (any authenticated identity may remove its
@@ -8664,6 +8692,9 @@ async function handleRequest(request, env, ctx) {
   // real provider integrations exist -- these three lines are the only
   // wiring removed. Re-enable only once handleDarkWebScan/handleDarkWebStatus/
   // handleLeakCheck call real, licensed data sources with provenance.
+  if (path === "/api/dark-web/scan" && method !== "POST") {
+    return jsonResp({ error: "method_not_allowed", allowed: ["POST"] }, 405, { "Allow": "POST", "Cache-Control": "no-store" });
+  }
   if (path === "/api/dark-web/scan" && method === "POST") return _darkWebUnavailable(crypto.randomUUID());
   if (path === "/api/dark-web/status")                    return _darkWebUnavailable(crypto.randomUUID());
   if (path === "/api/leak-check")                         return _darkWebUnavailable(crypto.randomUUID());
