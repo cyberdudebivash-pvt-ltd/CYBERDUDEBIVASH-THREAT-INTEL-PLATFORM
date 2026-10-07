@@ -160,6 +160,10 @@ export async function createCertificationWebhookSink(request, env) {
     expires_at: state.expires_at,
     storage: "SECURITY_HUB_KV",
     ttl_seconds: CERTIFICATION_SINK_TTL_SEC,
+    // The first webhook may arrive through a different Cloudflare location.
+    // Expose the same conservative KV settle bound used for mode changes so
+    // the certification workflow never races initial capability propagation.
+    settle_ms: CERTIFICATION_SINK_KV_SETTLE_MS,
   }, 201);
 }
 
