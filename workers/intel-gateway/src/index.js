@@ -141,6 +141,12 @@ import { resolveRequestId, withRequestId, withoutRequestId } from './request-id.
 // See rate-limit-cache.js for the cost rationale and the exact trade-off.
 import { bumpCounter, bumpCounterWriteThrough, peekCounter } from './rate-limit-cache.js';
 import { strongConsistencyEnabled, strongRateConsistencyEnabled, putStrongAuthState, getStrongAuthState, incrementStrongRate, authStateDenies, strongConsistencyCanaryEnabled, runStrongConsistencyCanary } from './strong-consistency-authority.js';
+import {
+  isCertificationWebhookSinkPath,
+  routeCertificationWebhookSink,
+  createCertificationWebhookSink,
+  deleteCertificationWebhookSink,
+} from './certification-webhook-sink.js';
 import { DEPLOY_COMMIT_SHA, DEPLOY_RUN_ID } from './build-info.js';
 // AI Swarm Synthesis (v4.45): pure prompt-building + tier-gate helpers for
 // handleSwarmSynthesis (below, defined right after handleCopilot). Extracted
@@ -3155,6 +3161,29 @@ export async function handleAdmin(request, env, ctx, path, method) {
     return jsonResp({ error: "Forbidden: invalid admin credentials" }, 403);
   }
   await clearAuthFailures(env, adminIp);
+
+  // Ephemeral first-party Watchdog webhook certification sink. This replaces
+  // the long-standing external CDB_WATCHDOG_SINK_* secret prerequisite with
+  // an owner-controlled receiver on the production gateway itself. It uses
+  // only the already-bound SECURITY_HUB_KV, is TTL-bounded, and is never a
+  // customer webhook destination outside a controlled certification run.
+  if (path === "/api/admin/certification/webhook-sink") {
+    if (method !== "POST") {
+      return jsonResp({ error: "Method not allowed", allowed: ["POST"] }, 405, { Allow: "POST" });
+    }
+    const response = await createCertificationWebhookSink(request, env);
+    auditLog(ctx, env, { action: "certification_webhook_sink_create", result: response.ok ? "ok" : "failed" });
+    return response;
+  }
+  const certificationSinkDelete = /^\/api\/admin\/certification\/webhook-sink\/([0-9a-f]{32})$/.exec(path);
+  if (certificationSinkDelete) {
+    if (method !== "DELETE") {
+      return jsonResp({ error: "Method not allowed", allowed: ["DELETE"] }, 405, { Allow: "DELETE" });
+    }
+    const response = await deleteCertificationWebhookSink(env, certificationSinkDelete[1]);
+    auditLog(ctx, env, { action: "certification_webhook_sink_delete", result: response.ok ? "ok" : "failed" });
+    return response;
+  }
 
   // POST /api/admin/strong-consistency/canary
   // Dormant by default. Even valid admin credentials cannot execute Durable
@@ -6599,6 +6628,16 @@ async function handleRequest(request, env, ctx) {
   // logic runs, same as before.
   if (method === "OPTIONS") {
     return buildPreflightResponse(request, path);
+  }
+
+  // P0 customer-release certification receiver. This capability URL is
+  // created only by an authenticated admin call, carries 128 bits of entropy,
+  // expires after 15 minutes, and has its own independent bearer token for
+  // inspection. Dispatch before customer auth/rate accounting: Watchdog
+  // delivery is platform control-plane traffic and must not consume a
+  // customer's API quota or be blocked by the anonymous FREE bucket.
+  if (isCertificationWebhookSinkPath(path)) {
+    return await routeCertificationWebhookSink(request, env, path);
   }
 
   // Client IP for rate limiting and brute-force tracking
