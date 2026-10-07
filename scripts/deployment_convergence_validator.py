@@ -777,17 +777,48 @@ def query_publication_status(report_id: str) -> Optional[dict]:
     # malformed feed entry) can't redirect the request to a different path
     # segment -- defensive hardening only, report_id is normally already
     # constrained to intel--[a-f0-9]+ by callers.
+    global _RETRY_NOT_BEFORE
     status_url = f"{PAGES_BASE_URL}/api/v1/reports/{urllib.parse.quote(report_id, safe='')}/publication-status"
-    probe = _http_probe(status_url)
-    if not probe.success:
-        return None
     try:
-        req = urllib.request.Request(status_url, headers={"User-Agent": "SentinelApex-ConvergenceValidator/1.0"})
+        # One bounded GET is sufficient to establish reachability, status and
+        # parseable evidence. The previous HEAD-then-GET sequence consumed two
+        # slots for every gate-classification lookup. With 15 latest reports,
+        # three confirmation passes and five historical probes, that exhausted
+        # MAX_TOTAL_REQUESTS during Phase 5 even on a healthy deployment.
+        # Keeping this to one request preserves the same global ceiling while
+        # leaving enough budget to complete the fail-closed historical sample.
+        req = urllib.request.Request(
+            status_url,
+            headers={"User-Agent": "SentinelApex-ConvergenceValidator/1.0"},
+            method="GET",
+        )
         if not _claim_request():
             return None
-        with urllib.request.urlopen(req, timeout=max(0.1, min(HTTP_TIMEOUT, MAX_PROTOCOL_SECONDS - (time.monotonic() - _PROTOCOL_STARTED)))) as resp:
-            return json.loads(resp.read(1024 * 1024).decode("utf-8", errors="replace"))
-    except Exception:
+        remaining = MAX_PROTOCOL_SECONDS - (
+            time.monotonic() - _PROTOCOL_STARTED
+        )
+        timeout = max(0.1, min(HTTP_TIMEOUT, remaining))
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if getattr(resp, "status", 200) != 200:
+                return None
+            data = json.loads(resp.read(1024 * 1024).decode("utf-8", errors="replace"))
+            return data if isinstance(data, dict) else None
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            from email.utils import parsedate_to_datetime
+            raw_retry = exc.headers.get("Retry-After", "60") if exc.headers else "60"
+            try:
+                delay = max(0.0, float(raw_retry))
+                if not math.isfinite(delay):
+                    delay = 60.0
+            except (ValueError, TypeError):
+                try:
+                    delay = max(0.0, parsedate_to_datetime(raw_retry).timestamp() - time.time())
+                except Exception:
+                    delay = 60.0
+            _RETRY_NOT_BEFORE = max(_RETRY_NOT_BEFORE, time.monotonic() + delay)
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
         return None
 
 
@@ -849,15 +880,22 @@ def phase5_historical_report_audit(feed: List[dict], manifest: dict) -> PhaseRes
     # gate rejections are excluded from this audit, as before.
     gate_rejected = sum(1 for r in results if r.gate_rejected)
 
-    effective_total = len(historical_urls) - gate_rejected
+    unprobed = len(historical_urls) - len(results)
+    effective_total = len(results) - gate_rejected
     effective_ok = ok - gate_rejected
     success_rate = (effective_ok / effective_total) if effective_total else 1.0
-    phase_success = effective_ok == effective_total  # No sampled historical loss is accepted.
+    phase_success = (
+        unprobed == 0 and effective_ok == effective_total
+    )  # No sampled historical loss or unverified sample is accepted.
 
     duration = time.monotonic() - t0
     if not phase_success:
-        log.error("Phase 5: HISTORICAL VERIFICATION INCOMPLETE  -  %d/%d historical report probes failed (excluding %d expected gate rejections)!",
-                   fail, effective_total, gate_rejected)
+        log.error(
+            "Phase 5: HISTORICAL VERIFICATION INCOMPLETE  -  "
+            "%d/%d completed non-gate probes accessible; %d failed, "
+            "%d unprobed, %d expected gate rejections excluded!",
+            effective_ok, effective_total, fail, unprobed, gate_rejected,
+        )
     else:
         log.info("Phase 5: Historical continuity OK  -  %d/%d accessible (%.0f%%), %d expected gate rejections excluded",
                   effective_ok, effective_total, success_rate * 100, gate_rejected)
@@ -868,7 +906,8 @@ def phase5_historical_report_audit(feed: List[dict], manifest: dict) -> PhaseRes
         success=phase_success,
         probes=results,
         duration_s=round(duration, 1),
-        message=f"{effective_ok}/{effective_total} historical reports accessible ({success_rate:.0%}), "
+        message=f"{effective_ok}/{effective_total} historical reports accessible "
+                f"({success_rate:.0%}) across completed non-gate probes, {unprobed} unprobed, "
                 f"{gate_rejected} excluded as expected publication-gate rejections. "
                 f"{'PASS' if phase_success else 'HISTORICAL VERIFICATION INCOMPLETE'}",
     )
