@@ -882,7 +882,7 @@ async function resolveAuth(request, env) {
           sub: record.customer_id || raw.slice(0, 8),
           kv: true,
           credential_type: "api_key",
-          subscription_status: record.subscription_status || "active",
+          subscription_status: effectiveRecord.subscription_status || "active",
           expires_at: record.expires_at || null,
           // v185.5 (Mission Phase 6): MSSP tenant ownership, OPT-IN not
           // fail-closed-by-default. `null` means "field genuinely absent" --

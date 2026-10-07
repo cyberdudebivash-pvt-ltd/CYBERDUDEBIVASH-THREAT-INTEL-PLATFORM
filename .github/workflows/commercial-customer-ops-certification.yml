@@ -1025,10 +1025,10 @@ jobs:
         run: python3 scripts/verify_customer_core_flow.py
 
   # ---------------------------------------------------------------------
-  # Phase 8 (partial, deliberately conservative): live boundary check for
-  # the FREE tier only (limit 30/min, the cheapest tier to verify). This
-  # job does NOT flood-test PRO(120)/ENTERPRISE(600)/MSSP(1200) live --
-  # checkRateLimit() (index.js) applies the exact same code path per tier
+  # Phase 8: live boundary check for the FREE tier (limit 30/min). The
+  # production gateway now uses the approved serialized rate authority.
+  # This job does NOT flood-test PRO(120)/ENTERPRISE(600)/MSSP(1200) live --
+  # checkRateLimit() (index.js) applies the exact same authority path per tier
   # with no special-casing, and driving 600-1200 requests/min at
   # production to "prove" that would be the abusive load this mission
   # explicitly warns against for marginal additional evidence. Runs on a
@@ -1108,7 +1108,7 @@ jobs:
             echo "PASS: FREE tier (limit 30/min) started returning 429 at request #$FIRST_429"
           else
             echo "FAIL: expected the 31st-33rd request to be the first 429, first 429 was at request #$FIRST_429 (0 = never seen)"
-            echo "::error::BLOCKED_BY_FINOPS_STRONG_RATE_AUTHORITY: live KV accounting did not provide an exact boundary. RATE_STRONG_CONSISTENCY_ENABLED remains intentionally disabled by the shared-account cost guard; do not certify the exact commercial per-minute limit until current Durable Object headroom is reviewed and the existing authority is explicitly activated."
+            echo "::error::P0_RATE_AUTHORITY_NOT_ENFORCING: production strong rate authority is approved and must deny the first request above the FREE 30/min boundary. A missing 429 is a release-blocking enforcement defect."
             FAIL=1
           fi
 

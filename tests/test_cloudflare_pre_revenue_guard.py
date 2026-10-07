@@ -49,25 +49,25 @@ def _crons(text: str):
     return re.findall(r'"([^"]+)"', m.group(1))
 
 
-def test_pre_revenue_cost_mode_keeps_strong_consistency_disabled_everywhere():
+def test_approved_customer_release_mode_enables_strong_auth_consistency_everywhere():
     text = WRANGLER.read_text(encoding="utf-8")
     values = re.findall(r'^AUTH_STRONG_CONSISTENCY_ENABLED\s*=\s*"([^"]+)"', text, re.M)
-    assert values, "strong-consistency flag missing"
-    assert all(v == "false" for v in values), values
+    assert len(values) == 2, values
+    assert all(v == "true" for v in values), values
 
 
-def test_pre_revenue_cost_mode_keeps_strong_rate_consistency_disabled_everywhere():
+def test_approved_customer_release_mode_enables_strong_rate_consistency_everywhere():
     text = WRANGLER.read_text(encoding="utf-8")
     values = re.findall(r'^RATE_STRONG_CONSISTENCY_ENABLED\s*=\s*"([^"]+)"', text, re.M)
-    assert values, "strong rate-consistency flag missing"
-    assert all(v == "false" for v in values), values
+    assert len(values) == 2, values
+    assert all(v == "true" for v in values), values
 
 
-def test_pre_revenue_cost_mode_keeps_strong_consistency_canary_disabled_everywhere():
+def test_approved_customer_release_mode_enables_explicit_strong_consistency_canary():
     text = WRANGLER.read_text(encoding="utf-8")
     values = re.findall(r'^AUTH_STRONG_CONSISTENCY_CANARY_ENABLED\s*=\s*"([^"]+)"', text, re.M)
-    assert values, "strong-consistency canary flag missing"
-    assert all(v == "false" for v in values), values
+    assert len(values) == 2, values
+    assert all(v == "true" for v in values), values
 
 
 def test_pre_revenue_cost_mode_keeps_freshness_guard_dispatch_disabled_everywhere():
@@ -121,9 +121,14 @@ def test_scheduled_cloudflare_triggers_do_not_expand_silently():
     assert set(_crons(text)) == set(policy["approved_crons"])
 
 
-def test_policy_explicitly_requires_separate_approval_for_cloudflare_expansion():
+def test_policy_records_explicit_strong_consistency_approval_without_resource_expansion():
     policy = json.loads(POLICY.read_text(encoding="utf-8"))
     assert policy["mode"] == "pre_revenue_cost_guard"
-    assert policy["production_strong_consistency_must_remain_disabled"] is True
+    assert policy["production_strong_consistency_must_remain_disabled"] is False
+    assert policy["strong_consistency_runtime_activation_approved"] is True
+    activation = policy["strong_consistency_activation"]
+    assert activation["approved_on"] == "2026-10-07"
+    assert "no new cloudflare resources" in activation["resource_change"].lower()
+    assert "gumroad_provisioning_lock" in activation["resource_change"].lower()
     assert "explicit founder approval" in policy["policy"].lower()
     assert "usage/cost impact" in policy["policy"].lower()
