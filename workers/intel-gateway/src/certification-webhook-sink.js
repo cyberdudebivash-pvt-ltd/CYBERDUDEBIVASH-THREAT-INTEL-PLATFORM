@@ -130,6 +130,33 @@ export function isCertificationWebhookSinkPath(path) {
   return parsePath(path) !== null;
 }
 
+/**
+ * Cloudflare Worker-to-self HTTPS subrequests do not reliably re-enter the
+ * same Worker route; on the production custom domain they can fall through
+ * to the underlying origin and return method-level responses such as 405.
+ *
+ * This adapter keeps ONLY an admin-provisioned certification sink inside the
+ * Worker. It first proves that the capability id exists in SECURITY_HUB_KV
+ * and that the stored origin exactly matches the requested origin. Any other
+ * URL -- including every real customer webhook destination -- is delegated
+ * unchanged to fallbackFetch and therefore retains the normal DNS/SSRF and
+ * network-delivery path.
+ */
+export function certificationWebhookSinkFetch(env, fallbackFetch = fetch) {
+  return async (input, init) => {
+    const request = input instanceof Request ? new Request(input, init) : new Request(input, init);
+    const url = new URL(request.url);
+    const parsed = parsePath(url.pathname);
+    if (!parsed) return fallbackFetch(input, init);
+
+    const state = await readState(env, parsed.id);
+    if (!state || typeof state.origin !== "string" || state.origin !== url.origin) {
+      return fallbackFetch(input, init);
+    }
+    return routeCertificationWebhookSink(request, env, url.pathname);
+  };
+}
+
 export async function createCertificationWebhookSink(request, env) {
   if (!env?.SECURITY_HUB_KV || typeof env.SECURITY_HUB_KV.put !== "function") {
     return json({ error: "certification_sink_storage_unavailable" }, 503);
@@ -137,8 +164,10 @@ export async function createCertificationWebhookSink(request, env) {
   const id = randomHex(16);
   const inspectToken = randomHex(32);
   const now = Date.now();
+  const origin = new URL(request.url).origin;
   const state = {
-    schema_version: 1,
+    schema_version: 2,
+    origin,
     inspect_token_hash: await sha256Hex(inspectToken),
     mode: { status: 204, retry_after: null },
     created_at: new Date(now).toISOString(),
@@ -149,7 +178,6 @@ export async function createCertificationWebhookSink(request, env) {
   } catch (_) {
     return json({ error: "certification_sink_storage_unavailable" }, 503);
   }
-  const origin = new URL(request.url).origin;
   const sinkUrl = origin + CERTIFICATION_SINK_PREFIX + id;
   return json({
     status: "created",
