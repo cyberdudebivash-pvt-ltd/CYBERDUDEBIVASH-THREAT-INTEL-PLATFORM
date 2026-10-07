@@ -1040,7 +1040,8 @@ def t24():
     # content in a finally block so this test can never leave the repo's
     # wrangler.toml modified, pass or fail.
     assert "vars" in gate._wrangler_sections(), "T24: wrangler.toml has no top-level [vars] block"
-    original_toml = gate.WRANGLER_TOML.read_text(encoding="utf-8")
+    original_toml_bytes = gate.WRANGLER_TOML.read_bytes()
+    original_toml = original_toml_bytes.decode("utf-8")
     bogus = "t24_synthetic_undefined_resource"
     try:
         injected_toml = original_toml.replace(
@@ -1059,7 +1060,7 @@ def t24():
             f"is broken, meaning it would silently pass real drift too."
         )
     finally:
-        gate.WRANGLER_TOML.write_text(original_toml, encoding="utf-8")
+        gate.WRANGLER_TOML.write_bytes(original_toml_bytes)
 
     restored_exit = gate.main()
     assert restored_exit == 0, (
