@@ -32,6 +32,7 @@ test("creates a short-lived capability sink without embedding inspect token in s
   assert.match(c.inspect_token, /^[0-9a-f]{64}$/);
   assert.equal(c.sink_url.includes(c.inspect_token), false);
   assert.equal(c.ttl_seconds, 900);
+  assert.equal(c.settle_ms, 65000);
 });
 
 test("verification challenge is answered and bounded evidence is inspectable only with bearer token", async () => {
