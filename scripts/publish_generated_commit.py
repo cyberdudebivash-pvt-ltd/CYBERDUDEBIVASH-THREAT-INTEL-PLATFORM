@@ -19,20 +19,22 @@ def publish() -> dict:
         )
 
     state = publish_metadata_pr(token, repository)
-    if state.get("state") != "PERSISTED_REVIEW_PENDING":
-        raise RuntimeError("Generated commit was not preserved in a reviewable PR")
-    print(
-        json.dumps(
-            {
-                "state": state["state"],
-                "branch": state["branch"],
-                "commit_sha": state["commit_sha"],
-                "pr_number": state["pr_number"],
-                "main_updated": False,
-            },
-            sort_keys=True,
-        )
-    )
+    allowed = {"PERSISTED_REVIEW_PENDING", "PERSISTED_REVIEW_BLOCKED"}
+    if state.get("state") not in allowed or state.get("remote_verified") is not True:
+        raise RuntimeError("Generated commit was not remotely verified on its protected review branch")
+    payload = {
+        "state": state["state"],
+        "branch": state["branch"],
+        "commit_sha": state["commit_sha"],
+        "main_updated": False,
+        "remote_verified": True,
+        "review_required": True,
+    }
+    if state.get("pr_number") is not None:
+        payload["pr_number"] = state["pr_number"]
+    if state.get("reason"):
+        payload["reason"] = state["reason"]
+    print(json.dumps(payload, sort_keys=True))
     return state
 
 

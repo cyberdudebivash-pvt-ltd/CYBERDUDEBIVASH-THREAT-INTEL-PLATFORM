@@ -141,6 +141,12 @@ import { resolveRequestId, withRequestId, withoutRequestId } from './request-id.
 // See rate-limit-cache.js for the cost rationale and the exact trade-off.
 import { bumpCounter, bumpCounterWriteThrough, peekCounter } from './rate-limit-cache.js';
 import { strongConsistencyEnabled, strongRateConsistencyEnabled, putStrongAuthState, getStrongAuthState, incrementStrongRate, authStateDenies, strongConsistencyCanaryEnabled, runStrongConsistencyCanary } from './strong-consistency-authority.js';
+import {
+  isCertificationWebhookSinkPath,
+  routeCertificationWebhookSink,
+  createCertificationWebhookSink,
+  deleteCertificationWebhookSink,
+} from './certification-webhook-sink.js';
 import { DEPLOY_COMMIT_SHA, DEPLOY_RUN_ID } from './build-info.js';
 // AI Swarm Synthesis (v4.45): pure prompt-building + tier-gate helpers for
 // handleSwarmSynthesis (below, defined right after handleCopilot). Extracted
@@ -3155,6 +3161,29 @@ export async function handleAdmin(request, env, ctx, path, method) {
     return jsonResp({ error: "Forbidden: invalid admin credentials" }, 403);
   }
   await clearAuthFailures(env, adminIp);
+
+  // Ephemeral first-party Watchdog webhook certification sink. This replaces
+  // the long-standing external CDB_WATCHDOG_SINK_* secret prerequisite with
+  // an owner-controlled receiver on the production gateway itself. It uses
+  // only the already-bound SECURITY_HUB_KV, is TTL-bounded, and is never a
+  // customer webhook destination outside a controlled certification run.
+  if (path === "/api/admin/certification/webhook-sink") {
+    if (method !== "POST") {
+      return jsonResp({ error: "Method not allowed", allowed: ["POST"] }, 405, { Allow: "POST" });
+    }
+    const response = await createCertificationWebhookSink(request, env);
+    auditLog(ctx, env, { action: "certification_webhook_sink_create", result: response.ok ? "ok" : "failed" });
+    return response;
+  }
+  const certificationSinkDelete = /^\/api\/admin\/certification\/webhook-sink\/([0-9a-f]{32})$/.exec(path);
+  if (certificationSinkDelete) {
+    if (method !== "DELETE") {
+      return jsonResp({ error: "Method not allowed", allowed: ["DELETE"] }, 405, { Allow: "DELETE" });
+    }
+    const response = await deleteCertificationWebhookSink(env, certificationSinkDelete[1]);
+    auditLog(ctx, env, { action: "certification_webhook_sink_delete", result: response.ok ? "ok" : "failed" });
+    return response;
+  }
 
   // POST /api/admin/strong-consistency/canary
   // Dormant by default. Even valid admin credentials cannot execute Durable
@@ -6579,14 +6608,33 @@ async function handleIncidentResponse(request, env, auth, method, path, url, ctx
 }
 
 // =============================================================================
+// CUSTOMER READ-ROUTE COMPATIBILITY
+// =============================================================================
+// A small number of v201 customer pages retained suffixless read paths after
+// the canonical JSON endpoints moved to explicit .json names. Canonicalize
+// before auth/rate/tier classification so aliases inherit *exactly* the same
+// premium gates, CORS posture, cache policy and response shaping. This is not
+// a generic extension fallback: only evidence-backed, read-only aliases are
+// accepted.
+const READ_ROUTE_ALIASES = new Map([
+  ["/api/ai/tracker", "/api/ai/tracker.json"],
+  ["/api/ai/health", "/api/ai/health.json"],
+  ["/api/v1/intel/ai_summary", "/api/v1/intel/ai_summary.json"],
+  ["/api/v1/intel/apex", "/api/v1/intel/apex.json"],
+]);
+
+// =============================================================================
 // MAIN REQUEST HANDLER
 // =============================================================================
 
 async function handleRequest(request, env, ctx) {
   const url      = new URL(request.url);
-  const path     = url.pathname;
-  const pathname = path; // gate-required alias: PREMIUM_INTEL_PATHS.has(pathname)
   const method   = request.method.toUpperCase();
+  let path       = url.pathname;
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+    path = READ_ROUTE_ALIASES.get(path) || path;
+  }
+  const pathname = path; // gate-required alias: PREMIUM_INTEL_PATHS.has(pathname)
 
   // CORS preflight -- SENTINEL APEX PUBLIC-REPO ZERO-TRUST PHASE 3: this
   // used to unconditionally return 204 + wildcard CORS_HEADERS for every
@@ -6599,6 +6647,16 @@ async function handleRequest(request, env, ctx) {
   // logic runs, same as before.
   if (method === "OPTIONS") {
     return buildPreflightResponse(request, path);
+  }
+
+  // P0 customer-release certification receiver. This capability URL is
+  // created only by an authenticated admin call, carries 128 bits of entropy,
+  // expires after 15 minutes, and has its own independent bearer token for
+  // inspection. Dispatch before customer auth/rate accounting: Watchdog
+  // delivery is platform control-plane traffic and must not consume a
+  // customer's API quota or be blocked by the anonymous FREE bucket.
+  if (isCertificationWebhookSinkPath(path)) {
+    return await routeCertificationWebhookSink(request, env, path);
   }
 
   // Client IP for rate limiting and brute-force tracking
@@ -8575,6 +8633,9 @@ async function handleRequest(request, env, ctx) {
   // handleAlertHistory enforces a *stricter*, different rule (Enterprise/MSSP
   // only) that "alerts" does not represent -- both intentionally left off
   // this resource rather than forcing an incorrect canonical mapping.
+  if (path === "/api/alerts/subscribe" && method !== "POST") {
+    return jsonResp({ error: "method_not_allowed", allowed: ["POST"] }, 405, { "Allow": "POST", "Cache-Control": "no-store" });
+  }
   if (path === "/api/alerts/subscribe" && method === "POST") {
     const alertsEnt = resolveEntitlement(ctx, env, "alerts", auth, auth.tier !== TIERS.FREE);
     if (alertsEnt.enforced && !alertsEnt.allowed) {
@@ -8589,6 +8650,9 @@ async function handleRequest(request, env, ctx) {
     }
     return await handleAlertSubscriptions(request, env, auth, crypto.randomUUID());
   }
+  if (path === "/api/alerts/test" && method !== "POST") {
+    return jsonResp({ error: "method_not_allowed", allowed: ["POST"] }, 405, { "Allow": "POST", "Cache-Control": "no-store" });
+  }
   if (path === "/api/alerts/test" && method === "POST") {
     const alertsEnt = resolveEntitlement(ctx, env, "alerts", auth, auth.tier !== TIERS.FREE);
     if (alertsEnt.enforced && !alertsEnt.allowed) {
@@ -8598,6 +8662,9 @@ async function handleRequest(request, env, ctx) {
   }
   if (path === "/api/alerts/dispatch" && method === "POST")       return await handleAlertDispatch(request, env, auth, crypto.randomUUID());
   if (path === "/api/alerts/history")                             return await handleAlertHistory(request, env, auth, crypto.randomUUID());
+  if (path === "/api/alerts/unsubscribe" && method !== "DELETE") {
+    return jsonResp({ error: "method_not_allowed", allowed: ["DELETE"] }, 405, { "Allow": "DELETE", "Cache-Control": "no-store" });
+  }
   if (path === "/api/alerts/unsubscribe" && method === "DELETE") {
     // Unlike the 3 routes above, handleAlertUnsubscribe's own ad-hoc gate has
     // no tier restriction at all (any authenticated identity may remove its
@@ -8625,6 +8692,9 @@ async function handleRequest(request, env, ctx) {
   // real provider integrations exist -- these three lines are the only
   // wiring removed. Re-enable only once handleDarkWebScan/handleDarkWebStatus/
   // handleLeakCheck call real, licensed data sources with provenance.
+  if (path === "/api/dark-web/scan" && method !== "POST") {
+    return jsonResp({ error: "method_not_allowed", allowed: ["POST"] }, 405, { "Allow": "POST", "Cache-Control": "no-store" });
+  }
   if (path === "/api/dark-web/scan" && method === "POST") return _darkWebUnavailable(crypto.randomUUID());
   if (path === "/api/dark-web/status")                    return _darkWebUnavailable(crypto.randomUUID());
   if (path === "/api/leak-check")                         return _darkWebUnavailable(crypto.randomUUID());
@@ -9418,7 +9488,13 @@ async function runWatchdogSchedule(env) {
 }
 
 function isEdgeCacheableRequest(pathname, method) {
-  return method === "GET" && classifyRoute(pathname, method).bucket === "PUBLIC" && !PREMIUM_INTEL_PATHS.has(pathname);
+  return method === "GET"
+    && classifyRoute(pathname, method).bucket === "PUBLIC"
+    && !PREMIUM_INTEL_PATHS.has(pathname)
+    // Inspection contains short-lived delivery evidence and is bearer
+    // protected. It must never be cached at the edge, even if the generic
+    // route classifier treats this additive path as public.
+    && !isCertificationWebhookSinkPath(pathname);
 }
 
 export default {

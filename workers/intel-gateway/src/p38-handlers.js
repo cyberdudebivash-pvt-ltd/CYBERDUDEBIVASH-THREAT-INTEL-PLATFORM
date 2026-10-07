@@ -312,6 +312,14 @@ const SCHEMA_REGISTRY = {
   "detection_quality_status": { required: false, type: "str", domain: "detection", nullable: true, version_introduced: "v3.0" },
   "detection_rules_production_ready": { required: false, type: "bool", domain: "detection", nullable: true, version_introduced: "v3.0" },
   "detection_rules_total": { required: false, type: "int", domain: "detection", nullable: true, version_introduced: "v3.0" },
+  // -- exposure intelligence --------------------------------------
+  // Exact mirror of scripts/p38_shared_validators.py:SCHEMA_REGISTRY.
+  // These fields appear only when an explicitly configured commercial
+  // exposure connector produced source-backed evidence; all remain optional.
+  "exposure_intel": { required: false, type: "dict", domain: "exposure", nullable: true, version_introduced: "v3.1" },
+  "exposure_hosts_total": { required: false, type: "int", domain: "exposure", nullable: true, version_introduced: "v3.1" },
+  "exposure_sources_count": { required: false, type: "int", domain: "exposure", nullable: true, version_introduced: "v3.1" },
+  "exposure_queried_at": { required: false, type: "str", domain: "exposure", nullable: true, version_introduced: "v3.1" },
   // -- quality -----------------------------------------------------
   "intelligence_grade": { required: false, type: "str", domain: "quality", nullable: true, version_introduced: "v2.0" },
   "iq_score": { required: false, type: "float", domain: "quality", nullable: true, version_introduced: "v3.0" },

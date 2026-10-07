@@ -68,7 +68,27 @@ function httpSink() {
   return {
     url,
     records: async () => (await (await fetch(inspect, { headers: h })).json()).records || [],
-    setMode: async (status, retryAfter) => { await fetch(inspect + "/mode", { method: "POST", headers: h, body: JSON.stringify({ status, retry_after: retryAfter || null }) }); },
+    setMode: async (status, retryAfter) => {
+      const res = await fetch(inspect + "/mode", {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify({ status, retry_after: retryAfter || null }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res.ok) throw new Error("sink mode update returned HTTP " + res.status);
+      let body = {};
+      try { body = await res.json(); } catch { body = {}; }
+      // The built-in production certification sink uses the existing
+      // eventually-consistent SECURITY_HUB_KV. It explicitly reports the
+      // conservative settle interval needed before another colo can rely on
+      // a mode transition. External owner sinks return no settle_ms and
+      // therefore retain their current zero-wait behavior.
+      const settleMs = Number(body && body.settle_ms || 0);
+      if (Number.isFinite(settleMs) && settleMs > 0) {
+        if (settleMs > 75_000) throw new Error("sink requested an unsafe settle interval");
+        await sleep(settleMs);
+      }
+    },
   };
 }
 
