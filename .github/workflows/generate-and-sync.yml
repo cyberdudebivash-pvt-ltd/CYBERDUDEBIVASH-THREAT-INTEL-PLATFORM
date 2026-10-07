@@ -104,6 +104,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -1080,19 +1081,18 @@ jobs:
       # ─────────────────────────────────────────────────────────────────────
       # STAGE 9 — SAFE COMMIT + PUSH (stash-safe, 5-attempt retry)
       # ─────────────────────────────────────────────────────────────────────
-      - name: "STAGE 9 — Safe commit + push (stash-safe, 5-attempt retry)"
+      - name: "STAGE 9 — Preserve generated outputs for review"
         if: env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name  "CYBERDUDEBIVASH"
+          set -euo pipefail
+          git config user.name "CYBERDUDEBIVASH"
           git config user.email "bivash@cyberdudebivash.com"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
-
-          # Clean any stale lock/rebase state
-          git rebase --abort 2>/dev/null || true
-          git merge  --abort 2>/dev/null || true
-          rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"
+          git diff --cached --quiet
+          test -s api/feed.json
+          test -s api/ai/tracker.json
 
           # Issue #274: api/ai/{tracker,health,executive-brief,monetization}.json
           # are no longer git-tracked (see .gitignore) -- STAGE 9.5 below already
@@ -1103,28 +1103,28 @@ jobs:
           # failing outright since main started requiring PRs (root-caused in
           # #274), so they were frozen in git anyway while the real serving
           # path (R2) already updates independently.
-          git add data/ai-telemetry/ 2>/dev/null || true
+          if [ -e data/ai-telemetry/ ]; then git add -f -- data/ai-telemetry/; fi
 
           # Stage governance engine outputs (feed enrichment + quality reports)
-          git add api/feed.json 2>/dev/null || true
-          git add api/intel_quality.json 2>/dev/null || true
-          git add data/health/intel_publication_gate_report.json 2>/dev/null || true
-          git add data/health/intel_quality_engine_report.json 2>/dev/null || true
-          git add data/health/intel_grade_engine_report.json 2>/dev/null || true
+          if [ -e api/feed.json ]; then git add -f -- api/feed.json; fi
+          if [ -e api/intel_quality.json ]; then git add -f -- api/intel_quality.json; fi
+          if [ -e data/health/intel_publication_gate_report.json ]; then git add -f -- data/health/intel_publication_gate_report.json; fi
+          if [ -e data/health/intel_quality_engine_report.json ]; then git add -f -- data/health/intel_quality_engine_report.json; fi
+          if [ -e data/health/intel_grade_engine_report.json ]; then git add -f -- data/health/intel_grade_engine_report.json; fi
 
           # Stage commercial readiness governor outputs
-          git add api/feed_enterprise.json 2>/dev/null || true
-          git add api/feed_mssp.json 2>/dev/null || true
-          git add api/feed_public.json 2>/dev/null || true
-          git add api/governance_status.json 2>/dev/null || true
-          git add api/commercial_readiness.json 2>/dev/null || true
-          git add data/health/commercial_readiness_governor_report.json 2>/dev/null || true
+          if [ -e api/feed_enterprise.json ]; then git add -f -- api/feed_enterprise.json; fi
+          if [ -e api/feed_mssp.json ]; then git add -f -- api/feed_mssp.json; fi
+          if [ -e api/feed_public.json ]; then git add -f -- api/feed_public.json; fi
+          if [ -e api/governance_status.json ]; then git add -f -- api/governance_status.json; fi
+          if [ -e api/commercial_readiness.json ]; then git add -f -- api/commercial_readiness.json; fi
+          if [ -e data/health/commercial_readiness_governor_report.json ]; then git add -f -- data/health/commercial_readiness_governor_report.json; fi
 
           # Stage v2 validation engine outputs
-          git add api/ioc_quality.json 2>/dev/null || true
-          git add api/detection_quality.json 2>/dev/null || true
-          git add data/governance/ 2>/dev/null || true
-          git add internal/governance/quarantine.json 2>/dev/null || true
+          if [ -e api/ioc_quality.json ]; then git add -f -- api/ioc_quality.json; fi
+          if [ -e api/detection_quality.json ]; then git add -f -- api/detection_quality.json; fi
+          if [ -e data/governance/ ]; then git add -f -- data/governance/; fi
+          if [ -e internal/governance/quarantine.json ]; then git add -f -- internal/governance/quarantine.json; fi
 
           # Stage Detection Engineering Core outputs (STAGE 3.1.11 above).
           # ROOT CAUSE FIX: this stage was missing from the add list entirely --
@@ -1142,8 +1142,8 @@ jobs:
           # the data/ai-telemetry/ and data/governance/ precedent above) because
           # per-advisory filenames aren't fixed paths -- new advisories need new
           # files staged automatically, not enumerated one by one.
-          git add api/detections/ 2>/dev/null || true
-          git add data/audit/stage_3_1_11_detection_engineering.json 2>/dev/null || true
+          if [ -e api/detections/ ]; then git add -f -- api/detections/; fi
+          if [ -e data/audit/stage_3_1_11_detection_engineering.json ]; then git add -f -- data/audit/stage_3_1_11_detection_engineering.json; fi
 
           # Same bug class, swept across the rest of this workflow's stages
           # (2026-08-31): a background audit cross-referenced every STAGE X.Y
@@ -1165,21 +1165,21 @@ jobs:
           # same stale content -- never by this stage. Directory-level adds
           # for the same reason as api/detections/ above: per-item filenames
           # (per-actor, per-advisory, per-campaign) aren't fixed paths.
-          git add data/health/intelligence_quality_hardener_report.json 2>/dev/null || true
-          git add data/threat_actors/ 2>/dev/null || true
-          git add data/health/actor_attribution_report.json 2>/dev/null || true
-          git add data/health/campaign_correlation_report.json 2>/dev/null || true
-          git add data/detection/ 2>/dev/null || true
-          git add data/reports/executive-briefs/ 2>/dev/null || true
-          git add data/golden_baseline/ 2>/dev/null || true
-          git add data/health/runtime_stability.json 2>/dev/null || true
-          git add data/health/kev_marker_report.json 2>/dev/null || true
-          git add api/v1/intel/daily_brief_meta.json 2>/dev/null || true
-          git add data/health/feed_health_gate.json 2>/dev/null || true
-          git add data/campaigns/ 2>/dev/null || true
-          git add data/malware/ 2>/dev/null || true
-          git add data/graph/ 2>/dev/null || true
-          git add data/health/advisory_immutability.json 2>/dev/null || true
+          if [ -e data/health/intelligence_quality_hardener_report.json ]; then git add -f -- data/health/intelligence_quality_hardener_report.json; fi
+          if [ -e data/threat_actors/ ]; then git add -f -- data/threat_actors/; fi
+          if [ -e data/health/actor_attribution_report.json ]; then git add -f -- data/health/actor_attribution_report.json; fi
+          if [ -e data/health/campaign_correlation_report.json ]; then git add -f -- data/health/campaign_correlation_report.json; fi
+          if [ -e data/detection/ ]; then git add -f -- data/detection/; fi
+          if [ -e data/reports/executive-briefs/ ]; then git add -f -- data/reports/executive-briefs/; fi
+          if [ -e data/golden_baseline/ ]; then git add -f -- data/golden_baseline/; fi
+          if [ -e data/health/runtime_stability.json ]; then git add -f -- data/health/runtime_stability.json; fi
+          if [ -e data/health/kev_marker_report.json ]; then git add -f -- data/health/kev_marker_report.json; fi
+          if [ -e api/v1/intel/daily_brief_meta.json ]; then git add -f -- api/v1/intel/daily_brief_meta.json; fi
+          if [ -e data/health/feed_health_gate.json ]; then git add -f -- data/health/feed_health_gate.json; fi
+          if [ -e data/campaigns/ ]; then git add -f -- data/campaigns/; fi
+          if [ -e data/malware/ ]; then git add -f -- data/malware/; fi
+          if [ -e data/graph/ ]; then git add -f -- data/graph/; fi
+          if [ -e data/health/advisory_immutability.json ]; then git add -f -- data/health/advisory_immutability.json; fi
 
           # Check if anything changed
           if git diff --staged --quiet; then
@@ -1195,28 +1195,7 @@ jobs:
           git commit -m "$COMMIT_MSG"
           echo "[INFO] Commit: $COMMIT_MSG"
 
-          # ── No-stash push retry (fetch+rebase only — stash not needed post-commit) ──
-          # Rationale: commit already made before loop; stash-pop after rebase can
-          # introduce index conflicts. Clean fetch+rebase is simpler and more reliable.
-          PUSH_OK=0
-          for ATTEMPT in 1 2 3 4 5; do
-            git fetch origin main --quiet 2>/dev/null || true
-            git rebase origin/main --quiet 2>/dev/null || {
-              git rebase --abort 2>/dev/null || true
-              rm -rf .git/rebase-merge .git/rebase-apply 2>/dev/null || true
-              git merge origin/main -X ours --no-edit --quiet 2>/dev/null || true
-            }
-            if git push origin main 2>&1; then
-              echo "[STAGE 9] Push successful (attempt ${ATTEMPT}/5)"
-              PUSH_OK=1
-              break
-            fi
-            echo "::warning::Push attempt ${ATTEMPT}/5 failed — retrying in $((ATTEMPT * 10))s"
-            sleep $((ATTEMPT * 10))
-          done
-          if [ "$PUSH_OK" -eq 0 ]; then
-            echo "::warning::STAGE 9: All push attempts exhausted — will sync on next scheduled run"
-          fi
+          python scripts/publish_generated_commit.py
 
       # ─────────────────────────────────────────────────────────────────────
       # STAGE 9.5 — R2 UPLOAD: AI Tracker files → Cloudflare R2
