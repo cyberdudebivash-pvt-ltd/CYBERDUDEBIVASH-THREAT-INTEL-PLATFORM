@@ -9457,7 +9457,13 @@ async function runWatchdogSchedule(env) {
 }
 
 function isEdgeCacheableRequest(pathname, method) {
-  return method === "GET" && classifyRoute(pathname, method).bucket === "PUBLIC" && !PREMIUM_INTEL_PATHS.has(pathname);
+  return method === "GET"
+    && classifyRoute(pathname, method).bucket === "PUBLIC"
+    && !PREMIUM_INTEL_PATHS.has(pathname)
+    // Inspection contains short-lived delivery evidence and is bearer
+    // protected. It must never be cached at the edge, even if the generic
+    // route classifier treats this additive path as public.
+    && !isCertificationWebhookSinkPath(pathname);
 }
 
 export default {
