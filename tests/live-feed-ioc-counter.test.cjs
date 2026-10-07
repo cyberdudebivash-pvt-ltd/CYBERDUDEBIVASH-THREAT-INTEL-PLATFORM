@@ -29,21 +29,26 @@ test('footer consumes live shared snapshot rather than a second stats source', (
 });
 test('saved recon shows measured counts, absence states and scan provenance', () => {
  const source = fs.readFileSync(require('node:path').join(__dirname, '../js/homepage-dashboard-engine.js'), 'utf8');
- const start = source.indexOf('function renderBugHunterEngine(data)');
+ const start = source.indexOf('function bugHunterScanView(data, nowMs)');
  const end = source.indexOf('// ── TIP+SOAR RENDERERS', start);
  const nodes = {};
  for (const id of ['bh-api-count','bh-critical-count','bh-health-badge']) nodes[id] = {style:{}};
- const context = {document:{getElementById:id=>nodes[id]||null, querySelector:()=>null},console};
+ const context = {document:{getElementById:id=>nodes[id]||null, querySelector:()=>null},console,
+  Date:class extends Date { static now(){return Date.parse('2026-10-07T05:00:00Z');} }};
  vm.runInNewContext(source.slice(start,end) + ';this.render=renderBugHunterEngine;',context);
- context.render({metrics:{api_endpoints:0,critical_findings:'3'},timestamp:'2026-10-06T12:00:00Z',domain:'example.test'});
- assert.equal(nodes['bh-api-count'].textContent,'None detected');
+ context.render({status:'COMPLETED',metrics:{api_endpoints:0,critical_findings:'3'},timestamp:'2026-10-06T12:00:00Z',domain:'example.test'});
+ assert.equal(nodes['bh-api-count'].textContent,'No observations in scan');
  assert.equal(nodes['bh-critical-count'].textContent,'3');
  assert.match(nodes['bh-health-badge'].textContent,/SCAN SNAPSHOT.*2026-10-06/);
  assert.match(nodes['bh-health-badge'].title,/example.test/);
+ context.render({status:'COMPLETED',metrics:{api_endpoints:12,critical_findings:3},timestamp:'2026-08-25T18:02:45.017Z'});
+ assert.equal(nodes['bh-api-count'].textContent,'Re-scan required');
+ assert.equal(nodes['bh-critical-count'].textContent,'Re-scan required');
+ assert.match(nodes['bh-health-badge'].textContent,/HISTORICAL.*2026-08-25/);
  for (const value of [null,false,'',-1,'bad']) {
   context.render({metrics:{api_endpoints:value,critical_findings:value}});
   assert.equal(nodes['bh-api-count'].textContent,'Awaiting scan');
   assert.equal(nodes['bh-critical-count'].textContent,'Awaiting scan');
  }
- assert.match(nodes['bh-health-badge'].textContent,/TIMESTAMP UNAVAILABLE/);
+ assert.match(nodes['bh-health-badge'].textContent,/SCAN PROVENANCE REQUIRED/);
 });
