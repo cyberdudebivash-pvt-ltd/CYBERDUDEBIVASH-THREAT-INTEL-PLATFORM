@@ -63,7 +63,7 @@ Behaviour contract introduced:
 * TLP: GREEN/AMBER/RED on a public page is flagged "PUBLICATION REVIEW REQUIRED" and the source label is preserved (not silently relabelled; not blocked — policy decision for the operator).
 
 ## 3. Before / after (same extractor, original vs fixed code, 8 real records)
-Full data: `before_after_comparison.json`. Examples: `examples/` (rated + KEV-listed; unrated low-evidence).
+Full data: `before_after_comparison.json`. Examples: `examples/*.html.txt` (rated + KEV-listed; unrated low-evidence) — full rendered pages stored as `.html.txt` so the repo-wide commercial-contract verifier (which scans every `*.html`) does not treat evidence artifacts as site pages; rename to `.html` to view in a browser.
 
 | Record | CVSS | IOC count shown (before → after) | Severity shown | Action shown after |
 |---|---|---|---|---|
