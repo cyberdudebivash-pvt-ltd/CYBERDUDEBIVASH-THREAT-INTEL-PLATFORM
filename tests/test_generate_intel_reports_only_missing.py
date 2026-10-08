@@ -27,6 +27,7 @@ repair pass -- it must:
 
 These tests lock in that contract so it cannot regress.
 """
+# P0 #721: fixtures carry an explicit TLP:CLEAR label -- unlabelled items are (correctly) refused publication
 import json
 import subprocess
 import sys
@@ -45,7 +46,7 @@ _BASE_ITEM = {
         "--only-missing incremental repair pass."
     ),
     "source": "TEST-FIXTURE",
-    "severity": "LOW",
+    "tlp": "TLP:CLEAR", "severity": "LOW",
     "timestamp": "2026-06-01T00:00:00Z",
     "processed_at": "2026-06-01T00:00:00Z",
 }

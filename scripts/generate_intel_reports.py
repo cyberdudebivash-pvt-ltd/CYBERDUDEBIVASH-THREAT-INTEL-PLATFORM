@@ -90,6 +90,7 @@ _di_dir = os.path.dirname(os.path.abspath(__file__))
 if _di_dir not in sys.path:
     sys.path.insert(0, _di_dir)
 import dossier_integrity as _di  # noqa: E402
+import tlp_policy as _tlp  # noqa: E402  (fail-closed anonymous-publication authority)
 
 # P0 v134.0: IOC enforcement imports
 try:
@@ -1442,8 +1443,8 @@ def build_report_sections(item: dict) -> str:
     # pipeline's composite heuristic -- not a severity rating, and not a basis
     # for any patch-timeline recommendation (routine OR emergency).
     _sevb       = _di.severity_basis(item, cvss, kev)
-    if _sevb["authoritative"]:
-        sev = _sevb["display"]      # CVSS band of the reported score (or KEV/non-vuln pipeline label)
+    if _sevb["rated"]:
+        sev = _sevb["display"]      # CVSS band of the reported score (KEV alone never sets a severity)
     # v184.0 G9 FIX: use composite APEX risk_score (not CVSS) as authoritative risk metric
     risk        = float(item.get("risk_score") or cvss or 0)
     ttps        = item.get("ttps") or item.get("mitre_tactics") or []
@@ -1462,7 +1463,9 @@ def build_report_sections(item: dict) -> str:
     # cannot diverge. (No new fields are persisted on the item; the rejected
     # entries and reasons are reproducible via dossier_integrity.qualify_iocs()
     # and are measured by scripts/p0_721_dossier_integrity_audit.py.)
-    iocs = list(_di.qualify_iocs(iocs)["actionable"])
+    _ioc_q = _di.qualify_iocs(iocs, item)           # item = context that corroborates claimed IOC sources
+    iocs = list(_ioc_q["observables"])
+    ioc_validated = _ioc_q["validated_count"]       # observables with corroborated provenance + malicious assertion
 
     # Step 1: Score IOC confidence (no IOC ships at 0%)
     if _IOC_ENFORCE_AVAILABLE and _ioc_confidence and iocs:
@@ -1493,19 +1496,18 @@ def build_report_sections(item: dict) -> str:
     # agent/apex_intelligence_upgrade.py now prefer over len(masked iocs).
     tags        = item.get("tags") or []
     stix_id     = item.get("stix_id") or item.get("id") or "-"
-    tlp         = item.get("tlp") or "TLP:CLEAR"
+    # P0 #721: fail closed. Only an item the TLP policy allows may be rendered; the displayed label is the
+    # decision's label (never a silent CLEAR default, never a relabel of third-party content).
+    _tlp_dec = _tlp.publication_decision(item)
+    if not _tlp_dec["allowed"]:
+        raise _tlp.PublicationDenied(_tlp_dec)
+    tlp         = _tlp_dec["label"] + (" (policy-assigned)" if (_tlp_dec["assignment"] or "").startswith("policy") else "")
     # P0 #721: `stix_id` above is the internal report key (also the API route
     # key) -- it is only a STIX 2.1 identifier if it is `object-type--UUID`.
     _stix_display = (
         f"<code>{_h(item.get('stix_id'))}</code>" if _di.valid_stix_id(item.get("stix_id")) else
         "<span style='color:var(--muted)'>Not assigned &mdash; the Report ID is an internal "
         "key, not a STIX 2.1 object identifier</span>"
-    )
-    _tlp_notice = (
-        f"<div class='callout critical'><strong>PUBLICATION REVIEW REQUIRED:</strong> this artifact "
-        f"is published openly but carries label {_h(_di.normalize_tlp(tlp))}, which does not permit "
-        f"unrestricted public disclosure. Source label preserved; release must be reviewed.</div>"
-        if _di.tlp_public_conflict(tlp) else ""
     )
     source_url  = item.get("source_url") or ""
     affected    = item.get("affected_products") or item.get("affected_versions") or []
@@ -1527,6 +1529,7 @@ def build_report_sections(item: dict) -> str:
         or item.get("campaign_graph_intel")
     )
     item  = _mask_item_for_public_report(item)
+    item["_ioc_validated"] = ioc_validated          # masked COPY only (never persisted): lets narrative engines show it
     iocs  = []
 
     # ── v148.1.0: APEX Intelligence Upgrade  -  enrich advisory before rendering ──
@@ -1567,7 +1570,7 @@ def build_report_sections(item: dict) -> str:
         f"<div class='kv-key'>Report ID</div><div class='kv-val'><code>{_h(stix_id)}</code></div>"
         f"<div class='kv-key'>STIX 2.1 ID</div><div class='kv-val'>{_stix_display}</div>"
         f"<div class='kv-key'>TLP</div><div class='kv-val'><span class='sev-chip {_tlp_class}'>{_h(tlp)}</span></div>"
-        f"<div class='kv-key'>Severity</div><div class='kv-val'><span class='sev-chip {_sev_class(sev if _sevb['authoritative'] else 'INFO')}'>{_h(_sevb['display'])}</span> {kev_badge}"
+        f"<div class='kv-key'>Severity</div><div class='kv-val'><span class='sev-chip {_sev_class(_sevb['display'] if _sevb['display'] in ('CRITICAL','HIGH','MEDIUM','LOW') else 'INFO')}'>{_h(_sevb['display'])}</span> {kev_badge}"
         f"{(' <span style=&quot;color:var(--muted);font-size:11px&quot;>' + _h(_sevb['note'] or _sevb['basis']) + '</span>')}</div>"
         f"<div class='kv-key'>Threat Type</div><div class='kv-val'>{_h(threat_type)}</div>"
         f"<div class='kv-key'>Feed Source</div><div class='kv-val'>{_h(feed)}</div>"
@@ -1575,7 +1578,6 @@ def build_report_sections(item: dict) -> str:
         f"<div class='kv-key'>Actor Cluster</div><div class='kv-val'>{_h(_actor_resolved_display)}</div>"
         f"<div class='kv-key'>Platform</div><div class='kv-val'>CYBERDUDEBIVASH SENTINEL APEX {PLATFORM_VERSION}</div>"
         f"</div>"
-        + _tlp_notice
     ))
 
     # ── S2: Executive Summary  -  APEX Enterprise Narrative Engine v149.0 ───
@@ -1633,7 +1635,7 @@ def build_report_sections(item: dict) -> str:
                     "HIGH PRIORITY"    if sev == "HIGH"     else
                     "PATCH STANDARD"   if (sev == "MEDIUM" and _has_cve) else
                     "STANDARD PRIORITY" if sev == "MEDIUM" else "MONITOR")
-    if not _sevb["authoritative"]:
+    if not _sevb["prioritized"]:
         _conds = _di.source_stated_conditions(item)
         _exec_action = (
             "PRIORITY NOT DETERMINED &mdash; no authoritative CVSS score or CISA KEV listing is available. "
@@ -1691,7 +1693,7 @@ def build_report_sections(item: dict) -> str:
             f"<strong>Threat Status:</strong> {kev_txt}<br>"
             f"{cvss_txt} &nbsp;|&nbsp; {epss_txt} &nbsp;|&nbsp; "
             f"Risk Score: <strong>{risk}/10</strong> &nbsp;|&nbsp; "
-            f"IOC Count: <strong>{ioc_count}</strong>"
+            f"IOC observables: <strong>{ioc_count}</strong> (validated as malicious: <strong>{ioc_validated}</strong>)"
             f"</div>"
         )
     # Prepend the CEO/CISO/Board executive layer
@@ -1716,7 +1718,8 @@ def build_report_sections(item: dict) -> str:
         + (f"<a href='{_h(source_url)}' target='_blank' rel='noopener' style='color:var(--accent2)'>{_h(source_url[:80])}{'…' if len(source_url)>80 else ''}</a>" if source_url else "-")
         + f"</div>"
         f"<div class='kv-key'>Processed</div><div class='kv-val'>{_h(ts)}</div>"
-        f"<div class='kv-key'>IOC Count</div><div class='kv-val'>{ioc_count}</div>"
+        f"<div class='kv-key'>IOC Observables</div><div class='kv-val'>{ioc_count}</div>"
+        f"<div class='kv-key'>Validated IOCs</div><div class='kv-val'>{ioc_validated}</div>"
         f"<div class='kv-key'>TTP Count</div><div class='kv-val'>{len(ttps)}</div>"
         f"</div>"
     ))
@@ -1737,7 +1740,7 @@ def build_report_sections(item: dict) -> str:
         + f"<div class='callout{'  critical' if risk >= 8 else ''}'>"
         f"<strong>Composite Score {risk}/10</strong> - "
         + ("Remediation priority (same basis as the executive summary): " + _exec_action
-           if _sevb["authoritative"] else
+           if _sevb["prioritized"] else
            "REMEDIATION TIMELINE NOT SET &mdash; no authoritative CVSS or KEV evidence; "
            "the composite score alone does not justify a patch deadline.")
         + "</div>"
@@ -1830,7 +1833,7 @@ def build_report_sections(item: dict) -> str:
             f"<li><strong>ATT&amp;CK mapping:</strong> {len(ttps)} technique(s) inferred "
             "from the advisory text (analyst inference, not observed adversary activity).</li>"
             f"<li><strong>Privilege context:</strong> Exploit path requires {_h(priv_req)} privileges.</li>"
-            f"<li><strong>Indicators:</strong> {ioc_count} qualified indicator(s) recorded at analysis time.</li>"
+            f"<li><strong>Indicators:</strong> {_di.ioc_count_phrase(ioc_count, ioc_validated)} at analysis time.</li>"
             f"<li><strong>KEV status:</strong> {'Actively exploited - CISA KEV confirmed.' if kev else 'Not presently on CISA KEV.'}</li>"
             f"<li><strong>Threat actor:</strong> "
             + (f"internal cluster label <strong>{_h(actor)}</strong> (not a verified attribution)."
@@ -1864,8 +1867,8 @@ def build_report_sections(item: dict) -> str:
     # claim zero IOCs were ever recorded.
     if ioc_count > 0:
         _s7_ioc_body = (
-            "<div class='callout'><strong>" + str(ioc_count) + " indicator(s) "
-            "of compromise recorded for this advisory.</strong> Full IOC values "
+            "<div class='callout'><strong>" + _di.ioc_count_phrase(ioc_count, ioc_validated) + ".</strong> "
+            "Observables are extracted from the source and are not evidence of compromise unless validated. Full IOC values "
             "(IP / domain / hash / URL) are an Enterprise entitlement — available "
             "in STIX 2.1, MISP, Sigma, and YARA formats via the enterprise API "
             "(<code>/api/stix/{id}</code>).</div>"
@@ -1942,9 +1945,12 @@ def build_report_sections(item: dict) -> str:
         "<div class='step'><p>Triage advisory against asset inventory. Identify affected versions and exposure classes.</p></div>"
         "<div class='step'><p>Apply detection content for this advisory only after it has been validated "
         "in your environment (see Section 18 for availability and validation status).</p></div>"
-        + ("<div class='step'><p>Hunt the qualified indicators (Section 7) in SIEM, DNS and proxy telemetry; "
-           "block only indicators your own review confirms as malicious.</p></div>" if ioc_count > 0 else
-           "<div class='step'><p>No qualified indicators were reported for this advisory, so there is "
+        + ("<div class='step'><p>" + str(ioc_validated) + " indicator(s) are validated as malicious (corroborated source and an "
+           "explicit malicious assertion): hunt them in SIEM, DNS and proxy telemetry and block per your own review.</p></div>"
+           if ioc_validated > 0 else
+           "<div class='step'><p>" + str(ioc_count) + " IOC observable(s) were extracted but none is validated as malicious: use them "
+           "for hunting/reference only and do not block on them.</p></div>" if ioc_count > 0 else
+           "<div class='step'><p>No indicator observables were extracted for this advisory, so there is "
            "no indicator blocklist to deploy; do not block on CVE identifiers or advisory URLs.</p></div>")
         + "<div class='step'><p>Isolate hosts only if triage finds evidence of exploitation.</p></div>"
         "</div></div>"
@@ -2002,7 +2008,7 @@ def build_report_sections(item: dict) -> str:
             "<div class='callout'><strong>Campaign correlation confirmed.</strong> "
             "This advisory has been linked to a tracked, multi-stage campaign. "
             f"APEX correlates {len(ttps)} ATT&amp;CK techniques and {ioc_count} "
-            "indicators across this cluster. Full phase analysis, actor linkage, and "
+            "IOC observables across this cluster. Full phase analysis, actor linkage, and "
             "IOC clustering are an Enterprise entitlement — available via the "
             "enterprise API.</div>"
         )
@@ -2166,7 +2172,7 @@ def build_report_sections(item: dict) -> str:
     ))
 
     # ── S20: Business Impact Score & MITRE Navigator Layer ─────────────
-    bis = _compute_bis(risk, cvss, epss, kev, ioc_count, len(ttps))
+    bis = _compute_bis(risk, cvss, epss, kev, ioc_validated, len(ttps))   # validated IOCs only: observables are not threat evidence
     bis_score  = bis["score"]
     bis_label  = bis["label"]
     bis_color  = bis["color"]
@@ -2183,13 +2189,14 @@ def build_report_sections(item: dict) -> str:
 
     nav_layer = json.dumps({
         "name": f"APEX - {title[:60]}",
-        "versions": {"attack": "15", "navigator": "4.9", "layer": "4.5"},
+        "versions": {"attack": _di.navigator_attack_version(), "navigator": "4.9", "layer": "4.5"},
         "domain": "enterprise-attack",
         "description": f"CYBERDUDEBIVASH SENTINEL APEX {PLATFORM_VERSION} - {title[:80]}",
         "techniques": nav_techniques,
         "gradient": {"colors": ["#ffffff","#ff3b3b"], "minValue": 0, "maxValue": 1},
         "legendItems": [{"label": "APEX inferred technique (not observed)", "color": "#ff3b3b"}],
         "metadata": [{"name": "apex_id", "value": stix_id}, {"name": "risk", "value": str(risk)},
+                     {"name": "attack_release", "value": str(_di.attack_dataset_pin().get("attack_release"))},
                      {"name": "attack_dataset_sha256", "value": str(_di.attack_dataset_pin().get("content_hash"))},
                      {"name": "technique_basis", "value": "ANALYST_INFERENCE"}],
     }, separators=(",", ":"))
@@ -2213,7 +2220,7 @@ def build_report_sections(item: dict) -> str:
         f"<div class='kv-key'>CVSS</div><div class='kv-val'>{cvss if cvss is not None else 'N/A'}</div>"
         f"<div class='kv-key'>EPSS (30d %)</div><div class='kv-val'>{epss if epss is not None else 'N/A'}</div>"
         f"<div class='kv-key'>KEV Status</div><div class='kv-val'>{'CONFIRMED' if kev else 'Not listed'}</div>"
-        f"<div class='kv-key'>IOC Density</div><div class='kv-val'>{ioc_count} indicators</div>"
+        f"<div class='kv-key'>IOC Observables / Validated</div><div class='kv-val'>{ioc_count} / {ioc_validated}</div>"
         f"<div class='kv-key'>TTP Coverage</div><div class='kv-val'>{len(ttps)} techniques</div>"
         f"</div>"
         "</div>"
@@ -2249,7 +2256,10 @@ def render_report(item: dict, public_prefix: str) -> str:
     published = str(item.get("published") or "")
     ts       = _fmt_ts(str(item.get("processed_at") or item.get("timestamp") or ""))
     intel_id = str(item.get("id") or "intel--unknown")
-    tlp      = str(item.get("tlp") or "TLP:CLEAR").replace(":", "-")
+    _tlp_dec_r = _tlp.publication_decision(item)
+    if not _tlp_dec_r["allowed"]:
+        raise _tlp.PublicationDenied(_tlp_dec_r)      # before ANY bytes are produced
+    tlp      = _tlp_dec_r["label"].replace(":", "-")
     _cvss_resolved, _epss_resolved = _resolve_cvss_epss(item)
     # v184.0 G9 FIX: use composite APEX risk_score as authoritative metric (not CVSS alone)
     risk     = float(item.get("risk_score") or _cvss_resolved or 0)
@@ -2272,6 +2282,7 @@ def render_report(item: dict, public_prefix: str) -> str:
         "Source Reliability: Standard | Limited verification signals — monitor for updates"
     )
     _ioc_list    = item.get("iocs") or []
+    _ioc_validated_hdr = _di.qualify_iocs(_ioc_list, item)["validated_count"]
     _ttp_list    = (item.get("apex_ai") or {}).get("ttps") or item.get("ttps") or []
     _cvss_disp   = str(_cvss_resolved) if _cvss_resolved is not None else "N/A"
     _epss_disp   = str(_epss_resolved) if _epss_resolved is not None else "N/A"
@@ -2282,12 +2293,12 @@ def render_report(item: dict, public_prefix: str) -> str:
     _kev         = _kev_confirmed_check(item)
     _kev_disp    = "YES &#x26A0;" if _kev else "No KEV listing found"
     _sevb_hdr    = _di.severity_basis(item, _cvss_resolved, _kev)
-    if _sevb_hdr["authoritative"]:
+    if _sevb_hdr["rated"]:
         sev = _sevb_hdr["display"]
     _feed_src    = str(item.get("feed_source") or item.get("source") or "SENTINEL APEX")[:40]
     _urgency_cls = ("IMMEDIATE" if sev in ("CRITICAL", "HIGH") else
                     "HIGH" if sev == "MEDIUM" else "MONITOR")
-    if not _sevb_hdr["authoritative"]:
+    if not _sevb_hdr["prioritized"]:
         _urgency_cls = "MONITOR"
     # Patch wording only when there is something to patch (RX-PR1 rule).
     _hdr_has_cve = bool(item.get("cve_id")) or bool(re.search(
@@ -2297,11 +2308,11 @@ def render_report(item: dict, public_prefix: str) -> str:
                     "HIGH PRIORITY"    if sev == "HIGH"     else
                     "PATCH STANDARD"   if (sev == "MEDIUM" and _hdr_has_cve) else
                     "STANDARD PRIORITY" if sev == "MEDIUM" else "MONITOR")
-    if not _sevb_hdr["authoritative"]:
+    if not _sevb_hdr["prioritized"]:
         _urgency_txt = "TRIAGE REQUIRED"
     _sev_tile    = ("crit" if sev == "CRITICAL" else "high" if sev == "HIGH" else
                     "med"  if sev == "MEDIUM"   else "low"  if sev == "LOW"  else "neutral")
-    if not _sevb_hdr["authoritative"]:
+    if _sevb_hdr["display"] == "UNRATED":
         _sev_tile = "neutral"
     _risk_tile   = ("crit" if risk >= 9 else "high" if risk >= 7 else
                     "med"  if risk >= 5 else "low")
@@ -2359,7 +2370,7 @@ def render_report(item: dict, public_prefix: str) -> str:
 </head>
 <body>
 <div class='tlp-banner tlp-{_h(tlp.replace(":","").replace("TLP","").strip() or "CLEAR")}'>
-  TLP: {_h(item.get('tlp','TLP:CLEAR'))} &nbsp;·&nbsp; CYBERDUDEBIVASH SENTINEL APEX TACTICAL DOSSIER &nbsp;·&nbsp; {PLATFORM_VERSION}
+  TLP: {_h(_tlp_dec_r['label'])} &nbsp;·&nbsp; CYBERDUDEBIVASH SENTINEL APEX TACTICAL DOSSIER &nbsp;·&nbsp; {PLATFORM_VERSION}
 </div>
 <nav class='top-nav'>
   <div>
@@ -2381,7 +2392,7 @@ def render_report(item: dict, public_prefix: str) -> str:
 <header class='dossier-hdr'>
   <div class='classification'>
     <span class='cls-chip cls-PUBLIC'>PUBLIC TIER</span>
-    <span class='cls-chip cls-TLP'>{_h(item.get('tlp','TLP:CLEAR'))}</span>{"<span class='cls-chip' style='color:#ff4444'>TLP PUBLICATION REVIEW</span>" if _di.tlp_public_conflict(item.get('tlp')) else ""}
+    <span class='cls-chip cls-TLP'>{_h(_tlp_dec_r['label'])}</span>
     <span>TACTICAL DOSSIER</span>
     &nbsp;&middot;&nbsp;
     <span class='urgency-badge urgency-{_urgency_cls}'><span class='sev-pulse'></span>{_urgency_txt}</span>
@@ -2389,11 +2400,12 @@ def render_report(item: dict, public_prefix: str) -> str:
   <div class='dossier-id'>INTEL ID: {_h(intel_id)} &nbsp;·&nbsp; PROCESSED: {_h(ts)} &nbsp;·&nbsp; SOURCE: {_h(_feed_src)}</div>
   <h1 class='dossier-title'>{_h(title)}</h1>
   <div class='meta-strip'>
-    <span>Severity: <strong><span class='sev-chip {_sev_class(sev if _sevb_hdr['authoritative'] else 'INFO')}'>{_h(_sevb_hdr['display'])}</span></strong></span>
+    <span>Severity: <strong><span class='sev-chip {_sev_class(_sevb_hdr['display'] if _sevb_hdr['display'] in ('CRITICAL','HIGH','MEDIUM','LOW') else 'INFO')}'>{_h(_sevb_hdr['display'])}</span></strong></span>
     <span>Risk: <strong>{risk}/10</strong></span>
     <span>CVSS: <strong>{_cvss_disp}</strong></span>
     <span>EPSS: <strong>{_epss_disp}{_epss_pct}</strong></span>
-    <span>IOCs: <strong>{len(_ioc_list)}</strong></span>
+    <span>IOC observables: <strong>{len(_ioc_list)}</strong></span>
+    <span>Validated IOCs: <strong>{_ioc_validated_hdr}</strong></span>
     <span>TTPs: <strong>{len(_ttp_list)}</strong></span>
     <span>KEV: <strong>{_kev_disp}</strong></span>
   </div>
@@ -2406,7 +2418,7 @@ def render_report(item: dict, public_prefix: str) -> str:
   <div class='exec-tile {_sev_tile}'>
     <div class='exec-tile-label'>Severity</div>
     <div class='exec-tile-val'>{_h(_sevb_hdr['display'][:5])}</div>
-    <div class='exec-tile-sub'>{'Classification' if _sevb_hdr['authoritative'] else 'No CVSS / KEV data'}</div>
+    <div class='exec-tile-sub'>{'Classification' if _sevb_hdr['authoritative'] else ('KEV listed &middot; no CVSS' if _sevb_hdr['kev'] else 'No CVSS / KEV data')}</div>
   </div>
   <div class='exec-tile {_risk_tile}'>
     <div class='exec-tile-label'>Risk Score</div>
@@ -2424,8 +2436,8 @@ def render_report(item: dict, public_prefix: str) -> str:
     <div class='exec-tile-sub'>Exploit Probability</div>
   </div>
   <div class='exec-tile {"crit" if _kev else "neutral"}'>
-    <div class='exec-tile-label'>IOCs / KEV</div>
-    <div class='exec-tile-val'>{len(_ioc_list)}</div>
+    <div class='exec-tile-label'>IOC obs. / valid. / KEV</div>
+    <div class='exec-tile-val'>{len(_ioc_list)}<span style='font-size:12px;font-weight:400'> / {_ioc_validated_hdr}</span></div>
     <div class='exec-tile-sub'>{"KEV CONFIRMED" if _kev else "No KEV entry"}</div>
   </div>
 </div>
@@ -2730,6 +2742,8 @@ def main(argv=None) -> int:
     uploaded = 0
     skipped_brand = 0
     errors = 0
+    tlp_quarantined: list = []      # P0 #721: items held back by the TLP publication policy
+    _tlp_policy_loaded = _tlp.load_policy()
     only_missing_candidates = 0  # P0.2: items --only-missing actually had to act on
     r2_upload_failed = 0
     excluded_by_window = 0  # P0 R2 cost fix: items --since-hours excluded, untouched
@@ -2812,6 +2826,25 @@ def main(argv=None) -> int:
         # `item` from `items[_idx]`. Re-link so later mutations (report_url,
         # internal_report_url, validation_status) persist to the saved manifest.
         items[_idx] = item
+
+        # ── TLP PUBLICATION GATE (P0 #721, fail closed) ──────────────────────────
+        # Anonymous distribution is limited to explicit TLP:CLEAR (or an operator-approved
+        # first-party-public collector for UNLABELLED items). Everything else is quarantined BEFORE any
+        # byte is rendered, written or uploaded to R2. The item's own label is never rewritten.
+        # Already-published artifacts are NOT silently deleted here (retraction is an explicit operator
+        # action -- docs/p0_721/TLP_RETRACTION_RUNBOOK.md); they are flagged in the quarantine report.
+        _dec = _tlp.publication_decision(item, _tlp_policy_loaded)
+        if not _dec["allowed"]:
+            try:
+                _already_public = rel_report_path(item).exists()
+            except Exception:
+                _already_public = None
+            tlp_quarantined.append({"id": intel_id, "reason_code": _dec["reason_code"],
+                                    "label": _dec["label"] or None, "already_published_on_disk": _already_public})
+            item["validation_status"] = "quarantined_tlp"
+            item["report_url"] = ""
+            log(f"TLP QUARANTINE [{intel_id}]: {_dec['reason_code']} ({_dec['reason']})", "warning")
+            continue
 
         path = rel_report_path(item)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -2939,6 +2972,18 @@ def main(argv=None) -> int:
     # -- END MAIN LOOP --
 
     elapsed = time.monotonic() - t_start
+    if tlp_quarantined:
+        log(f"TLP QUARANTINE: {len(tlp_quarantined)} item(s) withheld from public distribution", "warning")
+        try:
+            _qpath = REPO_ROOT / "data" / "quality" / "tlp_quarantine_report.json"
+            _qpath.parent.mkdir(parents=True, exist_ok=True)
+            _qpath.write_text(json.dumps({
+                "generated_at": utc_now_iso(), "policy": "config/tlp_publication_policy.json",
+                "quarantined": len(tlp_quarantined),
+                "needing_retraction_review": [q for q in tlp_quarantined if q.get("already_published_on_disk")],
+                "items": tlp_quarantined[:500]}, indent=1), encoding="utf-8")
+        except OSError as _qexc:
+            log(f"TLP quarantine report not written: {_qexc}", "warning")
     log(
         f"COMPLETE: written={written} uploaded={uploaded} skipped={skipped_brand} "
         f"excluded_by_window={excluded_by_window} errors={errors} total={len(items)} "

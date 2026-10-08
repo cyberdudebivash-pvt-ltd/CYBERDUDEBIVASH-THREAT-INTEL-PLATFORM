@@ -18,6 +18,7 @@ if generation genuinely fails). These tests exercise that function directly
 (not via a full pipeline run) to lock in its pipeline-order and atomicity
 contract.
 """
+# P0 #721: fixtures carry an explicit TLP:CLEAR label -- unlabelled items are (correctly) refused publication
 import json
 import os
 import sys
@@ -72,7 +73,7 @@ class TestMaterializationBarrierAtomicity(unittest.TestCase):
                             "Stage 3.6, carrying forward a report_url whose file "
                             "was never generated in this run's working tree.",
             "source": "TEST-FIXTURE",
-            "severity": "LOW",
+            "tlp": "TLP:CLEAR", "severity": "LOW",
             "timestamp": _ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "processed_at": _ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "report_url": dangling_url,
@@ -104,7 +105,7 @@ class TestMaterializationBarrierAtomicity(unittest.TestCase):
             "title": "Clean item, no report yet",
             "description": "No report_url at all -- nothing dangling for this item.",
             "source": "TEST-FIXTURE",
-            "severity": "LOW",
+            "tlp": "TLP:CLEAR", "severity": "LOW",
             "timestamp": "2026-06-01T00:00:00Z",
             "processed_at": "2026-06-01T00:00:00Z",
             "report_url": "",
@@ -140,13 +141,13 @@ class TestMaterializationBarrierAtomicity(unittest.TestCase):
         items = [
             {
                 "id": dangling_id, "title": "Dangling item in a bare list",
-                "description": "x" * 60, "source": "TEST-FIXTURE", "severity": "LOW",
+                "description": "x" * 60, "source": "TEST-FIXTURE", "tlp": "TLP:CLEAR", "severity": "LOW",
                 "timestamp": _ts_str, "processed_at": _ts_str,
                 "report_url": dangling_url,
             },
             {
                 "id": external_id, "title": "External item in a bare list",
-                "description": "x" * 60, "source": "TEST-FIXTURE", "severity": "LOW",
+                "description": "x" * 60, "source": "TEST-FIXTURE", "tlp": "TLP:CLEAR", "severity": "LOW",
                 "timestamp": _ts_str, "processed_at": _ts_str,
                 "report_url": external_url,
             },

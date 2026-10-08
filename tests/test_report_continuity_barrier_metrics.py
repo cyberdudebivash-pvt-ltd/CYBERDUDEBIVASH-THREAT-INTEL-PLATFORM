@@ -12,6 +12,7 @@ failed/r2_uploaded/r2_failed counts and a HEALTHY/DEGRADED/CRITICAL status,
 for BOTH call sites that share this one engine (STAGE 5.4.0b's direct YAML
 invocation and run_pipeline.py's apply_report_materialization_barrier()).
 """
+# P0 #721: fixtures carry an explicit TLP:CLEAR label -- unlabelled items are (correctly) refused publication
 import json
 import subprocess
 import sys
@@ -27,7 +28,7 @@ _BASE_ITEM = {
     "title": "Barrier Metrics Regression Test Advisory",
     "description": "Synthetic advisory for test_report_continuity_barrier_metrics.py.",
     "source": "TEST-FIXTURE",
-    "severity": "LOW",
+    "tlp": "TLP:CLEAR", "severity": "LOW",
     "timestamp": "2026-06-01T00:00:00Z",
     "processed_at": "2026-06-01T00:00:00Z",
 }

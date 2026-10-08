@@ -20,6 +20,7 @@ These tests lock in the --since-hours contract so it cannot regress:
   4. --fail-on-zero does not false-fail a genuinely empty (quiet) window --
      an empty 24h window is a valid, expected production state, not a defect.
 """
+# P0 #721: fixtures carry an explicit TLP:CLEAR label -- unlabelled items are (correctly) refused publication
 import json
 import subprocess
 import sys
@@ -58,7 +59,7 @@ class TestSinceHoursWindow(unittest.TestCase):
         old_id = "intel--sincehours0000001"
         item = {
             "id": old_id, "title": "Stale Advisory -- must not be touched",
-            "description": "x" * 80, "severity": "LOW",
+            "description": "x" * 80, "tlp": "TLP:CLEAR", "severity": "LOW",
             "timestamp": _iso(now - timedelta(hours=100)),
             "processed_at": _iso(now - timedelta(hours=100)),
             "report_url": "", "validation_status": "", "custom_marker": "UNTOUCHED_SENTINEL",
@@ -84,7 +85,7 @@ class TestSinceHoursWindow(unittest.TestCase):
         fresh_id = "intel--sincehours0000002"
         item = {
             "id": fresh_id, "title": "Fresh Advisory", "description": "x" * 80,
-            "severity": "LOW", "timestamp": _iso(now - timedelta(hours=2)),
+            "tlp": "TLP:CLEAR", "severity": "LOW", "timestamp": _iso(now - timedelta(hours=2)),
             "processed_at": _iso(now - timedelta(hours=2)), "report_url": "",
         }
         with tempfile.TemporaryDirectory() as td:
@@ -108,9 +109,9 @@ class TestSinceHoursWindow(unittest.TestCase):
         fresh_id = "intel--sincehours0000003"
         old_id = "intel--sincehours0000004"
         items = [
-            {"id": fresh_id, "title": "Fresh", "description": "x" * 80, "severity": "LOW",
+            {"id": fresh_id, "title": "Fresh", "description": "x" * 80, "tlp": "TLP:CLEAR", "severity": "LOW",
              "timestamp": _iso(now - timedelta(hours=1)), "report_url": ""},
-            {"id": old_id, "title": "Old", "description": "x" * 80, "severity": "LOW",
+            {"id": old_id, "title": "Old", "description": "x" * 80, "tlp": "TLP:CLEAR", "severity": "LOW",
              "timestamp": _iso(now - timedelta(days=30)), "report_url": ""},
         ]
         with tempfile.TemporaryDirectory() as td:
@@ -132,7 +133,7 @@ class TestSinceHoursWindow(unittest.TestCase):
         now = datetime.now(timezone.utc)
         old_id = "intel--sincehours0000005"
         item = {"id": old_id, "title": "Old but no flag passed", "description": "x" * 80,
-                "severity": "LOW", "timestamp": _iso(now - timedelta(days=30)), "report_url": ""}
+                "tlp": "TLP:CLEAR", "severity": "LOW", "timestamp": _iso(now - timedelta(days=30)), "report_url": ""}
         with tempfile.TemporaryDirectory() as td:
             manifest = Path(td) / "feed_manifest.json"
             manifest.write_text(json.dumps({"advisories": [item]}))
@@ -148,7 +149,7 @@ class TestSinceHoursWindow(unittest.TestCase):
     def test_malformed_timestamp_excluded_not_crashed(self):
         old_id = "intel--sincehours0000006"
         item = {"id": old_id, "title": "Corrupt timestamp", "description": "x" * 80,
-                "severity": "LOW", "timestamp": "not-a-real-timestamp", "report_url": ""}
+                "tlp": "TLP:CLEAR", "severity": "LOW", "timestamp": "not-a-real-timestamp", "report_url": ""}
         with tempfile.TemporaryDirectory() as td:
             manifest = Path(td) / "feed_manifest.json"
             manifest.write_text(json.dumps({"advisories": [item]}))
@@ -168,7 +169,7 @@ class TestFailOnZeroWithWindow(unittest.TestCase):
         now = datetime.now(timezone.utc)
         old_id = "intel--sincehours0000007"
         item = {"id": old_id, "title": "Only item, and it's old", "description": "x" * 80,
-                "severity": "LOW", "timestamp": _iso(now - timedelta(days=10)), "report_url": ""}
+                "tlp": "TLP:CLEAR", "severity": "LOW", "timestamp": _iso(now - timedelta(days=10)), "report_url": ""}
         with tempfile.TemporaryDirectory() as td:
             manifest = Path(td) / "feed_manifest.json"
             manifest.write_text(json.dumps({"advisories": [item]}))
@@ -185,7 +186,7 @@ class TestFailOnZeroWithWindow(unittest.TestCase):
         contain an eligible item renders it and exits 0, same as always."""
         now = datetime.now(timezone.utc)
         fresh_id = "intel--sincehours0000008"
-        item = {"id": fresh_id, "title": "", "description": "", "severity": "LOW",
+        item = {"id": fresh_id, "title": "", "description": "", "tlp": "TLP:CLEAR", "severity": "LOW",
                 "timestamp": _iso(now - timedelta(hours=1)), "report_url": ""}
         with tempfile.TemporaryDirectory() as td:
             manifest = Path(td) / "feed_manifest.json"

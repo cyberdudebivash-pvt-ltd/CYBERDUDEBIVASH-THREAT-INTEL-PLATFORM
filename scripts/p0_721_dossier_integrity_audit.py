@@ -37,6 +37,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import dossier_integrity as di  # noqa: E402
+import tlp_policy as tlp  # noqa: E402
 
 MANIFEST = ROOT / "data" / "apex_enriched_manifest.json"
 REPORT = ROOT / "data" / "quality" / "p0_721_dossier_integrity_report.json"
@@ -49,6 +50,8 @@ HTML_SIGNATURES = {
     "unconditional_applies_badge": re.compile(r"&#x25CF; APPLIES"),
     "fixed_kill_chain_template": re.compile(r"beacon interval 60s|Implant beacons to C2|Backdoor/RAT installed"),
     "css_blur_gate_with_content": re.compile(r'style="filter:blur\(4px\)'),
+    # contract: trial_policy is "No free trial" (owner decision 2026-09-19); the old enhancer banner promised one
+    "free_trial_promise": re.compile(r"Start Free 7-Day Trial"),
 }
 
 
@@ -56,15 +59,16 @@ def audit_manifest() -> dict:
     if not MANIFEST.exists():
         return {"status": "BLOCKED", "reason": f"{MANIFEST.name} not present"}
     items = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    raw = qual = 0
+    raw = qual = validated_total = 0
     rejected: dict = {}
     inflated_items = contradiction = unrated_labelled = bad_tech = 0
     rated = 0
     for it in items:
-        q = di.qualify_iocs(it.get("iocs"))
+        q = di.qualify_iocs(it.get("iocs"), it)
         n_raw = len(it.get("iocs") or [])
         raw += n_raw
         qual += q["count"]
+        validated_total += q["validated_count"]
         inflated_items += 1 if n_raw > q["count"] else 0
         for r in q["rejected"]:
             rejected[r["reason_class"]] = rejected.get(r["reason_class"], 0) + 1
@@ -79,7 +83,8 @@ def audit_manifest() -> dict:
         bad_tech += len(rej)
     return {
         "status": "MEASURED", "items": len(items),
-        "ioc": {"raw_entries": raw, "qualified": qual, "non_indicator_entries": raw - qual,
+        "ioc": {"raw_entries": raw, "qualified_observables": qual, "validated_actionable": validated_total,
+                "non_indicator_entries": raw - qual,
                 "items_with_inflated_count": inflated_items, "rejected_by_class": rejected},
         "severity": {"cvss_scored_vulnerabilities": rated, "label_contradicts_cvss_band": contradiction,
                      "unrated_vulnerabilities_carrying_a_severity_label": unrated_labelled},
@@ -105,6 +110,35 @@ def audit_api() -> dict:
                 examples.setdefault(t, str(p.relative_to(ROOT)))
     return {"status": "MEASURED", "json_files": files, "files_with_invalid_technique_ids": bad_files,
             "distinct_invalid_ids": sorted(examples), "first_seen_in": examples}
+
+
+def audit_tlp() -> dict:
+    """Static feed files are anonymously reachable; count entries the TLP policy would not publish."""
+    out, total_held = {}, 0
+    for name in ("feed.json", "feed_public.json", "feed_mssp.json", "feed_enterprise.json"):
+        p = ROOT / "api" / name
+        if not p.exists():
+            continue
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except ValueError:
+            out[name] = {"status": "UNREADABLE"}
+            continue
+        items = d if isinstance(d, list) else (d.get("advisories") or d.get("items") or [])
+        _, held = tlp.partition_publishable(items)
+        by: dict = {}
+        for h in held:
+            by[h["reason_code"]] = by.get(h["reason_code"], 0) + 1
+        with_page = 0
+        for it in items:
+            if isinstance(it, dict) and not tlp.publication_decision(it)["allowed"]:
+                ru = str(it.get("report_url") or it.get("internal_report_url") or "")
+                rel = ru.split("intel.cyberdudebivash.com")[-1].lstrip("/")
+                with_page += 1 if rel and (ROOT / rel).exists() else 0
+        out[name] = {"entries": len(items), "would_be_quarantined": len(held), "by_reason": by,
+                     "quarantined_with_live_report_page_on_disk": with_page}
+        total_held += len(held)
+    return {"status": "MEASURED", "files": out, "total_entries_that_must_not_be_anonymous": total_held}
 
 
 def audit_reports() -> dict:
@@ -143,6 +177,7 @@ def main() -> int:
         "attack_dataset": di.attack_dataset_pin(),
         "manifest": audit_manifest(),
         "api": audit_api(),
+        "tlp": audit_tlp(),
         "reports": audit_reports() if a.reports else {"status": "NOT_RUN", "reason": "pass --reports"},
         "note": "Measures published artifacts in this checkout; does not certify the live deployment.",
     }
@@ -151,13 +186,14 @@ def main() -> int:
         (m.get("ioc", {}).get("non_indicator_entries", 0)) + (m.get("severity", {}).get("label_contradicts_cvss_band", 0))
         + (m.get("severity", {}).get("unrated_vulnerabilities_carrying_a_severity_label", 0))
         + (m.get("attack", {}).get("invalid_id_shaped_techniques", 0)) + api.get("files_with_invalid_technique_ids", 0)
+        + out["tlp"].get("total_entries_that_must_not_be_anonymous", 0)
         + rep.get("pages_with_any_defect_signature", 0)
     )
     out["customer_visible_defects_in_scanned_artifacts"] = defects
     if not a.no_write:
         REPORT.parent.mkdir(parents=True, exist_ok=True)
         REPORT.write_text(json.dumps(out, indent=2), encoding="utf-8")
-    print(json.dumps({k: out[k] for k in ("manifest", "api", "reports", "customer_visible_defects_in_scanned_artifacts")}, indent=2))
+    print(json.dumps({k: out[k] for k in ("manifest", "api", "tlp", "reports", "customer_visible_defects_in_scanned_artifacts")}, indent=2))
     return 1 if (a.strict and defects) else 0
 
 
