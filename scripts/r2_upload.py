@@ -985,12 +985,12 @@ def main() -> None:
     tlp_scratch = tempfile.TemporaryDirectory(prefix="cdb-p0-tlp-r2-")
     try:
         guarded_pairs = []
-        for src, dst_key in pairs:
-            if dst_key == "api/feed.json":
-                safe = tlp_safe_public_feed_source(Path(src), Path(tlp_scratch.name))
-                guarded_pairs.append((str(safe), dst_key))
+        for candidate_src, candidate_dst_key in pairs:
+            if candidate_dst_key == "api/feed.json":
+                safe = tlp_safe_public_feed_source(Path(candidate_src), Path(tlp_scratch.name))
+                guarded_pairs.append((str(safe), candidate_dst_key))
             else:
-                guarded_pairs.append((src, dst_key))
+                guarded_pairs.append((candidate_src, candidate_dst_key))
         pairs = guarded_pairs
     except (OSError, ValueError, TypeError) as exc:
         tlp_scratch.cleanup()
