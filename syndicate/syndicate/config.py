@@ -31,12 +31,6 @@ class SyndicationConfig:
     # Also post to personal profile (set to urn:li:person:XXXXXXX)
     LINKEDIN_PERSONAL_URN: str = os.getenv("LINKEDIN_PERSONAL_URN", "")
 
-    # ── Twitter / X ──────────────────────────────────────────────────────────
-    TWITTER_API_KEY: str = os.getenv("TWITTER_API_KEY", "")
-    TWITTER_API_SECRET: str = os.getenv("TWITTER_API_SECRET", "")
-    TWITTER_ACCESS_TOKEN: str = os.getenv("TWITTER_ACCESS_TOKEN", "")
-    TWITTER_ACCESS_SECRET: str = os.getenv("TWITTER_ACCESS_SECRET", "")
-
     # ── Mastodon ──────────────────────────────────────────────────────────────
     MASTODON_INSTANCE_URL: str = os.getenv("MASTODON_INSTANCE_URL", "https://mastodon.social")
     MASTODON_ACCESS_TOKEN: str = os.getenv("MASTODON_ACCESS_TOKEN", "")
@@ -48,13 +42,6 @@ class SyndicationConfig:
     # ── Facebook ──────────────────────────────────────────────────────────────
     FACEBOOK_PAGE_ID: str = os.getenv("FACEBOOK_PAGE_ID", "")
     FACEBOOK_PAGE_ACCESS_TOKEN: str = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN", "")
-
-    # ── Tumblr ────────────────────────────────────────────────────────────────
-    TUMBLR_CONSUMER_KEY: str = os.getenv("TUMBLR_CONSUMER_KEY", "")
-    TUMBLR_CONSUMER_SECRET: str = os.getenv("TUMBLR_CONSUMER_SECRET", "")
-    TUMBLR_OAUTH_TOKEN: str = os.getenv("TUMBLR_OAUTH_TOKEN", "")
-    TUMBLR_OAUTH_SECRET: str = os.getenv("TUMBLR_OAUTH_SECRET", "")
-    TUMBLR_BLOG_NAME: str = os.getenv("TUMBLR_BLOG_NAME", "cyberdudebivash-news")
 
     # ── Reddit ────────────────────────────────────────────────────────────────
     REDDIT_CLIENT_ID: str = os.getenv("REDDIT_CLIENT_ID", "")
