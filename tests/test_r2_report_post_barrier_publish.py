@@ -95,6 +95,74 @@ class TestWorkflowWiring(unittest.TestCase):
         self.assertIn("--since-hours", run)
 
 
+
+class TestP0PublisherReleaseVerdict(unittest.TestCase):
+    """P0 #720: prevent Pages deploy after either continue-on-error publisher failed."""
+
+    def setUp(self):
+        self.steps = _steps()
+        self.first = self.steps[_index(self.steps, "STAGE 3.5a - Bounded")]
+        self.late = self.steps[_index(self.steps, "STAGE 5.4.0c - Post-Barrier")]
+        self.verdict = self.steps[_index(self.steps, "P0 - Report Publishing Release Verdict")]
+
+    def test_publisher_steps_preserve_nonblocking_downstream_checks_but_fail_their_outcome(self):
+        for step, expected_id in (
+            (self.first, "p0-report-publish-initial"),
+            (self.late, "p0-report-publish-late"),
+        ):
+            with self.subTest(step=expected_id):
+                self.assertEqual(step["id"], expected_id)
+                self.assertTrue(step["continue-on-error"])
+                self.assertIn("python3 scripts/r2_report_publisher.py || PUBLISH_EXIT=$?", step["run"])
+                self.assertIn('exit "$PUBLISH_EXIT"', step["run"])
+                self.assertNotIn("if ! python3 scripts/r2_report_publisher.py", step["run"])
+
+    def test_verdict_occurs_after_artifact_integrity_and_before_any_pages_action(self):
+        verify = _index(self.steps, "STAGE 5.4.7 - Dist Artifact Verifier")
+        verdict = _index(self.steps, "P0 - Report Publishing Release Verdict")
+        self.assertLess(verify, verdict)
+        for name in (
+            "STAGE 4.9.9 - Capture pre-deploy timestamp",
+            "STAGE 5 - Deploy to GitHub Pages",
+            "STAGE 5.4.9.1 - GitHub Pages Deployment Freshness Gate",
+        ):
+            with self.subTest(step=name):
+                idx = _index(self.steps, name)
+                self.assertLess(verdict, idx)
+                guard = self.steps[idx].get("if", "")
+                self.assertIn("steps.verify-dist.conclusion == 'success'", guard)
+                self.assertIn("steps['p0-publisher-verdict'].conclusion == 'success'", guard)
+        self.assertNotIn("p0-publisher-verdict", self.verdict.get("if", ""))
+
+    def test_verdict_uses_actual_outcomes_not_continue_on_error_conclusions(self):
+        env = self.verdict["env"]
+        self.assertIn("steps['p0-report-publish-initial'].outcome", env["INITIAL_OUTCOME"])
+        self.assertIn("steps['p0-report-publish-late'].outcome", env["LATE_OUTCOME"])
+        self.assertNotIn(".conclusion", env["INITIAL_OUTCOME"] + env["LATE_OUTCOME"])
+
+    def test_failed_skipped_or_missing_publisher_always_denies_pages_promotion(self):
+        cases = [
+            ("success", "success", True),
+            ("failure", "success", False),
+            ("success", "failure", False),
+            ("failure", "failure", False),
+            ("skipped", "success", False),
+            ("success", "skipped", False),
+            ("", "success", False),
+            ("success", "", False),
+        ]
+        for first, late, allowed in cases:
+            with self.subTest(first=first, late=late):
+                env = dict(os.environ, INITIAL_OUTCOME=first, LATE_OUTCOME=late)
+                proc = subprocess.run(
+                    ["bash", "-e", "-c", self.verdict["run"]],
+                    env=env, capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(proc.returncode == 0, allowed, proc.stdout + proc.stderr)
+                if not allowed:
+                    self.assertIn("Pages deployment withheld", proc.stdout)
+
+
 class TestSecondPublishIsIncremental(unittest.TestCase):
     def test_only_late_renders_are_put(self):
         now = datetime.now(timezone.utc)
