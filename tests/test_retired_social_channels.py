@@ -39,6 +39,12 @@ class RetiredSocialChannelsTests(unittest.TestCase):
         self.assertIn('default="linkedin,telegram,mastodon"', code)
         self.assertNotIn('"twitter":   generate_twitter', code)
 
+    def test_formatter_fails_closed_for_retired_destinations(self):
+        code = source("syndicate/syndicate/formatter.py")
+        self.assertIn("raise ValueError('Retired distribution destination: ' + platform)", code)
+        self.assertNotIn("'twitter': 280", code)
+        self.assertNotIn("'tumblr': 4096", code)
+
     def test_broadcast_does_not_fabricate_provider_success(self):
         code = source("scripts/broadcast_apex_syndication.py")
         self.assertNotIn("Successfully broadcasted", code)
