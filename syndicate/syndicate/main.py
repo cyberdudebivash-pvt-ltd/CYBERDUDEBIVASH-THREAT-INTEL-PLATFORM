@@ -27,12 +27,6 @@ except ImportError as e:
     print(f"[WARN] LinkedIn module unavailable: {e}")
 
 try:
-    from syndicate.platforms.twitter import TwitterPoster
-    PLATFORM_MODULES['twitter'] = TwitterPoster
-except ImportError as e:
-    print(f"[WARN] Twitter module unavailable: {e}")
-
-try:
     from syndicate.platforms.mastodon import MastodonPoster
     PLATFORM_MODULES['mastodon'] = MastodonPoster
 except ImportError as e:
@@ -49,12 +43,6 @@ try:
     PLATFORM_MODULES['facebook'] = FacebookPoster
 except ImportError as e:
     print(f"[WARN] Facebook module unavailable: {e}")
-
-try:
-    from syndicate.platforms.tumblr import TumblrPoster
-    PLATFORM_MODULES['tumblr'] = TumblrPoster
-except ImportError as e:
-    print(f"[WARN] Tumblr module unavailable: {e}")
 
 try:
     from syndicate.platforms.reddit import RedditPoster
