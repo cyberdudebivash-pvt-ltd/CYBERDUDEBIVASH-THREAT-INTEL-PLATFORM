@@ -1,0 +1,297 @@
+{
+  "type": "bundle",
+  "id": "bundle--581ddfb8-c031-4432-90b5-00bb533150ed",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "name": "CyberDudeBivash SENTINEL APEX",
+      "description": "CyberDudeBivash Pvt. Ltd. - Global Cybersecurity Intelligence Infrastructure",
+      "identity_class": "organization",
+      "sectors": [
+        "technology"
+      ],
+      "contact_information": "enterprise@cyberdudebivash.com",
+      "created": "2024-01-01T00:00:00Z",
+      "modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "type": "marking-definition",
+      "spec_version": "2.1",
+      "id": "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a",
+      "created": "2017-01-20T00:00:00.000Z",
+      "definition_type": "tlp",
+      "definition": {
+        "tlp": "green"
+      }
+    },
+    {
+      "type": "intrusion-set",
+      "spec_version": "2.1",
+      "id": "intrusion-set--5399bc91-1dc7-41ab-827c-ef0276a01204",
+      "name": "CDB-UNATTR-CVE Campaign",
+      "description": "CVE-2026-107615 DLL search order hijacking via screenhooks libraries in TightVNC Server",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "confidence": 20,
+      "aliases": [
+        "CDB-UNATTR-CVE"
+      ],
+      "extensions": {
+        "x-cdb-apex-1": {
+          "predictive_score": 0.2,
+          "campaign_id": "UNCLASSIFIED",
+          "campaign_confidence": 0.2,
+          "threat_category": "Remote Code Execution",
+          "behavioral_tags": [],
+          "ai_summary": "Initial access via rce",
+          "risk_factors": [
+            "IOC_density"
+          ],
+          "soc_priority": "P4",
+          "threat_level": "LOW",
+          "recommended_action": "Medium severity threat (score 4.5/10) — limited technical indicators in source data",
+          "x_cdb_published_at": "2026-10-08T13:39:59Z",
+          "x_cdb_source_url": "https://vulners.com/cve/CVE-2026-107615?utm_source=rss&utm_medium=rss&utm_campaign=rss"
+        }
+      },
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--7e0f32f1-f462-494d-8d20-31489ab410db",
+      "name": "Malicious Artifact: screenhooks32.dll",
+      "pattern": "[file:name = 'screenhooks32.dll']",
+      "pattern_type": "stix",
+      "valid_from": "2026-10-08T15:38:08Z",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "confidence": 20,
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--767532a8-280a-46cb-b172-90b1e95a44a9",
+      "name": "Malicious Artifact: screenhooks64.dll",
+      "pattern": "[file:name = 'screenhooks64.dll']",
+      "pattern_type": "stix",
+      "valid_from": "2026-10-08T15:38:08Z",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "confidence": 20,
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--1a6fbc42-d280-47fd-af7c-779e3a76f120",
+      "relationship_type": "indicates",
+      "source_ref": "indicator--7e0f32f1-f462-494d-8d20-31489ab410db",
+      "target_ref": "intrusion-set--5399bc91-1dc7-41ab-827c-ef0276a01204",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--fd248411-26bc-4ef9-a92c-95c2cd28ef60",
+      "relationship_type": "indicates",
+      "source_ref": "indicator--767532a8-280a-46cb-b172-90b1e95a44a9",
+      "target_ref": "intrusion-set--5399bc91-1dc7-41ab-827c-ef0276a01204",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "vulnerability",
+      "spec_version": "2.1",
+      "id": "vulnerability--fc8a21eb-d093-4a03-b727-39a496c5364a",
+      "name": "CVE-2026-14269",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "external_references": [
+        {
+          "source_name": "cve",
+          "external_id": "CVE-2026-14269",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-14269"
+        }
+      ],
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--bcb16c25-869c-47c4-93bb-b9de22a6ec8b",
+      "relationship_type": "exploits",
+      "source_ref": "intrusion-set--5399bc91-1dc7-41ab-827c-ef0276a01204",
+      "target_ref": "vulnerability--fc8a21eb-d093-4a03-b727-39a496c5364a",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "vulnerability",
+      "spec_version": "2.1",
+      "id": "vulnerability--8c6f4393-9727-4dc6-9f96-a6be2328c6ff",
+      "name": "CVE-2026-16111",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "external_references": [
+        {
+          "source_name": "cve",
+          "external_id": "CVE-2026-16111",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-16111"
+        }
+      ],
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--c49e174e-7b07-4106-9c82-20e65a9d0065",
+      "relationship_type": "exploits",
+      "source_ref": "intrusion-set--5399bc91-1dc7-41ab-827c-ef0276a01204",
+      "target_ref": "vulnerability--8c6f4393-9727-4dc6-9f96-a6be2328c6ff",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "vulnerability",
+      "spec_version": "2.1",
+      "id": "vulnerability--93cbbb38-87d0-4c52-9c70-15b5c58b11d4",
+      "name": "CVE-2026-12859",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "external_references": [
+        {
+          "source_name": "cve",
+          "external_id": "CVE-2026-12859",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-12859"
+        }
+      ],
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--f06b6792-548c-4cbc-b1cb-1547dc687e50",
+      "relationship_type": "exploits",
+      "source_ref": "intrusion-set--5399bc91-1dc7-41ab-827c-ef0276a01204",
+      "target_ref": "vulnerability--93cbbb38-87d0-4c52-9c70-15b5c58b11d4",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "vulnerability",
+      "spec_version": "2.1",
+      "id": "vulnerability--05077974-6b07-414d-a8ed-62dbc46e72ad",
+      "name": "CVE-2026-93017",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "external_references": [
+        {
+          "source_name": "cve",
+          "external_id": "CVE-2026-93017",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-93017"
+        }
+      ],
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--1a4c51d2-7402-4afe-8be7-b6f39954ac18",
+      "relationship_type": "exploits",
+      "source_ref": "intrusion-set--5399bc91-1dc7-41ab-827c-ef0276a01204",
+      "target_ref": "vulnerability--05077974-6b07-414d-a8ed-62dbc46e72ad",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "vulnerability",
+      "spec_version": "2.1",
+      "id": "vulnerability--703e3f41-9891-4aa0-8699-fe0770ac77b1",
+      "name": "CVE-2026-16167",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "external_references": [
+        {
+          "source_name": "cve",
+          "external_id": "CVE-2026-16167",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-16167"
+        }
+      ],
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--1b2078b5-d6b1-4143-a0e4-aa432b85020d",
+      "relationship_type": "exploits",
+      "source_ref": "intrusion-set--5399bc91-1dc7-41ab-827c-ef0276a01204",
+      "target_ref": "vulnerability--703e3f41-9891-4aa0-8699-fe0770ac77b1",
+      "created": "2026-10-08T15:38:08Z",
+      "modified": "2026-10-08T15:38:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    }
+  ]
+}
