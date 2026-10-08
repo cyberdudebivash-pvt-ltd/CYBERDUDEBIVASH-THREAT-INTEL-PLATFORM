@@ -10,12 +10,10 @@ from typing import Dict, Any
 class PostFormatter:
     # Character limits per platform
     LIMITS = {
-        'twitter': 280,
         'mastodon': 500,
         'bluesky': 300,
         'linkedin': 3000,
         'facebook': 2000,
-        'tumblr': 4096,
         'reddit': 6000,
         'threads': 500,
     }
@@ -25,6 +23,9 @@ class PostFormatter:
 
     def format_post(self, item: Dict[str, Any], platform: str = 'default') -> str:
         """Generate platform-specific post text."""
+        if platform.lower() in ('twitter', 'x', 'tumblr'):
+            raise ValueError('Retired distribution destination: ' + platform)
+
         title = item.get('title', 'Threat Intelligence Report')
         summary = item.get('summary', '')
         link = item.get('link', '')
@@ -33,9 +34,7 @@ class PostFormatter:
         hashtags = self._build_hashtags(categories, platform)
         limit = self.LIMITS.get(platform, 2000)
 
-        if platform == 'twitter':
-            return self._format_twitter(title, link, hashtags, limit)
-        elif platform == 'linkedin':
+        if platform == 'linkedin':
             return self._format_linkedin(title, summary, link, hashtags)
         elif platform == 'mastodon':
             return self._format_mastodon(title, summary, link, hashtags, limit)
@@ -43,21 +42,12 @@ class PostFormatter:
             return self._format_bluesky(title, link, hashtags, limit)
         elif platform == 'facebook':
             return self._format_facebook(title, summary, link, hashtags)
-        elif platform == 'tumblr':
-            return self._format_tumblr(title, summary, link, hashtags)
         elif platform == 'reddit':
             return self._format_reddit(title, summary, link)
         elif platform == 'threads':
             return self._format_threads(title, link, hashtags, limit)
         else:
             return self._format_generic(title, summary, link, hashtags)
-
-    def _format_twitter(self, title, link, hashtags, limit):
-        """Twitter: 280 chars. Lead with impact, include link + key tags."""
-        base = f"🚨 {title}\n\n{link}\n\n"
-        remaining = limit - len(base) - 5
-        tags = self._trim_hashtags(hashtags, remaining)
-        return f"🚨 {title}\n\n{link}\n\n{tags}"
 
     def _format_linkedin(self, title, summary, link, hashtags):
         """LinkedIn: Professional, full content, strong CTA."""
@@ -101,16 +91,6 @@ class PostFormatter:
             f"{hashtags}"
         )
 
-    def _format_tumblr(self, title, summary, link, hashtags):
-        """Tumblr: Supports HTML, use rich format."""
-        return (
-            f"<h2>🔐 {title}</h2>"
-            f"<p>{summary}</p>"
-            f"<p><strong>🔗 <a href='{link}'>Read Full Report → CyberDudeBivash Threat Intel</a></strong></p>"
-            f"<p><em>Powered by CYBERDUDEBIVASH SENTINEL APEX — AI-Powered Global Threat Intelligence</em></p>"
-            f"<p>{hashtags}</p>"
-        )
-
     def _format_reddit(self, title, summary, link):
         """Reddit: No hashtags, clean text with URL."""
         return (
@@ -134,7 +114,7 @@ class PostFormatter:
     def _build_hashtags(self, categories: list, platform: str) -> str:
         """Build hashtag string from categories + common tags."""
         common = self.config.HASHTAGS_COMMON
-        extra = self.config.HASHTAGS_EXTRA if platform not in ('twitter', 'bluesky') else ''
+        extra = self.config.HASHTAGS_EXTRA if platform != 'bluesky' else ''
 
         # Convert categories to hashtags
         cat_tags = []
