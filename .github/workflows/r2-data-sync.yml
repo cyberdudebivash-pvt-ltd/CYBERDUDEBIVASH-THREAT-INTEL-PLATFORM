@@ -71,7 +71,11 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
         run: |
           ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp data/stix/feed_manifest.json \
+          # P0 #721/#725: upload only TLP-boundary-verified bytes (fails the step if a document cannot be verified)
+          SAFE_DIR="$(mktemp -d)"
+          python3 scripts/tlp_public_boundary.py --sanitize-file data/stix/feed_manifest.json \
+            --out-file "$SAFE_DIR/feed_manifest.json"
+          aws s3 cp "$SAFE_DIR/feed_manifest.json" \
             s3://sentinel-apex-data/intel/feed_manifest.json \
             --endpoint-url "$ENDPOINT" \
             --content-type "application/json"
@@ -84,10 +88,12 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
         run: |
           ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          SAFE_DIR="$(mktemp -d)"   # P0 #721/#725: TLP-boundary-verified copies only
           for f in data/apex_enriched_manifest.json data/apex_v2_manifest.json data/apex_v2_strategic_report.json; do
             if [ -f "$f" ]; then
               fname=$(basename "$f")
-              aws s3 cp "$f" "s3://sentinel-apex-data/intel/$fname" \
+              python3 scripts/tlp_public_boundary.py --sanitize-file "$f" --out-file "$SAFE_DIR/$fname"
+              aws s3 cp "$SAFE_DIR/$fname" "s3://sentinel-apex-data/intel/$fname" \
                 --endpoint-url "$ENDPOINT" \
                 --content-type "application/json"
               echo "Uploaded $fname"
@@ -98,7 +104,8 @@ jobs:
             for f in api/apex_v2/*.json; do
               if [ -f "$f" ]; then
                 fname=$(basename "$f")
-                aws s3 cp "$f" "s3://sentinel-apex-data/apex_v2/$fname" \
+                python3 scripts/tlp_public_boundary.py --sanitize-file "$f" --out-file "$SAFE_DIR/v2_$fname"
+                aws s3 cp "$SAFE_DIR/v2_$fname" "s3://sentinel-apex-data/apex_v2/$fname" \
                   --endpoint-url "$ENDPOINT" \
                   --content-type "application/json"
                 echo "Uploaded apex_v2/$fname"

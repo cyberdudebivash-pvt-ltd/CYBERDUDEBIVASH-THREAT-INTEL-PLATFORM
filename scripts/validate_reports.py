@@ -81,6 +81,8 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+import tlp_policy as _tlp  # noqa: E402  (single publication authority; P0 #721)
+
 from r2_report_publisher import (  # noqa: E402
     canonical_age,
     load_publish_state,
@@ -255,6 +257,9 @@ def _validate_one(
                     responsibility to have produced or verified locally.
                     See module docstring's DEFERRAL section.
       "SKIP"     -- STIX-bundle-only record, no HTML report expected.
+      "WITHHELD" -- (P0 #721) the TLP publication policy denies this advisory, so its report was deliberately
+                    never rendered; "report file NOT FOUND" is the CORRECT state, not a defect. Only reached
+                    where RULE 3 would otherwise fail; a report that does exist is still validated normally.
       "FAIL"     -- one or more RULE violations; see `failures`.
 
     failures is non-empty only when disposition == "FAIL".
@@ -338,6 +343,11 @@ def _validate_one(
         _in_window = _age_hours is not None and 0 <= _age_hours <= window_hours
         if not _in_window:
             return failures, "DEFERRED"
+        # P0 #721: the generator withholds policy-denied advisories BEFORE rendering (generate_intel_reports.py),
+        # so a missing report for one of them is the intended outcome. Treating it as a failure made run
+        # 37809443847 hard-fail STAGE 3.3 with "20 report(s) failed validation" and block R2 upload.
+        if not _tlp.publication_decision(entry)["allowed"]:
+            return failures, "WITHHELD"
         failures.append(
             f"[{intel_id}] RULE 3 FAIL: report file NOT FOUND: {fs_path} "
             f"(within the {window_hours}h publish window -- this run should "
@@ -420,6 +430,7 @@ def validate_all_reports(
     passed = 0
     deferred = 0
     skipped = 0
+    withheld = 0
 
     for idx, entry in enumerate(advisories):
         failures, disposition = _validate_one(
@@ -440,6 +451,10 @@ def validate_all_reports(
             deferred += 1
         elif disposition == "SKIP":
             skipped += 1
+        elif disposition == "WITHHELD":
+            logger.warning("[WITHHELD] %s -- TLP publication policy denies this advisory; no report is expected",
+                           intel_id)
+            withheld += 1
         else:  # PASS
             _url, fs_path = _resolve_report_path(entry)
             size = os.path.getsize(fs_path) if fs_path and os.path.exists(fs_path) else 0
@@ -448,8 +463,8 @@ def validate_all_reports(
 
     logger.info(
         "Report validation complete: %d/%d passed, %d deferred (out-of-window, "
-        "not locally verifiable), %d skipped (no report expected), %d failed",
-        passed, total, deferred, skipped, len(all_failures),
+        "not locally verifiable), %d skipped (no report expected), %d withheld by TLP policy, %d failed",
+        passed, total, deferred, skipped, withheld, len(all_failures),
     )
 
     if all_failures:

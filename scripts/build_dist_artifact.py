@@ -701,6 +701,25 @@ def main() -> int:
     else:
         log.info("Report retention mode : ALL reports (full copy)")
 
+    # ── 0. TLP boundary on the public JSON this artifact is built from (P0 #721 / #725) ─────────────────────────
+    # Sanitized IN PLACE on the CI runner checkout, BEFORE anything is copied, so that every later consumer of
+    # api/feed.json (the report_url validation below, dist_artifact_verifier, regression T21, canaries) sees exactly
+    # the publishable set -- publishing and verification cannot disagree about which reports must exist. data/
+    # (internal manifests, state) is not touched. A failure here stops the build: an unchecked artifact is never built.
+    try:
+        import tlp_public_boundary as _tlp_boundary
+        _tlp_ws = _tlp_boundary.sanitize_workspace(REPO_ROOT)
+    except Exception as _tlp_exc:
+        log.error("HARD FAIL -- TLP PUBLIC BOUNDARY (workspace) could not be applied: %s", _tlp_exc)
+        return 1
+    _tlp_bad = [p for p in _tlp_ws["unverifiable_json"] if p.startswith("api/")]
+    if _tlp_bad:
+        log.error("HARD FAIL -- TLP PUBLIC BOUNDARY: %d api/ JSON document(s) cannot be verified: %s",
+                  len(_tlp_bad), ", ".join(_tlp_bad[:10]))
+        return 1
+    log.info("TLP workspace boundary: %d file(s) modified (%d withheld), %d record(s) removed, %d restricted id(s)",
+             _tlp_ws["files_modified"], _tlp_ws["files_withheld"], _tlp_ws["records_removed"], len(_tlp_ws["denied_ids"]))
+
     # ── 1. Wipe and recreate dist/ ──────────────────────────────────────────
     if DIST_DIR.exists():
         log.info("Removing previous dist/ (%d files)...",
@@ -1055,6 +1074,39 @@ def main() -> int:
         log.error("  ACTION: Ensure 'PAYMENT-GATEWAY' is NOT in HTML_EXCLUDE_PREFIXES.")
         return 1
     log.info("  OK: PAYMENT-GATEWAY.html is present in dist/")
+
+    # ── 5.3. TLP last-mile boundary for the anonymous Pages artifact (P0 #721 / #725) ──────────────────────────
+    # dist/ is published verbatim to GitHub Pages, which is reachable anonymously and is the static origin the
+    # Worker falls back to -- so sanitizing R2 objects alone does not close the disclosure boundary. Step 0 already
+    # sanitized the sources; this pass is the backstop on the BUILT artifact (nothing in dist/ is trusted):
+    # denied records are removed from every JSON document, self-classified restricted documents become
+    # tombstones, and report pages that are denied or declare a restricted TLP are removed. Runs AFTER the
+    # report_url / route validations above and BEFORE the manifest checksums, so deployment_manifest.json
+    # describes exactly what is deployed. No bypass flag exists.
+    log.info("")
+    log.info("Applying TLP public boundary to dist/ (P0 #721 -- HARD FAIL if unverifiable)...")
+    try:
+        _tlp_report = _tlp_boundary.sanitize_dist(DIST_DIR, extra_denied_ids=_tlp_ws["denied_ids"])
+    except Exception as _tlp_exc:  # fail closed: an unchecked artifact must not be deployed
+        log.error("HARD FAIL -- TLP PUBLIC BOUNDARY could not be applied: %s", _tlp_exc)
+        return 1
+    _bad_api = [p for p in _tlp_report["unverifiable_json"] if p.startswith("api/")]
+    if _bad_api:
+        log.error("HARD FAIL -- TLP PUBLIC BOUNDARY: %d api/ JSON document(s) cannot be verified: %s",
+                  len(_bad_api), ", ".join(_bad_api[:10]))
+        return 1
+    try:
+        _tlp_rep_path = REPO_ROOT / "data" / "quality" / "pages_tlp_boundary_report.json"
+        _tlp_rep_path.parent.mkdir(parents=True, exist_ok=True)
+        _tlp_rep_path.write_text(json.dumps({"workspace": {k: v for k, v in _tlp_ws.items() if k != "files"},
+                                             "dist": _tlp_report}, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError as _e:  # observability only
+        log.warning("  could not write pages_tlp_boundary_report.json: %s", _e)
+    log.info("  TLP boundary: %d JSON scanned, %d modified (%d withheld), %d record(s) removed, "
+             "%d report file(s) removed, %d non-api JSON unverifiable",
+             _tlp_report["json_files_scanned"], _tlp_report["json_files_modified"],
+             _tlp_report["json_files_withheld"], _tlp_report["records_removed"],
+             _tlp_report["report_files_removed"], len(_tlp_report["unverifiable_json"]))
 
     # ── 6. Write .nojekyll (prevents Jekyll processing on GitHub Pages) ──────
     nojekyll = DIST_DIR / ".nojekyll"

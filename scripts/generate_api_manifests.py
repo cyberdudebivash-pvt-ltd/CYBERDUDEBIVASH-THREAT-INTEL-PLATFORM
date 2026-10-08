@@ -273,8 +273,35 @@ if _tlp_held:
         _reason_counts[_row['reason_code']] = _reason_counts.get(_row['reason_code'], 0) + 1
     warn(f'[TLP] {len(_tlp_held)} item(s) withheld from public manifests: {_reason_counts}')
 if len(raw_feed) == 0:
-    fatal('[TLP] every feed item was withheld by the TLP publication policy; refusing to emit empty public '
-          'manifests -- operator review of labels/policy required (previous artifacts are NOT modified)')
+    # P0 #725: exiting without writing leaves the PREVIOUS (possibly restricted) bundles in place -- the local files,
+    # and via later `always()` uploads/resyncs the R2 and Pages copies. Deny-first instead: atomically replace every
+    # public bundle with an empty, schema-valid tombstone (fresh generated_at so staleness guards do not skip it), and
+    # only then fail the stage so the operator is alerted. The tombstones carry counts/reason codes only.
+    _ts = now_iso()
+    _stub_marker = {'withheld_all': True, 'reason': 'every feed item was withheld by the TLP publication policy',
+                    'reason_codes': _reason_counts, 'policy': 'config/tlp_publication_policy.json'}
+    try:
+        os.makedirs(OUT_DIR, exist_ok=True)
+        _bundles = {}
+        for _name in ('latest', 'latest_pro', 'top10', 'apex'):
+            _payload = {'schema_version': SCHEMA_VER, 'generated_at': _ts, 'generator': SCRIPT_NAME,
+                        'version': VERSION, 'count': 0, 'items': [], 'tlp_boundary': _stub_marker}
+            _text = json.dumps(_payload, ensure_ascii=False, separators=(',', ':'))
+            _sha = sha256_of(_text)
+            _payload['sha256'] = _sha
+            atomic_write(os.path.join(OUT_DIR, _name + '.json'),
+                         json.dumps(_payload, ensure_ascii=False, separators=(',', ':')))
+            _bundles[_name] = {'path': f'api/v1/intel/{_name}.json', 'count': 0, 'sha256': _sha, 'generated_at': _ts}
+        atomic_write(os.path.join(OUT_DIR, 'manifest.json'), json.dumps({
+            'schema_version': SCHEMA_VER, 'generated_at': _ts, 'generator': SCRIPT_NAME, 'version': VERSION,
+            'architecture': 'immutable-api-first-v150.0', 'bundles': _bundles,
+            'source': {'path': FEED_PATH, 'count': 0}, 'tlp_boundary': _stub_marker}, ensure_ascii=False, indent=2))
+        info(f'[TLP] deny-first: replaced all public bundles in {OUT_DIR}/ with empty tombstones')
+    except OSError as _e:
+        fatal(f'[TLP] every feed item was withheld AND the deny-first tombstones could not be written ({_e}); '
+              'previous bundles may still hold restricted records -- operator action required')
+    fatal('[TLP] every feed item was withheld by the TLP publication policy; public bundles were REPLACED by empty '
+          'tombstones (deny-first); operator review of labels/policy required')
 
 # ── STEP 1b: Deduplicate before manifests are generated ──────────────────────
 # Mirrors the 3-layer dedup in the Cloudflare Worker's deduplicateFeedItems().

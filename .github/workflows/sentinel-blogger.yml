@@ -4052,10 +4052,23 @@ jobs:
         env:
           INITIAL_OUTCOME: ${{ steps['p0-report-publish-initial'].outcome }}
           LATE_OUTCOME: ${{ steps['p0-report-publish-late'].outcome }}
+          PUBLISHING_ENABLED: ${{ env.R2_REPORT_PUBLISHING_ENABLED }}
         run: |
           if [ "$INITIAL_OUTCOME" != "success" ] || [ "$LATE_OUTCOME" != "success" ]; then
             echo "::error::P0 report publishing release BLOCKED: initial=$INITIAL_OUTCOME late=$LATE_OUTCOME. Pages deployment withheld."
             exit 1
+          fi
+          # A disabled publisher (kill switch) exits 0 without publishing anything: that is an operator-chosen
+          # pause, not a fully successful fresh release. Pages is not blocked (the switch exists for cost
+          # emergencies) but the run must never read as a clean publish -- say so in the log, annotations and summary.
+          # Same semantics as scripts/r2_report_publisher.py::report_publishing_enabled() (only literal "false").
+          if [ "$(printf '%s' "${PUBLISHING_ENABLED:-true}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" = "false" ]; then
+            echo "::warning::P0 report publishing release verdict: PASS-WITH-PUBLISHER-DISABLED -- R2_REPORT_PUBLISHING_ENABLED=false, no report was published or retired in R2 by this run. This is NOT a fully successful fresh release."
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              echo "### Report publishing release verdict: PUBLISHER DISABLED (kill switch)" >> "$GITHUB_STEP_SUMMARY"
+              echo "R2 report publishing was paused by R2_REPORT_PUBLISHING_ENABLED=false. Pages was allowed to deploy, but this run is **not** a fully successful fresh release." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
           fi
           echo "P0 report publishing release verdict: PASS (both R2 publisher stages succeeded)"
 

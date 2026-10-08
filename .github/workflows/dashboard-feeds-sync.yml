@@ -151,13 +151,18 @@ jobs:
           set -euo pipefail
           ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
           BUCKET="sentinel-apex-data"
+          # P0 #721/#725: every object leaves through the TLP boundary (scripts/tlp_public_boundary.py); an
+          # unverifiable document stops the publication (set -e) instead of being uploaded raw.
+          SAFE_DIR="$(mktemp -d)"
           for FILE in \
             api/v1/intel/ai_summary.json api/v1/intel/stats.json \
             api/v1/intel/campaigns.json api/v1/intel/ransomware.json api/v1/intel/apt.json \
             api/v1/intel/epss.json api/v1/intel/defcon.json api/v1/intel/pulse.json \
             api/v1/intel/darkweb.json api/v1/intel/cybermap.json; do
             echo "Publishing $FILE"
-            aws s3 cp "$FILE" "s3://${BUCKET}/${FILE}" \
+            SAFE_FILE="${SAFE_DIR}/$(echo "$FILE" | tr '/' '_')"
+            python3 scripts/tlp_public_boundary.py --sanitize-file "$FILE" --out-file "$SAFE_FILE"
+            aws s3 cp "$SAFE_FILE" "s3://${BUCKET}/${FILE}" \
               --endpoint-url "$ENDPOINT" --content-type "application/json" \
               --cache-control "max-age=120, s-maxage=120" --quiet
           done
