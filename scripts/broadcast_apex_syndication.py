@@ -25,9 +25,7 @@ if not posts:
     print("[SYNDICATE] Queue empty -- nothing to broadcast")
     sys.exit(0)
 
-latest_post = posts[-1].get("content", "")
-print("============== APEX BROADCAST INITIATED ==============")
-print(latest_post)
-print("======================================================")
-print("[OK] Successfully broadcasted Zero-Day Warning to LinkedIn CISO Network.")
-print("[OK] Successfully broadcasted to X/Twitter Infosec Community.")
+# This script does not call any social platform API. Do not report successful
+# delivery without a verified provider response.
+print("[INFO] Syndication queue contains %d post(s)." % len(posts))
+print("[INFO] No provider dispatch configured in this script; nothing published.")
