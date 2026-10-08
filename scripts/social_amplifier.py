@@ -7,18 +7,16 @@ Phase 6: Global Authority Content Pipeline
 
 WHAT IT DOES:
   For each newly published blog post, generates platform-optimized social
-  copy for LinkedIn, Twitter/X, and Telegram — ready to post or auto-push
-  via API.
+  copy for LinkedIn, Telegram, and Mastodon — ready for manual review.
+  This script generates files; it does not publish via a provider API.
 
 OUTPUT PER POST:
   LinkedIn post  — 1200–1500 chars, authority tone, 3 hashtags, CTA link
-  Twitter/X post — ≤280 chars, hook + CVE + risk + link
   Telegram post  — HTML-formatted, full context, Sentinel brand voice
   Mastodon post  — 500 chars, fediverse-friendly
 
 OUTPUT FILES:
   data/social_queue/<YYYYMMDD>/<slug>_linkedin.txt   → paste into LinkedIn
-  data/social_queue/<YYYYMMDD>/<slug>_twitter.txt    → paste into Twitter/X
   data/social_queue/<YYYYMMDD>/<slug>_telegram.html  → Telegram HTML-formatted
   data/social_queue/queue.json                        → API-ready queue
 
@@ -27,10 +25,6 @@ LINKEDIN VOICE:
   Leads with the threat hook, provides business context, ends with CTA
   Hashtags: #CyberSecurity #ThreatIntelligence #<CVE/ThreatActor>
 
-TWITTER/X VOICE:
-  High-impact hook in first 50 chars
-  Format: 🚨 [RISK LABEL]: [CVE/Title] — [1-line impact] — [link] #hashtag
-
 TELEGRAM VOICE:
   Full HTML format matching @cyberdudebivashSentinelApex channel style
   Includes: risk badge, summary, IOC count, MITRE tactics, CTA button link
@@ -38,7 +32,7 @@ TELEGRAM VOICE:
 USAGE:
   python3 scripts/social_amplifier.py                         (process all new posts)
   python3 scripts/social_amplifier.py --limit 5               (cap at 5)
-  python3 scripts/social_amplifier.py --platforms linkedin,twitter  (specific platforms)
+  python3 scripts/social_amplifier.py --platforms linkedin,telegram  (specific platforms)
   python3 scripts/social_amplifier.py --dry-run               (print only)
 """
 
@@ -201,34 +195,6 @@ Powered by CYBERDUDEBIVASH SENTINEL APEX | AI-First Cybersecurity Threat Intelli
     return linkedin.strip()
 
 
-# ─── TWITTER/X POST GENERATOR ────────────────────────────────────────────────
-def generate_twitter(post: dict) -> str:
-    risk  = post.get("risk_score", 7)
-    rl    = rlabel(risk)
-    emoji = RISK_EMOJIS.get(rl, "⚠")
-    cves  = post.get("cves", [])
-    title = post.get("title", "Threat Report")
-    url   = post.get("url", PLATFORM["domain"])
-    tags  = extract_hashtags(post)[:3]
-    tag_str = " ".join(tags)
-
-    # Target: ≤280 chars
-    cve_part = f" {cves[0]}" if cves else ""
-    title_short = title[:50] + ("…" if len(title) > 50 else "")
-    actor = post.get("actor", "")
-    actor_part = f" | {actor}" if actor and actor not in ("Unknown","N/A","") else ""
-
-    tweet = f"{emoji} {rl}{cve_part}: {title_short}{actor_part} — Full IOC list + MITRE ATT&CK → {url} {tag_str}"
-
-    # Ensure ≤280
-    if len(tweet) > 280:
-        tweet = f"{emoji} {rl}{cve_part}: {title_short} → {url} {tag_str}"
-    if len(tweet) > 280:
-        tweet = f"{emoji} {rl}{cve_part}: {title_short[:40]}… → {url} {' '.join(tags[:2])}"
-
-    return tweet
-
-
 # ─── TELEGRAM POST GENERATOR ────────────────────────────────────────────────
 def generate_telegram(post: dict) -> str:
     risk    = post.get("risk_score", 7)
@@ -385,7 +351,6 @@ def main():
     if generated > 0 and not args.dry_run:
         log.info("\nPOSTING SCHEDULE (suggested):")
         log.info("  LinkedIn → post between 08:00-09:00 or 17:00-18:00 local time")
-        log.info("  Twitter/X → post at 09:00, 13:00, 17:00 (3x/day max)")
         log.info("  Telegram → post immediately (24/7 audience)")
         log.info("  Files ready in: data/social_queue/" + today + "/")
 
