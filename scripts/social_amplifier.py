@@ -66,7 +66,6 @@ PLATFORM = {
     "name":    "CYBERDUDEBIVASH SENTINEL APEX",
     "short":   "Sentinel APEX",
     "domain":  "https://intel.cyberdudebivash.com",
-    "twitter": "@cyberdudebivash",
     "linkedin": "cyberdudebivash",
     "telegram": "@cyberdudebivashSentinelApex",
     "hashtags_base": ["#CyberSecurity", "#ThreatIntelligence", "#SENTINELAPEX"],
@@ -294,13 +293,11 @@ def process_post(post: dict, platforms: list, today_dir: Path, dry_run: bool = F
 
     generators = {
         "linkedin":  generate_linkedin,
-        "twitter":   generate_twitter,
         "telegram":  generate_telegram,
         "mastodon":  generate_mastodon,
     }
     exts = {
         "linkedin": "_linkedin.txt",
-        "twitter":  "_twitter.txt",
         "telegram": "_telegram.html",
         "mastodon": "_mastodon.txt",
     }
@@ -326,12 +323,15 @@ def main():
     parser = argparse.ArgumentParser(description="SENTINEL APEX Social Amplifier")
     parser.add_argument("--dry-run",   action="store_true")
     parser.add_argument("--limit",     type=int, default=10)
-    parser.add_argument("--platforms", type=str, default="linkedin,twitter,telegram,mastodon",
-                        help="Comma-separated: linkedin,twitter,telegram,mastodon")
+    parser.add_argument("--platforms", type=str, default="linkedin,telegram,mastodon",
+                        help="Comma-separated: linkedin,telegram,mastodon")
     parser.add_argument("--risk-min",  type=int, default=7)
     args = parser.parse_args()
 
     platforms = [p.strip() for p in args.platforms.split(",")]
+    retired = {"twitter", "x", "tumblr"}
+    if any(p in retired for p in platforms):
+        parser.error("Twitter/X and Tumblr are retired distribution destinations")
 
     log.info("=" * 70)
     log.info("SENTINEL APEX — SOCIAL AMPLIFIER v1.0")
