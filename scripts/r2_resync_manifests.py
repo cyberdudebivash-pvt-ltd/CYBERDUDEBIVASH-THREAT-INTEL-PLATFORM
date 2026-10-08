@@ -40,6 +40,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -57,7 +58,7 @@ log = logging.getLogger("sentinel.r2_resync")
 # see the P0 STALE-MANIFEST ROLLBACK GUARD comment in r2_upload.py.
 # Imported after this module's own logging.basicConfig() so r2_upload.py's
 # basicConfig() call is a no-op and log lines keep the [r2_resync] prefix.
-from r2_upload import stale_manifest_reason  # noqa: E402
+from r2_upload import stale_manifest_reason, tlp_safe_public_feed_source  # noqa: E402
 
 REPO_ROOT       = Path(__file__).resolve().parent.parent
 PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "184.0")
@@ -177,9 +178,24 @@ def main() -> None:
             print(f"::warning::r2_resync: skipped stale {src_rel} ({stale})", flush=True)
             skipped += 1
             continue
-        count = count_items(src_path)
-        log.info("Uploading %s (%d items) -> R2 %s ...", src_rel, count, dst_key)
-        ok = s3_cp(str(src_path), BUCKET_DATA, dst_key, endpoint, cache_ctrl)
+        # P0 #725: api/feed.json is an anonymously served R2 object.
+        # Re-synchronizing the original raw file would undo the TLP filtering
+        # performed by the primary uploader in STAGE 3.5. Apply the identical
+        # authority to fresh bytes here, without changing the source on disk.
+        if dst_key == "api/feed.json":
+            try:
+                with tempfile.TemporaryDirectory(prefix="cdb-p0-tlp-resync-") as tmp:
+                    safe_path = tlp_safe_public_feed_source(src_path, Path(tmp))
+                    count = count_items(safe_path)
+                    log.info("Uploading TLP-verified %s (%d items) -> R2 %s ...", src_rel, count, dst_key)
+                    ok = s3_cp(str(safe_path), BUCKET_DATA, dst_key, endpoint, cache_ctrl)
+            except (OSError, ValueError, TypeError) as exc:
+                log.critical("P0 TLP verification refused R2 resync: %s", exc)
+                sys.exit(1)  # no raw fallback, and api/feed.json is first in RESYNC_FILES
+        else:
+            count = count_items(src_path)
+            log.info("Uploading %s (%d items) -> R2 %s ...", src_rel, count, dst_key)
+            ok = s3_cp(str(src_path), BUCKET_DATA, dst_key, endpoint, cache_ctrl)
         if ok:
             uploaded += 1
         else:
