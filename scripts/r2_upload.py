@@ -61,6 +61,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -76,6 +77,7 @@ from r2_cost_guard import (  # noqa: E402
     enforce_budget,
 )
 import public_freshness_contract as _freshness  # noqa: E402
+import tlp_policy as _tlp_policy  # noqa: E402  (shared fail-closed publication authority)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -840,6 +842,33 @@ def _generate_ai_endpoints() -> None:
         )
 
 
+
+def tlp_safe_public_feed_source(source: Path, scratch_dir: Path) -> Path:
+    """Make an upload-only TLP-sanitized copy of api/feed.json.
+
+    The checked-in/runtime source is left unchanged for forensic comparison.
+    The R2 PUT must read only this validated copy. Missing policy, malformed
+    source JSON or an unexpected shape fails BEFORE any PUT is planned.
+    An empty authorized set is written as [] to replace stale public R2 feed
+    bytes, instead of retaining a previous restricted payload. Historical
+    Worker/CDN cache exposure still requires separately approved containment.
+    """
+    try:
+        raw = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError("cannot verify public feed JSON for TLP publication") from exc
+    if not isinstance(raw, list):
+        raise ValueError("public feed is not a JSON list; refusing R2 publication")
+    publishable, quarantined = _tlp_policy.partition_publishable(raw)
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    safe_path = scratch_dir / "tlp-public-feed.json"
+    safe_path.write_text(json.dumps(publishable, ensure_ascii=False, separators=(",", ":")),
+                         encoding="utf-8")
+    log.warning("TLP R2 feed boundary: %d allowed, %d withheld; source unchanged",
+                len(publishable), len(quarantined))
+    return safe_path
+
+
 def build_upload_plan() -> list[tuple[str, str]]:
     """
     Enumerates every (src, dst_key) pair main()'s normal run intends to PUT
@@ -950,6 +979,24 @@ def main() -> None:
 
     # --- Build the full operation plan BEFORE issuing a single R2 call ---
     pairs = build_upload_plan()
+    # P0 #725: the generic uploader must not PUT the raw, mixed-TLP api/feed.json
+    # that contains restricted entries. Build the sanitized replacement BEFORE
+    # any R2 mutation, using the same authority as the report publisher.
+    tlp_scratch = tempfile.TemporaryDirectory(prefix="cdb-p0-tlp-r2-")
+    try:
+        guarded_pairs = []
+        for candidate_src, candidate_dst_key in pairs:
+            if candidate_dst_key == "api/feed.json":
+                safe = tlp_safe_public_feed_source(Path(candidate_src), Path(tlp_scratch.name))
+                guarded_pairs.append((str(safe), candidate_dst_key))
+            else:
+                guarded_pairs.append((candidate_src, candidate_dst_key))
+        pairs = guarded_pairs
+    except (OSError, ValueError, TypeError) as exc:
+        tlp_scratch.cleanup()
+        log.critical("P0 TLP public feed verification refused before R2 writes: %s", exc)
+        sys.exit(1)
+
     plan = R2OperationPlan(label="r2_upload", bucket=BUCKET_DATA)
     plan.record_put(len(pairs) + 1)  # +1 for the sync-metadata write below
 
@@ -1023,6 +1070,7 @@ def main() -> None:
     write_github_env("R2_UPLOAD_COUNT", str(item_count))
     emit_summary(plan, budgets, status="PASS", is_report_plan=False,
                  extra={"advisory_count": item_count, "files_uploaded": uploaded})
+    tlp_scratch.cleanup()
     log.info("R2 upload complete.")
 
 
