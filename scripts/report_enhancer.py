@@ -53,6 +53,7 @@ from p38_shared_validators import is_detection_eligible
 # P0 #721: evidence-integrity authority (IOC qualification, pinned ATT&CK data,
 # severity basis) and the repo's EPSS scale reader -- never re-derive either.
 import dossier_integrity as _di
+import tlp_policy as _tlp          # fail-closed anonymous-publication authority (P0 #721)
 from severity_epss_truth import epss_percent as _epss_percent
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] REPORT-ENHANCER %(levelname)s %(message)s",
@@ -77,6 +78,9 @@ C_MUTED = "#94a3b8"
 SEV_COLORS = {"CRITICAL": C_RED, "HIGH": C_ORG, "MEDIUM": C_PUR, "LOW": C_BLU}
 
 UPGRADE_URL = "https://intel.cyberdudebivash.com/get-api-key.html?plan=pro"
+# DEPRECATED (P0 #721): no trial is offered -- the commercial contract's trial_policy is "No free trial"
+# (owner decision 2026-09-19) and POST /api/leads/trial is 410 Gone. Kept only so external importers of
+# this constant do not break; it is no longer rendered anywhere. Remove after the next major layer.
 TRIAL_URL   = "https://intel.cyberdudebivash.com/trial"
 
 
@@ -199,6 +203,7 @@ def _is_reference_not_ioc(i) -> bool:
 _EVIDENCE_LABELS = {
     "OBSERVED":        ("OBSERVED", "#22c55e"),
     "SOURCE_REPORTED": ("SOURCE-REPORTED", "#3b82f6"),
+    "SOURCE_CLAIMED":  ("SOURCE-CLAIMED (UNCORROBORATED)", "#f59e0b"),
     "UNVERIFIED":      ("UNVERIFIED", "#f59e0b"),
 }
 
@@ -210,8 +215,8 @@ def build_ioc_table_section(item: Dict, tier: str = "enterprise") -> str:
     "No IOCs in current data feed" placeholder row and then counted it as 1).
     Values below the Pro tier are not emitted into the page at all.
     """
-    q = _di.qualify_iocs(item.get("iocs"))
-    iocs, count = q["actionable"], q["count"]
+    q = _di.qualify_iocs(item.get("iocs"), item)
+    iocs, count, vcount = q["observables"], q["count"], q["validated_count"]
     rejected_n = len(q["rejected"]) + q["duplicates"]
 
     notes = []
@@ -227,14 +232,15 @@ def build_ioc_table_section(item: Dict, tier: str = "enterprise") -> str:
         for k, v in sorted(q["by_state"].items())
     )
     total_html = (
-        f'<div style="margin-top:10px;color:{C_MUTED};font-size:10px;">Qualified indicators: '
-        f'<strong style="color:{C_TEXT};">{count}</strong>'
+        f'<div style="margin-top:10px;color:{C_MUTED};font-size:10px;">IOC observables: '
+        f'<strong style="color:{C_TEXT};">{count}</strong> &nbsp;|&nbsp; validated as malicious: '
+        f'<strong style="color:{C_TEXT};">{vcount}</strong>'
         + (f' &nbsp;|&nbsp; {states_html}' if states_html else '') + '</div>'
     )
 
     if count == 0:
         content = (
-            f'<div style="color:{C_TEXT};font-size:12px;">No qualified indicators of compromise are recorded for this '
+            f'<div style="color:{C_TEXT};font-size:12px;">No IOC observables are recorded for this '
             f'advisory (count: 0). CVE identifiers and advisory URLs are references, not indicators.</div>'
             + total_html + note_html
         )
@@ -242,7 +248,7 @@ def build_ioc_table_section(item: Dict, tier: str = "enterprise") -> str:
 
     if {"free": 0, "pro": 1, "enterprise": 2}.get(tier, 0) < 1:
         content = (
-            f'<div style="color:{C_TEXT};font-size:12px;">{count} qualified indicator(s) recorded. Indicator values are '
+            f'<div style="color:{C_TEXT};font-size:12px;">{count} IOC observable(s) recorded ({vcount} validated as malicious). Indicator values are '
             f'a Pro entitlement and are not included in this public artifact.</div>' + total_html + note_html
         )
         return _card("INDICATORS OF COMPROMISE", content, icon="🔍")
@@ -281,8 +287,9 @@ def build_ioc_table_section(item: Dict, tier: str = "enterprise") -> str:
         f'<th style="text-align:left;padding:8px 12px;color:{C_MUTED};font-size:10px;">EVIDENCE</th>'
         f'</tr></thead><tbody>{rows}</tbody></table></div>'
         + total_html
-        + f'<div style="margin-top:6px;color:{C_MUTED};font-size:10px;font-style:italic;">Values are listed as extracted '
-          f'from the source; only OBSERVED indicators are evidence of compromise. Validate before blocking.</div>'
+        + f'<div style="margin-top:6px;color:{C_MUTED};font-size:10px;font-style:italic;">Observables are listed as extracted '
+          f'from the source; syntax is not evidence of malice. Only indicators validated as malicious (corroborated source plus an '
+          f'explicit malicious assertion) should drive blocking.</div>'
         + note_html
     )
     return _card("INDICATORS OF COMPROMISE", content, icon="🔍")
@@ -377,11 +384,12 @@ def build_soc_playbook_section(item: Dict) -> str:
     except (TypeError, ValueError):
         _cv0 = None
     _sevb0 = _di.severity_basis(item, _cv0, bool(item.get("kev_present") is True or item.get("kev") is True))
-    severity = _sevb0["display"].upper() if _sevb0["authoritative"] else "UNRATED"
+    severity = _sevb0["display"].upper()
     sev_col  = SEV_COLORS.get(severity, C_ORG)
     actor    = item.get("actor_tag") or "Threat Actor"
     cvss     = item.get("cvss_score","N/A")
-    ioc_count = item.get("ioc_count", len(item.get("iocs") or []))
+    _qp = _di.qualify_iocs(item.get("iocs"), item)
+    ioc_count, ioc_valid = _qp["count"], _qp["validated_count"]
     sector   = item.get("target_sector","all sectors")
 
     # AUDIT FIX (P0 evidence quality): no "Block all 0 IOCs", no "CVSS N/A"
@@ -395,13 +403,16 @@ def build_soc_playbook_section(item: Dict) -> str:
         _cvss_txt = f" (CVSS {float(cvss):.1f})" if cvss not in (None, "", "N/A") else ""
     except (TypeError, ValueError):
         _cvss_txt = ""
-    if ioc_count > 0:
-        _contain = (f"Validate the {ioc_count} published IOC{'s' if ioc_count != 1 else ''} against your telemetry, "
-                    "then block confirmed-malicious ones at firewall, proxy, DNS, and EDR. Isolate affected endpoints.")
-        _hunt = "Threat hunt across a 90-day log window for the published IOCs. Identify patient-zero. Map lateral movement."
+    if ioc_valid > 0:
+        _contain = (f"{ioc_valid} indicator(s) are validated as malicious (corroborated source plus an explicit malicious "
+                    "assertion): confirm against your telemetry, then block per your own review at firewall, proxy, DNS and EDR. "
+                    "Isolate affected endpoints.")
+        _hunt = "Threat hunt across a 90-day log window for the validated indicators and the behaviours described in this advisory."
     else:
-        _contain = ("No validated IOCs are published for this advisory — contain by exposure: restrict access to "
-                    "affected services and apply vendor mitigations. Isolate any endpoint showing related activity.")
+        _contain = ((f"{ioc_count} IOC observable(s) were extracted but none is validated as malicious — hunt on them, do not block on them. "
+                     if ioc_count else "No IOC observables were extracted for this advisory. ")
+                    + "Contain by exposure: restrict access to affected services and apply vendor mitigations. "
+                      "Isolate any endpoint showing related activity.")
         _hunt = "Threat hunt across a 90-day log window for the behaviours and techniques described in this advisory."
     steps = [
         ("0-15 min",  "CRITICAL", "IMMEDIATE TRIAGE",
@@ -592,36 +603,35 @@ def build_premium_intel_cards_css() -> str:
 
 
 def build_monetization_banner(item: Dict, tier: str = "free") -> str:
-    """Conversion-driving banner with urgency and value proposition."""
-    severity = (item.get("severity") or "HIGH").upper()
-    sev_col  = SEV_COLORS.get(severity, C_ORG)
-    ioc_count = item.get("ioc_count", len(item.get("iocs") or []))
-    actor    = item.get("actor_tag") or "Threat Actors"
+    """Upgrade banner.  Contains no trial offer (contract: "No free trial") and no claim of an
+    active threat; its numbers come from the same qualified collection as every other count."""
+    sevb      = _di.severity_basis(item, item.get("cvss_score"), bool(item.get("kev_present") is True or item.get("kev") is True))
+    severity  = sevb["display"]
+    sev_col   = SEV_COLORS.get(severity, C_MUTED)
+    _qb = _di.qualify_iocs(item.get("iocs"), item)
+    ioc_count, ioc_valid = _qb["count"], _qb["validated_count"]
 
     if tier == "enterprise":
         return ""
 
-    unlock_text = "PRO: Unlock IOCs, Sigma Rules & Playbook" if tier == "free" else "ENTERPRISE: Unlock Full STIX + Custom Feeds"
-    # v166.3-FIX: UPGRADE_URL already contains ?plan=pro — do NOT append ?plan=pro again (→ double param bug)
+    unlock_text = "PRO: Indicator values, rule content & playbook" if tier == "free" else "ENTERPRISE: Full STIX + custom feeds"
+    # v166.3-FIX: UPGRADE_URL already contains ?plan=pro -- do NOT append ?plan=pro again (-> double param bug)
     unlock_url  = UPGRADE_URL if tier == "free" else "https://intel.cyberdudebivash.com/get-api-key.html?plan=enterprise"
-    trial_text  = "Start Free 7-Day Trial"
-    trial_url   = TRIAL_URL  # v166.3-FIX: was using trial_text as href → href="Start Free 7-Day Trial"
+    headline = (f"{severity} &middot; {ioc_count} IOC observable(s), {ioc_valid} validated as malicious" if ioc_count
+                else f"{severity} &middot; no IOC observables recorded")
 
     return (
         f'<div class="monetization-banner">'
         f'<div>'
-        f'<div style="color:{sev_col};font-weight:800;font-size:13px;margin-bottom:4px;" class="urgency-pulse">'
-        f'⚠ {severity} THREAT ACTIVE — {ioc_count} IOCs AVAILABLE</div>'
+        f'<div style="color:{sev_col};font-weight:800;font-size:13px;margin-bottom:4px;">'
+        f'{headline}</div>'
         f'<div style="color:#94a3b8;font-size:12px;">'
-        f'{actor} campaign intelligence — upgrade to access full actionable data</div>'
+        f'Pro and Enterprise plans include indicator values, detection content (where available) and API access</div>'
         f'</div>'
         f'<div style="display:flex;gap:10px;flex-shrink:0;">'
-        f'<a href="{trial_url}" style="background:#1e293b;color:#e2e8f0;padding:8px 16px;'
-        f'border-radius:6px;text-decoration:none;font-size:12px;border:1px solid #334155;">'
-        f'{trial_text}</a>'
         f'<a href="{unlock_url}" style="background:linear-gradient(135deg,#7c3aed,#2563eb);'
         f'color:white;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:700;">'
-        f'🔓 {unlock_text}</a>'
+        f'{unlock_text}</a>'
         f'</div></div>'
     )
 
@@ -642,7 +652,8 @@ def build_threat_score_widget(item: Dict) -> str:
     sevb       = _di.severity_basis(item, cvss, kev)
     severity   = sevb["display"]
     sev_col    = SEV_COLORS.get(severity, C_MUTED)
-    ioc_count  = _di.qualify_iocs(item.get("iocs"))["count"]
+    _qw        = _di.qualify_iocs(item.get("iocs"), item)
+    ioc_count, ioc_valid = _qw["count"], _qw["validated_count"]
     exploit_st = str(item.get("exploit_maturity") or "UNKNOWN")
 
     kev_badge = (f'<span style="background:#ef444422;color:#ef4444;padding:2px 8px;border-radius:3px;'
@@ -653,8 +664,7 @@ def build_threat_score_widget(item: Dict) -> str:
     risk_txt = f"{risk_score:.1f}" if risk_score is not None else "n/a"
     cvss_txt = f"{cvss:.1f}" if cvss is not None else "n/a"
     epss_txt = f"{_html_escape(str(round(epss, 4)))}%" if epss is not None else "n/a"
-    unrated  = (f'<div style="color:{C_MUTED};font-size:10px;margin-top:4px;">{_html_escape(sevb["basis"])}; '
-                f'APEX composite heuristic: {_html_escape(sevb["composite"])}</div>') if not sevb["authoritative"] else ""
+    unrated  = (f'<div style="color:{C_MUTED};font-size:10px;margin-top:4px;">{_html_escape(sevb["note"])}</div>') if sevb["note"] and (not sevb["authoritative"] or sevb["conflict"]) else ""
 
     return (
         f'<div style="background:#0f172a;border-radius:8px;padding:14px;margin-bottom:16px;">'
@@ -669,8 +679,8 @@ def build_threat_score_widget(item: Dict) -> str:
         f'<div style="font-size:18px;font-weight:700;color:{C_RED if (epss or 0) >= 90 else C_ORG};">{epss_txt}</div>'
         f'<div style="color:#64748b;font-size:9px;">EPSS PERCENT</div></div>'
         f'<div style="text-align:center;">'
-        f'<div style="font-size:18px;font-weight:700;color:{C_GRN};">{ioc_count}</div>'
-        f'<div style="color:#64748b;font-size:9px;">QUALIFIED IOCs</div></div>'
+        f'<div style="font-size:18px;font-weight:700;color:{C_GRN};">{ioc_count}<span style="font-size:11px;color:#64748b;"> / {ioc_valid}</span></div>'
+        f'<div style="color:#64748b;font-size:9px;">IOC OBSERVABLES / VALIDATED</div></div>'
         f'<div style="flex:1;min-width:120px;">'
         f'<div style="color:{C_TEXT};font-size:11px;margin-bottom:4px;">'
         f'{_sev_badge(severity)} {kev_badge}</div>'
@@ -693,6 +703,10 @@ def enhance_report_html(html: str, item: Dict, tier: str = "free") -> str:
     Inject all enterprise sections into an existing HTML report.
     Idempotent — strips old enhancement block before re-injecting.
     """
+    _dec = _tlp.publication_decision(item)
+    if not _dec["allowed"]:
+        raise _tlp.PublicationDenied(_dec)       # fail closed before any bytes are produced
+
     # Strip old enhancement block
     if ENHANCE_MARKER in html:
         s = html.find(ENHANCE_MARKER)
@@ -775,6 +789,9 @@ def generate_pdf_report(item: Dict, html_content: str, out_path: Path) -> bool:
     a standalone self-contained HTML file that browsers can print-to-PDF.
     Returns True on success.
     """
+    if not _tlp.publication_decision(item)["allowed"]:
+        log.warning("PDF refused for %s: TLP policy", str(item.get("id", ""))[:16])
+        return False
     try:
         import weasyprint
         weasyprint.HTML(string=html_content).write_pdf(str(out_path))
@@ -868,6 +885,14 @@ def run_enhancement(manifest_path: Path = MANIFEST_PATH, tier: str = "free") -> 
         if not report_path or not report_path.exists():
             log.warning("Report file not found for %s — skipping enhancement", item_id[:16])
             stats["errors"] += 1
+            continue
+
+        # TLP gate: never append content to / produce a PDF for an artifact the policy does not allow
+        # to be anonymously distributed (the enhancer is a publisher of those bytes).
+        _dec = _tlp.publication_decision(item)
+        if not _dec["allowed"]:
+            stats["tlp_skipped"] = stats.get("tlp_skipped", 0) + 1
+            log.warning("TLP skip %s: %s", item_id[:16], _dec["reason_code"])
             continue
 
         try:

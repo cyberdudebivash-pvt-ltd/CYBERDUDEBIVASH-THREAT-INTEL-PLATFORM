@@ -38,6 +38,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+# P0 #721: every feed this governor writes (api/feed.json, feed_public/mssp/enterprise) is a STATIC file
+# on a public site, i.e. anonymously reachable -- so the TLP policy is enforced at this publish gate.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import tlp_policy as _tlp  # noqa: E402
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
@@ -476,6 +481,23 @@ def govern_item(item: Dict) -> Tuple[Dict, bool, Dict, List[str]]:
         if log4: triggered.append("M4")
         quarantine_record["mandates_triggered"] = triggered
         audit.append(f"M1: item quarantined — decision={item.get('publication_decision')}")
+
+    # TLP publication gate (fail closed): only explicit TLP:CLEAR (or an operator-approved first-party-public
+    # collector for UNLABELLED items) reaches any statically published feed. Labels are never rewritten.
+    _tlp_dec = _tlp.publication_decision(item)
+    if should_publish and not _tlp_dec["allowed"]:
+        should_publish = False
+        quarantine_record = {
+            "id": item.get("id") or item.get("stix_id", ""),
+            "title": item.get("title", ""),
+            "publication_decision": "QUARANTINE",
+            "intelligence_grade": item.get("intelligence_grade", ""),
+            "block_reasons": f"TLP: {_tlp_dec['reason_code']} - {_tlp_dec['reason']}",
+            "analyst_verdict": item.get("analyst_verdict", ""),
+            "quarantined_at": datetime.now(timezone.utc).isoformat(),
+            "mandates_triggered": ["TLP"],
+        }
+        audit.append(f"TLP: item quarantined - {_tlp_dec['reason_code']}")
 
     # Stamp with governor metadata
     item["governor_version"] = GOVERNOR_VERSION

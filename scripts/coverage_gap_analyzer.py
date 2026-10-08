@@ -22,6 +22,13 @@ OUTPUTS:
 """
 from __future__ import annotations
 import json,logging,os
+
+# P0 #721: Navigator `versions.attack` comes from the pinned, verified ATT&CK release (was a hard-coded guess).
+import sys as _sys_nav
+_nav_dir = os.path.dirname(os.path.abspath(__file__))
+if _nav_dir not in _sys_nav.path:
+    _sys_nav.path.insert(0, _nav_dir)
+import dossier_integrity as _di_nav  # noqa: E402
 from collections import defaultdict
 from dataclasses import dataclass,field,asdict
 from datetime import datetime,timezone
@@ -386,7 +393,7 @@ class CoverageGapAnalyzer:
             techniques.append({"techniqueID":gap.technique_id,"color":"#FF9800","score":0,"comment":"HIGH gap — no detection"})
         return {
             "name": f"CYBERDUDEBIVASH SENTINEL APEX Coverage — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
-            "versions": {"attack":"16","navigator":"4.9","layer":"4.5"},
+            "versions": {"attack":_di_nav.navigator_attack_version(),"navigator":"4.9","layer":"4.5"},
             "domain": "enterprise-attack",
             "description": "SENTINEL APEX detection coverage layer. Green=covered, Red=critical gap, Orange=high gap.",
             "techniques": techniques,

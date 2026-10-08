@@ -17,6 +17,7 @@ run -- items in api/feed.json never received a report_url, producing permanent
 
 This test locks in support for BOTH manifest shapes so this cannot regress.
 """
+# P0 #721: fixtures carry an explicit TLP:CLEAR label -- unlabelled items are (correctly) refused publication
 import json
 import sys
 import subprocess
@@ -35,7 +36,7 @@ _BASE_ITEM = {
         "manifests without crashing."
     ),
     "source": "TEST-FIXTURE",
-    "severity": "LOW",
+    "tlp": "TLP:CLEAR", "severity": "LOW",
     "timestamp": "2026-06-01T00:00:00Z",
     "processed_at": "2026-06-01T00:00:00Z",
 }

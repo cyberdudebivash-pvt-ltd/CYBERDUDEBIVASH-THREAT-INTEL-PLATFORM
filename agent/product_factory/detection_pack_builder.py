@@ -47,6 +47,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+
+# P0 #721: Navigator `versions.attack` comes from the pinned, verified ATT&CK release (was a hard-coded guess).
+import os as _os_nav
+import sys as _sys_nav
+_nav_dir = _os_nav.path.join(_os_nav.path.dirname(_os_nav.path.dirname(_os_nav.path.dirname(_os_nav.path.abspath(__file__)))), "scripts")
+if _nav_dir not in _sys_nav.path:
+    _sys_nav.path.insert(0, _nav_dir)
+import dossier_integrity as _di_nav  # noqa: E402
 import os
 import subprocess
 import sys
@@ -320,7 +328,7 @@ class DetectionPackBuilder:
         max_hits = max(techniques.values()) if techniques else 1
         layer = {
             "name": "CYBERDUDEBIVASH SENTINEL APEX Detection Coverage",
-            "versions": {"attack": "14", "navigator": "4.9.1", "layer": "4.5"},
+            "versions": {"attack": _di_nav.navigator_attack_version(), "navigator": "4.9.1", "layer": "4.5"},
             "domain": "enterprise-attack",
             "description": (
                 "Detection coverage delivered by the SENTINEL APEX Detection Pack. "

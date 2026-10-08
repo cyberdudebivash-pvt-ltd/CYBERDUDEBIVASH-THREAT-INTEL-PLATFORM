@@ -21,6 +21,7 @@ production pipeline (confirmed in sentinel-blogger run 35818582480 logs):
   5. scripts/apply_v131_upgrades.py injected fabricated advisories when the
      feed held fewer than 3 items.
 """
+# P0 #721: fixtures carry an explicit TLP:CLEAR label -- unlabelled items are (correctly) refused publication
 import html as _html
 import re
 import sys
@@ -45,13 +46,13 @@ def _text(html: str) -> str:
 
 ZERO_IOC_CVE = {
     "id": "intel--evq-cve", "title": "CVE-2026-11111 Apache ActiveMQ frame size validation bypass",
-    "description": "A denial of service in Apache ActiveMQ.", "severity": "HIGH",
+    "description": "A denial of service in Apache ActiveMQ.", "tlp": "TLP:CLEAR", "severity": "HIGH",
     "cve_id": "CVE-2026-11111", "cvss_score": 7.5, "epss_score": 0.0123,
     "timestamp": "2026-09-23T10:00:00Z", "iocs": [], "risk_score": 7.1,
 }
 ZERO_IOC_RANSOM = {
     "id": "intel--evq-ransom", "title": "LockBit ransomware campaign targets healthcare",
-    "description": "Ransomware operators encrypt hospital systems.", "severity": "CRITICAL",
+    "description": "Ransomware operators encrypt hospital systems.", "tlp": "TLP:CLEAR", "severity": "CRITICAL",
     "timestamp": "2026-09-23T10:00:00Z", "iocs": [], "risk_score": 8.8, "tags": ["healthcare"],
 }
 
@@ -149,7 +150,7 @@ _NARRATIVES = sorted(a for a in dir(narr) if a.startswith("_narrative_"))
 @pytest.mark.parametrize("fn", _NARRATIVES)
 @pytest.mark.parametrize("n", [0, 1, 2])
 def test_narratives_never_instruct_on_zero_or_misplural_iocs(fn, n):
-    item = {"id": "x", "title": "CVE-2026-1234 test threat", "description": "d", "severity": "CRITICAL",
+    item = {"id": "x", "title": "CVE-2026-1234 test threat", "description": "d", "tlp": "TLP:CLEAR", "severity": "CRITICAL",
             "iocs": [{"type": "ipv4", "value": f"198.51.100.{i}"} for i in range(n)], "cvss_score": 9.0}
     txt = _text(getattr(narr, fn)(item))
     assert not re.search(r"\b0 (network )?IOCs?\b|\ball 0\b|\b0 indicators?\b|\b1 IOCs\b", txt), txt
@@ -175,8 +176,13 @@ def test_enhancer_detection_uses_real_domains_when_present():
 def test_enhancer_playbook_zero_iocs_and_missing_cvss():
     txt = _text(enh.build_soc_playbook_section(dict(ZERO_IOC_RANSOM, cvss_score="N/A")))
     assert "Block all" not in txt and "CVSS" not in txt
+    # P0 #721: the playbook counts only real, corroborated, malicious-asserted indicators (never a bare ioc_count)
+    real = [{"type": "ipv4", "value": f"45.153.204.{i}", "source": "abuse.ch", "verdict": "malicious"} for i in (1, 2, 3)]
+    txt = _text(enh.build_soc_playbook_section(dict(ZERO_IOC_CVE, source="abuse.ch", iocs=real, ioc_count=3)))
+    assert "3 indicator(s) are validated as malicious" in txt and "(CVSS 7.5)" in txt
+    # value-less placeholder dicts with a claimed ioc_count of 3 are NOT indicators: no blocking instruction
     txt = _text(enh.build_soc_playbook_section(dict(ZERO_IOC_CVE, iocs=[{"v": 1}] * 3, ioc_count=3)))
-    assert "3 published IOCs" in txt and "(CVSS 7.5)" in txt
+    assert "No IOC observables were extracted" in txt and "validated as malicious" not in txt.replace("none is validated as malicious", "")
 
 
 @pytest.mark.parametrize("sev", ["CRITICAL", "HIGH", "MEDIUM", "LOW"])

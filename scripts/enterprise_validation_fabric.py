@@ -21,6 +21,13 @@ CYBERDUDEBIVASH PRIVATE LIMITED · Sentinel APEX v161+ · Odisha, India
 """
 
 import json, uuid, time, math, logging, os
+
+# P0 #721: Navigator `versions.attack` comes from the pinned, verified ATT&CK release (was a hard-coded guess).
+import sys as _sys_nav
+_nav_dir = os.path.dirname(os.path.abspath(__file__))
+if _nav_dir not in _sys_nav.path:
+    _sys_nav.path.insert(0, _nav_dir)
+import dossier_integrity as _di_nav  # noqa: E402
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple, Set
@@ -191,7 +198,7 @@ class ATTACKCoverageScorer:
                                    "metadata": [], "showSubtechniques": True})
         return {
             "name":        "SENTINEL APEX Coverage",
-            "versions":    {"attack": "16", "navigator": "4.9"},
+            "versions":    {"attack": _di_nav.navigator_attack_version(), "navigator": "4.9"},
             "domain":      "enterprise-attack",
             "description": "APEX auto-generated ATT&CK coverage assessment",
             "techniques":  techniques,

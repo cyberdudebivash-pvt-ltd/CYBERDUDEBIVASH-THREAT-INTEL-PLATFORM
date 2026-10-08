@@ -1,132 +1,62 @@
 # P0 #721 — Enterprise Dossier Intelligence Integrity
 
-Branch `cyberdudebivash/stoic-lovelace-insrcn` · base `241cce7fb` (= `origin/main`, clean tree at start) · 2026-10-08
+Branch `cyberdudebivash/stoic-lovelace-insrcn` · base `241cce7fb` (= `origin/main`) · draft PR #722 · 2026-10-08
+Status: **BLOCKED — not certified, not deployed, not for merge.** Local validation only; remote CI on the final head is recorded in the PR.
 
-## 0. Release decision
+## 0. Release decision and remaining blockers
+| # | Blocker | State |
+|---|---|---|
+| B1 | **Golden eight** originals: supplied outside this session and **TLP-restricted** — must not be committed to this public repo. Need an authorized restricted transfer or sanitized records in `tests/fixtures/golden_721/`. The 2 harness tests stay **SKIPPED** as a release blocker. The 8 production records used here are regression samples, not the requested eight. | OPEN |
+| B2 | **Already-public restricted content** (measured, §4): 76 entries in four static feed files, 19 with live report pages (incl. 2 TLP:RED). Needs operator retraction — `TLP_RETRACTION_RUNBOOK.md`. | OPEN |
+| B3 | **TLP gate covers**: report HTML, enhancer HTML+PDF, `commercial_readiness_governor` feeds (`api/feed.json` + tier files). **Not covered / unverified**: Cloudflare Worker routes, R2 key-level access, `r2_report_publisher.py`, STIX/MISP/other exporters, other writers of `api/*.json`. | OPEN |
+| B4 | **Published corpus unchanged** (§4): 22,380 / 22,433 pages carry pre-fix defects (21,187 carry the unauthorized trial promise). Regeneration + redeploy needs operator authorization; not done. | OPEN |
+| B5 | **Data-model gaps** that cap what can be claimed: legacy IOC strings carry no provenance (0 validated IOCs across 2,000 records); no `cvss_vector`/CVSS version; no KEV lookup timestamp. | OPEN |
+| B6 | Detection-rule validation pipeline, STIX/MISP/TAXII validation, entitlement/tenant audit, claim ledger/lifecycle, FLASH→STRATEGIC tiers, Python↔JS lineage coupling: **not done**; no readiness/interoperability claim is made. | OPEN |
+| B7 | Unsupported predictions remain in `agent/apex_intelligence_upgrade.py` (e.g. "exploitation highly likely within 7 days of disclosure", "volume to increase 3–5×", "median time-to-exploit 3–7 days"). Not touched this round. | OPEN |
+| B8 | Operator decisions: first-party-public collector allowlist (empty ⇒ all unlabelled content, incl. the whole enriched manifest, is withheld); `TLP:WHITE` migration; approval to merge/deploy. | OPEN |
 
-| | |
+## 1. Response to the independent review and to the execution order
+| Item | Outcome |
 |---|---|
-| **Decision** | **BLOCKED — do not promote.** Source-level fixes are implemented and tested; nothing is deployed, and the *published* artifacts are unchanged (see §5). |
-| Not met | Golden-eight regeneration (originals unavailable) · STIX/MISP exporter validation (not in scope of this change) · detection-rule validation pipeline (§7) · live regeneration + redeploy · operator authorization |
-| Rollback | `git revert` the merge commit. No schema, KV, D1, R2, auth, billing or workflow change is included; published artifacts are untouched. |
+| **1 Commercial-contract drift** | Root cause was **at source, and my first fix was wrong**: I renamed the example pages to `.html.txt`, which hid the finding. `report_enhancer.build_monetization_banner` emitted *"Start Free 7-Day Trial"* → `/trial`, contradicting `trial_policy = "No free trial"` (owner decision 2026-09-19; `/api/leads/trial` is 410 Gone). Removed the button, the `THREAT ACTIVE` claim and the unqualified IOC count; `TRIAL_URL` kept as a documented deprecated constant. Examples re-rendered **from the fixed code** and restored as `.html`. `verify_commercial_contract.py`: **5,424 checks, 0 failed** (C1648/C1669 pass). Guard tests apply the verifier's own banned patterns to every generated page (3 tiers × 51 records). Note `reports/` is excluded from that verifier, so 21,187 published pages still carry the promise (B4). |
+| **2 Cancelled Bandit/TruffleHog** | Not a finding and **no check was bypassed**. `sast-security-scan.yml` has `concurrency: cancel-in-progress: true` per ref; my second push cancelled the in-flight runs on `f7e86d60`, and the required SAST gate correctly failed closed on that superseded SHA. On `edb8679b0` all 16 checks succeeded (Bandit, TruffleHog, Semgrep, SAST Gate, Python suite, gateway 1,121 tests). Consequence: every push restarts scanners; only the final head counts. |
+| **3 TLP fail-closed** | `scripts/tlp_policy.py` (FIRST TLP v2): only explicit `TLP:CLEAR` publishes; GREEN/AMBER/AMBER+STRICT/RED, missing, invalid and `TLP:WHITE` are quarantined; no bypass flag; unreadable policy ⇒ deny. Enforced **before bytes are emitted**: `render_report`/`build_report_sections`/`enhance_report_html` raise `PublicationDenied`; `generate_intel_reports.main` quarantines before write/R2 (and flags already-public files for retraction review, never silently deleting); enhancer skips HTML+PDF; the governor excludes them from every feed it writes. Labels are never rewritten. Migration path = reviewed allowlist in `config/tlp_publication_policy.json` (default empty). In-page warning removed (it could not prevent disclosure). Negative controls: producer, publisher (real `main()` on a temp tree), enhancer, feed writer, direct-object (pre-existing public file flagged, not deleted). Scope limits: B3. |
+| **4 ATT&CK on official data** | Pulled MITRE's **official v19.2** (`enterprise-attack-19.2.json`, sha256 `dc1639ca…c3d8f4`) and verified the repo snapshot is **identical** (697 current ids and names). `data/attck/attack_release_pin.json` (generated by `scripts/attack_release_pin.py`) records release, hashes, 149 retired ids with MITRE's replacements, and the **only** approved legacy alias `T1190.001→T1190`. **No parent coercion:** unknown sub-techniques are suppressed (parent only reported as a reviewer hint); retired ids are suppressed with replacements reported; non-ID strings pass only if they resolve to an official current technique (`Name` or `Parent: Sub`); missing dataset/pin or snapshot-hash drift ⇒ everything suppressed (fail closed). **Correction of my earlier claim:** `T1562`, `T1562.001`, `T1574.002` are genuine ids that are **revoked (retired) in v19.2** (`T1562*`→`T1685`; `T1574.002`→`T1574.001`), not "unknown/restructured". All six Navigator exporters now take `versions.attack` from the pin (`19`) instead of hard-coded 14/15/16. |
+| **5 Provenance-aware IOCs** | Two distinct counts: **observables** (syntactically valid, routable, non-reference) and **validated actionable** (corroborated provenance **and** an explicit maliciousness assertion). A claimed source counts only if the record's own collector metadata corroborates it (`SOURCE_CLAIMED` otherwise ⇒ spoof-resistant); `observed_in_wild` needs a corroborated source. Domain-shaped strings are preserved as observables only with a real **IANA TLD** (`data/reference/iana_tlds.txt`, v2026100800) and never for product/platform/advisory hosts. All sites (page header, executive text, IOC card, banner, widget, playbook, BIS input) use the same two numbers; BIS now uses validated only. |
+| **6 Severity / KEV / priority** | `severity_basis` returns independently attributable facts: `display` (CVSS band of the reported score, or `UNRATED`), `rated`, `kev`, `prioritized`, `composite` (APEX heuristic, disclosed, never presented as vendor severity), `severity_source`, `conflict`. **KEV no longer sets or raises a severity** (previous behaviour removed). KEV-listed CVE without CVSS ⇒ `UNRATED` + KEV badge, action still driven by KEV. CVSS 0/blank/NaN = missing. Stale/absent KEV lookup: the data has no lookup timestamp, so the page says "no KEV listing found; absence does not establish non-exploitation" and never claims a verified as-of date (B5). |
+| **7 Re-run + PR** | §3. |
 
-### The eight named dossiers — BLOCKED / UNVERIFIED
-CVE-2026-71183, -89191, -12260, -4894, -105110, -107466, -87426, -107510 **do not exist anywhere in this repository** (full-text search of every file; the only hit, `CVE-2026-4894`, was a substring of `CVE-2026-48946`), and issue #721 contains no report text. They were *not* reconstructed or simulated. Instead the same defect classes were reproduced on **verbatim production feed records** (`tests/fixtures/dossier_p0_721_real_records.json`, 8 records from `data/apex_enriched_manifest.json`). A harness is in place: drop the eight feed records into `tests/fixtures/golden_721/*.json` and `test_golden_eight_dossiers` enforces every invariant on them (currently skipped with the reason).
+## 2. Root-cause register (condensed; see git history for the original)
+IOC counts diverged three ways (raw count → public mask resets `iocs=[]` → enhancer placeholder row counted); internal ids rendered as "STIX ID"; invalid `T1190.001`; Sigma tags dropped the dot (`attack.t1059001`); composite label shown as severity (206/226 CVSS-scored vulnerabilities contradict their own band); fixed kill-chain templates (60-s beacon); unconditional `APPLIES`; CSS-blur "gating" that left content in the HTML; non-idempotent enhancer; **trial promise in the banner**; **restricted TLP labels published**; unqualified `ioc_count` as a 5th count source in the playbook/banner. Found, not changed: `ioc_truth_engine` rejects every bare lowercase domain (now handled provenance-aware in `dossier_integrity`; the engine itself is untouched); duplicate root `apex_sigma_templates.py` (MERGE, not deleted); static technique table in the upgrade module still lists retired ids (suppressed at render).
 
-## 1. Forensic register — root cause per file
-
-| # | File (function) | Defect | Evidence |
-|---|---|---|---|
-| 1 | `scripts/generate_intel_reports.py::build_report_sections` | `ioc_count = len(raw iocs)` with no qualification; then overwrites `item["iocs"]` with the raw list | Real manifest: 1,528 raw IOC entries → 498 qualified; **1,030 (67%) are not indicators** (703 bare domains incl. the platform's own `cyberdudebivash.com`/`.in`, 243 filenames e.g. `composer.js`, 75 advisory URLs e.g. cisa.gov, 9 malformed) |
-| 2 | same, `_mask_item_for_public_report` + `agent/apex_intelligence_upgrade.py` (3 sites) | Public mask sets `iocs=[]`; narrative engines read `len(item["iocs"])` → "0" | **Root cause of the 7/0/1 split**: headline = raw count (render_report reads the overwritten list), executive/narrative = masked 0, enhancer = placeholder row |
-| 3 | `scripts/report_enhancer.py::build_ioc_table_section` | Inserts a `"No IOCs in current data feed"` row, then `len(iocs)` counts it → "Total IOCs: 1"; every non-generated IOC labelled `OBSERVED` | Reproduced: before = `IOCs: 0` and `IOCs: 1` on the same page |
-| 4 | `generate_intel_reports.py` S1 | Internal report key rendered as **"STIX ID"** | 22,379 / 22,433 published pages; keys are `intel--<hex>` or `intrusion-set--<uuid>` |
-| 5 | `scripts/apex_mitre_attack_engine.py` | Library key `T1190.001` ("SQL Injection") and `CWE-89 → T1190.001`; hard-coded "ATT&CK v16"; hypothesis text stored in a field named `observed_behavior` | Pinned dataset: `T1190` has no sub-techniques. Published in 282 report pages + 23 `api/*.json` files |
-| 6 | `scripts/apex_sigma_templates.py` (+ byte-identical root duplicate) | Sigma tag built with `.replace(".", "")` → `attack.t1059001` (invalid); unknown IDs passed through | verified by test |
-| 7 | `generate_intel_reports.py` S9 → `agent/apex_intelligence_upgrade.py::_KILL_CHAIN_TEMPLATES`; `report_enhancer.py::build_kill_chain_section` | Fixed 7-step templates (implant, persistent C2, **60-second beacon**, DoH, exfiltration) for every advisory | 21,191 pages |
-| 8 | `report_enhancer.py::build_defensive_matrix_section` / `_mitre_name` | Falls back to T1566.001 / T1078 / T1041 when none mapped; every row `HIGH`; non-official names ("LSASS Memory Credential Dump") | code |
-| 9 | `generate_intel_reports.py` (severity/exec/urgency/S4) | Pipeline composite label shown as severity; `INFORMATIONAL — apply patch in routine cycle` for any CVE at LOW/UNKNOWN; S4 deadline from composite risk | Real manifest: **206 of 226 CVSS-scored vulnerabilities (91%) carry a severity label contradicting their own CVSS band**, incl. 22 labelled LOW with CVSS ≥ 9.0; **no record carries a CVSS vector**, so `severity_epss_truth` (which requires a verifying vector) cannot correct any of them. 909 unrated vulnerability records carry a severity label |
-| 10 | `generate_intel_reports.py::render_report` | Header KEV via `bool()`; body via canonical `_kev_confirmed_check` | legacy `"NO"` string read as confirmed in the header |
-| 11 | `generate_intel_reports.py` regulatory (`_reg_flag`, `reg_note`, `_render_regulatory_matrix`) | "YES — Breach notification obligations may apply", `APPLIES` badge on GDPR/DPDP/NIS2 unconditionally; invented KEV "3–14 days" | 22,379 pages |
-| 12 | `generate_intel_reports.py` S11/S18/S20 | Unattributed cluster presented as "tracking cluster"; "Rules are syntax-validated" / "validated rule packs"; BIS "FAIR-aligned" with `float(cvss or 0)` | code |
-| 13 | `report_enhancer.py::_tier_gate` | "Gating" = CSS `filter:blur` over **content still in the served HTML** (view-source/print/scrape bypass); IOC values ungated | 21,187 pages |
-| 14 | `report_enhancer.py` | Unescaped feed text in HTML; `float(x or 0)` for CVSS/EPSS; EPSS treated as 0–1 while generator uses percent; "CVSS v3.1" asserted though no version is recorded; non-idempotent (2 stray newlines per re-run) | tests |
-| 15 | `agent/apex_intelligence_upgrade.py` narrative bank | Unsupported predictions stated as fact: "lateral movement … within 4–6 hours", "dark web within 24–48 hours", "200+ days on average", "treat as CRITICAL regardless of CVSS" (keyword severity override); "attribution maintained across prior campaign activity" for `CDB-UNATTR-*` | code |
-
-**Found, not changed (decisions for the operator):**
-* `scripts/ioc_truth_engine.py` classifies *every* bare lowercase two-label domain (`evil.com`, `c2.evil.ru`) as `software_component` → fail-closed, genuine malicious bare domains are also dropped (recall loss). Left as is: a domain in an advisory body is not evidence of malice, and fixing recall needs a provenance/maliciousness signal, not a syntax rule.
-* Apex upgrade module's static technique table contains `T1562`, `T1562.001`, `T1574.002`, which are **absent from the pinned dataset** (it uses the newer `stealth`/`defense-impairment` tactic names; likely restructured upstream). They are now suppressed from published output if ID-shaped; the table itself is untouched pending a remap review.
-* The ATT&CK sync (`data/attck/enterprise-attack.json`) records no release number, so **no version is claimed anywhere**; Navigator `versions.attack:"15"` remains and is unverified. Recommend recording `x_mitre_version` in `true_intel_ingestor.py`.
-* `sentinel-blogger.yml`, `p*_production_certification.py`, KV/D1/R2, auth, payment: untouched.
-* A byte-identical duplicate `apex_sigma_templates.py` sits at the repo root (no importers; certifier checks existence). Classified MERGE; not deleted (deprecation policy).
-
-## 2. Architecture (what changed, what was reused)
-
-```
-feed record ─► dossier_integrity (single authority, stdlib, side-effect free)
-                 ├─ qualify_iocs()      ► reuses ioc_truth_engine.classify_ioc   (no new classifier)
-                 ├─ validate_technique() ► reads pinned data/attck/enterprise-attack.json
-                 ├─ severity_basis()    ► reuses severity_epss_truth.cvss_rating / verified_cvss
-                 ├─ valid_stix_id(), tlp_public_conflict(), source_stated_conditions()
-                 ▼
-   generate_intel_reports.py (20-section page) ─► report_enhancer.py (appended cards)
-        both consume the SAME qualified collection ⇒ one IOC count per record
-```
-No new reporting engine was created (the Python dossier lineage and the JS Evidence-Registry lineage remain uncoupled — that unification is **not** done here and is the recommended next architectural step; see §8).
-
-Behaviour contract introduced:
-* IOC count = `len(qualified)`; empty = 0; no placeholder rows; AI-generated candidates never counted; evidence state is `SOURCE_REPORTED` / `UNVERIFIED` — `OBSERVED` only with an explicit marker **and** a source.
-* Severity: non-vuln → pipeline label; KEV → pipeline label (may only be *raised* to the CVSS band); CVSS present → CVSS band of the reported score (labelled "vector unavailable to verify") with the composite label disclosed when it disagrees; otherwise **UNRATED** + "PRIORITY NOT DETERMINED … CUSTOMER EXPOSURE: UNKNOWN", quoting the source's own stated attack conditions. CVSS 0/blank = missing.
-* ATT&CK: ID-shaped values validated against the pinned dataset; undefined sub-technique → parent; unknown → suppressed; names pass through; all mappings flagged `ANALYST_INFERENCE` / `HYPOTHESIS_NOT_OBSERVED`.
-* Kill chain: only source-provided phases; else "OBSERVED ACTIVITY: NONE REPORTED" + a labelled hypothetical limited to what the advisory states.
-* Gating is server-side (content not emitted below tier); feed text HTML-escaped.
-* TLP: GREEN/AMBER/RED on a public page is flagged "PUBLICATION REVIEW REQUIRED" and the source label is preserved (not silently relabelled; not blocked — policy decision for the operator).
-
-## 3. Before / after (same extractor, original vs fixed code, 8 real records)
-Full data: `before_after_comparison.json`. Examples: `examples/*.html.txt` (rated + KEV-listed; unrated low-evidence) — full rendered pages stored as `.html.txt` so the repo-wide commercial-contract verifier (which scans every `*.html`) does not treat evidence artifacts as site pages; rename to `.html` to view in a browser.
-
-| Record | CVSS | IOC count shown (before → after) | Severity shown | Action shown after |
-|---|---|---|---|---|
-| FortiGate CVE-2025-59718 (KEV) | 9.8 | 5 → 0 | HIGH → **CRITICAL** | IMMEDIATE PATCH REQUIRED |
-| CVE-2026-3300 Everest Forms (unauth RCE) | — | 0 and **1** → 0 | LOW → **UNRATED** | PRIORITY NOT DETERMINED; source states “Unauthenticated Remote Code Execution…” |
-| Magento PolyShell (unauth upload/RCE) | — | 0 and **1** → 0 | LOW → UNRATED | same |
-| WordPress unauth SQLi (400k sites) | — | 0 and **1** → 0 | LOW → UNRATED | same |
-| PHP Composer flaws → command exec | — | 2 → 0 | CRITICAL → UNRATED | same |
-| GPL Odorizers / Contemporary Controls / org page | — | 5→3, 4→1, 5→0 | MEDIUM (non-vuln) | unchanged |
-
-All 8 before-pages carried the fixed kill-chain text, 3× `APPLIES`, CSS-blur gating and `STIX ID intrusion-set--…`; all 8 after-pages carry none of them.
-
-## 4. Validation (actual commands)
-
-| Command | Result |
+## 3. Validation (local; exact)
+| Check | Result |
 |---|---|
-| `pytest tests/test_dossier_integrity_p0_721.py tests/test_generate_intel_reports_financial_impact.py` | 137 passed, 2 skipped (skips = golden-eight harness, BLOCKED) |
-| same new module run against the **original** source (5 files stashed) | 83 of the then-117 tests failed → tests discriminate (suite has grown since) |
-| `python3 scripts/regression_tests.py` | **41/41 PASS** (CLAUDE.md still says 21) |
-| `python3 scripts/p33_production_certification.py` / `ci_stats_extract.py p33` | WORLDWIDE_RELEASE, 0 blockers, 21/26 (5 pre-existing warnings) |
-| `pytest tests` (≈4,360 collected; 2 modules ignored: need `boto3`, absent here) | 4,324 passed · 24 failed · 1 collection error · 12 skipped — **identical failing set to the original source (§4a)** |
-| `pyflakes` on all modified/new files | no undefined names |
-| `python3 scripts/p0_721_dossier_integrity_audit.py --reports` | §5 |
+| `tests/test_dossier_integrity_p0_721.py` | **204 passed, 2 skipped** (golden harness, B1) |
+| Mutation test: allow missing TLP / allow restricted TLP / coerce unknown sub-technique to parent / drop source corroboration / restore trial button / let KEV set severity | each mutant **fails** the suite (14 / 15 / 5 / 2 / 65 / 2 tests); baseline restored, 204 pass |
+| `scripts/verify_commercial_contract.py` | **5,424 checks, 0 failed** |
+| `verify_public_claims.py` / `customer_release_label.py` / `health_clock_negative_controls.py` | 36,261 checks, 0 failed / 135 pages, 0 stale / pass |
+| `scripts/regression_tests.py` | **41/41 PASS** |
+| `p33_production_certification.py` | WORLDWIDE_RELEASE, 0 blockers |
+| `pytest tests` (2 modules need `boto3`, ignored) | 4,405 passed · 24 failed + 1 collection error · 12 skipped — **identical failing set to the original source** (0 regressions) |
+| pyflakes undefined names / `py_compile` on Python 3.11 (CI version) | clean on all 14 changed `.py` files |
+| Remote CI | see PR for the final head; scanners restart on every push |
 
-Test content (not smoke): negative controls for empty/None/non-list IOCs, CVE refs, advisory URLs, filenames, software/platform domains, private/malformed IPs, duplicates across case/defang/root-dot, AI-generated, forged `observed` markers; ATT&CK valid/sub-technique/malformed/unknown + a sweep over every library keyword and CWE; Sigma tags; Navigator layer; STIX-id grammar (9 cases); severity matrix incl. CVSS band edges, zero/blank CVSS, KEV-raise; TLP; legacy KEV strings; HTML/script injection in title/description/IOC/kill-chain; 6 000-char + NUL + RTL titles; empty/partial records; idempotency; server-side gating; **sweep of 43 sampled production records** + the 8 fixtures, each asserting: one IOC count across every section, no template fabrications, no invalid ATT&CK id (incl. the Navigator data-URI), no internal key as STIX id, severity/action never contradictory, CVSS never shown below its band.
+**Existing tests changed (all deliberate):** 7 report-generation suites now label their fixture items `TLP:CLEAR` (unlabelled items are correctly refused); `test_genuine_cve_item_keeps_its_patch_directive` supplies a CVSS score (a deadline needs a basis) with a new unrated sibling; `test_enhancer_playbook_zero_iocs_and_missing_cvss` previously expected "3 published IOCs" from three value-less placeholder dicts plus `ioc_count=3` — the exact defect — and now uses real corroborated indicators plus a placeholder negative control.
 
-**One existing test was changed**, deliberately: `test_genuine_cve_item_keeps_its_patch_directive` asserted a hard "PATCH WITHIN 14 DAYS" for a CVE with *no CVSS and no KEV* (composite label only). It now supplies `cvss_score: 8.1` (still asserts the deadline) and a new sibling test asserts the unrated variant gets triage, not a deadline.
+## 4. Measured state of what is already published (not fixed by this PR)
+`data/quality/p0_721_dossier_integrity_report.json` (`python3 scripts/p0_721_dossier_integrity_audit.py --reports [--strict]`):
+* **TLP** — entries that must not be anonymous: `feed.json` 11 (all with a live page, 2×RED), `feed_public.json` 26, `feed_mssp.json` 26, `feed_enterprise.json` 13 (8 with a live page) = **76**.
+* **Pages** — 22,380 / 22,433 carry ≥1 pre-fix signature: placeholder IOC row 9,483 · internal key as "STIX ID" 22,379 · `APPLIES` 22,379 · fixed kill chain 21,191 · CSS-blur gating 21,187 · **free-trial promise 21,187**; 282 pages + 23 API files carry non-current ATT&CK ids (`T1190.001`, `T1574.002`).
+* **Manifest (2,000 records)** — IOC entries 1,528 → **855 observables**, **0 validated**, 673 non-indicators (platform's own domains 48, advisory refs 109, software/product 264, filenames 243, malformed 9); severity label contradicts CVSS band on 206 / 226; 931 unrated vulnerability records carry a severity label; 175 technique strings fail verification.
+Unlabelled production records (all 2,000 enriched-manifest items have no `tlp`) are now **withheld** until the owner approves collectors — a deliberate consequence of fail-closed.
 
-### 4a. Full-suite comparison
-The 24 failures + 1 collection error (`tests/platform_services/test_billing_engine.py`) are **pre-existing**: the same 25 fail identically when the five modified source files are restored to `241cce7fb` (brand-identity strings, dashboard/workflow-pinning contracts, v27/v29 module tests, etc. — unrelated to dossier rendering). Net regressions from this change: **0**. During development the full-suite run also surfaced one isolation bug of mine (a module-level `logging.disable` breaking 8 later `caplog` tests), which was fixed.
-Method: full run on changed code → list failures → re-run exactly those ids on stashed original source → set difference. Test side-effects on 4 tracked data files were reverted (not part of this PR).
-
-## 5. Measured state of what is *already published* (not fixed by this PR)
-`data/quality/p0_721_dossier_integrity_report.json` (read-only audit; `--strict` exits 1 on any defect):
-* 22,380 of 22,433 report pages carry ≥1 pre-fix signature: placeholder IOC row 9,483 · internal key as "STIX ID" 22,379 · unconditional `APPLIES` 22,379 · fixed kill-chain text 21,191 · CSS-blur-gated content 21,187.
-* 282 pages and 23 API JSON files contain invalid ATT&CK ids (`T1190.001`, `T1574.002`).
-* Manifest: 1,030 non-indicator IOC entries in 456 items; 206/226 severity-vs-CVSS contradictions.
-
-These change only when the pipeline regenerates and redeploys. A passing local test does not certify the live site.
+## 5. Before / after (same extractor; original = clean checkout of `241cce7fb`; 8 real records)
+`before_after_comparison.json`; examples rendered by the fixed code: `examples/*.html` (rated KEV-listed; unrated low-evidence). Records are production samples labelled `TLP:CLEAR` explicitly for the "after" run.
+All eight before-pages carried the trial promise, fixed kill-chain text, 3× `APPLIES`, CSS-blur gating and `STIX ID intrusion-set--…`; none of the after-pages do. Severity: unauth-RCE/SQLi records `LOW`/`CRITICAL` → `UNRATED` + triage; KEV+CVSS 9.8 record `HIGH` → `CRITICAL` (CVSS band). IOC counts: `[5]→[0]`, `[5]→[4]`, `[4]→[2]`, `[2]→[0]`, `[5]→[1]`, `[0,1]→[0]`×3, each now a single value on the page with validated = 0.
 
 ## 6. Reuse report (CLAUDE.md)
-| Metric | Result |
-|---|---|
-| Existing engines reused (called, not re-implemented) | `ioc_truth_engine.classify_ioc`, `severity_epss_truth` (`cvss_rating`, `verified_cvss`, `epss_percent`, `kev_confirmed`), `_kev_confirmed_check`, pinned `data/attck` |
-| Routes extended / duplicated | 0 / 0 (no route touched) |
-| New modules | `dossier_integrity.py` (thin composition layer), `p0_721_dossier_integrity_audit.py` (observability) — gap: no shared evidence rules existed; 3 renderers each had their own |
-| Duplicate engines introduced | 0 |
-| Backward compatibility | field names/shapes kept (`observed_behavior`, `iocs` shape, `ioc_count`); `T1190.001` library entry kept as documented deprecated alias → `T1190` |
-| Certification chain | intact (P33 WORLDWIDE_RELEASE, 0 blockers) |
-| Regression suite | 41/41 |
+Reused, not re-implemented: `ioc_truth_engine.classify_ioc`, `severity_epss_truth` (`cvss_rating`, `verified_cvss`, `epss_percent`), `_kev_confirmed_check`, the pinned MITRE data, the commercial verifier's own banned-pattern list (as a test oracle). New: `dossier_integrity.py`, `tlp_policy.py`, `attack_release_pin.py`, `p0_721_dossier_integrity_audit.py` — gap: no shared evidence/TLP authority existed. Duplicate engines/routes: 0. Compatibility: field names and shapes kept (`observed_behavior`, `iocs`, `ioc_count`), the `T1190.001` library key retained as a documented alias, deprecated wrappers (`normalize_tlp`, `tlp_public_conflict`, `TRIAL_URL`) retained; the one intentional behaviour break is fail-closed publication.
 
-## 7. Not done / honest limits
-* **Detection engineering (Phase 7)**: the public artifact now makes *no* readiness claim and says per-rule validation states are separate (syntax / offline-fixture / customer-environment). No rule generator, fixture harness or `PRODUCTION_READY` gate was built or changed; no Sigma/KQL/SPL/EQL/Suricata/YARA output was validated.
-* **STIX / MISP / TAXII exports, PDF, entitlement/tenant paths, payment, Workers**: not audited or changed here (beyond the HTML gate). No interoperability claim is made or supported.
-* **Claim ledger / lifecycle states / correction notices / four-product (FLASH…STRATEGIC) dossier architecture / unified contract with the JS lineage**: not implemented. `agent/dynamic_dossier_engine.py` was not wired.
-* **KEV/EPSS lookup state** ("not listed" vs "lookup unavailable") is not recorded in the data, so the report says "no KEV listing found" and that absence is not proof of non-exploitation; it cannot say "lookup unavailable".
-* Remote CI was not run. `GATE 1` pyflakes undefined-name check was reproduced locally only.
-* Pre-existing failures (identical on original source) are listed in §4a.
-
-## 8. Recommended next steps (priority order)
-1. Supply the 8 originals → golden harness; regenerate + redeploy (operator-authorized) and run the audit with `--reports --strict` against the regenerated tree; wire `--strict` into CI after regeneration.
-2. Record `cvss_vector`, CVSS version, `x_mitre_version`, and KEV/EPSS lookup status in the feed so severity can be *verified* rather than band-derived.
-3. TLP policy decision for GREEN/AMBER/RED items on public URLs (block vs relabel after review).
-4. Decide the `ioc_truth_engine` bare-domain policy with a provenance signal; remap the 3 obsolete technique ids.
-5. Detection-pack validation pipeline, then STIX 2.1 / MISP validator tests on real serialized bundles.
-6. Couple the Python dossier lineage to the JS Evidence Registry via a versioned record (ADR), and wire `dynamic_dossier_engine`.
+## 7. Rollback
+`git revert` the merge commit. No workflow, schema, KV/D1/R2, auth or payment change. New runtime inputs: `config/tlp_publication_policy.json`, `data/attck/attack_release_pin.json`, `data/reference/iana_tlds.txt` (all fail closed if absent). Test-run side effects on four tracked data files were reverted and are not part of this PR.

@@ -17,6 +17,7 @@ MANDATE: These tests are the permanent regression guard for both defects. If
          figure can again be presented as if it were customer-specific.
 """
 
+# P0 #721: fixtures carry an explicit TLP:CLEAR label -- unlabelled items are (correctly) refused publication
 import os
 import sys
 
@@ -38,7 +39,7 @@ FIXTURE_A1_PHISHING = {
     "id": "intel--f43ac4fcc6f30452",
     "title": "[OpenPhish] Phishing URL: https://a1d504.arcadejafet.cl/",
     "description": "A phishing URL was identified by OpenPhish.",
-    "severity": "HIGH",
+    "tlp": "TLP:CLEAR", "severity": "HIGH",
     "threat_type": "",
     "feed_source": "openphish",
     "risk_score": 7.0,
@@ -90,7 +91,7 @@ def test_genuine_cve_item_keeps_its_patch_directive():
         "id": "intel--test-genuine-cve",
         "title": "CVE-2026-99999 Critical Remote Code Execution in Example Product",
         "description": "A critical remote code execution vulnerability affecting Example Product.",
-        "severity": "HIGH",
+        "tlp": "TLP:CLEAR", "severity": "HIGH",
         "threat_type": "Vulnerability",
         "feed_source": "nvd",
         "risk_score": 8.5,
@@ -115,7 +116,7 @@ def test_cve_without_cvss_or_kev_gets_triage_not_a_fabricated_patch_deadline():
         "id": "intel--test-unrated-cve",
         "title": "CVE-2026-99999 Critical Remote Code Execution in Example Product",
         "description": "A critical remote code execution vulnerability affecting Example Product.",
-        "severity": "HIGH",
+        "tlp": "TLP:CLEAR", "severity": "HIGH",
         "threat_type": "Vulnerability",
         "feed_source": "nvd",
         "risk_score": 8.5,
@@ -132,7 +133,7 @@ def test_genuine_kev_confirmed_cve_shows_immediate_patch_language():
         "id": "intel--test-genuine-kev",
         "title": "CVE-2026-88888 Critical Remote Code Execution — Actively Exploited",
         "description": "A critical remote code execution vulnerability confirmed in CISA KEV.",
-        "severity": "CRITICAL",
+        "tlp": "TLP:CLEAR", "severity": "CRITICAL",
         "threat_type": "Vulnerability",
         "feed_source": "cisa_kev",
         "risk_score": 9.8,
