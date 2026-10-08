@@ -456,20 +456,56 @@ class TestTlpPublicationPolicy:
         d = tlp.publication_decision({"tlp": "TLP:WHITE"}, dict(NO_POLICY, legacy_white_treated_as_clear=True))
         assert d["allowed"] and d["assignment"] == "legacy_white_operator_migration"
 
+    APPROVED = [{"source": "cisa-kev", "hosts": ["cisa.gov"]}]
+
     def test_policy_assignment_only_for_unlabelled_items_of_an_approved_collector(self):
-        pol = dict(NO_POLICY, first_party_public_sources=["cisa-kev"])
-        ok = tlp.publication_decision({"source": "CISA-KEV"}, pol)
+        pol = dict(NO_POLICY, first_party_public_sources=self.APPROVED)
+        good = {"source": "CISA-KEV", "source_url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"}
+        ok = tlp.publication_decision(good, pol)
         assert ok["allowed"] and ok["assignment"] == "policy_first_party_public_source" and ok["label"] == "TLP:CLEAR"
-        assert not tlp.publication_decision({"source": "someone-else"}, pol)["allowed"]
+        assert not tlp.publication_decision({"source": "someone-else", "source_url": "https://www.cisa.gov/x"}, pol)["allowed"]
         # an explicit label always wins over source approval -- third-party content is never relabelled
-        assert not tlp.publication_decision({"tlp": "TLP:GREEN", "source": "cisa-kev"}, pol)["allowed"]
-        assert not tlp.publication_decision({"tlp": "TLP:PURPLE", "source": "cisa-kev"}, pol)["allowed"]
-        assert not tlp.publication_decision({"tlp": "TLP:AMBER", "source": "cisa-kev"}, pol)["allowed"]
+        for lab in ("TLP:GREEN", "TLP:PURPLE", "TLP:AMBER"):
+            assert not tlp.publication_decision(dict(good, tlp=lab), pol)["allowed"], lab
+
+    def test_feed_supplied_source_string_alone_cannot_self_approve(self):
+        pol = dict(NO_POLICY, first_party_public_sources=self.APPROVED)
+        # spoofed name, no URL / wrong host / look-alike host / userinfo trick / legacy string entry
+        for item in ({"source": "cisa-kev"},
+                     {"source": "cisa-kev", "source_url": "https://evil.example/cisa.gov"},
+                     {"source": "cisa-kev", "source_url": "https://cisa.gov.evil.example/x"},
+                     {"source": "cisa-kev", "source_url": "https://notcisa.gov/x"},
+                     {"source": "cisa-kev", "source_url": "https://cisa.gov@evil.example/x"},
+                     {"source": "cisa-kev", "source_url": "not a url"}):
+            d = tlp.publication_decision(item, pol)
+            assert not d["allowed"] and d["reason_code"] == "MISSING_LABEL", item
+        legacy = dict(NO_POLICY, first_party_public_sources=["cisa-kev"])  # bare-string entries are not an approval
+        assert not tlp.publication_decision({"source": "cisa-kev", "source_url": "https://www.cisa.gov/x"}, legacy)["allowed"]
+
+    def test_restricted_upstream_label_is_never_laundered_into_a_clear_dossier(self):
+        base = {"id": "agg", "tlp": "TLP:CLEAR"}
+        cases = {
+            "tlp_label": dict(base, tlp_label="TLP:AMBER"),
+            "evidence_chain": dict(base, evidence_chain=[{"source_name": "a", "tlp": "TLP:CLEAR"}, {"source_name": "b", "tlp": "TLP:GREEN"}]),
+            "sources": dict(base, sources=[{"name": "x", "tlp_label": "TLP:RED"}]),
+            "merged_from": dict(base, merged_from=[{"tlp": "TLP:AMBER+STRICT"}]),
+            "invalid_component": dict(base, evidence_chain=[{"tlp": "TLP:BLUE"}]),
+            "legacy_component": dict(base, corroborating_sources=[{"tlp": "TLP:WHITE"}]),
+        }
+        for name, item in cases.items():
+            d = tlp.publication_decision(item, NO_POLICY)
+            assert not d["allowed"], name
+        assert tlp.publication_decision(cases["tlp_label"], NO_POLICY)["reason_code"] == "RESTRICTED_UPSTREAM_LABEL"
+        # unlabelled components cannot be proven restricted; an all-CLEAR aggregate still publishes
+        ok = dict(base, tlp_label="TLP:CLEAR", evidence_chain=[{"source_name": "a"}, {"tlp": "TLP:CLEAR"}])
+        assert tlp.publication_decision(ok, NO_POLICY)["allowed"]
+        # an upstream label can only restrict: it never grants publication to an otherwise-quarantined item
+        assert not tlp.publication_decision({"id": "u", "evidence_chain": [{"tlp": "TLP:CLEAR"}]}, NO_POLICY)["allowed"]
 
     def test_decision_never_rewrites_the_item(self):
         item = {"id": "x", "tlp": "TLP:GREEN", "source": "cisa-kev"}
         before = copy.deepcopy(item)
-        tlp.publication_decision(item, dict(NO_POLICY, first_party_public_sources=["cisa-kev"]))
+        tlp.publication_decision(item, dict(NO_POLICY, first_party_public_sources=self.APPROVED))
         assert item == before
 
     def test_policy_file_is_default_deny_and_unreadable_policy_fails_closed(self, tmp_path):
@@ -478,7 +514,9 @@ class TestTlpPublicationPolicy:
         raw = json.loads((ROOT / "config" / "tlp_publication_policy.json").read_text(encoding="utf-8"))
         assert raw["default"] == "deny" and raw["rules"]["only_tlp_clear_is_anonymously_publishable"] is True
         for name, body in (("absent.json", None), ("garbage.json", "{not json"), ("wrong.json", '{"first_party_public_sources": "all"}'),
-                           ("mixed.json", '{"first_party_public_sources": [1, 2]}')):
+                           ("mixed.json", '{"first_party_public_sources": [1, 2]}'),
+                           ("strings.json", '{"first_party_public_sources": ["cisa-kev"]}'),
+                           ("nohosts.json", '{"first_party_public_sources": [{"source": "cisa-kev", "hosts": []}]}')):
             p = tmp_path / name
             if body is not None:
                 p.write_text(body, encoding="utf-8")

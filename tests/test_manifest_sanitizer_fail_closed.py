@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_publication_requires_working_sanitizer(tmp_path, dependency):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    for name in ("generate_api_manifests.py", "severity_epss_truth.py"):
+    for name in ("generate_api_manifests.py", "severity_epss_truth.py", "tlp_policy.py"):
         shutil.copyfile(ROOT / "scripts" / name, scripts / name)
     sanitizer = scripts / "public_api_sanitizer.py"
     if dependency == "healthy":
@@ -24,7 +24,7 @@ def test_publication_requires_working_sanitizer(tmp_path, dependency):
     api = tmp_path / "api"
     api.mkdir()
     (api / "feed.json").write_text(json.dumps([{
-        "id": "test-advisory", "title": "Evidence fixture", "severity": "HIGH",
+        "id": "test-advisory", "title": "Evidence fixture", "severity": "HIGH", "tlp": "TLP:CLEAR",  # P0 #721: unlabelled items are refused
         "timestamp": "2026-10-06T00:00:00Z", "report_url": "https://example.com/private",
     }]))
     out = api / "v1" / "intel"
@@ -45,3 +45,57 @@ def test_publication_requires_working_sanitizer(tmp_path, dependency):
         assert payload["count"] == 1
         assert "report_url" not in payload["items"][0]
         assert (out / "latest_pro.json").exists()
+
+
+# ── P0 #721: TLP last-mile gate on the anonymously served immutable manifests ──────────────────────────────
+def _run_manifests(tmp_path, feed, copy_policy=True):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    names = ["generate_api_manifests.py", "severity_epss_truth.py", "public_api_sanitizer.py"]
+    if copy_policy:
+        names.append("tlp_policy.py")
+    for name in names:
+        shutil.copyfile(ROOT / "scripts" / name, scripts / name)
+    api = tmp_path / "api"
+    (api / "v1" / "intel").mkdir(parents=True)
+    (api / "feed.json").write_text(json.dumps(feed))
+    existing = api / "v1" / "intel" / "latest.json"
+    existing.write_text('{"last_known_good":true}')
+    result = subprocess.run([sys.executable, str(scripts / "generate_api_manifests.py")],
+                            cwd=tmp_path, capture_output=True, text=True)
+    return result, existing
+
+
+def _adv(i, **kw):
+    return dict({"id": f"adv-{i}", "title": f"Fixture {i}", "severity": "HIGH", "timestamp": "2026-10-06T00:00:00Z"}, **kw)
+
+
+def test_manifests_withhold_every_non_clear_item(tmp_path):
+    feed = [_adv(1, tlp="TLP:CLEAR"), _adv(2, tlp="TLP:GREEN"), _adv(3, tlp="TLP:AMBER"), _adv(4, tlp="TLP:RED"),
+            _adv(5), _adv(6, tlp="TLP:PURPLE"), _adv(7, tlp="TLP:WHITE"),
+            _adv(8, tlp="TLP:CLEAR", evidence_chain=[{"tlp": "TLP:GREEN"}])]
+    result, existing = _run_manifests(tmp_path, feed)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "withheld from public manifests" in result.stdout
+    emitted = set()
+    for f in (tmp_path / "api" / "v1" / "intel").glob("*.json"):
+        if f.name == "registry.json":
+            continue
+        raw = f.read_text(encoding="utf-8")
+        emitted |= {i for i in range(1, 9) if f'"adv-{i}"' in raw}
+    assert emitted == {1}, f"only the TLP:CLEAR, un-contradicted item may be emitted; got {sorted(emitted)}"
+    assert json.loads(existing.read_text())["count"] == 1
+
+
+def test_manifests_refuse_to_emit_when_everything_is_withheld(tmp_path):
+    result, existing = _run_manifests(tmp_path, [_adv(1), _adv(2, tlp="TLP:RED")])
+    assert result.returncode == 1
+    assert "withheld by the TLP publication policy" in result.stdout
+    assert existing.read_text() == '{"last_known_good":true}', "previous artifacts must not be modified"
+
+
+def test_manifests_refuse_when_policy_module_unavailable(tmp_path):
+    result, existing = _run_manifests(tmp_path, [_adv(1, tlp="TLP:CLEAR")], copy_policy=False)
+    assert result.returncode == 1
+    assert "TLP policy module unavailable" in result.stdout
+    assert existing.read_text() == '{"last_known_good":true}'

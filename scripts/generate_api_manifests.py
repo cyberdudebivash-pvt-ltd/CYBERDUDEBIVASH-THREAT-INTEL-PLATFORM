@@ -257,6 +257,25 @@ if len(raw_feed) == 0:
 
 info(f'Feed loaded: {len(raw_feed)} total items')
 
+# ── STEP 1a: TLP last-mile gate (P0 #721) ────────────────────────────────────
+# These manifests are anonymously served immutable bundles. Only items that scripts/tlp_policy.py allows
+# (TLP:CLEAR, or an operator-approved first-party-public collector) may enter them; GREEN/AMBER/AMBER+STRICT/RED,
+# missing, invalid and unmigrated-legacy labels are dropped here and counted. There is no bypass flag. If the
+# policy cannot be loaded the generator stops (fail closed) rather than publishing unchecked.
+try:
+    import tlp_policy as _tlp_policy
+except ImportError as _e:
+    fatal(f'TLP policy module unavailable ({_e}); refusing to emit public manifests unchecked')
+raw_feed, _tlp_held = _tlp_policy.partition_publishable(raw_feed)
+if _tlp_held:
+    _reason_counts = {}
+    for _row in _tlp_held:
+        _reason_counts[_row['reason_code']] = _reason_counts.get(_row['reason_code'], 0) + 1
+    warn(f'[TLP] {len(_tlp_held)} item(s) withheld from public manifests: {_reason_counts}')
+if len(raw_feed) == 0:
+    fatal('[TLP] every feed item was withheld by the TLP publication policy; refusing to emit empty public '
+          'manifests -- operator review of labels/policy required (previous artifacts are NOT modified)')
+
 # ── STEP 1b: Deduplicate before manifests are generated ──────────────────────
 # Mirrors the 3-layer dedup in the Cloudflare Worker's deduplicateFeedItems().
 # Ensures duplicates are never baked into the immutable bundle files.

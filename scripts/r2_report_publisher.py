@@ -119,6 +119,7 @@ from r2_cost_guard import (  # noqa: E402
     enforce_budget,
 )
 from canonical_timestamp import parse_timestamp  # noqa: E402
+import tlp_policy  # noqa: E402  (P0 #721: last-mile TLP decision; there is no bypass flag)
 from generate_intel_reports import rel_report_path, report_future_skew_hours  # noqa: E402
 
 logging.basicConfig(
@@ -266,6 +267,42 @@ def canonical_age(item: dict, now: datetime) -> tuple[Optional[datetime], Option
         return None, None
     age_hours = (now - result.normalized).total_seconds() / 3600.0
     return result.normalized, age_hours
+
+
+TLP_QUARANTINE_REPORT = REPO_ROOT / "data" / "quality" / "r2_tlp_quarantine_report.json"
+
+
+def apply_tlp_gate(items: list[dict], state: dict) -> tuple[list[dict], list[dict]]:
+    """Last-mile publication gate (P0 #721): only items tlp_policy allows may become publish candidates.
+
+    Denied items never reach build_plan(), so no PUT of their HTML/PDF is ever planned. The gate does NOT
+    delete anything: an object that is already in R2 (the state file names it) is only REPORTED here as
+    needing operator retraction review -- deletion of previously public material is an operator-approved,
+    backed-up action (docs/p0_721/TLP_RETRACTION_RUNBOOK.md), never an automatic side effect.
+    Returns (allowed items, quarantine rows). Rows carry ids and reason codes only -- never report content.
+    """
+    ok, held = tlp_policy.partition_publishable(items)
+    state_items = state.get("items", {}) if isinstance(state, dict) else {}
+    for row in held:
+        entry = state_items.get(row.get("id")) or {}
+        row["already_in_r2"] = bool(entry.get("html_key") or entry.get("pdf_key"))
+    return ok, held
+
+
+def write_tlp_quarantine_report(held: list[dict], total: int, now: datetime) -> None:
+    report = {
+        "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "policy": "config/tlp_publication_policy.json",
+        "items_considered": total,
+        "quarantined": len(held),
+        "needing_retraction_review": sorted(r["id"] for r in held if r.get("already_in_r2") and r.get("id")),
+        "items": held,
+    }
+    try:
+        TLP_QUARANTINE_REPORT.parent.mkdir(parents=True, exist_ok=True)
+        TLP_QUARANTINE_REPORT.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError as exc:  # observability only -- never blocks the (already-gated) publish
+        log.warning("Could not write %s: %s", TLP_QUARANTINE_REPORT, exc)
 
 
 def build_publish_candidates(items: list[dict], window_hours: int, now: datetime) -> list[dict]:
@@ -674,10 +711,20 @@ def main() -> int:
     items = _get_items(_load_json(FEED_JSON, []))
     log.info("Loaded %d item(s) from %s; rolling window = %dh", len(items), FEED_JSON, window_hours)
 
+    state = load_publish_state()
+    items, tlp_held = apply_tlp_gate(items, state)
+    write_tlp_quarantine_report(tlp_held, len(items) + len(tlp_held), now)
+    if tlp_held:
+        in_r2 = sum(1 for r in tlp_held if r.get("already_in_r2"))
+        log.warning(
+            "TLP gate: %d item(s) withheld from R2 publication (restricted/missing/invalid label); %d of them are "
+            "ALREADY in R2 and need operator retraction review (see %s). Nothing was deleted.",
+            len(tlp_held), in_r2, "data/quality/r2_tlp_quarantine_report.json",
+        )
+
     candidates = build_publish_candidates(items, window_hours, now)
     log.info("%d item(s) within the %dh window are publish candidates.", len(candidates), window_hours)
 
-    state = load_publish_state()
     budgets = R2Budgets.from_env()
     plan, put_ops, delete_ops = build_plan(
         candidates, state, window_hours, now,
