@@ -296,14 +296,14 @@ _TECH_NARRATIVES = {
         "impact": "Full system compromise — arbitrary code execution with process-level privileges",
         "attack_surface": "all internet-exposed instances of the affected application",
         "defender_focus": "emergency patching, network segmentation, EDR behavioural alerting for anomalous child-process spawning",
-        "escalation": "RCE vulnerabilities are the highest-value initial access vectors — adversaries will attempt immediate lateral movement, credential harvesting, and ransomware staging within 4–6 hours of exploitation.",
+        "escalation": "Remote code execution flaws are attractive initial-access vectors; if exploitation occurs, post-exploitation activity such as lateral movement or credential theft becomes possible. No such activity is reported for this advisory.",
     },
     "sql_injection": {
         "delivery": "Malformed SQL expression injected through user-controlled input field or API parameter",
         "impact": "Unauthorised database read/write access — potential data exfiltration, authentication bypass, and file system read",
         "attack_surface": "all database-backed web application endpoints accepting unsanitised user input",
         "defender_focus": "WAF rule deployment for SQL metacharacter filtering, database activity monitoring, and query parameterisation audit",
-        "escalation": "SQLi access to sensitive data tables creates immediate regulatory exposure under GDPR, DPDP, and HIPAA. Data exfiltration often precedes public extortion campaigns.",
+        "escalation": "If exploited, SQL injection can expose data held in the affected database; whether any regulation applies depends on the data involved and your jurisdiction. No data exposure is reported for this advisory.",
     },
     "path_traversal": {
         "delivery": "Crafted file path sequences (e.g., ../../../../etc/passwd) submitted via API or file upload functionality",
@@ -345,7 +345,7 @@ _TECH_NARRATIVES = {
         "impact": "Unauthorised access to protected resources, admin functionality, or sensitive data without valid credentials",
         "attack_surface": "login endpoints, API authentication layers, JWT validation, and session management functions",
         "defender_focus": "authentication logic audit, anomalous login pattern detection, and privileged access monitoring",
-        "escalation": "Authentication bypass to admin functionality grants immediate full application control — treat as severity CRITICAL regardless of CVSS rating.",
+        "escalation": "Authentication bypass to administrative functionality, if exploitable in your deployment, would grant control of the application. Rate severity from the CVSS score and your own exposure, not from the flaw class alone.",
     },
     "memory_corruption": {
         "delivery": "Memory safety violation triggered via crafted input — heap/stack overflow, use-after-free, or type confusion",
@@ -373,28 +373,28 @@ _TECH_NARRATIVES = {
         "impact": "Mass file encryption, backup deletion, and extortion demand — operational continuity disruption",
         "attack_surface": "entire domain environment including file servers, backup systems, and NAS devices",
         "defender_focus": "offline backup validation, EDR anti-ransomware behavioural rules, and immediate network segmentation on detection",
-        "escalation": "Modern ransomware operators conduct dual extortion — data theft precedes encryption. Assume data is exfiltrated before encryption begins.",
+        "escalation": "Many ransomware operations combine data theft with encryption; if an intrusion is confirmed, assess whether data was exfiltrated.",
     },
     "infostealer": {
         "delivery": "Stealer malware delivered via phishing, malvertising, or trojanised software targeting browser credential stores",
         "impact": "Bulk credential theft, session cookie exfiltration, cryptocurrency wallet compromise, and sensitive data harvesting",
         "attack_surface": "all endpoints with browsers storing credentials or authenticated sessions",
         "defender_focus": "EDR process monitoring for browser data access, stolen credential monitoring via threat intel feeds, and forced session invalidation",
-        "escalation": "Stolen credentials fuel subsequent account takeover campaigns and are sold on dark web marketplaces within 24–48 hours.",
+        "escalation": "Stolen credentials can enable subsequent account takeover; treat exposed credentials as compromised and rotate them.",
     },
     "phishing": {
         "delivery": "Deceptive email or message luring victim to credential harvesting page or malicious file download",
         "impact": "Credential compromise, session theft, or malware installation enabling persistent access",
         "attack_surface": "all corporate email recipients — particularly those with access to financial, admin, or sensitive systems",
         "defender_focus": "email security gateway tuning, DMARC/DKIM/SPF enforcement, and user security awareness training",
-        "escalation": "Compromised credentials from phishing campaigns are immediately used for BEC fraud, wire transfer manipulation, and lateral movement.",
+        "escalation": "Credentials captured by phishing can be used for business email compromise or lateral movement; reset credentials of any user who interacted with the lure.",
     },
     "apt": {
         "delivery": "Multi-vector, multi-stage attack chain combining spearphishing, zero-day exploitation, and supply chain compromise",
         "impact": "Long-term persistent access enabling espionage, data theft, intellectual property exfiltration, and pre-positioning",
         "attack_surface": "high-value targets: government, defence, critical infrastructure, and technology sectors",
         "defender_focus": "threat hunting for long-dwell indicators, privileged access monitoring, and network traffic anomaly detection",
-        "escalation": "APT actors maintain access for 200+ days on average before detection. Comprehensive forensic investigation required — assume full domain compromise.",
+        "escalation": "Long-dwell intrusions are difficult to scope; if compromise is suspected, a comprehensive forensic investigation is warranted.",
     },
     "malware": {
         "delivery": "Malware binary delivered via phishing attachment, drive-by download, or trojanised software",
@@ -408,7 +408,7 @@ _TECH_NARRATIVES = {
         "impact": "System compromise with no immediate vendor-provided remediation — compensating controls are the only defence",
         "attack_surface": "all systems running the affected software version",
         "defender_focus": "immediate network-level mitigations, virtual patching via WAF/IPS, and enhanced monitoring pending vendor patch",
-        "escalation": "Zero-day vulnerabilities are often sold to nation-state actors or criminal groups before public disclosure — exploitation may have been ongoing for months.",
+        "escalation": "Zero-day vulnerabilities may be exploited before a patch exists; consider compensating controls until a fix is available. Prior exploitation of this flaw is not established by the source.",
     },
 }
 
@@ -479,7 +479,9 @@ def generate_technical_narrative(item: Dict[str, Any]) -> str:
         actor = str(item.get("actor_cluster") or item.get("actor") or "Unknown Cluster")
         ttps = item.get("ttps") or item.get("techniques") or []
         iocs = item.get("iocs") or []
-        ioc_count = len(iocs)
+        # P0 #721: the public report masks `iocs` to []; the authoritative
+        # qualified count travels in `ioc_count` -- prefer it (never 0 by mask).
+        ioc_count = item["ioc_count"] if isinstance(item.get("ioc_count"), int) else len(iocs)
         cvss = item.get("cvss_score") or item.get("cvss")
         # bool(item.get("kev") or ...) treated any non-empty string as truthy,
         # so a legacy value like "NO" or "false" read as KEV-confirmed. Reuse
@@ -560,11 +562,11 @@ def generate_technical_narrative(item: Dict[str, Any]) -> str:
             f"<div class='apex-intel-item'><span class='apex-label'>Defender Priority</span>"
             f"<span class='apex-value'>{narr['defender_focus']}</span></div>"
             f"</div>"
-            f"<p>{narr['escalation']}{ttp_action}</p>"
+            f"<p><em>General risk context for this vulnerability class (not an observation about this advisory):</em> {narr['escalation']}{ttp_action}</p>"
             f"<p>Defenders should correlate the IOC table (Section 7) against 30-day SIEM retention, "
             f"proxy logs, EDR process telemetry, and authentication events. "
             f"{ioc_count} indicator{'s' if ioc_count != 1 else ''} of compromise recorded at analysis time."
-            f"{' Actor cluster <strong>' + actor + '</strong> attribution maintained across prior campaign activity.' if actor and actor not in ('Unknown Cluster', 'CDB-CVE-GEN') else ''}"
+            f"{' Actor cluster <strong>' + actor + '</strong> attribution maintained across prior campaign activity.' if actor and actor not in ('Unknown Cluster', 'CDB-CVE-GEN', 'UNATTRIBUTED') and not str(actor).upper().startswith(('CDB-UNATTR', 'UNC-', 'UNKNOWN')) else ''}"
             f"</p>"
             f"</div>"
         )
@@ -1671,7 +1673,7 @@ def generate_campaign_intelligence(item: Dict[str, Any]) -> str:
             f"<div class='apex-intel-item'><span class='apex-label'>TTP Signature Count</span>"
             f"<span class='apex-value'>{len(ttps)} techniques</span></div>"
             f"<div class='apex-intel-item'><span class='apex-label'>IOC Density</span>"
-            f"<span class='apex-value'>{len(iocs)} indicators</span></div>"
+            f"<span class='apex-value'>{item['ioc_count'] if isinstance(item.get('ioc_count'), int) else len(iocs)} indicators</span></div>"
             f"<div class='apex-intel-item'><span class='apex-label'>Escalation Probability</span>"
             f"<span class='apex-value'><strong>{esc_prob}%</strong> (APEX model, 14-day horizon)</span></div>"
             f"<div class='apex-intel-item'><span class='apex-label'>AI Attribution Confidence</span>"
@@ -2625,7 +2627,7 @@ def generate_executive_summary(item):
         epss_disp = "EPSS " + str(epss) + "%" if epss is not None else "EPSS Pending"
         kev_disp  = "CISA KEV CONFIRMED" if kev else "Not in CISA KEV"
         kev_color = "var(--critical)" if kev else "var(--muted)"
-        ioc_count = len(iocs)
+        ioc_count = item["ioc_count"] if isinstance(item.get("ioc_count"), int) else len(iocs)
         ttp_count = len(ttps)
 
         metric_bar = (

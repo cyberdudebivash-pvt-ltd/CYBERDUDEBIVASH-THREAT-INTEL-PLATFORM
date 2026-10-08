@@ -50,6 +50,10 @@ from typing import Any, Dict, List, Optional
 # regardless of report type, including pure IOC/phishing-indicator items that
 # were never CVE/vuln-class eligible for a detection rule in the first place.
 from p38_shared_validators import is_detection_eligible
+# P0 #721: evidence-integrity authority (IOC qualification, pinned ATT&CK data,
+# severity basis) and the repo's EPSS scale reader -- never re-derive either.
+import dossier_integrity as _di
+from severity_epss_truth import epss_percent as _epss_percent
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] REPORT-ENHANCER %(levelname)s %(message)s",
                     datefmt="%Y-%m-%dT%H:%M:%SZ")
@@ -95,68 +99,76 @@ def _card(title: str, content: str, tier: str = "enterprise", icon: str = "") ->
     )
 
 def _tier_gate(content: str, tier_required: str, current_tier: str = "free") -> str:
-    """Wrap content with blur overlay for insufficient tier."""
+    """Gate content by tier.
+
+    P0 #721: this used to wrap the full content in a CSS ``filter:blur`` and
+    overlay -- the gated text remained in the served HTML (view-source / DOM /
+    print / scrape bypass). Gating is now server-side: for an insufficient
+    tier the content is NOT emitted at all, only a locked placeholder.
+    """
     tier_rank = {"free": 0, "pro": 1, "enterprise": 2}
     if tier_rank.get(current_tier, 0) >= tier_rank.get(tier_required, 2):
         return content
     return (
-        f'<div style="position:relative;overflow:hidden;border-radius:8px;">'
-        f'<div style="filter:blur(4px);pointer-events:none;user-select:none;">{content}</div>'
-        f'<div style="position:absolute;inset:0;background:rgba(15,23,42,0.85);'
-        f'display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;">'
-        f'<div style="text-align:center;padding:20px;">'
+        f'<div class="enh-locked" style="border:1px dashed #334155;border-radius:8px;padding:28px 20px;'
+        f'text-align:center;background:rgba(15,23,42,0.85);margin:16px 0;">'
         f'<div style="font-size:24px;margin-bottom:8px;">🔒</div>'
-        f'<div style="color:{C_TEXT};font-weight:700;font-size:14px;margin-bottom:6px;">PRO FEATURE</div>'
-        f'<div style="color:{C_MUTED};font-size:12px;margin-bottom:14px;">Upgrade to access full intelligence</div>'
+        f'<div style="color:{C_TEXT};font-weight:700;font-size:14px;margin-bottom:6px;">'
+        f'{_html_escape(tier_required.upper())} FEATURE</div>'
+        f'<div style="color:{C_MUTED};font-size:12px;margin-bottom:14px;">This section is not included in the public artifact.</div>'
         f'<a href="{UPGRADE_URL}" style="background:linear-gradient(135deg,#7c3aed,#2563eb);color:white;'
         f'padding:8px 20px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:700;">'
         f'UPGRADE NOW</a>'
-        f'</div></div></div>'
+        f'</div>'
     )
 
 def build_kill_chain_section(item: Dict) -> str:
+    """Evidence-gated attack-chain card (P0 #721).
+
+    This used to fall back to a fixed 7-phase template asserting implant
+    installation, persistence, encrypted C2 with a 60-second beacon, DNS-over-
+    HTTPS, credential harvesting and exfiltration for EVERY advisory. Phases are
+    now shown only if the record itself carries them; otherwise the card states
+    that no attack-chain activity was reported.
+    """
     kc = item.get("kill_chain") or []
     if not isinstance(kc, list):
         kc = []
-    severity = (item.get("severity") or "HIGH").upper()
-    sev_col  = SEV_COLORS.get(severity, C_ORG)
+    severity = (item.get("severity") or "").upper()
+    sev_col  = SEV_COLORS.get(severity, C_MUTED)
 
-    default_phases = [
-        ("1. Reconnaissance",   "OSINT collection on target: LinkedIn, Shodan, WHOIS, GitHub leaks, job postings"),
-        ("2. Weaponization",    "Custom exploit payload crafted targeting identified vulnerability; dropper packaged"),
-        ("3. Delivery",         "Phishing email / direct exploitation of internet-facing service / watering hole"),
-        ("4. Exploitation",     f"Vulnerability exploited; initial code execution on target system ({severity} severity)"),
-        ("5. Installation",     "Backdoor/RAT installed; persistence via registry, scheduled tasks, or WMI subscriptions"),
-        ("6. C2",               "Encrypted C2 channel established over HTTPS; beacon interval 60s; DNS-over-HTTPS used"),
-        ("7. Actions on Obj.",  "Credential harvesting → lateral movement → data staging → exfiltration → impact"),
+    phases = [
+        (p.get("phase", "") if isinstance(p, dict) else str(p),
+         p.get("description", "") if isinstance(p, dict) else "")
+        for p in kc if p
     ]
-
-    if kc:
-        # v142.1: guard for string elements (phase as plain string instead of dict)
-        phases = [
-            (p.get("phase","") if isinstance(p, dict) else str(p),
-             p.get("description","") if isinstance(p, dict) else "")
-            for p in kc
-        ]
-    else:
-        phases = default_phases
+    if not phases:
+        content = (
+            f'<div style="color:{C_TEXT};font-size:12px;line-height:1.6;">'
+            f'<strong>OBSERVED ACTIVITY: NONE REPORTED.</strong> The source record describes no intrusion, actor '
+            f'activity or post-exploitation behaviour for this advisory, so no reconnaissance, installation, '
+            f'persistence, command-and-control or exfiltration activity is asserted here.</div>'
+        )
+        return _card("ATTACK-CHAIN EVIDENCE", content, icon="⚔️")
 
     rows = "".join(
         f'<tr>'
         f'<td style="padding:10px 14px;color:{sev_col};font-weight:700;font-size:11px;white-space:nowrap;'
-        f'border-bottom:1px solid #334155;">{ph}</td>'
-        f'<td style="padding:10px 14px;color:{C_TEXT};font-size:12px;border-bottom:1px solid #334155;">{desc}</td>'
+        f'border-bottom:1px solid #334155;">{_html_escape(str(ph))}</td>'
+        f'<td style="padding:10px 14px;color:{C_TEXT};font-size:12px;border-bottom:1px solid #334155;">{_html_escape(str(desc))}</td>'
         f'</tr>'
         for ph, desc in phases
     )
     content = (
+        f'<div style="color:{C_MUTED};font-size:11px;margin-bottom:8px;">Phases as recorded on this advisory '
+        f'(provenance not recorded; not independently verified).</div>'
         f'<table style="width:100%;border-collapse:collapse;">'
         f'<thead><tr>'
         f'<th style="text-align:left;padding:8px 14px;color:{C_MUTED};font-size:10px;border-bottom:2px solid #334155;">PHASE</th>'
         f'<th style="text-align:left;padding:8px 14px;color:{C_MUTED};font-size:10px;border-bottom:2px solid #334155;">ACTIVITY</th>'
         f'</tr></thead><tbody>{rows}</tbody></table>'
     )
-    return _card("ATTACK KILL CHAIN", content, icon="⚔️")
+    return _card("ATTACK-CHAIN EVIDENCE", content, icon="⚔️")
 
 
 _IOC_CVE_REF_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
@@ -184,61 +196,96 @@ def _is_reference_not_ioc(i) -> bool:
     return False
 
 
-def build_ioc_table_section(item: Dict) -> str:
-    iocs = [i for i in (item.get("iocs") or []) if not _is_reference_not_ioc(i)]
-    if not iocs:
-        iocs = [{"type": "—", "value": "No IOCs in current data feed", "confidence": 0}]
+_EVIDENCE_LABELS = {
+    "OBSERVED":        ("OBSERVED", "#22c55e"),
+    "SOURCE_REPORTED": ("SOURCE-REPORTED", "#3b82f6"),
+    "UNVERIFIED":      ("UNVERIFIED", "#f59e0b"),
+}
 
-    # Pre-defined spans avoid backslashes inside f-string expressions (Python 3.10 compat)
-    # v185.0 TRUST FIX: replaced red "⚠ GENERATED" with professional amber "AI-ENRICHED"
-    # sourcing label to align with enterprise trust standards. Generated IOCs are
-    # AI-derived from campaign context and behavioral patterns — valid for detection
-    # but distinguished from network-observed indicators.
-    _SPAN_AI_ENRICHED = '<span style="color:#f59e0b;font-weight:700;font-size:9px;letter-spacing:0.5px;">AI-ENRICHED</span>'
-    _SPAN_OBSERVED    = '<span style="color:#22c55e;font-weight:700;font-size:9px;letter-spacing:0.5px;">OBSERVED</span>'
+
+def build_ioc_table_section(item: Dict, tier: str = "enterprise") -> str:
+    """IOC card.  Every number derives from ONE qualified collection (P0 #721).
+
+    An empty collection renders NO row and a count of 0 (the old code inserted a
+    "No IOCs in current data feed" placeholder row and then counted it as 1).
+    Values below the Pro tier are not emitted into the page at all.
+    """
+    q = _di.qualify_iocs(item.get("iocs"))
+    iocs, count = q["actionable"], q["count"]
+    rejected_n = len(q["rejected"]) + q["duplicates"]
+
+    notes = []
+    if rejected_n:
+        notes.append(f"{rejected_n} non-indicator value(s) excluded (CVE references, advisory URLs, filenames, "
+                     f"software names, malformed or duplicate entries).")
+    if q["generated"]:
+        notes.append(f"{len(q['generated'])} AI-derived candidate(s) withheld: not evidence-backed, not counted, "
+                     f"not for blocking.")
+    note_html = "".join(f'<div style="color:{C_MUTED};font-size:10px;margin-top:6px;">{_html_escape(n)}</div>' for n in notes)
+    states_html = " &nbsp;|&nbsp; ".join(
+        f'<span style="color:{_EVIDENCE_LABELS.get(k, (k, C_MUTED))[1]};">{_EVIDENCE_LABELS.get(k, (k, C_MUTED))[0].title()}: {v}</span>'
+        for k, v in sorted(q["by_state"].items())
+    )
+    total_html = (
+        f'<div style="margin-top:10px;color:{C_MUTED};font-size:10px;">Qualified indicators: '
+        f'<strong style="color:{C_TEXT};">{count}</strong>'
+        + (f' &nbsp;|&nbsp; {states_html}' if states_html else '') + '</div>'
+    )
+
+    if count == 0:
+        content = (
+            f'<div style="color:{C_TEXT};font-size:12px;">No qualified indicators of compromise are recorded for this '
+            f'advisory (count: 0). CVE identifiers and advisory URLs are references, not indicators.</div>'
+            + total_html + note_html
+        )
+        return _card("INDICATORS OF COMPROMISE", content, icon="🔍")
+
+    if {"free": 0, "pro": 1, "enterprise": 2}.get(tier, 0) < 1:
+        content = (
+            f'<div style="color:{C_TEXT};font-size:12px;">{count} qualified indicator(s) recorded. Indicator values are '
+            f'a Pro entitlement and are not included in this public artifact.</div>' + total_html + note_html
+        )
+        return _card("INDICATORS OF COMPROMISE", content, icon="🔍")
 
     def _ioc_row(i) -> str:
-        # v134.0 P0 FIX: normalise legacy string-format IOCs to dict before .get() calls
-        if isinstance(i, str):
-            i = {"type": "indicator", "value": i, "confidence": 50, "context": "legacy", "generated": False}
-        conf     = int(i.get("confidence", 0))
-        col      = "#22c55e" if conf >= 80 else C_ORG
-        status   = _SPAN_AI_ENRICHED if i.get("generated") else _SPAN_OBSERVED
+        d = i if isinstance(i, dict) else {"value": i}
+        state = _di.ioc_evidence_state(i)
+        label, col_s = _EVIDENCE_LABELS.get(state, (state, C_MUTED))
+        conf = d.get("confidence")
+        try:
+            conf_txt = f"{float(conf):.0f}%"
+        except (TypeError, ValueError):
+            conf_txt = "n/a"          # missing stays missing (never 0%)
         return (
             f'<tr style="border-bottom:1px solid #334155;">'
             f'<td style="padding:8px 12px;color:{C_PUR};font-size:10px;font-weight:700;white-space:nowrap;">'
-            f'{str(i.get("type","?")).upper()}</td>'
+            f'{_html_escape(str(d.get("ioc_type") or d.get("type") or "?").upper())}</td>'
             f'<td style="padding:8px 12px;color:{C_TEXT};font-family:monospace;font-size:11px;word-break:break-all;">'
-            f'{str(i.get("value","?"))}</td>'
-            f'<td style="padding:8px 12px;color:{col};'
-            f'font-size:11px;font-weight:700;text-align:center;">{i.get("confidence","?")}%</td>'
-            # v186.0 P0 FIX: was defaulting every IOC with no explicit context to the
-            # literal string "C2" -- fabricating a command-and-control claim for
-            # indicators never observed in that role. Honest default: unclassified.
-            f'<td style="padding:8px 12px;color:{C_MUTED};font-size:10px;">{i.get("context") or "Unclassified"}</td>'
-            f'<td style="padding:8px 12px;font-size:10px;">{status}</td>'
+            f'{_html_escape(str(d.get("value", "")))}</td>'
+            f'<td style="padding:8px 12px;color:{C_MUTED};font-size:11px;text-align:center;">{conf_txt}</td>'
+            f'<td style="padding:8px 12px;color:{C_MUTED};font-size:10px;">{_html_escape(str(d.get("context") or "Unclassified"))}</td>'
+            f'<td style="padding:8px 12px;font-size:10px;"><span style="color:{col_s};font-weight:700;'
+            f'letter-spacing:0.5px;">{label}</span></td>'
             f'</tr>'
         )
 
-    rows = "".join(_ioc_row(i) for i in (iocs if isinstance(iocs, list) else []))
-    ai_enriched_count = sum(1 for i in iocs if isinstance(i, dict) and i.get("generated"))
-    observed_count    = sum(1 for i in iocs if isinstance(i, str) or (isinstance(i, dict) and not i.get("generated")))
+    rows = "".join(_ioc_row(i) for i in iocs)
     content = (
         f'<div style="overflow-x:auto;">'
         f'<table style="width:100%;border-collapse:collapse;">'
         f'<thead><tr style="border-bottom:2px solid #334155;">'
         f'<th style="text-align:left;padding:8px 12px;color:{C_MUTED};font-size:10px;">TYPE</th>'
         f'<th style="text-align:left;padding:8px 12px;color:{C_MUTED};font-size:10px;">INDICATOR VALUE</th>'
-        f'<th style="text-align:center;padding:8px 12px;color:{C_MUTED};font-size:10px;">CONFIDENCE</th>'
+        f'<th style="text-align:center;padding:8px 12px;color:{C_MUTED};font-size:10px;">SCORE</th>'
         f'<th style="text-align:left;padding:8px 12px;color:{C_MUTED};font-size:10px;">CONTEXT</th>'
-        f'<th style="text-align:left;padding:8px 12px;color:{C_MUTED};font-size:10px;">SOURCE</th>'
+        f'<th style="text-align:left;padding:8px 12px;color:{C_MUTED};font-size:10px;">EVIDENCE</th>'
         f'</tr></thead><tbody>{rows}</tbody></table></div>'
-        f'<div style="margin-top:10px;color:{C_MUTED};font-size:10px;">Total IOCs: <strong style="color:{C_TEXT};">{len(iocs)}</strong>'
-        f' &nbsp;|&nbsp; <span style="color:#22c55e;">Observed: {observed_count}</span>'
-        f' &nbsp;|&nbsp; <span style="color:#f59e0b;">AI-Enriched: {ai_enriched_count}</span>'
-        f' &nbsp;·&nbsp; <span style="color:{C_MUTED};font-style:italic;">AI-Enriched indicators are derived from campaign context and behavioral patterns. Deploy with EDR confidence scoring.</span></div>'
+        + total_html
+        + f'<div style="margin-top:6px;color:{C_MUTED};font-size:10px;font-style:italic;">Values are listed as extracted '
+          f'from the source; only OBSERVED indicators are evidence of compromise. Validate before blocking.</div>'
+        + note_html
     )
-    return _card("INDICATORS OF COMPROMISE — FULL TABLE", content, icon="🔍")
+    return _card("INDICATORS OF COMPROMISE", content, icon="🔍")
 
 def build_detection_rules_section(item: Dict) -> str:
     """
@@ -311,7 +358,7 @@ def build_detection_rules_section(item: Dict) -> str:
         )
 
     content = (
-        f'<div style="color:{C_MUTED};font-size:11px;margin-bottom:12px;">Deploy these rules to your SIEM/EDR within <strong style="color:{C_RED};">24 hours</strong> of receipt.</div>'
+        f'<div style="color:{C_MUTED};font-size:11px;margin-bottom:12px;">Validation status: <strong style="color:{C_ORG};">not validated in your environment</strong>. Syntax-check, test against your telemetry and tune before enabling; do not enable blocking actions unvalidated.</div>'
         + code_block("Sigma Rule (YAML) — Universal SIEM", sigma)
         + (code_block("Splunk SPL Query", splunk_q) if splunk_q else "")
         + (code_block("Elastic EQL / Lucene", elastic_q) if elastic_q else "")
@@ -325,7 +372,12 @@ def build_detection_rules_section(item: Dict) -> str:
 
 
 def build_soc_playbook_section(item: Dict) -> str:
-    severity = (item.get("severity") or "HIGH").upper()
+    try:
+        _cv0 = float(item.get("cvss_score")) if item.get("cvss_score") not in (None, "") else None
+    except (TypeError, ValueError):
+        _cv0 = None
+    _sevb0 = _di.severity_basis(item, _cv0, bool(item.get("kev_present") is True or item.get("kev") is True))
+    severity = _sevb0["display"].upper() if _sevb0["authoritative"] else "UNRATED"
     sev_col  = SEV_COLORS.get(severity, C_ORG)
     actor    = item.get("actor_tag") or "Threat Actor"
     cvss     = item.get("cvss_score","N/A")
@@ -354,7 +406,9 @@ def build_soc_playbook_section(item: Dict) -> str:
     steps = [
         ("0-15 min",  "CRITICAL", "IMMEDIATE TRIAGE",
          f"Determine whether affected products or assets exist in your environment. If exposure or activity "
-         f"is confirmed, declare a {severity} severity incident and engage the IR team."),
+         f"is confirmed, declare an incident per your IR policy"
+         + (f" ({severity} severity)" if severity != "UNRATED" else " (severity not rated by APEX: no CVSS/KEV evidence)")
+         + " and engage the IR team."),
         ("15-60 min", C_RED,     "CONTAINMENT", _contain),
         ("1-4 hrs",   C_ORG,    "INVESTIGATION", _hunt),
         ("4-24 hrs",  C_PUR,    "ERADICATION",
@@ -386,7 +440,13 @@ def build_business_impact_section(item: Dict) -> str:
     subscription" -- none derived from any evidence about the advisory or
     the reader's organisation. Now renders only facts the item carries and
     states what quantification would require."""
-    severity   = (item.get("severity") or "UNKNOWN").upper()
+    _kev_flag  = bool(item.get("kev_present") is True or item.get("kev") is True)
+    try:
+        _cv = float(item.get("cvss_score")) if item.get("cvss_score") not in (None, "") else None
+    except (TypeError, ValueError):
+        _cv = None
+    _sevb      = _di.severity_basis(item, _cv, _kev_flag)
+    severity   = _sevb["display"].upper()
     biz_impact = item.get("business_impact") or {}
     if not isinstance(biz_impact, dict):
         biz_impact = {}
@@ -403,7 +463,7 @@ def build_business_impact_section(item: Dict) -> str:
     metrics = [
         ("Customer Exposure",       "UNKNOWN — no visibility into your environment", C_ORG),
         ("Severity",                severity, SEV_COLORS.get(severity, C_ORG)),
-        ("CISA KEV",                "Listed — exploited in the wild" if kev else "Not listed", C_RED if kev else C_MUTED),
+        ("CISA KEV",                "Listed — exploited in the wild" if kev else "No KEV listing found (absence does not prove no exploitation)", C_RED if kev else C_MUTED),
         ("Regulatory Exposure",     _fmt(regulatory), C_ORG),
         ("Operational Risk",        _fmt(op_risk), C_PUR),
         ("Estimated Direct Cost",   "Not computed — requires your asset, data and downtime figures", C_MUTED),
@@ -427,33 +487,45 @@ def build_business_impact_section(item: Dict) -> str:
 
 
 def build_defensive_matrix_section(item: Dict) -> str:
+    """ATT&CK x NIST CSF card.  Only techniques whose IDs validate against the
+    repo's pinned MITRE dataset are listed, with their official names (P0 #721).
+    The old code defaulted to phishing / valid-accounts / exfiltration techniques
+    when the record had none, labelled every row HIGH, and used non-official
+    technique names."""
     mitre = item.get("mitre_techniques") or item.get("ttps") or item.get("mitre_tactics") or []
     if not isinstance(mitre, list):
         mitre = []
-    # v142.1: mitre_tactics in manifest are dicts {"id":"T1566","name":"...","tactic":"..."}
-    # Normalise to string technique IDs for _mitre_name() / _nist_control() lookups
-    def _tech_id(t) -> str:
-        if isinstance(t, dict):
-            return t.get("id") or t.get("technique_id") or t.get("name", "T1566.001")
-        return str(t) if t else "T1566.001"
-    mitre_ids = [_tech_id(t) for t in mitre[:8]] or ["T1566.001","T1078","T1041"]
+    valid, rejected = _di.filter_valid_techniques(mitre)
+    ids = []
+    for t in valid:
+        tid = _di.technique_id_of(t)
+        if _di.validate_technique(tid)["status"] == "VALID" and tid not in ids:
+            ids.append(tid)       # names without an ID are not mappable -> omitted
+    ids = ids[:8]
+    if not ids:
+        return _card("DEFENSIVE PRIORITY MATRIX (MITRE ATT&CK + NIST CSF)",
+                     f'<div style="color:{C_TEXT};font-size:12px;">No ATT&amp;CK technique mapping with sufficient '
+                     f'evidence is available for this advisory. No default techniques are substituted.</div>',
+                     icon="🎯")
     rows = "".join(
         f'<tr style="border-bottom:1px solid #334155;">'
-        f'<td style="padding:8px 12px;color:{C_PUR};font-family:monospace;font-size:11px;">{t}</td>'
-        f'<td style="padding:8px 12px;color:{C_TEXT};font-size:11px;">{_mitre_name(t)}</td>'
-        f'<td style="padding:8px 12px;text-align:center;">'
-        f'<span style="background:{C_RED}22;color:{C_RED};padding:2px 8px;border-radius:3px;font-size:9px;font-weight:700;">HIGH</span>'
-        f'</td>'
+        f'<td style="padding:8px 12px;color:{C_PUR};font-family:monospace;font-size:11px;">{_html_escape(t)}</td>'
+        f'<td style="padding:8px 12px;color:{C_TEXT};font-size:11px;">{_html_escape(_mitre_name(t))}</td>'
+        f'<td style="padding:8px 12px;text-align:center;color:{C_MUTED};font-size:9px;font-weight:700;">ANALYST INFERENCE</td>'
         f'<td style="padding:8px 12px;color:{C_MUTED};font-size:11px;">{_nist_control(t)}</td>'
         f'</tr>'
-        for t in mitre_ids
+        for t in ids
     )
+    pin = _di.attack_dataset_pin()
     content = (
+        f'<div style="color:{C_MUTED};font-size:10px;margin-bottom:8px;">Techniques are inferred from the advisory text '
+        f'(not observed adversary activity) and validated against the pinned MITRE ATT&amp;CK dataset '
+        f'(sync {_html_escape(str(pin.get("synced_at")))}, sha256 {_html_escape(str(pin.get("content_hash"))[:12])}).</div>'
         f'<table style="width:100%;border-collapse:collapse;">'
         f'<thead><tr style="border-bottom:2px solid #334155;">'
         f'<th style="text-align:left;padding:8px 12px;color:{C_MUTED};font-size:10px;">TECHNIQUE ID</th>'
         f'<th style="text-align:left;padding:8px 12px;color:{C_MUTED};font-size:10px;">TECHNIQUE NAME</th>'
-        f'<th style="text-align:center;padding:8px 12px;color:{C_MUTED};font-size:10px;">PRIORITY</th>'
+        f'<th style="text-align:center;padding:8px 12px;color:{C_MUTED};font-size:10px;">BASIS</th>'
         f'<th style="text-align:left;padding:8px 12px;color:{C_MUTED};font-size:10px;">NIST CSF CONTROL</th>'
         f'</tr></thead><tbody>{rows}</tbody></table>'
     )
@@ -461,23 +533,10 @@ def build_defensive_matrix_section(item: Dict) -> str:
 
 
 def _mitre_name(t: str) -> str:
-    names = {
-        "T1566.001": "Phishing: Spearphishing Attachment",
-        "T1566.002": "Phishing: Spearphishing Link",
-        "T1078":     "Valid Accounts",
-        "T1190":     "Exploit Public-Facing Application",
-        "T1486":     "Data Encrypted for Impact",
-        "T1041":     "Exfiltration Over C2 Channel",
-        "T1059.001": "PowerShell Execution",
-        "T1003.001": "LSASS Memory Credential Dump",
-        "T1021.001": "Remote Desktop Protocol",
-        "T1505.003": "Web Shell",
-        "T1036.005": "Masquerading: Match Legitimate Name",
-        "T1195.002": "Supply Chain: Software Supply Chain",
-        "T1490":     "Inhibit System Recovery",
-        "T1529":     "System Shutdown/Reboot",
-    }
-    return names.get(t, f"MITRE ATT&CK Technique {t}")
+    """Official ATT&CK name from the pinned dataset (P0 #721). The previous
+    hard-coded table used non-official names (e.g. 'LSASS Memory Credential
+    Dump', 'PowerShell Execution') and returned a generic label for any ID."""
+    return _di.technique_name(t) or f"Unvalidated technique ID ({t})"
 
 def _nist_control(t: str) -> str:
     controls = {
@@ -568,41 +627,56 @@ def build_monetization_banner(item: Dict, tier: str = "free") -> str:
 
 
 def build_threat_score_widget(item: Dict) -> str:
-    """Threat score + exploit status + business impact badge for card header."""
-    risk_score   = float(item.get("risk_score") or 0)
-    cvss         = float(item.get("cvss_score") or 0)
-    epss         = float(item.get("epss_score") or 0)
-    kev          = item.get("kev_present", False)
-    severity     = (item.get("severity") or "HIGH").upper()
-    sev_col      = SEV_COLORS.get(severity, C_ORG)
-    ioc_count    = item.get("ioc_count", len(item.get("iocs") or []))
-    exploit_st   = item.get("exploit_maturity","theoretical")
-    synth        = item.get("synthetic", False)
+    """Score strip for the card header.  Missing data renders as n/a -- never as
+    0.0 / 0% (P0 #721) -- and the IOC count is the same qualified count the IOC
+    card shows."""
+    def _num(v):
+        try:
+            return None if v is None or v == "" else float(v)
+        except (TypeError, ValueError):
+            return None
+    risk_score = _num(item.get("risk_score"))
+    cvss       = _num(item.get("cvss_score"))
+    epss       = _epss_percent(item)          # percent 0-100 or None (scale proven, never guessed)
+    kev        = item.get("kev_present") is True or item.get("kev") is True
+    sevb       = _di.severity_basis(item, cvss, kev)
+    severity   = sevb["display"]
+    sev_col    = SEV_COLORS.get(severity, C_MUTED)
+    ioc_count  = _di.qualify_iocs(item.get("iocs"))["count"]
+    exploit_st = str(item.get("exploit_maturity") or "UNKNOWN")
 
-    kev_badge = f'<span style="background:#ef444422;color:#ef4444;padding:2px 8px;border-radius:3px;font-size:9px;font-weight:700;margin-left:6px;">KEV</span>' if kev else ""
-    synth_badge = f'<span style="background:#3b82f622;color:#3b82f6;padding:2px 8px;border-radius:3px;font-size:9px;">SYNTHETIC</span>' if synth else ""
+    kev_badge = (f'<span style="background:#ef444422;color:#ef4444;padding:2px 8px;border-radius:3px;'
+                 f'font-size:9px;font-weight:700;margin-left:6px;">KEV</span>') if kev else ""
+    if item.get("synthetic"):
+        kev_badge += ('<span style="background:#3b82f622;color:#3b82f6;padding:2px 8px;border-radius:3px;'
+                      'font-size:9px;margin-left:6px;">SYNTHETIC</span>')
+    risk_txt = f"{risk_score:.1f}" if risk_score is not None else "n/a"
+    cvss_txt = f"{cvss:.1f}" if cvss is not None else "n/a"
+    epss_txt = f"{_html_escape(str(round(epss, 4)))}%" if epss is not None else "n/a"
+    unrated  = (f'<div style="color:{C_MUTED};font-size:10px;margin-top:4px;">{_html_escape(sevb["basis"])}; '
+                f'APEX composite heuristic: {_html_escape(sevb["composite"])}</div>') if not sevb["authoritative"] else ""
 
     return (
         f'<div style="background:#0f172a;border-radius:8px;padding:14px;margin-bottom:16px;">'
         f'<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;">'
         f'<div style="text-align:center;">'
-        f'<div style="font-size:28px;font-weight:900;color:{sev_col};">{risk_score}</div>'
-        f'<div style="color:#64748b;font-size:9px;">RISK SCORE</div></div>'
+        f'<div style="font-size:28px;font-weight:900;color:{sev_col};">{risk_txt}</div>'
+        f'<div style="color:#64748b;font-size:9px;">APEX COMPOSITE (not CVSS)</div></div>'
         f'<div style="text-align:center;">'
-        f'<div style="font-size:18px;font-weight:700;color:{C_ORG if cvss>=7 else C_PUR};">{cvss}</div>'
-        f'<div style="color:#64748b;font-size:9px;">CVSS v3.1</div></div>'
+        f'<div style="font-size:18px;font-weight:700;color:{C_ORG if (cvss or 0) >= 7 else C_PUR};">{cvss_txt}</div>'
+        f'<div style="color:#64748b;font-size:9px;">CVSS (version not recorded)</div></div>'
         f'<div style="text-align:center;">'
-        f'<div style="font-size:18px;font-weight:700;color:{C_RED if epss>=0.9 else C_ORG};">{epss:.0%}</div>'
-        f'<div style="color:#64748b;font-size:9px;">EPSS SCORE</div></div>'
+        f'<div style="font-size:18px;font-weight:700;color:{C_RED if (epss or 0) >= 90 else C_ORG};">{epss_txt}</div>'
+        f'<div style="color:#64748b;font-size:9px;">EPSS PERCENT</div></div>'
         f'<div style="text-align:center;">'
         f'<div style="font-size:18px;font-weight:700;color:{C_GRN};">{ioc_count}</div>'
-        f'<div style="color:#64748b;font-size:9px;">IOC COUNT</div></div>'
+        f'<div style="color:#64748b;font-size:9px;">QUALIFIED IOCs</div></div>'
         f'<div style="flex:1;min-width:120px;">'
         f'<div style="color:{C_TEXT};font-size:11px;margin-bottom:4px;">'
-        f'{_sev_badge(severity)} {kev_badge} {synth_badge}</div>'
-        f'<div style="color:{C_MUTED};font-size:11px;">Exploit: '
-        f'<span class="exploit-status-{"active" if "active" in exploit_st else "weaponized"}">'
-        f'{exploit_st.upper()}</span></div>'
+        f'{_sev_badge(severity)} {kev_badge}</div>'
+        f'<div style="color:{C_MUTED};font-size:11px;">Exploit maturity: '
+        f'<span>{_html_escape(exploit_st.upper())}</span></div>'
+        f'{unrated}'
         f'</div></div></div>'
     )
 
@@ -624,7 +698,14 @@ def enhance_report_html(html: str, item: Dict, tier: str = "free") -> str:
         s = html.find(ENHANCE_MARKER)
         e = html.find(ENHANCE_ENDMRK)
         if e != -1:
-            html = html[:s] + html[e + len(ENHANCE_ENDMRK):]
+            end = e + len(ENHANCE_ENDMRK)
+            # the block is injected as "\n<MARK>...<END>\n": remove those delimiting newlines
+            # too, otherwise every re-run leaves two stray newlines (non-idempotent output)
+            if s > 0 and html[s - 1] == "\n":
+                s -= 1
+            if html[end:end + 1] == "\n":
+                end += 1
+            html = html[:s] + html[end:]
 
     css       = build_premium_intel_cards_css()
     ts_widget = build_threat_score_widget(item)
@@ -632,7 +713,7 @@ def enhance_report_html(html: str, item: Dict, tier: str = "free") -> str:
 
     # Build all enterprise sections
     kill_chain   = build_kill_chain_section(item)
-    ioc_table    = build_ioc_table_section(item)
+    ioc_table    = build_ioc_table_section(item, tier)
     # v134.1 FIX: the detection-rules card is CVE/vuln-class-specific content
     # (Sigma host/network selectors, SIEM queries) -- it is NOT_APPLICABLE for
     # pure indicator/phishing-URL items by the same report-type contract

@@ -1,0 +1,1426 @@
+{
+ "_provenance": "Verbatim records from data/apex_enriched_manifest.json at commit 241cce7fb (real production feed data; NOT the eight issue-#721 dossiers, which are not present in the repository).",
+ "records": [
+  {
+   "id": "intrusion-set--6cdda667-ae38-4c78-ba72-69e090da2670",
+   "title": "CYBERDUDEBIVASH® PRIVATE LIMITED — OFFICIAL WORKPLACE, GST & PAN VERIFIED GLOBAL CYBERSECURITY AUTHORITY",
+   "description": "Tactical cluster: CYBERDUDEBIVASH® PRIVATE LIMITED — OFFICIAL WORKPLACE, GST & PAN VERIFIED GLOBAL CYBERSECURITY AUTHORITY",
+   "severity": "MEDIUM",
+   "risk_score": 5.2,
+   "confidence": 52,
+   "timestamp": "2026-04-16T01:54:47Z",
+   "source": "CYBERDUDEBIVASH SENTINEL APEX",
+   "stix_bundle": "CDB-APEX-1776304487.json",
+   "iocs": [
+    "api.cyberdudebivash.com",
+    "blog.cyberdudebivash.com",
+    "cyberdudebivash.com",
+    "cyberdudebivash.in",
+    "intel.cyberdudebivash.com"
+   ],
+   "ttps": [
+    "Active Scanning",
+    "Exploitation for Client Execution",
+    "Credentials from Password Stores"
+   ],
+   "tags": [],
+   "blog_url": "",
+   "threat_type": "General",
+   "exploit_probability": "Low",
+   "openclaw": {
+    "score": 5,
+    "patterns": [
+     "surge:general"
+    ],
+    "anomaly": false,
+    "velocity": "rising",
+    "attack_surface": [
+     "general"
+    ],
+    "fingerprint": "b793d065315e",
+    "trend": "escalating"
+   },
+   "evidence_validation": {
+    "kev_verified": false,
+    "vendor_advisory": false,
+    "multi_source_confirmed": true,
+    "exploit_status": "UNVERIFIED",
+    "reliability_score": "LOW",
+    "evidence_confidence": "UNVERIFIED",
+    "raw_confidence_score": 21,
+    "sources_referenced": [
+     "Feed Aggregator"
+    ],
+    "validation_timestamp": "2026-04-16T01:55:45.911302+00:00",
+    "cve_count": 0,
+    "has_cvss": true
+   },
+   "analyst_insight": {
+    "vulnerability_class": "DEFAULT",
+    "exploitation_rationale": "This vulnerability class is actively targeted by threat actors due to its accessibility and the value of the resources it exposes. Automated scanning infrastructure continuously probes internet-facing assets for known vulnerabilities, converting newly disclosed CVEs into operational capabilities within hours of public disclosure. Organizations relying solely on patch cadence without compensating controls are at risk during the window between disclosure and patch deployment.",
+    "detection_difficulty": "Detection of exploitation attempts requires application-specific log analysis that goes beyond standard network flow data. Many exploit attempts arrive over legitimate protocols (HTTPS, DNS) that are not deeply inspected. Post-exploitation activity frequently uses legitimately installed tools and signed binaries that appear normal in process telemetry. The signal-to-noise ratio in enterprise log environments makes identifying the specific exploitation event challenging without precise detection rules.",
+    "soc_failure_points": "Coverage gaps most often arise from incomplete log forwarding to SIEM, detection rules that are not maintained after initial deployment, and insufficient analyst training on application-specific attack techniques. Vulnerability management processes often lack integration with threat intelligence, resulting in patches being prioritized by CVSS score alone rather than active exploitation evidence. The absence of a validated detection rule for a specific CVE leaves organizations blind to exploitation until post-compromise forensics.",
+    "strategic_risk": "Every unpatched vulnerability in the CISA KEV catalog represents confirmed, active exploitation risk. The KEV listing indicates that threat actors have operationalized the vulnerability and are using it in real attacks against real organizations. The strategic question is not if your organization will be targeted, but whether your detection and patching capability is faster than the attacker's scanning and exploitation pipeline. Unpatched KEV vulnerabilities in internet-facing systems should be treated as open backdoors.",
+    "analyst_context_note": "ANALYST NOTE: Monitor CISA KEV catalog for exploitation status updates. Detection rules should be deployed proactively — threat actors typically develop operational exploits within days of public CVE disclosure.",
+    "analyst_engine": "SENTINEL-APEX-ANALYST-v103"
+   },
+   "soc_context": {
+    "soc_priority": "P2 — HIGH",
+    "required_log_sources": [
+     "SIEM/EDR Alerts",
+     "Sysmon Full Event Log",
+     "Network Flow Logs",
+     "Web Proxy Logs",
+     "Windows Security Event Log",
+     "Application Error Logs"
+    ],
+    "false_positive_scenarios": [
+     "Authorized security scanning tools",
+     "IT administration activity",
+     "Automated monitoring and health check systems",
+     "Authorized penetration testing"
+    ],
+    "tuning_recommendations": [
+     "Build environment-specific baseline before deploying new detection rules to production",
+     "Run in monitoring mode for 72 hours before enabling automated blocking",
+     "Set CVSS-based auto-escalation thresholds aligned to SLA policy"
+    ],
+    "deployment_steps": [
+     "Step 1: Import detection rules into SIEM (Sigma/Splunk/KQL — see Detection Engine section).",
+     "Step 2: Validate log sources are forwarding to SIEM (check required log sources list above).",
+     "Step 3: Run detection query against 30-day historical data for retrospective detection.",
+     "Step 4: Set alert threshold and assign to SOC Tier-1 queue for initial triage.",
+     "Step 5: Build escalation runbook — define Tier-1 triage steps and Tier-2 escalation criteria.",
+     "Step 6: Test rule with a simulated benign event matching the false positive scenarios above.",
+     "Step 7: Enable automated enrichment (IP reputation, CVE lookup, user account context) on alert trigger.",
+     "Step 8: Schedule 72-hour rule review after deployment to tune false positive rate."
+    ],
+    "estimated_deployment_time_minutes": 15,
+    "soc_context_engine": "SENTINEL-APEX-SOC-v103"
+   },
+   "detection_confidence": {
+    "confidence": "LOW",
+    "detection_strength": "WEAK",
+    "false_positive_risk": "MEDIUM",
+    "deployment_complexity": "MEDIUM",
+    "scoring_rationale": "Limited evidence — detection confidence reduced",
+    "composite_score": 21,
+    "siem_readiness": "REVIEW",
+    "detection_engine": "SENTINEL-APEX-DETECT-v103"
+   },
+   "revenue_metadata": {
+    "pricing_tier": "STANDARD",
+    "pricing_details": {
+     "label": "Standard",
+     "inr_range": "₹999–₹1,999",
+     "usd_range": "$12–$24",
+     "target": "Security Teams, Analysts"
+    },
+    "detection_pack": "Threat Intelligence Defense Pack — Comprehensive detection coverage for this threat category. Includes network, host, and identity-layer detection rules for enterprise SOC deployment.",
+    "api_product_mapping": {
+     "endpoint": "/api/ai/analyze",
+     "product": "SENTINEL APEX Threat Intelligence API",
+     "use_case": "Enterprise threat intelligence feed integration"
+    },
+    "enterprise_use_cases": [
+     "Enterprise threat intelligence program",
+     "SOC capability maturity assessment",
+     "Security program ROI demonstration",
+     "Executive risk reporting"
+    ],
+    "marketplace_listing": {
+     "listing_id": "A345D82A",
+     "product_name": "SENTINEL APEX: CYBERDUDEBIVASH® PRIVATE LIMITED — OFFICIAL WORKPLACE, GST &",
+     "category": "Threat Intelligence",
+     "subcategory": "DEFAULT",
+     "pricing_tier": "Standard",
+     "price_inr": "₹999–₹1,999",
+     "price_usd": "$12–$24",
+     "target_audience": "Security Teams, Analysts",
+     "delivery_format": "JSON API + PDF Report + SIEM Detection Rules",
+     "license_type": "Enterprise Annual Subscription",
+     "kev_premium": false,
+     "sla": "4h critical / 24h standard"
+    },
+    "revenue_engine": "SENTINEL-APEX-REVENUE-v103"
+   },
+   "executive_summary": {
+    "risk_level": "MEDIUM",
+    "immediate_actions": [
+     "1. SCHEDULE EMERGENCY PATCH — patch within 72 hours; treat as P1 change management",
+     "2. DEPLOY DETECTION RULES — activate SIEM detection rules within 8 hours",
+     "3. ASSET IDENTIFICATION — enumerate all affected systems within 24 hours",
+     "4. NETWORK SEGMENTATION — verify network access controls restrict exposure surface",
+     "5. MONITORING ELEVATION — increase alert verbosity on affected system logs"
+    ],
+    "business_impact": "This vulnerability poses direct risk to system availability, data confidentiality, and/or data integrity. Business continuity and regulatory compliance obligations are at risk if exploitation occurs.",
+    "decision_statement": "ACTION REQUIRED: this vulnerability requires scheduled patching within your standard high-severity SLA. Deploy detection coverage now to identify exploitation attempts during the patching window.",
+    "time_to_exploit": "1–30 days — exploit development estimated post-disclosure",
+    "patch_priority_sla": "72 hours",
+    "executive_engine": "SENTINEL-APEX-EXEC-v103"
+   },
+   "compliance_block": {
+    "tlp_classification": "TLP:AMBER",
+    "attribution": "Analysis by CYBERDUDEBIVASH SENTINEL APEX Threat Intelligence Engine",
+    "platform": "CYBERDUDEBIVASH Pvt. Ltd. — intel.cyberdudebivash.com",
+    "legal_disclaimer": "This report is for cybersecurity defense and research purposes only. All technical information is derived from publicly disclosed vulnerability advisories, official government catalogs (CISA KEV, NVD), and reputable threat intelligence publications. No proprietary vendor content has been reproduced. Recipients are responsible for validating indicators and detection rules against their specific environments prior to operational deployment.",
+    "data_handling": "Recipients must handle this intelligence in accordance with the TLP classification above. TLP:AMBER: Share only within your organization and with trusted partners who have a need to know.",
+    "compliance_frameworks": [
+     "ISO 27001 — Information Security Controls (A.12.6 — Technical Vulnerability Management)"
+    ],
+    "cve_references": [],
+    "google_safe": true,
+    "copyright_safe": true,
+    "original_analysis": true,
+    "compliance_engine": "SENTINEL-APEX-COMPLIANCE-v103"
+   },
+   "_apex_enriched": true,
+   "_apex_version": "103.0",
+   "_apex_enriched_at": "2026-04-16T01:55:45.911302+00:00"
+  },
+  {
+   "id": "intrusion-set--afa8a01a-7045-4f54-ac69-e6c2ae740ffa",
+   "title": "GPL Odorizers GPL750",
+   "description": "Tactical cluster: GPL Odorizers GPL750",
+   "severity": "MEDIUM",
+   "risk_score": 5.8,
+   "confidence": 58,
+   "timestamp": "2026-04-15T13:19:42Z",
+   "source": "CYBERDUDEBIVASH SENTINEL APEX",
+   "stix_bundle": "CDB-APEX-1776259182.json",
+   "iocs": [
+    "devices.https",
+    "hornerautomation.com",
+    "lincenergysystems-my.sharepoint.com",
+    "https://hornerautomation.com/controller-firmware/",
+    "https://hornerautomation.com/controller-firmware/."
+   ],
+   "ttps": [
+    "Phishing",
+    "Exploitation for Client Execution",
+    "Pre-OS Boot: Firmware Corruption"
+   ],
+   "tags": [],
+   "blog_url": "",
+   "threat_type": "General",
+   "exploit_probability": "Low",
+   "openclaw": {
+    "score": 5,
+    "patterns": [
+     "surge:general"
+    ],
+    "anomaly": false,
+    "velocity": "rising",
+    "attack_surface": [
+     "general"
+    ],
+    "fingerprint": "b793d065315e",
+    "trend": "escalating"
+   },
+   "evidence_validation": {
+    "kev_verified": false,
+    "vendor_advisory": false,
+    "multi_source_confirmed": false,
+    "exploit_status": "UNVERIFIED",
+    "reliability_score": "LOW",
+    "evidence_confidence": "UNVERIFIED",
+    "raw_confidence_score": 6,
+    "sources_referenced": [
+     "Feed Aggregator"
+    ],
+    "validation_timestamp": "2026-04-16T01:55:45.911302+00:00",
+    "cve_count": 0,
+    "has_cvss": true
+   },
+   "analyst_insight": {
+    "vulnerability_class": "DEFAULT",
+    "exploitation_rationale": "This vulnerability class is actively targeted by threat actors due to its accessibility and the value of the resources it exposes. Automated scanning infrastructure continuously probes internet-facing assets for known vulnerabilities, converting newly disclosed CVEs into operational capabilities within hours of public disclosure. Organizations relying solely on patch cadence without compensating controls are at risk during the window between disclosure and patch deployment.",
+    "detection_difficulty": "Detection of exploitation attempts requires application-specific log analysis that goes beyond standard network flow data. Many exploit attempts arrive over legitimate protocols (HTTPS, DNS) that are not deeply inspected. Post-exploitation activity frequently uses legitimately installed tools and signed binaries that appear normal in process telemetry. The signal-to-noise ratio in enterprise log environments makes identifying the specific exploitation event challenging without precise detection rules.",
+    "soc_failure_points": "Coverage gaps most often arise from incomplete log forwarding to SIEM, detection rules that are not maintained after initial deployment, and insufficient analyst training on application-specific attack techniques. Vulnerability management processes often lack integration with threat intelligence, resulting in patches being prioritized by CVSS score alone rather than active exploitation evidence. The absence of a validated detection rule for a specific CVE leaves organizations blind to exploitation until post-compromise forensics.",
+    "strategic_risk": "Every unpatched vulnerability in the CISA KEV catalog represents confirmed, active exploitation risk. The KEV listing indicates that threat actors have operationalized the vulnerability and are using it in real attacks against real organizations. The strategic question is not if your organization will be targeted, but whether your detection and patching capability is faster than the attacker's scanning and exploitation pipeline. Unpatched KEV vulnerabilities in internet-facing systems should be treated as open backdoors.",
+    "analyst_context_note": "ANALYST NOTE: Monitor CISA KEV catalog for exploitation status updates. Detection rules should be deployed proactively — threat actors typically develop operational exploits within days of public CVE disclosure.",
+    "analyst_engine": "SENTINEL-APEX-ANALYST-v103"
+   },
+   "soc_context": {
+    "soc_priority": "P2 — HIGH",
+    "required_log_sources": [
+     "SIEM/EDR Alerts",
+     "Sysmon Full Event Log",
+     "Network Flow Logs",
+     "Web Proxy Logs",
+     "Windows Security Event Log",
+     "Application Error Logs"
+    ],
+    "false_positive_scenarios": [
+     "Authorized security scanning tools",
+     "IT administration activity",
+     "Automated monitoring and health check systems",
+     "Authorized penetration testing"
+    ],
+    "tuning_recommendations": [
+     "Build environment-specific baseline before deploying new detection rules to production",
+     "Run in monitoring mode for 72 hours before enabling automated blocking",
+     "Set CVSS-based auto-escalation thresholds aligned to SLA policy"
+    ],
+    "deployment_steps": [
+     "Step 1: Import detection rules into SIEM (Sigma/Splunk/KQL — see Detection Engine section).",
+     "Step 2: Validate log sources are forwarding to SIEM (check required log sources list above).",
+     "Step 3: Run detection query against 30-day historical data for retrospective detection.",
+     "Step 4: Set alert threshold and assign to SOC Tier-1 queue for initial triage.",
+     "Step 5: Build escalation runbook — define Tier-1 triage steps and Tier-2 escalation criteria.",
+     "Step 6: Test rule with a simulated benign event matching the false positive scenarios above.",
+     "Step 7: Enable automated enrichment (IP reputation, CVE lookup, user account context) on alert trigger.",
+     "Step 8: Schedule 72-hour rule review after deployment to tune false positive rate."
+    ],
+    "estimated_deployment_time_minutes": 15,
+    "soc_context_engine": "SENTINEL-APEX-SOC-v103"
+   },
+   "detection_confidence": {
+    "confidence": "LOW",
+    "detection_strength": "WEAK",
+    "false_positive_risk": "MEDIUM",
+    "deployment_complexity": "MEDIUM",
+    "scoring_rationale": "Limited evidence — detection confidence reduced",
+    "composite_score": 6,
+    "siem_readiness": "REVIEW",
+    "detection_engine": "SENTINEL-APEX-DETECT-v103"
+   },
+   "revenue_metadata": {
+    "pricing_tier": "STANDARD",
+    "pricing_details": {
+     "label": "Standard",
+     "inr_range": "₹999–₹1,999",
+     "usd_range": "$12–$24",
+     "target": "Security Teams, Analysts"
+    },
+    "detection_pack": "Threat Intelligence Defense Pack — Comprehensive detection coverage for this threat category. Includes network, host, and identity-layer detection rules for enterprise SOC deployment.",
+    "api_product_mapping": {
+     "endpoint": "/api/ai/analyze",
+     "product": "SENTINEL APEX Threat Intelligence API",
+     "use_case": "Enterprise threat intelligence feed integration"
+    },
+    "enterprise_use_cases": [
+     "Enterprise threat intelligence program",
+     "SOC capability maturity assessment",
+     "Security program ROI demonstration",
+     "Executive risk reporting"
+    ],
+    "marketplace_listing": {
+     "listing_id": "7EE82B23",
+     "product_name": "SENTINEL APEX: GPL Odorizers GPL750",
+     "category": "Threat Intelligence",
+     "subcategory": "DEFAULT",
+     "pricing_tier": "Standard",
+     "price_inr": "₹999–₹1,999",
+     "price_usd": "$12–$24",
+     "target_audience": "Security Teams, Analysts",
+     "delivery_format": "JSON API + PDF Report + SIEM Detection Rules",
+     "license_type": "Enterprise Annual Subscription",
+     "kev_premium": false,
+     "sla": "4h critical / 24h standard"
+    },
+    "revenue_engine": "SENTINEL-APEX-REVENUE-v103"
+   },
+   "executive_summary": {
+    "risk_level": "MEDIUM",
+    "immediate_actions": [
+     "1. SCHEDULE EMERGENCY PATCH — patch within 72 hours; treat as P1 change management",
+     "2. DEPLOY DETECTION RULES — activate SIEM detection rules within 8 hours",
+     "3. ASSET IDENTIFICATION — enumerate all affected systems within 24 hours",
+     "4. NETWORK SEGMENTATION — verify network access controls restrict exposure surface",
+     "5. MONITORING ELEVATION — increase alert verbosity on affected system logs"
+    ],
+    "business_impact": "This vulnerability poses direct risk to system availability, data confidentiality, and/or data integrity. Business continuity and regulatory compliance obligations are at risk if exploitation occurs.",
+    "decision_statement": "ACTION REQUIRED: this vulnerability requires scheduled patching within your standard high-severity SLA. Deploy detection coverage now to identify exploitation attempts during the patching window.",
+    "time_to_exploit": "1–30 days — exploit development estimated post-disclosure",
+    "patch_priority_sla": "72 hours",
+    "executive_engine": "SENTINEL-APEX-EXEC-v103"
+   },
+   "compliance_block": {
+    "tlp_classification": "TLP:AMBER",
+    "attribution": "Analysis by CYBERDUDEBIVASH SENTINEL APEX Threat Intelligence Engine",
+    "platform": "CYBERDUDEBIVASH Pvt. Ltd. — intel.cyberdudebivash.com",
+    "legal_disclaimer": "This report is for cybersecurity defense and research purposes only. All technical information is derived from publicly disclosed vulnerability advisories, official government catalogs (CISA KEV, NVD), and reputable threat intelligence publications. No proprietary vendor content has been reproduced. Recipients are responsible for validating indicators and detection rules against their specific environments prior to operational deployment.",
+    "data_handling": "Recipients must handle this intelligence in accordance with the TLP classification above. TLP:AMBER: Share only within your organization and with trusted partners who have a need to know.",
+    "compliance_frameworks": [
+     "ISO 27001 — Information Security Controls (A.12.6 — Technical Vulnerability Management)"
+    ],
+    "cve_references": [],
+    "google_safe": true,
+    "copyright_safe": true,
+    "original_analysis": true,
+    "compliance_engine": "SENTINEL-APEX-COMPLIANCE-v103"
+   },
+   "_apex_enriched": true,
+   "_apex_version": "103.0",
+   "_apex_enriched_at": "2026-04-16T01:55:45.911302+00:00"
+  },
+  {
+   "id": "intrusion-set--7578aecc-554d-4265-ba68-02943f8616ad",
+   "title": "Contemporary Controls BASC 20T",
+   "description": "Tactical cluster: Contemporary Controls BASC 20T",
+   "severity": "MEDIUM",
+   "risk_score": 6.0,
+   "confidence": 60,
+   "timestamp": "2026-04-15T13:18:48Z",
+   "source": "CYBERDUDEBIVASH SENTINEL APEX",
+   "stix_bundle": "CDB-APEX-1776259128.json",
+   "iocs": [
+    "www.ccontrols.com",
+    "https://www.ccontrols.com/support/contacttech.htm",
+    "https://www.cisa.gov/notification",
+    "https://www.cisa.gov/privacy-policy"
+   ],
+   "ttps": [
+    "Phishing",
+    "Exploitation for Client Execution",
+    "Account Discovery"
+   ],
+   "tags": [],
+   "blog_url": "",
+   "threat_type": "General",
+   "exploit_probability": "Low",
+   "openclaw": {
+    "score": 5,
+    "patterns": [
+     "surge:general"
+    ],
+    "anomaly": false,
+    "velocity": "rising",
+    "attack_surface": [
+     "general"
+    ],
+    "fingerprint": "b793d065315e",
+    "trend": "escalating"
+   },
+   "evidence_validation": {
+    "kev_verified": false,
+    "vendor_advisory": false,
+    "multi_source_confirmed": false,
+    "exploit_status": "UNVERIFIED",
+    "reliability_score": "LOW",
+    "evidence_confidence": "UNVERIFIED",
+    "raw_confidence_score": 6,
+    "sources_referenced": [
+     "Feed Aggregator"
+    ],
+    "validation_timestamp": "2026-04-16T01:55:45.911302+00:00",
+    "cve_count": 0,
+    "has_cvss": true
+   },
+   "analyst_insight": {
+    "vulnerability_class": "DEFAULT",
+    "exploitation_rationale": "This vulnerability class is actively targeted by threat actors due to its accessibility and the value of the resources it exposes. Automated scanning infrastructure continuously probes internet-facing assets for known vulnerabilities, converting newly disclosed CVEs into operational capabilities within hours of public disclosure. Organizations relying solely on patch cadence without compensating controls are at risk during the window between disclosure and patch deployment.",
+    "detection_difficulty": "Detection of exploitation attempts requires application-specific log analysis that goes beyond standard network flow data. Many exploit attempts arrive over legitimate protocols (HTTPS, DNS) that are not deeply inspected. Post-exploitation activity frequently uses legitimately installed tools and signed binaries that appear normal in process telemetry. The signal-to-noise ratio in enterprise log environments makes identifying the specific exploitation event challenging without precise detection rules.",
+    "soc_failure_points": "Coverage gaps most often arise from incomplete log forwarding to SIEM, detection rules that are not maintained after initial deployment, and insufficient analyst training on application-specific attack techniques. Vulnerability management processes often lack integration with threat intelligence, resulting in patches being prioritized by CVSS score alone rather than active exploitation evidence. The absence of a validated detection rule for a specific CVE leaves organizations blind to exploitation until post-compromise forensics.",
+    "strategic_risk": "Every unpatched vulnerability in the CISA KEV catalog represents confirmed, active exploitation risk. The KEV listing indicates that threat actors have operationalized the vulnerability and are using it in real attacks against real organizations. The strategic question is not if your organization will be targeted, but whether your detection and patching capability is faster than the attacker's scanning and exploitation pipeline. Unpatched KEV vulnerabilities in internet-facing systems should be treated as open backdoors.",
+    "analyst_context_note": "ANALYST NOTE: Monitor CISA KEV catalog for exploitation status updates. Detection rules should be deployed proactively — threat actors typically develop operational exploits within days of public CVE disclosure.",
+    "analyst_engine": "SENTINEL-APEX-ANALYST-v103"
+   },
+   "soc_context": {
+    "soc_priority": "P2 — HIGH",
+    "required_log_sources": [
+     "SIEM/EDR Alerts",
+     "Sysmon Full Event Log",
+     "Network Flow Logs",
+     "Web Proxy Logs",
+     "Windows Security Event Log",
+     "Application Error Logs"
+    ],
+    "false_positive_scenarios": [
+     "Authorized security scanning tools",
+     "IT administration activity",
+     "Automated monitoring and health check systems",
+     "Authorized penetration testing"
+    ],
+    "tuning_recommendations": [
+     "Build environment-specific baseline before deploying new detection rules to production",
+     "Run in monitoring mode for 72 hours before enabling automated blocking",
+     "Set CVSS-based auto-escalation thresholds aligned to SLA policy"
+    ],
+    "deployment_steps": [
+     "Step 1: Import detection rules into SIEM (Sigma/Splunk/KQL — see Detection Engine section).",
+     "Step 2: Validate log sources are forwarding to SIEM (check required log sources list above).",
+     "Step 3: Run detection query against 30-day historical data for retrospective detection.",
+     "Step 4: Set alert threshold and assign to SOC Tier-1 queue for initial triage.",
+     "Step 5: Build escalation runbook — define Tier-1 triage steps and Tier-2 escalation criteria.",
+     "Step 6: Test rule with a simulated benign event matching the false positive scenarios above.",
+     "Step 7: Enable automated enrichment (IP reputation, CVE lookup, user account context) on alert trigger.",
+     "Step 8: Schedule 72-hour rule review after deployment to tune false positive rate."
+    ],
+    "estimated_deployment_time_minutes": 15,
+    "soc_context_engine": "SENTINEL-APEX-SOC-v103"
+   },
+   "detection_confidence": {
+    "confidence": "LOW",
+    "detection_strength": "WEAK",
+    "false_positive_risk": "MEDIUM",
+    "deployment_complexity": "MEDIUM",
+    "scoring_rationale": "Limited evidence — detection confidence reduced",
+    "composite_score": 6,
+    "siem_readiness": "REVIEW",
+    "detection_engine": "SENTINEL-APEX-DETECT-v103"
+   },
+   "revenue_metadata": {
+    "pricing_tier": "STANDARD",
+    "pricing_details": {
+     "label": "Standard",
+     "inr_range": "₹999–₹1,999",
+     "usd_range": "$12–$24",
+     "target": "Security Teams, Analysts"
+    },
+    "detection_pack": "Threat Intelligence Defense Pack — Comprehensive detection coverage for this threat category. Includes network, host, and identity-layer detection rules for enterprise SOC deployment.",
+    "api_product_mapping": {
+     "endpoint": "/api/ai/analyze",
+     "product": "SENTINEL APEX Threat Intelligence API",
+     "use_case": "Enterprise threat intelligence feed integration"
+    },
+    "enterprise_use_cases": [
+     "Enterprise threat intelligence program",
+     "SOC capability maturity assessment",
+     "Security program ROI demonstration",
+     "Executive risk reporting"
+    ],
+    "marketplace_listing": {
+     "listing_id": "D1036B77",
+     "product_name": "SENTINEL APEX: Contemporary Controls BASC 20T",
+     "category": "Threat Intelligence",
+     "subcategory": "DEFAULT",
+     "pricing_tier": "Standard",
+     "price_inr": "₹999–₹1,999",
+     "price_usd": "$12–$24",
+     "target_audience": "Security Teams, Analysts",
+     "delivery_format": "JSON API + PDF Report + SIEM Detection Rules",
+     "license_type": "Enterprise Annual Subscription",
+     "kev_premium": false,
+     "sla": "4h critical / 24h standard"
+    },
+    "revenue_engine": "SENTINEL-APEX-REVENUE-v103"
+   },
+   "executive_summary": {
+    "risk_level": "MEDIUM",
+    "immediate_actions": [
+     "1. SCHEDULE EMERGENCY PATCH — patch within 72 hours; treat as P1 change management",
+     "2. DEPLOY DETECTION RULES — activate SIEM detection rules within 8 hours",
+     "3. ASSET IDENTIFICATION — enumerate all affected systems within 24 hours",
+     "4. NETWORK SEGMENTATION — verify network access controls restrict exposure surface",
+     "5. MONITORING ELEVATION — increase alert verbosity on affected system logs"
+    ],
+    "business_impact": "This vulnerability poses direct risk to system availability, data confidentiality, and/or data integrity. Business continuity and regulatory compliance obligations are at risk if exploitation occurs.",
+    "decision_statement": "ACTION REQUIRED: this vulnerability requires scheduled patching within your standard high-severity SLA. Deploy detection coverage now to identify exploitation attempts during the patching window.",
+    "time_to_exploit": "1–30 days — exploit development estimated post-disclosure",
+    "patch_priority_sla": "72 hours",
+    "executive_engine": "SENTINEL-APEX-EXEC-v103"
+   },
+   "compliance_block": {
+    "tlp_classification": "TLP:AMBER",
+    "attribution": "Analysis by CYBERDUDEBIVASH SENTINEL APEX Threat Intelligence Engine",
+    "platform": "CYBERDUDEBIVASH Pvt. Ltd. — intel.cyberdudebivash.com",
+    "legal_disclaimer": "This report is for cybersecurity defense and research purposes only. All technical information is derived from publicly disclosed vulnerability advisories, official government catalogs (CISA KEV, NVD), and reputable threat intelligence publications. No proprietary vendor content has been reproduced. Recipients are responsible for validating indicators and detection rules against their specific environments prior to operational deployment.",
+    "data_handling": "Recipients must handle this intelligence in accordance with the TLP classification above. TLP:AMBER: Share only within your organization and with trusted partners who have a need to know.",
+    "compliance_frameworks": [
+     "ISO 27001 — Information Security Controls (A.12.6 — Technical Vulnerability Management)"
+    ],
+    "cve_references": [],
+    "google_safe": true,
+    "copyright_safe": true,
+    "original_analysis": true,
+    "compliance_engine": "SENTINEL-APEX-COMPLIANCE-v103"
+   },
+   "_apex_enriched": true,
+   "_apex_version": "103.0",
+   "_apex_enriched_at": "2026-04-16T01:55:45.911302+00:00"
+  },
+  {
+   "id": "intrusion-set--f8526dbf-7d7f-4465-a4c8-ffbf724f0ac1",
+   "title": "PHP Composer flaws enable remote command execution via Perforce VCS",
+   "description": "Tactical cluster: PHP Composer flaws enable remote command execution via Perforce VCS",
+   "severity": "CRITICAL",
+   "risk_score": 5.1,
+   "confidence": 51,
+   "timestamp": "2026-04-15T13:14:22Z",
+   "source": "CYBERDUDEBIVASH SENTINEL APEX",
+   "stix_bundle": "CDB-APEX-1776258862.json",
+   "iocs": [
+    "composer.phar",
+    "composer.js"
+   ],
+   "ttps": [
+    "Valid Accounts",
+    "Exploitation for Client Execution",
+    "Command and Scripting Interpreter",
+    "Data from Local System"
+   ],
+   "tags": [],
+   "blog_url": "",
+   "threat_type": "General",
+   "exploit_probability": "Low",
+   "openclaw": {
+    "score": 5,
+    "patterns": [
+     "surge:general"
+    ],
+    "anomaly": false,
+    "velocity": "rising",
+    "attack_surface": [
+     "cloud_aws"
+    ],
+    "fingerprint": "d4ebbef9ff95",
+    "trend": "escalating"
+   },
+   "evidence_validation": {
+    "kev_verified": false,
+    "vendor_advisory": false,
+    "multi_source_confirmed": true,
+    "exploit_status": "UNVERIFIED",
+    "reliability_score": "LOW",
+    "evidence_confidence": "UNVERIFIED",
+    "raw_confidence_score": 21,
+    "sources_referenced": [
+     "Feed Aggregator"
+    ],
+    "validation_timestamp": "2026-04-16T01:55:45.911302+00:00",
+    "cve_count": 0,
+    "has_cvss": true
+   },
+   "analyst_insight": {
+    "vulnerability_class": "RCE",
+    "exploitation_rationale": "Remote code execution vulnerabilities are the highest-value exploit primitive for threat actors. They convert network access into full system control without requiring physical presence or prior credentials. Pre-authentication RCE eliminates all access barriers, enabling mass exploitation via automated scanning infrastructure. Ransomware groups and APTs prioritize RCE in internet-facing services because a single exploit converts to persistent foothold at network scale.",
+    "detection_difficulty": "RCE exploitation often masquerades as legitimate application traffic. Web-based RCE exploits arrive as HTTP requests indistinguishable from normal user traffic without deep packet inspection or application-layer anomaly detection. Post-exploitation activity frequently uses living-off-the-land binaries (LOLBins) that appear in normal process telemetry. Detection window between initial exploit and credential dumping is often under 15 minutes in automated attack chains.",
+    "soc_failure_points": "Most SOC teams rely on signature-based IDS for initial detection and miss RCE exploitation when payloads are obfuscated or use uncommon encoding. Alert fatigue from high-volume web application logs causes analysts to miss the single exploit request among millions of legitimate requests. Post-exploitation detection via process lineage (e.g., web server spawning cmd.exe) is frequently misconfigured or disabled.",
+    "strategic_risk": "A single unpatched RCE in an internet-facing service represents complete perimeter elimination. Attackers who achieve RCE on a web-facing server or VPN gateway gain an internal pivot point that negates all perimeter security investments. The strategic risk compounds when the vulnerable system is an identity provider, VPN gateway, or ERP system with connectivity to critical business infrastructure.",
+    "analyst_context_note": "ANALYST NOTE: Monitor CISA KEV catalog for exploitation status updates. Detection rules should be deployed proactively — threat actors typically develop operational exploits within days of public CVE disclosure.",
+    "analyst_engine": "SENTINEL-APEX-ANALYST-v103"
+   },
+   "soc_context": {
+    "soc_priority": "P1 — IMMEDIATE",
+    "required_log_sources": [
+     "Web Server Access Logs (HTTP/HTTPS)",
+     "WAF Logs",
+     "Sysmon EventID 1 (Process Create)",
+     "Sysmon EventID 3 (Network Connect)",
+     "EDR Process Telemetry",
+     "Windows Security EventID 4688"
+    ],
+    "false_positive_scenarios": [
+     "Legitimate application deployment scripts writing to web directories",
+     "Authorized penetration testing activities",
+     "Development team debug endpoints in non-production environments",
+     "Automated CI/CD pipeline deployment agents"
+    ],
+    "tuning_recommendations": [
+     "Allowlist known deployment tool source IPs/user-agents from web upload detection",
+     "Tune process lineage rules to exclude known parent-child pairs from CI/CD agents",
+     "Set CVSS threshold to 8.0+ for immediate alert escalation; 6.0-8.0 for SOC review queue"
+    ],
+    "deployment_steps": [
+     "Step 1: Import detection rules into SIEM (Sigma/Splunk/KQL — see Detection Engine section).",
+     "Step 2: Validate log sources are forwarding to SIEM (check required log sources list above).",
+     "Step 3: Run detection query against 30-day historical data for retrospective detection.",
+     "Step 4: Set alert threshold and assign to SOC Tier-1 queue for initial triage.",
+     "Step 5: Build escalation runbook — define Tier-1 triage steps and Tier-2 escalation criteria.",
+     "Step 6: Test rule with a simulated benign event matching the false positive scenarios above.",
+     "Step 7: Enable automated enrichment (IP reputation, CVE lookup, user account context) on alert trigger.",
+     "Step 8: Schedule 72-hour rule review after deployment to tune false positive rate."
+    ],
+    "estimated_deployment_time_minutes": 15,
+    "soc_context_engine": "SENTINEL-APEX-SOC-v103"
+   },
+   "detection_confidence": {
+    "confidence": "LOW",
+    "detection_strength": "WEAK",
+    "false_positive_risk": "LOW",
+    "deployment_complexity": "LOW",
+    "scoring_rationale": "Limited evidence — detection confidence reduced",
+    "composite_score": 21,
+    "siem_readiness": "REVIEW",
+    "detection_engine": "SENTINEL-APEX-DETECT-v103"
+   },
+   "revenue_metadata": {
+    "pricing_tier": "STANDARD",
+    "pricing_details": {
+     "label": "Standard",
+     "inr_range": "₹999–₹1,999",
+     "usd_range": "$12–$24",
+     "target": "Security Teams, Analysts"
+    },
+    "detection_pack": "RCE Defense Pack — Network-based and host-based detection rules for remote code execution exploitation chains. Includes web shell detection, process lineage anomalies, and post-exploitation command execution.",
+    "api_product_mapping": {
+     "endpoint": "/api/ai/analyze",
+     "product": "Threat Analysis API — RCE Intelligence Feed",
+     "use_case": "Automated CVE-to-detection pipeline integration"
+    },
+    "enterprise_use_cases": [
+     "MSSP customer reporting — Critical CVE weekly briefings",
+     "SOC Tier-1 automated triage enrichment",
+     "Vulnerability management team prioritization feed",
+     "CISO dashboard CVE-to-risk scoring"
+    ],
+    "marketplace_listing": {
+     "listing_id": "43A9A58A",
+     "product_name": "SENTINEL APEX: PHP Composer flaws enable remote command execution via Perfo",
+     "category": "Threat Intelligence",
+     "subcategory": "RCE",
+     "pricing_tier": "Standard",
+     "price_inr": "₹999–₹1,999",
+     "price_usd": "$12–$24",
+     "target_audience": "Security Teams, Analysts",
+     "delivery_format": "JSON API + PDF Report + SIEM Detection Rules",
+     "license_type": "Enterprise Annual Subscription",
+     "kev_premium": false,
+     "sla": "4h critical / 24h standard"
+    },
+    "revenue_engine": "SENTINEL-APEX-REVENUE-v103"
+   },
+   "executive_summary": {
+    "risk_level": "MEDIUM",
+    "immediate_actions": [
+     "1. SCHEDULE EMERGENCY PATCH — patch within 72 hours; treat as P1 change management",
+     "2. DEPLOY DETECTION RULES — activate SIEM detection rules within 8 hours",
+     "3. ASSET IDENTIFICATION — enumerate all affected systems within 24 hours",
+     "4. NETWORK SEGMENTATION — verify network access controls restrict exposure surface",
+     "5. MONITORING ELEVATION — increase alert verbosity on affected system logs"
+    ],
+    "business_impact": "Complete system compromise enabling ransomware deployment, data exfiltration, and persistent threat actor access. Estimated recovery cost: $2M–$20M+ depending on system criticality and data sensitivity.",
+    "decision_statement": "ACTION REQUIRED: this vulnerability requires scheduled patching within your standard high-severity SLA. Deploy detection coverage now to identify exploitation attempts during the patching window.",
+    "time_to_exploit": "1–30 days — exploit development estimated post-disclosure",
+    "patch_priority_sla": "72 hours",
+    "executive_engine": "SENTINEL-APEX-EXEC-v103"
+   },
+   "compliance_block": {
+    "tlp_classification": "TLP:AMBER",
+    "attribution": "Analysis by CYBERDUDEBIVASH SENTINEL APEX Threat Intelligence Engine",
+    "platform": "CYBERDUDEBIVASH Pvt. Ltd. — intel.cyberdudebivash.com",
+    "legal_disclaimer": "This report is for cybersecurity defense and research purposes only. All technical information is derived from publicly disclosed vulnerability advisories, official government catalogs (CISA KEV, NVD), and reputable threat intelligence publications. No proprietary vendor content has been reproduced. Recipients are responsible for validating indicators and detection rules against their specific environments prior to operational deployment.",
+    "data_handling": "Recipients must handle this intelligence in accordance with the TLP classification above. TLP:AMBER: Share only within your organization and with trusted partners who have a need to know.",
+    "compliance_frameworks": [
+     "ISO 27001 — Information Security Controls (A.12.6 — Technical Vulnerability Management)",
+     "NIST SP 800-61r2 — Computer Security Incident Handling Guide"
+    ],
+    "cve_references": [],
+    "google_safe": true,
+    "copyright_safe": true,
+    "original_analysis": true,
+    "compliance_engine": "SENTINEL-APEX-COMPLIANCE-v103"
+   },
+   "_apex_enriched": true,
+   "_apex_version": "103.0",
+   "_apex_enriched_at": "2026-04-16T01:55:45.911302+00:00"
+  },
+  {
+   "id": "intrusion-set--beed0c4d-2598-4224-a532-5dc17d943f47",
+   "title": "FortiGate CVE-2025-59718 Exploitation: Incident Response Findings",
+   "description": "Tactical cluster: FortiGate CVE-2025-59718 Exploitation: Incident Response Findings",
+   "severity": "HIGH",
+   "risk_score": 7.1,
+   "confidence": 71,
+   "timestamp": "2026-04-11T12:05:36Z",
+   "source": "CYBERDUDEBIVASH SENTINEL APEX",
+   "stix_bundle": "CDB-APEX-1775909136.json",
+   "iocs": [
+    "firewall.policy",
+    "forticloud.com",
+    "system.sso",
+    "1.exe",
+    "3869.exe"
+   ],
+   "ttps": [
+    "Active Scanning",
+    "Exploit Public-Facing Application",
+    "Valid Accounts",
+    "Exploitation for Client Execution",
+    "Command and Scripting Interpreter"
+   ],
+   "tags": [],
+   "blog_url": "",
+   "threat_type": "Vulnerability",
+   "exploit_probability": "Medium",
+   "openclaw": {
+    "score": 15,
+    "patterns": [
+     "baseline"
+    ],
+    "anomaly": false,
+    "velocity": "stable",
+    "attack_surface": [
+     "network_fortinet"
+    ],
+    "fingerprint": "54d7d47b2ad7",
+    "trend": "stable"
+   },
+   "epss_score": 7.62,
+   "kev_present": true,
+   "alert": {
+    "severity": "HIGH",
+    "score": 45,
+    "reasons": [
+     "CISA_KEV_active"
+    ]
+   },
+   "cvss_score": 9.8,
+   "correlation": {
+    "cluster_id": "CVE-49430D20",
+    "cluster_type": "cve",
+    "related_count": 2,
+    "confidence": 90
+   },
+   "evidence_validation": {
+    "kev_verified": true,
+    "vendor_advisory": false,
+    "multi_source_confirmed": true,
+    "exploit_status": "ACTIVE_CONFIRMED",
+    "reliability_score": "HIGH",
+    "evidence_confidence": "LIKELY",
+    "raw_confidence_score": 77,
+    "sources_referenced": [
+     "CISA KEV Catalog",
+     "NVD/CVE Database",
+     "Threat Intelligence Feed"
+    ],
+    "validation_timestamp": "2026-04-16T01:55:45.911302+00:00",
+    "cve_count": 1,
+    "has_cvss": true
+   },
+   "analyst_insight": {
+    "vulnerability_class": "DEFAULT",
+    "exploitation_rationale": "This vulnerability class is actively targeted by threat actors due to its accessibility and the value of the resources it exposes. Automated scanning infrastructure continuously probes internet-facing assets for known vulnerabilities, converting newly disclosed CVEs into operational capabilities within hours of public disclosure. Organizations relying solely on patch cadence without compensating controls are at risk during the window between disclosure and patch deployment.",
+    "detection_difficulty": "Detection of exploitation attempts requires application-specific log analysis that goes beyond standard network flow data. Many exploit attempts arrive over legitimate protocols (HTTPS, DNS) that are not deeply inspected. Post-exploitation activity frequently uses legitimately installed tools and signed binaries that appear normal in process telemetry. The signal-to-noise ratio in enterprise log environments makes identifying the specific exploitation event challenging without precise detection rules.",
+    "soc_failure_points": "Coverage gaps most often arise from incomplete log forwarding to SIEM, detection rules that are not maintained after initial deployment, and insufficient analyst training on application-specific attack techniques. Vulnerability management processes often lack integration with threat intelligence, resulting in patches being prioritized by CVSS score alone rather than active exploitation evidence. The absence of a validated detection rule for a specific CVE leaves organizations blind to exploitation until post-compromise forensics.",
+    "strategic_risk": "Every unpatched vulnerability in the CISA KEV catalog represents confirmed, active exploitation risk. The KEV listing indicates that threat actors have operationalized the vulnerability and are using it in real attacks against real organizations. The strategic question is not if your organization will be targeted, but whether your detection and patching capability is faster than the attacker's scanning and exploitation pipeline. Unpatched KEV vulnerabilities in internet-facing systems should be treated as open backdoors.",
+    "analyst_context_note": "ANALYST NOTE: CISA KEV listing confirms active exploitation in the wild. This moves the vulnerability from theoretical risk to confirmed, ongoing threat. Treat patch deployment as an emergency action, not a scheduled maintenance item.",
+    "analyst_engine": "SENTINEL-APEX-ANALYST-v103"
+   },
+   "soc_context": {
+    "soc_priority": "P1 — IMMEDIATE",
+    "required_log_sources": [
+     "SIEM/EDR Alerts",
+     "Sysmon Full Event Log",
+     "Network Flow Logs",
+     "Web Proxy Logs",
+     "Windows Security Event Log",
+     "Application Error Logs"
+    ],
+    "false_positive_scenarios": [
+     "Authorized security scanning tools",
+     "IT administration activity",
+     "Automated monitoring and health check systems",
+     "Authorized penetration testing"
+    ],
+    "tuning_recommendations": [
+     "Build environment-specific baseline before deploying new detection rules to production",
+     "Run in monitoring mode for 72 hours before enabling automated blocking",
+     "Set CVSS-based auto-escalation thresholds aligned to SLA policy"
+    ],
+    "deployment_steps": [
+     "Step 1: Import detection rules into SIEM (Sigma/Splunk/KQL — see Detection Engine section).",
+     "Step 2: Validate log sources are forwarding to SIEM (check required log sources list above).",
+     "Step 3: Run detection query against 30-day historical data for retrospective detection.",
+     "Step 4: Set alert threshold and assign to SOC Tier-1 queue for initial triage.",
+     "Step 5: Build escalation runbook — define Tier-1 triage steps and Tier-2 escalation criteria.",
+     "Step 6: Test rule with a simulated benign event matching the false positive scenarios above.",
+     "Step 7: Enable automated enrichment (IP reputation, CVE lookup, user account context) on alert trigger.",
+     "Step 8: Schedule 72-hour rule review after deployment to tune false positive rate."
+    ],
+    "estimated_deployment_time_minutes": 15,
+    "soc_context_engine": "SENTINEL-APEX-SOC-v103"
+   },
+   "detection_confidence": {
+    "confidence": "HIGH",
+    "detection_strength": "STRONG",
+    "false_positive_risk": "MEDIUM",
+    "deployment_complexity": "MEDIUM",
+    "scoring_rationale": "CISA KEV confirmed (highest evidence weight) | CVSS 7.1 — high severity tier | High-reliability source validation | Active exploitation confirmed",
+    "composite_score": 77,
+    "siem_readiness": "PRODUCTION",
+    "detection_engine": "SENTINEL-APEX-DETECT-v103"
+   },
+   "revenue_metadata": {
+    "pricing_tier": "ENTERPRISE_HIGH",
+    "pricing_details": {
+     "label": "Enterprise High",
+     "inr_range": "₹4,999–₹9,999",
+     "usd_range": "$60–$120",
+     "target": "Enterprise SOC, Mid-Market Security"
+    },
+    "detection_pack": "Threat Intelligence Defense Pack — Comprehensive detection coverage for this threat category. Includes network, host, and identity-layer detection rules for enterprise SOC deployment.",
+    "api_product_mapping": {
+     "endpoint": "/api/ai/analyze",
+     "product": "SENTINEL APEX Threat Intelligence API",
+     "use_case": "Enterprise threat intelligence feed integration"
+    },
+    "enterprise_use_cases": [
+     "Enterprise threat intelligence program",
+     "SOC capability maturity assessment",
+     "Security program ROI demonstration",
+     "Executive risk reporting"
+    ],
+    "marketplace_listing": {
+     "listing_id": "DE472C33",
+     "product_name": "SENTINEL APEX: FortiGate CVE-2025-59718 Exploitation: Incident Response Fin",
+     "category": "Threat Intelligence",
+     "subcategory": "DEFAULT",
+     "pricing_tier": "Enterprise High",
+     "price_inr": "₹4,999–₹9,999",
+     "price_usd": "$60–$120",
+     "target_audience": "Enterprise SOC, Mid-Market Security",
+     "delivery_format": "JSON API + PDF Report + SIEM Detection Rules",
+     "license_type": "Enterprise Annual Subscription",
+     "kev_premium": true,
+     "sla": "4h critical / 24h standard"
+    },
+    "revenue_engine": "SENTINEL-APEX-REVENUE-v103"
+   },
+   "executive_summary": {
+    "risk_level": "CRITICAL",
+    "immediate_actions": [
+     "1. PATCH IMMEDIATELY — apply vendor patch within 24 hours or apply WAF/network compensating control",
+     "2. DEPLOY DETECTION RULES — activate SIEM detection rules from this report within 2 hours",
+     "3. RETROSPECTIVE HUNT — run detection rules against 30-day historical logs immediately",
+     "4. ASSET INVENTORY — identify all affected systems within 4 hours; prioritize internet-facing instances",
+     "5. ISOLATE CRITICAL SYSTEMS — if patching is not immediately possible, network-isolate most critical affected systems",
+     "6. CREDENTIAL ROTATION — rotate credentials for service accounts with access to affected systems",
+     "7. EXECUTIVE NOTIFICATION — brief CISO and security leadership on confirmed exploitation risk"
+    ],
+    "business_impact": "This vulnerability poses direct risk to system availability, data confidentiality, and/or data integrity. Business continuity and regulatory compliance obligations are at risk if exploitation occurs.",
+    "decision_statement": "DECISION REQUIRED: CVE-2025-59718 is on the CISA KEV catalog — confirmed active exploitation. CVSS 7.1. This is not a future risk — attackers are exploiting this NOW. Immediate patching or compensating control deployment is the only acceptable response.",
+    "time_to_exploit": "IMMEDIATE — already being exploited",
+    "patch_priority_sla": "24 hours",
+    "executive_engine": "SENTINEL-APEX-EXEC-v103"
+   },
+   "compliance_block": {
+    "tlp_classification": "TLP:RED",
+    "attribution": "Analysis by CYBERDUDEBIVASH SENTINEL APEX Threat Intelligence Engine",
+    "platform": "CYBERDUDEBIVASH Pvt. Ltd. — intel.cyberdudebivash.com",
+    "legal_disclaimer": "This report is for cybersecurity defense and research purposes only. All technical information is derived from publicly disclosed vulnerability advisories, official government catalogs (CISA KEV, NVD), and reputable threat intelligence publications. No proprietary vendor content has been reproduced. Recipients are responsible for validating indicators and detection rules against their specific environments prior to operational deployment.",
+    "data_handling": "Recipients must handle this intelligence in accordance with the TLP classification above. TLP:RED: Share only within your organization and with trusted partners who have a need to know.",
+    "compliance_frameworks": [
+     "ISO 27001 — Information Security Controls (A.12.6 — Technical Vulnerability Management)"
+    ],
+    "cve_references": [
+     "CVE-2025-59718"
+    ],
+    "google_safe": true,
+    "copyright_safe": true,
+    "original_analysis": true,
+    "compliance_engine": "SENTINEL-APEX-COMPLIANCE-v103"
+   },
+   "_apex_enriched": true,
+   "_apex_version": "103.0",
+   "_apex_enriched_at": "2026-04-16T01:55:45.911302+00:00"
+  },
+  {
+   "id": "intrusion-set--4336641f-c816-41e7-9fbe-f50ab0c2c056",
+   "title": "CVE-2026-3300 - Everest Forms Pro <= 1.9.12 - Unauthenticated Remote Code Execution via Calculation Field",
+   "description": "Tactical cluster: CVE-2026-3300 - Everest Forms Pro <= 1.9.12 - Unauthenticated Remote Code Execution via Calculation Field",
+   "severity": "LOW",
+   "risk_score": 2.3,
+   "confidence": 23,
+   "timestamp": "2026-03-31T04:32:13Z",
+   "source": "CYBERDUDEBIVASH SENTINEL APEX",
+   "stix_bundle": "CDB-APEX-1774931533.json",
+   "iocs": [],
+   "ttps": [
+    "Command and Scripting Interpreter",
+    "Browser Extensions"
+   ],
+   "tags": [],
+   "threat_type": "Vulnerability",
+   "exploit_probability": "Low",
+   "openclaw": {
+    "score": 0,
+    "patterns": [
+     "baseline"
+    ],
+    "anomaly": false,
+    "velocity": "stable",
+    "attack_surface": [
+     "general"
+    ],
+    "fingerprint": "05fd05568ea1",
+    "trend": "escalating"
+   },
+   "epss_score": 0.29,
+   "evidence_validation": {
+    "kev_verified": false,
+    "vendor_advisory": false,
+    "multi_source_confirmed": true,
+    "exploit_status": "UNVERIFIED",
+    "reliability_score": "LOW",
+    "evidence_confidence": "UNVERIFIED",
+    "raw_confidence_score": 20,
+    "sources_referenced": [
+     "NVD/CVE Database"
+    ],
+    "validation_timestamp": "2026-04-16T01:55:45.911302+00:00",
+    "cve_count": 1,
+    "has_cvss": true
+   },
+   "analyst_insight": {
+    "vulnerability_class": "RCE",
+    "exploitation_rationale": "Remote code execution vulnerabilities are the highest-value exploit primitive for threat actors. They convert network access into full system control without requiring physical presence or prior credentials. Pre-authentication RCE eliminates all access barriers, enabling mass exploitation via automated scanning infrastructure. Ransomware groups and APTs prioritize RCE in internet-facing services because a single exploit converts to persistent foothold at network scale.",
+    "detection_difficulty": "RCE exploitation often masquerades as legitimate application traffic. Web-based RCE exploits arrive as HTTP requests indistinguishable from normal user traffic without deep packet inspection or application-layer anomaly detection. Post-exploitation activity frequently uses living-off-the-land binaries (LOLBins) that appear in normal process telemetry. Detection window between initial exploit and credential dumping is often under 15 minutes in automated attack chains.",
+    "soc_failure_points": "Most SOC teams rely on signature-based IDS for initial detection and miss RCE exploitation when payloads are obfuscated or use uncommon encoding. Alert fatigue from high-volume web application logs causes analysts to miss the single exploit request among millions of legitimate requests. Post-exploitation detection via process lineage (e.g., web server spawning cmd.exe) is frequently misconfigured or disabled.",
+    "strategic_risk": "A single unpatched RCE in an internet-facing service represents complete perimeter elimination. Attackers who achieve RCE on a web-facing server or VPN gateway gain an internal pivot point that negates all perimeter security investments. The strategic risk compounds when the vulnerable system is an identity provider, VPN gateway, or ERP system with connectivity to critical business infrastructure.",
+    "analyst_context_note": "ANALYST NOTE: Monitor CISA KEV catalog for exploitation status updates. Detection rules should be deployed proactively — threat actors typically develop operational exploits within days of public CVE disclosure.",
+    "analyst_engine": "SENTINEL-APEX-ANALYST-v103"
+   },
+   "soc_context": {
+    "soc_priority": "P1 — IMMEDIATE",
+    "required_log_sources": [
+     "Web Server Access Logs (HTTP/HTTPS)",
+     "WAF Logs",
+     "Sysmon EventID 1 (Process Create)",
+     "Sysmon EventID 3 (Network Connect)",
+     "EDR Process Telemetry",
+     "Windows Security EventID 4688"
+    ],
+    "false_positive_scenarios": [
+     "Legitimate application deployment scripts writing to web directories",
+     "Authorized penetration testing activities",
+     "Development team debug endpoints in non-production environments",
+     "Automated CI/CD pipeline deployment agents"
+    ],
+    "tuning_recommendations": [
+     "Allowlist known deployment tool source IPs/user-agents from web upload detection",
+     "Tune process lineage rules to exclude known parent-child pairs from CI/CD agents",
+     "Set CVSS threshold to 8.0+ for immediate alert escalation; 6.0-8.0 for SOC review queue"
+    ],
+    "deployment_steps": [
+     "Step 1: Import detection rules into SIEM (Sigma/Splunk/KQL — see Detection Engine section).",
+     "Step 2: Validate log sources are forwarding to SIEM (check required log sources list above).",
+     "Step 3: Run detection query against 30-day historical data for retrospective detection.",
+     "Step 4: Set alert threshold and assign to SOC Tier-1 queue for initial triage.",
+     "Step 5: Build escalation runbook — define Tier-1 triage steps and Tier-2 escalation criteria.",
+     "Step 6: Test rule with a simulated benign event matching the false positive scenarios above.",
+     "Step 7: Enable automated enrichment (IP reputation, CVE lookup, user account context) on alert trigger.",
+     "Step 8: Schedule 72-hour rule review after deployment to tune false positive rate."
+    ],
+    "estimated_deployment_time_minutes": 15,
+    "soc_context_engine": "SENTINEL-APEX-SOC-v103"
+   },
+   "detection_confidence": {
+    "confidence": "LOW",
+    "detection_strength": "WEAK",
+    "false_positive_risk": "LOW",
+    "deployment_complexity": "LOW",
+    "scoring_rationale": "Limited evidence — detection confidence reduced",
+    "composite_score": 20,
+    "siem_readiness": "REVIEW",
+    "detection_engine": "SENTINEL-APEX-DETECT-v103"
+   },
+   "revenue_metadata": {
+    "pricing_tier": "STANDARD",
+    "pricing_details": {
+     "label": "Standard",
+     "inr_range": "₹999–₹1,999",
+     "usd_range": "$12–$24",
+     "target": "Security Teams, Analysts"
+    },
+    "detection_pack": "RCE Defense Pack — Network-based and host-based detection rules for remote code execution exploitation chains. Includes web shell detection, process lineage anomalies, and post-exploitation command execution.",
+    "api_product_mapping": {
+     "endpoint": "/api/ai/analyze",
+     "product": "Threat Analysis API — RCE Intelligence Feed",
+     "use_case": "Automated CVE-to-detection pipeline integration"
+    },
+    "enterprise_use_cases": [
+     "MSSP customer reporting — Critical CVE weekly briefings",
+     "SOC Tier-1 automated triage enrichment",
+     "Vulnerability management team prioritization feed",
+     "CISO dashboard CVE-to-risk scoring"
+    ],
+    "marketplace_listing": {
+     "listing_id": "4ECEF782",
+     "product_name": "SENTINEL APEX: CVE-2026-3300 - Everest Forms Pro <= 1.9.12 - Unauthenticate",
+     "category": "Threat Intelligence",
+     "subcategory": "RCE",
+     "pricing_tier": "Standard",
+     "price_inr": "₹999–₹1,999",
+     "price_usd": "$12–$24",
+     "target_audience": "Security Teams, Analysts",
+     "delivery_format": "JSON API + PDF Report + SIEM Detection Rules",
+     "license_type": "Enterprise Annual Subscription",
+     "kev_premium": false,
+     "sla": "4h critical / 24h standard"
+    },
+    "revenue_engine": "SENTINEL-APEX-REVENUE-v103"
+   },
+   "executive_summary": {
+    "risk_level": "LOW",
+    "immediate_actions": [
+     "1. SCHEDULE EMERGENCY PATCH — patch within 72 hours; treat as P1 change management",
+     "2. DEPLOY DETECTION RULES — activate SIEM detection rules within 8 hours",
+     "3. ASSET IDENTIFICATION — enumerate all affected systems within 24 hours",
+     "4. NETWORK SEGMENTATION — verify network access controls restrict exposure surface",
+     "5. MONITORING ELEVATION — increase alert verbosity on affected system logs"
+    ],
+    "business_impact": "Complete system compromise enabling ransomware deployment, data exfiltration, and persistent threat actor access. Estimated recovery cost: $2M–$20M+ depending on system criticality and data sensitivity.",
+    "decision_statement": "ACTION REQUIRED: CVE-2026-3300 requires scheduled patching within your standard high-severity SLA. Deploy detection coverage now to identify exploitation attempts during the patching window.",
+    "time_to_exploit": "1–30 days — exploit development estimated post-disclosure",
+    "patch_priority_sla": "72 hours",
+    "executive_engine": "SENTINEL-APEX-EXEC-v103"
+   },
+   "compliance_block": {
+    "tlp_classification": "TLP:GREEN",
+    "attribution": "Analysis by CYBERDUDEBIVASH SENTINEL APEX Threat Intelligence Engine",
+    "platform": "CYBERDUDEBIVASH Pvt. Ltd. — intel.cyberdudebivash.com",
+    "legal_disclaimer": "This report is for cybersecurity defense and research purposes only. All technical information is derived from publicly disclosed vulnerability advisories, official government catalogs (CISA KEV, NVD), and reputable threat intelligence publications. No proprietary vendor content has been reproduced. Recipients are responsible for validating indicators and detection rules against their specific environments prior to operational deployment.",
+    "data_handling": "Recipients must handle this intelligence in accordance with the TLP classification above. TLP:GREEN: Share only within your organization and with trusted partners who have a need to know.",
+    "compliance_frameworks": [
+     "ISO 27001 — Information Security Controls (A.12.6 — Technical Vulnerability Management)",
+     "NIST SP 800-61r2 — Computer Security Incident Handling Guide"
+    ],
+    "cve_references": [
+     "CVE-2026-3300"
+    ],
+    "google_safe": true,
+    "copyright_safe": true,
+    "original_analysis": true,
+    "compliance_engine": "SENTINEL-APEX-COMPLIANCE-v103"
+   },
+   "_apex_enriched": true,
+   "_apex_version": "103.0",
+   "_apex_enriched_at": "2026-04-16T01:55:45.911302+00:00"
+  },
+  {
+   "id": "intrusion-set--49e15ebe-9d10-4e51-92a8-72cb3aef4f74",
+   "title": "400,000 WordPress Sites Affected by Unauthenticated SQL Injection Vulnerability in Ally WordPress Plugin",
+   "description": "Tactical cluster: 400,000 WordPress Sites Affected by Unauthenticated SQL Injection Vulnerability in Ally WordPress Plugin",
+   "severity": "LOW",
+   "risk_score": 3.1,
+   "confidence": 31,
+   "timestamp": "2026-03-22T00:39:16Z",
+   "source": "CYBERDUDEBIVASH SENTINEL APEX",
+   "stix_bundle": "CDB-APEX-1774139956.json",
+   "iocs": [],
+   "ttps": [
+    "Exploitation for Client Execution",
+    "Command and Scripting Interpreter",
+    "Data from Information Repositories",
+    "Application Layer Protocol"
+   ],
+   "tags": [],
+   "threat_type": "General",
+   "exploit_probability": "Low",
+   "openclaw": {
+    "score": 0,
+    "patterns": [
+     "baseline"
+    ],
+    "anomaly": false,
+    "velocity": "stable",
+    "attack_surface": [
+     "web_wordpress"
+    ],
+    "fingerprint": "da9811cfcf5a",
+    "trend": "stable"
+   },
+   "evidence_validation": {
+    "kev_verified": false,
+    "vendor_advisory": false,
+    "multi_source_confirmed": true,
+    "exploit_status": "UNVERIFIED",
+    "reliability_score": "LOW",
+    "evidence_confidence": "UNVERIFIED",
+    "raw_confidence_score": 15,
+    "sources_referenced": [
+     "Feed Aggregator"
+    ],
+    "validation_timestamp": "2026-04-16T01:55:45.911302+00:00",
+    "cve_count": 0,
+    "has_cvss": true
+   },
+   "analyst_insight": {
+    "vulnerability_class": "AUTH_BYPASS",
+    "exploitation_rationale": "Authentication bypass vulnerabilities are disproportionately dangerous because they invalidate the foundational security assumption that only authorized users can access protected resources. Attackers exploit auth bypasses to impersonate any user — including administrators — without knowing actual credentials. In SaaS and web application contexts, a single auth bypass can expose all tenant data across a multi-tenant platform.",
+    "detection_difficulty": "Successful authentication bypass generates log entries that appear identical to legitimate authentication events. Standard SIEM queries looking for failed authentication produce zero alerts for bypasses — the bypass succeeds. Detection requires behavioral analysis of what the authenticated session does, not just that authentication occurred. Source IP reputation checks are easily defeated by residential proxy networks.",
+    "soc_failure_points": "SOC teams typically build detection around authentication failures, not successes. Monitoring for successful authentication from unexpected geographic locations is frequently tuned out due to VPN and remote worker false positives. Session behavior analytics (accessing resources inconsistent with user role) requires baselining that many organizations have not implemented.",
+    "strategic_risk": "Authentication bypass in privileged access management, identity providers, or administrative interfaces grants attackers the equivalent of a master key. The strategic impact scales with the sensitivity of resources the bypassed system protects. In enterprise environments, bypassing a single PAM or IAM solution can cascade into full Active Directory compromise.",
+    "analyst_context_note": "ANALYST NOTE: Monitor CISA KEV catalog for exploitation status updates. Detection rules should be deployed proactively — threat actors typically develop operational exploits within days of public CVE disclosure.",
+    "analyst_engine": "SENTINEL-APEX-ANALYST-v103"
+   },
+   "soc_context": {
+    "soc_priority": "P1 — IMMEDIATE",
+    "required_log_sources": [
+     "Application Authentication Logs",
+     "Web Server Access Logs",
+     "Identity Provider Logs (ADFS/AAD/Okta)",
+     "Windows Security EventID 4624/4625",
+     "VPN/Gateway Access Logs"
+    ],
+    "false_positive_scenarios": [
+     "Users accessing from new devices after device refresh",
+     "VPN connections from travel locations",
+     "Service account authentications from new systems after migration",
+     "SSO federation events from new IdP configurations"
+    ],
+    "tuning_recommendations": [
+     "Build geographic baseline per user — alert only on locations outside defined home/office regions",
+     "Allowlist known VPN exit node IP ranges to reduce travel false positives",
+     "Set time-window correlation: auth anomaly + unusual resource access within 30 minutes = high-confidence alert"
+    ],
+    "deployment_steps": [
+     "Step 1: Import detection rules into SIEM (Sigma/Splunk/KQL — see Detection Engine section).",
+     "Step 2: Validate log sources are forwarding to SIEM (check required log sources list above).",
+     "Step 3: Run detection query against 30-day historical data for retrospective detection.",
+     "Step 4: Set alert threshold and assign to SOC Tier-1 queue for initial triage.",
+     "Step 5: Build escalation runbook — define Tier-1 triage steps and Tier-2 escalation criteria.",
+     "Step 6: Test rule with a simulated benign event matching the false positive scenarios above.",
+     "Step 7: Enable automated enrichment (IP reputation, CVE lookup, user account context) on alert trigger.",
+     "Step 8: Schedule 72-hour rule review after deployment to tune false positive rate."
+    ],
+    "estimated_deployment_time_minutes": 15,
+    "soc_context_engine": "SENTINEL-APEX-SOC-v103"
+   },
+   "detection_confidence": {
+    "confidence": "LOW",
+    "detection_strength": "WEAK",
+    "false_positive_risk": "MEDIUM",
+    "deployment_complexity": "MEDIUM",
+    "scoring_rationale": "Limited evidence — detection confidence reduced",
+    "composite_score": 15,
+    "siem_readiness": "REVIEW",
+    "detection_engine": "SENTINEL-APEX-DETECT-v103"
+   },
+   "revenue_metadata": {
+    "pricing_tier": "STANDARD",
+    "pricing_details": {
+     "label": "Standard",
+     "inr_range": "₹999–₹1,999",
+     "usd_range": "$12–$24",
+     "target": "Security Teams, Analysts"
+    },
+    "detection_pack": "Identity Defense Pack — Authentication bypass detection, impossible travel analysis, session anomaly rules, and privileged access monitoring for identity infrastructure.",
+    "api_product_mapping": {
+     "endpoint": "/api/ai/correlate",
+     "product": "Correlation API — Identity Threat Graph",
+     "use_case": "Identity system compromise correlation and lateral movement tracking"
+    },
+    "enterprise_use_cases": [
+     "Identity team posture assessment",
+     "Zero Trust architecture gap analysis",
+     "CASB policy enforcement integration",
+     "PAM solution health monitoring"
+    ],
+    "marketplace_listing": {
+     "listing_id": "7599130C",
+     "product_name": "SENTINEL APEX: 400,000 WordPress Sites Affected by Unauthenticated SQL Inje",
+     "category": "Threat Intelligence",
+     "subcategory": "AUTH BYPASS",
+     "pricing_tier": "Standard",
+     "price_inr": "₹999–₹1,999",
+     "price_usd": "$12–$24",
+     "target_audience": "Security Teams, Analysts",
+     "delivery_format": "JSON API + PDF Report + SIEM Detection Rules",
+     "license_type": "Enterprise Annual Subscription",
+     "kev_premium": false,
+     "sla": "4h critical / 24h standard"
+    },
+    "revenue_engine": "SENTINEL-APEX-REVENUE-v103"
+   },
+   "executive_summary": {
+    "risk_level": "LOW",
+    "immediate_actions": [
+     "1. SCHEDULE EMERGENCY PATCH — patch within 72 hours; treat as P1 change management",
+     "2. DEPLOY DETECTION RULES — activate SIEM detection rules within 8 hours",
+     "3. ASSET IDENTIFICATION — enumerate all affected systems within 24 hours",
+     "4. NETWORK SEGMENTATION — verify network access controls restrict exposure surface",
+     "5. MONITORING ELEVATION — increase alert verbosity on affected system logs"
+    ],
+    "business_impact": "Authentication bypass exposes all resources protected by the bypassed system to unauthorized access. In enterprise deployments, this includes customer data, financial records, intellectual property, and administrative infrastructure.",
+    "decision_statement": "ACTION REQUIRED: this vulnerability requires scheduled patching within your standard high-severity SLA. Deploy detection coverage now to identify exploitation attempts during the patching window.",
+    "time_to_exploit": "1–30 days — exploit development estimated post-disclosure",
+    "patch_priority_sla": "72 hours",
+    "executive_engine": "SENTINEL-APEX-EXEC-v103"
+   },
+   "compliance_block": {
+    "tlp_classification": "TLP:GREEN",
+    "attribution": "Analysis by CYBERDUDEBIVASH SENTINEL APEX Threat Intelligence Engine",
+    "platform": "CYBERDUDEBIVASH Pvt. Ltd. — intel.cyberdudebivash.com",
+    "legal_disclaimer": "This report is for cybersecurity defense and research purposes only. All technical information is derived from publicly disclosed vulnerability advisories, official government catalogs (CISA KEV, NVD), and reputable threat intelligence publications. No proprietary vendor content has been reproduced. Recipients are responsible for validating indicators and detection rules against their specific environments prior to operational deployment.",
+    "data_handling": "Recipients must handle this intelligence in accordance with the TLP classification above. TLP:GREEN: Share only within your organization and with trusted partners who have a need to know.",
+    "compliance_frameworks": [
+     "ISO 27001 — Information Security Controls (A.12.6 — Technical Vulnerability Management)"
+    ],
+    "cve_references": [],
+    "google_safe": true,
+    "copyright_safe": true,
+    "original_analysis": true,
+    "compliance_engine": "SENTINEL-APEX-COMPLIANCE-v103"
+   },
+   "_apex_enriched": true,
+   "_apex_version": "103.0",
+   "_apex_enriched_at": "2026-04-16T01:55:45.911302+00:00"
+  },
+  {
+   "id": "intrusion-set--cd8b9080-1761-4a1a-a092-653fc0ecf9f5",
+   "title": "Magento PolyShell Flaw Enables Unauthenticated Uploads, RCE and Account Takeover",
+   "description": "Tactical cluster: Magento PolyShell Flaw Enables Unauthenticated Uploads, RCE and Account Takeover",
+   "severity": "LOW",
+   "risk_score": 2.9,
+   "confidence": 29,
+   "timestamp": "2026-03-20T12:55:58Z",
+   "source": "CYBERDUDEBIVASH SENTINEL APEX",
+   "stix_bundle": "CDB-APEX-1774011358.json",
+   "iocs": [],
+   "ttps": [
+    "Exploitation for Client Execution",
+    "Valid Accounts",
+    "Remote Services"
+   ],
+   "tags": [],
+   "threat_type": "General",
+   "exploit_probability": "Low",
+   "openclaw": {
+    "score": 0,
+    "patterns": [
+     "baseline"
+    ],
+    "anomaly": false,
+    "velocity": "stable",
+    "attack_surface": [
+     "general"
+    ],
+    "fingerprint": "b793d065315e",
+    "trend": "stable"
+   },
+   "evidence_validation": {
+    "kev_verified": false,
+    "vendor_advisory": false,
+    "multi_source_confirmed": true,
+    "exploit_status": "UNVERIFIED",
+    "reliability_score": "LOW",
+    "evidence_confidence": "UNVERIFIED",
+    "raw_confidence_score": 15,
+    "sources_referenced": [
+     "Feed Aggregator"
+    ],
+    "validation_timestamp": "2026-04-16T01:55:45.911302+00:00",
+    "cve_count": 0,
+    "has_cvss": true
+   },
+   "analyst_insight": {
+    "vulnerability_class": "RCE",
+    "exploitation_rationale": "Remote code execution vulnerabilities are the highest-value exploit primitive for threat actors. They convert network access into full system control without requiring physical presence or prior credentials. Pre-authentication RCE eliminates all access barriers, enabling mass exploitation via automated scanning infrastructure. Ransomware groups and APTs prioritize RCE in internet-facing services because a single exploit converts to persistent foothold at network scale.",
+    "detection_difficulty": "RCE exploitation often masquerades as legitimate application traffic. Web-based RCE exploits arrive as HTTP requests indistinguishable from normal user traffic without deep packet inspection or application-layer anomaly detection. Post-exploitation activity frequently uses living-off-the-land binaries (LOLBins) that appear in normal process telemetry. Detection window between initial exploit and credential dumping is often under 15 minutes in automated attack chains.",
+    "soc_failure_points": "Most SOC teams rely on signature-based IDS for initial detection and miss RCE exploitation when payloads are obfuscated or use uncommon encoding. Alert fatigue from high-volume web application logs causes analysts to miss the single exploit request among millions of legitimate requests. Post-exploitation detection via process lineage (e.g., web server spawning cmd.exe) is frequently misconfigured or disabled.",
+    "strategic_risk": "A single unpatched RCE in an internet-facing service represents complete perimeter elimination. Attackers who achieve RCE on a web-facing server or VPN gateway gain an internal pivot point that negates all perimeter security investments. The strategic risk compounds when the vulnerable system is an identity provider, VPN gateway, or ERP system with connectivity to critical business infrastructure.",
+    "analyst_context_note": "ANALYST NOTE: Monitor CISA KEV catalog for exploitation status updates. Detection rules should be deployed proactively — threat actors typically develop operational exploits within days of public CVE disclosure.",
+    "analyst_engine": "SENTINEL-APEX-ANALYST-v103"
+   },
+   "soc_context": {
+    "soc_priority": "P1 — IMMEDIATE",
+    "required_log_sources": [
+     "Web Server Access Logs (HTTP/HTTPS)",
+     "WAF Logs",
+     "Sysmon EventID 1 (Process Create)",
+     "Sysmon EventID 3 (Network Connect)",
+     "EDR Process Telemetry",
+     "Windows Security EventID 4688"
+    ],
+    "false_positive_scenarios": [
+     "Legitimate application deployment scripts writing to web directories",
+     "Authorized penetration testing activities",
+     "Development team debug endpoints in non-production environments",
+     "Automated CI/CD pipeline deployment agents"
+    ],
+    "tuning_recommendations": [
+     "Allowlist known deployment tool source IPs/user-agents from web upload detection",
+     "Tune process lineage rules to exclude known parent-child pairs from CI/CD agents",
+     "Set CVSS threshold to 8.0+ for immediate alert escalation; 6.0-8.0 for SOC review queue"
+    ],
+    "deployment_steps": [
+     "Step 1: Import detection rules into SIEM (Sigma/Splunk/KQL — see Detection Engine section).",
+     "Step 2: Validate log sources are forwarding to SIEM (check required log sources list above).",
+     "Step 3: Run detection query against 30-day historical data for retrospective detection.",
+     "Step 4: Set alert threshold and assign to SOC Tier-1 queue for initial triage.",
+     "Step 5: Build escalation runbook — define Tier-1 triage steps and Tier-2 escalation criteria.",
+     "Step 6: Test rule with a simulated benign event matching the false positive scenarios above.",
+     "Step 7: Enable automated enrichment (IP reputation, CVE lookup, user account context) on alert trigger.",
+     "Step 8: Schedule 72-hour rule review after deployment to tune false positive rate."
+    ],
+    "estimated_deployment_time_minutes": 15,
+    "soc_context_engine": "SENTINEL-APEX-SOC-v103"
+   },
+   "detection_confidence": {
+    "confidence": "LOW",
+    "detection_strength": "WEAK",
+    "false_positive_risk": "LOW",
+    "deployment_complexity": "LOW",
+    "scoring_rationale": "Limited evidence — detection confidence reduced",
+    "composite_score": 15,
+    "siem_readiness": "REVIEW",
+    "detection_engine": "SENTINEL-APEX-DETECT-v103"
+   },
+   "revenue_metadata": {
+    "pricing_tier": "STANDARD",
+    "pricing_details": {
+     "label": "Standard",
+     "inr_range": "₹999–₹1,999",
+     "usd_range": "$12–$24",
+     "target": "Security Teams, Analysts"
+    },
+    "detection_pack": "RCE Defense Pack — Network-based and host-based detection rules for remote code execution exploitation chains. Includes web shell detection, process lineage anomalies, and post-exploitation command execution.",
+    "api_product_mapping": {
+     "endpoint": "/api/ai/analyze",
+     "product": "Threat Analysis API — RCE Intelligence Feed",
+     "use_case": "Automated CVE-to-detection pipeline integration"
+    },
+    "enterprise_use_cases": [
+     "MSSP customer reporting — Critical CVE weekly briefings",
+     "SOC Tier-1 automated triage enrichment",
+     "Vulnerability management team prioritization feed",
+     "CISO dashboard CVE-to-risk scoring"
+    ],
+    "marketplace_listing": {
+     "listing_id": "E8F033A2",
+     "product_name": "SENTINEL APEX: Magento PolyShell Flaw Enables Unauthenticated Uploads, RCE ",
+     "category": "Threat Intelligence",
+     "subcategory": "RCE",
+     "pricing_tier": "Standard",
+     "price_inr": "₹999–₹1,999",
+     "price_usd": "$12–$24",
+     "target_audience": "Security Teams, Analysts",
+     "delivery_format": "JSON API + PDF Report + SIEM Detection Rules",
+     "license_type": "Enterprise Annual Subscription",
+     "kev_premium": false,
+     "sla": "4h critical / 24h standard"
+    },
+    "revenue_engine": "SENTINEL-APEX-REVENUE-v103"
+   },
+   "executive_summary": {
+    "risk_level": "LOW",
+    "immediate_actions": [
+     "1. SCHEDULE EMERGENCY PATCH — patch within 72 hours; treat as P1 change management",
+     "2. DEPLOY DETECTION RULES — activate SIEM detection rules within 8 hours",
+     "3. ASSET IDENTIFICATION — enumerate all affected systems within 24 hours",
+     "4. NETWORK SEGMENTATION — verify network access controls restrict exposure surface",
+     "5. MONITORING ELEVATION — increase alert verbosity on affected system logs"
+    ],
+    "business_impact": "Complete system compromise enabling ransomware deployment, data exfiltration, and persistent threat actor access. Estimated recovery cost: $2M–$20M+ depending on system criticality and data sensitivity.",
+    "decision_statement": "ACTION REQUIRED: this vulnerability requires scheduled patching within your standard high-severity SLA. Deploy detection coverage now to identify exploitation attempts during the patching window.",
+    "time_to_exploit": "1–30 days — exploit development estimated post-disclosure",
+    "patch_priority_sla": "72 hours",
+    "executive_engine": "SENTINEL-APEX-EXEC-v103"
+   },
+   "compliance_block": {
+    "tlp_classification": "TLP:GREEN",
+    "attribution": "Analysis by CYBERDUDEBIVASH SENTINEL APEX Threat Intelligence Engine",
+    "platform": "CYBERDUDEBIVASH Pvt. Ltd. — intel.cyberdudebivash.com",
+    "legal_disclaimer": "This report is for cybersecurity defense and research purposes only. All technical information is derived from publicly disclosed vulnerability advisories, official government catalogs (CISA KEV, NVD), and reputable threat intelligence publications. No proprietary vendor content has been reproduced. Recipients are responsible for validating indicators and detection rules against their specific environments prior to operational deployment.",
+    "data_handling": "Recipients must handle this intelligence in accordance with the TLP classification above. TLP:GREEN: Share only within your organization and with trusted partners who have a need to know.",
+    "compliance_frameworks": [
+     "ISO 27001 — Information Security Controls (A.12.6 — Technical Vulnerability Management)",
+     "NIST SP 800-61r2 — Computer Security Incident Handling Guide"
+    ],
+    "cve_references": [],
+    "google_safe": true,
+    "copyright_safe": true,
+    "original_analysis": true,
+    "compliance_engine": "SENTINEL-APEX-COMPLIANCE-v103"
+   },
+   "_apex_enriched": true,
+   "_apex_version": "103.0",
+   "_apex_enriched_at": "2026-04-16T01:55:45.911302+00:00"
+  }
+ ]
+}

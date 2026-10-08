@@ -21,17 +21,32 @@ SOLUTION:
     3. CWE mapping → technique alignment
     4. Per-technique: WHY it applies + observed behavior + detection + Sigma
 
-MITRE ATT&CK VERSION: v16
+MITRE ATT&CK DATASET: validated against the repo-pinned sync in
+data/attck/enterprise-attack.json (see dossier_integrity.attack_dataset_pin()).
+The sync records no ATT&CK release number, so none is claimed here (the earlier
+hard-coded "v16" was unverifiable).
+
+P0 #721: published technique IDs are canonicalised against that dataset
+(T1190 has no sub-techniques, so the legacy "T1190.001" SQL-injection alias is
+published as T1190); mappings are ANALYST_INFERENCE from advisory text, not
+observed adversary behaviour.
 ================================================================================
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+import dossier_integrity as _di  # noqa: E402  (pinned ATT&CK authority)
 
 log = logging.getLogger("apex.mitre_attack")
 ENGINE_VERSION = "152.0.0"
@@ -182,6 +197,12 @@ TECHNIQUE_LIBRARY: Dict[str, Dict] = {
         "sigma_tag": "attack.persistence.t1098",
         "kql_hint": "AuditLogs | where OperationName has_any ('Add member to role','Add user','Grant','Assign') | where InitiatedBy.user.userPrincipalName !in (authorised_admins)",
     },
+    # DEPRECATED ALIAS (P0 #721): "T1190.001" is NOT an ATT&CK technique -- T1190 has no
+    # sub-techniques in the pinned MITRE dataset (data/attck/enterprise-attack.json).
+    # The entry is kept ONLY as an internal SQL-injection vocabulary/detection profile
+    # (backward compatibility); everything this engine PUBLISHES is mapped to the real
+    # parent T1190 via _canonical_tid().  Replacement: T1190.  Remove after the next
+    # re-enrichment of persisted records that still carry the alias.
     "T1190.001": {
         "name":    "SQL Injection",
         "tactic":  "Initial Access",
@@ -196,7 +217,7 @@ TECHNIQUE_LIBRARY: Dict[str, Dict] = {
 CWE_TO_ATTACK: Dict[str, List[str]] = {
     "CWE-78":  ["T1059"],           # OS Command Injection
     "CWE-79":  ["T1539"],           # XSS → Cookie theft
-    "CWE-89":  ["T1190.001"],       # SQL Injection
+    "CWE-89":  ["T1190"],           # SQL Injection (T1190.001 does not exist in ATT&CK)
     "CWE-22":  ["T1083"],           # Path Traversal
     "CWE-94":  ["T1059"],           # Code Injection
     "CWE-119": ["T1055"],           # Buffer Overflow → Process injection
@@ -278,23 +299,35 @@ def _build_technique_entry(tid: str, item: Dict, match_score: float) -> Dict:
         if _keyword_matches(keyword, combined):
             triggered_by.append(keyword)
 
+    # P0 #721: publish only the canonical ATT&CK ID and the official name.
+    canon = _di.canonical_technique_id(tid)
+    if canon is None:
+        return {"technique_id": tid, "justification": "Suppressed: technique ID is not in the pinned ATT&CK dataset",
+                "evidence_state": "UNKNOWN", "suppressed": True}
+    official = _di.technique_name(canon) or tech["name"]
+
     justification = (
         f"Technique applies because: {', '.join(triggered_by[:3]) if triggered_by else 'CWE mapping'}. "
-        f"The {tech['name']} technique is relevant because this vulnerability's "
+        f"The {official} technique is relevant because this vulnerability's "
         f"{'attack mechanism' if triggered_by else 'CWE class'} aligns with "
-        f"{tech['tactic']} phase behavior described in ATT&CK v16."
+        f"{tech['tactic']} phase behavior (analyst inference from advisory text)."
     )
 
+    # Key name kept for backward compatibility (consumers read it as the
+    # justification text); the CONTENT is explicitly a hypothesis, not an observation.
     observed_behavior = (
-        f"Based on the vulnerability description, an adversary exploiting '{title[:80]}' "
-        f"would employ {tech['name']} ({tid}) during the {tech['tactic']} phase. "
-        f"The exploitation mechanism directly enables the {tech['tactic']} objective."
+        f"NOT OBSERVED. Hypothesis from the vulnerability description: exploiting '{title[:80]}' "
+        f"could enable {official} ({canon}) in the {tech['tactic']} phase. "
+        f"No adversary use of this technique is reported by the source."
     )
 
     return {
-        "technique_id":       tid,
-        "technique_name":     tech["name"],
+        "technique_id":       canon,
+        "technique_name":     official,
         "tactic":             tech["tactic"],
+        "evidence_state":     "ANALYST_INFERENCE",
+        "behavior_status":    "HYPOTHESIS_NOT_OBSERVED",
+        "library_key":        tid if tid != canon else None,
         "justification":      justification,
         "observed_behavior":  observed_behavior,
         "detection_hint":     tech["detection_hint"],
@@ -358,7 +391,23 @@ def enrich_attack_mapping(item: Dict) -> Dict:
     # for any caller that wants to inspect why nothing matched -- it is
     # simply not injected into the item's persisted coverage-bearing
     # fields, where its presence alone would misrepresent coverage.
-    resolved_entries = [t for t in technique_entries if t.get("technique_id") != "UNRESOLVED"]
+    resolved_entries = []
+    _seen_canon: Dict[str, int] = {}
+    for t in technique_entries:
+        if t.get("technique_id") == "UNRESOLVED" or t.get("suppressed"):
+            continue
+        # canonicalisation can fold two library keys onto one real technique
+        # (T1190 + legacy T1190.001 alias): keep the stronger match, merge evidence.
+        if t["technique_id"] in _seen_canon:
+            prev = resolved_entries[_seen_canon[t["technique_id"]]]
+            if t.get("match_score", 0) > prev.get("match_score", 0):
+                t["evidence_chain"] = list(dict.fromkeys((t.get("evidence_chain") or []) + (prev.get("evidence_chain") or [])))[:5]
+                resolved_entries[_seen_canon[t["technique_id"]]] = t
+            else:
+                prev["evidence_chain"] = list(dict.fromkeys((prev.get("evidence_chain") or []) + (t.get("evidence_chain") or [])))[:5]
+            continue
+        _seen_canon[t["technique_id"]] = len(resolved_entries)
+        resolved_entries.append(t)
 
     item_out = dict(item)
     item_out["ttps"]                 = resolved_entries
@@ -379,6 +428,7 @@ def enrich_attack_mapping(item: Dict) -> Dict:
     item_out["attck_techniques"]     = resolved_entries
     item_out["attck_technique_ids"]  = [t["technique_id"] for t in resolved_entries]
     item_out["ttp_count"]            = len(resolved_entries)
+    item_out["attack_dataset"]       = {k: _di.attack_dataset_pin().get(k) for k in ("synced_at", "content_hash")}
     item_out["attack_engine"]        = ENGINE_ID
     item_out["attack_version"]       = ENGINE_VERSION
     item_out["attack_ts"]            = datetime.now(timezone.utc).isoformat()
