@@ -110,6 +110,11 @@ jobs:
       - name: "GATE D/E -- r2_upload.py accounting + AI-tracker duplicate-writer elimination"
         run: python -m pytest tests/test_r2_ai_tracker_duplicate_writer.py -v --tb=short
 
+      # P0 #725: run the actual TLP-safe feed upload/resync tests in a mandatory
+      # PR/push gate. An existing test file does not protect production unless CI executes it.
+      - name: "P0 #725 -- TLP-safe primary R2 feed upload and final resync"
+        run: python -m pytest tests/test_p0_publish_window_race_and_stale_manifest_guard.py -k TestR2TlpPublicFeedBoundary -v --tb=short
+
       - name: "r2_upload.py -- reports keyspace never resurrected (PR #369 invariant)"
         run: python -m pytest tests/test_r2_upload_reports_sync.py -v --tb=short
 
