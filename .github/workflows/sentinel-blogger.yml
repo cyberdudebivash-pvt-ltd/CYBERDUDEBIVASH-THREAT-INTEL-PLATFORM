@@ -2061,6 +2061,7 @@ jobs:
       # verification of what's actually in R2.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.5a - Bounded 24h Report Publisher (P0 R2 Cost Fix)"
+        id: p0-report-publish-initial
         if: env.PIPELINE_LOCKED != 'true'
         timeout-minutes: 15
         continue-on-error: true
@@ -2068,8 +2069,10 @@ jobs:
           CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
           CF_R2_REPORTS_SECRET_KEY: ${{ secrets.CF_R2_REPORTS_SECRET_KEY }}
         run: |
-          if ! python3 scripts/r2_report_publisher.py; then
-            echo "::error::STAGE 3.5a: report publisher aborted (budget breach or R2 error) -- see R2_COST_GUARD summary above. NO R2 mutation was performed for this stage (fail-closed). continue-on-error keeps the rest of the pipeline running -- core dashboard/feed/API are not affected by a report-publish issue."
+          PUBLISH_EXIT=0
+          python3 scripts/r2_report_publisher.py || PUBLISH_EXIT=$?
+          if [ "$PUBLISH_EXIT" -ne 0 ]; then
+            echo "::error::STAGE 3.5a: report publisher failed (exit $PUBLISH_EXIT). Inspect R2 publish state and uploads; no Pages promotion is permitted."
           fi
           if [ -f data/quality/r2_cost_guard_report.json ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
             echo '### R2 Cost Guard Report (data/quality/r2_cost_guard_report.json)' >> "$GITHUB_STEP_SUMMARY"
@@ -2077,6 +2080,8 @@ jobs:
             cat data/quality/r2_cost_guard_report.json >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
+          # continue-on-error preserves independent checks, while outcome still records failure.
+          exit "$PUBLISH_EXIT"
 
       # -----------------------------------------------------------------------
       # STAGE 3.5.1: R2 REPORTS INDEX INTEGRITY GATE (v1.0 P0 PERMANENT FIX)
@@ -3629,6 +3634,7 @@ jobs:
       # Same guards as 3.5a: pipeline lock, kill switch, continue-on-error.
       # -----------------------------------------------------------------------
       - name: "STAGE 5.4.0c - Post-Barrier Report Publish"
+        id: p0-report-publish-late
         if: env.PIPELINE_LOCKED != 'true'
         timeout-minutes: 10
         continue-on-error: true
@@ -3636,9 +3642,12 @@ jobs:
           CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
           CF_R2_REPORTS_SECRET_KEY: ${{ secrets.CF_R2_REPORTS_SECRET_KEY }}
         run: |
-          if ! python3 scripts/r2_report_publisher.py; then
-            echo "::error::STAGE 5.4.0c: post-barrier report publish aborted (budget breach or R2 error) -- late-rendered reports stay off R2 until the next run's STAGE 3.5a. See R2_COST_GUARD summary."
+          PUBLISH_EXIT=0
+          python3 scripts/r2_report_publisher.py || PUBLISH_EXIT=$?
+          if [ "$PUBLISH_EXIT" -ne 0 ]; then
+            echo "::error::STAGE 5.4.0c: post-barrier report publish failed (exit $PUBLISH_EXIT). Pages promotion must be denied."
           fi
+          exit "$PUBLISH_EXIT"
 
       # -----------------------------------------------------------------------
       # STAGE 5.4.0d: REFRESH CUSTOMER REPORTS CATALOG (2026-09-26)
@@ -4032,6 +4041,25 @@ jobs:
         run: python3 scripts/dist_artifact_verifier.py
 
       # -----------------------------------------------------------------------
+      # P0 #720: evaluate both report publishers by OUTCOME, not conclusion.
+      # continue-on-error keeps unrelated R2 integrity/quality checks running,
+      # but its conclusion is 'success' even when the publisher outcome failed.
+      # This verdict is the required precondition for all Pages write paths.
+      # -----------------------------------------------------------------------
+      - name: "P0 - Report Publishing Release Verdict"
+        id: p0-publisher-verdict
+        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' }}
+        env:
+          INITIAL_OUTCOME: ${{ steps['p0-report-publish-initial'].outcome }}
+          LATE_OUTCOME: ${{ steps['p0-report-publish-late'].outcome }}
+        run: |
+          if [ "$INITIAL_OUTCOME" != "success" ] || [ "$LATE_OUTCOME" != "success" ]; then
+            echo "::error::P0 report publishing release BLOCKED: initial=$INITIAL_OUTCOME late=$LATE_OUTCOME. Pages deployment withheld."
+            exit 1
+          fi
+          echo "P0 report publishing release verdict: PASS (both R2 publisher stages succeeded)"
+
+      # -----------------------------------------------------------------------
       # STAGE 5: GITHUB PAGES DEPLOY
       # v184.0 PAGES SIZE GOVERNANCE UPGRADE (P0 — GitHub 1 GB hard limit):
       #   folder: dist          -- governed, validated artifact
@@ -4063,14 +4091,14 @@ jobs:
       # independent of whatever GitHub's Pages backend reports about its own build.
       - name: "STAGE 4.9.9 - Capture pre-deploy timestamp"
         id: pre-deploy-ts
-        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' }}
+        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' && steps['p0-publisher-verdict'].conclusion == 'success' }}
         run: echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: "STAGE 5 - Deploy to GitHub Pages"
         # v184.0: deploy only after 5.4.7 verified dist/ integrity — never deploy
         # a broken or incomplete artifact. This gate ensures convergence validator
         # will see a fully-populated gh-pages with all report files.
-        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' }}
+        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' && steps['p0-publisher-verdict'].conclusion == 'success' }}
         timeout-minutes: 15
         # v184.8 FIX: was on the floating @v4.8.0 tag -- this job holds
         # pages:write and pushes to gh-pages, so a re-pointed tag would deploy
@@ -4096,7 +4124,7 @@ jobs:
       # actually live" is itself the actionable signal this step exists to surface.
       # -----------------------------------------------------------------------
       - name: "STAGE 5.4.9.1 - GitHub Pages Deployment Freshness Gate (v184.1)"
-        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' }}
+        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' && steps['p0-publisher-verdict'].conclusion == 'success' }}
         timeout-minutes: 14
         env:
           PLATFORM_URL: https://intel.cyberdudebivash.com
