@@ -224,5 +224,85 @@ class TestStaleManifestGuard(unittest.TestCase):
         self.assertEqual(resync.log.name, "sentinel.r2_resync")
 
 
+class TestR2TlpPublicFeedBoundary(unittest.TestCase):
+    """P0 #725: legacy and resync writers must never upload raw mixed-TLP feed bytes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "api").mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _source(self, data):
+        p = self.root / "api/feed.json"
+        p.write_text(json.dumps(data), encoding="utf-8")
+        return p
+
+    def test_sanitizer_preserves_source_and_whitelists_only_clear(self):
+        source = self._source([
+            {"id": "allowed", "tlp": "TLP:CLEAR", "title": "Permitted"},
+            {"id": "green", "tlp": "TLP:GREEN"},
+            {"id": "red", "tlp": "TLP:RED"},
+            {"id": "missing"},
+            {"id": "launder", "tlp": "TLP:CLEAR",
+             "evidence_chain": [{"tlp": "TLP:AMBER"}]},
+        ])
+        before = source.read_bytes()
+        with tempfile.TemporaryDirectory() as td:
+            safe = r2_upload.tlp_safe_public_feed_source(source, Path(td))
+            filtered = json.loads(safe.read_text())
+            self.assertEqual([x["id"] for x in filtered], ["allowed"])
+        self.assertEqual(source.read_bytes(), before, "source must remain available for forensic audit")
+
+    def test_all_restricted_items_replace_stale_r2_feed_with_empty_payload(self):
+        source = self._source([{"id": "denied", "tlp": "TLP:RED"}])
+        with tempfile.TemporaryDirectory() as td:
+            safe = r2_upload.tlp_safe_public_feed_source(source, Path(td))
+            self.assertEqual(json.loads(safe.read_text()), [])
+
+    def test_invalid_source_is_refused_before_upload(self):
+        source = self._source({"items": [{"id": "unknown", "tlp": "TLP:RED"}]})
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(ValueError):
+                r2_upload.tlp_safe_public_feed_source(source, Path(td))
+        source.write_text("{bad json")
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(ValueError):
+                r2_upload.tlp_safe_public_feed_source(source, Path(td))
+
+    def test_final_resync_only_puts_tlp_authorized_feed_bytes(self):
+        source = self._source([{"id": "clear", "tlp": "TLP:CLEAR"}, {"id": "restricted", "tlp": "TLP:RED"}])
+        uploaded = []
+
+        def fake_cp(src, bucket, key, endpoint, cache_control="x"):
+            uploaded.append((key, json.loads(Path(src).read_text(encoding="utf-8"))))
+            return True
+
+        with mock.patch.object(resync, "REPO_ROOT", self.root), \
+             mock.patch.object(resync, "s3_cp", side_effect=fake_cp), \
+             mock.patch.object(resync, "get_credentials", return_value=("test", "key", "secret")), \
+             mock.patch("os.chdir"):
+            with self.assertRaises(SystemExit) as error:
+                resync.main()
+        self.assertEqual(error.exception.code, 0)
+        self.assertEqual(len(uploaded), 1)
+        self.assertEqual(uploaded[0][0], "api/feed.json")
+        self.assertEqual([x["id"] for x in uploaded[0][1]], ["clear"])
+        self.assertEqual(len(json.loads(source.read_text())), 2, "the original raw input is not mutated")
+
+    def test_resync_invalid_feed_must_not_put_any_bytes(self):
+        self._source({"items": [{"id": "bad", "tlp": "TLP:CLEAR"}]})
+        with mock.patch.object(resync, "REPO_ROOT", self.root), \
+             mock.patch.object(resync, "s3_cp") as cp, \
+             mock.patch.object(resync, "get_credentials", return_value=("test", "key", "secret")), \
+             mock.patch("os.chdir"):
+            with self.assertRaises(SystemExit) as error:
+                resync.main()
+        self.assertEqual(error.exception.code, 1)
+        cp.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
