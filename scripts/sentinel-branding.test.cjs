@@ -166,3 +166,23 @@ test('public AI-search profiles stay aligned with the canonical commercial contr
   assert.ok(!/<100ms P95/i.test(llmsFull));
   assert.ok(!/≤15 minute lag|updated every 6 hours/i.test(llmsFull));
 });
+
+
+test('retired or unverified X identities are stripped from customer-facing artifacts', () => {
+  const html = '<html><head><meta name="twitter:site" content="@CDBSENTINELAPEX"><meta name="twitter:card" content="summary_large_image"><script type="application/ld+json">'+JSON.stringify({ '@type':'Organization', sameAs:['https://x.com/CDBSENTINELAPEX','https://www.linkedin.com/company/cyberdudebivash/'] })+'</script></head><body><footer><a href="https://twitter.com/cyberbivash">X/Twitter</a><a href="https://twitter.com/">X</a><a href="https://www.linkedin.com/company/cyberdudebivash/">LinkedIn</a></footer></body></html>';
+  const out = brandHtml(html, NAME);
+  assert.ok(!/CDBSENTINELAPEX|twitter\.com\/cyberbivash|href="https:\/\/twitter\.com\/"/i.test(out));
+  assert.ok(out.includes('name="twitter:card"'));
+  assert.ok(out.includes('https://www.linkedin.com/company/cyberdudebivash/'));
+});
+
+test('governed public identity sources do not publish retired X or Tumblr identities', () => {
+  const root = path.resolve(__dirname, '..');
+  const llms = fs.readFileSync(path.join(root, 'llms.txt'), 'utf8');
+  const layout = fs.readFileSync(path.join(root, 'platform/frontend/src/app/layout.tsx'), 'utf8');
+  for (const source of [llms, layout]) {
+    assert.ok(!/x\.com\/(?:CDBSENTINELAPEX|cyberbivash|Iambivash007)|twitter\.com\/(?:CDBSENTINELAPEX|cyberbivash|Iambivash007)|tumblr\.com/i.test(source));
+  }
+  assert.ok(llms.includes('https://www.linkedin.com/company/cyberdudebivash/'));
+  assert.ok(llms.includes('https://www.instagram.com/cyberdudebivash_official/'));
+});

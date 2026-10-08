@@ -94,8 +94,6 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    site: "@CDBSENTINELAPEX",
-    creator: "@CDBSENTINELAPEX",
     title: "CYBERDUDEBIVASH® SENTINEL APEX | AI-Native Threat Intelligence",
     description:
       "Real-time threat intelligence — CVE tracking, CISA KEV, STIX 2.1, MITRE ATT&CK, IOC feeds, ransomware intel. Free tier at intel.cyberdudebivash.com",
@@ -132,7 +130,6 @@ const organizationSchema = {
         "addressCountry": "IN",
       },
       "sameAs": [
-        "https://x.com/CDBSENTINELAPEX",
         "https://www.linkedin.com/company/cyberdudebivash/",
         "https://github.com/cyberdudebivash",
         "https://www.facebook.com/cyberdudebivash",

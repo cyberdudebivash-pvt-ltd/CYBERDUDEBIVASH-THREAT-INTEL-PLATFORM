@@ -11,6 +11,8 @@ const FOCUS_STYLE = '<style data-sentinel-branding="true">a[data-sentinel-parent
 const RAW = new Set(['script', 'style', 'code', 'pre', 'svg', 'textarea']);
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 const SELLER = /\b(?:GSTIN|PAN:|seller.of.record|legal.entity|beneficiary|trademarks?|proprietorship|licensor|copyright holder|operated by|trading as|payee|Pvt\.?\s+Ltd\.?|Private\s+Limited)\b/i;
+const RETIRED_SOCIAL_URL = /^https?:\/\/(?:www\.)?(?:x\.com\/(?:CDBSENTINELAPEX|cyberbivash|Iambivash007)|twitter\.com\/(?:CDBSENTINELAPEX|cyberbivash|Iambivash007)?)\/?$/i;
+const RETIRED_SOCIAL_HANDLE = /^@(?:CDBSENTINELAPEX|cyberbivash|cyberdudebivash|Iambivash007)$/i;
 
 function displayName(value) {
   const protectedParent = [];
@@ -47,7 +49,12 @@ function brandHtml(source, platformName) {
   const canonicalName = canonicalPlatformName(platformName);
   let raw = null;
   const stack = [];
-  const input = String(source).replace(/(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi, (all, open, text, close) => {
+  const sanitizedSource = String(source)
+    .replace(/<meta\b(?=[^>]*\bname=["']twitter:(?:site|creator)["'])(?=[^>]*\bcontent=["'](@[^"']+)["'])[^>]*>\s*/gi,
+      (tag, handle) => RETIRED_SOCIAL_HANDLE.test(handle) ? '' : tag)
+    .replace(/<a\b[^>]*\bhref=["'](https?:\/\/[^"']+)["'][^>]*>[\s\S]*?<\/a>\s*(?:&nbsp;)?(?:&middot;)?(?:&nbsp;)?/gi,
+      (tag, url) => RETIRED_SOCIAL_URL.test(url) ? '' : tag);
+  const input = sanitizedSource.replace(/(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi, (all, open, text, close) => {
     if (!/type=["']application\/ld\+json["']/i.test(open)) {
       // Narrow legacy UI-template treatment. Operational/payment/license scripts
       // are byte-preserved; only plain text inside literal display tags changes.
@@ -65,6 +72,11 @@ function brandHtml(source, platformName) {
         if (types.includes('WebSite')) { changed ||= value.name !== canonicalName; value.name = canonicalName; }
         if (types.includes('SoftwareApplication') && typeof value.name === 'string') {
           const name = displayName(value.name); changed ||= value.name !== name; value.name = name;
+        }
+        if (Array.isArray(value.sameAs)) {
+          const filtered = value.sameAs.filter((url) => typeof url !== 'string' || !RETIRED_SOCIAL_URL.test(url));
+          changed ||= filtered.length !== value.sameAs.length;
+          value.sameAs = filtered;
         }
         Object.values(value).forEach(visit);
       }
