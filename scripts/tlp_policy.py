@@ -11,7 +11,16 @@ Rules (fail closed; there is no bypass flag):
   * TLP:GREEN / AMBER / AMBER+STRICT / RED -> quarantined (restricted).
   * MISSING label        -> quarantined, unless the operator has approved the item's collector in
                             config/tlp_publication_policy.json::first_party_public_sources (a reviewed
-                            commit).  Policy assignment never applies to an item with ANY explicit label.
+                            commit).  An approved entry binds a source id to the hostnames that collector
+                            is known to publish from; the item's source URL must resolve to one of them, so
+                            a bare "source" string supplied by feed text cannot self-approve.  Policy
+                            assignment never applies to an item with ANY explicit label.
+  * MIXED sources        -> the effective label is the MOST RESTRICTIVE of the item's own labels
+                            (`tlp`, `tlp_label`) and the labels carried by merged/evidence components
+                            (COMPONENT_FIELDS).  A CLEAR aggregate never launders a restricted, invalid or
+                            unmigrated-legacy upstream label.  Components that carry no label cannot be
+                            proven restricted and are not counted against the item (limitation: provenance
+                            that is not in the record cannot be checked here).
   * INVALID label        -> quarantined.  Never assignable.
   * TLP:WHITE (v1)       -> quarantined until legacy_white_treated_as_clear is set by the operator.
   * Third-party content is never relabelled: a decision never rewrites `item["tlp"]`.
@@ -27,6 +36,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
+from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 POLICY_PATH = REPO_ROOT / "config" / "tlp_publication_policy.json"
@@ -36,6 +46,12 @@ RESTRICTED = frozenset(LABELS_V2) - {"TLP:CLEAR"}
 LEGACY_V1 = frozenset({"TLP:WHITE"})
 
 MISSING, VALID, LEGACY, INVALID = "MISSING", "VALID", "LEGACY_V1", "INVALID"
+
+# Secondary label-bearing fields on the item itself, and list fields whose dict entries describe the
+# upstream documents an aggregated dossier was built from.  Secondary labels can only RESTRICT.
+SECONDARY_LABEL_FIELDS = ("tlp_label",)
+COMPONENT_FIELDS = ("evidence_chain", "sources", "merged_from", "source_documents", "corroborating_sources")
+COMPONENT_LABEL_KEYS = ("tlp", "tlp_label")
 
 _DEFAULT_POLICY: Dict[str, Any] = {
     "legacy_white_treated_as_clear": False,
@@ -48,10 +64,19 @@ def load_policy(path: Path = POLICY_PATH) -> Dict[str, Any]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         srcs = raw.get("first_party_public_sources", [])
-        if not isinstance(srcs, list) or not all(isinstance(s, str) for s in srcs):
+        if not isinstance(srcs, list):
             return dict(_DEFAULT_POLICY)
+        entries = []
+        for e in srcs:
+            # every entry must be {"source": str, "hosts": [str, ...]}; any malformed entry fails the whole policy closed
+            if (not isinstance(e, dict) or not isinstance(e.get("source"), str) or not e["source"].strip()
+                    or not isinstance(e.get("hosts"), list) or not e["hosts"]
+                    or not all(isinstance(h, str) and h.strip() for h in e["hosts"])):
+                return dict(_DEFAULT_POLICY)
+            entries.append({"source": e["source"].strip().lower(),
+                            "hosts": sorted({h.strip().lower().lstrip(".") for h in e["hosts"]})})
         return {"legacy_white_treated_as_clear": raw.get("legacy_white_treated_as_clear") is True,
-                "first_party_public_sources": [s.strip().lower() for s in srcs if s.strip()]}
+                "first_party_public_sources": entries}
     except (OSError, ValueError, AttributeError):
         return dict(_DEFAULT_POLICY)
 
@@ -69,6 +94,43 @@ def parse_label(value: Any) -> Dict[str, str]:
     if v in LEGACY_V1:
         return {"status": LEGACY, "label": v}
     return {"status": INVALID, "label": ""}
+
+
+def _source_host(item: Dict[str, Any]) -> str:
+    for k in ("source_url", "link", "url"):
+        v = item.get(k)
+        if isinstance(v, str) and v.strip():
+            try:
+                return (urlsplit(v.strip()).hostname or "").lower()
+            except ValueError:
+                return ""
+    return ""
+
+
+def _approved_collector(item: Dict[str, Any], pol: Dict[str, Any]) -> bool:
+    """True only when the item's source id AND its source-URL host both match one operator-approved entry."""
+    src = str(item.get("source") or item.get("feed_source") or "").strip().lower()
+    host = _source_host(item)
+    if not src or not host:
+        return False
+    for e in pol.get("first_party_public_sources", []):
+        if not isinstance(e, dict) or e.get("source") != src:
+            continue
+        if any(host == h or host.endswith("." + h) for h in e.get("hosts", [])):
+            return True
+    return False
+
+
+def _upstream_labels(item: Dict[str, Any]) -> List[Any]:
+    """Raw labels carried by secondary fields and by merged/evidence components (None entries are skipped)."""
+    out: List[Any] = [item.get(k) for k in SECONDARY_LABEL_FIELDS if item.get(k) is not None]
+    for f in COMPONENT_FIELDS:
+        comps = item.get(f)
+        if isinstance(comps, list):
+            for c in comps:
+                if isinstance(c, dict):
+                    out.extend(c.get(k) for k in COMPONENT_LABEL_KEYS if c.get(k) is not None)
+    return out
 
 
 def publication_decision(item: Any, policy: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -89,6 +151,16 @@ def publication_decision(item: Any, policy: Dict[str, Any] | None = None) -> Dic
         return {"allowed": True, "state": "PUBLISH", "label": label, "assignment": assignment,
                 "reason_code": "OK", "reason": ""}
 
+    # Most-restrictive-wins: an upstream/secondary label may only tighten the decision, never loosen it.
+    for raw in _upstream_labels(it):
+        q = parse_label(raw)
+        if q["status"] == VALID and q["label"] != "TLP:CLEAR":
+            return deny("RESTRICTED_UPSTREAM_LABEL",
+                        f"an included source or secondary label is {q['label']}; the aggregate cannot be CLEAR")
+        if q["status"] == INVALID:
+            return deny("INVALID_LABEL", "unrecognised TLP label on an included source; invalid labels are never assignable")
+        if q["status"] == LEGACY and not pol.get("legacy_white_treated_as_clear"):
+            return deny("LEGACY_LABEL_UNMIGRATED", "an included source carries TLP:WHITE (TLP v1) not migrated by the operator")
     if p["status"] == VALID:
         if p["label"] == "TLP:CLEAR":
             return allow("TLP:CLEAR", "explicit")
@@ -100,10 +172,9 @@ def publication_decision(item: Any, policy: Dict[str, Any] | None = None) -> Dic
     if p["status"] == INVALID:
         return deny("INVALID_LABEL", "unrecognised TLP label; invalid labels are never assignable")
     # MISSING: only an operator-approved first-party-public collector may be policy-assigned
-    src = str(it.get("source") or it.get("feed_source") or "").strip().lower()
-    if src and src in pol.get("first_party_public_sources", []):
+    if _approved_collector(it, pol):
         return allow("TLP:CLEAR", "policy_first_party_public_source")
-    return deny("MISSING_LABEL", "no TLP label and collector not approved as first-party public")
+    return deny("MISSING_LABEL", "no TLP label and collector (source id + source-URL host) not approved as first-party public")
 
 
 def partition_publishable(items: Iterable[Any], policy: Dict[str, Any] | None = None
