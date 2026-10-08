@@ -1,8 +1,7 @@
 # 🔐 CYBERDUDEBIVASH SENTINEL SYNDICATION ENGINE v1.0
 ## RSS → Multi-Platform Social Media Automation | 100% Free | GitHub Actions
 
-Replace Make.com with zero cost. Posts your threat intel reports from  
-`cyberbivash.blogspot.com` to all social platforms automatically, every 2 hours.
+This is an optional RSS syndication engine for explicitly configured, supported destinations. Twitter/X and Tumblr are retired distribution channels. Deployment, scheduling, and successful provider dispatch must be verified independently.
 
 ---
 
@@ -11,11 +10,9 @@ Replace Make.com with zero cost. Posts your threat intel reports from
 | Platform | API Cost | Notes |
 |---|---|---|
 | LinkedIn (Showcase Page) | FREE | Needs OAuth app |
-| Twitter / X | FREE | Free tier: 1,500 posts/month |
 | Mastodon | FREE | Instant access token |
 | Bluesky | FREE | App password only |
 | Facebook Page | FREE | Graph API |
-| Tumblr | FREE | OAuth app |
 | Reddit (Optional) | FREE | Disabled unless an active official destination is explicitly configured |
 | Threads | FREE | Meta Developers |
 
@@ -41,11 +38,9 @@ your-repo/
 │   │   ├── formatter.py
 │   │   └── platforms/
 │   │       ├── linkedin.py
-│   │       ├── twitter.py
 │   │       ├── mastodon.py
 │   │       ├── bluesky.py
 │   │       ├── facebook.py
-│   │       ├── tumblr.py
 │   │       ├── reddit.py
 │   │       └── threads.py
 │   ├── data/
@@ -96,23 +91,6 @@ BLUESKY_APP_PASSWORD = <your app password>
 
 ---
 
-#### ✅ TWITTER / X (10 minutes)
-1. Go to `developer.twitter.com > Projects & Apps > New App`
-2. App type: `Web App, Automated App or Bot`
-3. In `App Settings > Keys and Tokens`:
-   - Copy `API Key` and `API Key Secret`
-   - Generate `Access Token` and `Access Token Secret` (with Read+Write permissions)
-
-**GitHub Secrets:**
-```
-TWITTER_API_KEY       = <API Key>
-TWITTER_API_SECRET    = <API Key Secret>
-TWITTER_ACCESS_TOKEN  = <Access Token>
-TWITTER_ACCESS_SECRET = <Access Token Secret>
-```
-
----
-
 #### ✅ LINKEDIN (15 minutes)
 1. Go to `linkedin.com/developers > Create App`
 2. App name: `CyberDudeBivash Syndication`
@@ -159,38 +137,6 @@ LINKEDIN_PERSONAL_URN = urn:li:person:XXXXXXX          ← Optional personal pro
 ```
 FACEBOOK_PAGE_ID           = <numeric page ID>
 FACEBOOK_PAGE_ACCESS_TOKEN = <page access token>
-```
-
----
-
-#### ✅ TUMBLR (10 minutes)
-1. Go to `tumblr.com/oauth/apps > Register App`
-2. Application Website: `https://cyberdudebivash.com`
-3. Copy Consumer Key and Consumer Secret
-4. Run OAuth dance (Python one-liner below):
-
-```python
-# pip install requests-oauthlib
-from requests_oauthlib import OAuth1Session
-consumer_key = "YOUR_KEY"
-consumer_secret = "YOUR_SECRET"
-oauth = OAuth1Session(consumer_key, client_secret=consumer_secret,
-                      callback_uri='https://cyberdudebivash.com')
-r = oauth.fetch_request_token('https://www.tumblr.com/oauth/request_token')
-print("Go to:", oauth.authorization_url('https://www.tumblr.com/oauth/authorize'))
-verifier = input("Enter verifier: ")
-oauth_tokens = oauth.fetch_access_token('https://www.tumblr.com/oauth/access_token', verifier)
-print("OAUTH_TOKEN:", oauth_tokens['oauth_token'])
-print("OAUTH_SECRET:", oauth_tokens['oauth_token_secret'])
-```
-
-**GitHub Secrets:**
-```
-TUMBLR_CONSUMER_KEY    = <consumer key>
-TUMBLR_CONSUMER_SECRET = <consumer secret>
-TUMBLR_OAUTH_TOKEN     = <oauth token>
-TUMBLR_OAUTH_SECRET    = <oauth secret>
-TUMBLR_BLOG_NAME       = cyberdudebivash-news
 ```
 
 ---
@@ -247,7 +193,7 @@ git commit -m "feat: Add Sentinel Syndication Engine v1.0 — RSS to Social Medi
 git push
 ```
 
-The workflow will run automatically every 2 hours. First run will post any recent unsynced posts.
+The workflow schedule must be explicitly enabled and validated before automated dispatch. Do not assume a successful post without a provider response.
 
 ---
 
@@ -273,11 +219,9 @@ Check the logs to confirm each platform posts successfully.
        ▼
   For each new post:
     ├── LinkedIn (Showcase Page)
-    ├── Twitter/X
     ├── Mastodon
     ├── Bluesky
     ├── Facebook Page
-    ├── Tumblr
     ├── Reddit (only when explicitly configured)
     └── Threads
        │
