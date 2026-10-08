@@ -96,12 +96,35 @@ def test_genuine_cve_item_keeps_its_patch_directive():
         "risk_score": 8.5,
         "cve_id": "CVE-2026-99999",
         "kev": "NO",
+        # P0 #721: a patch deadline needs an authoritative basis. A CVSS score
+        # (HIGH band) supplies it; the pipeline's composite label alone does not.
+        "cvss_score": 8.1,
     }
     html = gir.build_report_sections(item)
     assert "PATCH WITHIN 14 DAYS" in html, (
         "A genuine CVE/vulnerability record must keep its patch-remediation "
         "directive — the A-1 fix must not over-suppress legitimate guidance."
     )
+
+
+def test_cve_without_cvss_or_kev_gets_triage_not_a_fabricated_patch_deadline():
+    """P0 #721: the same record WITHOUT a CVSS score or KEV listing has only the
+    composite heuristic -- it must be marked UNRATED and told to triage, never
+    handed a patch deadline (nor a 'routine cycle' downgrade)."""
+    item = {
+        "id": "intel--test-unrated-cve",
+        "title": "CVE-2026-99999 Critical Remote Code Execution in Example Product",
+        "description": "A critical remote code execution vulnerability affecting Example Product.",
+        "severity": "HIGH",
+        "threat_type": "Vulnerability",
+        "feed_source": "nvd",
+        "risk_score": 8.5,
+        "cve_id": "CVE-2026-99999",
+        "kev": "NO",
+    }
+    html = gir.build_report_sections(item)
+    assert "PATCH WITHIN" not in html and "routine cycle" not in html
+    assert "PRIORITY NOT DETERMINED" in html and "UNRATED" in html
 
 
 def test_genuine_kev_confirmed_cve_shows_immediate_patch_language():

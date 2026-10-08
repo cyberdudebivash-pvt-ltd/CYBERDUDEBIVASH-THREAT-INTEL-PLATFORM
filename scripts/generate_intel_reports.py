@@ -83,6 +83,14 @@ def _sanitize_intel_text_fields(obj: dict) -> dict:
                     apex[field] = _strip_html(apex[field])
     return obj
 
+# P0 #721: evidence-integrity authority (IOC qualification, ATT&CK validation,
+# STIX-id / severity / TLP honesty). Composes ioc_truth_engine + pinned ATT&CK
+# data; fail-closed import: without it the generator must not render a count.
+_di_dir = os.path.dirname(os.path.abspath(__file__))
+if _di_dir not in sys.path:
+    sys.path.insert(0, _di_dir)
+import dossier_integrity as _di  # noqa: E402
+
 # P0 v134.0: IOC enforcement imports
 try:
     from core.intelligence.ioc_enforcer import IOCEnforcer as _IOCEnforcer
@@ -1264,15 +1272,15 @@ def _render_regulatory_matrix(sev: str, kev: bool, sectors: list) -> str:
     regs = [
         {
             "name": "GDPR",
-            "trigger": f"{'Mandatory' if sev in ('CRITICAL','HIGH') else 'Conditional'} - personal data at risk",
-            "deadline": "72-hour notification to supervisory authority",
+            "trigger": "Conditional - relevant only if personal data is confirmed affected",
+            "deadline": "If applicable: 72-hour notification to supervisory authority",
             "penalty": "Up to €20M or 4% global turnover",
             "active": True,
         },
         {
             "name": "DPDP ACT (India)",
-            "trigger": f"{'High-priority' if sev in ('CRITICAL','HIGH') else 'Standard'} - Indian resident data",
-            "deadline": "72 hours to Data Protection Board",
+            "trigger": "Conditional - relevant only if digital personal data of Indian residents is confirmed affected",
+            "deadline": "If applicable: notification timelines per DPDP rules",
             "penalty": "Up to ₹250 crore (~$30M)",
             "active": True,
         },
@@ -1292,8 +1300,8 @@ def _render_regulatory_matrix(sev: str, kev: bool, sectors: list) -> str:
         },
         {
             "name": "NIS2 (EU)",
-            "trigger": f"{'Significant impact on essential services' if sev in ('CRITICAL','HIGH') else 'Standard incident'} classification",
-            "deadline": "Early warning: 24h; Notification: 72h; Final report: 1 month",
+            "trigger": "Conditional - relevant only to in-scope entities with a confirmed significant incident",
+            "deadline": "If applicable: early warning 24h; notification 72h; final report 1 month",
             "penalty": "Essential entities: up to €10M or 2% global turnover",
             "active": True,
         },
@@ -1305,7 +1313,7 @@ def _render_regulatory_matrix(sev: str, kev: bool, sectors: list) -> str:
             "active": False,
         },
     ]
-    _applies_badge = "&nbsp;<span style='color:var(--accent);font-size:8px'>&#x25CF; APPLIES</span>"
+    _applies_badge = "&nbsp;<span style='color:var(--muted);font-size:8px'>&#x25CF; POTENTIALLY RELEVANT (UNCONFIRMED)</span>"
     cards = []
     for reg in regs:
         active_style = "" if reg["active"] else "opacity:.55;"
@@ -1315,26 +1323,31 @@ def _render_regulatory_matrix(sev: str, kev: bool, sectors: list) -> str:
             f"<div class='reg-name'>{_h(reg['name'])}{applies_html}</div>"
             f"<div class='reg-trigger'>{_h(reg['trigger'])}</div>"
             f"<div class='reg-deadline'>&#x23F1; {_h(reg['deadline'])}</div>"
-            f"<div class='reg-penalty'>&#x26A0; {_h(reg['penalty'])}</div>"
+            f"<div class='reg-penalty'>&#x26A0; Statutory maximum, if applicable: {_h(reg['penalty'])}</div>"
             f"</div>"
         )
     kev_note = (
-        "<div class='callout critical'><strong>KEV CONFIRMED:</strong> CISA KEV listing creates mandatory remediation "
-        "timelines for US Federal civilian agencies (FCEB) - 3 - 14 days depending on severity. "
-        "US critical infrastructure operators should treat as equivalent obligation.</div>"
+        "<div class='callout critical'><strong>KEV LISTED:</strong> CISA KEV listing carries a remediation due date "
+        "set by CISA for US Federal civilian agencies (BOD 22-01); the date is entry-specific. "
+        "It is not a legal obligation for other organisations.</div>"
         if kev else ""
     )
     return (
-        "<p>Regulatory obligations triggered by this advisory depend on your sector, data classification, "
-        "and jurisdiction. APEX compliance mapping covers the frameworks below - engage your DPO/GC immediately "
-        "on any <strong>CRITICAL</strong> or <strong>HIGH</strong> advisory with personal data in scope.</p>"
+        "<p><strong>APPLICABILITY: UNKNOWN.</strong> Regulatory obligations arise from a confirmed incident and depend "
+        "on your organisation, jurisdiction, sector and the data involved. No obligation is established by this "
+        "advisory. The frameworks below are <em>potentially relevant</em> only; legal review is required before "
+        "concluding that any applies.</p>"
         f"<div class='reg-matrix'>{''.join(cards)}</div>"
         f"{kev_note}"
     )
 
 
 def _compute_bis(risk: float, cvss: Any, epss: Any, kev: bool, ioc_count: int, ttp_count: int) -> dict:
-    """Compute Business Impact Score (BIS/10) - FAIR-aligned composite metric."""
+    """Compute Business Impact Score (BIS/10) -- an APEX-internal weighted heuristic
+    (NOT a FAIR loss model).  P0 #721: with no CVSS, no EPSS and no KEV listing the
+    inputs cannot support a score, so none is produced (missing data is not zero)."""
+    if cvss is None and epss is None and not kev:
+        return {"score": None, "label": "INSUFFICIENT EVIDENCE", "color": "var(--muted)"}
     base  = float(risk or 0) * 0.35
     c_v   = (float(cvss or 0) / 10.0) * 2.5
     e_v   = min(float(epss or 0) / 100.0, 1.0) * 2.0
@@ -1425,12 +1438,31 @@ def build_report_sections(item: dict) -> str:
     # RX-PR1: bool(...) treated any non-empty string (e.g. "NO") as truthy —
     # use the canonical parser instead (see _kev_confirmed_check above).
     kev         = _kev_confirmed_check(item)
+    # P0 #721: a vulnerability record with no CVSS and no KEV listing has only the
+    # pipeline's composite heuristic -- not a severity rating, and not a basis
+    # for any patch-timeline recommendation (routine OR emergency).
+    _sevb       = _di.severity_basis(item, cvss, kev)
+    if _sevb["authoritative"]:
+        sev = _sevb["display"]      # CVSS band of the reported score (or KEV/non-vuln pipeline label)
     # v184.0 G9 FIX: use composite APEX risk_score (not CVSS) as authoritative risk metric
     risk        = float(item.get("risk_score") or cvss or 0)
     ttps        = item.get("ttps") or item.get("mitre_tactics") or []
+    # P0 #721: ID-shaped techniques are validated against the pinned ATT&CK
+    # dataset (e.g. T1190 has no sub-techniques -> T1190.001 is normalised to
+    # T1190); unknown IDs are suppressed rather than published.
+    ttps, _ttp_rejected = _di.filter_valid_techniques(ttps)
     iocs        = item.get("iocs") or []
     # P0 FIX v134.0: IOC enforcement + confidence scoring pipeline
     iocs = list(iocs)  # ensure list
+
+    # Step 0 (P0 #721): qualify BEFORE anything is counted or scored. CVE ids,
+    # advisory URLs, filenames, software names, duplicates and AI-generated
+    # candidates are not IOCs. The qualified set is the ONLY collection any
+    # count derives from, so headline / executive / table / enhancer counts
+    # cannot diverge. (No new fields are persisted on the item; the rejected
+    # entries and reasons are reproducible via dossier_integrity.qualify_iocs()
+    # and are measured by scripts/p0_721_dossier_integrity_audit.py.)
+    iocs = list(_di.qualify_iocs(iocs)["actionable"])
 
     # Step 1: Score IOC confidence (no IOC ships at 0%)
     if _IOC_ENFORCE_AVAILABLE and _ioc_confidence and iocs:
@@ -1456,9 +1488,25 @@ def build_report_sections(item: dict) -> str:
     item["ioc_count"]        = ioc_count
     item["indicator_count"]  = ioc_count
     item["iocs"]             = iocs
+    # NOTE (P0 #721): the public mask below empties `iocs`; the masked copy
+    # inherits this authoritative `ioc_count`, which the narrative engines in
+    # agent/apex_intelligence_upgrade.py now prefer over len(masked iocs).
     tags        = item.get("tags") or []
     stix_id     = item.get("stix_id") or item.get("id") or "-"
     tlp         = item.get("tlp") or "TLP:CLEAR"
+    # P0 #721: `stix_id` above is the internal report key (also the API route
+    # key) -- it is only a STIX 2.1 identifier if it is `object-type--UUID`.
+    _stix_display = (
+        f"<code>{_h(item.get('stix_id'))}</code>" if _di.valid_stix_id(item.get("stix_id")) else
+        "<span style='color:var(--muted)'>Not assigned &mdash; the Report ID is an internal "
+        "key, not a STIX 2.1 object identifier</span>"
+    )
+    _tlp_notice = (
+        f"<div class='callout critical'><strong>PUBLICATION REVIEW REQUIRED:</strong> this artifact "
+        f"is published openly but carries label {_h(_di.normalize_tlp(tlp))}, which does not permit "
+        f"unrestricted public disclosure. Source label preserved; release must be reviewed.</div>"
+        if _di.tlp_public_conflict(tlp) else ""
+    )
     source_url  = item.get("source_url") or ""
     affected    = item.get("affected_products") or item.get("affected_versions") or []
     kc_phases   = item.get("kill_chain_phases") or []
@@ -1486,10 +1534,12 @@ def build_report_sections(item: dict) -> str:
         try:
             item = _apex_enrich(item)
             # Re-read enriched TTPs
-            ttps = item.get("ttps") or item.get("mitre_tactics") or []
+            ttps, _ttp_rejected = _di.filter_valid_techniques(
+                item.get("ttps") or item.get("mitre_tactics") or [])
         except Exception as _enrich_exc:
             log(f"APEX enrich warn (non-fatal): {_enrich_exc}", "warning")
 
+    item["ttps"] = ttps   # item is the masked copy here -- renderers see validated techniques only
     # Re-bind actor/campaign after enrichment (item is the masked copy — safe)
     actor       = str(item.get("actor_cluster") or item.get("actor_tag") or item.get("primary_actor") or "UNATTRIBUTED")
     campaign    = item.get("campaign_id") or item.get("campaign") or "UNCLASSIFIED"
@@ -1514,15 +1564,18 @@ def build_report_sections(item: dict) -> str:
     _tlp_class = _sev_class("INFO")   # pre-computed - no backslash inside f-string
     sections.append(_section(1, "Classification &amp; Header",
         f"<div class='kv'>"
-        f"<div class='kv-key'>STIX ID</div><div class='kv-val'><code>{_h(stix_id)}</code></div>"
+        f"<div class='kv-key'>Report ID</div><div class='kv-val'><code>{_h(stix_id)}</code></div>"
+        f"<div class='kv-key'>STIX 2.1 ID</div><div class='kv-val'>{_stix_display}</div>"
         f"<div class='kv-key'>TLP</div><div class='kv-val'><span class='sev-chip {_tlp_class}'>{_h(tlp)}</span></div>"
-        f"<div class='kv-key'>Severity</div><div class='kv-val'><span class='sev-chip {_sev_class(sev)}'>{_h(sev)}</span> {kev_badge}</div>"
+        f"<div class='kv-key'>Severity</div><div class='kv-val'><span class='sev-chip {_sev_class(sev if _sevb['authoritative'] else 'INFO')}'>{_h(_sevb['display'])}</span> {kev_badge}"
+        f"{(' <span style=&quot;color:var(--muted);font-size:11px&quot;>' + _h(_sevb['note'] or _sevb['basis']) + '</span>')}</div>"
         f"<div class='kv-key'>Threat Type</div><div class='kv-val'>{_h(threat_type)}</div>"
         f"<div class='kv-key'>Feed Source</div><div class='kv-val'>{_h(feed)}</div>"
         f"<div class='kv-key'>Processed</div><div class='kv-val'>{_h(ts)}</div>"
         f"<div class='kv-key'>Actor Cluster</div><div class='kv-val'>{_h(_actor_resolved_display)}</div>"
         f"<div class='kv-key'>Platform</div><div class='kv-val'>CYBERDUDEBIVASH SENTINEL APEX {PLATFORM_VERSION}</div>"
         f"</div>"
+        + _tlp_notice
     ))
 
     # ── S2: Executive Summary  -  APEX Enterprise Narrative Engine v149.0 ───
@@ -1569,7 +1622,8 @@ def build_report_sections(item: dict) -> str:
         "INDUSTRY/SCENARIO ESTIMATE: not computed — no organisation-specific inputs "
         "(see Business Impact Assessment; sector context: IBM Cost of a Data Breach Report 2025)."
     )
-    _reg_flag = "YES — Breach notification obligations may apply under GDPR/DPDP/HIPAA" if sev in ("CRITICAL", "HIGH") else "Conditional — assess scope of data at risk"
+    _reg_flag = ("UNKNOWN — applicability depends on your organisation, jurisdiction and confirmed incident facts; "
+                 "no obligation is established by this advisory (legal review required)")
     # v166.4 FIX: _urgency_txt was defined at line ~2060 (after first use at ~1386) causing
     # NameError on every report render → 33 write failures → Stage 5.5 HARD FAIL.
     # Same RX-PR1 rule as _exec_action above: patch wording only when there
@@ -1579,6 +1633,15 @@ def build_report_sections(item: dict) -> str:
                     "HIGH PRIORITY"    if sev == "HIGH"     else
                     "PATCH STANDARD"   if (sev == "MEDIUM" and _has_cve) else
                     "STANDARD PRIORITY" if sev == "MEDIUM" else "MONITOR")
+    if not _sevb["authoritative"]:
+        _conds = _di.source_stated_conditions(item)
+        _exec_action = (
+            "PRIORITY NOT DETERMINED &mdash; no authoritative CVSS score or CISA KEV listing is available. "
+            "Triage against the vendor advisory now"
+            + (f"; the source states: &ldquo;{_h('; '.join(_conds))}&rdquo;" if _conds else "")
+            + ". CUSTOMER EXPOSURE: UNKNOWN."
+        )
+        _urgency_txt = "TRIAGE REQUIRED"
     _exec_layer = (
         "<div style='background:#0a0a1a;border:2px solid #ff4444;border-radius:8px;"
         "padding:20px 24px;margin:0 0 20px;'>"
@@ -1588,8 +1651,9 @@ def build_report_sections(item: dict) -> str:
         f"<tr><td style='padding:6px 12px 6px 0;color:#888;font-size:12px;width:180px;vertical-align:top;font-weight:600;'>WHAT HAPPENED?</td>"
         f"<td style='padding:6px 0;color:#e0e0e0;font-size:13px;line-height:1.5;'>{_h(title)}</td></tr>"
         f"<tr><td style='padding:6px 12px 6px 0;color:#888;font-size:12px;vertical-align:top;font-weight:600;'>WHY SHOULD I CARE?</td>"
-        f"<td style='padding:6px 0;color:#e0e0e0;font-size:13px;line-height:1.5;'>Severity: <strong style='color:{'#ff4444' if sev=='CRITICAL' else '#ff8800' if sev=='HIGH' else '#ffcc00' if sev=='MEDIUM' else '#888'};'>{_h(sev)}</strong>"
-        f" &nbsp;|&nbsp; Risk Score: <strong>{risk}/10</strong>"
+        f"<td style='padding:6px 0;color:#e0e0e0;font-size:13px;line-height:1.5;'>Severity: <strong style='color:{'#ff4444' if sev=='CRITICAL' else '#ff8800' if sev=='HIGH' else '#ffcc00' if sev=='MEDIUM' else '#888'};'>{_h(_sevb['display'])}</strong>"
+        f"{(' <span style=&quot;color:#888;font-size:11px;&quot;>(' + _h(_sevb['note']) + ')</span>') if _sevb['note'] else ''}"
+        f" &nbsp;|&nbsp; APEX composite risk (not CVSS): <strong>{risk}/10</strong>"
         f"{'&nbsp;|&nbsp;&#x26A0; <strong style=&quot;color:#ff4444;&quot;>CISA KEV — Active Exploitation Confirmed</strong>' if kev else ''}</td></tr>"
         f"<tr><td style='padding:6px 12px 6px 0;color:#888;font-size:12px;vertical-align:top;font-weight:600;'>WHAT TO DO TODAY?</td>"
         f"<td style='padding:6px 0;color:#ffcc00;font-size:13px;font-weight:700;line-height:1.5;'>{_exec_action}</td></tr>"
@@ -1614,7 +1678,7 @@ def build_report_sections(item: dict) -> str:
             if kev else
             "No confirmed active exploitation in CISA KEV catalogue at time of analysis."
         )
-        cvss_txt = f"CVSS 3.1 base score: <strong>{_h(cvss)}</strong>" if cvss is not None else "CVSS score: <strong style='color:var(--muted)'>N/A</strong>"
+        cvss_txt = f"CVSS base score: <strong>{_h(cvss)}</strong>" if cvss is not None else "CVSS score: <strong style='color:var(--muted)'>N/A</strong>"
         epss_txt = f"EPSS probability (30-day): <strong>{_h(epss)}%</strong>" if epss is not None else "EPSS: <strong style='color:var(--muted)'>N/A</strong>"
         _s2_body = (
             f"<p>CYBERDUDEBIVASH SENTINEL APEX has detected, correlated, and validated a "
@@ -1663,18 +1727,19 @@ def build_report_sections(item: dict) -> str:
     epss_v = float(epss) if epss is not None else None
     kev_score = 10.0 if kev else 0.0
     sections.append(_section(4, "Risk Score Breakdown",
-        "<p>Composite risk score is derived from 5 independent signal layers normalised "
-        "against APEX's 500-advisory rolling baseline.</p>"
+        "<p>The composite risk score is an APEX-internal heuristic that blends the signal layers "
+        "below. It is not a CVSS score and is not calibrated against a published baseline.</p>"
         + _score_row("Composite Risk", risk, 10)
-        + _score_row("CVSS 3.1 Base", cvss_v, 10)
+        + _score_row("CVSS Base (version not recorded)", cvss_v, 10)
         + _score_row("EPSS (30-day %)", epss_v, 100)
         + _score_row("KEV Exploitation", kev_score, 10)
         + _score_row("TTP Coverage", min(len(ttps), 10), 10)
         + f"<div class='callout{'  critical' if risk >= 8 else ''}'>"
         f"<strong>Composite Score {risk}/10</strong> - "
-        + ("IMMINENT. Patch within 24 hours." if risk >= 9 else
-           "HIGH PRIORITY. Patch within 72 hours." if risk >= 7 else
-           "STANDARD. Patch within standard window.")
+        + ("Remediation priority (same basis as the executive summary): " + _exec_action
+           if _sevb["authoritative"] else
+           "REMEDIATION TIMELINE NOT SET &mdash; no authoritative CVSS or KEV evidence; "
+           "the composite score alone does not justify a patch deadline.")
         + "</div>"
     ))
 
@@ -1762,19 +1827,19 @@ def build_report_sections(item: dict) -> str:
             "reveals the following technical characteristics:</p>"
             "<ul>"
             f"<li><strong>Delivery vector:</strong> {_h(delivery)}</li>"
-            f"<li><strong>Execution chain:</strong> {len(ttps)} MITRE ATT&amp;CK techniques "
-            "spanning initial access through impact phases.</li>"
+            f"<li><strong>ATT&amp;CK mapping:</strong> {len(ttps)} technique(s) inferred "
+            "from the advisory text (analyst inference, not observed adversary activity).</li>"
             f"<li><strong>Privilege context:</strong> Exploit path requires {_h(priv_req)} privileges.</li>"
-            f"<li><strong>Network footprint:</strong> {ioc_count} distinct indicators "
-            "of compromise recorded at analysis time.</li>"
+            f"<li><strong>Indicators:</strong> {ioc_count} qualified indicator(s) recorded at analysis time.</li>"
             f"<li><strong>KEV status:</strong> {'Actively exploited - CISA KEV confirmed.' if kev else 'Not presently on CISA KEV.'}</li>"
-            f"<li><strong>Threat actor:</strong> Activity attributed to cluster "
-            f"<strong>{_h(actor)}</strong>.</li>"
+            f"<li><strong>Threat actor:</strong> "
+            + (f"internal cluster label <strong>{_h(actor)}</strong> (not a verified attribution)."
+               if not _is_real_attribution(actor) else f"cluster <strong>{_h(actor)}</strong>.")
+            + "</li>"
             "</ul>"
             "<p>Defenders should correlate the IOC table (Section 7) against 30-day "
             "SIEM retention, proxy logs, EDR process telemetry, and authentication "
-            "events. Absence of a match does not rule out compromise - this advisory "
-            "has been associated with re-generated C2 infrastructure and DGA campaigns.</p>"
+            "events. Absence of a match does not rule out compromise.</p>"
         )
     sections.append(_section(5, "Technical Analysis", _s5_body))
 
@@ -1783,7 +1848,8 @@ def build_report_sections(item: dict) -> str:
         _s6_body = _apex_render_ttps(ttps, item)
     else:
         _s6_body = (
-            "<p>The following ATT&amp;CK v15 techniques have been mapped with HIGH confidence. "
+            "<p>The following ATT&amp;CK techniques are analyst inferences from the advisory text "
+            "(validated against the pinned MITRE dataset); they are not observed adversary activity. "
             "Enterprise subscribers receive a Navigator layer (.json) for direct overlay "
             "onto your detection coverage matrix.</p>"
             + _render_ttps(ttps)
@@ -1821,7 +1887,7 @@ def build_report_sections(item: dict) -> str:
     _kev_chip = "<span class='sev-chip sev-CRITICAL'>YES &mdash; ACTIVELY EXPLOITED</span>" if kev else "No"
     sections.append(_section(8, "CVSS &amp; EPSS Deep Dive",
         "<div class='kv'>"
-        f"<div class='kv-key'>CVSS 3.1 Score</div><div class='kv-val'><strong>" + (_h(str(cvss)) if cvss is not None else "<span style='color:var(--muted)'>N/A</span>") + "</strong></div>"
+        f"<div class='kv-key'>CVSS Score (version not recorded)</div><div class='kv-val'><strong>" + (_h(str(cvss)) if cvss is not None else "<span style='color:var(--muted)'>N/A</span>") + "</strong></div>"
         f"<div class='kv-key'>CVSS Vector</div><div class='kv-val'><code>{_h(cvss_vec)}</code></div>"
         f"<div class='kv-key'>EPSS Score</div><div class='kv-val'><strong>" + (_h(str(epss)) + '%' if epss is not None else "<span style='color:var(--muted)'>N/A</span>") + "</strong></div>"
         f"<div class='kv-key'>KEV Listed</div><div class='kv-val'>{_kev_chip}</div>"
@@ -1835,40 +1901,37 @@ def build_report_sections(item: dict) -> str:
         "triggers APEX's IMMINENT classification - immediate patching required.</p>"
     ))
 
-    # ── S9: Kill Chain Analysis  -  APEX Threat-Specific Engine v148.1 ────────
-    if _APEX_UPGRADE_AVAILABLE:
-        kc_html = _apex_kill_chain(item, kc_phases)
-        if not kc_html:
-            # fallback to original if upgrade returns empty
-            default_kc = ["Reconnaissance", "Weaponisation", "Delivery", "Exploitation"]
-            kc_html = "".join(
+    # ── S9: Kill Chain Analysis  -  evidence-gated (P0 #721) ───────────────────
+    # The previous implementation rendered fixed 7-step templates (implant
+    # installation, persistent C2, 60-second beaconing, lateral movement,
+    # exfiltration) for every advisory, i.e. observed-attack claims with no
+    # report-specific observation behind them. Only phases the SOURCE reported
+    # (`kill_chain_phases`) are rendered, as such. Otherwise state plainly that
+    # no attack-chain activity was reported, and show a clearly-labelled
+    # hypothetical scenario limited to what the advisory itself describes.
+    if kc_phases:
+        kc_html = (
+            "<div class='callout'><strong>SOURCE-REPORTED PHASES</strong> &mdash; phase names as "
+            "supplied by the source; no activity detail beyond the source is asserted.</div>"
+            + "".join(
                 f"<div class='kc-phase'><div class='kc-num'>{i:02d}</div>"
-                f"<div class='kc-body'><h4>{p}</h4></div></div>"
-                for i, p in enumerate(default_kc, 1)
+                f"<div class='kc-body'><h4>{_h(p)}</h4></div></div>"
+                for i, p in enumerate(kc_phases, 1)
             )
+        )
     else:
-        default_kc = ["Reconnaissance", "Weaponisation", "Delivery",
-                      "Exploitation", "Installation", "C2", "Actions on Objectives"]
-        phases = kc_phases if kc_phases else default_kc[:4]
-        kc_html = ""
-        kc_descs = {
-            "Reconnaissance": "Adversary collects information about the target environment.",
-            "Weaponisation": "Exploit code is packaged into a deliverable payload.",
-            "Delivery": "Payload is transmitted to the target via observed delivery vector.",
-            "Exploitation": f"{'CVE exploitation ' if cvss else 'Vulnerability '}triggers execution in target environment.",
-            "Installation": "Persistent access mechanism installed; foothold established.",
-            "C2": "Attacker communicates with implant via observed C2 infrastructure.",
-            "Actions on Objectives": "Data exfiltration, ransomware deployment, or lateral movement executed.",
-        }
-        for i, phase in enumerate(phases, 1):
-            kc_html += (
-                f"<div class='kc-phase'>"
-                f"<div class='kc-num'>{i:02d}</div>"
-                f"<div class='kc-body'>"
-                f"<h4>{_h(phase)}</h4>"
-                f"<p>{_h(kc_descs.get(phase, 'Phase observed in this campaign.'))}</p>"
-                f"</div></div>"
-            )
+        _kc_conds = _di.source_stated_conditions(item)
+        kc_html = (
+            "<div class='callout'><strong>OBSERVED ACTIVITY: NONE REPORTED.</strong> The source does not "
+            "describe an intrusion, actor activity, or post-exploitation behaviour for this advisory. "
+            "No reconnaissance, installation, persistence, command-and-control or exfiltration "
+            "activity is asserted.</div>"
+            "<div class='callout warn'><strong>HYPOTHETICAL SCENARIO (not observed).</strong> "
+            "Assumptions: the vulnerable component is reachable by an attacker and unpatched. "
+            + (f"Attack conditions stated by the source: &ldquo;{_h('; '.join(_kc_conds))}&rdquo;. "
+               if _kc_conds else "The source states no attack preconditions. ")
+            + "Anything beyond exploitation of the described flaw would be speculation and is omitted.</div>"
+        )
     sections.append(_section(9, "Kill Chain Phase Analysis", kc_html))
 
     # ── S10: Detection & Response Playbook ────────────────────────────────
@@ -1877,14 +1940,18 @@ def build_report_sections(item: dict) -> str:
         "<div class='playbook-label'>Immediate (0 - 4 hours)</div>"
         "<div class='playbook-steps'>"
         "<div class='step'><p>Triage advisory against asset inventory. Identify affected versions and exposure classes.</p></div>"
-        "<div class='step'><p>Deploy APEX Sigma &amp; YARA rule packs into your SIEM and EDR estate.</p></div>"
-        "<div class='step'><p>Block full IOC list (Section 7) at egress firewall, proxy, and DNS RPZ tiers.</p></div>"
-        "<div class='step'><p>Isolate hosts exhibiting observed behavioural signatures pending forensic review.</p></div>"
+        "<div class='step'><p>Apply detection content for this advisory only after it has been validated "
+        "in your environment (see Section 18 for availability and validation status).</p></div>"
+        + ("<div class='step'><p>Hunt the qualified indicators (Section 7) in SIEM, DNS and proxy telemetry; "
+           "block only indicators your own review confirms as malicious.</p></div>" if ioc_count > 0 else
+           "<div class='step'><p>No qualified indicators were reported for this advisory, so there is "
+           "no indicator blocklist to deploy; do not block on CVE identifiers or advisory URLs.</p></div>")
+        + "<div class='step'><p>Isolate hosts only if triage finds evidence of exploitation.</p></div>"
         "</div></div>"
         "<div class='playbook-phase'>"
         "<div class='playbook-label'>Short-term (4 - 24 hours)</div>"
         "<div class='playbook-steps'>"
-        "<div class='step'><p>Apply vendor patch or configuration workaround per remediation guidance (Section 16).</p></div>"
+        "<div class='step'><p>Apply vendor patch or configuration workaround per the vendor advisory.</p></div>"
         "<div class='step'><p>Run 30-day retro-hunt across all telemetry using APEX hunt queries (hunt.hql / hunt.kql).</p></div>"
         "<div class='step'><p>Review third-party and supply-chain exposure; confirm upstream providers are patched.</p></div>"
         "</div></div>"
@@ -1907,17 +1974,18 @@ def build_report_sections(item: dict) -> str:
         f"<div class='actor-card'>"
         f"<div class='actor-icon'>⚔</div>"
         f"<div class='actor-body'>"
-        f"<h3>{_h(_actor_resolved_display)}</h3>"
-        f"<p>Tracking cluster: <code>{_h(actor)}</code> &nbsp;|&nbsp; "
-        f"Campaign: <code>{_h(campaign)}</code></p>"
-        f"</div></div>"
-        f"<p style='margin-top:16px'>APEX tracks this actor cluster across {len(ttps)} "
-        f"ATT&amp;CK technique signatures. Full actor dossier including infrastructure "
-        f"history, geolocation intelligence, and TTP evolution is available via the "
-        f"enterprise API endpoint <code>/api/actor/{_h(actor)}</code>.</p>"
-        "<div class='callout'><strong>Enterprise subscribers</strong> receive automated "
-        "actor tracking reports, infrastructure pivot analysis, and proactive alerting "
-        "when this cluster shows new activity.</div>"
+        f"<h3>{_h(_actor_resolved_display) if _had_real_attribution else 'Unattributed'}</h3>"
+        + (f"<p>Cluster label: <code>{_h(actor)}</code> &nbsp;|&nbsp; "
+           f"Campaign: <code>{_h(campaign)}</code></p>" if _had_real_attribution else "")
+        + f"</div></div>"
+        + (
+            "<div class='callout'><strong>NO THREAT ACTOR ATTRIBUTED.</strong> "
+            "<code>" + _h(actor) + "</code> is an internal unattributed classification, not a verified "
+            "actor, group or campaign. No actor activity, infrastructure or targeting is asserted.</div>"
+            if not _had_real_attribution else
+            f"<p style='margin-top:16px'>Attribution detail for this advisory is an Enterprise entitlement "
+            f"(<code>/api/actor/{_h(actor)}</code>).</p>"
+        )
     )
     sections.append(_section(11, "Threat Actor Profile", _s11_body))
 
@@ -1957,22 +2025,24 @@ def build_report_sections(item: dict) -> str:
 
     # ── S14: Strategic Implications ────────────────────────────────────────
     reg_note = (
-        "For organisations in regulated sectors (financial services, healthcare, energy, "
-        "public sector) this advisory may trigger mandatory incident reporting obligations "
-        "under NIS2, DPDP Act, HIPAA, FFIEC, or NERC CIP."
-        if sev in ("CRITICAL", "HIGH") else
-        "Validate against your regulatory reporting thresholds for DPDP, GDPR, and sector-specific mandates."
+        "Reporting obligations arise only from a confirmed incident affecting your organisation, "
+        "and depend on your jurisdiction, sector and the data involved. A published vulnerability "
+        "alone does not establish any obligation. Legal review required if exploitation is suspected."
     )
     sections.append(_section(14, "Strategic Implications &amp; Business Risk",
-        f"<div class='callout critical'><strong>CISO Action Required:</strong> {reg_note}</div>"
-        f"<p>The <strong>{_h(sev)}</strong> classification combined with "
-        f"{'confirmed active exploitation' if kev else 'high exploitability probability'} "
-        "positions this advisory as a board-level cyber risk event.</p>"
+        f"<div class='callout'><strong>Regulatory note:</strong> {reg_note}</div>"
+        + (f"<p>CISA lists this vulnerability as known-exploited (KEV); treat as a priority "
+           f"remediation item.</p>" if kev else
+           "<p>Exploitation status: no CISA KEV listing was found in the data available to APEX at "
+           "analysis time. Absence from KEV does not establish that the flaw is not being exploited.</p>")
+        + ""
         "<ul>"
-        "<li>Executive briefing to CISO/CIO within 24 hours of this dossier receipt.</li>"
-        "<li>Risk quantification using FAIR or ISO 27005 model against APEX risk vectors.</li>"
+        "<li>Determine exposure first: match affected products/versions against your asset inventory "
+        "(CUSTOMER EXPOSURE: UNKNOWN until you do). Brief the CISO if exposure is confirmed.</li>"
+        "<li>Risk quantification requires your own asset values and loss data (e.g. FAIR/ISO 27005); "
+        "this dossier provides none.</li>"
         "<li>Cyber-insurance disclosure review if evidence of compromise exists.</li>"
-        "<li>Proactive customer/supplier notification if shared platforms are in scope.</li>"
+        "<li>Notify customers/suppliers only if shared platforms are confirmed affected.</li>"
         "<li>Update risk register and vulnerability management programme with this advisory.</li>"
         "</ul>"
     ))
@@ -2080,13 +2150,13 @@ def build_report_sections(item: dict) -> str:
     # artifact — also avoids the wasted compute of generating Sigma/YARA/KQL/
     # SPL rules that would never be shown.
     sections.append(_section(18, "Detection Engineering Pack",
-        "<p>Production-grade detection artefacts (Sigma, YARA, KQL, SPL) are generated "
-        "by SENTINEL APEX's rule synthesis engine, pre-mapped to this advisory's IOCs "
-        "and ATT&amp;CK techniques. Rules are syntax-validated; tune and test them "
-        "against your own telemetry before enabling blocking actions.</p>"
-        "<div class='callout'><strong>Enterprise Delivery:</strong> Full validated rule packs "
-        "(Sigma, YARA, KQL, SPL, EQL, LEEF) with ATT&amp;CK Navigator overlay and SOC "
-        "deployment guide available via "
+        "<div class='callout'><strong>DETECTION CONTENT: NOT INCLUDED IN THIS PUBLIC ARTIFACT.</strong> "
+        "No detection rule is attached to this report, and none is claimed to be production-ready. "
+        "Where an Enterprise detection pack exists for this advisory, each rule carries its own "
+        "validation status &mdash; <em>syntax-checked</em>, <em>offline-tested against fixtures</em>, "
+        "and <em>validated in a customer environment</em> are separate states, and a rule must be "
+        "validated in your environment before it is enabled for blocking. Availability is "
+        "determined per advisory via the "
         "<a href='https://intel.cyberdudebivash.com/api/stix/" + _h(stix_id) + "' style='color:var(--accent)'>APEX Enterprise API</a>.</div>"
     ))
 
@@ -2104,12 +2174,12 @@ def build_report_sections(item: dict) -> str:
     # Build MITRE Navigator layer JSON (inline data URI download)
     nav_techniques = []
     for t in ttps[:20]:
-        if isinstance(t, str):
-            nav_techniques.append({"techniqueID": t, "color": "#ff3b3b", "comment": f"Mapped by APEX: {title[:60]}", "enabled": True})
-        elif isinstance(t, dict):
-            tid = t.get("technique_id") or t.get("id") or ""
-            if tid:
-                nav_techniques.append({"techniqueID": tid, "color": "#ff3b3b", "comment": f"Mapped by APEX: {title[:60]}", "enabled": True})
+        tid = _di.technique_id_of(t)
+        # Navigator layers must contain real ATT&CK IDs only (names/unknown IDs are skipped)
+        if _di.validate_technique(tid)["status"] != "VALID":
+            continue
+        nav_techniques.append({"techniqueID": tid, "color": "#ff3b3b",
+                               "comment": f"Analyst inference (APEX) from advisory text: {title[:60]}", "enabled": True})
 
     nav_layer = json.dumps({
         "name": f"APEX - {title[:60]}",
@@ -2118,26 +2188,29 @@ def build_report_sections(item: dict) -> str:
         "description": f"CYBERDUDEBIVASH SENTINEL APEX {PLATFORM_VERSION} - {title[:80]}",
         "techniques": nav_techniques,
         "gradient": {"colors": ["#ffffff","#ff3b3b"], "minValue": 0, "maxValue": 1},
-        "legendItems": [{"label": "APEX Mapped Technique", "color": "#ff3b3b"}],
-        "metadata": [{"name": "apex_id", "value": stix_id}, {"name": "risk", "value": str(risk)}],
+        "legendItems": [{"label": "APEX inferred technique (not observed)", "color": "#ff3b3b"}],
+        "metadata": [{"name": "apex_id", "value": stix_id}, {"name": "risk", "value": str(risk)},
+                     {"name": "attack_dataset_sha256", "value": str(_di.attack_dataset_pin().get("content_hash"))},
+                     {"name": "technique_basis", "value": "ANALYST_INFERENCE"}],
     }, separators=(",", ":"))
     import urllib.parse as _ul
     nav_href = "data:application/json;charset=utf-8," + _ul.quote(nav_layer)
 
     sections.append(_section(20, "Business Impact Score &amp; MITRE Navigator Layer",
         "<h3>Business Impact Score (BIS)</h3>"
-        "<p>BIS is a FAIR-aligned composite metric combining CVSS severity, EPSS exploitation probability, "
-        "CISA KEV status, IOC density, and TTP coverage into a single board-reportable risk number.</p>"
+        "<p>BIS is an APEX-internal weighted heuristic combining CVSS, EPSS, CISA KEV status, indicator count "
+        "and technique count. It is not a calibrated FAIR loss estimate and is withheld when CVSS, EPSS and "
+        "KEV data are all unavailable.</p>"
         "<div class='bis-ring'>"
         f"<div class='bis-circle' style='border-color:{_h(bis_color)};background:rgba(0,0,0,.3)'>"
-        f"<span class='bis-num' style='color:{_h(bis_color)}'>{bis_score}</span>"
+        f"<span class='bis-num' style='color:{_h(bis_color)}'>{bis_score if bis_score is not None else 'N/A'}</span>"
         f"<span class='bis-label'>/10 BIS</span>"
         f"</div>"
         "<div>"
         f"<div style='font-family:var(--mono);font-size:14px;font-weight:700;color:{_h(bis_color)};margin-bottom:6px'>{_h(bis_label)}</div>"
         f"<div class='kv' style='grid-template-columns:160px 1fr;font-size:12px'>"
         f"<div class='kv-key'>APEX Risk Input</div><div class='kv-val'>{risk}/10</div>"
-        f"<div class='kv-key'>CVSS 3.1</div><div class='kv-val'>{cvss if cvss is not None else 'N/A'}</div>"
+        f"<div class='kv-key'>CVSS</div><div class='kv-val'>{cvss if cvss is not None else 'N/A'}</div>"
         f"<div class='kv-key'>EPSS (30d %)</div><div class='kv-val'>{epss if epss is not None else 'N/A'}</div>"
         f"<div class='kv-key'>KEV Status</div><div class='kv-val'>{'CONFIRMED' if kev else 'Not listed'}</div>"
         f"<div class='kv-key'>IOC Density</div><div class='kv-val'>{ioc_count} indicators</div>"
@@ -2158,9 +2231,8 @@ def build_report_sections(item: dict) -> str:
             "Enterprise tier auto-maps via APEX AI inference engine.</div>"
         )
         + "<div class='callout' style='margin-top:16px'>"
-        "<strong>Board Reporting:</strong> BIS score is designed for executive dashboards and cyber-insurance "
-        "disclosure. Include BIS alongside CVSS in your risk register and monthly CISO report. "
-        "APEX Enterprise provides automated board-level PDF briefing generation on every advisory.</div>"
+        "<strong>Use of BIS:</strong> an APEX-internal prioritisation aid only. Do not cite it in insurance "
+        "or regulatory disclosures as a loss estimate; combine it with your own asset and exposure data.</div>"
     ))
 
     return "\n".join(sections)
@@ -2205,11 +2277,18 @@ def render_report(item: dict, public_prefix: str) -> str:
     _epss_disp   = str(_epss_resolved) if _epss_resolved is not None else "N/A"
     _epss_pct    = "%" if _epss_resolved is not None else ""
     # v184.0 G4 FIX: read KEV from all possible field names for cross-source consistency
-    _kev         = bool(item.get("kev_present") or item.get("kev") or item.get("kev_status"))
-    _kev_disp    = "YES &#x26A0;" if _kev else "No"
+    # P0 #721: same canonical KEV parser as build_report_sections (plain bool() read
+    # legacy strings such as "NO"/"false" as KEV-confirmed -> header/body contradiction).
+    _kev         = _kev_confirmed_check(item)
+    _kev_disp    = "YES &#x26A0;" if _kev else "No KEV listing found"
+    _sevb_hdr    = _di.severity_basis(item, _cvss_resolved, _kev)
+    if _sevb_hdr["authoritative"]:
+        sev = _sevb_hdr["display"]
     _feed_src    = str(item.get("feed_source") or item.get("source") or "SENTINEL APEX")[:40]
     _urgency_cls = ("IMMEDIATE" if sev in ("CRITICAL", "HIGH") else
                     "HIGH" if sev == "MEDIUM" else "MONITOR")
+    if not _sevb_hdr["authoritative"]:
+        _urgency_cls = "MONITOR"
     # Patch wording only when there is something to patch (RX-PR1 rule).
     _hdr_has_cve = bool(item.get("cve_id")) or bool(re.search(
         r"CVE-\d{4}-\d+", f"{item.get('title') or ''} {item.get('description') or ''}", re.IGNORECASE))
@@ -2218,8 +2297,12 @@ def render_report(item: dict, public_prefix: str) -> str:
                     "HIGH PRIORITY"    if sev == "HIGH"     else
                     "PATCH STANDARD"   if (sev == "MEDIUM" and _hdr_has_cve) else
                     "STANDARD PRIORITY" if sev == "MEDIUM" else "MONITOR")
+    if not _sevb_hdr["authoritative"]:
+        _urgency_txt = "TRIAGE REQUIRED"
     _sev_tile    = ("crit" if sev == "CRITICAL" else "high" if sev == "HIGH" else
                     "med"  if sev == "MEDIUM"   else "low"  if sev == "LOW"  else "neutral")
+    if not _sevb_hdr["authoritative"]:
+        _sev_tile = "neutral"
     _risk_tile   = ("crit" if risk >= 9 else "high" if risk >= 7 else
                     "med"  if risk >= 5 else "low")
     # Tile colour: "neutral" when score absent  -  never show red/orange on a null value
@@ -2298,7 +2381,7 @@ def render_report(item: dict, public_prefix: str) -> str:
 <header class='dossier-hdr'>
   <div class='classification'>
     <span class='cls-chip cls-PUBLIC'>PUBLIC TIER</span>
-    <span class='cls-chip cls-TLP'>{_h(item.get('tlp','TLP:CLEAR'))}</span>
+    <span class='cls-chip cls-TLP'>{_h(item.get('tlp','TLP:CLEAR'))}</span>{"<span class='cls-chip' style='color:#ff4444'>TLP PUBLICATION REVIEW</span>" if _di.tlp_public_conflict(item.get('tlp')) else ""}
     <span>TACTICAL DOSSIER</span>
     &nbsp;&middot;&nbsp;
     <span class='urgency-badge urgency-{_urgency_cls}'><span class='sev-pulse'></span>{_urgency_txt}</span>
@@ -2306,7 +2389,7 @@ def render_report(item: dict, public_prefix: str) -> str:
   <div class='dossier-id'>INTEL ID: {_h(intel_id)} &nbsp;·&nbsp; PROCESSED: {_h(ts)} &nbsp;·&nbsp; SOURCE: {_h(_feed_src)}</div>
   <h1 class='dossier-title'>{_h(title)}</h1>
   <div class='meta-strip'>
-    <span>Severity: <strong><span class='sev-chip {_sev_class(sev)}'>{_h(sev)}</span></strong></span>
+    <span>Severity: <strong><span class='sev-chip {_sev_class(sev if _sevb_hdr['authoritative'] else 'INFO')}'>{_h(_sevb_hdr['display'])}</span></strong></span>
     <span>Risk: <strong>{risk}/10</strong></span>
     <span>CVSS: <strong>{_cvss_disp}</strong></span>
     <span>EPSS: <strong>{_epss_disp}{_epss_pct}</strong></span>
@@ -2322,8 +2405,8 @@ def render_report(item: dict, public_prefix: str) -> str:
 <div class='exec-card'>
   <div class='exec-tile {_sev_tile}'>
     <div class='exec-tile-label'>Severity</div>
-    <div class='exec-tile-val'>{_h(sev[:4])}</div>
-    <div class='exec-tile-sub'>Classification</div>
+    <div class='exec-tile-val'>{_h(_sevb_hdr['display'][:5])}</div>
+    <div class='exec-tile-sub'>{'Classification' if _sevb_hdr['authoritative'] else 'No CVSS / KEV data'}</div>
   </div>
   <div class='exec-tile {_risk_tile}'>
     <div class='exec-tile-label'>Risk Score</div>
@@ -2331,7 +2414,7 @@ def render_report(item: dict, public_prefix: str) -> str:
     <div class='exec-tile-sub'>Composite APEX</div>
   </div>
   <div class='exec-tile {_cvss_tile}'>
-    <div class='exec-tile-label'>CVSS 3.1</div>
+    <div class='exec-tile-label'>CVSS</div>
     <div class='exec-tile-val'>{_cvss_disp}</div>
     <div class='exec-tile-sub'>Base Score</div>
   </div>

@@ -16,12 +16,20 @@ This module generates per-vulnerability-class Sigma rules that are:
   - MITRE ATT&CK tagged
 """
 
+import os
+import sys
 import uuid
 import re
 from datetime import date
 from typing import Optional
 from dataclasses import dataclass, field
 import yaml
+
+# P0 #721: ATT&CK tags are validated against the repo-pinned MITRE dataset.
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+import dossier_integrity as _di  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -377,8 +385,15 @@ class APEXSigmaGenerator:
         # Build MITRE ATT&CK tags
         tags = ["attack.initial_access"]
         for tech in mitre_techniques:
-            tech_lower = tech.lower().replace(".", "").replace("T", "t")
-            tags.append(f"attack.{tech_lower}")
+            # Sigma ATT&CK tags keep the sub-technique dot (attack.t1059.001); the old
+            # code stripped it (attack.t1059001 -- invalid) and passed unknown IDs
+            # such as the non-existent T1190.001 straight through.
+            canon = _di.canonical_technique_id(tech)
+            if canon is None:
+                continue
+            tag = f"attack.{canon.lower()}"
+            if tag not in tags:
+                tags.append(tag)
 
         # Select logsource based on vuln class
         if logsource_override:
@@ -585,7 +600,7 @@ if __name__ == "__main__":
         advisory_title="CISA Warns of Drupal Core SQL Injection Vulnerability Exploited in Attacks",
         cve_id="CVE-2026-9082",
         vuln_class="sqli",
-        mitre_techniques=["T1190", "T1059", "T1190.001"],
+        mitre_techniques=["T1190", "T1059"],  # T1190.001 does not exist in ATT&CK (#721)
         real_iocs=["45.153.204.118"],
         severity="high",
         source_url="https://cybersecuritynews.com/drupal-core-sql-injection-vulnerability-exploited/",
