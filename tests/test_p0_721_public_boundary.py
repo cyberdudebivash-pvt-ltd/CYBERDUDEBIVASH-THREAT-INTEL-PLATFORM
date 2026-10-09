@@ -137,6 +137,96 @@ class TestSanitizeDocument(unittest.TestCase):
         self.assertEqual((removed, withheld), ([], None))
 
 
+class TestConflictingClassification(unittest.TestCase):
+    """Independent review of #728 head 29b12cb: a first-token match let "TLP:CLEAR; TLP:RED" through, and a benign
+    CLEAR anywhere in a page negated an explicit RED marking. Neither may recur."""
+
+    AMBIGUOUS = ["TLP:CLEAR; TLP:RED", "TLP:RED; TLP:CLEAR", "TLP:CLEAR/RED", "TLP:CLEAR, TLP:GREEN", "TLP:CLEAR and TLP:AMBER",
+                 "TLP:GREEN or TLP:CLEAR", "TLP:CLEAR | TLP:AMBER+STRICT", "TLP:CLEAR TLP:RED", "TLP:CLEAR - TLP:RED"]
+
+    def test_document_classification_with_any_restricted_or_conflicting_marking_is_denied(self):
+        for text in self.AMBIGUOUS + ["TLP:GREEN \u2014 For Authorized Recipients Only", "TLP:AMBER", "TLP:AMBER+STRICT",
+                                      "TLP:RED", "tlp:red", "TLP\u200b:RED", "TLP&#58;RED".replace("&#58;", ":"),
+                                      "TLP:\u0421LEAR", "TLP:CLEAR\u202e; TLP:RED", "TLP", "TLP: unknown"]:
+            out, removed, withheld = tb.sanitize_document({"classification": text, "payload": SECRET}, POLICY)
+            self.assertIsNotNone(withheld, text)
+            self.assertNotIn(SECRET, json.dumps(out), text)
+        out, _r, w = tb.sanitize_document({"classification": "TLP:CLEAR; TLP:RED", "n": 1}, POLICY)
+        self.assertEqual(w[0], "CONFLICTING_CLASSIFICATION")
+
+    def test_unambiguous_clear_or_non_tlp_classification_is_not_denied(self):
+        for text in ("TLP:CLEAR", "tlp:clear", "TLP:CLEAR \u2014 public", "UNCLASSIFIED", "Internal", ""):
+            _o, _r, w = tb.sanitize_document({"classification": text, "n": 1}, POLICY)
+            self.assertIsNone(w, text)
+        # legacy WHITE only when the operator migrated it
+        _o, _r, w = tb.sanitize_document({"classification": "TLP:WHITE"}, POLICY)
+        self.assertEqual(w[0], "LEGACY_LABEL_UNMIGRATED")
+        _o, _r, w = tb.sanitize_document({"classification": "TLP:WHITE"}, dict(POLICY, legacy_white_treated_as_clear=True))
+        self.assertIsNone(w)
+
+    def test_tlp_and_tlp_label_fields_must_be_exactly_one_clear_label(self):
+        for key in ("tlp", "tlp_label"):
+            for val in self.AMBIGUOUS + ["CLEAR", "TLP:CLEAR ", "TLP:CLEAR\u200b"]:
+                doc = {key: val, "items": [rec("a", "TLP:CLEAR")]}
+                _o, _r, w = tb.sanitize_document(doc, POLICY)
+                if val.strip() == "TLP:CLEAR":
+                    continue
+                self.assertIsNotNone(w, (key, val))
+
+    def test_record_level_classification_text_with_a_restricted_or_conflicting_marking_denies_the_record(self):
+        for text in self.AMBIGUOUS + ["TLP:AMBER \u2014 authorized recipients"]:
+            out, removed, _w = tb.sanitize_document([rec("a", "TLP:CLEAR", classification=text), rec("b", "TLP:CLEAR")], POLICY)
+            self.assertEqual([x["id"] for x in out], ["b"], text)
+        out, _r, _w = tb.sanitize_document([rec("a", "TLP:CLEAR", classification="TLP:CLEAR"), rec("c", "TLP:CLEAR", classification="Internal")], POLICY)
+        self.assertEqual([x["id"] for x in out], ["a", "c"])
+
+    def test_html_an_explicit_restricted_marking_is_never_negated_by_a_clear_elsewhere(self):
+        pages = {
+            "reviewer case (RED badge + CLEAR mention)": "<html><span>TLP:RED</span><p>see TLP:CLEAR guidance</p></html>",
+            "RED banner class, CLEAR text": "<div class='tlp-banner tlp-RED'>TLP:CLEAR</div>",
+            "CLEAR banner class, RED text in the same element": "<div class='tlp-banner tlp-CLEAR'>TLP:RED</div>",
+            "meta RED, CLEAR row": "<meta name='tlp' content='TLP:RED'><div class='kv-key'>TLP Label</div><div class='kv-val'>TLP:CLEAR</div>",
+            "no authoritative markers, both in prose": "<p>TLP:CLEAR</p><p>TLP:GREEN</p>",
+            "entity-encoded RED beside CLEAR": "<span>TLP&#58;RED</span><span>TLP:CLEAR</span>",
+            "zero-width inside RED": "<span>TLP:R\u200bED</span><span>TLP:CLEAR</span>",
+            "data-tlp attribute": "<body data-tlp='amber'><span>TLP:CLEAR</span></body>",
+            "title RED": "<title>Report TLP:RED</title><div class='tlp-banner tlp-CLEAR'>TLP:CLEAR</div>",
+            "kv row RED, banner CLEAR": "<div class='tlp-banner tlp-CLEAR'>TLP:CLEAR</div><div class='kv-key'>TLP Label</div><div class='kv-val'>TLP:AMBER+STRICT</div>",
+            "compound marking in the banner": "<div class='tlp-banner tlp-CLEAR'>TLP:CLEAR/RED</div>",
+            "look-alike letters in the banner": "<div class='tlp-banner tlp--CLEAR'>TLP:\u0421LEAR</div>",
+            "AMBER+STRICT sev-chip": "<span class='sev-chip sev-INFO'>TLP:AMBER+STRICT</span><span>TLP:CLEAR</span>",
+        }
+        for name, html in pages.items():
+            self.assertTrue(tb.classify_html_head(html)["restricted"], name)
+
+    def test_html_clear_pages_and_incidental_mentions_are_kept(self):
+        real_markup = ("<style>.tlp-banner.tlp-RED{color:red}.tlp-GREEN{x:1}/* TLP Banner */.cls-TLP{y:2}</style>"
+                       "<div class='tlp-banner tlp--CLEAR'>\n  TLP: TLP:CLEAR &nbsp;\u00b7&nbsp; CYBERDUDEBIVASH</div>"
+                       "<span class='cls-chip cls-TLP'>TLP:CLEAR</span><div class='kv-key'>TLP</div><div class='kv-val'>"
+                       "<span class='sev-chip sev-INFO'>TLP:CLEAR</span></div><div class='kv-key'>TLP Label</div>"
+                       "<div class='kv-val'>TLP:CLEAR</div>")
+        for name, html in {"generator markup with CSS naming every label": real_markup,
+                           "CLEAR badge, prose about RED handling": "<div class='tlp-banner tlp-CLEAR'>TLP:CLEAR</div><p>how to handle TLP:RED data</p>",
+                           "no TLP at all": "<html>nothing</html>"}.items():
+            self.assertFalse(tb.classify_html_head(html)["restricted"], name)
+
+    def test_html_files_end_to_end_in_dist_and_inventory(self):
+        with tempfile.TemporaryDirectory() as td:
+            dist = Path(td, "dist")
+            rep = dist / "reports" / "2026" / "10"
+            rep.mkdir(parents=True)
+            (rep / "neg.html").write_text("<html><span>TLP:RED</span><p>see TLP:CLEAR</p></html>")
+            (rep / "ok.html").write_text("<div class='tlp-banner tlp--CLEAR'>TLP: TLP:CLEAR</div>")
+            r = tb.sanitize_dist(dist, POLICY, parent_sources=[])
+            self.assertFalse((rep / "neg.html").exists())
+            self.assertTrue((rep / "ok.html").exists())
+            self.assertEqual(r["report_files_removed"], 1)
+            (rep / "neg2.html").write_text("<div class='tlp-banner tlp-AMBER'>TLP:AMBER</div><span class='x'>TLP:CLEAR</span>")
+            inv = tb.inventory_tree(Path(td, "dist"), subdirs=("reports",), policy=POLICY)
+            self.assertEqual(inv["report_pages"]["restricted_badge"], 1)
+            self.assertEqual(inv["report_pages"]["by_label"], {"TLP:AMBER": 1})
+
+
 class TestSanitizeJsonFile(unittest.TestCase):
     def test_source_untouched_and_output_contains_no_restricted_bytes(self):
         with tempfile.TemporaryDirectory() as td:
@@ -184,7 +274,8 @@ class TestSanitizeDist(unittest.TestCase):
         (rep / "bad.html").write_text("<html><span>TLP:CLEAR</span></html>")      # removed by denied id
         (rep / "bad2.html").write_text("<html>x</html>")                           # removed by denied id
         (rep / "selfred.html").write_text("<html><span>TLP:RED</span> " + SECRET + "</html>")  # self-declared
-        (rep / "mentions.html").write_text("<html><span>TLP:CLEAR</span> text about TLP:RED handling</html>")
+        (rep / "mentions.html").write_text(
+            "<html><div class='tlp-banner tlp--CLEAR'>TLP: TLP:CLEAR</div><p>handling of TLP:RED data</p></html>")
         (self.dist / "reports" / "2026" / "outside.html").write_text("<html>y</html>")
 
     def tearDown(self):
@@ -219,7 +310,8 @@ class TestSanitizeDist(unittest.TestCase):
         self.assertFalse((rep_dir / "bad.html").exists())
         self.assertFalse((rep_dir / "bad2.html").exists())
         self.assertFalse((rep_dir / "selfred.html").exists())
-        self.assertTrue((rep_dir / "mentions.html").exists(), "a CLEAR page that merely mentions another label stays")
+        self.assertTrue((rep_dir / "mentions.html").exists(),
+                        "a page whose authoritative badge is CLEAR and that merely MENTIONS another label in prose stays")
         self.assertGreaterEqual(rep["report_files_removed"], 3)
 
     def test_first_party_content_outside_api_is_not_treated_as_advisory_data(self):

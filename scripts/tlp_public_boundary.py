@@ -50,9 +50,6 @@ ADVISORY_MARKERS = frozenset({"report_url", "internal_report_url", "cve_id", "st
 DOC_LABEL_KEYS = ("classification", "tlp", "tlp_label")
 COUNT_KEYS = ("count", "total", "total_count", "advisory_count", "item_count")
 MAX_DEPTH = 40
-_DOC_TLP_RE = re.compile(r"^\s*TLP\s*[:\-]\s*([A-Za-z]+(?:\s*\+\s*STRICT)?)", re.IGNORECASE)
-_HTML_TLP_RE = re.compile(r"TLP\s*[:\-]\s*(RED|AMBER\s*\+\s*STRICT|AMBER|GREEN)", re.IGNORECASE)
-_HTML_CLEAR_RE = re.compile(r"TLP\s*[:\-]\s*CLEAR", re.IGNORECASE)
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9._\-]{1,200}$")
 HTML_HEAD_BYTES = 65536
 
@@ -82,29 +79,45 @@ def _short_id(obj: Dict[str, Any]) -> Optional[str]:
     return str(v)[:120] if v is not None else None
 
 
+def _judge_tokens(tokens: List[str], policy: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """None when the markings are one unambiguous publishable label; else (reason_code, reason).  The FIRST marking
+    never decides: any restriction, unrecognised marking or disagreement between markings denies."""
+    distinct = set(tokens)
+    if distinct == {"TLP:CLEAR"}:
+        return None
+    if distinct == {"TLP:WHITE"} and policy.get("legacy_white_treated_as_clear"):
+        return None
+    if "INVALID" in distinct:
+        return "INVALID_LABEL", "an unrecognised TLP marking is present"
+    if len(distinct) > 1:
+        return "CONFLICTING_CLASSIFICATION", "the document carries conflicting TLP markings"
+    if distinct == {"TLP:WHITE"}:
+        return "LEGACY_LABEL_UNMIGRATED", "TLP:WHITE (TLP v1) has not been migrated by the operator"
+    return "RESTRICTED_DOCUMENT", "the document states a restricted TLP"
+
+
 def document_level_denial(doc: Any, policy: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    """(reason_code, reason) when a document declares its OWN restricted classification, else None."""
+    """(reason_code, reason) when a document declares its OWN restricted / invalid / conflicting classification."""
     if not isinstance(doc, dict):
         return None
     for key in DOC_LABEL_KEYS:
         val = doc.get(key)
         if not isinstance(val, str) or not val.strip():
             continue
+        toks = tlp_policy.scan_tlp_tokens(val)
         if key == "classification":
-            m = _DOC_TLP_RE.match(val)
-            if not m:
-                continue  # a non-TLP classification string is not a TLP declaration
-            token = "TLP:" + re.sub(r"\s+", "", m.group(1).upper())
+            if not toks:
+                continue  # a classification string that never mentions TLP is not a TLP declaration
         else:
-            token = val
-        parsed = tlp_policy.parse_label(token)
-        if parsed["status"] == tlp_policy.VALID and parsed["label"] == "TLP:CLEAR":
-            continue
-        if parsed["status"] == tlp_policy.LEGACY and policy.get("legacy_white_treated_as_clear"):
-            continue
-        code = "RESTRICTED_DOCUMENT" if parsed["status"] == tlp_policy.VALID else (
-            "LEGACY_LABEL_UNMIGRATED" if parsed["status"] == tlp_policy.LEGACY else "INVALID_LABEL")
-        return code, f"document {key} is not anonymously publishable"
+            exact = tlp_policy.parse_label(val)  # tlp / tlp_label hold exactly one label, nothing else
+            if exact["status"] == tlp_policy.VALID and exact["label"] == "TLP:CLEAR":
+                continue
+            if exact["status"] == tlp_policy.LEGACY and policy.get("legacy_white_treated_as_clear"):
+                continue
+            toks = toks or ["INVALID"]
+        verdict = _judge_tokens(toks, policy)
+        if verdict:
+            return verdict[0], f"document {key}: {verdict[1]}"
     return None
 
 
@@ -314,14 +327,74 @@ def _report_paths_for_id(dist: Path, intel_id: str) -> List[Path]:
     return [p for p in hits if root.resolve() in p.resolve().parents]
 
 
-def html_declares_restricted_tlp(path: Path) -> bool:
-    """True when a report page states a restricted TLP in its head region and never states TLP:CLEAR."""
+_ATTR_CLASS = re.compile(r"""class\s*=\s*(['"])(.*?)\1""", re.IGNORECASE | re.DOTALL)
+_CLASS_LABEL = re.compile(r"\btlp[-_ ]{0,2}(clear|white|green|amber[-_ ]?strict|amber|red)\b", re.IGNORECASE)
+_META_TAG = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+_META_NAME = re.compile(r"""name\s*=\s*['"]?(tlp|tlp[-_]label|classification)\b""", re.IGNORECASE)
+_META_CONTENT = re.compile(r"""content\s*=\s*(['"])(.*?)\1""", re.IGNORECASE | re.DOTALL)
+_DATA_TLP = re.compile(r"""data-tlp\s*=\s*(['"])(.*?)\1""", re.IGNORECASE | re.DOTALL)
+_TLP_ELEMENT = re.compile(r"""<(\w+)\b[^>]*class\s*=\s*['"][^'"]*\b(?:tlp|sev-chip)[^'"]*['"][^>]*>(.*?)</\1\s*>""",
+                          re.IGNORECASE | re.DOTALL)
+_KV_LABEL = re.compile(r"TLP\s*Label\s*</[^>]*>\s*<[^>]*>\s*([^<]*)", re.IGNORECASE)
+_TITLE = re.compile(r"<title\b[^>]*>(.*?)</title\s*>", re.IGNORECASE | re.DOTALL)
+_TAGS = re.compile(r"<[^>]+>")
+
+
+def _canon_class_label(word: str) -> str:
+    p = tlp_policy.parse_label("TLP:" + re.sub(r"[-_ ]", "", word.upper()).replace("AMBERSTRICT", "AMBER+STRICT"))
+    return p["label"] if p["status"] in (tlp_policy.VALID, tlp_policy.LEGACY) else "INVALID"
+
+
+def classify_html_head(head: str) -> Dict[str, Any]:
+    """Assess the TLP a report page states.  `authoritative` = markings in metadata/badge contexts (class names,
+    <meta>, data-tlp, the 'TLP Label' row, elements classed tlp-* / sev-chip, <title>); `prose` = markings anywhere
+    else.  An explicit restricted marking is never cancelled by a CLEAR elsewhere:
+      * any non-CLEAR authoritative marking            -> restricted (a CLEAR beside it is a CONFLICT, still restricted)
+      * no authoritative marking found at all          -> any non-CLEAR marking anywhere restricts the page
+      * authoritative markings all CLEAR               -> a restricted word in running prose is an incidental mention
+    Unparseable / look-alike markings count as non-CLEAR."""
+    import html as _html
+    t = _html.unescape(tlp_policy.normalize_label_text(head))
+    auth: List[str] = []
+    for m in _ATTR_CLASS.finditer(t):
+        auth += [_canon_class_label(x) for x in _CLASS_LABEL.findall(m.group(2))]
+    for tag in _META_TAG.findall(t):
+        if _META_NAME.search(tag):
+            c = _META_CONTENT.search(tag)
+            auth += (tlp_policy.scan_tlp_tokens(c.group(2)) or [_canon_class_label(c.group(2).strip())]) if c else ["INVALID"]
+    for m in _DATA_TLP.finditer(t):
+        auth += tlp_policy.scan_tlp_tokens(m.group(2)) or [_canon_class_label(m.group(2).strip())]
+    for m in _TLP_ELEMENT.finditer(t):
+        auth += tlp_policy.scan_tlp_tokens(_TAGS.sub(" ", m.group(2)))
+    for m in _KV_LABEL.finditer(t):
+        auth += tlp_policy.scan_tlp_tokens(m.group(1)) or ["INVALID"]
+    for m in _TITLE.finditer(t):
+        auth += tlp_policy.scan_tlp_tokens(_TAGS.sub(" ", m.group(1)))
+    prose_src = re.sub(r"<(script|style)\b.*?</\1\s*>", " ", t, flags=re.IGNORECASE | re.DOTALL)  # CSS/JS are not claims
+    anywhere = tlp_policy.scan_tlp_tokens(_TAGS.sub(" ", prose_src), lenient=True) + auth
+    non_clear_auth = [x for x in auth if x != "TLP:CLEAR"]
+    if non_clear_auth:
+        restricted, labels = True, non_clear_auth
+    elif not auth:
+        labels = [x for x in anywhere if x != "TLP:CLEAR"]
+        restricted = bool(labels)
+    else:
+        restricted, labels = False, []
+    return {"restricted": restricted, "labels": labels, "authoritative": auth}
+
+
+def _read_head(path: Path) -> Optional[str]:
     try:
         with open(path, "rb") as fh:
-            head = fh.read(HTML_HEAD_BYTES).decode("utf-8", errors="replace")
+            return fh.read(HTML_HEAD_BYTES).decode("utf-8", errors="replace")
     except OSError:
-        return False
-    return bool(_HTML_TLP_RE.search(head)) and not _HTML_CLEAR_RE.search(head)
+        return None
+
+
+def html_declares_restricted_tlp(path: Path) -> bool:
+    """True when a report page states a restricted/invalid/conflicting TLP (see classify_html_head)."""
+    head = _read_head(path)
+    return bool(head is not None and classify_html_head(head)["restricted"])
 
 
 def sanitize_dist(dist: Path, policy: Optional[Dict[str, Any]] = None, dry_run: bool = False,
@@ -447,16 +520,14 @@ def inventory_tree(root: Path, subdirs: Iterable[str] = ("api", "reports"), poli
         if sd == "reports":
             for page in base.rglob("*.html"):
                 inv["report_pages"]["scanned"] += 1
-                try:
-                    with open(page, "rb") as fh:
-                        head = fh.read(HTML_HEAD_BYTES).decode("utf-8", errors="replace")
-                except OSError:
+                head = _read_head(page)
+                if head is None:
                     continue
-                m = _HTML_TLP_RE.search(head)
-                if m and not _HTML_CLEAR_RE.search(head):
-                    lab = "TLP:" + re.sub(r"\s+", "", m.group(1).upper())
+                verdict = classify_html_head(head)
+                if verdict["restricted"]:
                     inv["report_pages"]["restricted_badge"] += 1
-                    inv["report_pages"]["by_label"][lab] = inv["report_pages"]["by_label"].get(lab, 0) + 1
+                    for lab in sorted(set(verdict["labels"])):
+                        inv["report_pages"]["by_label"][lab] = inv["report_pages"]["by_label"].get(lab, 0) + 1
     return inv
 
 
