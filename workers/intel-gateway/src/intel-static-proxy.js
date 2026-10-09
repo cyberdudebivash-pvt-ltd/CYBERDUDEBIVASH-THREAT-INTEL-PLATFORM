@@ -67,7 +67,7 @@ function jsonResp(data, status = 200, extra = {}) {
 const MAX_PUBLIC_BODY_BYTES = 1024 * 1024;
 const MAX_PUBLIC_NODES = 25000;
 const MAX_PUBLIC_DEPTH = 40;
-const ADVISORY_KEYS = ["advisory_id", "intel_id", "report_url", "internal_report_url", "cve_id", "stix_id"];
+const ADVISORY_KEYS = ["id", "advisory_id", "intel_id", "report_url", "internal_report_url", "cve_id", "stix_id", "cve_ids", "threat_id"];
 
 function publicTlpJsonVerified(doc) {
   let nodes = 0;
@@ -81,7 +81,7 @@ function publicTlpJsonVerified(doc) {
         if (typeof node[key] !== "string" || node[key].trim().toUpperCase() !== "TLP:CLEAR") return false;
       }
     }
-    if (typeof node.classification === "string" && /^\s*TLP\s*[:\-]/i.test(node.classification)) {
+    if (typeof node.classification === "string" && /TLP\s*[:\-]/i.test(node.classification)) {
       const tokens = [...node.classification.matchAll(/TLP\s*[:\-]\s*(?:AMBER\s*\+\s*STRICT|[A-Z]+)/gi)];
       if (!tokens.length || tokens.some(([v]) => v.replace(/\s+/g, "").replace(/TLP-/i, "TLP:").toUpperCase() !== "TLP:CLEAR")) return false;
     }
@@ -91,32 +91,10 @@ function publicTlpJsonVerified(doc) {
     if (!hasTlp && typeof node.title === "string" && ADVISORY_KEYS.some(k => Object.hasOwn(node, k))) return false;
     return Object.values(node).every(value => walk(value, depth + 1));
   }
-  return walk(doc, 0);
+  // Scalar or null JSON has no verifiable public intelligence schema.\n  if (doc === null || typeof doc !== "object") return false;\n  return walk(doc, 0);
 }
 
-// New endpoints only -- the original data/ai_intelligence/ai_index.json and
-// data/intelligence/detection_rules/rule_manifest.json static paths are
-// untouched and keep serving their git-committed content unchanged, so any
-// existing consumer of those exact URLs sees no behavior change.
-//
-// Historical GitHub fallback fields are retained as inert metadata; no
-// public request is permitted to read them. The R2 provenance gate always wins.
-// ghBranch (optional, per entry): which branch handleIntelStaticProxy()
-// falls back to when R2 is empty/errors. Defaults to "gh-pages" below --
-// unchanged for these first two entries. The 5 P0 RUNTIME INTELLIGENCE
-// STATE RECOVERY entries added underneath explicitly set "main": their
-// fallback content (data/{nexus,cortex,quantum,sovereign,genesis}/
-// *_output.json) was never included in the gh-pages deploy bundle
-// (scripts/build_dist_artifact.py's INCLUDE_DIRS excludes data/ entirely --
-// confirmed, not assumed), so falling back to gh-pages for these would 404
-// even when main has a servable (if stale) copy. Falling back to the exact
-// raw-GitHub-main URL index.html already reads today keeps zero regression:
-// R2 becomes the fresh primary source, and the pre-existing fallback content
-// (frozen, but already what every consumer sees pre-migration) is neither
-// removed nor relocated -- only demoted from "the only source" to "the
-// fallback", per this mission's explicit "no removal of GitHub Raw runtime
-// fallbacks" constraint.
-const INTEL_STATIC_PROXY = {
+// Static proxy routing remains unchanged, but original raw GitHub branch/path\n// values below are retained only as inert metadata for backwards-compatible\n// route registration. The public handler NEVER performs a GitHub fetch.\nconst INTEL_STATIC_PROXY = {
   "/api/v1/intel/ai_index.json": {
     r2Key:  "intelligence/ai_index.json",
     ghPath: "data/ai_intelligence/ai_index.json",
