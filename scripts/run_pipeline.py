@@ -2280,8 +2280,13 @@ def stage_dedup_and_enrich() -> None:
             log.warning("[3.2] Manifest has 0 items -- nothing to dedup/enrich.")
             return
 
-        # Step 1: Dedup
-        items, removed = dedup_items(items)
+        # Step 1: Canonical snapshot uniqueness, NOT cross-run newness.
+        # R22 P0: persistent dedup_batch() marked previously seen advisories
+        # as duplicates and deleted ALL 45 canonical records in publisher #2534.
+        # The canonical manifest is retained inventory, not a feed of only
+        # newly ingested events. Preserve old legitimate records; the later
+        # source-age and TLP publication gates still decide public eligibility.
+        items, removed = dedup_items(items, use_persistent_history=False)
         if METRICS:
             METRICS.record_duplicates(removed)
 
