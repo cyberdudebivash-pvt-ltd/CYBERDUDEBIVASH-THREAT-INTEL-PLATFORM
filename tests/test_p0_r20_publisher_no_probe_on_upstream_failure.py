@@ -85,3 +85,17 @@ def test_convergence_uses_outcomes_and_short_circuits_network():
 def test_guard_runs_on_failed_steps_and_never_on_cancelled_job():
     convergence = _steps()["STAGE 5.8.1c - Deployment Convergence Engine (v184.0 Enterprise Grade)"]
     assert "!cancelled()" in convergence["if"]
+
+
+def test_final_authoritative_r2_upload_is_forbidden_after_any_mandatory_failure():
+    steps = _steps()
+    upload = steps["Upload Intel State to R2 (post-manifest-repair, final)"]
+    condition = upload["if"]
+    assert "!cancelled()" in condition
+    assert "PIPELINE_LOCKED != 'true'" in condition
+    assert "steps.pipeline_stage_1_3.outcome == 'success'" in condition
+    assert "steps.p0_apex_enrichment.outcome == 'success'" in condition
+    assert "steps.p0_regression_suite.outcome == 'success'" in condition
+    assert "r2_state_sync.py --upload" in upload["run"]
+    # Nonfatal upload transport errors stay nonfatal, but unauthorized state
+    # *must not* pass the precondition that enables the production PUT.
