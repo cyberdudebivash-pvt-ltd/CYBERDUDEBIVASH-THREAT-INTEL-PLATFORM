@@ -861,7 +861,7 @@ class TestRenderedDossiers:
 
     def test_kill_chain_requires_source_phases(self):
         card = enh.build_kill_chain_section({"severity": "CRITICAL"})
-        assert "NONE REPORTED" in card and "Persistence" not in card and "beacon" not in card.lower()
+        assert "ATTACK-CHAIN EVIDENCE: NOT PROVIDED" in card and "Persistence" not in card and "beacon" not in card.lower()
         card2 = enh.build_kill_chain_section({"kill_chain": [{"phase": "Delivery", "description": "phish"}]})
         assert "Delivery" in card2 and "not independently verified" in card2
 
