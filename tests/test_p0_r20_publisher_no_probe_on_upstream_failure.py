@@ -99,3 +99,27 @@ def test_final_authoritative_r2_upload_is_forbidden_after_any_mandatory_failure(
     assert "r2_state_sync.py --upload" in upload["run"]
     # Nonfatal upload transport errors stay nonfatal, but unauthorized state
     # *must not* pass the precondition that enables the production PUT.
+
+
+
+def test_intermediate_r2_manifest_resync_requires_apex_quality_success():
+    steps = _steps()
+    resync = steps["STAGE 4.1 - Final R2 Full Sync (v184.0 -- post-git-push complete feed)"]
+    condition = resync["if"]
+    assert "!cancelled()" in condition
+    assert "steps.r2-manifest-integrity.outcome == 'success'" in condition
+    assert "steps.pipeline_stage_1_3.outcome == 'success'" in condition
+    assert "steps.p0_apex_enrichment.outcome == 'success'" in condition
+    assert "r2_resync_manifests.py" in resync["run"]
+
+
+def test_pre_regression_r2_state_sync_requires_apex_quality_success():
+    steps = _steps()
+    write = steps["Upload Intel State to R2 (final, post-enrichment)"]
+    condition = write["if"]
+    assert "!cancelled()" in condition
+    assert "steps.pipeline_stage_1_3.outcome == 'success'" in condition
+    assert "steps.r2-manifest-integrity.outcome == 'success'" in condition
+    assert "steps.p0_apex_enrichment.outcome == 'success'" in condition
+    assert "PIPELINE_LOCKED != 'true'" in condition
+    assert "r2_state_sync.py --upload" in write["run"]
