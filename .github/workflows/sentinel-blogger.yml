@@ -4913,7 +4913,10 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "Upload Intel State to R2 (post-manifest-repair, final)"
         timeout-minutes: 5
-        if: ${{ always() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' }}
+        # R20: late upload is a production mutation. Pipeline success alone
+        # is insufficient if feed enrichment/regression subsequently failed.
+        # Do not overwrite last-known-good R2 state from an invalid run.
+        if: ${{ !cancelled() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' && steps.p0_apex_enrichment.outcome == 'success' && steps.p0_regression_suite.outcome == 'success' }}
         continue-on-error: true
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
