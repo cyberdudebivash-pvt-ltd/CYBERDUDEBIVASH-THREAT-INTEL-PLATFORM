@@ -207,7 +207,7 @@ def _http_probe(url: str, timeout: int = HTTP_TIMEOUT) -> ProbeResult:
     t0 = time.monotonic()
     if not _claim_request():
         return ProbeResult(url=url, status_code=0, latency_ms=0, success=False,
-                           is_transient=False, error="NOT_PROBED: shared request/time budget exhausted")
+                           is_transient=True, error="NOT_PROBED: shared request/time budget exhausted")
     try:
         req = urllib.request.Request(url, method="HEAD")
         req.add_header("User-Agent", "CDB-Sentinel-Convergence/184.0")
@@ -520,10 +520,17 @@ def _backoff_wait(attempt: int) -> float:
 # Convergence signal detection
 # ---------------------------------------------------------------------------
 
+def _unprobed_budget_exhausted(results: List[ProbeResult]) -> bool:
+    """No network response was obtained; never label a budget stop as a 404."""
+    return any((r.error or "").startswith("NOT_PROBED:") for r in results)
+
+
 def _only_permanent_failures(results: List[ProbeResult]) -> bool:
-    """True when this round failed and every failure is permanent."""
+    """Only observed non-transient HTTP failures qualify as permanent."""
     failed = [r for r in results if not r.success]
-    return bool(failed) and all(not r.is_transient for r in failed)
+    return bool(failed) and not _unprobed_budget_exhausted(failed) and all(
+        not r.is_transient and r.status_code > 0 for r in failed
+    )
 
 
 def _detect_transient_vs_permanent(results: List[ProbeResult]) -> Tuple[int, int, int]:
@@ -624,6 +631,10 @@ def phase2_cdn_readiness_probe(feed: List[dict], manifest: dict) -> PhaseResult:
                 message=f"CDN ready after {attempt+1} round(s). Success rate: {success_rate:.0%}",
             )
 
+        if _unprobed_budget_exhausted(results):
+            log.error("Phase 2: verification incomplete -- shared request/time budget exhausted. No further retries.")
+            break
+
         if attempt >= PERMANENT_STOP_ROUND and _only_permanent_failures(results):
             log.warning("Phase 2: remaining failures are permanent (404) after %d rounds -- not retrying.", attempt + 1)
             break
@@ -694,6 +705,13 @@ def phase3_incremental_retry(feed: List[dict], manifest: dict) -> PhaseResult:
         for r in results:
             if r.success:
                 url_status[r.url] = True
+
+        if _unprobed_budget_exhausted(results):
+            log.error(
+                "Phase 3: report verification incomplete -- request/time budget exhausted; "
+                "unprobed URLs are NOT permanent 404s and cannot certify convergence."
+            )
+            break
 
         confirmed = sum(url_status.values())
         total = len(url_status)
