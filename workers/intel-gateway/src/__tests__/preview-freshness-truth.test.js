@@ -162,3 +162,33 @@ test("blocked internal report URLs are hidden without removing external source c
   assert.equal(item.blog_url, sourceLink);
   assert.equal(item.report_url, null);
 });
+
+test("genuinely customer-ready reports retain their canonical link in the preview", async () => {
+  const publicUrl = "https://intel.cyberdudebivash.com/reports/intel--goodreport/";
+  const { status, body } = await preview(fmt(Date.now() - 60_000), {
+    id: "intel--goodreport",
+    title: "CVE-2026-99999: Critical RCE in Example Product",
+    description: "A".repeat(200), severity: "CRITICAL",
+    cvss_score: 9.8, risk_score: 9.8, kev_present: true, epss_score: 0.85,
+    evidence_chain: { reliability_code: "A", source_reliability: "HIGH", source_name: "Vendor Advisory" },
+    iocs: [
+      { value: "192.0.2.1", type: "ip", response_guidance: "Block at firewall" },
+      { value: "evil.example.com", type: "domain", response_guidance: "Add to DNS sinkhole" },
+    ],
+    ioc_count: 2, ttps: ["T1190", "T1059"],
+    mitre_techniques: ["T1190", "T1059"],
+    detection_bundle: [{ type: "sigma", rule: "title: Example Detection" }],
+    executive_summary: "This is a critical vulnerability requiring immediate patching.",
+    exec_summary: "This is a critical vulnerability requiring immediate patching.",
+    source_url: "https://vendor.example.com/advisory/2026-99999",
+    confidence: 0.9,
+    apex: { ai_summary: "Example source narrative", kev_listed: true },
+    blog_url: publicUrl,
+  });
+  assert.equal(status, 200);
+  const item = body.preview.items[0];
+  assert.equal(item.report_customer_ready, true);
+  assert.equal(item.report_publication_state, "CUSTOMER_READY");
+  assert.equal(item.blog_url, publicUrl);
+  assert.deepEqual(item.iocs, [], "FREE entitlements must remain enforced");
+});
