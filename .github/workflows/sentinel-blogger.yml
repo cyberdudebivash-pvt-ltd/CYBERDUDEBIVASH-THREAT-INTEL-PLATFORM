@@ -3486,7 +3486,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "STAGE 4.1 - Final R2 Full Sync (v184.0 -- post-git-push complete feed)"
         timeout-minutes: 5
-        if: ${{ !cancelled() && steps.r2-manifest-integrity.outcome == 'success' && steps.pipeline_stage_1_3.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.r2-manifest-integrity.outcome == 'success' && steps.pipeline_stage_1_3.outcome == 'success' && steps.p0_apex_enrichment.outcome == 'success' }}
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
@@ -3541,7 +3541,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "Upload Intel State to R2 (final, post-enrichment)"
         timeout-minutes: 5
-        if: ${{ !cancelled() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' && steps.r2-manifest-integrity.outcome == 'success' }}
+        if: ${{ !cancelled() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' && steps.r2-manifest-integrity.outcome == 'success' && steps.p0_apex_enrichment.outcome == 'success' }}
         continue-on-error: true
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
