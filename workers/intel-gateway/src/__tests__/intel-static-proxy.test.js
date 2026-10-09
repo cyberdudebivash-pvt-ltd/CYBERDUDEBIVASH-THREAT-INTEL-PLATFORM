@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { handleIntelStaticProxy, INTEL_STATIC_PROXY } from "../intel-static-proxy.js";
+import { handleIntelStaticProxy, INTEL_STATIC_PROXY, publicTlpJsonVerified } from "../intel-static-proxy.js";
 
 // ---------------------------------------------------------------------------
 // Stage 4 -- CYBERDUDEBIVASH SENTINEL APEX
@@ -253,4 +253,19 @@ test("P0 #725: scalar JSON is not an authorized intelligence document", async ()
   const response = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
   assert.equal(response.status, 503);
   assert.equal(JSON.stringify(await response.json()).includes("opaque-private-evidence"), false);
+});
+
+
+test("P0 #725: shared report TLP authority requires explicit CLEAR and checks every upstream classification", () => {
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Reviewed", tlp: "TLP:CLEAR" }), true);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Unknown" }), false);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Restricted", tlp: "TLP:RED" }), false);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Mixed", tlp: "TLP:CLEAR",
+    evidence_chain: [{ tlp: "TLP:AMBER" }] }), false);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Conflicted", tlp: "TLP:CLEAR",
+    classification: "Internal: TLP:GREEN" }), false);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Legacy", tlp: "TLP:WHITE" }), false);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Invalid", tlp: "TLP:CLEAR\u200b" }), false);
+  assert.equal(publicTlpJsonVerified(null), false);
+  assert.equal(publicTlpJsonVerified("raw secret"), false);
 });
