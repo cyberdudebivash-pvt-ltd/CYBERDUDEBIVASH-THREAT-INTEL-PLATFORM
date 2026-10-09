@@ -83,30 +83,37 @@ def _short_id(obj: Dict[str, Any]) -> Optional[str]:
 
 
 def document_level_denial(doc: Any, policy: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    """(reason_code, reason) when a document declares its OWN restricted classification, else None."""
+    """Fail closed on any restrictive document classification, not merely the first TLP token.
+
+    "TLP:CLEAR; TLP:RED" is an explicit conflict, never public authorization.
+    Non-TLP classifications such as UNCLASSIFIED are not TLP declarations.
+    """
     if not isinstance(doc, dict):
         return None
     for key in DOC_LABEL_KEYS:
         val = doc.get(key)
-        if not isinstance(val, str) or not val.strip():
+        if val is None or (isinstance(val, str) and not val.strip()):
             continue
         if key == "classification":
-            m = _DOC_TLP_RE.match(val)
-            if not m:
-                continue  # a non-TLP classification string is not a TLP declaration
-            token = "TLP:" + re.sub(r"\s+", "", m.group(1).upper())
+            if not isinstance(val, str) or not re.match(r"^\s*TLP\s*[:\-]", val, re.IGNORECASE):
+                continue
+            tokens = ["TLP:" + re.sub(r"\s+", "", m.group(1).upper())
+                      for m in re.finditer(r"TLP\s*[:\-]\s*([A-Za-z]+(?:\s*\+\s*STRICT)?)",
+                                           val, re.IGNORECASE)]
+            if not tokens:
+                return "INVALID_LABEL", "document classification TLP declaration cannot be verified"
         else:
-            token = val
-        parsed = tlp_policy.parse_label(token)
-        if parsed["status"] == tlp_policy.VALID and parsed["label"] == "TLP:CLEAR":
-            continue
-        if parsed["status"] == tlp_policy.LEGACY and policy.get("legacy_white_treated_as_clear"):
-            continue
-        code = "RESTRICTED_DOCUMENT" if parsed["status"] == tlp_policy.VALID else (
-            "LEGACY_LABEL_UNMIGRATED" if parsed["status"] == tlp_policy.LEGACY else "INVALID_LABEL")
-        return code, f"document {key} is not anonymously publishable"
+            tokens = [val]
+        for token in tokens:
+            parsed = tlp_policy.parse_label(token)
+            if parsed["status"] == tlp_policy.VALID and parsed["label"] == "TLP:CLEAR":
+                continue
+            if parsed["status"] == tlp_policy.LEGACY and policy.get("legacy_white_treated_as_clear"):
+                continue
+            code = "RESTRICTED_DOCUMENT" if parsed["status"] == tlp_policy.VALID else (
+                "LEGACY_LABEL_UNMIGRATED" if parsed["status"] == tlp_policy.LEGACY else "INVALID_LABEL")
+            return code, f"document {key} is not anonymously publishable"
     return None
-
 
 def _decide(rec: Dict[str, Any], policy: Dict[str, Any], parents: Optional[Dict[str, Dict[str, Any]]],
             id_hint: Optional[str] = None) -> Dict[str, Any]:
@@ -315,13 +322,32 @@ def _report_paths_for_id(dist: Path, intel_id: str) -> List[Path]:
 
 
 def html_declares_restricted_tlp(path: Path) -> bool:
-    """True when a report page states a restricted TLP in its head region and never states TLP:CLEAR."""
+    """Deny explicit restricted metadata even when CLEAR text appears elsewhere.
+
+    Ordinary CLEAR pages can discuss TLP:RED as a concept. Explicit
+    classification metadata, data-tlp attributes and displayed badges are
+    authoritative; an incidental CLEAR mention cannot veto them.
+    """
     try:
         with open(path, "rb") as fh:
             head = fh.read(HTML_HEAD_BYTES).decode("utf-8", errors="replace")
     except OSError:
         return False
-    return bool(_HTML_TLP_RE.search(head)) and not _HTML_CLEAR_RE.search(head)
+    if not _HTML_TLP_RE.search(head):
+        return False
+    if not _HTML_CLEAR_RE.search(head):
+        return True
+    for tag in re.findall(r"<meta\b[^>]{0,2048}>", head, re.IGNORECASE):
+        if (re.search(r"\b(?:name|property)\s*=\s*['\"](?:tlp|classification|x-tlp)['\"]", tag, re.IGNORECASE)
+                and _HTML_TLP_RE.search(tag)):
+            return True
+    if re.search(r"\bdata-tlp\s*=\s*['\"]\s*TLP\s*[:\-]\s*(?:RED|GREEN|AMBER)", head, re.IGNORECASE):
+        return True
+    if re.search(r"<(?:span|strong|b)\b[^>]{0,512}>\s*TLP\s*[:\-]\s*(?:RED|GREEN|AMBER(?:\s*\+\s*STRICT)?)\s*</", head, re.IGNORECASE):
+        return True
+    if re.search(r"\b(?:classification|tlp[ -]marking)\s*[:=]\s*TLP\s*[:\-]\s*(?:RED|GREEN|AMBER)", head, re.IGNORECASE):
+        return True
+    return False
 
 
 def sanitize_dist(dist: Path, policy: Optional[Dict[str, Any]] = None, dry_run: bool = False,
