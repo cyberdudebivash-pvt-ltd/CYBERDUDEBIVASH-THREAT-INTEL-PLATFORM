@@ -16,7 +16,7 @@ function fakeKV() {
   };
 }
 const fmt = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
-async function preview(feedDate) {
+async function preview(feedDate, itemOverrides = {}) {
   globalThis.caches = { default: { match: async () => undefined, put: async () => {} } };
   const feed = {
     generated_at: feedDate,
@@ -25,6 +25,7 @@ async function preview(feedDate) {
       id: "intel--evidence-1", title: "Verified source advisory",
       tlp: "TLP:CLEAR", severity: "HIGH", risk_score: 7.5,
       description: "Evidence is source-backed", iocs: ["198.51.100.5"],
+      ...itemOverrides,
     }],
   };
   const env = {
@@ -88,4 +89,46 @@ test("healthy edge cache TTL cannot outlive approaching six-hour feed expiry", a
   assert.ok(match, "bounded cache-control required");
   assert.ok(Number(match[1]) <= 90);
   assert.ok(Number(match[1]) >= 0);
+});
+
+test("legacy internal ID is preserved for links but never asserted as a STIX 2.1 ID", async () => {
+  const { status, body } = await preview(fmt(Date.now() - 60_000), {
+    id: "intel--d2a1d301aea000a0a26860d8",
+    stix_id: "intel--d2a1d301aea000a0a26860d8",
+  });
+  assert.equal(status, 200);
+  const item = body.preview.items[0];
+  assert.equal(item.id, "intel--d2a1d301aea000a0a26860d8");
+  assert.equal(item.stix_id, item.id, "legacy alias preserved for report links");
+  assert.equal(item.internal_advisory_id, item.id);
+  assert.equal(item.stix_object_id, null);
+  assert.equal(item.stix_id_kind, "LEGACY_INTERNAL_IDENTIFIER");
+  assert.equal(item.stix_object_id_validation, "UNAVAILABLE");
+});
+
+test("a syntactically valid STIX ID is labelled format-only, never certified", async () => {
+  const id = "indicator--123e4567-e89b-42d3-a456-426614174000";
+  const { body } = await preview(fmt(Date.now() - 60_000), {
+    stix_id: id,
+    id: "intel--legacy-article",
+  });
+  const item = body.preview.items[0];
+  assert.equal(item.stix_object_id, id);
+  assert.equal(item.internal_advisory_id, "intel--legacy-article");
+  assert.equal(item.stix_id_kind, "STIX_2_1_SYNTAX_ONLY");
+  assert.equal(item.stix_object_id_validation, "SYNTAX_ONLY");
+});
+
+test("FREE preview never exposes a gated STIX object ID from a separate premium field", async () => {
+  const privateId = "malware--123e4567-e89b-42d3-a456-426614174000";
+  const { body } = await preview(fmt(Date.now() - 60_000), {
+    id: "intel--public-id",
+    stix_id: "intel--public-id",
+    stix_object_id: privateId,
+  });
+  const item = body.preview.items[0];
+  assert.equal(item.stix_object_id, null);
+  assert.equal(item.internal_advisory_id, "intel--public-id");
+  assert.equal(item.stix_id_kind, "LEGACY_INTERNAL_IDENTIFIER");
+  assert.equal(item.stix_object_id_validation, "UNAVAILABLE");
 });
