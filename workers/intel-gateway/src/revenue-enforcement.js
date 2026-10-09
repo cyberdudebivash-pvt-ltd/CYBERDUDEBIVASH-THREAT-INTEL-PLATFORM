@@ -976,19 +976,35 @@ export function applyTierGateV2(item, tier, usageState) {
     }
   }
 
-  //  Threat urgency CTA injection 
+  // P0 R15: Commercial urgency must never imply observed exploitation
+  // solely from severity, CVSS or a calculated risk score. Preserve the
+  // customer upgrade CTA but separate high-risk triage from KEV evidence.
   if (isFree) {
-    const sev       = (item.severity || item.risk_level || "").toUpperCase();
+    // A stale upstream urgency object must never bypass the customer-facing
+    // evidence decision below, including when the new advisory is low risk.
+    delete gated.threat_urgency;
+    const sev = String(item.severity || item.risk_level || "").toUpperCase();
     const riskScore = typeof item.risk_score === "number" ? item.risk_score
-                    : typeof item.cvss_score  === "number" ? item.cvss_score : 0;
-    if (sev === "CRITICAL" || sev === "HIGH" || riskScore >= 7.0) {
+                    : typeof item.cvss_score === "number" ? item.cvss_score : 0;
+    // A boolean CISA KEV confirmation is the minimum positive evidence.
+    // Explicitly contradictory upstream labels invalidate the claim instead
+    // of letting a stale/corrupt record present verified exploitation.
+    const explicitlyNotKev = [item.kev, item.kev_present].some(value =>
+      value === false || value === 0 ||
+      (typeof value === "string" && ["NO", "FALSE", "0"].includes(value.trim().toUpperCase()))
+    );
+    const kevConfirmed = item.kev_confirmed === true && !explicitlyNotKev;
+    if (sev === "CRITICAL" || sev === "HIGH" || riskScore >= 7.0 || kevConfirmed) {
       gated.threat_urgency = {
-        active:       true,
-        severity:     sev,
-        message:      ` ${sev} ACTIVE THREAT  Full IOC array, actor attribution, and kill chain locked.`,
-        upgrade:      buildUpgradeTrigger("ioc", t),
-        cta_modal:    "upgrade_modal",
-        cta_plan:     "pro",
+        active: kevConfirmed,
+        severity: sev,
+        exploitation_status: kevConfirmed ? "KEV_CONFIRMED" : "NOT_VERIFIED",
+        message: kevConfirmed
+          ? `${sev || "ELEVATED"} RISK — recorded as confirmed KEV exploitation. Full IOC array and analysis require eligible access.`
+          : `${sev || "ELEVATED"} RISK ADVISORY — exploitation not verified in this record. Full IOC array and analysis require eligible access.`,
+        upgrade: buildUpgradeTrigger("ioc", t),
+        cta_modal: "upgrade_modal",
+        cta_plan: "pro",
       };
     }
   }
