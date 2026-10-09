@@ -483,6 +483,22 @@ test("feed.json: stale is never represented as fresh, and a stale body is not ed
   assert.equal(m.body.publication_state, "missing_timestamp");
 });
 
+test("P0 TLP gate: restricted and unlabeled R2 feeds deny anonymous AND paid access", async () => {
+  for (const restriction of ["TLP:RED", "TLP:AMBER", "TLP:GREEN", "MISSING"]) {
+    const item = { ...FEED_ITEMS[0] };
+    if (restriction === "MISSING") delete item.tlp;
+    else item.tlp = restriction;
+    const h = harness({ feed: feedObject([item], 60) });
+    for (const opts of [{}, { key: PRO_KEY }, { key: ENT_KEY }]) {
+      const res = await h.call("GET", "/api/feed.json", opts);
+      assert.equal(res.status, 503, "restricted/unlabeled public intelligence must be withheld");
+      assert.equal(res.headers.get("cache-control"), "no-store");
+      assert.ok(!JSON.stringify(res.body).includes(item.id),
+        "denied report identifiers must not leak in the response");
+    }
+  }
+});
+
 test("feed.json: a paid body is never stored in the shared edge cache", async () => {
   const h = harness();
   const paid = await h.call("GET", "/api/feed.json", { key: PRO_KEY });

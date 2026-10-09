@@ -106,9 +106,9 @@ export function fakeNetwork() {
 export const iso = (offsetSec, base = Date.now()) => new Date(base + offsetSec * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 
 export const FEED_ITEMS = [
-  { id: "intel--kev-1", title: "CVE-2026-1000 exploited in ransomware campaign", severity: "CRITICAL", source: "CISA KEV", cve_ids: ["CVE-2026-1000"], kev_present: true, processed_at: "2026-09-24T05:00:00Z", affected_products: ["Microsoft Windows"] },
-  { id: "intel--cloud-2", title: "Azure Kubernetes supply-chain advisory", severity: "HIGH", source: "Vendor", processed_at: "2026-09-24T05:01:00Z" },
-  { id: "intel--soc-3", title: "Sigma detection for suspicious PowerShell", severity: "MEDIUM", source: "Detection pack", processed_at: "2026-09-24T05:02:00Z" },
+  { id: "intel--kev-1", tlp: "TLP:CLEAR", title: "CVE-2026-1000 exploited in ransomware campaign", severity: "CRITICAL", source: "CISA KEV", cve_ids: ["CVE-2026-1000"], kev_present: true, processed_at: "2026-09-24T05:00:00Z", affected_products: ["Microsoft Windows"] },
+  { id: "intel--cloud-2", tlp: "TLP:CLEAR", title: "Azure Kubernetes supply-chain advisory", severity: "HIGH", source: "Vendor", processed_at: "2026-09-24T05:01:00Z" },
+  { id: "intel--soc-3", tlp: "TLP:CLEAR", title: "Sigma detection for suspicious PowerShell", severity: "MEDIUM", source: "Detection pack", processed_at: "2026-09-24T05:02:00Z" },
 ];
 
 export function feedObject(items = FEED_ITEMS, ageSec = 600) {

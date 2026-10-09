@@ -31,7 +31,7 @@ const ALL_VALUES = Object.values(IOC_VALUES).flat();
 
 function item(overrides = {}) {
   return {
-    id: "intel--f15-1", title: "Loader campaign with C2 relays", severity: "HIGH", source: "Vendor",
+    id: "intel--f15-1", title: "Loader campaign with C2 relays", tlp: "TLP:CLEAR", severity: "HIGH", source: "Vendor",
     processed_at: "2026-09-30T05:00:00Z",
     iocs: ALL_VALUES.map((value) => ({ value })),
     iocs_by_type: JSON.parse(JSON.stringify(IOC_VALUES)),

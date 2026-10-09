@@ -25,7 +25,7 @@ function fakeKV() {
 
 // Realistically heavy items so the size assertion means something.
 const bulky = (i) => ({
-  id: `intel--${String(i).padStart(4, "0")}`, stix_id: `intel--${i}`, title: `Advisory ${i}`,
+  id: `intel--${String(i).padStart(4, "0")}`, stix_id: `intel--${i}`, title: `Advisory ${i}`, tlp: "TLP:CLEAR",
   severity: "HIGH", risk_score: 7.5, description: "x".repeat(4000),
   ttps: Array.from({ length: 20 }, (_, n) => `T${1000 + n}`), iocs: [`198.51.100.${i % 250}`],
 });
