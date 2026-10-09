@@ -106,3 +106,13 @@ def test_fence_does_not_reduce_existing_cost_or_content_authorization_gates():
     assert 'STAGE 3.6 - R2 Upload Integrity Verifier (HARD FAIL)' in workflow
     assert 'P0 - Report Publishing Release Verdict' in workflow
     assert 'STAGE 5.9.3 - Pipeline Health Terminal Gate' in workflow
+
+def test_health_recorder_produces_explicit_degraded_state_before_fence():
+    workflow = (ROOT / ".github/workflows/sentinel-blogger.yml").read_text(encoding="utf-8")
+    status_start = workflow.index('- name: "STAGE 1-3 STATUS GATE')
+    fence_start = workflow.index('- name: "P0 - Stage 1-3 Ingestion Health Fence', status_start)
+    status = workflow[status_start:fence_start]
+    assert 'steps.pipeline_stage_1_3.outcome' in status
+    assert 'echo "PIPELINE_HEALTH=DEGRADED" >> $GITHUB_ENV' in status
+    assert 'echo "PIPELINE_HEALTH=HEALTHY" >> $GITHUB_ENV' in status
+    assert "pipeline_health.json" in status
