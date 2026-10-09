@@ -2563,6 +2563,9 @@ async function servePremiumIntelManifest(request, env, ctx, pathname) {
     const r2 = await r2Get(env, AI_SUMMARY_KEY);
     data = (r2 && Object.keys(r2).length > 0) ? r2 : buildAISummaryInline(feedData, stats);
   }
+  if (!publicTlpJsonVerified(data)) {
+    return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+  }
   if (auth.tier === TIERS.FREE) {
     const preview = maskForFreeTier(data);
     preview._auth_tier   = TIERS.FREE;
@@ -7264,10 +7267,16 @@ async function handleRequest(request, env, ctx) {
       data = await r2Get(env, LATEST_PRO_JSON_KEY);
       if (!data) data = await r2Get(env, LATEST_JSON_KEY);
       if (!data) return errorResp("Feed not available", 503);
+      if (!publicTlpJsonVerified(data)) {
+        return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+      }
       return jsonResp(data, 200, { "Cache-Control": "private, max-age=120" });
     }
     data = await r2Get(env, LATEST_JSON_KEY);
     if (!data) return errorResp("Feed not available", 503);
+    if (!publicTlpJsonVerified(data)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     // v142.0: this branch previously returned the canonical item array
     // untouched -- full IOCs, Sigma/KQL/Suricata rules, and actor attribution
     // leaked to every anonymous caller despite the comment above. Mask it.
@@ -7284,6 +7293,11 @@ async function handleRequest(request, env, ctx) {
       const feedData = await loadFeedItems(env);
       const top10    = (feedData.items || []).sort((a, b) => parseFloat(b.risk_score || 0) - parseFloat(a.risk_score || 0)).slice(0, 10);
       data = { items: top10, count: top10.length, generated_at: now(), version: PLATFORM_VERSION };
+    }
+    // Like latest.json, top10 can come from an old R2 object or from a
+    // fallback feed. Validate the complete input before projecting any tier.
+    if (!publicTlpJsonVerified(data)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
     // Same tier gate as /api/v1/intel/latest.json -- this endpoint carries the
     // same canonical item shape (IOCs, detection rules, actor attribution).
@@ -9016,6 +9030,11 @@ async function handleRequest(request, env, ctx) {
   // routeEnterpriseEndpoint() above takes resolveEntitlement as a parameter.
   if (path.startsWith("/api/v1/export/")) {
     const feedData  = await loadFeedItems(env);
+    // P0 #725: STIX/MISP/TAXII and signature exports must not bypass the
+    // anonymous JSON TLP boundary through a different serialization.
+    if (!publicTlpJsonVerified(feedData?.items)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     const exportRes = await routeExports(path, request, env, ctx, auth.tier, feedData.items || [], crypto.randomUUID(), auth, buildStixPattern, resolveEntitlement);
     if (exportRes) return exportRes;
   }
