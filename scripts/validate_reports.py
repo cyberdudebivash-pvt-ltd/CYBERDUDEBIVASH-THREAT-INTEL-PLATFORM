@@ -247,8 +247,7 @@ def _validate_one(
     Validate a single advisory entry. Returns (failures, disposition).
 
     disposition is exactly one of:
-      "PASS"     -- fully validated: local file confirmed present & valid HTML,
-                    or explicitly confirmed published via the CDN-URL bypass.
+      "PASS"     -- fully validated: local file confirmed present & valid HTML.
       "DEFERRED" -- report_url present, local file missing, but the advisory
                     is outside this run's rolling publish window (or its
                     canonical timestamp is unparseable) and/or its id is
@@ -304,31 +303,37 @@ def _validate_one(
     if not explicit_url and not os.path.exists(fs_path):
         return failures, "SKIP"  # STIX bundle-only record, no HTML report expected
 
-    # RULE 2: if an explicit URL is present, it must not be a foreign external URL
-    if explicit_url and explicit_url.startswith("http") and "cyberdudebivash" not in explicit_url:
-        failures.append(
-            f"[{intel_id}] RULE 2 FAIL: report_url is external URL: {explicit_url!r}"
-        )
-        return failures, "FAIL"
+    # RULE 2: validate the actual URL origin, not an arbitrary brand-name
+    # substring (which an attacker-controlled host/path can contain).
+    # A URL is a *locator*, never proof of a published, validated report.
+    from urllib.parse import urlsplit
+    for field in ("report_url", "internal_report_url"):
+        candidate = (entry.get(field) or "").strip()
+        if not candidate:
+            continue
+        if candidate.startswith("//"):
+            failures.append(f"[{intel_id}] RULE 2 FAIL: scheme-relative {field} forbidden")
+            return failures, "FAIL"
+        parsed = urlsplit(candidate)
+        if parsed.scheme or parsed.netloc:
+            if not (
+                parsed.scheme == "https"
+                and parsed.hostname == "intel.cyberdudebivash.com"
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.port is None
+                and parsed.path.startswith("/reports/")
+                and not parsed.query
+                and not parsed.fragment
+            ):
+                failures.append(f"[{intel_id}] RULE 2 FAIL: unapproved {field} origin/path: {candidate!r}")
+                return failures, "FAIL"
 
-    # v160.5d HARDENING: Already-Deployed CDN Bypass.
-    # When report_url is an HTTPS URL on our own published domain
-    # (cyberdudebivash.com), the report was generated and uploaded to
-    # Cloudflare R2 / GitHub Pages in a prior run.  On a fresh GitHub Actions
-    # runner there is NO local copy of that file -- it was never committed to
-    # the repo.  Attempting a local-file check (RULE 3/4/5) will always fail
-    # for these entries, producing spurious P0 GATE failures on fix-only or
-    # no-new-intel commits.
-    #
-    # Resolution: if report_url begins with https:// AND contains our domain,
-    # treat the report as already validated and deployed.  Return PASS immediately.
-    # This preserves all RULE 3/4/5 checks for NEW reports (local files present).
-    _pub_url = (entry.get("report_url") or "").strip()
-    _already_deployed = bool(
-        _pub_url.startswith("https://") and "cyberdudebivash" in _pub_url
-    )
-    if _already_deployed:
-        return failures, "PASS"  # report already live on cyberdudebivash CDN/R2
+    # P0 R16: never return PASS for an HTTPS URL alone. The old early
+    # return bypassed RULE 3/4/5 entirely and produced 'PASS (0 bytes)'
+    # in sentinel-blogger #2522. A missing local file may only be
+    # DEFERRED under the existing durable-state/out-of-window policy;
+    # an unverified, in-window missing report must still hard-fail.
 
     # RULE 3: physical HTML file must exist on disk at resolved path
     if not os.path.exists(fs_path):
