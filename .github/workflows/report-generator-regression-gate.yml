@@ -186,6 +186,14 @@ jobs:
         run: |
           python -m bandit scripts/apex_attribution_engine_v2.py --severity-level medium --confidence-level medium
 
+      - name: P0 R2 integrity release fence and authenticated HEAD negative controls
+        run: |
+          python -m pytest tests/test_p0_r2_integrity_release_fence.py -v --tb=short
+
+      - name: P0 R2 verifier security scan
+        run: |
+          python -m bandit scripts/r2_upload_verifier.py --severity-level medium --confidence-level medium
+
       - name: Run manifest-format regression tests
         run: |
           python -m pytest tests/test_generate_intel_reports_manifest_formats.py -v --tb=short
