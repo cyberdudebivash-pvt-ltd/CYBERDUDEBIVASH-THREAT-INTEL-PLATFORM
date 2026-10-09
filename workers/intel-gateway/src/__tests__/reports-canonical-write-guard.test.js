@@ -115,3 +115,36 @@ test("P0 #725: both GET and POST IOC lookup routes deny an unverifiable feed", (
   const lookups = routes.match(/return jsonResp\(await iocLookup\(/g) || [];
   assert.equal(lookups.length, 2, "both guarded routes must retain the IOC lookup function");
 });
+
+
+test("P0 #725: latest, top10, apex and AI summary inputs pass TLP check before any response", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  const latestStart = source.indexOf('if (path === "/api/v1/intel/latest.json")');
+  const topStart = source.indexOf('if (path === "/api/v1/intel/top10.json")', latestStart);
+  const statsStart = source.indexOf("// --- /api/platform/stats", topStart);
+  assert.ok(latestStart >= 0 && topStart > latestStart && statsStart > topStart);
+  const latest = source.slice(latestStart, topStart);
+  const top10 = source.slice(topStart, statsStart);
+  assert.equal((latest.match(/!publicTlpJsonVerified\(data\)/g) || []).length, 2,
+    "the FREE and authorized full-manifest branches must both reject old restricted R2 data");
+  assert.match(top10, /!publicTlpJsonVerified\(data\)/);
+  const premiumStart = source.indexOf("async function servePremiumIntelManifest(");
+  const premiumEnd = source.indexOf("async function handleLogin(", premiumStart);
+  assert.ok(premiumStart >= 0 && premiumEnd > premiumStart);
+  const premium = source.slice(premiumStart, premiumEnd);
+  assert.match(premium, /!publicTlpJsonVerified\(data\)/);
+  assert.ok(premium.indexOf("!publicTlpJsonVerified(data)") < premium.indexOf("maskForFreeTier(data)"));
+});
+
+test("P0 #725: public export router refuses unsanitized feed before serializing STIX or rule bundles", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  const start = source.indexOf('if (path.startsWith("/api/v1/export/"))');
+  assert.ok(start >= 0);
+  const end = source.indexOf("  // CYBERDUDEBIVASH SENTINEL APEX CYBER WATCHDOG.", start);
+  assert.ok(end > start);
+  const block = source.slice(start, end);
+  assert.match(block, /!publicTlpJsonVerified\(feedData\?\.items\)/);
+  assert.match(block, /routeExports\(/);
+  assert.ok(block.indexOf("!publicTlpJsonVerified(feedData?.items)") <
+    block.indexOf("routeExports("), "exporter must never serialize an unverified source feed");
+});
