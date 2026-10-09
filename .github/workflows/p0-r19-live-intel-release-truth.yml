@@ -1,0 +1,40 @@
+name: "P0 R19 — Live Intel Worker Release Truth (manual, read-only)"
+
+# Non-deploying, no credentials, cost-bounded. Run only after a separately
+# approved Worker release. PASS != enterprise dossier certification.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-r19-live-intel-worker-release-truth
+  cancel-in-progress: false
+
+jobs:
+  worker-release-truth:
+    name: "Read-only exact-SHA, freshness and preview publication proof"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: "Fail closed if manually dispatched from a non-production branch"
+        env:
+          ACTUAL_REF: ${{ github.ref }}
+        run: |
+          if [ "$ACTUAL_REF" != "refs/heads/main" ]; then
+            echo "::error::P0 R19 verification must run on main; no release verdict on PR branches."
+            exit 2
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: "Verify bounded production GET responses against checked-out main"
+        run: python scripts/p0_r19_live_release_truth.py --expected-worker-sha "$GITHUB_SHA" --limit 3
+      - name: "Record certification scope"
+        if: always()
+        run: |
+          echo "P0 R19 is a read-only Worker deployment/preview smoke gate." >> "$GITHUB_STEP_SUMMARY"
+          echo "It does not certify eight historical dossiers, TLP retractions, auth or billing." >> "$GITHUB_STEP_SUMMARY"
+          echo "Enterprise GO requires independent approval and private evidence." >> "$GITHUB_STEP_SUMMARY"
