@@ -399,15 +399,17 @@ def verify_r2_object() -> tuple[bool, str, dict]:
     }
 
     if not CF_ACCOUNT_ID or not ACCESS_KEY or not SECRET_KEY:
+        # P0 #725: The CI stage is a HARD integrity gate. An absent
+        # authenticated verification principal cannot produce a verified
+        # upload, irrespective of the preceding upload step's exit code.
         msg = (
-            "R2 credentials absent (CF_ACCOUNT_ID / AWS_ACCESS_KEY_ID / "
-            "AWS_SECRET_ACCESS_KEY) -- skipping S3 API verification. "
-            "Trusting Stage 3.5 exit code as source of truth."
+            "R2 verification credentials absent (CF_ACCOUNT_ID / "
+            "AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY); upload UNVERIFIED."
         )
-        log.warning(msg)
-        details["skipped"] = True
-        details["skip_reason"] = "missing_credentials"
-        return True, msg, details
+        log.error(msg)
+        details["verification_unavailable"] = True
+        details["reason_code"] = "MISSING_AUTHORITY"
+        return False, msg, details
 
     log.info("Verifying: s3://%s/%s via %s", BUCKET_DATA, MANIFEST_KEY, R2_ENDPOINT)
 
@@ -421,22 +423,11 @@ def verify_r2_object() -> tuple[bool, str, dict]:
         # Both S3 API methods failed. Run HTTP HEAD as diagnostic only.
         if R2_ENDPOINT:
             diag_url = f"{R2_ENDPOINT}/{BUCKET_DATA}/{MANIFEST_KEY}"
-            diag = _http_head_diagnostic(diag_url)
-            details["http_diagnostic"] = diag
-            if diag and diag.get("status") in (400, 403):
-                # HTTP 400/403 on private R2 = auth required (NOT a failure).
-                # S3 API tooling is not available but Stage 3.5 already exited 0.
-                msg = (
-                    f"S3 API unavailable (awscli+boto3 both failed). "
-                    f"HTTP HEAD returned {diag['status']} (private bucket, auth required -- EXPECTED). "
-                    "Soft-passing: Stage 3.5 exited 0, data confirmed uploaded. "
-                    "Install awscli or boto3 in pipeline for full S3 API verification."
-                )
-                log.warning(msg)
-                details["soft_pass"] = True
-                details["soft_pass_reason"] = f"s3api_unavailable_private_bucket_{diag['status']}"
-                return True, msg, details
-
+            details["http_diagnostic"] = _http_head_diagnostic(diag_url)
+        # HTTP 400/403 from a private bucket merely proves authentication
+        # is required. It cannot authenticate an object, its hash or count;
+        # therefore it must NEVER be a substitute for an S3 API HEAD.
+        details["reason_code"] = "AUTHENTICATED_READ_UNAVAILABLE"
         return (
             False,
             f"S3 API head-object totally failed (awscli+boto3) for "
