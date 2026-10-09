@@ -175,6 +175,17 @@ jobs:
           python -m pytest tests/test_resolve_malware_benchmark_request.py -v --tb=short
           python -m pytest tests/test_malware_review_workspace.py tests/test_malware_package_verifier.py tests/test_malware_analysis_interchange.py tests/test_malware_case_benchmark.py tests/test_malware_benchmark_contract.py tests/test_malware_customer_benchmark_workflow.py tests/test_malware_source_binding.py -v --tb=short
 
+      # P0 2026-10-09: #2519 Stage 2.4 real production failure. The
+      # attribution engine consumed dict-valued ATT&CK TTPs and crashed.
+      # Run its typed-schema/false-attribution negative controls on every PR.
+      - name: P0 attribution mixed-TTP schema and false-attribution regressions
+        run: |
+          python -m pytest tests/test_p0_attribution_structured_ttps.py -v --tb=short
+
+      - name: P0 attribution source security scan
+        run: |
+          python -m bandit scripts/apex_attribution_engine_v2.py --severity-level medium --confidence-level medium
+
       - name: Run manifest-format regression tests
         run: |
           python -m pytest tests/test_generate_intel_reports_manifest_formats.py -v --tb=short
