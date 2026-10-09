@@ -22,3 +22,7 @@ This is a distinct last-mile output boundary. Other publisher and manifest TLP g
 This prevents **new unauthorized HTML writes** through this secondary generator. It cannot retroactively retract historical public R2/Pages objects, purge CDN caches, guarantee correctness of independent primary writer `scripts/generate_intel_reports.py`, or independently validate source facts. Existing restricted objects need a privately authorized inventory and targeted clean-up.
 
 Do not treat a passing R23 CI run as an enterprise report-quality certificate. Continue to enforce issues #721 (eight historical dossier evidence), #725 (historic TLP containment), and #596 (customer auth/revocation). Require an actual fresh feed, verified R2/Pages+Worker SHA parity, privacy-safe analyst sign-off, premium entitlement and rollback tests before Enterprise GO.
+
+## Additional false-green CLI defect
+
+The `--entry` CLI used `ok = generate_report(...); return 0 if ok else 1`, but `generate_report` returns a **tuple** `(success, result)`. Even a failed `(False, error)` tuple is truthy, so automation could report success after a rejected write. The caller also passed an unsupported `force` keyword to `generate_report`. The R23 fix unpacks `ok, _result`, uses exit 2 on deny/failure and calls the supported interface. CLI tests now assert both denied/non-written and explicitly approved/CLEAR cases.
