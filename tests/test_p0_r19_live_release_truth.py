@@ -135,3 +135,15 @@ def test_empty_expected_sha_and_bad_bounds_refused_without_requests():
         raise AssertionError("Expected zero network")
     assert gate.evaluate("", never_called, now=NOW)["status"] == "BLOCKED"
     assert gate.evaluate(SHA, never_called, now=NOW, limit=20)["status"] == "BLOCKED"
+
+
+def test_malformed_health_checks_fail_closed_instead_of_crashing():
+    payload = responses()
+    payload["/api/health"]["checks"] = None
+    assert "PUBLICATION_HEALTH_NOT_OK" in verify(payload)["reasons"]
+
+
+def test_report_status_claims_customer_ready_while_boolean_false_blocks():
+    payload = responses()
+    payload[f"/api/v1/reports/{SLUG}/publication-status"]["state"] = "CUSTOMER_READY"
+    assert "REPORT_STATUS_CONTRADICTORY" in verify(payload)["reasons"]
