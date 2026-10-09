@@ -2336,6 +2336,11 @@ function buildApexInline(feedData, stats) {
     total_iocs: stats.total_iocs, last_sync: stats.last_sync,
     top_advisories: items.map(i => ({
       id: i.id, title: i.title, severity: i.severity, risk_score: i.risk_score,
+      // Retain publication evidence from the source item, never upgrade a
+      // derived aggregate to CLEAR by inference.
+      ...(i.tlp !== undefined ? { tlp: i.tlp } : {}),
+      ...(i.tlp_label !== undefined ? { tlp_label: i.tlp_label } : {}),
+      ...(i.classification !== undefined ? { classification: i.classification } : {}),
       source: i.source, published: i.published, cve_ids: i.cve_ids || [],
       ioc_count: i.ioc_count || 0, tags: i.tags || [], kev_present: i.kev_present || false,
     })),
@@ -2365,6 +2370,9 @@ function buildAISummaryInline(feedData, stats) {
       `No separate anomaly model output is attached to this summary.`,
     top_critical_advisories: critItems.map(i => ({
       title: i.title, risk_score: i.risk_score, source: i.source,
+      ...(i.tlp !== undefined ? { tlp: i.tlp } : {}),
+      ...(i.tlp_label !== undefined ? { tlp_label: i.tlp_label } : {}),
+      ...(i.classification !== undefined ? { classification: i.classification } : {}),
       cve_ids: i.cve_ids || [], kev_present: i.kev_present || false,
     })),
     // Canonical unknown/no-model-run default (0-100 scale) -- see
@@ -2558,10 +2566,26 @@ async function servePremiumIntelManifest(request, env, ctx, pathname) {
   let data;
   if (pathname === "/api/v1/intel/apex.json") {
     const r2 = await r2Get(env, APEX_JSON_KEY);
-    data = (r2 && Object.keys(r2).length > 0) ? r2 : buildApexInline(feedData, stats);
+    if (r2 && Object.keys(r2).length > 0) {
+      data = r2;
+    } else {
+      // A generated fallback cannot bypass producer classification because
+      // the generator projects only a subset of source fields.
+      if (!publicTlpJsonVerified(feedData.items)) {
+        return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+      }
+      data = buildApexInline(feedData, stats);
+    }
   } else {
     const r2 = await r2Get(env, AI_SUMMARY_KEY);
-    data = (r2 && Object.keys(r2).length > 0) ? r2 : buildAISummaryInline(feedData, stats);
+    if (r2 && Object.keys(r2).length > 0) {
+      data = r2;
+    } else {
+      if (!publicTlpJsonVerified(feedData.items)) {
+        return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+      }
+      data = buildAISummaryInline(feedData, stats);
+    }
   }
   if (!publicTlpJsonVerified(data)) {
     return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
