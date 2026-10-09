@@ -48,6 +48,92 @@ def test_two_failures_are_down():
     assert "HTTP 503" in r["note"]
 
 
+
+def test_worker_alive_does_not_mask_customer_readiness_503():
+    calls = []
+    def liveness(target):
+        calls.append(target)
+        return "worker_liveness=alive"
+    result = hb.probe(
+        "https://example.invalid", retry_pause=0,
+        probe_fn=_seq((False, 5, "HTTP 503"), (False, 4, "HTTP 503")),
+        liveness_fn=liveness,
+    )
+    assert result["ok"] is False, "SLA readiness incident must remain a failed heartbeat"
+    assert result["component"] == "intel-gateway"
+    assert "HTTP 503" in result["note"]
+    assert "worker_liveness=alive" in result["note"]
+    assert calls == ["https://example.invalid"]
+
+
+def test_healthy_probe_never_spends_extra_worker_liveness_read():
+    calls = []
+    def liveness(target):
+        calls.append(target)
+        return "worker_liveness=alive"
+    result = hb.probe(
+        "https://example.invalid", retry_pause=0,
+        probe_fn=_seq((True, 3, "health=ok")), liveness_fn=liveness,
+    )
+    assert result["ok"] is True
+    assert calls == []
+
+
+def test_http_200_with_degraded_status_is_not_counted_healthy(monkeypatch):
+    class Response:
+        status = 200
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, cap):
+            return b'{"status":"degraded","reason":"intelligence_stale"}'
+    monkeypatch.setattr(hb.urllib.request, "urlopen", lambda req, timeout: Response())
+    up, ms, note = hb.probe_once("https://example.invalid")
+    assert up is False and ms >= 0
+    assert "health=degraded" in note
+
+
+def test_worker_live_fallback_validates_json_and_exact_service(monkeypatch):
+    class Response:
+        status = 200
+        def __init__(self, body):
+            self.body = body
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, cap):
+            assert cap <= 4096
+            return self.body
+    bodies = (
+        b'{"status":"alive","service":"sentinel-apex"}',
+        b'{"status":"alive","service":"untrusted"}',
+        b'{"status":"down","service":"sentinel-apex"}',
+    )
+    for body, expected in zip(bodies, ("worker_liveness=alive", "worker_liveness=invalid_response", "worker_liveness=invalid_response")):
+        monkeypatch.setattr(hb.urllib.request, "urlopen", lambda req, timeout, body=body: Response(body))
+        assert hb.probe_worker_liveness("https://example.invalid") == expected
+
+
+def test_degraded_readiness_still_exits_nonzero_and_reports_precise_scope(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("WORKER_ADMIN_SECRET", "test-secret")
+    monkeypatch.setenv("SLA_PENDING_FILE", str(tmp_path / "pending.json"))
+    monkeypatch.setattr(hb, "probe", lambda target: {
+        "ok": False, "latency_ms": 50,
+        "note": "HTTP 503; retry: HTTP 503; worker_liveness=alive",
+        "component": "intel-gateway", "region": "github-actions",
+        "observed_at": "2026-10-09T04:20:00Z", "probe_id": "local-1",
+    })
+    monkeypatch.setattr(hb, "_post", lambda u, secret, payload: True)
+    assert hb.main() == 1
+    out = capsys.readouterr().out
+    assert "INTELLIGENCE_DEGRADED" in out
+    assert "Worker is alive" in out
+    assert "readiness is DOWN" not in out
+
+
+
 def test_deliver_batches_oldest_first_and_keeps_the_rest_on_failure():
     pending = [{"probe_id": f"p{i}"} for i in range(1200)]
     sent = []
