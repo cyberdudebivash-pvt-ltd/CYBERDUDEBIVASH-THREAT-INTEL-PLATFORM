@@ -980,12 +980,20 @@ export function applyTierGateV2(item, tier, usageState) {
   // solely from severity, CVSS or a calculated risk score. Preserve the
   // customer upgrade CTA but separate high-risk triage from KEV evidence.
   if (isFree) {
+    // A stale upstream urgency object must never bypass the customer-facing
+    // evidence decision below, including when the new advisory is low risk.
+    delete gated.threat_urgency;
     const sev = String(item.severity || item.risk_level || "").toUpperCase();
     const riskScore = typeof item.risk_score === "number" ? item.risk_score
                     : typeof item.cvss_score === "number" ? item.cvss_score : 0;
-    // Only the verified KEV boolean counts as positive exploitation evidence;
-    // producer-supplied "active" strings or unverified exploit references do not.
-    const kevConfirmed = item.kev_confirmed === true;
+    // A boolean CISA KEV confirmation is the minimum positive evidence.
+    // Explicitly contradictory upstream labels invalidate the claim instead
+    // of letting a stale/corrupt record present verified exploitation.
+    const explicitlyNotKev = [item.kev, item.kev_present].some(value =>
+      value === false || value === 0 ||
+      (typeof value === "string" && ["NO", "FALSE", "0"].includes(value.trim().toUpperCase()))
+    );
+    const kevConfirmed = item.kev_confirmed === true && !explicitlyNotKev;
     if (sev === "CRITICAL" || sev === "HIGH" || riskScore >= 7.0 || kevConfirmed) {
       gated.threat_urgency = {
         active: kevConfirmed,
