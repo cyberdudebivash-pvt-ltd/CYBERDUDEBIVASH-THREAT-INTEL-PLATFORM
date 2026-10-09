@@ -50,7 +50,6 @@ def test_phase2_no_unconditional_sleep_before_first_local_duplicate_filter():
 def test_throttle_occurs_only_after_all_local_rejection_filters():
     loop = _phase2_entry_loop()
     delay_index = next(i for i, n in enumerate(loop.body) if _delay(n))
-    precheck_source = ast.get_source_segment(SOURCE, loop)[:SOURCE.index("NOT_A_REAL_SENTINEL") if "NOT_A_REAL_SENTINEL" in SOURCE else 5000]
     # Structural checks: a delayed accepted candidate follows the short-
     # circuiting quality/temporal/dedup branches.
     assert delay_index >= 6
