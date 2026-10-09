@@ -108,3 +108,32 @@ def test_no_fail_open_clear_default_in_renderer():
     assert 'or "TLP:CLEAR")' not in source
     assert "publication_decision(entry)" in source
     assert "html_content = _build_html(public_entry" in source
+
+
+def test_cli_entry_denied_produces_failure_exit_and_no_html(tmp_path, fake_html, monkeypatch):
+    import json
+    case = {"id": "intel--cli-denied", "title": "Unclassified report"}
+    monkeypatch.setattr(sys, "argv", [
+        "report_generator.py", "--entry", json.dumps(case),
+        "--reports-base", str(tmp_path / "public")
+    ])
+    result = gen.main()
+    assert result != 0, "A denied (False, reason) tuple must never mean CLI PASS"
+    assert not (tmp_path / "public").exists()
+
+
+def test_cli_entry_explicit_clear_uses_success_exit(tmp_path, fake_html, monkeypatch):
+    import json
+    case = {"id": "intel--cli-clear", "title": "Approved report", "tlp": "TLP:CLEAR"}
+    monkeypatch.setattr(sys, "argv", [
+        "report_generator.py", "--entry", json.dumps(case),
+        "--reports-base", str(tmp_path)
+    ])
+    assert gen.main() == 0
+    assert list(tmp_path.rglob("intel--cli-clear.html")), "Approved report should be written"
+
+
+def test_cli_uses_boolean_return_element_not_truthiness_of_tuple():
+    source = (ROOT / "scripts" / "report_generator.py").read_text(encoding="utf-8")
+    assert "ok, _result = generate_report(" in source
+    assert "return 0 if ok else 2" in source
