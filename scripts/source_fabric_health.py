@@ -310,7 +310,15 @@ def compute_health() -> Dict[str, Any]:
 
         bucket = per_source.setdefault(matched_id, {"manifest_count": 0, "latest_ts": None})
         bucket["manifest_count"] += 1
-        item_ts = _parse_ts(entry.get("timestamp") or entry.get("published_at") or entry.get("processed_at"))
+        # An ingestion/processing clock is not evidence of a newly published
+        # threat. Prefer the original source publication clock and never
+        # treat processed_at (or generic pipeline timestamp) as a fresh
+        # upstream event when source time is missing.
+        item_ts = _parse_ts(
+            entry.get("source_published_at")
+            or entry.get("_source_published_at")
+            or entry.get("published_at")
+        )
         if item_ts and (bucket["latest_ts"] is None or item_ts > bucket["latest_ts"]):
             bucket["latest_ts"] = item_ts
 
