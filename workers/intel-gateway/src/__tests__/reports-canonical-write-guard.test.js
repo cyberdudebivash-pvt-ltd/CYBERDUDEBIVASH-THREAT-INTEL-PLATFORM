@@ -86,3 +86,32 @@ test("P0 #725: source no longer treats unresolved historical reports as implicit
   assert.doesNotMatch(source, /older report that has aged out of the "latest" windows this\s+function searches\).*?non-blocking/s);
   assert.match(source, /Legacy R2 pages lacking authoritative public TLP provenance/);
 });
+
+
+test("P0 #725: both anonymous feed aliases and the preview validate R2 TLP before projection", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  const previewStart = source.indexOf('if (path === "/api/preview" || path === "/api/preview/")');
+  const feedStart = source.indexOf('if (path === "/api/feed" || path === "/api/feed.json")', previewStart);
+  assert.ok(previewStart >= 0 && feedStart > previewStart);
+  const preview = source.slice(previewStart, feedStart);
+  const feed = source.slice(feedStart, source.indexOf('if (path.startsWith("/reports/"))', feedStart));
+  assert.match(preview, /!publicTlpJsonVerified\(feedData\.items\)/);
+  assert.ok(preview.indexOf("!publicTlpJsonVerified(feedData.items)") <
+    preview.indexOf("applyTierGateV2"), "no preview content may be projected from unsanitized data");
+  assert.match(feed, /!publicTlpJsonVerified\(data\)/);
+  assert.ok(feed.indexOf("!publicTlpJsonVerified(data)") <
+    feed.indexOf("applyTierGateV2"), "R2 input must be verified ahead of tier projection");
+  assert.match(feed, /"Cache-Control": "no-store"/);
+});
+
+test("P0 #725: both GET and POST IOC lookup routes deny an unverifiable feed", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  const start = source.indexOf("// --- /api/v1/ioc/lookup");
+  const end = source.indexOf("// --- /api/preview", start);
+  assert.ok(start >= 0 && end > start);
+  const routes = source.slice(start, end);
+  const checks = routes.match(/!publicTlpJsonVerified\(feedData\?\.items\)/g) || [];
+  assert.equal(checks.length, 2, "both GET and POST must verify stored intelligence");
+  const lookups = routes.match(/return jsonResp\(await iocLookup\(/g) || [];
+  assert.equal(lookups.length, 2, "both guarded routes must retain the IOC lookup function");
+});
