@@ -434,11 +434,32 @@ def main():
         print(f"[FAIL] Feed not found: {FEED_PATH}")
         sys.exit(1)
 
-    with open(FEED_PATH, "r", encoding="utf-8") as f:
-        raw = json.load(f)
+    # P0 R19: the anonymous-public feed may contain ZERO publishable items
+    # after fail-closed TLP filtering. Never index enriched[0], rewrite the
+    # empty feed, or silently substitute old/restricted records as a fallback.
+    # A blocked run requires an upstream authorization/publication fix.
+    try:
+        with open(FEED_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError, UnicodeError):
+        print("[BLOCKED] Public feed JSON is absent, empty or malformed; enrichment not performed.")
+        raise SystemExit(2)
 
-    items = raw if isinstance(raw, list) else raw.get("items", [])
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, dict) and isinstance(raw.get("items"), list):
+        items = raw["items"]
+    else:
+        print("[BLOCKED] Public feed must be an array or object with an items array.")
+        raise SystemExit(2)
+
     print(f"  Loaded: {len(items)} items from feed.json")
+    if not items:
+        print("[BLOCKED] Zero authorized public feed entries; cannot enrich or certify an empty feed.")
+        raise SystemExit(2)
+    if any(not isinstance(item, dict) for item in items):
+        print("[BLOCKED] Public feed contains malformed non-object records; refusing partial rewrite.")
+        raise SystemExit(2)
 
     before_apex_ai = sum(1 for i in items if "apex_ai" in i)
     before_apex    = sum(1 for i in items if "apex" in i)
