@@ -1,0 +1,167 @@
+{
+  "type": "bundle",
+  "id": "bundle--da6aa9a3-1f97-47bd-b2d3-e576631966c5",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "name": "CyberDudeBivash SENTINEL APEX",
+      "description": "CyberDudeBivash Pvt. Ltd. - Global Cybersecurity Intelligence Infrastructure",
+      "identity_class": "organization",
+      "sectors": [
+        "technology"
+      ],
+      "contact_information": "enterprise@cyberdudebivash.com",
+      "created": "2024-01-01T00:00:00Z",
+      "modified": "2024-01-01T00:00:00Z"
+    },
+    {
+      "type": "marking-definition",
+      "spec_version": "2.1",
+      "id": "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a",
+      "created": "2017-01-20T00:00:00.000Z",
+      "definition_type": "tlp",
+      "definition": {
+        "tlp": "green"
+      }
+    },
+    {
+      "type": "intrusion-set",
+      "spec_version": "2.1",
+      "id": "intrusion-set--b8449cc1-b6fe-4e01-b885-518e83f6ab4f",
+      "name": "CDB-UNATTR-RAN Campaign",
+      "description": "Leaked Chat Logs Show Silent Ransomware Extorted Over $200,000,000 in 6 Months Without Encrypting Data",
+      "created": "2026-10-09T09:50:08Z",
+      "modified": "2026-10-09T09:50:08Z",
+      "confidence": 57,
+      "aliases": [
+        "CDB-UNATTR-RAN"
+      ],
+      "extensions": {
+        "x-cdb-apex-1": {
+          "predictive_score": 5.5,
+          "campaign_id": "CDB-CONTI",
+          "campaign_confidence": 5.5,
+          "threat_category": "Phishing",
+          "behavioral_tags": [],
+          "ai_summary": "Initial access via phishing → execution chain: initial access → impact",
+          "risk_factors": [
+            "IOC_density",
+            "MITRE_coverage",
+            "exploitation_context"
+          ],
+          "soc_priority": "P3",
+          "threat_level": "MEDIUM",
+          "recommended_action": "Medium severity threat (score 5.5/10) — limited technical indicators in source data",
+          "x_cdb_published_at": "2026-10-09T06:35:28Z",
+          "x_cdb_source_url": "https://cybersecuritynews.com/leaked-chat-logs-show-silent-ransomware-extorted/"
+        }
+      },
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--09930966-bf4d-42a6-9ff6-0e0310e43313",
+      "name": "Malicious Artifact: Next.js",
+      "pattern": "[file:name = 'Next.js']",
+      "pattern_type": "stix",
+      "valid_from": "2026-10-09T09:50:08Z",
+      "created": "2026-10-09T09:50:08Z",
+      "modified": "2026-10-09T09:50:08Z",
+      "indicator_types": [
+        "malicious-activity"
+      ],
+      "confidence": 57,
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--6a6d53a0-5714-4b70-adb6-5d5e6ae8496e",
+      "relationship_type": "indicates",
+      "source_ref": "indicator--09930966-bf4d-42a6-9ff6-0e0310e43313",
+      "target_ref": "intrusion-set--b8449cc1-b6fe-4e01-b885-518e83f6ab4f",
+      "created": "2026-10-09T09:50:08Z",
+      "modified": "2026-10-09T09:50:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--96ad3701-5004-4de7-b343-ae73aedd49b9",
+      "name": "Data Encrypted for Impact",
+      "created": "2026-10-09T09:50:08Z",
+      "modified": "2026-10-09T09:50:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1486",
+          "url": "https://attack.mitre.org/techniques/T1486/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--fcf01913-7324-4ccb-9470-35d412a0337e",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--b8449cc1-b6fe-4e01-b885-518e83f6ab4f",
+      "target_ref": "attack-pattern--96ad3701-5004-4de7-b343-ae73aedd49b9",
+      "created": "2026-10-09T09:50:08Z",
+      "modified": "2026-10-09T09:50:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--379013d9-c340-4cec-9513-f63934f04f59",
+      "name": "Phishing",
+      "created": "2026-10-09T09:50:08Z",
+      "modified": "2026-10-09T09:50:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1566",
+          "url": "https://attack.mitre.org/techniques/T1566/"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--9afd1a6d-f9c1-4552-9cf4-938a8fcd93e8",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--b8449cc1-b6fe-4e01-b885-518e83f6ab4f",
+      "target_ref": "attack-pattern--379013d9-c340-4cec-9513-f63934f04f59",
+      "created": "2026-10-09T09:50:08Z",
+      "modified": "2026-10-09T09:50:08Z",
+      "object_marking_refs": [
+        "marking-definition--34098fce-860f-479c-ad6f-e09814c4f58a"
+      ],
+      "created_by_ref": "identity--61a8943b-b27b-5e19-afff-893bb2e2fa2b"
+    }
+  ]
+}
