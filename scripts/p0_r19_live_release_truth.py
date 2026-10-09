@@ -101,7 +101,8 @@ def evaluate(
         errors.append("WORKER_NOT_ALIVE")
     if live.get("deploy_commit_sha") != expected_sha:
         errors.append("DEPLOYED_WORKER_SHA_MISMATCH")
-    if health.get("status") != "ok" or health.get("checks", {}).get("publication_integrity") != "ok":
+    checks = health.get("checks")
+    if health.get("status") != "ok" or not isinstance(checks, dict) or checks.get("publication_integrity") != "ok":
         errors.append("PUBLICATION_HEALTH_NOT_OK")
     intelligence = health.get("intelligence")
     if not isinstance(intelligence, dict):
@@ -167,6 +168,10 @@ def evaluate(
                     errors.append("REPORT_STATUS_ID_MISMATCH")
                 if authoritative.get("customer_ready") is not ready:
                     errors.append("REPORT_VERDICT_DIVERGENCE")
+                if ready and authoritative.get("state") != "CUSTOMER_READY":
+                    errors.append("REPORT_STATUS_NOT_READY")
+                if not ready and authoritative.get("state") == "CUSTOMER_READY":
+                    errors.append("REPORT_STATUS_CONTRADICTORY")
                 if ready and not any(
                     isinstance(item.get(k), str) and INTERNAL_REPORT.match(item[k])
                     for k in ("blog_url", "report_url")
