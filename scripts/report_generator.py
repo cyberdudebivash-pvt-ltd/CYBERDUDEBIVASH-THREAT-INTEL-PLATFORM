@@ -1823,8 +1823,11 @@ def main() -> int:
     if args.entry:
         import json as _json
         entry = _json.loads(args.entry)
-        ok = generate_report(entry, reports_base=args.reports_base, force=args.force)
-        return 0 if ok else 1
+        # R23: generate_report returns (success, path_or_error), NOT bool.
+        # A nonempty (False, reason) tuple is truthy and previously caused
+        # denied/unwritten --entry reports to exit 0 in publishing automation.
+        ok, _result = generate_report(entry, reports_base=args.reports_base)
+        return 0 if ok else 2
 
     results = generate_reports_from_manifest(
         manifest_path=args.manifest,
