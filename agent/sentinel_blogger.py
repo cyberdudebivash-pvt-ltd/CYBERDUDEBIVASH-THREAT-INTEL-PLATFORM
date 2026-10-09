@@ -653,8 +653,11 @@ def main():
                 logger.debug("[FEED-TRACKER] per-feed filter error (non-fatal): %s", _ft_loop_e)
 
         for entry in entries:
-            time.sleep(RATE_LIMIT_DELAY)
-
+            # P0 R16: Do not pay the external-work pacing delay for entries
+            # rejected by local duplicate/freshness/quality filters.
+            # Run #2522 spent >1,200s ingesting stale/duplicate source entries
+            # while sleeping 3s BEFORE filtering each one. The authoritative
+            # source and quality controls remain unchanged.
             # v142.0 — Layer 0: source_url + stix_id + content_hash (strongest dedup)
             if _intel_engine:
                 try:
@@ -713,6 +716,9 @@ def main():
                 except Exception as _fps_ck2_e:
                     logger.debug("[DEDUP-L2] check_entry error (non-fatal): %s", _fps_ck2_e)
 
+            # Pace only actual processing / possible source calls. Keep the
+            # operator-configured RATE_LIMIT_DELAY intact for accepted items.
+            time.sleep(RATE_LIMIT_DELAY)
             try:
                 result = process_entry(entry, feed_source=_resolve_feed_source_name(feed_url))
             except Exception as _pe:

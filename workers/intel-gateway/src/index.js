@@ -7713,18 +7713,31 @@ async function handleRequest(request, env, ctx) {
     // never throws and returns null until the 6-hourly cron has run at least
     // once, so this is zero-behavior-change for every existing consumer that
     // doesn't look at the new key.
+    // P0 R16: evaluate the authoritative stored publication timestamp,
+    // not the time this HTTP preview was assembled. Keep the historical
+    // FREE preview available, but never label its intelligence as fresh
+    // when /api/health has crossed the six-hour freshness boundary.
+    const previewTruth = publicationEnvelope(feedData, Date.now(), 120);
     const liveIndicators = await getLiveIndicatorsSummary(env);
     return jsonResp({
       status: "ok",
       preview: {
         items, total_preview: items.length, feed_total: (feedData.items || []).length,
-        preview_limit: PREVIEW_LIMIT, generated_at: now(), version: PLATFORM_VERSION,
+        preview_limit: PREVIEW_LIMIT,
+        generated_at: previewTruth.evaluation.intelligence.generated_at,
+        response_generated_at: now(), version: PLATFORM_VERSION,
+        ...previewTruth.fields,
         limit: pvLimit, offset: pvOffset, has_more: pvNext < window_.length,
         next_offset: pvNext < window_.length ? pvNext : null,
         _tier: TIERS.FREE, _upgrade_url: "https://intel.cyberdudebivash.com/upgrade.html",
         ...(liveIndicators ? { live_indicators_summary: liveIndicators } : {}),
       },
-    }, 200, { "Cache-Control": "public, max-age=120" });
+    }, 200, {
+      ...previewTruth.headers,
+      // Do not cache a FRESH claim beyond the source freshness deadline.
+      "Cache-Control": previewTruth.evaluation.healthy
+        ? `public, max-age=${previewTruth.edge_ttl_seconds}` : "no-store",
+    });
   }
 
   // --- /api/feed + /api/feed.json (legacy) ------------------------------------

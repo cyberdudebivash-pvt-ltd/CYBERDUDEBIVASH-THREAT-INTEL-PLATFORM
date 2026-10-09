@@ -258,6 +258,67 @@ def _fetch(url: str, timeout: int, token: Optional[str] = None) -> Tuple[int, st
 
 # ─── Contract Engine ─────────────────────────────────────────────────────────
 
+def preview_envelope_from_worker_route(src: str) -> tuple[bool, bool]:
+    """Inspect the exact /api/preview branch, not a fragile fixed-size slice.
+
+    Return (has_nested_item_contract, has_nested_success_response).
+    This is a conservative static source gate, *not* a substitute for the
+    live API schema canary. A missing/renamed branch fails closed.
+    """
+    anchor = re.search(
+        r'(?m)^[ \t]*if\s*\(\s*path\s*===\s*["\']/api/preview["\']',
+        src,
+    )
+    if anchor is None:
+        return False, False
+    scoped = src[anchor.start():]
+    # The request router uses two-space indentation for its route-level
+    # closing brace. Stop there: later /api/feed declarations must not pass
+    # preview certification accidentally.
+    route_end = re.search(r'(?m)^  \}\s*$', scoped)
+    if route_end is None:
+        return False, False
+    route = scoped[:route_end.start()]
+    route = re.sub(r'/\*[\s\S]*?\*/', '', route)
+    route = re.sub(r'(?m)^[ \t]*//[^\n]*$', '', route)
+
+    inline = re.search(
+        r'return\s+jsonResp\s*\(\s*\{\s*status\s*:\s*["\']ok["\']'
+        r'\s*,\s*preview\s*:\s*\{',
+        route,
+    )
+    named = re.search(
+        r'return\s+jsonResp\s*\(\s*\{\s*status\s*:\s*["\']ok["\']'
+        r'\s*,\s*preview\s*:\s*previewPayload\b',
+        route,
+    )
+
+    def has_payload_fields(blob: str) -> bool:
+        # A declaration or shorthand "items" key and an explicit
+        # "total_preview" key must both be present in this same payload.
+        return bool(
+            re.search(r'\bitems\s*(?:,|:)', blob)
+            and re.search(r'\btotal_preview\s*:', blob)
+        )
+
+    if inline is not None:
+        # Scope to this inline object's outer end; nested one-line
+        # live-indicator object spreads do not terminate the payload.
+        remaining = route[inline.end():]
+        close = re.search(r'(?m)^      \},?\s*$', remaining)
+        if close is not None:
+            return has_payload_fields(remaining[:close.start()]), True
+        return False, True
+
+    if named is not None:
+        decl = re.search(r'\b(?:const|let)\s+previewPayload\s*=\s*\{', route)
+        if decl is not None and decl.start() < named.start():
+            return has_payload_fields(route[decl.end():named.start()]), True
+        return False, True
+
+    return False, False
+
+
 class FeedContractValidator:
     def __init__(self, base_url: str, timeout: int, live: bool, repo_root: Path):
         self.base        = base_url.rstrip("/")
@@ -316,30 +377,14 @@ class FeedContractValidator:
 
         src = wp.read_text(encoding="utf-8", errors="replace")
 
-        # CONTRACT-5: Verify /api/preview returns nested envelope
-        # We expect: preview: { items: [...], total_preview: N, ... }
-        #
-        # v186.0 P0 FIX: this check regex-matched ONLY a named-variable pattern
-        # (`previewPayload = { ... items ... }`), assuming a specific coding
-        # style. The live route (index.js, "/api/preview" branch) constructs
-        # the response as an inline object literal passed straight into
-        # jsonResp() -- there is no `previewPayload` variable at all, so this
-        # check HARD-FAILED against fully contract-compliant code (verified
-        # live: GET /api/preview returns exactly
-        # {"status":"ok","preview":{"items":[...],"total_preview":N,...}}).
-        # Fixed to recognize EITHER coding style -- the named-variable
-        # pattern (in case it's used elsewhere) or the inline literal nested
-        # under the "preview" key within the /api/preview route's own source
-        # block, scoped to that block so this doesn't accidentally match an
-        # unrelated "preview:" occurrence elsewhere in the file.
-        preview_route_m = re.search(r'path === "/api/preview"[\s\S]{0,2000}', src)
-        preview_block = preview_route_m.group(0) if preview_route_m else ""
+        # CONTRACT-5 / 5b: statically inspect only the actual /api/preview
+        # route. The v186 2,000-character window ended BEFORE the response
+        # (offset 2,082 on main 36a08fad), falsely hard-failing a compliant
+        # Worker. Do not search unrelated handlers or trust stray comments.
+        has_shape, has_nest = preview_envelope_from_worker_route(src)
 
         self._tick()
-        has_named_pattern  = bool(re.search(r"previewPayload\s*=\s*\{[^}]*\bitems\b", src, re.DOTALL))
-        has_inline_pattern = bool(re.search(r"preview\s*:\s*\{[^}]*\bitems\b[^}]*\btotal_preview\b",
-                                            preview_block, re.DOTALL))
-        if has_named_pattern or has_inline_pattern:
+        if has_shape:
             self._pass("/api/preview", "CONTRACT-5",
                        "preview envelope emits items + total_preview (nested envelope confirmed)")
         else:
@@ -347,12 +392,8 @@ class FeedContractValidator:
                        "/api/preview envelope structure changed -- canary B may false-negative",
                        "Expected: preview object containing both 'items' and 'total_preview'")
 
-        # CONTRACT-5b: Verify the final jsonResponse wraps preview: {...} or preview: previewPayload
         self._tick()
-        # The response must be: { status:"ok", preview: <object> }
-        has_named_nest  = bool(re.search(r'preview\s*:\s*previewPayload', src))
-        has_inline_nest = bool(re.search(r'preview\s*:\s*\{', preview_block))
-        if has_named_nest or has_inline_nest:
+        if has_nest:
             self._pass("/api/preview", "CONTRACT-5b",
                        "/api/preview response wraps payload under 'preview' key")
         else:
