@@ -88,3 +88,30 @@ def test_zero_records_or_unmatched_collector_never_makes_healthy_source(monkeypa
         result = _audit(monkeypatch, payload)
         assert result["health_breakdown"]["HEALTHY"] == 0
         assert result["sources"][0]["records_received_current_window"] == 0
+
+
+
+def test_fresh_processing_timestamp_does_not_launder_old_publication(monkeypatch):
+    now = datetime.now(timezone.utc)
+    raw = {"advisories": [{
+        "id": "intel--old-source",
+        "feed_source": "rss_vendor_example",
+        "published_at": (now - timedelta(days=12)).isoformat(),
+        "timestamp": now.isoformat(),
+        "processed_at": now.isoformat(),
+    }]}
+    audit = _audit(monkeypatch, raw)
+    assert audit["health_breakdown"]["STALE"] == 1
+    assert audit["health_breakdown"]["HEALTHY"] == 0
+
+
+def test_unverified_processing_clock_alone_is_not_a_real_source_event(monkeypatch):
+    now = datetime.now(timezone.utc).isoformat()
+    raw = {"advisories": [{
+        "id": "intel--no-source-clock",
+        "feed_source": "rss_vendor_example",
+        "timestamp": now, "processed_at": now,
+    }]}
+    audit = _audit(monkeypatch, raw)
+    assert audit["health_breakdown"]["NO_DATA"] == 1
+    assert audit["health_breakdown"]["HEALTHY"] == 0
