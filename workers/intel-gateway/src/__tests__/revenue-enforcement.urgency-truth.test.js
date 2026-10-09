@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import { applyTierGateV2 } from "../revenue-enforcement.js";
 
 function advisory(overrides = {}) {
@@ -64,4 +65,12 @@ test("paid customers are not given a fabricated FREE promotional urgency", () =>
     const out = applyTierGateV2(advisory(), tier, null);
     assert.equal(out.threat_urgency, undefined);
   }
+});
+
+test("public homepage fallback never asserts active exploitation without evidence", () => {
+  const homepage = readFileSync(new URL("../../../../index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(homepage, /ACTIVE THREAT DETECTED/);
+  assert.match(homepage, /THREAT INTELLIGENCE ADVISORY/);
+  assert.match(homepage, /id="cdb-threat-cta-bar"/);
+  assert.match(homepage, /upgrade\.html\?plan=pro/);
 });
