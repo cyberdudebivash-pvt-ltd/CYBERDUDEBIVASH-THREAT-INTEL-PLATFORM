@@ -7712,7 +7712,7 @@ async function handleRequest(request, env, ctx) {
     const stixIdSyntax = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*--[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
     const items = window_.slice(pvOffset, pvOffset + pvLimit).map(i => {
       const publicItem = applyTierGateV2(i, "free", null);
-      const candidate = typeof i.stix_object_id === "string" ? i.stix_object_id : i.stix_id;
+      const candidate = typeof i.stix_id === "string" ? i.stix_id : null;
       const syntacticallyValid = typeof candidate === "string" && stixIdSyntax.test(candidate);
       return {
         ...publicItem,
