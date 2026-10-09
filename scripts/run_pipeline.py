@@ -4265,6 +4265,25 @@ def main() -> None:
     stage_sync_root_feed_json()          # FINAL: ensure feed.json populated (double-guarantee)
     _stage_done("feed_json_final")       # v143.4.1 FIX: mark BEFORE stage audit so it registers
 
+    # P0 R16: authoritative POST-INGEST mandate enforcement.
+    # The earlier --fix audit is deliberately non-fatal because it inspects
+    # the old pre-ingestion feed; only this final read of the completed
+    # api/feed.json can authorize downstream report generation/publication.
+    # run_script(allow_fail=False) merely LOGS failure, so explicitly require
+    # exit 0 and fail closed on violations, crashes and 60s timeouts.
+    mandate_verdict = run_script(
+        [sys.executable, "scripts/sentinel_apex_mandate_enforcer.py"],
+        stage="final.mandate_enforcement",
+        allow_fail=False,
+        timeout=60,
+    )
+    if mandate_verdict.returncode != 0:
+        raise RuntimeError(
+            "P0 MANDATE ENFORCEMENT FAILED after feed finalization: "
+            f"exit={mandate_verdict.returncode}. Stop pipeline; do not publish."
+        )
+    _stage_done("mandate_enforcement")
+
     # ---- Phase 3.95 — Immutable Snapshot (v184.0) -----------------------
     # Create an immutable timestamped snapshot from the freshly-written api/feed.json.
     # snapshot_integration.py reads api/feed.json, deduplicates, sorts, writes atomically

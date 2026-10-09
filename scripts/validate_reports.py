@@ -247,8 +247,7 @@ def _validate_one(
     Validate a single advisory entry. Returns (failures, disposition).
 
     disposition is exactly one of:
-      "PASS"     -- fully validated: local file confirmed present & valid HTML,
-                    or explicitly confirmed published via the CDN-URL bypass.
+      "PASS"     -- fully validated: local file confirmed present & valid HTML.
       "DEFERRED" -- report_url present, local file missing, but the advisory
                     is outside this run's rolling publish window (or its
                     canonical timestamp is unparseable) and/or its id is
@@ -282,7 +281,60 @@ def _validate_one(
     failures: List[str] = []
     intel_id = (entry.get("id") or entry.get("stix_id") or f"entry[{idx}]").strip()
 
-    # Resolve best available path: explicit URL first, then id-derived fallback
+    # Validate all untrusted manifest locators BEFORE filesystem resolution.
+    # _resolve_report_path() calls os.path.exists() for its current-month
+    # fallback; a path containing ../ must never reach that operation.
+    from urllib.parse import urlsplit
+    if intel_id in (".", "..") or any(marker in intel_id for marker in ("/", "\\", "\0")):
+        failures.append(f"[{intel_id}] RULE 2 FAIL: unsafe advisory id")
+        return failures, "FAIL"
+
+    for field in ("report_url", "internal_report_url"):
+        raw = entry.get(field)
+        if raw is not None and not isinstance(raw, str):
+            failures.append(f"[{intel_id}] RULE 2 FAIL: invalid {field} type")
+            return failures, "FAIL"
+        candidate = (raw or "").strip()
+        if not candidate:
+            continue
+        if candidate.startswith("//"):
+            failures.append(f"[{intel_id}] RULE 2 FAIL: scheme-relative {field} forbidden")
+            return failures, "FAIL"
+        try:
+            parsed = urlsplit(candidate)
+            external = bool(parsed.scheme or parsed.netloc)
+            approved_origin = (
+                parsed.scheme == "https"
+                and parsed.hostname == "intel.cyberdudebivash.com"
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.port is None
+            ) if external else True
+            # Restrict relative and absolute URLs to the original report
+            # directory. Refuse encoded dot segments, backslashes, control
+            # characters, URL parameters, and path traversal even if a
+            # malicious hostname includes the company name.
+            report_path = parsed.path.lstrip("/")
+            segments = report_path.split("/")
+            approved_path = (
+                report_path.startswith("reports/")
+                and report_path.endswith(".html")
+                and len(segments) >= 4
+                and all(part not in ("", ".", "..") for part in segments)
+                and "%" not in candidate
+                and "\\" not in candidate
+                and not any(ord(c) < 32 for c in candidate)
+                and not parsed.query and not parsed.fragment
+            )
+            approved = approved_origin and approved_path
+        except ValueError:
+            approved = False  # malformed host/port is not a valid report URL
+        if not approved:
+            failures.append(f"[{intel_id}] RULE 2 FAIL: unapproved {field} origin/path: {candidate!r}")
+            return failures, "FAIL"
+
+    # Resolve only after the safety checks above, then apply all original
+    # existence, report-window, TLP, HTML-size and content gates unchanged.
     _url, fs_path = _resolve_report_path(entry)
     explicit_url = (entry.get("internal_report_url") or entry.get("report_url") or "").strip()
 
@@ -294,41 +346,16 @@ def _validate_one(
         )
         return failures, "FAIL"
 
-    # v160.5e HARDENING: Skip STIX-bundle-only entries (no HTML report).
-    # Manifest entries with NEITHER report_url NOR internal_report_url are raw
-    # STIX bundle index records produced by run_pipeline.py. They never have
-    # associated HTML report files -- HTML reports use intel--{hex} IDs while
-    # STIX bundles use bundle--{uuid}. Derived fs_path will always be absent.
-    # Condition: no explicit URL AND local file does not exist at derived path.
-    # This preserves full RULE 3/4/5 checks for genuine intel-- advisory reports.
+    # v160.5e: STIX bundle-only records with no HTML report remain skipped.
+    # Never skip an explicitly linked HTML report whose file is missing.
     if not explicit_url and not os.path.exists(fs_path):
-        return failures, "SKIP"  # STIX bundle-only record, no HTML report expected
+        return failures, "SKIP"
 
-    # RULE 2: if an explicit URL is present, it must not be a foreign external URL
-    if explicit_url and explicit_url.startswith("http") and "cyberdudebivash" not in explicit_url:
-        failures.append(
-            f"[{intel_id}] RULE 2 FAIL: report_url is external URL: {explicit_url!r}"
-        )
-        return failures, "FAIL"
-
-    # v160.5d HARDENING: Already-Deployed CDN Bypass.
-    # When report_url is an HTTPS URL on our own published domain
-    # (cyberdudebivash.com), the report was generated and uploaded to
-    # Cloudflare R2 / GitHub Pages in a prior run.  On a fresh GitHub Actions
-    # runner there is NO local copy of that file -- it was never committed to
-    # the repo.  Attempting a local-file check (RULE 3/4/5) will always fail
-    # for these entries, producing spurious P0 GATE failures on fix-only or
-    # no-new-intel commits.
-    #
-    # Resolution: if report_url begins with https:// AND contains our domain,
-    # treat the report as already validated and deployed.  Return PASS immediately.
-    # This preserves all RULE 3/4/5 checks for NEW reports (local files present).
-    _pub_url = (entry.get("report_url") or "").strip()
-    _already_deployed = bool(
-        _pub_url.startswith("https://") and "cyberdudebivash" in _pub_url
-    )
-    if _already_deployed:
-        return failures, "PASS"  # report already live on cyberdudebivash CDN/R2
+    # P0 R16: never return PASS for an HTTPS URL alone. The old early
+    # return bypassed RULE 3/4/5 entirely and produced 'PASS (0 bytes)'
+    # in sentinel-blogger #2522. A missing local file may only be
+    # DEFERRED under the existing durable-state/out-of-window policy;
+    # an unverified, in-window missing report must still hard-fail.
 
     # RULE 3: physical HTML file must exist on disk at resolved path
     if not os.path.exists(fs_path):
@@ -393,7 +420,11 @@ def _validate_one(
         )
         return failures, "FAIL"
 
-    return failures, "PASS"
+    # P0 R16: RULE 3b / RULE 4 can append failures without early return.
+    # A non-empty failure list must NEVER receive disposition PASS: the
+    # aggregate release gate logs only FAIL dispositions and previously
+    # ignored truncated HTML / missing public-path evidence.
+    return failures, "FAIL" if failures else "PASS"
 
 
 def validate_all_reports(

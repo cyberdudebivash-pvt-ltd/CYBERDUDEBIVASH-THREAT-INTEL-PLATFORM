@@ -71,14 +71,45 @@ def probe_once(target: str, timeout: float = PROBE_TIMEOUT_S) -> tuple[bool, int
                 data = json.loads(body)
             except ValueError:
                 return False, ms, "HTTP 200, body is not JSON"
-            return True, ms, f"health={data.get('status', 'unknown')}" if isinstance(data, dict) else "HTTP 200"
+            if not isinstance(data, dict) or data.get("status") != "ok":
+                state = data.get("status", "invalid") if isinstance(data, dict) else "not_object"
+                return False, ms, f"HTTP 200 but health={state}"
+            return True, ms, "health=ok"
     except urllib.error.HTTPError as e:
         return False, int((time.monotonic() - t0) * 1000), f"HTTP {e.code}"
     except Exception as e:  # timeout, DNS, TLS, connection reset
         return False, int((time.monotonic() - t0) * 1000), f"{type(e).__name__}: {str(e)[:120]}"
 
 
-def probe(target: str, retry_pause: float | None = None, probe_fn=None) -> dict:
+
+def probe_worker_liveness(target: str, timeout: float = PROBE_TIMEOUT_S) -> str:
+    """Diagnostics only: never override the SLA readiness failure.
+
+    Called once only when /api/health fails with HTTP 503 twice. The worker
+    can be alive while customer intelligence is stale. This GET does not
+    change the recorded availability result or incur any R2/KV operation.
+    """
+    req = urllib.request.Request(
+        f"{target}/api/health/live",
+        headers={"User-Agent": USER_AGENT, "Accept": "application/json", "Cache-Control": "no-cache"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
+            if res.status != 200:
+                return f"worker_liveness=HTTP_{res.status}"
+            body = json.loads(res.read(4096))
+            if isinstance(body, dict) and body.get("status") == "alive" and body.get("service") == "sentinel-apex":
+                return "worker_liveness=alive"
+            return "worker_liveness=invalid_response"
+    except urllib.error.HTTPError as exc:
+        return f"worker_liveness=HTTP_{exc.code}"
+    except Exception as exc:
+        return f"worker_liveness={type(exc).__name__}"
+
+
+
+def probe(target: str, retry_pause: float | None = None, probe_fn=None, liveness_fn=None) -> dict:
+    injected_probe = probe_fn is not None
     probe_fn = probe_fn or probe_once
     retry_pause = RETRY_PAUSE_S if retry_pause is None else retry_pause
     observed_at = _now_iso()
@@ -87,6 +118,15 @@ def probe(target: str, retry_pause: float | None = None, probe_fn=None) -> dict:
         time.sleep(retry_pause)
         up, ms, retry_note = probe_fn(target)
         note = f"{note}; retry: {retry_note}"
+        # Diagnose, but DO NOT recategorize HTTP 503 as a successful SLA
+        # sample: customer intelligence readiness is unavailable. Avoid
+        # extra requests when readiness is healthy or a test injects a probe.
+        if "HTTP 503" in note:
+            diagnostic = liveness_fn if liveness_fn is not None else (
+                None if injected_probe else probe_worker_liveness
+            )
+            if diagnostic is not None:
+                note = f"{note}; {diagnostic(target)}"
     run = os.environ.get("GITHUB_RUN_ID", "local")
     attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
     return {
@@ -158,11 +198,13 @@ def main() -> int:
         return 2
     save_pending(pending_path, remaining)
 
-    state = "UP" if result["ok"] else "DOWN"
+    worker_alive_but_unready = not result["ok"] and "worker_liveness=alive" in result["note"]
+    state = "UP" if result["ok"] else ("INTELLIGENCE_DEGRADED" if worker_alive_but_unready else "DOWN")
     print(f"{target}/api/health: {state} in {result['latency_ms']}ms ({result['note']}); "
           f"delivered {len(pending) - len(remaining)}/{len(pending)}, {len(remaining)} buffered for replay")
     if not result["ok"]:
-        print(f"::error::{target} is DOWN: {result['note']}")
+        reason = "intelligence readiness is degraded (Worker is alive)" if worker_alive_but_unready else "readiness is DOWN"
+        print(f"::error::{target} {reason}: {result['note']}")
         return 1
     if remaining:
         print(f"::warning::{len(remaining)} heartbeat(s) not delivered; will replay next run")
