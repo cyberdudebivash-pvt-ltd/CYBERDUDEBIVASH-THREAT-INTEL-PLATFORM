@@ -121,7 +121,7 @@ import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-me
 import { deductCredits } from './credit-system.js';
 import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
 import { inferGumroadTier, inferGumroadBillingCycle, isGumroadCancellationEvent, isGumroadAccessRevokingEvent, classifyGumroadPing, renewedExpiry, renewalMayReactivate, BILLING_CYCLE_DAYS } from './gumroad-lifecycle.js';
-import { handleIntelStaticProxy, INTEL_STATIC_PROXY } from './intel-static-proxy.js';
+import { handleIntelStaticProxy, INTEL_STATIC_PROXY, publicTlpJsonVerified } from './intel-static-proxy.js';
 // P0 2026-09-03: separates the first-party dashboard's own read traffic from
 // the commercial API entitlement plane. See first-party-plane.js's header for
 // the incident this closes -- the public dashboard was metered against the
@@ -7760,16 +7760,27 @@ async function handleRequest(request, env, ctx) {
     // calls) so every serving path -- direct R2 cache hit, redirect
     // target, or fresh synthesis -- is covered by a single evaluation.
     //
-    // When the item is NOT resolvable via findItemBySlug's feed sources
-    // (an older report that has aged out of the "latest" windows this
-    // function searches), this is deliberately non-blocking: existing
-    // behavior is unchanged rather than newly 404ing content this gate
-    // has no way to verify either way. That population -- and any
-    // already-cached bad copies matching a resolvable item -- is covered
-    // by scripts/publication_gate_scan.py, not by blocking every view.
+    // An item outside the resolvable feed is now unavailable (fail-closed).
+    // Legacy R2 pages lacking authoritative public TLP provenance must not
+    // be served merely because an object exists in storage. Historical
+    // reports can be restored after verified manifest reconstruction.
     // -------------------------------------------------------------------
     const gateItem   = gateSlug ? await findItemBySlug(env, gateSlug) : null;
     const gateResult = gateItem ? evaluatePublicationGate(gateItem) : null;
+    // P0 #725: NO report URL is authorized by an unresolved feed item.
+    // Before this check, an aged-out or missing advisory still reached a
+    // canonical R2 object or a cross-month redirect without a TLP decision.
+    // Pages/static origins need their own separate gate (#728); this gate
+    // protects every Worker /reports/** branch, including old URLs.
+    // Explicit valid CLEAR required for anonymous delivery; quality gates
+    // below remain additive, never an alternative authorization source.
+    if (!gateItem || !publicTlpJsonVerified(gateItem) ||
+        !Object.hasOwn(gateItem, "tlp") && !Object.hasOwn(gateItem, "tlp_label")) {
+      return jsonResp(
+        { error: "Report unavailable", reason: "anonymous_publication_unverified" },
+        404, { "Cache-Control": "no-store" },
+      );
+    }
     if (gateItem && gateResult && !gateResult.customer_ready) {
       // v187.0 P0 FIX: a report the publication gate permanently rejected
       // (P21_BELOW_MINIMUM / P26_REJECTED / etc.) is not "still generating"
