@@ -15,10 +15,17 @@ concurrency:
 jobs:
   worker-release-truth:
     name: "Read-only exact-SHA, freshness and preview publication proof"
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: "Fail closed if manually dispatched from a non-production branch"
+        env:
+          ACTUAL_REF: ${{ github.ref }}
+        run: |
+          if [ "$ACTUAL_REF" != "refs/heads/main" ]; then
+            echo "::error::P0 R19 verification must run on main; no release verdict on PR branches."
+            exit 2
+          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
