@@ -1376,7 +1376,7 @@ def _is_generic_title(title: str) -> bool:
     return len(meaningful) < 5
 
 
-def dedup_items(items: List[Dict]) -> Tuple[List[Dict], int]:
+def dedup_items(items: List[Dict], *, use_persistent_history: bool = True) -> Tuple[List[Dict], int]:
     """
     v141.3.0 GLOBAL DEDUP ENGINE — four-layer deduplication.
 
@@ -1390,25 +1390,33 @@ def dedup_items(items: List[Dict]) -> Tuple[List[Dict], int]:
     Layer 3: SHA-256(bundle_id)                        -- STIX bundle ID dedup
 
     Preserves FIRST occurrence. Returns (deduped_list, removed_count).
+
+    R22: use_persistent_history=False for canonical manifest snapshots.
+    Cross-run seen-history is appropriate for deciding whether an advisory
+    is newly discovered, NOT for deleting already-known advisories from the
+    current manifest. All in-memory and final uniqueness layers still run.
     """
     total_removed: int = 0
 
     # ------------------------------------------------------------------
     # Layer 0: Persistent cross-run dedup engine (new in v141.3.0)
     # ------------------------------------------------------------------
-    try:
-        _scripts = Path(__file__).resolve().parent
-        if str(_scripts) not in sys.path:
-            sys.path.insert(0, str(_scripts))
-        from intel_dedup_engine import get_dedup_engine, enforce_manifest_uniqueness
-        engine = get_dedup_engine()
-        items, l0_removed = engine.dedup_batch(items)
-        total_removed += l0_removed
-        if l0_removed:
-            log.info("dedup-L0 (persistent): %d duplicates removed by cross-run index",
-                     l0_removed)
-    except Exception as _e:
-        log.warning("dedup-L0 (persistent) skipped (%s) — falling back to in-memory only", _e)
+    if use_persistent_history:
+        try:
+            _scripts = Path(__file__).resolve().parent
+            if str(_scripts) not in sys.path:
+                sys.path.insert(0, str(_scripts))
+            from intel_dedup_engine import get_dedup_engine, enforce_manifest_uniqueness
+            engine = get_dedup_engine()
+            items, l0_removed = engine.dedup_batch(items)
+            total_removed += l0_removed
+            if l0_removed:
+                log.info("dedup-L0 (persistent): %d duplicates removed by cross-run index",
+                         l0_removed)
+        except Exception as _e:
+            log.warning("dedup-L0 (persistent) skipped (%s) — falling back to in-memory only", _e)
+    else:
+        log.info("dedup-L0: bypassed cross-run newness filter for canonical manifest preservation")
 
     # ------------------------------------------------------------------
     # Layers 1-3: In-memory dedup (original logic, unchanged)
