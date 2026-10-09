@@ -699,23 +699,41 @@ def t19():
     assert sz >= 3_000, f"r2_upload_verifier.py suspiciously small: {sz} bytes"
 
     content = script.read_text(encoding="utf-8")
+    # P0 R15: R2 is a private bucket. Public, unauthenticated HTTP HEAD is
+    # neither a valid object-integrity check nor an acceptable fallback.
+    # Require the authenticated S3 implementations and explicit fail-closed
+    # outcomes, rather than the retired _http_head helper (PR #733).
     required = [
-        "verify_r2_object",
-        "verify_local_feed",
         "MIN_FEED_BYTES",
         "MIN_ADVISORY_COUNT",
-        "_http_head",
+        "MISSING_AUTHORITY",
+        "AUTHENTICATED_READ_UNAVAILABLE",
     ]
     missing = [p for p in required if p not in content]
     assert not missing, (
-        f"r2_upload_verifier.py missing verification primitives: {missing}"
+        f"r2_upload_verifier.py missing fail-closed verification controls: {missing}"
     )
 
-    # Must be valid Python syntax — use ast.parse (no temp file writes, Windows-safe)
+    # Parse real function definitions, not occurrences of names in comments.
+    # A missing or renamed authenticated probe must fail this release gate.
     try:
-        ast.parse(script.read_bytes(), filename=str(script))
+        tree = ast.parse(content, filename=str(script))
     except SyntaxError as e:
         assert False, f"r2_upload_verifier.py has syntax error at line {e.lineno}: {e.msg}"
+    defined = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    required_functions = {
+        "verify_r2_object",
+        "verify_local_feed",
+        "_s3api_head_object",
+        "_boto3_head_object",
+    }
+    assert required_functions <= defined, (
+        f"r2_upload_verifier.py missing authenticated verification functions: "
+        f"{sorted(required_functions - defined)}"
+    )
+    assert "_http_head" not in defined, (
+        "Unauthenticated HTTP HEAD must not be restored as an R2 verification fallback"
+    )
 
 
 # ---------------------------------------------------------------------------
