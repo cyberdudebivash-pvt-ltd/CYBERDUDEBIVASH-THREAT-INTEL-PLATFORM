@@ -152,7 +152,7 @@ log.info("API integrity: %d ioc_count fields corrected", integrity_fixes)
 # STEP 5: DUPLICATE ELIMINATION
 # ═══════════════════════════════════════════════════════════════════════════════
 step(5, "DUPLICATE ELIMINATION")
-import hashlib
+from v131_fingerprint import advisory_fingerprint
 seen_fingerprints = {}
 seen_ids          = set()
 deduped           = []
@@ -166,12 +166,11 @@ for item in advisories:
         log.info("Duplicate ID removed: %s", item_id[:20])
         continue
     # Content fingerprint dedup (title + cve + actor)
-    fp_key = "|".join([
-        (item.get("title") or "").lower().strip(),
-        (item.get("cve") or item.get("cve_id") or ""),
-        (item.get("actor_tag") or ""),
-    ])
-    fp = hashlib.sha256(fp_key.encode()).hexdigest()
+    # R20: CVE / actor identifiers can be arrays in real advisory records.
+    # Legacy string join raised TypeError, aborting Stage 3.6 enrichment.
+    # Structured canonical JSON distinguishes title/CVE/actor boundaries,
+    # handles arrays without losing the record, and never changes TLP.
+    fp = advisory_fingerprint(item)
     if fp in seen_fingerprints:
         dupes_removed += 1
         log.info("Duplicate fingerprint removed: %s", (item.get("title",""))[:50])
