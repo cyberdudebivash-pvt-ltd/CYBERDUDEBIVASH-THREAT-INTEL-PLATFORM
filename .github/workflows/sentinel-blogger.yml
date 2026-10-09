@@ -776,6 +776,28 @@ jobs:
           CENSUS_EOF
 
       # -----------------------------------------------------------------------
+      # P0 R16: If the intelligence orchestrator failed (including the
+      # 1200-second timeout / anti-stale floor), DO NOT run costly enrichment,
+      # HTML/PDF generation or publication against incomplete work-in-progress
+      # manifests. The status gate above records DEGRADED; this step enforces
+      # that assessment before any Stage 3.1+ content regeneration.
+      # Do not rely on steps.pipeline_stage_1_3.conclusion: its parent has
+      # continue-on-error=true, so outcome is the accurate failure signal.
+      # -----------------------------------------------------------------------
+      - name: "P0 - Stage 1-3 Ingestion Health Fence (HARD FAIL before enrichment)"
+        id: p0-ingestion-health-fence
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          STAGE_OUTCOME="${{ steps.pipeline_stage_1_3.outcome }}"
+          HEALTH="${PIPELINE_HEALTH:-UNKNOWN}"
+          if [ "$STAGE_OUTCOME" != "success" ] || [ "$HEALTH" != "HEALTHY" ]; then
+            echo "::error::P0 ingestion fence BLOCKED: Stage 1-3 outcome=$STAGE_OUTCOME health=$HEALTH. No enrichment, report generation or publication permitted."
+            exit 1
+          fi
+          echo "[P0 INGESTION FENCE] PASS: intelligence generation complete and HEALTHY"
+
+      # -----------------------------------------------------------------------
       # STAGE 1-3b - Stale Source Guard (2026-09-26)
       # Production latest.json (06:28Z): 12 of 42 items were articles their
       # sources published 2026-01-14 .. 2026-08-07, ingested as new intel and
