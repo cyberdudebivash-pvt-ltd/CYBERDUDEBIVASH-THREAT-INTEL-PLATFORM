@@ -102,7 +102,7 @@ def document_level_denial(doc: Any, policy: Dict[str, Any]) -> Optional[Tuple[st
         return None
     for key in DOC_LABEL_KEYS:
         val = doc.get(key)
-        if not isinstance(val, str) or not val.strip():
+        if val is None or (isinstance(val, str) and not val.strip()):
             continue
         toks = tlp_policy.scan_tlp_tokens(val)
         if key == "classification":
@@ -119,7 +119,6 @@ def document_level_denial(doc: Any, policy: Dict[str, Any]) -> Optional[Tuple[st
         if verdict:
             return verdict[0], f"document {key}: {verdict[1]}"
     return None
-
 
 def _decide(rec: Dict[str, Any], policy: Dict[str, Any], parents: Optional[Dict[str, Dict[str, Any]]],
             id_hint: Optional[str] = None) -> Dict[str, Any]:

@@ -84,6 +84,16 @@ class TestSanitizeDocument(unittest.TestCase):
             _o, _r, w = tb.sanitize_document(ok, POLICY)
             self.assertIsNone(w, ok)
 
+    def test_conflicting_document_classification_never_allows_restricted_bytes(self):
+        for label in ("TLP:CLEAR; TLP:RED", "TLP:CLEAR / TLP:GREEN",
+                      "TLP:CLEAR then TLP:AMBER+STRICT", "TLP:CLEAR; TLP:PURPLE"):
+            with self.subTest(label=label):
+                doc = {"classification": label, "payload": SECRET}
+                out, _removed, withheld = tb.sanitize_document(doc, POLICY)
+                self.assertIsNotNone(withheld)
+                self.assertNotIn(SECRET, json.dumps(out))
+                self.assertTrue(out["tlp_boundary"]["withheld"])
+
     def test_single_top_level_restricted_record_becomes_a_tombstone(self):
         out, _removed, withheld = tb.sanitize_document(rec("one", "TLP:RED", d=SECRET), POLICY)
         self.assertIsNotNone(withheld)
@@ -276,6 +286,8 @@ class TestSanitizeDist(unittest.TestCase):
         (rep / "selfred.html").write_text("<html><span>TLP:RED</span> " + SECRET + "</html>")  # self-declared
         (rep / "mentions.html").write_text(
             "<html><div class='tlp-banner tlp--CLEAR'>TLP: TLP:CLEAR</div><p>handling of TLP:RED data</p></html>")
+        (rep / "mixedmeta.html").write_text("<html><head><meta name='tlp' content='TLP:RED'></head><span>TLP:CLEAR</span> " + SECRET + "</html>")
+        (rep / "mixedbadge.html").write_text("<html><span>TLP:GREEN</span><span>TLP:CLEAR</span> " + SECRET + "</html>")
         (self.dist / "reports" / "2026" / "outside.html").write_text("<html>y</html>")
 
     def tearDown(self):
@@ -310,6 +322,8 @@ class TestSanitizeDist(unittest.TestCase):
         self.assertFalse((rep_dir / "bad.html").exists())
         self.assertFalse((rep_dir / "bad2.html").exists())
         self.assertFalse((rep_dir / "selfred.html").exists())
+        self.assertFalse((rep_dir / "mixedmeta.html").exists(), "explicit RED meta cannot be vetoed by CLEAR")
+        self.assertFalse((rep_dir / "mixedbadge.html").exists(), "explicit GREEN badge cannot be vetoed by CLEAR")
         self.assertTrue((rep_dir / "mentions.html").exists(),
                         "a page whose authoritative badge is CLEAR and that merely MENTIONS another label in prose stays")
         self.assertGreaterEqual(rep["report_files_removed"], 3)
