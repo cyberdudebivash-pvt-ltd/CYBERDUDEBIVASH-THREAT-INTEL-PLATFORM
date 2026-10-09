@@ -228,3 +228,29 @@ test("invalid or oversized R2 JSON fails closed", async () => {
   const oversize = { async get() { return { size: 1048577, body: "{}" }; } };
   assert.equal((await handleIntelStaticProxy({ INTEL_R2: oversize }, AI_INDEX_PATH, "GET")).status, 503);
 });
+
+
+test("P0 #725: id-only unlabelled advisory cannot bypass the edge gate", async () => {
+  const hidden = "opaque-private-evidence";
+  const r2 = fakeR2({ "intelligence/ai_index.json": [{ id: "intel--unlabelled", title: "Unknown report", description: hidden }] });
+  const response = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(JSON.stringify(await response.json()).includes(hidden), false);
+});
+
+test("P0 #725: conflicting document TLP after an ordinary classification prefix is withheld", async () => {
+  for (const classification of ["INTERNAL: TLP:RED", "INFO TLP:CLEAR; TLP:AMBER", "NOTES: TLP:GREEN"]) {
+    const r2 = fakeR2({ "intelligence/ai_index.json": { classification, sensitive: "opaque-private-evidence" } });
+    const response = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
+    assert.equal(response.status, 503, classification);
+    assert.equal(JSON.stringify(await response.json()).includes("opaque-private-evidence"), false);
+  }
+});
+
+test("P0 #725: scalar JSON is not an authorized intelligence document", async () => {
+  const r2 = fakeR2({ "intelligence/ai_index.json": "opaque-private-evidence" });
+  const response = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
+  assert.equal(response.status, 503);
+  assert.equal(JSON.stringify(await response.json()).includes("opaque-private-evidence"), false);
+});
