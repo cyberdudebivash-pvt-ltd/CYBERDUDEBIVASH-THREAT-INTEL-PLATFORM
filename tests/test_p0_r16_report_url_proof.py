@@ -91,5 +91,26 @@ class ReportUrlProofTests(unittest.TestCase):
         self.assertTrue(any("RULE 4 FAIL" in e for e in failures))
 
 
+    def test_internal_html_present_but_missing_customer_public_path_fails(self):
+        internal = Path("reports/2026/10/intel--proof-negative.html")
+        internal.parent.mkdir(parents=True, exist_ok=True)
+        internal.write_text("<!doctype html>" + ("source proof " * 80), encoding="utf-8")
+        entry = self.advisory(
+            internal_report_url="/reports/2026/10/intel--proof-negative.html",
+            report_url="/reports/2026/10/nonexistent-public-report.html",
+        )
+        failures, disposition = self.inspect(entry)
+        self.assertEqual(disposition, "FAIL")
+        self.assertTrue(any("RULE 3b FAIL" in e for e in failures))
+
+    def test_valid_size_but_invalid_markup_fails_html_guard(self):
+        path = Path("reports/2026/10/intel--proof-negative.html")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("not html, " * 100, encoding="utf-8")
+        failures, disposition = self.inspect(self.advisory())
+        self.assertEqual(disposition, "FAIL")
+        self.assertTrue(any("RULE 5 FAIL" in e for e in failures))
+
+
 if __name__ == "__main__":
     unittest.main()
