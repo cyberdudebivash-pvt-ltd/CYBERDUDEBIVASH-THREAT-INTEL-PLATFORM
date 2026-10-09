@@ -7705,7 +7705,41 @@ async function handleRequest(request, env, ctx) {
     const pvLimit  = boundedIntParam(url.searchParams.get("limit"), PREVIEW_LIMIT, 1, PREVIEW_LIMIT);
     const pvOffset = boundedIntParam(url.searchParams.get("offset"), 0, 0, PREVIEW_LIMIT);
     const window_  = (feedData.items || []).slice(0, PREVIEW_LIMIT);
-    const items    = window_.slice(pvOffset, pvOffset + pvLimit).map(i => applyTierGateV2(i, "free", null));
+    // P0 R18: legacy intel--<hex> keys are internal advisory IDs, not
+    // STIX 2.1 object IDs. Keep the legacy stix_id property unchanged for
+    // report-link/SDK compatibility, but expose separate truthful fields.
+    // Syntax alone is NOT an export-integrity or STIX conformance assertion.
+    const stixIdSyntax = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*--[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    const items = window_.slice(pvOffset, pvOffset + pvLimit).map(i => {
+      const publicItem = applyTierGateV2(i, "free", null);
+      // P0 #721: the public preview must not advertise a report link that
+      // /reports/** is contractually required to 404. Reuse the *same*
+      // evidence/publication authority, without inventing readiness or
+      // leaking internal scoring reasons into the unauthenticated teaser.
+      const publication = evaluatePublicationGate(i);
+      const reportsOrigin = /^(?:https?:\/\/intel\.cyberdudebivash\.com)?\/reports\//i;
+      if (!publication.customer_ready) {
+        if (typeof publicItem.blog_url === "string" && reportsOrigin.test(publicItem.blog_url)) {
+          publicItem.blog_url = null;
+        }
+        if (typeof publicItem.report_url === "string" && reportsOrigin.test(publicItem.report_url)) {
+          publicItem.report_url = null;
+        }
+      }
+      const candidate = typeof i.stix_id === "string" ? i.stix_id : null;
+      const syntacticallyValid = typeof candidate === "string" && stixIdSyntax.test(candidate);
+      return {
+        ...publicItem,
+        report_customer_ready: Boolean(publication.customer_ready),
+        report_publication_state: publication.customer_ready ? "CUSTOMER_READY" : "BLOCKED",
+        internal_advisory_id: typeof i.id === "string" ? i.id
+          : (typeof i.stix_id === "string" ? i.stix_id : null),
+        stix_object_id: syntacticallyValid ? candidate : null,
+        stix_object_id_validation: syntacticallyValid ? "SYNTAX_ONLY" : "UNAVAILABLE",
+        stix_id_kind: typeof i.stix_id === "string" && stixIdSyntax.test(i.stix_id)
+          ? "STIX_2_1_SYNTAX_ONLY" : "LEGACY_INTERNAL_IDENTIFIER",
+      };
+    });
     const pvNext   = pvOffset + items.length;
     // v201.0: additive-only field sourced from the new cron_worker.js
     // ingestion pipeline's cached summary (threat-indicators/summary.json,

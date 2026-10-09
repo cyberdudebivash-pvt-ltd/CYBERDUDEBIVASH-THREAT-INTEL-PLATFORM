@@ -16,7 +16,7 @@ function fakeKV() {
   };
 }
 const fmt = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
-async function preview(feedDate) {
+async function preview(feedDate, itemOverrides = {}) {
   globalThis.caches = { default: { match: async () => undefined, put: async () => {} } };
   const feed = {
     generated_at: feedDate,
@@ -25,6 +25,7 @@ async function preview(feedDate) {
       id: "intel--evidence-1", title: "Verified source advisory",
       tlp: "TLP:CLEAR", severity: "HIGH", risk_score: 7.5,
       description: "Evidence is source-backed", iocs: ["198.51.100.5"],
+      ...itemOverrides,
     }],
   };
   const env = {
@@ -88,4 +89,106 @@ test("healthy edge cache TTL cannot outlive approaching six-hour feed expiry", a
   assert.ok(match, "bounded cache-control required");
   assert.ok(Number(match[1]) <= 90);
   assert.ok(Number(match[1]) >= 0);
+});
+
+test("legacy internal ID is preserved for links but never asserted as a STIX 2.1 ID", async () => {
+  const { status, body } = await preview(fmt(Date.now() - 60_000), {
+    id: "intel--d2a1d301aea000a0a26860d8",
+    stix_id: "intel--d2a1d301aea000a0a26860d8",
+  });
+  assert.equal(status, 200);
+  const item = body.preview.items[0];
+  assert.equal(item.id, "intel--d2a1d301aea000a0a26860d8");
+  assert.equal(item.stix_id, item.id, "legacy alias preserved for report links");
+  assert.equal(item.internal_advisory_id, item.id);
+  assert.equal(item.stix_object_id, null);
+  assert.equal(item.stix_id_kind, "LEGACY_INTERNAL_IDENTIFIER");
+  assert.equal(item.stix_object_id_validation, "UNAVAILABLE");
+});
+
+test("a syntactically valid STIX ID is labelled format-only, never certified", async () => {
+  const id = "indicator--123e4567-e89b-42d3-a456-426614174000";
+  const { body } = await preview(fmt(Date.now() - 60_000), {
+    stix_id: id,
+    id: "intel--legacy-article",
+  });
+  const item = body.preview.items[0];
+  assert.equal(item.stix_object_id, id);
+  assert.equal(item.internal_advisory_id, "intel--legacy-article");
+  assert.equal(item.stix_id_kind, "STIX_2_1_SYNTAX_ONLY");
+  assert.equal(item.stix_object_id_validation, "SYNTAX_ONLY");
+});
+
+test("FREE preview never exposes a gated STIX object ID from a separate premium field", async () => {
+  const privateId = "malware--123e4567-e89b-42d3-a456-426614174000";
+  const { body } = await preview(fmt(Date.now() - 60_000), {
+    id: "intel--public-id",
+    stix_id: "intel--public-id",
+    stix_object_id: privateId,
+  });
+  const item = body.preview.items[0];
+  assert.equal(item.stix_object_id, null);
+  assert.equal(item.internal_advisory_id, "intel--public-id");
+  assert.equal(item.stix_id_kind, "LEGACY_INTERNAL_IDENTIFIER");
+  assert.equal(item.stix_object_id_validation, "UNAVAILABLE");
+});
+
+test("blocked report links are not advertised when the authoritative report route would refuse", async () => {
+  const internalLink = "https://intel.cyberdudebivash.com/reports/intel--blocked-article/";
+  const { status, body } = await preview(fmt(Date.now() - 60_000), {
+    id: "intel--blocked-article", stix_id: "intel--blocked-article",
+    blog_url: internalLink,
+    report_url: "/reports/2026/10/intel--blocked-article.html",
+    P25_TRUST_SCORE: 0, P23_OPERATIONAL_READINESS_PCT: 0,
+  });
+  assert.equal(status, 200);
+  const item = body.preview.items[0];
+  assert.equal(item.report_customer_ready, false);
+  assert.equal(item.report_publication_state, "BLOCKED");
+  assert.equal(item.blog_url, null);
+  assert.equal(item.report_url, null);
+  assert.equal(item.id, "intel--blocked-article", "teaser data stays visible");
+});
+
+test("blocked internal report URLs are hidden without removing external source citations", async () => {
+  const sourceLink = "https://www.example.org/security-advisory";
+  const { body } = await preview(fmt(Date.now() - 60_000), {
+    id: "intel--evidence-1",
+    blog_url: sourceLink,
+    report_url: "/reports/2026/10/intel--blocked-article.html",
+  });
+  const item = body.preview.items[0];
+  assert.equal(item.report_publication_state, "BLOCKED");
+  assert.equal(item.blog_url, sourceLink);
+  assert.equal(item.report_url, null);
+});
+
+test("genuinely customer-ready reports retain their canonical link in the preview", async () => {
+  const publicUrl = "https://intel.cyberdudebivash.com/reports/intel--goodreport/";
+  const { status, body } = await preview(fmt(Date.now() - 60_000), {
+    id: "intel--goodreport",
+    title: "CVE-2026-99999: Critical RCE in Example Product",
+    description: "A".repeat(200), severity: "CRITICAL",
+    cvss_score: 9.8, risk_score: 9.8, kev_present: true, epss_score: 0.85,
+    evidence_chain: { reliability_code: "A", source_reliability: "HIGH", source_name: "Vendor Advisory" },
+    iocs: [
+      { value: "192.0.2.1", type: "ip", response_guidance: "Block at firewall" },
+      { value: "evil.example.com", type: "domain", response_guidance: "Add to DNS sinkhole" },
+    ],
+    ioc_count: 2, ttps: ["T1190", "T1059"],
+    mitre_techniques: ["T1190", "T1059"],
+    detection_bundle: [{ type: "sigma", rule: "title: Example Detection" }],
+    executive_summary: "This is a critical vulnerability requiring immediate patching.",
+    exec_summary: "This is a critical vulnerability requiring immediate patching.",
+    source_url: "https://vendor.example.com/advisory/2026-99999",
+    confidence: 0.9,
+    apex: { ai_summary: "Example source narrative", kev_listed: true },
+    blog_url: publicUrl,
+  });
+  assert.equal(status, 200);
+  const item = body.preview.items[0];
+  assert.equal(item.report_customer_ready, true);
+  assert.equal(item.report_publication_state, "CUSTOMER_READY");
+  assert.equal(item.blog_url, publicUrl);
+  assert.deepEqual(item.iocs, [], "FREE entitlements must remain enforced");
 });
