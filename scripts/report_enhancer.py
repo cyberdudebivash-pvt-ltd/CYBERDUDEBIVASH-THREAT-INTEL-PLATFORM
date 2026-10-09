@@ -149,9 +149,10 @@ def build_kill_chain_section(item: Dict) -> str:
     if not phases:
         content = (
             f'<div style="color:{C_TEXT};font-size:12px;line-height:1.6;">'
-            f'<strong>OBSERVED ACTIVITY: NONE REPORTED.</strong> The source record describes no intrusion, actor '
-            f'activity or post-exploitation behaviour for this advisory, so no reconnaissance, installation, '
-            f'persistence, command-and-control or exfiltration activity is asserted here.</div>'
+            f'<strong>ATTACK-CHAIN EVIDENCE: NOT PROVIDED.</strong> No report-specific attack-chain '
+            f'observations are supplied in this record. This is not evidence that intrusion or '
+            f'post-exploitation activity did not occur. Installation, persistence, command-and-control '
+            f'and exfiltration are not asserted without corroborating evidence.</div>'
         )
         return _card("ATTACK-CHAIN EVIDENCE", content, icon="⚔️")
 
