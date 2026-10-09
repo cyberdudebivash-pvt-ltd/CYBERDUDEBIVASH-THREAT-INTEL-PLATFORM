@@ -132,3 +132,33 @@ test("FREE preview never exposes a gated STIX object ID from a separate premium 
   assert.equal(item.stix_id_kind, "LEGACY_INTERNAL_IDENTIFIER");
   assert.equal(item.stix_object_id_validation, "UNAVAILABLE");
 });
+
+test("blocked report links are not advertised when the authoritative report route would refuse", async () => {
+  const internalLink = "https://intel.cyberdudebivash.com/reports/intel--blocked-article/";
+  const { status, body } = await preview(fmt(Date.now() - 60_000), {
+    id: "intel--blocked-article", stix_id: "intel--blocked-article",
+    blog_url: internalLink,
+    report_url: "/reports/2026/10/intel--blocked-article.html",
+    P25_TRUST_SCORE: 0, P23_OPERATIONAL_READINESS_PCT: 0,
+  });
+  assert.equal(status, 200);
+  const item = body.preview.items[0];
+  assert.equal(item.report_customer_ready, false);
+  assert.equal(item.report_publication_state, "BLOCKED");
+  assert.equal(item.blog_url, null);
+  assert.equal(item.report_url, null);
+  assert.equal(item.id, "intel--blocked-article", "teaser data stays visible");
+});
+
+test("blocked internal report URLs are hidden without removing external source citations", async () => {
+  const sourceLink = "https://www.example.org/security-advisory";
+  const { body } = await preview(fmt(Date.now() - 60_000), {
+    id: "intel--evidence-1",
+    blog_url: sourceLink,
+    report_url: "/reports/2026/10/intel--blocked-article.html",
+  });
+  const item = body.preview.items[0];
+  assert.equal(item.report_publication_state, "BLOCKED");
+  assert.equal(item.blog_url, sourceLink);
+  assert.equal(item.report_url, null);
+});
