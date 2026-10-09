@@ -56,6 +56,7 @@ Environment variables consumed (set at job level in workflow):
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -78,6 +79,7 @@ from r2_cost_guard import (  # noqa: E402
 )
 import public_freshness_contract as _freshness  # noqa: E402
 import tlp_policy as _tlp_policy  # noqa: E402  (shared fail-closed publication authority)
+import tlp_public_boundary as _tlp_boundary  # noqa: E402  (last-mile sanitizer for every JSON object)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -291,6 +293,9 @@ def configure_awscli_performance() -> None:
     )
 
 
+_TLP_VERIFIED_COPIES: set = set()  # str paths of upload-only copies produced by the tlp_safe_* helpers
+
+
 def s3_cp(
     src: str,
     dst_bucket: str,
@@ -300,7 +305,12 @@ def s3_cp(
     cache_control: str = "no-cache, no-store, must-revalidate",
     only_show_errors: bool = True,
 ) -> bool:
-    """Upload a single file to R2. Returns True on success."""
+    """Upload a single file to R2. Returns True on success.
+
+    This is the plain PUT primitive and is also used for INTERNAL cross-run state (scripts/r2_state_sync.py), whose
+    JSON must round-trip byte-for-byte -- so it deliberately does NOT apply the public TLP boundary. Anything
+    served anonymously must go through s3_cp_public() instead (P0 #721/#725).
+    """
     cmd = [
         "aws", "s3", "cp", src, f"s3://{dst_bucket}/{dst_key}",
         "--endpoint-url", endpoint,
@@ -318,6 +328,38 @@ def s3_cp(
         result.returncode, result.stdout.strip(), result.stderr.strip(),
     )
     return False
+
+
+def s3_cp_public(
+    src: str,
+    dst_bucket: str,
+    dst_key: str,
+    endpoint: str,
+    content_type: str = "application/json",
+    cache_control: str = "no-cache, no-store, must-revalidate",
+    only_show_errors: bool = True,
+) -> bool:
+    """s3_cp for objects that are served ANONYMOUSLY (P0 #721/#725): every JSON object passes the TLP boundary
+    first unless the caller already produced a verified copy (tlp_safe_* helpers register it). An object that cannot
+    be verified is NOT uploaded and the call reports failure (callers already treat that as fatal or skip it); the
+    source file is never modified. Non-JSON keys are passed through unchanged."""
+    extra = {}
+    if content_type != "application/json":
+        extra["content_type"] = content_type
+    if cache_control != "no-cache, no-store, must-revalidate":
+        extra["cache_control"] = cache_control
+    if only_show_errors is not True:
+        extra["only_show_errors"] = only_show_errors
+    if dst_key.endswith(".json") and str(src) not in _TLP_VERIFIED_COPIES:
+        with tempfile.TemporaryDirectory(prefix="cdb-p0-tlp-s3cp-") as _td:
+            parents = _tlp_boundary.build_parent_index([
+                REPO_ROOT / "api" / "feed.json", REPO_ROOT / "data" / "feed_manifest.json",
+                REPO_ROOT / "data" / "stix" / "feed_manifest.json"])
+            safe = tlp_safe_public_json_source(Path(src), Path(_td), dst_key, parents)
+            if safe is None:
+                return False
+            return s3_cp(str(safe), dst_bucket, dst_key, endpoint, **extra)
+    return s3_cp(src, dst_bucket, dst_key, endpoint, **extra)
 
 
 def s3_get(
@@ -532,7 +574,7 @@ def upload_p40_artifacts(endpoint: str) -> int:
     uploaded_p40 = 0
     for src, dst_key in P40_SOURCE_FABRIC_FILES:
         if Path(src).exists():
-            s3_cp(src, BUCKET_DATA, dst_key, endpoint)
+            s3_cp_public(src, BUCKET_DATA, dst_key, endpoint)
             uploaded_p40 += 1
         else:
             log.warning("SKIP: %s not found (P40 endpoint will 503 until it is generated)", src)
@@ -613,7 +655,7 @@ def main_ai_tracker_only() -> None:
 
     uploaded = 0
     for src, dst_key in candidates:
-        if s3_cp(src, BUCKET_DATA, dst_key, endpoint):
+        if s3_cp_public(src, BUCKET_DATA, dst_key, endpoint):
             uploaded += 1
     log.info("OK: AI Tracker files uploaded to R2 (%d/%d)", uploaded, len(AI_TRACKER_FILES))
 
@@ -659,7 +701,7 @@ def main_governance_telemetry_only() -> None:
 
     uploaded = 0
     for src, dst_key in candidates:
-        if s3_cp(src, BUCKET_DATA, dst_key, endpoint):
+        if s3_cp_public(src, BUCKET_DATA, dst_key, endpoint):
             uploaded += 1
     log.info("OK: Governance telemetry uploaded to R2 (%d/%d)", uploaded, len(GOVERNANCE_TELEMETRY_FILES))
 
@@ -727,7 +769,7 @@ def main_weekly_brief_only() -> None:
 
     uploaded = 0
     for src, dst_key in candidates:
-        if s3_cp(src, BUCKET_DATA, dst_key, endpoint):
+        if s3_cp_public(src, BUCKET_DATA, dst_key, endpoint):
             uploaded += 1
 
     emit_summary(
@@ -795,7 +837,7 @@ def main_reports_index_only() -> None:
 
     uploaded = 0
     for src, dst_key in candidates:
-        if s3_cp(src, BUCKET_DATA, dst_key, endpoint):
+        if s3_cp_public(src, BUCKET_DATA, dst_key, endpoint):
             uploaded += 1
     log.info("OK: Reports catalog uploaded to R2 (%d/%d)", uploaded, len(candidates))
 
@@ -866,7 +908,33 @@ def tlp_safe_public_feed_source(source: Path, scratch_dir: Path) -> Path:
                          encoding="utf-8")
     log.warning("TLP R2 feed boundary: %d allowed, %d withheld; source unchanged",
                 len(publishable), len(quarantined))
+    _TLP_VERIFIED_COPIES.add(str(safe_path))
     return safe_path
+
+
+def tlp_safe_public_json_source(source: Path, scratch_dir: Path, dst_key: str, parents=None):
+    """Upload-only, boundary-sanitized copy of ANY JSON object bound for the public data bucket (P0 #721/#725).
+
+    Restricted/missing/invalid-label records are removed; a document that declares its own restricted
+    classification is replaced by a tombstone (so stale restricted bytes are overwritten, not retained).
+    Unlabelled derived documents inherit the verified decision of their parent advisory (`parents`).
+    The source is never modified. Returns the path to PUT, the original path if it does not exist (s3_cp reports
+    that exactly as before), or None when the document cannot be verified -- the caller must then withhold it.
+    """
+    if not source.exists():
+        return source
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    safe = scratch_dir / (hashlib.sha256(dst_key.encode("utf-8")).hexdigest()[:16] + ".json")
+    try:
+        res = _tlp_boundary.sanitize_json_file(source, safe, parents=parents)
+    except _tlp_boundary.BoundaryError as exc:
+        log.error("TLP boundary: %s -> %s cannot be verified; withheld from R2 (%s)", source.name, dst_key, exc)
+        return None
+    if res["removed"] or res["withheld"]:
+        log.warning("TLP boundary: %s -> %s: %d record(s) removed%s; source unchanged", source.name, dst_key,
+                    len(res["removed"]), ", document replaced by tombstone" if res["withheld"] else "")
+    _TLP_VERIFIED_COPIES.add(str(safe))
+    return safe
 
 
 def build_upload_plan() -> list[tuple[str, str]]:
@@ -984,11 +1052,24 @@ def main() -> None:
     # any R2 mutation, using the same authority as the report publisher.
     tlp_scratch = tempfile.TemporaryDirectory(prefix="cdb-p0-tlp-r2-")
     try:
+        # derived per-advisory documents (no label of their own) inherit the verified decision of their parent
+        tlp_parents = _tlp_boundary.build_parent_index([
+            REPO_ROOT / "api" / "feed.json", REPO_ROOT / "data" / "feed_manifest.json",
+            REPO_ROOT / "data" / "stix" / "feed_manifest.json"])
         guarded_pairs = []
         for candidate_src, candidate_dst_key in pairs:
             if candidate_dst_key == "api/feed.json":
                 safe = tlp_safe_public_feed_source(Path(candidate_src), Path(tlp_scratch.name))
                 guarded_pairs.append((str(safe), candidate_dst_key))
+            elif candidate_dst_key.endswith(".json"):
+                # P0 #721: every other JSON object bound for the public bucket passes the same authority
+                # (apex_v2/priority.json, intel/*_manifest.json, ai/*.json, ... -- measured: several carry
+                # restricted-labelled records or a document-level TLP:AMBER classification).
+                safe_json = tlp_safe_public_json_source(Path(candidate_src), Path(tlp_scratch.name), candidate_dst_key,
+                                                      tlp_parents)
+                if safe_json is None:
+                    continue  # unverifiable -> withheld (no PUT planned, none budgeted)
+                guarded_pairs.append((str(safe_json), candidate_dst_key))
             else:
                 guarded_pairs.append((candidate_src, candidate_dst_key))
         pairs = guarded_pairs

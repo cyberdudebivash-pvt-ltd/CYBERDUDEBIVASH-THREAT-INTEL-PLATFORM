@@ -3069,7 +3069,16 @@ def main(argv=None) -> int:
     # not brand-skipped) and still produced zero written reports -- that
     # combination means real work existed and nothing came out of it, which
     # --fail-on-zero exists to catch.
-    eligible = len(items) - excluded_by_window - skipped_brand
+    #
+    # P0 #721: items the TLP publication policy deliberately withheld are not "work that should have produced a
+    # report" either -- counting them made every window whose only fresh items were unlabelled/restricted fail
+    # the terminal gate (observed: sentinel-blogger run 37806739926, "excluded_by_window=8, 2 quarantined,
+    # written=0" -> exit 1 -> PIPELINE_HEALTH=DEGRADED). The withholding is NOT silent: it is logged per item, written
+    # to data/quality/tlp_quarantine_report.json and surfaced as a workflow annotation below.
+    eligible = len(items) - excluded_by_window - skipped_brand - len(tlp_quarantined)
+    if tlp_quarantined and written == 0:
+        print(f"::warning::TLP policy withheld {len(tlp_quarantined)} item(s) and no report was written in this "
+              f"window; nothing was published for them (see data/quality/tlp_quarantine_report.json)", flush=True)
     if args.fail_on_zero and written == 0 and eligible > 0:
         return 1
 

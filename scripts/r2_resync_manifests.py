@@ -58,7 +58,8 @@ log = logging.getLogger("sentinel.r2_resync")
 # see the P0 STALE-MANIFEST ROLLBACK GUARD comment in r2_upload.py.
 # Imported after this module's own logging.basicConfig() so r2_upload.py's
 # basicConfig() call is a no-op and log lines keep the [r2_resync] prefix.
-from r2_upload import stale_manifest_reason, tlp_safe_public_feed_source  # noqa: E402
+from r2_upload import stale_manifest_reason, tlp_safe_public_feed_source, tlp_safe_public_json_source  # noqa: E402
+from tlp_public_boundary import build_parent_index  # noqa: E402
 
 REPO_ROOT       = Path(__file__).resolve().parent.parent
 PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "184.0")
@@ -163,6 +164,8 @@ def main() -> None:
     skipped  = 0
     failed   = 0
 
+    _tlp_parents = build_parent_index([REPO_ROOT / "api" / "feed.json", REPO_ROOT / "data" / "feed_manifest.json",
+                                       REPO_ROOT / "data" / "stix" / "feed_manifest.json"])
     for src_rel, dst_key, cache_ctrl in RESYNC_FILES:
         src_path = REPO_ROOT / src_rel
         if not src_path.exists():
@@ -192,6 +195,17 @@ def main() -> None:
             except (OSError, ValueError, TypeError) as exc:
                 log.critical("P0 TLP verification refused R2 resync: %s", exc)
                 sys.exit(1)  # no raw fallback, and api/feed.json is first in RESYNC_FILES
+        elif dst_key.endswith(".json"):
+            # P0 #721: same last-mile authority for every other JSON object in the final resync.
+            with tempfile.TemporaryDirectory(prefix="cdb-p0-tlp-resync-") as tmp:
+                safe_path = tlp_safe_public_json_source(src_path, Path(tmp), dst_key, _tlp_parents)
+                if safe_path is None:
+                    log.error("SKIP: %s cannot be verified for TLP publication; withheld from R2", src_rel)
+                    skipped += 1
+                    continue
+                count = count_items(safe_path)
+                log.info("Uploading TLP-verified %s (%d items) -> R2 %s ...", src_rel, count, dst_key)
+                ok = s3_cp(str(safe_path), BUCKET_DATA, dst_key, endpoint, cache_ctrl)
         else:
             count = count_items(src_path)
             log.info("Uploading %s (%d items) -> R2 %s ...", src_rel, count, dst_key)

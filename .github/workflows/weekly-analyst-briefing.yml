@@ -83,6 +83,10 @@ jobs:
           mkdir -p .publish/data/weekly_briefings
           cp -a data/weekly_briefings/. .publish/data/weekly_briefings/
 
+          # P0 #721/#725: the staged folder goes to an anonymous destination -- apply the TLP boundary to every
+          # JSON document in it (fails the step if one cannot be verified).
+          python3 scripts/tlp_public_boundary.py --tree .publish --out /tmp/tlp_tree_report.json
+
           echo "Publication manifest:"
           find .publish/data/weekly_briefings -type f -print0 \
             | sort -z \

@@ -168,10 +168,22 @@ jobs:
       # pages:write and pushes to gh-pages, so a re-pointed tag would deploy
       # arbitrary content to the live Pages site with this token. Pinned to
       # the commit SHA @v4.8.0 currently resolves to.
+      # P0 #721/#725: this step used to publish `folder: .` -- the ENTIRE checkout (raw api/*.json feeds, reports/,
+      # data/) to the anonymous gh-pages branch, bypassing build_dist_artifact.py and every TLP control. It now
+      # stages exactly the two artifacts the step is named for and runs them through the TLP boundary first.
+      - name: "STEP 7b — Stage brief artifacts for Pages (TLP boundary)"
+        run: |
+          set -euo pipefail
+          rm -rf .publish
+          mkdir -p .publish/api/v1/intel
+          cp weekly-brief.html .publish/weekly-brief.html
+          cp api/v1/intel/weekly_brief.json .publish/api/v1/intel/weekly_brief.json
+          python3 scripts/tlp_public_boundary.py --tree .publish --out /tmp/tlp_tree_report.json
+
       - name: "STEP 8 — Deploy brief HTML to GitHub Pages"
         uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4.9.0
         with:
-          folder: .
+          folder: .publish
           branch: gh-pages
           clean: false
           single-commit: false

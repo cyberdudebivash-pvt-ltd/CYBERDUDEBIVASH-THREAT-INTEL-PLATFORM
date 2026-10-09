@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 from urllib.parse import urlsplit
@@ -57,6 +58,48 @@ _DEFAULT_POLICY: Dict[str, Any] = {
     "legacy_white_treated_as_clear": False,
     "first_party_public_sources": [],
 }
+
+
+_TLP_WORD = re.compile(r"\bTLP\b", re.IGNORECASE)
+_LBL = r"(?:CLEAR|WHITE|GREEN|AMBER(?:\s*\+\s*STRICT)?|RED)"
+_TLP_TOKEN = re.compile(
+    r"\bTLP\s*[:\-]?\s*(?:TLP\s*[:\-]?\s*)*(?P<first>[A-Za-z]+(?:\s*\+\s*STRICT)?)"
+    r"(?P<more>(?:\s*(?:[/,;|&]|\band\b|\bor\b)\s*(?:TLP\s*[:\-]?\s*)?" + _LBL + r"\b)*)", re.IGNORECASE)
+_MORE_LABEL = re.compile(_LBL, re.IGNORECASE)
+
+
+def normalize_label_text(text: str) -> str:
+    """NFKC-normalise and drop invisible/format characters (zero-width joiners, BOMs, bidi controls) so a label cannot
+    be disguised from the scanners.  Look-alike letters from other scripts survive normalisation on purpose: they
+    then fail to parse as a valid label and are denied."""
+    t = unicodedata.normalize("NFKC", text)
+    return "".join(ch for ch in t if unicodedata.category(ch) not in ("Cf", "Cc") or ch in "\t\n\r ")
+
+
+def scan_tlp_tokens(text: Any, lenient: bool = False) -> List[str]:
+    """Every TLP marking found in free text, in order, as canonical labels ('TLP:CLEAR', ...) or 'INVALID' for a
+    marking that is not a recognised label (e.g. a look-alike).  The WORD 'TLP' with nothing parseable after it also
+    yields 'INVALID'.  Never returns an empty list for text that mentions TLP at all.
+
+    lenient=True is for running prose (HTML body text): only markings made of the label vocabulary are reported, so
+    ordinary phrases such as "TLP Banner" are not mistaken for an unrecognised marking."""
+    if not isinstance(text, str):
+        return []
+    t = normalize_label_text(text)
+    if not _TLP_WORD.search(t):
+        return []
+    out: List[str] = []
+    for m in _TLP_TOKEN.finditer(t):
+        if lenient and not re.fullmatch(_LBL, m.group("first").strip(), re.IGNORECASE):
+            continue
+        # "TLP:CLEAR/RED", "TLP:CLEAR, AMBER", "TLP:GREEN or CLEAR": every joined label is its own marking
+        words = [m.group("first")] + [x.group(0) for x in _MORE_LABEL.finditer(m.group("more") or "")]
+        for word in words:
+            parsed = parse_label("TLP:" + re.sub(r"\s+", "", word.upper()))
+            out.append(parsed["label"] if parsed["status"] in (VALID, LEGACY) else "INVALID")
+    if lenient:
+        return out
+    return out or ["INVALID"]
 
 
 def load_policy(path: Path = POLICY_PATH) -> Dict[str, Any]:
@@ -152,6 +195,22 @@ def publication_decision(item: Any, policy: Dict[str, Any] | None = None) -> Dic
                 "reason_code": "OK", "reason": ""}
 
     # Most-restrictive-wins: an upstream/secondary label may only tighten the decision, never loosen it.
+    # Free-text classification fields (e.g. "TLP:CLEAR; TLP:RED"): every marking counts, any restriction or any
+    # CONFLICT between markings denies -- the first token never decides.
+    for key in ("classification",):
+        toks = scan_tlp_tokens(it.get(key))
+        if not toks:
+            continue
+        distinct = set(toks)
+        if distinct - {"TLP:CLEAR"}:
+            bad = distinct - {"TLP:CLEAR"}
+            if bad == {"TLP:WHITE"} and pol.get("legacy_white_treated_as_clear") and len(distinct) == 1:
+                continue
+            if "INVALID" in bad:
+                return deny("INVALID_LABEL", f"{key} carries an unrecognised TLP marking")
+            if distinct & {"TLP:WHITE"} and not pol.get("legacy_white_treated_as_clear"):
+                return deny("LEGACY_LABEL_UNMIGRATED", f"{key} carries TLP:WHITE (TLP v1) not migrated by the operator")
+            return deny("RESTRICTED_UPSTREAM_LABEL", f"{key} carries a restricted or conflicting TLP marking")
     for raw in _upstream_labels(it):
         q = parse_label(raw)
         if q["status"] == VALID and q["label"] != "TLP:CLEAR":

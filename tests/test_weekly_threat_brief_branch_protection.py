@@ -37,11 +37,13 @@ def test_weekly_threat_brief_keeps_shared_writer_concurrency():
 def test_weekly_threat_brief_pages_action_is_commit_pinned():
     doc = _load_workflow()
     steps = (doc["jobs"]["generate-brief"].get("steps") or [])
-    deploy = next(step for step in steps if step.get("name") == "STEP 7 — Deploy brief to GitHub Pages")
-    uses = deploy.get("uses", "")
-    assert uses.startswith("JamesIves/github-pages-deploy-action@")
-    ref = uses.split("@", 1)[1]
-    assert re.fullmatch(r"[0-9a-f]{40}", ref)
+    # Locate every Pages deploy step by the action it uses, not by a step title that drifts when steps are
+    # renumbered (the title lookup made this test fail on main with StopIteration, silently skipping the pin check).
+    deploys = [step for step in steps if str(step.get("uses", "")).startswith("JamesIves/github-pages-deploy-action@")]
+    assert deploys, "weekly-threat-brief must contain a gh-pages deploy step"
+    for deploy in deploys:
+        ref = deploy["uses"].split("@", 1)[1].split()[0]
+        assert re.fullmatch(r"[0-9a-f]{40}", ref), deploy.get("name")
 
 
 

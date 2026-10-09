@@ -73,7 +73,7 @@ class TestInWindowMissingStillFails(_ChdirFixture):
 
     def test_in_window_missing_report_is_fail(self):
         entry = {
-            "id": "intel--freshmissing",
+            "id": "intel--freshmissing", "tlp": "TLP:CLEAR",  # P0 #721: an unlabelled advisory is policy-withheld, not "missing"
             "report_url": "/reports/2026/09/intel--freshmissing.html",
             "processed_at": _iso(self.now - timedelta(hours=1)),  # 1h old, well inside 24h window
         }
@@ -85,7 +85,7 @@ class TestInWindowMissingStillFails(_ChdirFixture):
 
     def test_exactly_at_window_boundary_still_treated_as_in_window(self):
         entry = {
-            "id": "intel--boundary",
+            "id": "intel--boundary", "tlp": "TLP:CLEAR",
             "report_url": "/reports/2026/09/intel--boundary.html",
             "processed_at": _iso(self.now - timedelta(hours=24)),  # exactly at the boundary
         }
@@ -219,7 +219,7 @@ class TestValidateAllReportsEndToEnd(_ChdirFixture):
                 "processed_at": _iso(datetime.now(timezone.utc) - timedelta(days=60)),
             },
             {
-                "id": "intel--freshmissing",
+                "id": "intel--freshmissing", "tlp": "TLP:CLEAR",  # P0 #721: labelled, so a missing report is a real defect
                 "report_url": "/reports/2026/09/intel--freshmissing.html",
                 "processed_at": _iso(datetime.now(timezone.utc) - timedelta(hours=1)),
             },

@@ -87,11 +87,23 @@ def test_manifests_withhold_every_non_clear_item(tmp_path):
     assert json.loads(existing.read_text())["count"] == 1
 
 
-def test_manifests_refuse_to_emit_when_everything_is_withheld(tmp_path):
-    result, existing = _run_manifests(tmp_path, [_adv(1), _adv(2, tlp="TLP:RED")])
+def test_all_withheld_replaces_stale_public_bundles_with_tombstones_then_fails(tmp_path):
+    """P0 #725: exiting without a write left the previous (possibly restricted) bundles served. Deny-first instead."""
+    result, existing = _run_manifests(tmp_path, [_adv(1), _adv(2, tlp="TLP:RED", description="LEAKMARKER-BODY")])
     assert result.returncode == 1
-    assert "withheld by the TLP publication policy" in result.stdout
-    assert existing.read_text() == '{"last_known_good":true}', "previous artifacts must not be modified"
+    assert "REPLACED by empty tombstones" in result.stdout
+    out = existing.parent
+    for name in ("latest", "latest_pro", "top10", "apex"):
+        payload = json.loads((out / f"{name}.json").read_text())
+        assert payload["count"] == 0 and payload["items"] == []
+        assert payload["tlp_boundary"]["withheld_all"] is True
+        assert payload["sha256"]
+    reg = json.loads((out / "manifest.json").read_text())
+    assert set(reg["bundles"]) == {"latest", "latest_pro", "top10", "apex"}
+    assert all(b["count"] == 0 for b in reg["bundles"].values())
+    blob = "".join(p.read_text() for p in out.glob("*.json"))
+    assert "last_known_good" not in blob, "the stale bundle was overwritten"
+    assert "LEAKMARKER-BODY" not in blob
 
 
 def test_manifests_refuse_when_policy_module_unavailable(tmp_path):
