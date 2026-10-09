@@ -314,9 +314,10 @@ def _validate_one(
         if candidate.startswith("//"):
             failures.append(f"[{intel_id}] RULE 2 FAIL: scheme-relative {field} forbidden")
             return failures, "FAIL"
-        parsed = urlsplit(candidate)
-        if parsed.scheme or parsed.netloc:
-            if not (
+        try:
+            parsed = urlsplit(candidate)
+            external = bool(parsed.scheme or parsed.netloc)
+            approved = (
                 parsed.scheme == "https"
                 and parsed.hostname == "intel.cyberdudebivash.com"
                 and parsed.username is None
@@ -325,9 +326,12 @@ def _validate_one(
                 and parsed.path.startswith("/reports/")
                 and not parsed.query
                 and not parsed.fragment
-            ):
-                failures.append(f"[{intel_id}] RULE 2 FAIL: unapproved {field} origin/path: {candidate!r}")
-                return failures, "FAIL"
+            ) if external else True
+        except ValueError:
+            approved = False  # malformed host/port is never a valid report URL
+        if not approved:
+            failures.append(f"[{intel_id}] RULE 2 FAIL: unapproved {field} origin/path: {candidate!r}")
+            return failures, "FAIL"
 
     # P0 R16: never return PASS for an HTTPS URL alone. The old early
     # return bypassed RULE 3/4/5 entirely and produced 'PASS (0 bytes)'
