@@ -61,9 +61,8 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import time
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -87,7 +86,7 @@ REPORT_PATH     = REPO / "data" / "quality" / "r2_verify_report.json"
 # sync_meta.json: r2_upload.py writes to /tmp/sync_meta.json before uploading.
 # Check /tmp/ first, then fallback repo paths.
 SYNC_META_PATHS = [
-    Path("/tmp/sync_meta.json"),
+    Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / "sentinel-apex-r2" / "sync_meta.json",
     REPO / "data" / "quality" / "r2_sync_meta.json",
     REPO / "data" / "sync_meta.json",
 ]
@@ -276,32 +275,9 @@ def _boto3_head_object(bucket: str, key: str) -> Optional[dict]:
         return None
 
 
-def _http_head_diagnostic(url: str) -> Optional[dict]:
-    """
-    HTTP HEAD for diagnostic/logging only -- NEVER used for hard-fail decisions.
-    HTTP 400 and 403 from R2 = private bucket (auth required) -- EXPECTED.
-    """
-    try:
-        req = urllib.request.Request(url, method="HEAD")
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-            return {
-                "status":         resp.status,
-                "content_length": int(resp.headers.get("Content-Length") or 0),
-                "etag":           (resp.headers.get("ETag") or "").strip('"'),
-            }
-    except urllib.error.HTTPError as e:
-        if e.code in (400, 403):
-            log.info(
-                "HTTP HEAD %s -> %d (private bucket, auth required -- EXPECTED for R2). "
-                "S3 API is used for actual verification.",
-                url, e.code,
-            )
-        else:
-            log.warning("HTTP HEAD %s -> %d (diagnostic only)", url, e.code)
-        return {"status": e.code, "content_length": 0, "etag": ""}
-    except Exception as e:
-        log.info("HTTP HEAD diagnostic unavailable: %s", e)
-        return None
+# No unauthenticated HTTP diagnostic fallback. Public HEAD/403 cannot
+# establish R2 object identity, and avoiding URL opening here also avoids
+# unnecessary external calls in a mandatory authenticated verification step.
 
 
 # ---------------------------------------------------------------------------
@@ -420,13 +396,7 @@ def verify_r2_object() -> tuple[bool, str, dict]:
         head = _boto3_head_object(BUCKET_DATA, MANIFEST_KEY)
 
     if head is None:
-        # Both S3 API methods failed. Run HTTP HEAD as diagnostic only.
-        if R2_ENDPOINT:
-            diag_url = f"{R2_ENDPOINT}/{BUCKET_DATA}/{MANIFEST_KEY}"
-            details["http_diagnostic"] = _http_head_diagnostic(diag_url)
-        # HTTP 400/403 from a private bucket merely proves authentication
-        # is required. It cannot authenticate an object, its hash or count;
-        # therefore it must NEVER be a substitute for an S3 API HEAD.
+        # Authenticating HEAD failed. Do not substitute a public HTTP status.
         details["reason_code"] = "AUTHENTICATED_READ_UNAVAILABLE"
         return (
             False,
