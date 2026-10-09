@@ -241,6 +241,28 @@ def _compute_state(health: str, reason_code: str) -> str:
     return _HEALTH_TO_STATE.get(health, "UNKNOWN")
 
 
+def _manifest_rows(raw: Any) -> List[Dict[str, Any]]:
+    """Read the same canonical manifest envelopes accepted by Stage 3.9.
+
+    Never treat a populated object-wrapped manifest as an empty source. Do
+    not invent records for missing/malformed manifests: keep zero output and
+    the downstream G10 hard release blocker until authentic evidence exists.
+    """
+    if isinstance(raw, list):
+        rows = raw
+    elif isinstance(raw, dict):
+        rows = None
+        for key in ("advisories", "reports", "items", "data", "entries", "intel", "feed"):
+            if isinstance(raw.get(key), list):
+                rows = raw[key]
+                break
+        if rows is None:
+            return []
+    else:
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
 def compute_health() -> Dict[str, Any]:
     registry = load_registry()
     sources = all_sources()
@@ -248,9 +270,11 @@ def compute_health() -> Dict[str, Any]:
     feed_state = _load_json_safe(FEED_STATE_PATH) or {}
     feed_state_sources: Dict[str, Any] = feed_state.get("sources", {})
 
-    manifest = _load_json_safe(MANIFEST_PATH) or []
-    if not isinstance(manifest, list):
-        manifest = []
+    # R24: Stage 3.9 and the report writer support envelope-shaped
+    # manifests. The source-health aggregator formerly discarded all those
+    # records, incorrectly reporting NO_DATA even when genuine evidence was
+    # present. This is format alignment, not an override of source-age gates.
+    manifest = _manifest_rows(_load_json_safe(MANIFEST_PATH))
 
     attck_ref = _load_json_safe(ATTCK_PATH)
 
@@ -286,7 +310,15 @@ def compute_health() -> Dict[str, Any]:
 
         bucket = per_source.setdefault(matched_id, {"manifest_count": 0, "latest_ts": None})
         bucket["manifest_count"] += 1
-        item_ts = _parse_ts(entry.get("timestamp") or entry.get("published_at") or entry.get("processed_at"))
+        # An ingestion/processing clock is not evidence of a newly published
+        # threat. Prefer the original source publication clock and never
+        # treat processed_at (or generic pipeline timestamp) as a fresh
+        # upstream event when source time is missing.
+        item_ts = _parse_ts(
+            entry.get("source_published_at")
+            or entry.get("_source_published_at")
+            or entry.get("published_at")
+        )
         if item_ts and (bucket["latest_ts"] is None or item_ts > bucket["latest_ts"]):
             bucket["latest_ts"] = item_ts
 
