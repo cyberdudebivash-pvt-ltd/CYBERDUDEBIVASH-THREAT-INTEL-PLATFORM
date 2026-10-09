@@ -62,3 +62,27 @@ test("the Worker-local fallback renderer still exists and still serves a live re
     "on the fly and never persisted, so it must not be cached as if it were the canonical artifact)."
   );
 });
+
+
+test("P0 #725: all Worker report R2 reads are dominated by explicit CLEAR TLP and resolvable advisory gates", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  const start = source.indexOf('if (path.startsWith("/reports/"))');
+  assert.ok(start >= 0, "Worker report route must exist");
+  const block = source.slice(start, source.indexOf("env.REPORTS_R2.get(", start));
+  assert.match(block, /const gateItem\s*=\s*gateSlug\s*\?\s*await findItemBySlug\(/);
+  assert.match(block, /if \(!gateItem\s*\|\|\s*!publicTlpJsonVerified\(gateItem\)/);
+  assert.match(block, /Object\.hasOwn\(gateItem,\s*"tlp"\)/);
+  assert.match(block, /Object\.hasOwn\(gateItem,\s*"tlp_label"\)/);
+  assert.match(block, /"anonymous_publication_unverified"/);
+  assert.match(block, /"Cache-Control":\s*"no-store"/);
+  const r2Body = source.slice(start, source.indexOf("  // --- /api/", start) > start
+    ? source.indexOf("  // --- /api/", start) : start + 16000);
+  assert.match(r2Body, /const obj = await env\.REPORTS_R2\.get\(key\)/,
+    "canonical direct R2 path remains protected");
+});
+
+test("P0 #725: source no longer treats unresolved historical reports as implicitly publishable", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  assert.doesNotMatch(source, /older report that has aged out of the "latest" windows this\s+function searches\).*?non-blocking/s);
+  assert.match(source, /Legacy R2 pages lacking authoritative public TLP provenance/);
+});
