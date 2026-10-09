@@ -80,7 +80,7 @@ def verify_bundle(root: Path, expected_deployment_sha: str) -> dict[str, Any]:
         errors.append("Evidence deployment SHA does not equal checked deployment")
     cases = index["cases"]
     cves = [row.get("cve") for row in cases if isinstance(row, dict)]
-    if len(cases) != 8 or len(cves) != 8 or set(cves) != REQUIRED_CVES or len(set(cves)) != 8:
+    if (len(cases) != 8 or len(cves) != 8 or\n            any(not isinstance(cve, str) for cve in cves) or\n            set(cves) != REQUIRED_CVES or len(set(cves)) != 8):
         errors.append("Eight unique, exact target CVE records are required")
     seen: set[str] = set()
     completed = 0
