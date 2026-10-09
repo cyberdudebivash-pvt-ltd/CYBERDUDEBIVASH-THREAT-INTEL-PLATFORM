@@ -281,7 +281,60 @@ def _validate_one(
     failures: List[str] = []
     intel_id = (entry.get("id") or entry.get("stix_id") or f"entry[{idx}]").strip()
 
-    # Resolve best available path: explicit URL first, then id-derived fallback
+    # Validate all untrusted manifest locators BEFORE filesystem resolution.
+    # _resolve_report_path() calls os.path.exists() for its current-month
+    # fallback; a path containing ../ must never reach that operation.
+    from urllib.parse import urlsplit
+    if intel_id in (".", "..") or any(marker in intel_id for marker in ("/", "\\", "\0")):
+        failures.append(f"[{intel_id}] RULE 2 FAIL: unsafe advisory id")
+        return failures, "FAIL"
+
+    for field in ("report_url", "internal_report_url"):
+        raw = entry.get(field)
+        if raw is not None and not isinstance(raw, str):
+            failures.append(f"[{intel_id}] RULE 2 FAIL: invalid {field} type")
+            return failures, "FAIL"
+        candidate = (raw or "").strip()
+        if not candidate:
+            continue
+        if candidate.startswith("//"):
+            failures.append(f"[{intel_id}] RULE 2 FAIL: scheme-relative {field} forbidden")
+            return failures, "FAIL"
+        try:
+            parsed = urlsplit(candidate)
+            external = bool(parsed.scheme or parsed.netloc)
+            approved_origin = (
+                parsed.scheme == "https"
+                and parsed.hostname == "intel.cyberdudebivash.com"
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.port is None
+            ) if external else True
+            # Restrict relative and absolute URLs to the original report
+            # directory. Refuse encoded dot segments, backslashes, control
+            # characters, URL parameters, and path traversal even if a
+            # malicious hostname includes the company name.
+            report_path = parsed.path.lstrip("/")
+            segments = report_path.split("/")
+            approved_path = (
+                report_path.startswith("reports/")
+                and report_path.endswith(".html")
+                and len(segments) >= 4
+                and all(part not in ("", ".", "..") for part in segments)
+                and "%" not in candidate
+                and "\\" not in candidate
+                and not any(ord(c) < 32 for c in candidate)
+                and not parsed.query and not parsed.fragment
+            )
+            approved = approved_origin and approved_path
+        except ValueError:
+            approved = False  # malformed host/port is not a valid report URL
+        if not approved:
+            failures.append(f"[{intel_id}] RULE 2 FAIL: unapproved {field} origin/path: {candidate!r}")
+            return failures, "FAIL"
+
+    # Resolve only after the safety checks above, then apply all original
+    # existence, report-window, TLP, HTML-size and content gates unchanged.
     _url, fs_path = _resolve_report_path(entry)
     explicit_url = (entry.get("internal_report_url") or entry.get("report_url") or "").strip()
 
@@ -293,45 +346,10 @@ def _validate_one(
         )
         return failures, "FAIL"
 
-    # v160.5e HARDENING: Skip STIX-bundle-only entries (no HTML report).
-    # Manifest entries with NEITHER report_url NOR internal_report_url are raw
-    # STIX bundle index records produced by run_pipeline.py. They never have
-    # associated HTML report files -- HTML reports use intel--{hex} IDs while
-    # STIX bundles use bundle--{uuid}. Derived fs_path will always be absent.
-    # Condition: no explicit URL AND local file does not exist at derived path.
-    # This preserves full RULE 3/4/5 checks for genuine intel-- advisory reports.
+    # v160.5e: STIX bundle-only records with no HTML report remain skipped.
+    # Never skip an explicitly linked HTML report whose file is missing.
     if not explicit_url and not os.path.exists(fs_path):
-        return failures, "SKIP"  # STIX bundle-only record, no HTML report expected
-
-    # RULE 2: validate the actual URL origin, not an arbitrary brand-name
-    # substring (which an attacker-controlled host/path can contain).
-    # A URL is a *locator*, never proof of a published, validated report.
-    from urllib.parse import urlsplit
-    for field in ("report_url", "internal_report_url"):
-        candidate = (entry.get(field) or "").strip()
-        if not candidate:
-            continue
-        if candidate.startswith("//"):
-            failures.append(f"[{intel_id}] RULE 2 FAIL: scheme-relative {field} forbidden")
-            return failures, "FAIL"
-        try:
-            parsed = urlsplit(candidate)
-            external = bool(parsed.scheme or parsed.netloc)
-            approved = (
-                parsed.scheme == "https"
-                and parsed.hostname == "intel.cyberdudebivash.com"
-                and parsed.username is None
-                and parsed.password is None
-                and parsed.port is None
-                and parsed.path.startswith("/reports/")
-                and not parsed.query
-                and not parsed.fragment
-            ) if external else True
-        except ValueError:
-            approved = False  # malformed host/port is never a valid report URL
-        if not approved:
-            failures.append(f"[{intel_id}] RULE 2 FAIL: unapproved {field} origin/path: {candidate!r}")
-            return failures, "FAIL"
+        return failures, "SKIP"
 
     # P0 R16: never return PASS for an HTTPS URL alone. The old early
     # return bypassed RULE 3/4/5 entirely and produced 'PASS (0 bytes)'
