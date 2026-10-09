@@ -2115,6 +2115,7 @@ jobs:
       # Prevents silent data loss between R2 upload and cache invalidation.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.6 - R2 Upload Integrity Verifier (HARD FAIL)"
+        id: r2-manifest-integrity
         timeout-minutes: 5
         run: python3 scripts/r2_upload_verifier.py
 
@@ -2209,12 +2210,14 @@ jobs:
         run: python3 scripts/report_engine_consistency_gate.py || true
 
       # -----------------------------------------------------------------------
-      # STAGE 3.7: BUST WORKER KV CACHE -- ALWAYS RUNS
-      # Safe to run even if R2 upload had issues. Exit 0 guaranteed.
+      # STAGE 3.7: BUST WORKER KV CACHE ONLY AFTER R2 VERIFIED
+      # Run #2520 proved a failed integrity step was followed by an
+      # unconditional cache invalidation. Never expose unverified R2 bytes
+      # by busting cache after a failed, skipped or cancelled verifier.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.7 - Bust Worker KV Cache"
         timeout-minutes: 3
-        if: always()
+        if: ${{ !cancelled() && steps.r2-manifest-integrity.outcome == 'success' }}
         run: python3 scripts/bust_kv_cache.py || true
 
       # -----------------------------------------------------------------------
@@ -3460,7 +3463,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "STAGE 4.1 - Final R2 Full Sync (v184.0 -- post-git-push complete feed)"
         timeout-minutes: 5
-        if: always()
+        if: ${{ !cancelled() && steps.r2-manifest-integrity.outcome == 'success' && steps.pipeline_stage_1_3.outcome == 'success' }}
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
@@ -3515,7 +3518,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "Upload Intel State to R2 (final, post-enrichment)"
         timeout-minutes: 5
-        if: ${{ always() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' }}
+        if: ${{ !cancelled() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' && steps.r2-manifest-integrity.outcome == 'success' }}
         continue-on-error: true
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -4104,14 +4107,14 @@ jobs:
       # independent of whatever GitHub's Pages backend reports about its own build.
       - name: "STAGE 4.9.9 - Capture pre-deploy timestamp"
         id: pre-deploy-ts
-        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' && steps['p0-publisher-verdict'].conclusion == 'success' }}
+        if: ${{ !cancelled() && steps.r2-manifest-integrity.outcome == 'success' && steps.verify-dist.conclusion == 'success' && steps['p0-publisher-verdict'].conclusion == 'success' }}
         run: echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: "STAGE 5 - Deploy to GitHub Pages"
         # v184.0: deploy only after 5.4.7 verified dist/ integrity — never deploy
         # a broken or incomplete artifact. This gate ensures convergence validator
         # will see a fully-populated gh-pages with all report files.
-        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' && steps['p0-publisher-verdict'].conclusion == 'success' }}
+        if: ${{ !cancelled() && steps.r2-manifest-integrity.outcome == 'success' && steps.verify-dist.conclusion == 'success' && steps['p0-publisher-verdict'].conclusion == 'success' }}
         timeout-minutes: 15
         # v184.8 FIX: was on the floating @v4.8.0 tag -- this job holds
         # pages:write and pushes to gh-pages, so a re-pointed tag would deploy
@@ -4137,7 +4140,7 @@ jobs:
       # actually live" is itself the actionable signal this step exists to surface.
       # -----------------------------------------------------------------------
       - name: "STAGE 5.4.9.1 - GitHub Pages Deployment Freshness Gate (v184.1)"
-        if: ${{ !cancelled() && steps.verify-dist.conclusion == 'success' && steps['p0-publisher-verdict'].conclusion == 'success' }}
+        if: ${{ !cancelled() && steps.r2-manifest-integrity.outcome == 'success' && steps.verify-dist.conclusion == 'success' && steps['p0-publisher-verdict'].conclusion == 'success' }}
         timeout-minutes: 14
         env:
           PLATFORM_URL: https://intel.cyberdudebivash.com
