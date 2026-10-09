@@ -35,7 +35,7 @@ test("derived Apex and AI-summary advisory rows retain the explicitly approved s
     assert.equal(rows[0].tlp, "TLP:CLEAR");
     assert.equal(rows[0].classification, "TLP:CLEAR");
     // FREE remains FREE, regardless of the approved TLP label.
-    assert.equal(res.body._tier, "free");
+    assert.equal(res.body._tier, "FREE");
   }
 });
 
