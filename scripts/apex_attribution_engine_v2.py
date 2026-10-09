@@ -522,15 +522,60 @@ THRESHOLD       = 60   # Min confidence to name a specific actor
 # SCORING ENGINE
 # =============================================================================
 
+# P0 2026-10-09 (sentinel-blogger #2519): incoming ATT&CK TTPs may
+# legitimately be structured dictionaries, not just strings. The previous
+# " ".join(ttps) crashed the whole attribution subprocess, and S3 attempted
+# set(dict), which would also raise TypeError once the first failure was fixed.
+# Extract only explicit, syntactically valid ATT&CK technique IDs for scoring;
+# never guess a technique, flatten a whole dict, or award attribution points
+# for an unrecognized value.
+_ATTACK_TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$", re.IGNORECASE)
+_ATTACK_ID_KEYS = ("technique_id", "mitre_technique_id", "attack_id", "mitre_id", "id")
+
+
+def _technique_ids(values: object) -> set[str]:
+    """Return explicitly supplied canonical ATT&CK IDs from mixed string/dict lists."""
+    if not isinstance(values, list):
+        return set()
+    out: set[str] = set()
+    for entry in values:
+        candidates = [entry] if isinstance(entry, str) else (
+            [entry.get(k) for k in _ATTACK_ID_KEYS] if isinstance(entry, dict) else [])
+        for candidate in candidates:
+            if not isinstance(candidate, str):
+                continue
+            normalized = candidate.strip().upper()
+            if _ATTACK_TECHNIQUE_ID_RE.fullmatch(normalized):
+                out.add(normalized)
+                break
+    return out
+
+
+def _safe_text_list(values: object, dict_keys: tuple[str, ...] = ()) -> str:
+    """Avoid str(dict) and implicit actor attribution from untrusted nested JSON."""
+    if not isinstance(values, list):
+        return ""
+    found: list[str] = []
+    for value in values:
+        if isinstance(value, str):
+            found.append(value)
+        elif isinstance(value, dict):
+            for key in dict_keys:
+                candidate = value.get(key)
+                if isinstance(candidate, str):
+                    found.append(candidate)
+    return " ".join(found)
+
+
 def _text(item: dict) -> str:
-    """All searchable text from a feed item (lowercase)."""
+    """Searchable text from a feed item; mixed dict/string TTP lists are safe."""
     parts = [
         item.get("title", ""),
         item.get("description", ""),
         item.get("summary", ""),
-        " ".join(item.get("tags", []) if isinstance(item.get("tags"), list) else []),
-        " ".join(item.get("ttps", []) if isinstance(item.get("ttps"), list) else []),
-        " ".join(item.get("cve_ids", []) if isinstance(item.get("cve_ids"), list) else []),
+        _safe_text_list(item.get("tags")),
+        _safe_text_list(item.get("ttps"), _ATTACK_ID_KEYS + ("technique", "name")),
+        _safe_text_list(item.get("cve_ids")),
         item.get("threat_type", ""),
         item.get("actor_tag", ""),
         item.get("source_url", ""),
@@ -565,8 +610,8 @@ def _score_actor(text: str, item: dict, actor_id: str, actor: dict) -> tuple[int
             break
 
     # S3: ATT&CK technique overlap
-    item_ttps = set(item.get("ttps", []) + item.get("actor_ttps", []))
-    actor_ttps = set(actor.get("ttps", []))
+    item_ttps = _technique_ids(item.get("ttps")) | _technique_ids(item.get("actor_ttps"))
+    actor_ttps = _technique_ids(actor.get("ttps"))
     if item_ttps and actor_ttps:
         overlap_count = len(item_ttps & actor_ttps)
         if overlap_count:
