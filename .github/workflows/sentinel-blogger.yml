@@ -833,6 +833,7 @@ jobs:
       # Safe: deterministic, idempotent, non-destructive to existing fields.
       # -----------------------------------------------------------------------
       - name: "STAGE 3.1 - APEX AI Feed Enrichment (inject apex_ai into all items)"
+        id: p0_apex_enrichment
         timeout-minutes: 8
         run: python3 scripts/enrich_feed_apex.py
 
@@ -4226,6 +4227,7 @@ jobs:
       # Hard fail on regression detection.
       # -----------------------------------------------------------------------
       - name: "STAGE 5.6 - Regression Test Suite"
+        id: p0_regression_suite
         # v184.2 (2026-09-21): runs even when an EARLIER step failed.
         # STAGE 5.4.9.1 (Pages Freshness Gate) hard-fails on a GitHub Pages
         # publish/CDN problem -- external infrastructure this repo does not
@@ -4481,8 +4483,14 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "STAGE 5.8.1c - Deployment Convergence Engine (v184.0 Enterprise Grade)"
         timeout-minutes: 30
-        if: always()  # v184.0 FIX: Run even when Stage 1-3 fails so deployment_confidence_score.json is always written and Domain 4 governance WARN is eliminated
+        # R20: preserve a diagnostic artifact on mandatory upstream failure
+        # WITHOUT spending another 80 HEAD/GET calls or 600-second retry budget.
+        # NEVER confer readiness when the feed or hard regression gate failed.
+        if: ${{ !cancelled() }}
         env:
+          UPSTREAM_PIPELINE_OUTCOME: ${{ steps.pipeline_stage_1_3.outcome }}
+          UPSTREAM_APEX_OUTCOME: ${{ steps.p0_apex_enrichment.outcome }}
+          UPSTREAM_REGRESSION_OUTCOME: ${{ steps.p0_regression_suite.outcome }}
           PAGES_BASE_URL: "https://intel.cyberdudebivash.com"
           CONVERGENCE_PHASE1_WAIT: "90"
           CONVERGENCE_PHASE2_WAIT: "45"
@@ -4497,6 +4505,20 @@ jobs:
           MAX_REPORT_PROBES: "15"
           HISTORICAL_PROBE_COUNT: "5"
         run: |
+          # R20: no convergence network probes after failed/skipped mandatory
+          # pipeline, public feed enrichment, or anti-regression gates.
+          if [ "$UPSTREAM_PIPELINE_OUTCOME" != 'success' ] || \
+             [ "$UPSTREAM_APEX_OUTCOME" != 'success' ] || \
+             [ "$UPSTREAM_REGRESSION_OUTCOME" != 'success' ]; then
+            python3 scripts/p0_r20_convergence_preflight.py \
+              --pipeline "$UPSTREAM_PIPELINE_OUTCOME" \
+              --apex "$UPSTREAM_APEX_OUTCOME" \
+              --regression "$UPSTREAM_REGRESSION_OUTCOME" \
+              --output deployment_confidence_score.json
+            echo "CONVERGENCE_EXIT_CODE=1" >> "$GITHUB_ENV"
+            echo "::error::P0 UPSTREAM_BLOCKED: deployment convergence not attempted; mandatory source/feed regressions failed or skipped."
+            exit 1
+          fi
           set +e
           # v184.0 FIX: 28-min hard deadline — prevents GitHub Actions from killing
           # the process at the 30-min step timeout (unhandled exit → hard fail).
@@ -4891,7 +4913,10 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "Upload Intel State to R2 (post-manifest-repair, final)"
         timeout-minutes: 5
-        if: ${{ always() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' }}
+        # R20: late upload is a production mutation. Pipeline success alone
+        # is insufficient if feed enrichment/regression subsequently failed.
+        # Do not overwrite last-known-good R2 state from an invalid run.
+        if: ${{ !cancelled() && env.PIPELINE_LOCKED != 'true' && steps.pipeline_stage_1_3.outcome == 'success' && steps.p0_apex_enrichment.outcome == 'success' && steps.p0_regression_suite.outcome == 'success' }}
         continue-on-error: true
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
