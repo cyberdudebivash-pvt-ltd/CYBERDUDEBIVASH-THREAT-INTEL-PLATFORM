@@ -50,7 +50,7 @@ test("verified KEV evidence is described as confirmed, without generating attrib
 });
 
 test("verified KEV evidence retains an upgrade CTA even if severity is low", () => {
-  const out = applyTierGateV2(advisory({ severity: "LOW", risk_score: 2, kev_confirmed: true }), "FREE", null);
+  const out = applyTierGateV2(advisory({ severity: "LOW", risk_score: 2, kev_confirmed: true, kev: "YES" }), "FREE", null);
   assert.equal(out.threat_urgency.active, true);
   assert.equal(out.threat_urgency.cta_plan, "pro");
 });
@@ -73,4 +73,36 @@ test("public homepage fallback never asserts active exploitation without evidenc
   assert.match(homepage, /THREAT INTELLIGENCE ADVISORY/);
   assert.match(homepage, /id="cdb-threat-cta-bar"/);
   assert.match(homepage, /upgrade\.html\?plan=pro/);
+});
+
+test("contradictory KEV flags fail closed instead of claiming confirmed exploitation", () => {
+  for (const fields of [
+    { kev_confirmed: true, kev: "NO" },
+    { kev_confirmed: true, kev: false },
+    { kev_confirmed: true, kev_present: "FALSE" },
+    { kev_confirmed: true, kev_present: 0 },
+  ]) {
+    const out = applyTierGateV2(advisory(fields), "FREE", null);
+    assert.equal(out.threat_urgency.active, false);
+    assert.equal(out.threat_urgency.exploitation_status, "NOT_VERIFIED");
+    assert.ok(out.threat_urgency.upgrade);
+  }
+});
+
+test("a stale producer-provided urgency cannot mark a low-risk unverified item active", () => {
+  const out = applyTierGateV2(advisory({
+    severity: "LOW",
+    risk_score: 2,
+    threat_urgency: { active: true, message: "ACTIVE THREAT DETECTED" },
+  }), "FREE", null);
+  assert.equal(out.threat_urgency, undefined);
+});
+
+test("high-risk unverified input discards inherited active urgency, preserving a truthful CTA", () => {
+  const out = applyTierGateV2(advisory({
+    threat_urgency: { active: true, message: "ACTIVE THREAT DETECTED" },
+  }), "FREE", null);
+  assert.equal(out.threat_urgency.active, false);
+  assert.match(out.threat_urgency.message, /exploitation not verified/i);
+  assert.ok(out.threat_urgency.upgrade);
 });
