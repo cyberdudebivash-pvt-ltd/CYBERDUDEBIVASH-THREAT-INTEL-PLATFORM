@@ -189,3 +189,66 @@ def test_full_healthy_protocol_completes_phase5_within_existing_cap(
     assert len(phase5.probes) == dcv.HIST_PROBE_COUNT
     assert dcv._REQUESTS_USED <= dcv.MAX_TOTAL_REQUESTS
     assert len(publication_reads) == 20
+
+
+def test_not_probed_is_distinct_from_permanent_404(monkeypatch, clean_budget):
+    monkeypatch.setattr(dcv, "_REQUESTS_USED", dcv.MAX_TOTAL_REQUESTS)
+    monkeypatch.setattr(
+        dcv.urllib.request, "urlopen",
+        lambda *args, **kwargs: pytest.fail("request budget exhaustion must make zero HTTP calls"),
+    )
+    result = dcv._http_probe(dcv.PAGES_BASE_URL + "/reports/2026/10/intel--deadbeef.html")
+    assert result.status_code == 0
+    assert result.success is False
+    assert result.error.startswith("NOT_PROBED:")
+    assert result.is_transient is True, "cannot classify unattempted request as permanent HTTP failure"
+    assert dcv._unprobed_budget_exhausted([result])
+    assert not dcv._only_permanent_failures([result])
+
+
+def test_only_actual_nontransient_http_failures_are_permanent():
+    permanent = dcv.ProbeResult(
+        url=dcv.PAGES_BASE_URL + "/reports/missing.html",
+        status_code=404, latency_ms=1, success=False,
+        is_transient=False, error="HTTPError 404",
+    )
+    assert dcv._only_permanent_failures([permanent])
+    unprobed = dcv.ProbeResult(
+        url=dcv.PAGES_BASE_URL + "/reports/unprobed.html",
+        status_code=0, latency_ms=0, success=False,
+        is_transient=False, error="NOT_PROBED: shared request/time budget exhausted",
+    )
+    assert not dcv._only_permanent_failures([permanent, unprobed])
+    assert dcv._unprobed_budget_exhausted([permanent, unprobed])
+
+
+def test_phase2_budget_exhaustion_fails_closed_without_retries(monkeypatch, clean_budget):
+    calls = []
+    missing = dcv.ProbeResult(
+        url=dcv.PAGES_BASE_URL + "/reports/pending.html", status_code=0,
+        latency_ms=0, success=False, is_transient=True,
+        error="NOT_PROBED: shared request/time budget exhausted",
+    )
+    monkeypatch.setattr(dcv, "_extract_report_urls", lambda *args: ([missing.url], []))
+    monkeypatch.setattr(dcv, "_probe_batch", lambda *args: (calls.append(args) or [missing], 0, 1))
+    monkeypatch.setattr(dcv, "_backoff_wait", lambda _: pytest.fail("no retry when budget exhausted"))
+    result = dcv.phase2_cdn_readiness_probe([], {})
+    assert result.success is False
+    assert len(calls) == 1
+    assert result.probes[0].status_code == 0
+
+
+def test_phase3_budget_exhaustion_fails_closed_without_retry(monkeypatch, clean_budget):
+    url = dcv.PAGES_BASE_URL + "/reports/2026/10/intel--feed123.html"
+    missing = dcv.ProbeResult(
+        url=url, status_code=0, latency_ms=0, success=False, is_transient=True,
+        error="NOT_PROBED: shared request/time budget exhausted",
+    )
+    calls = []
+    monkeypatch.setattr(dcv, "_extract_report_urls", lambda *args: ([url], []))
+    monkeypatch.setattr(dcv, "_probe_batch", lambda *args: (calls.append(args) or [missing], 0, 1))
+    monkeypatch.setattr(dcv, "_backoff_wait", lambda _: pytest.fail("must not claim a retry occurred"))
+    result = dcv.phase3_incremental_retry([], {})
+    assert result.success is False
+    assert len(calls) == 1
+    assert not any(r.success for r in result.probes)
