@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { handleIntelStaticProxy, INTEL_STATIC_PROXY } from "../intel-static-proxy.js";
+import { handleIntelStaticProxy, INTEL_STATIC_PROXY, publicTlpJsonVerified } from "../intel-static-proxy.js";
 
 // ---------------------------------------------------------------------------
 // Stage 4 -- CYBERDUDEBIVASH SENTINEL APEX
@@ -41,7 +41,7 @@ test("non-GET method is rejected with 405", async () => {
 });
 
 test("R2 hit returns R2's content directly, without touching gh-pages", async () => {
-  const r2 = fakeR2({ "intelligence/ai_index.json": [{ advisory_id: "intel--abc", title: "R2-sourced record" }] });
+  const r2 = fakeR2({ "intelligence/ai_index.json": [{ advisory_id: "intel--abc", title: "R2-sourced record", tlp: "TLP:CLEAR" }] });
   const originalFetch = globalThis.fetch;
   let ghPagesFetched = false;
   globalThis.fetch = async () => { ghPagesFetched = true; throw new Error("must not reach gh-pages when R2 has the object"); };
@@ -49,7 +49,7 @@ test("R2 hit returns R2's content directly, without touching gh-pages", async ()
     const resp = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
     assert.equal(resp.status, 200);
     const body = await resp.json();
-    assert.deepEqual(body, [{ advisory_id: "intel--abc", title: "R2-sourced record" }]);
+    assert.deepEqual(body, [{ advisory_id: "intel--abc", title: "R2-sourced record", tlp: "TLP:CLEAR" }]);
     assert.equal(ghPagesFetched, false);
     assert.deepEqual(r2.calls, ["intelligence/ai_index.json"]);
   } finally {
@@ -57,72 +57,56 @@ test("R2 hit returns R2's content directly, without touching gh-pages", async ()
   }
 });
 
-test("R2 miss (object not found) falls back to gh-pages raw content", async () => {
-  const r2 = fakeR2({}); // empty -- get() returns null for any key
+test("R2 miss denies access without fetching raw GitHub content", async () => {
+  const r2 = fakeR2({});
   const originalFetch = globalThis.fetch;
-  let requestedUrl = null;
-  globalThis.fetch = async (url) => {
-    requestedUrl = url;
-    return { ok: true, json: async () => ({ source: "gh-pages-fallback" }) };
-  };
+  let fetched = false;
+  globalThis.fetch = async () => { fetched = true; throw new Error("raw fallback forbidden"); };
   try {
     const resp = await handleIntelStaticProxy({ INTEL_R2: r2 }, RULES_PATH, "GET");
-    assert.equal(resp.status, 200);
-    const body = await resp.json();
-    assert.deepEqual(body, { source: "gh-pages-fallback" });
-    assert.match(requestedUrl, /gh-pages\/data\/intelligence\/detection_rules\/rule_manifest\.json$/);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    assert.equal(resp.status, 503);
+    assert.equal(resp.headers.get("cache-control"), "no-store");
+    assert.equal(fetched, false);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
-test("R2 binding missing entirely falls back to gh-pages", async () => {
+test("missing R2 binding fails closed without GitHub fallback", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ source: "gh-pages-fallback" }) });
+  let fetched = false;
+  globalThis.fetch = async () => { fetched = true; throw new Error("raw fallback forbidden"); };
   try {
     const resp = await handleIntelStaticProxy({}, AI_INDEX_PATH, "GET");
-    assert.equal(resp.status, 200);
-    assert.deepEqual(await resp.json(), { source: "gh-pages-fallback" });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    assert.equal(resp.status, 503);
+    assert.equal(fetched, false);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
-test("R2 read throwing falls back to gh-pages instead of failing the request", async () => {
-  const r2 = { async get() { throw new Error("simulated R2 outage"); } };
+test("R2 outage fails closed rather than exposing upstream contents", async () => {
+  const r2 = { async get() { throw new Error("simulated outage"); } };
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ source: "gh-pages-fallback" }) });
+  let fetched = false;
+  globalThis.fetch = async () => { fetched = true; throw new Error("raw fallback forbidden"); };
   try {
     const resp = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
-    assert.equal(resp.status, 200);
-    assert.deepEqual(await resp.json(), { source: "gh-pages-fallback" });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    assert.equal(resp.status, 503);
+    assert.equal(fetched, false);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
-test("gh-pages fallback itself failing returns an honest 502, never fabricated content", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: false, status: 404 });
-  try {
-    const resp = await handleIntelStaticProxy({}, AI_INDEX_PATH, "GET");
-    assert.equal(resp.status, 502);
-    const body = await resp.json();
-    assert.equal(body.error, "upstream_unavailable");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+test("restricted nested TLP in R2 is withheld even when the outer document is CLEAR", async () => {
+  const r2 = fakeR2({ "intelligence/ai_index.json": {
+    tlp: "TLP:CLEAR", items: [{ id: "intel--red", title: "not public", tlp: "TLP:RED", description: "private" }],
+  } });
+  const res = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
+  assert.equal(res.status, 503);
+  assert.equal(JSON.stringify(await res.json()).includes("private"), false);
+  assert.equal(res.headers.get("cache-control"), "no-store");
 });
 
-test("gh-pages fetch throwing (e.g. timeout) returns an honest 502", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => { throw new Error("simulated timeout"); };
-  try {
-    const resp = await handleIntelStaticProxy({}, RULES_PATH, "GET");
-    assert.equal(resp.status, 502);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+test("unlabelled advisory with a report ID is not anonymously authorized", async () => {
+  const r2 = fakeR2({ "intelligence/ai_index.json": [{ advisory_id: "intel--unverified", title: "Unverified advisory" }] });
+  const resp = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
+  assert.equal(resp.status, 503);
 });
 
 test("all proxied paths are registered with distinct R2 keys and gh paths", () => {
@@ -144,29 +128,26 @@ test("all proxied paths are registered with distinct R2 keys and gh paths", () =
 // ---------------------------------------------------------------------------
 const NEXUS_PATH = "/api/v1/intel/nexus_output.json";
 
-test("default ghBranch (unset on an entry) still falls back to gh-pages -- existing entries unaffected", async () => {
+test("legacy gh-pages fallback configuration is inert at public read time", async () => {
   const originalFetch = globalThis.fetch;
-  let requestedUrl = null;
-  globalThis.fetch = async (url) => { requestedUrl = url; return { ok: true, json: async () => ({ source: "gh-pages-fallback" }) }; };
+  let fetched = false;
+  globalThis.fetch = async () => { fetched = true; throw new Error("forbidden"); };
   try {
-    await handleIntelStaticProxy({}, AI_INDEX_PATH, "GET");
-    assert.match(requestedUrl, /\/gh-pages\//);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    const resp = await handleIntelStaticProxy({}, AI_INDEX_PATH, "GET");
+    assert.equal(resp.status, 503);
+    assert.equal(fetched, false);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
-test("ghBranch: 'main' entries fall back to the main branch, not gh-pages", async () => {
+test("main branch raw fallback is also prohibited", async () => {
   const originalFetch = globalThis.fetch;
-  let requestedUrl = null;
-  globalThis.fetch = async (url) => { requestedUrl = url; return { ok: true, json: async () => ({ source: "main-fallback" }) }; };
+  let fetched = false;
+  globalThis.fetch = async () => { fetched = true; throw new Error("forbidden"); };
   try {
     const resp = await handleIntelStaticProxy({}, NEXUS_PATH, "GET");
-    assert.equal(resp.status, 200);
-    assert.match(requestedUrl, /\/main\/data\/nexus\/nexus_output\.json$/);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    assert.equal(resp.status, 503);
+    assert.equal(fetched, false);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("nexus_output.json prefers R2 over the main-branch fallback", async () => {
@@ -204,18 +185,87 @@ test("all 5 new engine routes are registered with ghBranch main and path-mirrore
 // a git commit or Pages deploy to pick up new intelligence.
 // ---------------------------------------------------------------------------
 test("DEPLOYMENT-DECOUPLING PROOF: changing R2's stored object changes the response with zero code change", async () => {
-  const store = { "intelligence/ai_index.json": [{ advisory_id: "intel--v1", title: "before update" }] };
+  const store = { "intelligence/ai_index.json": [{ advisory_id: "intel--v1", title: "before update", tlp: "TLP:CLEAR" }] };
   const r2 = fakeR2(store);
   const env = { INTEL_R2: r2 };
 
   const before = await handleIntelStaticProxy(env, AI_INDEX_PATH, "GET");
-  assert.deepEqual(await before.json(), [{ advisory_id: "intel--v1", title: "before update" }]);
+  assert.deepEqual(await before.json(), [{ advisory_id: "intel--v1", title: "before update", tlp: "TLP:CLEAR" }]);
 
   // Simulates the real production path: scripts/r2_upload.py's Upload 3c
   // step writing a freshly-generated file straight to R2 -- no git commit,
   // no Pages deploy, same handler code as the call above.
-  store["intelligence/ai_index.json"] = [{ advisory_id: "intel--v2", title: "after runtime update, no deploy" }];
+  store["intelligence/ai_index.json"] = [{ advisory_id: "intel--v2", title: "after runtime update, no deploy", tlp: "TLP:CLEAR" }];
 
   const after = await handleIntelStaticProxy(env, AI_INDEX_PATH, "GET");
-  assert.deepEqual(await after.json(), [{ advisory_id: "intel--v2", title: "after runtime update, no deploy" }]);
+  assert.deepEqual(await after.json(), [{ advisory_id: "intel--v2", title: "after runtime update, no deploy", tlp: "TLP:CLEAR" }]);
+});
+
+
+test("invalid, mixed, and legacy classifications never return bytes", async () => {
+  for (const tlp of ["TLP:AMBER", "TLP:GREEN", "TLP:AMBER+STRICT", "TLP:WHITE", "TLP:INVALID", null]) {
+    const data = [{ id: "test", title: "advisory", advisory_id: "intel--test", tlp }];
+    const r2 = fakeR2({ "intelligence/ai_index.json": data });
+    const resp = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
+    assert.equal(resp.status, 503, String(tlp));
+    assert.equal(JSON.stringify(await resp.json()).includes("advisory"), false);
+  }
+});
+
+test("ambiguous document classification CLEAR and RED is withheld", async () => {
+  const r2 = fakeR2({ "intelligence/ai_index.json": {
+    classification: "TLP:CLEAR; TLP:RED",
+    internal_note: "restricted-information",
+  } });
+  const resp = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
+  assert.equal(resp.status, 503);
+  assert.equal(JSON.stringify(await resp.json()).includes("restricted-information"), false);
+});
+
+test("invalid or oversized R2 JSON fails closed", async () => {
+  const bad = { async get() { return { body: "{invalid" }; } };
+  assert.equal((await handleIntelStaticProxy({ INTEL_R2: bad }, AI_INDEX_PATH, "GET")).status, 503);
+  const oversize = { async get() { return { size: 1048577, body: "{}" }; } };
+  assert.equal((await handleIntelStaticProxy({ INTEL_R2: oversize }, AI_INDEX_PATH, "GET")).status, 503);
+});
+
+
+test("P0 #725: id-only unlabelled advisory cannot bypass the edge gate", async () => {
+  const hidden = "opaque-private-evidence";
+  const r2 = fakeR2({ "intelligence/ai_index.json": [{ id: "intel--unlabelled", title: "Unknown report", description: hidden }] });
+  const response = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(JSON.stringify(await response.json()).includes(hidden), false);
+});
+
+test("P0 #725: conflicting document TLP after an ordinary classification prefix is withheld", async () => {
+  for (const classification of ["INTERNAL: TLP:RED", "INFO TLP:CLEAR; TLP:AMBER", "NOTES: TLP:GREEN"]) {
+    const r2 = fakeR2({ "intelligence/ai_index.json": { classification, sensitive: "opaque-private-evidence" } });
+    const response = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
+    assert.equal(response.status, 503, classification);
+    assert.equal(JSON.stringify(await response.json()).includes("opaque-private-evidence"), false);
+  }
+});
+
+test("P0 #725: scalar JSON is not an authorized intelligence document", async () => {
+  const r2 = fakeR2({ "intelligence/ai_index.json": "opaque-private-evidence" });
+  const response = await handleIntelStaticProxy({ INTEL_R2: r2 }, AI_INDEX_PATH, "GET");
+  assert.equal(response.status, 503);
+  assert.equal(JSON.stringify(await response.json()).includes("opaque-private-evidence"), false);
+});
+
+
+test("P0 #725: shared report TLP authority requires explicit CLEAR and checks every upstream classification", () => {
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Reviewed", tlp: "TLP:CLEAR" }), true);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Unknown" }), false);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Restricted", tlp: "TLP:RED" }), false);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Mixed", tlp: "TLP:CLEAR",
+    evidence_chain: [{ tlp: "TLP:AMBER" }] }), false);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Conflicted", tlp: "TLP:CLEAR",
+    classification: "Internal: TLP:GREEN" }), false);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Legacy", tlp: "TLP:WHITE" }), false);
+  assert.equal(publicTlpJsonVerified({ id: "intel--1", title: "Invalid", tlp: "TLP:CLEAR\u200b" }), false);
+  assert.equal(publicTlpJsonVerified(null), false);
+  assert.equal(publicTlpJsonVerified("raw secret"), false);
 });

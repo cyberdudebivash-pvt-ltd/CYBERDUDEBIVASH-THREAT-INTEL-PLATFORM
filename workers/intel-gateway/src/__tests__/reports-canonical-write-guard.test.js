@@ -62,3 +62,89 @@ test("the Worker-local fallback renderer still exists and still serves a live re
     "on the fly and never persisted, so it must not be cached as if it were the canonical artifact)."
   );
 });
+
+
+test("P0 #725: all Worker report R2 reads are dominated by explicit CLEAR TLP and resolvable advisory gates", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  const start = source.indexOf('if (path.startsWith("/reports/"))');
+  assert.ok(start >= 0, "Worker report route must exist");
+  const block = source.slice(start, source.indexOf("env.REPORTS_R2.get(", start));
+  assert.match(block, /const gateItem\s*=\s*gateSlug\s*\?\s*await findItemBySlug\(/);
+  assert.match(block, /if \(!gateItem\s*\|\|\s*!publicTlpJsonVerified\(gateItem\)/);
+  assert.match(block, /Object\.hasOwn\(gateItem,\s*"tlp"\)/);
+  assert.match(block, /Object\.hasOwn\(gateItem,\s*"tlp_label"\)/);
+  assert.match(block, /"anonymous_publication_unverified"/);
+  assert.match(block, /"Cache-Control":\s*"no-store"/);
+  const r2Body = source.slice(start, source.indexOf("  // --- /api/", start) > start
+    ? source.indexOf("  // --- /api/", start) : start + 16000);
+  assert.match(r2Body, /const obj = await env\.REPORTS_R2\.get\(key\)/,
+    "canonical direct R2 path remains protected");
+});
+
+test("P0 #725: source no longer treats unresolved historical reports as implicitly publishable", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  assert.doesNotMatch(source, /older report that has aged out of the "latest" windows this\s+function searches\).*?non-blocking/s);
+  assert.match(source, /Legacy R2 pages lacking authoritative public TLP provenance/);
+});
+
+
+test("P0 #725: both anonymous feed aliases and the preview validate R2 TLP before projection", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  const previewStart = source.indexOf('if (path === "/api/preview" || path === "/api/preview/")');
+  const feedStart = source.indexOf('if (path === "/api/feed" || path === "/api/feed.json")', previewStart);
+  assert.ok(previewStart >= 0 && feedStart > previewStart);
+  const preview = source.slice(previewStart, feedStart);
+  const feed = source.slice(feedStart, source.indexOf('if (path.startsWith("/reports/"))', feedStart));
+  assert.match(preview, /!publicTlpJsonVerified\(feedData\.items\)/);
+  assert.ok(preview.indexOf("!publicTlpJsonVerified(feedData.items)") <
+    preview.indexOf("applyTierGateV2"), "no preview content may be projected from unsanitized data");
+  assert.match(feed, /!publicTlpJsonVerified\(data\)/);
+  assert.ok(feed.indexOf("!publicTlpJsonVerified(data)") <
+    feed.indexOf("applyTierGateV2"), "R2 input must be verified ahead of tier projection");
+  assert.match(feed, /"Cache-Control": "no-store"/);
+});
+
+test("P0 #725: both GET and POST IOC lookup routes deny an unverifiable feed", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  const start = source.indexOf("// --- /api/v1/ioc/lookup");
+  const end = source.indexOf("// --- /api/preview", start);
+  assert.ok(start >= 0 && end > start);
+  const routes = source.slice(start, end);
+  const checks = routes.match(/!publicTlpJsonVerified\(feedData\?\.items\)/g) || [];
+  assert.equal(checks.length, 2, "both GET and POST must verify stored intelligence");
+  const lookups = routes.match(/return jsonResp\(await iocLookup\(/g) || [];
+  assert.equal(lookups.length, 2, "both guarded routes must retain the IOC lookup function");
+});
+
+
+test("P0 #725: latest, top10, apex and AI summary inputs pass TLP check before any response", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  const latestStart = source.indexOf('if (path === "/api/v1/intel/latest.json")');
+  const topStart = source.indexOf('if (path === "/api/v1/intel/top10.json")', latestStart);
+  const statsStart = source.indexOf("// --- /api/platform/stats", topStart);
+  assert.ok(latestStart >= 0 && topStart > latestStart && statsStart > topStart);
+  const latest = source.slice(latestStart, topStart);
+  const top10 = source.slice(topStart, statsStart);
+  assert.equal((latest.match(/!publicTlpJsonVerified\(data\)/g) || []).length, 2,
+    "the FREE and authorized full-manifest branches must both reject old restricted R2 data");
+  assert.match(top10, /!publicTlpJsonVerified\(data\)/);
+  const premiumStart = source.indexOf("async function servePremiumIntelManifest(");
+  const premiumEnd = source.indexOf("async function handleLogin(", premiumStart);
+  assert.ok(premiumStart >= 0 && premiumEnd > premiumStart);
+  const premium = source.slice(premiumStart, premiumEnd);
+  assert.match(premium, /!publicTlpJsonVerified\(data\)/);
+  assert.ok(premium.indexOf("!publicTlpJsonVerified(data)") < premium.indexOf("maskForFreeTier(data)"));
+});
+
+test("P0 #725: public export router refuses unsanitized feed before serializing STIX or rule bundles", () => {
+  const source = readFileSync(INDEX_JS_PATH, "utf-8");
+  const start = source.indexOf('if (path.startsWith("/api/v1/export/"))');
+  assert.ok(start >= 0);
+  const end = source.indexOf("  // CYBERDUDEBIVASH SENTINEL APEX CYBER WATCHDOG.", start);
+  assert.ok(end > start);
+  const block = source.slice(start, end);
+  assert.match(block, /!publicTlpJsonVerified\(feedData\?\.items\)/);
+  assert.match(block, /routeExports\(/);
+  assert.ok(block.indexOf("!publicTlpJsonVerified(feedData?.items)") <
+    block.indexOf("routeExports("), "exporter must never serialize an unverified source feed");
+});

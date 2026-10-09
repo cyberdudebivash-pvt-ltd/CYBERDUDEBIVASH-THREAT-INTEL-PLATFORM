@@ -121,7 +121,7 @@ import { trackApiUsage, calculateCostPerCall, slugifyEndpoint } from './usage-me
 import { deductCredits } from './credit-system.js';
 import { evaluateKeyRecordAccess, SUBSCRIPTION_STATUS_DENY_STATES, SUBSCRIPTION_STATUS_VALID_STATES } from './subscription-lifecycle.js';
 import { inferGumroadTier, inferGumroadBillingCycle, isGumroadCancellationEvent, isGumroadAccessRevokingEvent, classifyGumroadPing, renewedExpiry, renewalMayReactivate, BILLING_CYCLE_DAYS } from './gumroad-lifecycle.js';
-import { handleIntelStaticProxy, INTEL_STATIC_PROXY } from './intel-static-proxy.js';
+import { handleIntelStaticProxy, INTEL_STATIC_PROXY, publicTlpJsonVerified } from './intel-static-proxy.js';
 // P0 2026-09-03: separates the first-party dashboard's own read traffic from
 // the commercial API entitlement plane. See first-party-plane.js's header for
 // the incident this closes -- the public dashboard was metered against the
@@ -2562,6 +2562,9 @@ async function servePremiumIntelManifest(request, env, ctx, pathname) {
   } else {
     const r2 = await r2Get(env, AI_SUMMARY_KEY);
     data = (r2 && Object.keys(r2).length > 0) ? r2 : buildAISummaryInline(feedData, stats);
+  }
+  if (!publicTlpJsonVerified(data)) {
+    return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
   }
   if (auth.tier === TIERS.FREE) {
     const preview = maskForFreeTier(data);
@@ -7264,10 +7267,16 @@ async function handleRequest(request, env, ctx) {
       data = await r2Get(env, LATEST_PRO_JSON_KEY);
       if (!data) data = await r2Get(env, LATEST_JSON_KEY);
       if (!data) return errorResp("Feed not available", 503);
+      if (!publicTlpJsonVerified(data)) {
+        return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+      }
       return jsonResp(data, 200, { "Cache-Control": "private, max-age=120" });
     }
     data = await r2Get(env, LATEST_JSON_KEY);
     if (!data) return errorResp("Feed not available", 503);
+    if (!publicTlpJsonVerified(data)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     // v142.0: this branch previously returned the canonical item array
     // untouched -- full IOCs, Sigma/KQL/Suricata rules, and actor attribution
     // leaked to every anonymous caller despite the comment above. Mask it.
@@ -7284,6 +7293,11 @@ async function handleRequest(request, env, ctx) {
       const feedData = await loadFeedItems(env);
       const top10    = (feedData.items || []).sort((a, b) => parseFloat(b.risk_score || 0) - parseFloat(a.risk_score || 0)).slice(0, 10);
       data = { items: top10, count: top10.length, generated_at: now(), version: PLATFORM_VERSION };
+    }
+    // Like latest.json, top10 can come from an old R2 object or from a
+    // fallback feed. Validate the complete input before projecting any tier.
+    if (!publicTlpJsonVerified(data)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
     // Same tier gate as /api/v1/intel/latest.json -- this endpoint carries the
     // same canonical item shape (IOCs, detection rules, actor attribution).
@@ -7633,11 +7647,17 @@ async function handleRequest(request, env, ctx) {
     try { body = await request.json(); } catch (_) {}
     const query    = body.query || body.ioc || url.searchParams.get("q") || "";
     const feedData = await loadFeedItems(env);
+    if (!publicTlpJsonVerified(feedData?.items)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     return jsonResp(await iocLookup(query, feedData, auth.tier));
   }
   if (path === "/api/v1/ioc/lookup" && method === "GET") {
     const query    = url.searchParams.get("q") || url.searchParams.get("query") || "";
     const feedData = await loadFeedItems(env);
+    if (!publicTlpJsonVerified(feedData?.items)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     return jsonResp(await iocLookup(query, feedData, auth.tier));
   }
 
@@ -7649,6 +7669,11 @@ async function handleRequest(request, env, ctx) {
     // R2 errors into an empty-but-200 payload, which previously rendered as a
     // silent empty preview instead of a signal that the feed is down.
     if (!Array.isArray(feedData.items) || feedData.items.length === 0) return errorResp("Feed not available", 503);
+    // P0 #725: old unsanitized R2 objects may reappear after a failed
+    // upload, cache rollback or resync. Never disclose them in a preview.
+    if (!publicTlpJsonVerified(feedData.items)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     // Always the FREE/teaser view regardless of caller tier (unauthenticated
     // by design) -- so IOCs, detection rules, and actor attribution must be
     // masked the same way the FREE branch of every other endpoint is.
@@ -7682,6 +7707,12 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/feed" || path === "/api/feed.json") {
     let data = await r2Get(env, LATEST_JSON_KEY);
     if (!data) return errorResp("Feed not available", 503);
+    // This object can predate the publishing TLP gate. Verify the
+    // *complete* stored document before FREE/paid tier projection; no
+    // restricted record can be reintroduced by a stale R2 or KV copy.
+    if (!publicTlpJsonVerified(data)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     // Freshness truth (Cyber Watchdog P3 / feed staleness contract). HTTP 200
     // is kept for existing clients, so the verdict travels in the body
     // (publication_state, freshness_status, age_seconds) and in X-Sentinel-*
@@ -7760,16 +7791,27 @@ async function handleRequest(request, env, ctx) {
     // calls) so every serving path -- direct R2 cache hit, redirect
     // target, or fresh synthesis -- is covered by a single evaluation.
     //
-    // When the item is NOT resolvable via findItemBySlug's feed sources
-    // (an older report that has aged out of the "latest" windows this
-    // function searches), this is deliberately non-blocking: existing
-    // behavior is unchanged rather than newly 404ing content this gate
-    // has no way to verify either way. That population -- and any
-    // already-cached bad copies matching a resolvable item -- is covered
-    // by scripts/publication_gate_scan.py, not by blocking every view.
+    // An item outside the resolvable feed is now unavailable (fail-closed).
+    // Legacy R2 pages lacking authoritative public TLP provenance must not
+    // be served merely because an object exists in storage. Historical
+    // reports can be restored after verified manifest reconstruction.
     // -------------------------------------------------------------------
     const gateItem   = gateSlug ? await findItemBySlug(env, gateSlug) : null;
     const gateResult = gateItem ? evaluatePublicationGate(gateItem) : null;
+    // P0 #725: NO report URL is authorized by an unresolved feed item.
+    // Before this check, an aged-out or missing advisory still reached a
+    // canonical R2 object or a cross-month redirect without a TLP decision.
+    // Pages/static origins need their own separate gate (#728); this gate
+    // protects every Worker /reports/** branch, including old URLs.
+    // Explicit valid CLEAR required for anonymous delivery; quality gates
+    // below remain additive, never an alternative authorization source.
+    if (!gateItem || !publicTlpJsonVerified(gateItem) ||
+        !Object.hasOwn(gateItem, "tlp") && !Object.hasOwn(gateItem, "tlp_label")) {
+      return jsonResp(
+        { error: "Report unavailable", reason: "anonymous_publication_unverified" },
+        404, { "Cache-Control": "no-store" },
+      );
+    }
     if (gateItem && gateResult && !gateResult.customer_ready) {
       // v187.0 P0 FIX: a report the publication gate permanently rejected
       // (P21_BELOW_MINIMUM / P26_REJECTED / etc.) is not "still generating"
@@ -8988,6 +9030,11 @@ async function handleRequest(request, env, ctx) {
   // routeEnterpriseEndpoint() above takes resolveEntitlement as a parameter.
   if (path.startsWith("/api/v1/export/")) {
     const feedData  = await loadFeedItems(env);
+    // P0 #725: STIX/MISP/TAXII and signature exports must not bypass the
+    // anonymous JSON TLP boundary through a different serialization.
+    if (!publicTlpJsonVerified(feedData?.items)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     const exportRes = await routeExports(path, request, env, ctx, auth.tier, feedData.items || [], crypto.randomUUID(), auth, buildStixPattern, resolveEntitlement);
     if (exportRes) return exportRes;
   }
