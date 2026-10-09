@@ -3523,6 +3523,13 @@ def stage_sync_root_feed_json() -> None:
     out_count = min(len(manifest_items), 500)  # cap at 500
     payload = manifest_items[:out_count]
 
+    # P0 R35: validate the exact final public payload BEFORE either feed
+    # file is touched. Earlier mandate checking happened only after writes,
+    # leaving failed runs with unauthorised local/publication candidates.
+    # Never backfill invented source evidence or treat an old feed as fresh.
+    from p0_r35_feed_prewrite_guard import assert_publishable
+    assert_publishable(payload)
+
     # P0-FIX v141.6.0: Pre-serialise payload to a string ONCE and validate it
     # BEFORE touching any on-disk file.  This prevents the race where the file
     # is overwritten with invalid JSON (which the external CI validate_repo.py
