@@ -42,7 +42,10 @@ def test_denied_input_creates_no_html_or_directory(tmp_path, fake_html, case):
     assert case == before, "Original TLP/provenance must not be rewritten"
 
 
-def test_existing_public_report_not_overwritten_by_restricted_input(tmp_path, fake_html):
+def test_existing_public_report_not_overwritten_by_restricted_input(tmp_path, fake_html, monkeypatch):
+    # Route-style paths resolve relative to the current working directory.
+    # Isolate it so this negative control can never touch repository reports.
+    monkeypatch.chdir(tmp_path)
     base = tmp_path / "reports"
     target = base / "2026" / "10" / "intel--keep.html"
     target.parent.mkdir(parents=True)
