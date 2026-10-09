@@ -573,7 +573,7 @@
 
   /* ════════════════════════════════════════════════════════════════════════════
    *  ZONE 9: 🟢 TRUST + VALIDATION FOOTER
-   *  Source credibility, STIX/MITRE verification, report CTA.
+   *  Source credibility, evidence-grounded advisory ID, report CTA.
    * ═══════════════════════════════════════════════════════════════════════════ */
   function renderTrustFooter(item) {
     const vs     = item.validation_status;
@@ -590,8 +590,8 @@
           <span class="sapx-source-name">${esc(item.source_host)}</span>
         </a>
         <div class="sapx-trust-badges">
-          <span class="sapx-trust-badge sapx-trust-stix" title="STIX 2.1 Verified Bundle">
-            ✓ STIX 2.1
+          <span class="sapx-trust-badge sapx-trust-stix" title="SENTINEL APEX advisory reference; exported STIX objects are validated separately">
+            INTEL ADVISORY
           </span>
           ${hasTtps
             ? `<span class="sapx-trust-badge sapx-trust-mitre" title="MITRE ATT&CK Mapped">
@@ -606,7 +606,7 @@
       </div>
       <div class="sapx-footer-bottom">
         <span class="sapx-stix-id" data-full-id="${esc(item.stix_id)}" data-short-id="${esc(item.stix_id_short)}"
-              title="${esc(item.stix_id)} — click to copy" onclick="SentinelApexCardRenderer.copyStixId(this)">
+              title="Advisory reference: ${esc(item.stix_id)} — click to copy" onclick="SentinelApexCardRenderer.copyStixId(this)">
           ${esc(item.stix_id_short)}
         </span>
         <div class="sapx-footer-ctas">
