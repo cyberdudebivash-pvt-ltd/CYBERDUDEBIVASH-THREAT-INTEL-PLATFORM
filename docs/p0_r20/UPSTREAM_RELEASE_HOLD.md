@@ -22,3 +22,9 @@ The *mandatory* publisher orchestrator, APEX enrichment, and final regression su
 ## R20 GO policy
 
 Source PR requires exact-head Python, Worker, release regression and security check results. Independently require a fully authorized TLP:CLEAR public feed, real upstream freshness, correct blocked-versus-ready report links, deployed SHA parity, successful report URL canaries, eight signed private dossier evidence manifests and analyst claims verification, historical TLP containment evidence, and live commercial lifecycle/entitlement verification. Any missing requirement means **Enterprise NO-GO**.
+
+## Additional P0 prevention: final R2 writer forbidden on failed source quality
+
+Publisher #2534 reached `Upload Intel State to R2 (post-manifest-repair, final)` after both enrichment and regression failed, because its old conditional checked only `steps.pipeline_stage_1_3.outcome == 'success'`. The upload could therefore replace canonical cross-workflow feed/processing metadata with an incomplete local state. The revised condition requires all three mandatory outcome signals to equal `success`, with the pipeline lock disengaged and cancellation false. This is an actual write-path guard, not merely a green dashboard. The existing R2 upload code and limits are untouched.
+
+This guard does not retroactively repair any R2 object written before the patch. Such objects require private inventory, TLP/legal classification, source/provenance confirmation and independently authorized targeted replacement or retraction.
