@@ -76,3 +76,33 @@ def test_delay_configuration_not_diluted_to_force_green():
     sys.path.insert(0, str(ROOT))
     from agent.config import RATE_LIMIT_DELAY
     assert RATE_LIMIT_DELAY == 3
+
+def test_ingestion_fence_precedes_all_stage3_enrichment():
+    workflow = (ROOT / ".github/workflows/sentinel-blogger.yml").read_text(encoding="utf-8")
+    fence_start = workflow.index('- name: "P0 - Stage 1-3 Ingestion Health Fence')
+    stale_guard = workflow.index('- name: "STAGE 1-3b - Stale Source Guard', fence_start)
+    enrichment = workflow.index('- name: "STAGE 3.1 - APEX AI Feed Enrichment', stale_guard)
+    assert fence_start < stale_guard < enrichment
+
+
+def test_fence_fails_closed_on_real_outcome_and_health_not_masked_conclusion():
+    workflow = (ROOT / ".github/workflows/sentinel-blogger.yml").read_text(encoding="utf-8")
+    beginning = workflow.index('- name: "P0 - Stage 1-3 Ingestion Health Fence')
+    ending = workflow.index('- name: "STAGE 1-3b - Stale Source Guard', beginning)
+    body = workflow[beginning:ending]
+    assert 'id: p0-ingestion-health-fence' in body
+    assert 'if: ${{ !cancelled() }}' in body
+    assert 'steps.pipeline_stage_1_3.outcome' in body
+    assert 'steps.pipeline_stage_1_3.conclusion' not in body
+    assert 'PIPELINE_HEALTH:-UNKNOWN' in body
+    assert '"$STAGE_OUTCOME" != "success"' in body
+    assert '"$HEALTH" != "HEALTHY"' in body
+    assert 'exit 1' in body
+
+
+def test_fence_does_not_reduce_existing_cost_or_content_authorization_gates():
+    workflow = (ROOT / ".github/workflows/sentinel-blogger.yml").read_text(encoding="utf-8")
+    assert 'STAGE 3.3 - Report Validation Gate (HARD FAIL)' in workflow
+    assert 'STAGE 3.6 - R2 Upload Integrity Verifier (HARD FAIL)' in workflow
+    assert 'P0 - Report Publishing Release Verdict' in workflow
+    assert 'STAGE 5.9.3 - Pipeline Health Terminal Gate' in workflow
