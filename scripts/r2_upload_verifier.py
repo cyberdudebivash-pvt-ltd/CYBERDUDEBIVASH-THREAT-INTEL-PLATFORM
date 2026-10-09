@@ -61,9 +61,8 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import time
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -87,7 +86,7 @@ REPORT_PATH     = REPO / "data" / "quality" / "r2_verify_report.json"
 # sync_meta.json: r2_upload.py writes to /tmp/sync_meta.json before uploading.
 # Check /tmp/ first, then fallback repo paths.
 SYNC_META_PATHS = [
-    Path("/tmp/sync_meta.json"),
+    Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / "sentinel-apex-r2" / "sync_meta.json",
     REPO / "data" / "quality" / "r2_sync_meta.json",
     REPO / "data" / "sync_meta.json",
 ]
@@ -276,32 +275,9 @@ def _boto3_head_object(bucket: str, key: str) -> Optional[dict]:
         return None
 
 
-def _http_head_diagnostic(url: str) -> Optional[dict]:
-    """
-    HTTP HEAD for diagnostic/logging only -- NEVER used for hard-fail decisions.
-    HTTP 400 and 403 from R2 = private bucket (auth required) -- EXPECTED.
-    """
-    try:
-        req = urllib.request.Request(url, method="HEAD")
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-            return {
-                "status":         resp.status,
-                "content_length": int(resp.headers.get("Content-Length") or 0),
-                "etag":           (resp.headers.get("ETag") or "").strip('"'),
-            }
-    except urllib.error.HTTPError as e:
-        if e.code in (400, 403):
-            log.info(
-                "HTTP HEAD %s -> %d (private bucket, auth required -- EXPECTED for R2). "
-                "S3 API is used for actual verification.",
-                url, e.code,
-            )
-        else:
-            log.warning("HTTP HEAD %s -> %d (diagnostic only)", url, e.code)
-        return {"status": e.code, "content_length": 0, "etag": ""}
-    except Exception as e:
-        log.info("HTTP HEAD diagnostic unavailable: %s", e)
-        return None
+# No unauthenticated HTTP diagnostic fallback. Public HEAD/403 cannot
+# establish R2 object identity, and avoiding URL opening here also avoids
+# unnecessary external calls in a mandatory authenticated verification step.
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +362,33 @@ def verify_sync_meta_count() -> tuple[bool, str, int]:
     return True, "sync_meta.json absent and MANIFEST_FINAL_COUNT unset -- count check skipped", -1
 
 
+def _expected_public_manifest_bytes() -> tuple[bytes, dict]:
+    """Reconstruct EXACT upload bytes using the uploader's public TLP authority.
+
+    r2_upload.py publishes tlp_public_boundary.sanitize_json_file(source,
+    dest, parents=build_parent_index(...)), not source bytes. Comparing a
+    published R2 ETag against raw feed_manifest.json generated a false integrity
+    mismatch on run #2520 (R2 98,674 B; raw local 244,957 B).
+
+    The verifier intentionally runs the sanitizer independently, rather than
+    trusting uploader-provided checksums. This catches changed policy,
+    unexpected post-upload source mutation, incorrect R2 objects, and drift.
+    """
+    from tlp_public_boundary import build_parent_index, sanitize_json_file
+
+    if not MANIFEST_PATH.is_file():
+        raise FileNotFoundError("canonical feed_manifest.json missing; no public-view attestation possible")
+    parents = build_parent_index([
+        REPO / "api" / "feed.json",
+        REPO / "data" / "feed_manifest.json",
+        REPO / "data" / "stix" / "feed_manifest.json",
+    ])
+    with tempfile.TemporaryDirectory(prefix="cdb-r2-integrity-") as scratch:
+        dst = Path(scratch) / "public-feed_manifest.json"
+        result = sanitize_json_file(MANIFEST_PATH, dst, parents=parents)
+        return dst.read_bytes(), result
+
+
 def verify_r2_object() -> tuple[bool, str, dict]:
     """
     Layers 1-3: Verify the primary manifest in R2 via authenticated S3 API.
@@ -399,15 +402,17 @@ def verify_r2_object() -> tuple[bool, str, dict]:
     }
 
     if not CF_ACCOUNT_ID or not ACCESS_KEY or not SECRET_KEY:
+        # P0 #725: The CI stage is a HARD integrity gate. An absent
+        # authenticated verification principal cannot produce a verified
+        # upload, irrespective of the preceding upload step's exit code.
         msg = (
-            "R2 credentials absent (CF_ACCOUNT_ID / AWS_ACCESS_KEY_ID / "
-            "AWS_SECRET_ACCESS_KEY) -- skipping S3 API verification. "
-            "Trusting Stage 3.5 exit code as source of truth."
+            "R2 verification credentials absent (CF_ACCOUNT_ID / "
+            "AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY); upload UNVERIFIED."
         )
-        log.warning(msg)
-        details["skipped"] = True
-        details["skip_reason"] = "missing_credentials"
-        return True, msg, details
+        log.error(msg)
+        details["verification_unavailable"] = True
+        details["reason_code"] = "MISSING_AUTHORITY"
+        return False, msg, details
 
     log.info("Verifying: s3://%s/%s via %s", BUCKET_DATA, MANIFEST_KEY, R2_ENDPOINT)
 
@@ -418,25 +423,8 @@ def verify_r2_object() -> tuple[bool, str, dict]:
         head = _boto3_head_object(BUCKET_DATA, MANIFEST_KEY)
 
     if head is None:
-        # Both S3 API methods failed. Run HTTP HEAD as diagnostic only.
-        if R2_ENDPOINT:
-            diag_url = f"{R2_ENDPOINT}/{BUCKET_DATA}/{MANIFEST_KEY}"
-            diag = _http_head_diagnostic(diag_url)
-            details["http_diagnostic"] = diag
-            if diag and diag.get("status") in (400, 403):
-                # HTTP 400/403 on private R2 = auth required (NOT a failure).
-                # S3 API tooling is not available but Stage 3.5 already exited 0.
-                msg = (
-                    f"S3 API unavailable (awscli+boto3 both failed). "
-                    f"HTTP HEAD returned {diag['status']} (private bucket, auth required -- EXPECTED). "
-                    "Soft-passing: Stage 3.5 exited 0, data confirmed uploaded. "
-                    "Install awscli or boto3 in pipeline for full S3 API verification."
-                )
-                log.warning(msg)
-                details["soft_pass"] = True
-                details["soft_pass_reason"] = f"s3api_unavailable_private_bucket_{diag['status']}"
-                return True, msg, details
-
+        # Authenticating HEAD failed. Do not substitute a public HTTP status.
+        details["reason_code"] = "AUTHENTICATED_READ_UNAVAILABLE"
         return (
             False,
             f"S3 API head-object totally failed (awscli+boto3) for "
@@ -468,7 +456,7 @@ def verify_r2_object() -> tuple[bool, str, dict]:
     # Layer 2: size floor
     r2_size = head["content_length"]
     details["r2_size_ok"] = r2_size >= MIN_FEED_BYTES
-    if 0 < r2_size < MIN_FEED_BYTES:
+    if r2_size < MIN_FEED_BYTES:
         return (
             False,
             f"R2 object size {r2_size} bytes < floor {MIN_FEED_BYTES} bytes -- "
@@ -476,41 +464,53 @@ def verify_r2_object() -> tuple[bool, str, dict]:
             details,
         )
 
-    # Layer 3: ETag vs local MD5 (hard fail ONLY on mismatch + >10% size diverge)
-    r2_etag = head["etag"]
-    local_path = MANIFEST_PATH if MANIFEST_PATH.exists() else (FEED_PATH if FEED_PATH.exists() else None)
-    if r2_etag and local_path:
-        local_md5 = _md5_file(local_path)
-        details["local_md5"]   = local_md5
-        details["r2_etag_raw"] = r2_etag
+    # Layer 3: deterministic EXACT byte-identity check on the sanitized
+    # public artifact, NOT the restricted/raw producer manifest.
+    try:
+        expected_bytes, sanitizer = _expected_public_manifest_bytes()
+    except (OSError, ValueError, TypeError) as exc:
+        details["reason_code"] = "PUBLIC_VIEW_RECONSTRUCTION_FAILED"
+        log.error("Cannot reproduce public TLP upload bytes: %s", type(exc).__name__)
+        return False, "Cannot reconstruct the exact verified public manifest", details
 
-        if "-" in r2_etag:
-            log.info("R2 ETag is multi-part -- skipping MD5 exact check (expected for large uploads)")
-            details["etag_check"] = "skipped_multipart"
-        elif r2_etag.lower() == local_md5.lower():
-            log.info("ETag MATCH: R2=%s == local_md5=%s", r2_etag, local_md5)
-            details["etag_check"] = "PASS"
-        else:
-            log.warning(
-                "ETag MISMATCH: R2=%s != local_md5=%s -- checking size as secondary signal.",
-                r2_etag, local_md5,
-            )
-            details["etag_check"] = "MISMATCH_WARN"
-            local_size = local_path.stat().st_size
-            if r2_size > 0 and abs(r2_size - local_size) > 0.10 * local_size:
-                return (
-                    False,
-                    f"R2 ETag mismatch + size divergence >10%: "
-                    f"R2={r2_size} bytes vs local={local_size} bytes. "
-                    "Upload integrity compromised.",
-                    details,
-                )
-            log.warning(
-                "ETag mismatch but size within 10%% tolerance -- soft warning "
-                "(Cloudflare may re-encode). Object present and size acceptable."
-            )
-    else:
-        details["etag_check"] = "skipped_no_etag_or_local_file"
+    expected_size = len(expected_bytes)
+    expected_md5 = hashlib.md5(expected_bytes, usedforsecurity=False).hexdigest()
+    details["expected_public_bytes"] = expected_size
+    details["expected_public_sha256"] = hashlib.sha256(expected_bytes).hexdigest()
+    details["expected_public_md5"] = expected_md5
+    details["sanitized_records_removed"] = len(sanitizer.get("removed", []))
+    details["sanitized_document_withheld"] = bool(sanitizer.get("withheld"))
+
+    if r2_size != expected_size:
+        details["reason_code"] = "PUBLIC_BYTE_LENGTH_MISMATCH"
+        details["etag_check"] = "FAIL"
+        return (
+            False,
+            f"R2 public manifest size {r2_size} != independently "
+            f"sanitized expected size {expected_size}; R2 not certified",
+            details,
+        )
+
+    r2_etag = str(head.get("etag") or "").strip('"')
+    details["r2_etag_raw"] = r2_etag
+    # R2 single-part objects carry the MD5 of their uploaded bytes. A
+    # multipart ETag (with a hyphen), absent ETag, or a mismatched digest is
+    # NOT a positive integrity attestation; require a future authenticated
+    # byte-for-byte GET fallback rather than claiming PASS by size alone.
+    if not r2_etag or "-" in r2_etag:
+        details["reason_code"] = "ETAG_UNVERIFIABLE"
+        details["etag_check"] = "FAIL"
+        return False, "R2 ETag absent or multipart; exact public artifact identity unverified", details
+    if r2_etag.lower() != expected_md5:
+        details["reason_code"] = "PUBLIC_ETAG_MISMATCH"
+        details["etag_check"] = "FAIL"
+        return False, "R2 ETag differs from independently sanitized public manifest MD5", details
+
+    details["etag_check"] = "PASS"
+    log.info(
+        "PUBLIC SANITIZED ETag MATCH: R2 ETag=%s, expected_bytes=%d; removed=%d",
+        r2_etag, expected_size, details["sanitized_records_removed"],
+    )
 
     return (
         True,

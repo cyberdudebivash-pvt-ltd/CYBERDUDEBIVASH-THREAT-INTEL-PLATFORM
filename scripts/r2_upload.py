@@ -1141,7 +1141,12 @@ def main() -> None:
         "run_id":           os.environ.get("GITHUB_RUN_ID", "local"),
         "p0_fix":           "v184.2 -- r2_timeout_fix, awscli_perf, full_content_sync",
     }
-    sync_meta_path = "/tmp/sync_meta.json"
+    # Stage 3.6 reads this exact private runner-local path. Avoid a
+    # predictable world-writable /tmp file and cross-run stale collisions.
+    sync_meta_dir = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / "sentinel-apex-r2"
+    sync_meta_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(sync_meta_dir, 0o700)
+    sync_meta_path = str(sync_meta_dir / "sync_meta.json")
     with open(sync_meta_path, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, indent=2)
 
