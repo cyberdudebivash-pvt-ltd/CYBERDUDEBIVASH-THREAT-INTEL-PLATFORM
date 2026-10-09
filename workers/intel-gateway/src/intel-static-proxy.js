@@ -179,4 +179,4 @@ async function handleIntelStaticProxy(env, path, method) {
   }
 }
 
-export { handleIntelStaticProxy, INTEL_STATIC_PROXY };
+export { handleIntelStaticProxy, INTEL_STATIC_PROXY, publicTlpJsonVerified };
