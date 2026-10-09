@@ -7633,11 +7633,17 @@ async function handleRequest(request, env, ctx) {
     try { body = await request.json(); } catch (_) {}
     const query    = body.query || body.ioc || url.searchParams.get("q") || "";
     const feedData = await loadFeedItems(env);
+    if (!publicTlpJsonVerified(feedData?.items)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     return jsonResp(await iocLookup(query, feedData, auth.tier));
   }
   if (path === "/api/v1/ioc/lookup" && method === "GET") {
     const query    = url.searchParams.get("q") || url.searchParams.get("query") || "";
     const feedData = await loadFeedItems(env);
+    if (!publicTlpJsonVerified(feedData?.items)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     return jsonResp(await iocLookup(query, feedData, auth.tier));
   }
 
@@ -7649,6 +7655,11 @@ async function handleRequest(request, env, ctx) {
     // R2 errors into an empty-but-200 payload, which previously rendered as a
     // silent empty preview instead of a signal that the feed is down.
     if (!Array.isArray(feedData.items) || feedData.items.length === 0) return errorResp("Feed not available", 503);
+    // P0 #725: old unsanitized R2 objects may reappear after a failed
+    // upload, cache rollback or resync. Never disclose them in a preview.
+    if (!publicTlpJsonVerified(feedData.items)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     // Always the FREE/teaser view regardless of caller tier (unauthenticated
     // by design) -- so IOCs, detection rules, and actor attribution must be
     // masked the same way the FREE branch of every other endpoint is.
@@ -7682,6 +7693,12 @@ async function handleRequest(request, env, ctx) {
   if (path === "/api/feed" || path === "/api/feed.json") {
     let data = await r2Get(env, LATEST_JSON_KEY);
     if (!data) return errorResp("Feed not available", 503);
+    // This object can predate the publishing TLP gate. Verify the
+    // *complete* stored document before FREE/paid tier projection; no
+    // restricted record can be reintroduced by a stale R2 or KV copy.
+    if (!publicTlpJsonVerified(data)) {
+      return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
+    }
     // Freshness truth (Cyber Watchdog P3 / feed staleness contract). HTTP 200
     // is kept for existing clients, so the verdict travels in the body
     // (publication_state, freshness_status, age_seconds) and in X-Sentinel-*
