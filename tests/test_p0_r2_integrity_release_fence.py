@@ -30,18 +30,17 @@ def test_missing_verifier_credentials_are_a_hard_failure():
     assert "UNVERIFIED" in message
 
 
-def test_http_403_private_bucket_cannot_soft_pass_an_unverified_s3_head():
+def test_unavailable_authenticated_s3_head_cannot_soft_pass():
     with patch.object(verifier, "CF_ACCOUNT_ID", "account-fixture"), \
          patch.object(verifier, "ACCESS_KEY", "fake-key"), \
          patch.object(verifier, "SECRET_KEY", "fake-secret"), \
          patch.object(verifier, "R2_ENDPOINT", "https://r2.example.invalid"), \
          patch.object(verifier, "_s3api_head_object", return_value=None), \
-         patch.object(verifier, "_boto3_head_object", return_value=None), \
-         patch.object(verifier, "_http_head_diagnostic", return_value={"status": 403, "etag": ""}):
+         patch.object(verifier, "_boto3_head_object", return_value=None):
         verified, message, details = verifier.verify_r2_object()
     assert verified is False, "private R2 denial cannot certify object presence"
     assert details["reason_code"] == "AUTHENTICATED_READ_UNAVAILABLE"
-    assert details["http_diagnostic"]["status"] == 403
+    assert "http_diagnostic" not in details
     assert "Cannot verify R2 upload" in message
 
 
@@ -102,3 +101,14 @@ def test_workflow_cannot_treat_r2_integrity_step_as_soft_warning():
     contents = (ROOT / ".github/workflows/sentinel-blogger.yml").read_text(encoding="utf-8")
     assert 'id: r2-manifest-integrity' in contents
     assert 'if: always()\n        run: python3 scripts/bust_kv_cache.py' not in contents
+
+
+def test_upload_and_verifier_share_private_runner_temp_metadata_contract():
+    upload_source = (ROOT / "scripts/r2_upload.py").read_text(encoding="utf-8")
+    verifier_source = (ROOT / "scripts/r2_upload_verifier.py").read_text(encoding="utf-8")
+    for content in (upload_source, verifier_source):
+        assert '"RUNNER_TEMP"' in content
+        assert "sentinel-apex-r2" in content
+        assert '"/tmp/sync_meta.json"' not in content
+    assert "_http_head_diagnostic" not in verifier_source
+    assert "urllib.request.urlopen" not in verifier_source
