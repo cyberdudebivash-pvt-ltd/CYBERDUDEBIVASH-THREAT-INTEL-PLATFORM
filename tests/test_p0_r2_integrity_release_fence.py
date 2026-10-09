@@ -64,6 +64,8 @@ def test_authenticated_matching_s3_head_remains_eligible(tmp_path):
          patch.object(verifier, "ACCESS_KEY", "fake-key"), \
          patch.object(verifier, "SECRET_KEY", "fake-secret"), \
          patch.object(verifier, "MANIFEST_PATH", source), \
+         patch.object(verifier, "_expected_public_manifest_bytes",
+                      return_value=(body, {"removed": [], "withheld": False})), \
          patch.object(verifier, "_s3api_head_object",
                       return_value={"status": 200, "content_length": len(body),
                                     "etag": md5, "source": "fake-s3"}):
@@ -112,3 +114,84 @@ def test_upload_and_verifier_share_private_runner_temp_metadata_contract():
         assert '"/tmp/sync_meta.json"' not in content
     assert "_http_head_diagnostic" not in verifier_source
     assert "urllib.request.urlopen" not in verifier_source
+
+
+def test_sanitized_manifest_expected_bytes_match_uploader_public_boundary(tmp_path):
+    # The uploader invokes this same sanitizer on the same canonical source;
+    # the verifier must reconstruct those bytes, not compare against raw.
+    import tlp_public_boundary as boundary
+
+    root = tmp_path / "workspace"
+    (root / "api").mkdir(parents=True)
+    (root / "data" / "stix").mkdir(parents=True)
+    src = root / "data" / "stix" / "feed_manifest.json"
+    src.write_text(json.dumps({
+        "items": [
+            {"id": "intel--clear", "title": "Public advisory", "tlp": "TLP:CLEAR"},
+            {"id": "intel--red", "title": "Do not publish", "tlp": "TLP:RED",
+             "restricted_sentinel": "NEVER_IN_R2"},
+        ]
+    }), encoding="utf-8")
+    parent_paths = [root / "api" / "feed.json",
+                    root / "data" / "feed_manifest.json", src]
+    parents = boundary.build_parent_index(parent_paths)
+    uploader_safe = tmp_path / "upload-sanitized.json"
+    boundary.sanitize_json_file(src, uploader_safe, parents=parents)
+    with patch.object(verifier, "REPO", root), patch.object(verifier, "MANIFEST_PATH", src):
+        expected_bytes, metadata = verifier._expected_public_manifest_bytes()
+    assert expected_bytes == uploader_safe.read_bytes()
+    assert expected_bytes != src.read_bytes()
+    assert b"NEVER_IN_R2" not in expected_bytes
+    assert len(metadata["removed"]) >= 1
+
+
+def test_sanitized_public_bytes_not_raw_producer_are_the_etag_authority(tmp_path):
+    raw = tmp_path / "feed_manifest.json"
+    raw.write_bytes(b'{"restricted":"internal-source-bytes"}' + b" " * 1500)
+    public = b'{"items":[{"id":"intel--approved","tlp":"TLP:CLEAR"}]}' + b" " * 1500
+    public_md5 = hashlib.md5(public, usedforsecurity=False).hexdigest()
+    with patch.object(verifier, "CF_ACCOUNT_ID", "account-fixture"), \
+         patch.object(verifier, "ACCESS_KEY", "fake-key"), \
+         patch.object(verifier, "SECRET_KEY", "fake-secret"), \
+         patch.object(verifier, "MANIFEST_PATH", raw), \
+         patch.object(verifier, "_expected_public_manifest_bytes",
+                      return_value=(public, {"removed": [{"id": "hidden"}], "withheld": False})), \
+         patch.object(verifier, "_s3api_head_object",
+                      return_value={"status": 200, "content_length": len(public),
+                                    "etag": public_md5, "source": "fake-s3"}):
+        ok, _, details = verifier.verify_r2_object()
+    assert ok is True
+    assert details["etag_check"] == "PASS"
+    assert details["expected_public_sha256"] == hashlib.sha256(public).hexdigest()
+    assert details["sanitized_records_removed"] == 1
+    assert details["expected_public_bytes"] != len(raw.read_bytes())
+
+
+def test_same_size_but_wrong_public_bytes_cannot_soft_pass():
+    body = b"x" * 2048
+    with patch.object(verifier, "CF_ACCOUNT_ID", "account-fixture"), \
+         patch.object(verifier, "ACCESS_KEY", "fake-key"), \
+         patch.object(verifier, "SECRET_KEY", "fake-secret"), \
+         patch.object(verifier, "_expected_public_manifest_bytes",
+                      return_value=(body, {"removed": [], "withheld": False})), \
+         patch.object(verifier, "_s3api_head_object",
+                      return_value={"status": 200, "content_length": len(body),
+                                    "etag": "0" * 32, "source": "fake-s3"}):
+        ok, _, details = verifier.verify_r2_object()
+    assert ok is False
+    assert details["reason_code"] == "PUBLIC_ETAG_MISMATCH"
+
+
+def test_multipart_etag_without_authenticated_hash_proof_fails_closed():
+    body = b"x" * 2048
+    with patch.object(verifier, "CF_ACCOUNT_ID", "account-fixture"), \
+         patch.object(verifier, "ACCESS_KEY", "fake-key"), \
+         patch.object(verifier, "SECRET_KEY", "fake-secret"), \
+         patch.object(verifier, "_expected_public_manifest_bytes",
+                      return_value=(body, {"removed": [], "withheld": False})), \
+         patch.object(verifier, "_s3api_head_object",
+                      return_value={"status": 200, "content_length": len(body),
+                                    "etag": "abcd-2", "source": "fake-s3"}):
+        ok, _, details = verifier.verify_r2_object()
+    assert ok is False
+    assert details["reason_code"] == "ETAG_UNVERIFIABLE"
