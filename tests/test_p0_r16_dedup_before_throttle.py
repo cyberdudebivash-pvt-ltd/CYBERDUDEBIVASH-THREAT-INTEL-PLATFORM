@@ -116,3 +116,32 @@ def test_health_recorder_produces_explicit_degraded_state_before_fence():
     assert 'echo "PIPELINE_HEALTH=DEGRADED" >> $GITHUB_ENV' in status
     assert 'echo "PIPELINE_HEALTH=HEALTHY" >> $GITHUB_ENV' in status
     assert "pipeline_health.json" in status
+
+def test_final_mandate_fail_closed_after_ingestion_and_before_snapshot():
+    source = (ROOT / "scripts/run_pipeline.py").read_text(encoding="utf-8")
+    after_sync = source.index('stage_sync_root_feed_json()          # FINAL:')
+    mandate = source.index('mandate_verdict = run_script(', after_sync)
+    snapshot = source.index('Phase 3.95', mandate)
+    assert after_sync < mandate < snapshot
+    invocation = source[mandate:snapshot]
+    assert 'scripts/sentinel_apex_mandate_enforcer.py' in invocation
+    assert '"--report"' not in invocation
+    assert '"--fix"' not in invocation
+    assert 'allow_fail=False' in invocation
+    assert 'mandate_verdict.returncode != 0' in invocation
+    assert 'raise RuntimeError(' in invocation
+    assert '_stage_done("mandate_enforcement")' in invocation
+
+
+def test_mandate_enforcement_cannot_succeed_by_logging_nonzero_exit():
+    source = (ROOT / "scripts/run_pipeline.py").read_text(encoding="utf-8")
+    module = ast.parse(source)
+    guarded = [
+        node for node in ast.walk(module)
+        if isinstance(node, ast.If)
+        and "mandate_verdict.returncode != 0" in
+            (ast.get_source_segment(source, node.test) or "")
+    ]
+    assert len(guarded) == 1
+    assert any(isinstance(node, ast.Raise) for item in guarded[0].body for node in ast.walk(item))
+    assert not any(isinstance(node, ast.Pass) for item in guarded[0].body for node in ast.walk(item))
