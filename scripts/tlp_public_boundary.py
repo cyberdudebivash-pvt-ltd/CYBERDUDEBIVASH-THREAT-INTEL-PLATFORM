@@ -153,6 +153,23 @@ def _walk(node: Any, path: str, policy: Dict[str, Any], removed: List[Dict[str, 
             out.append(_walk(el, f"{path}[{i}]", policy, removed, depth + 1, parents))
         return out
     if isinstance(node, dict):
+        # P0 #725: a nested dict keyed by field name is just as capable of
+        # carrying restricted content as a list element. Previously only
+        # list elements and the document root were classified, allowing
+        # {"report": {"tlp":"TLP:RED","title":"..."}} through unchanged.
+        # Keep the root decision in sanitize_document() so callers receive
+        # its existing withheld status; nested denied dicts become safe
+        # tombstones with id/reason metadata, never their original bytes.
+        if depth > 0:
+            restriction = document_level_denial(node, policy)
+            if restriction:
+                removed.append({"id": _short_id(node), "reason_code": restriction[0], "path": path})
+                return tombstone(restriction[0])
+            if is_record(node):
+                nested_decision = _decide(node, policy, parents)
+                if not nested_decision["allowed"]:
+                    removed.append({"id": _short_id(node), "reason_code": nested_decision["reason_code"], "path": path})
+                    return tombstone(nested_decision["reason_code"])
         out_d: Dict[str, Any] = {}
         shrunk: Dict[str, Tuple[int, int]] = {}
         for k, v in node.items():
