@@ -9,12 +9,10 @@
  * and data/intelligence/detection_rules/rule_manifest.json, which back
  * index.html's per-card "AI Record" / "Detection Rules" annotations.
  *
- * Same fix, same pattern as the existing /api/ai/{tracker,health,
- * executive-brief}.json proxy in index.js (issue #274's root-caused fix):
- * R2 checked first (no dependency on git push or Pages deploy timing), raw
- * gh-pages content kept as the fallback (zero regression if the R2 object
- * is ever missing, e.g. before the first pipeline run that writes it via
- * scripts/r2_upload.py's Upload 3c block).
+ * P0 #725: R2 is the ONLY public read authority. A raw GitHub fallback
+ * can bypass the source's TLP publication gate after a denied item was
+ * withheld from R2. Missing/unavailable R2 returns 503, never stale raw
+ * upstream content. Every R2 JSON payload is checked before emission.
  *
  * Extracted into its own dependency-free module -- same reason as
  * subscription-lifecycle.js / gumroad-lifecycle.js / revenue-enforcement.js
@@ -60,11 +58,49 @@ function jsonResp(data, status = 200, extra = {}) {
   });
 }
 
+
+// P0 #725: deny-only edge backstop, not a second publication authority.
+// The Python tlp_policy.py remains the authorizing producer-side policy.
+// A Worker must NOT turn an unverified object or source-less advisory into
+// public content when R2 contains old, pre-gate bytes. Intentional false
+// negatives are unacceptable; on ambiguity, retry after verified regeneration.
+const MAX_PUBLIC_BODY_BYTES = 1024 * 1024;
+const MAX_PUBLIC_NODES = 25000;
+const MAX_PUBLIC_DEPTH = 40;
+const ADVISORY_KEYS = ["advisory_id", "intel_id", "report_url", "internal_report_url", "cve_id", "stix_id"];
+
+function publicTlpJsonVerified(doc) {
+  let nodes = 0;
+  function walk(node, depth) {
+    if (++nodes > MAX_PUBLIC_NODES || depth > MAX_PUBLIC_DEPTH) return false;
+    if (node === null || typeof node !== "object") return true;
+    if (Array.isArray(node)) return node.every(item => walk(item, depth + 1));
+    const hasTlp = Object.hasOwn(node, "tlp") || Object.hasOwn(node, "tlp_label");
+    for (const key of ["tlp", "tlp_label"]) {
+      if (Object.hasOwn(node, key)) {
+        if (typeof node[key] !== "string" || node[key].trim().toUpperCase() !== "TLP:CLEAR") return false;
+      }
+    }
+    if (typeof node.classification === "string" && /^\s*TLP\s*[:\-]/i.test(node.classification)) {
+      const tokens = [...node.classification.matchAll(/TLP\s*[:\-]\s*(?:AMBER\s*\+\s*STRICT|[A-Z]+)/gi)];
+      if (!tokens.length || tokens.some(([v]) => v.replace(/\s+/g, "").replace(/TLP-/i, "TLP:").toUpperCase() !== "TLP:CLEAR")) return false;
+    }
+    // Metadata can be unlabeled; an individual advisory cannot be
+    // anonymously authorized without an explicit classification. An
+    // untrusted source URL is not evidence that a collector approved it.
+    if (!hasTlp && typeof node.title === "string" && ADVISORY_KEYS.some(k => Object.hasOwn(node, k))) return false;
+    return Object.values(node).every(value => walk(value, depth + 1));
+  }
+  return walk(doc, 0);
+}
+
 // New endpoints only -- the original data/ai_intelligence/ai_index.json and
 // data/intelligence/detection_rules/rule_manifest.json static paths are
 // untouched and keep serving their git-committed content unchanged, so any
 // existing consumer of those exact URLs sees no behavior change.
 //
+// Historical GitHub fallback fields are retained as inert metadata; no
+// public request is permitted to read them. The R2 provenance gate always wins.
 // ghBranch (optional, per entry): which branch handleIntelStaticProxy()
 // falls back to when R2 is empty/errors. Defaults to "gh-pages" below --
 // unchanged for these first two entries. The 5 P0 RUNTIME INTELLIGENCE
@@ -131,38 +167,37 @@ async function handleIntelStaticProxy(env, path, method) {
   if (method !== "GET") {
     return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
   }
-  const { r2Key, ghPath, ghBranch = "gh-pages" } = entry;
+  const { r2Key } = entry;
 
-  if (env.INTEL_R2) {
-    try {
-      const r2Obj = await env.INTEL_R2.get(r2Key);
-      if (r2Obj) {
-        return new Response(r2Obj.body, {
-          status: 200,
-          headers: { ...CORS_HEADERS, ...SECURITY_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" },
-        });
-      }
-    } catch (r2Err) {
-      console.error(`[intel-static proxy] R2 read failed for ${r2Key}, falling back to gh-pages: ${r2Err && r2Err.message ? r2Err.message : r2Err}`);
-    }
+  if (!env?.INTEL_R2 || typeof env.INTEL_R2.get !== "function") {
+    return jsonResp({ error: "verified_intelligence_unavailable" }, 503,
+      { "Cache-Control": "no-store", "Retry-After": "60" });
   }
-
-  const upstreamUrl = `https://raw.githubusercontent.com/cyberdudebivash-pvt-ltd/CYBERDUDEBIVASH-THREAT-INTEL-PLATFORM/${ghBranch}/${ghPath}`;
+  let obj;
   try {
-    const resp = await fetch(upstreamUrl, {
-      cf: { cacheEverything: true, cacheTtl: 300 },
-      headers: { "User-Agent": `SENTINEL-APEX/${PLATFORM_VERSION} (+https://intel.cyberdudebivash.com)` },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!resp.ok) {
-      console.error(`[intel-static proxy] ${ghPath}: upstream returned ${resp.status}`);
-      return jsonResp({ error: "upstream_unavailable", path, request_id: crypto.randomUUID() }, 502, { "Cache-Control": "no-store" });
+    obj = await env.INTEL_R2.get(r2Key);
+  } catch {
+    // Never disclose storage details, and never fall back to raw GitHub.
+    return jsonResp({ error: "verified_intelligence_unavailable" }, 503,
+      { "Cache-Control": "no-store", "Retry-After": "60" });
+  }
+  if (!obj) {
+    return jsonResp({ error: "verified_intelligence_unavailable" }, 503,
+      { "Cache-Control": "no-store", "Retry-After": "60" });
+  }
+  try {
+    if (Number.isFinite(obj.size) && obj.size > MAX_PUBLIC_BODY_BYTES) {
+      throw new Error("oversize");
     }
-    const data = await resp.json();
-    return jsonResp(data, 200, { "Cache-Control": "public, max-age=300" });
-  } catch (e) {
-    console.error(`[intel-static proxy] ${ghPath}: ${e && e.message ? e.message : e}`);
-    return jsonResp({ error: "upstream_unavailable", path, request_id: crypto.randomUUID() }, 502, { "Cache-Control": "no-store" });
+    const raw = await new Response(obj.body).text();
+    if (new TextEncoder().encode(raw).byteLength > MAX_PUBLIC_BODY_BYTES) throw new Error("oversize");
+    const doc = JSON.parse(raw);
+    if (!publicTlpJsonVerified(doc)) throw new Error("unverified_public_classification");
+    return jsonResp(doc, 200, { "Cache-Control": "public, max-age=120" });
+  } catch {
+    // Restricted/invalid data never appears in diagnostics or access logs.
+    return jsonResp({ error: "verified_intelligence_unavailable" }, 503,
+      { "Cache-Control": "no-store", "Retry-After": "60" });
   }
 }
 
