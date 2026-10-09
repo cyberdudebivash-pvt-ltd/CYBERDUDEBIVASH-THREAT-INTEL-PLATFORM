@@ -7726,10 +7726,26 @@ async function handleRequest(request, env, ctx) {
           publicItem.report_url = null;
         }
       }
+      // P0 R19: an authorized FREE-masked report route already exists for
+      // eligible intel--<hex> advisories; empty legacy blog_url/report_url
+      // suppressed discovery for 14/25 observed public previews. Only add
+      // a navigable route if the real report bucket is configured, the item
+      // passed the *same* gate as /reports/** and its internal slug is safe.
+      // This is a route locator, NOT evidence of persisted/certified HTML/PDF.
+      const internalId = typeof i.id === "string" ? i.id : null;
+      const safeLegacySlug = typeof internalId === "string" &&
+        /^intel--[a-f0-9]+$/.test(internalId);
+      const publicReportUrl = publication.customer_ready && env.REPORTS_R2 && safeLegacySlug
+        ? `https://intel.cyberdudebivash.com/reports/${internalId}/` : null;
+      if (publicReportUrl && !publicItem.blog_url) {
+        publicItem.blog_url = publicReportUrl;
+      }
       const candidate = typeof i.stix_id === "string" ? i.stix_id : null;
       const syntacticallyValid = typeof candidate === "string" && stixIdSyntax.test(candidate);
       return {
         ...publicItem,
+        public_report_url: publicReportUrl,
+        public_report_url_kind: publicReportUrl ? "FREE_MASKED_WORKER_ROUTE" : "UNAVAILABLE",
         report_customer_ready: Boolean(publication.customer_ready),
         report_publication_state: publication.customer_ready ? "CUSTOMER_READY" : "BLOCKED",
         internal_advisory_id: typeof i.id === "string" ? i.id
