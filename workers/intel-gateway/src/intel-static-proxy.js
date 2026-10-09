@@ -91,10 +91,15 @@ function publicTlpJsonVerified(doc) {
     if (!hasTlp && typeof node.title === "string" && ADVISORY_KEYS.some(k => Object.hasOwn(node, k))) return false;
     return Object.values(node).every(value => walk(value, depth + 1));
   }
-  // Scalar or null JSON has no verifiable public intelligence schema.\n  if (doc === null || typeof doc !== "object") return false;\n  return walk(doc, 0);
+  // Scalar or null JSON has no verifiable public intelligence schema.
+  if (doc === null || typeof doc !== "object") return false;
+  return walk(doc, 0);
 }
 
-// Static proxy routing remains unchanged, but original raw GitHub branch/path\n// values below are retained only as inert metadata for backwards-compatible\n// route registration. The public handler NEVER performs a GitHub fetch.\nconst INTEL_STATIC_PROXY = {
+// Static proxy routing remains unchanged, but original raw GitHub branch/path
+// values below are retained only as inert metadata for backwards-compatible
+// route registration. The public handler NEVER performs a GitHub fetch.
+const INTEL_STATIC_PROXY = {
   "/api/v1/intel/ai_index.json": {
     r2Key:  "intelligence/ai_index.json",
     ghPath: "data/ai_intelligence/ai_index.json",
