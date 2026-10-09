@@ -57,6 +57,31 @@ class TestSanitizeDocument(unittest.TestCase):
         self.assertEqual(out["top_critical_items"], [])
         self.assertEqual(len(removed), 2)
 
+    def test_restricted_nested_dicts_are_quarantined_not_just_list_elements(self):
+        doc = {
+            "outer": {
+                "restricted": {"id": "hidden", "title": "sensitive", "tlp": "TLP:RED", "payload": SECRET},
+                "unlabelled": {"id": "unsigned", "title": "advisory", "report_url": "/reports/old", "payload": SECRET},
+                "allow": {"id": "clear", "title": "safe", "tlp": "TLP:CLEAR", "summary": "Approved"},
+            }
+        }
+        out, removed, withheld = tb.sanitize_document(doc, POLICY)
+        self.assertIsNone(withheld)
+        self.assertTrue(out["outer"]["restricted"]["tlp_boundary"]["withheld"])
+        self.assertTrue(out["outer"]["unlabelled"]["tlp_boundary"]["withheld"])
+        self.assertEqual(out["outer"]["allow"]["id"], "clear")
+        self.assertNotIn(SECRET, json.dumps(out))
+        self.assertEqual({r["id"] for r in removed}, {"hidden", "unsigned"})
+
+    def test_nested_document_level_classification_fails_closed(self):
+        for cls in ("TLP:AMBER", "TLP:CLEAR; TLP:RED"):
+            with self.subTest(cls=cls):
+                doc = {"cards": {"intel": {"classification": cls, "payload": SECRET}}}
+                out, removed, _ = tb.sanitize_document(doc, POLICY)
+                self.assertTrue(out["cards"]["intel"]["tlp_boundary"]["withheld"])
+                self.assertNotIn(SECRET, json.dumps(out))
+                self.assertEqual(len(removed), 1)
+
     def test_restricted_upstream_evidence_cannot_be_laundered_into_a_clear_record(self):
         doc = [rec("agg", "TLP:CLEAR", evidence_chain=[{"tlp": "TLP:AMBER"}]), rec("ok", "TLP:CLEAR")]
         out, removed, _ = tb.sanitize_document(doc, POLICY)
