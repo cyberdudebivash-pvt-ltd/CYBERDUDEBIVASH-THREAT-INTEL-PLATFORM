@@ -402,7 +402,11 @@ def _validate_one(
         )
         return failures, "FAIL"
 
-    return failures, "PASS"
+    # P0 R16: RULE 3b / RULE 4 can append failures without early return.
+    # A non-empty failure list must NEVER receive disposition PASS: the
+    # aggregate release gate logs only FAIL dispositions and previously
+    # ignored truncated HTML / missing public-path evidence.
+    return failures, "FAIL" if failures else "PASS"
 
 
 def validate_all_reports(
