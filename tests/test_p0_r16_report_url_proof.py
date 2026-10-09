@@ -112,5 +112,37 @@ class ReportUrlProofTests(unittest.TestCase):
         self.assertTrue(any("RULE 5 FAIL" in e for e in failures))
 
 
+    def test_untrusted_report_url_cannot_escape_reports_directory(self):
+        for unsafe in (
+            "/reports/2026/10/../secret.html",
+            "/reports/2026/10/%2e%2e/secret.html",
+            "/reports/2026//10/report.html",
+            "/reports/2026/10/..\\secret.html",
+            "/tmp/2026/10/secret.html",
+            "reports/../../secrets.html",
+            "/reports/2026/10/report.html?redirect=/evil",
+            "https://intel.cyberdudebivash.com/reports/2026/10/%2e%2e/report.html",
+        ):
+            with self.subTest(path=unsafe):
+                failures, result = self.inspect(self.advisory(report_url=unsafe))
+                self.assertEqual(result, "FAIL")
+                self.assertTrue(any("RULE 2 FAIL" in err for err in failures))
+
+    def test_untrusted_id_cannot_escape_derived_report_directory(self):
+        for bad_id in ("../private", "subdir/../../secret", "..", "name\\path"):
+            with self.subTest(intel_id=bad_id):
+                failures, disposition = self.inspect(self.advisory(
+                    id=bad_id, report_url=None, internal_report_url=None
+                ))
+                self.assertEqual(disposition, "FAIL")
+                self.assertTrue(any("RULE 2 FAIL" in err for err in failures))
+
+    def test_malformed_report_url_type_is_rejected_not_a_parser_crash(self):
+        for candidate in ({"href": "/reports/2026/10/a.html"}, ["report"], 7):
+            failures, disposition = self.inspect(self.advisory(report_url=candidate))
+            self.assertEqual(disposition, "FAIL")
+            self.assertTrue(any("RULE 2 FAIL" in err for err in failures))
+
+
 if __name__ == "__main__":
     unittest.main()
