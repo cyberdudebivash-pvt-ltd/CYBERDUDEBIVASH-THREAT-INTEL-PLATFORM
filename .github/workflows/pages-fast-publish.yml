@@ -143,6 +143,9 @@ on:
       - 'llms.txt'
       - 'llms-full.txt'
       - '.github/workflows/pages-fast-publish.yml'
+      - 'scripts/build_dist_artifact.py'
+      - 'scripts/p0_r37_static_feed_denial.py'
+      - 'tests/test_p0_r37_static_feed_denial.py'
   # ADDITIVE FIX (issue #320, see header comment above): identical paths
   # list to the push trigger above -- only fires when a merged PR actually
   # touched one of these files, matching that trigger's own scoping intent
@@ -162,6 +165,9 @@ on:
       - 'llms.txt'
       - 'llms-full.txt'
       - '.github/workflows/pages-fast-publish.yml'
+      - 'scripts/build_dist_artifact.py'
+      - 'scripts/p0_r37_static_feed_denial.py'
+      - 'tests/test_p0_r37_static_feed_denial.py'
   workflow_dispatch: {}
 
 permissions:
@@ -223,10 +229,26 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: P0 R37 - Test permanent static feed denial
+        run: python3 -m unittest discover -s tests -p 'test_p0_r37_static_feed_denial.py' -v
+
       - name: Build dist/ artifact (reuses build_dist_artifact.py -- same script as sentinel-blogger.yml STAGE 5.4.6)
         env:
           REPORT_RETENTION_DAYS: "3"
         run: python3 scripts/build_dist_artifact.py
+
+      - name: P0 R37 - Reject stale legacy intelligence in Pages artifact
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for name in ("feed.json", "latest.json"):
+              entry = json.loads((Path("dist") / name).read_text(encoding="utf-8"))
+              assert entry.get("error") == "legacy_static_feed_disabled", name
+              assert entry.get("items") == [] and entry.get("data") == [], name
+              assert entry.get("live_data_available") is False, name
+          print("P0: both static aliases have zero intelligence records")
+          PY
 
       - name: Verify frontend-critical files are present in dist/
         run: |
