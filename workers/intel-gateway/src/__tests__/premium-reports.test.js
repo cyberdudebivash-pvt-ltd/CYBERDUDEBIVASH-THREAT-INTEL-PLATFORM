@@ -130,17 +130,18 @@ test("no readable feed: 503, nothing stored, nothing counted", async () => {
   assert.equal(env.analytics.length, 0);
 });
 
-test("stale feed: labelled NOT LIVE within 48h, refused beyond it", async () => {
-  const stale = await handlePremiumReport(post(), envWith([CITRIX], { generatedAt: isoAgo(9 * 3600) }), { tier: "PRO", sub: "c" }, "rid");
-  assert.equal(stale.status, 201);
-  const body = await stale.json();
-  assert.equal(body.intelligence_freshness.live, false);
-  assert.match(body.intelligence_freshness.label, /NOT LIVE/);
-  const ancient = envWith([CITRIX], { generatedAt: isoAgo(49 * 3600) });
-  const res = await handlePremiumReport(post(), ancient, { tier: "PRO", sub: "c" }, "rid");
-  assert.equal(res.status, 503);
-  assert.equal((await res.json()).error, "intelligence_degraded");
-  assert.equal(ancient.puts.length, 0);
+test("P0 R41: expired feeds cannot generate reports, persist output or consume paid usage", async () => {
+  for (const hours of [9, 27, 49]) {
+    const expired = envWith([CITRIX], { generatedAt: isoAgo(hours * 3600) });
+    const res = await handlePremiumReport(post(), expired, { tier: "PRO", sub: "c" }, "rid");
+    assert.equal(res.status, 503);
+    const body = await res.json();
+    assert.equal(body.error, "intelligence_degraded");
+    assert.equal(body.freshness_status, "STALE");
+    assert.equal(expired.puts.length, 0);
+    assert.equal(expired.analytics.length, 0);
+    assert.ok(!JSON.stringify(body).includes(CITRIX.title));
+  }
   const fresh = await (await handlePremiumReport(post(), envWith([CITRIX]), { tier: "PRO", sub: "c" }, "rid")).json();
   assert.equal(fresh.intelligence_freshness.live, true);
 });

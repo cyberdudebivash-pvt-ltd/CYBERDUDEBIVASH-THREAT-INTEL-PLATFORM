@@ -57,9 +57,10 @@ def test_board_reads_only_the_freshness_contracted_brief():
     assert BOARD_JS.count("fetch(") == 1, "one data source only"
     # First render reuses the page's single shared brief request.
     assert "window.APEX_BRIEF" in BOARD_JS
-    # A stale feed is shown only through last_authoritative, labelled NOT LIVE.
-    assert "last.live === false" in BOARD_JS
-    assert "NOT LIVE" in BOARD_JS
+    # Expired records cannot return through a nested historical fallback.
+    assert "x.b.freshness_status === 'FRESH'" in BOARD_JS
+    assert "render(last" not in BOARD_JS
+    assert "last_authoritative" not in BOARD_JS
     # Feed text is set as text, never parsed as markup.
     assert "innerHTML" not in BOARD_JS and "insertAdjacentHTML" not in BOARD_JS
     assert "Math.random" not in BOARD_JS

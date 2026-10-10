@@ -16,8 +16,8 @@
  * Same contract as Cyber Watchdog, reused rather than re-implemented:
  *   - tier from effectiveTier() (cancelled / refunded / expired -> FREE)
  *   - freshness from watchdogPublication() (the canonical contract): not
- *     FRESH -> 503 intelligence_degraded, plus a labelled last_authoritative
- *     block (live:false) while STALE <= 48h, exactly like /api/watchdog/brief
+ *     FRESH -> 503 intelligence_degraded with empty items and no historical
+ *     fallback, exactly like /api/watchdog/brief
  *   - prices only from planPrice() (the runtime pricing provider, the same
  *     values Razorpay charges). No price literal in this file:
  *     __tests__/ai-threat-feed.test.js fails on one.
@@ -29,7 +29,7 @@
  *   GET  /api/ai-feed/item/:id    PRO+     one item, tier-projected
  *   POST /api/ai-feed/ingest      operator (X-Admin-Key) validated Hub upsert / retract
  */
-import { effectiveTier, planPrice, watchdogPublication, LAST_AUTHORITATIVE_MAX_AGE_SECONDS } from "./cyber-watchdog.js";
+import { effectiveTier, planPrice, watchdogPublication } from "./cyber-watchdog.js";
 import { sourceKey } from "./watchdog-stories.js";
 
 export const AI_FEED_NAME = "SENTINEL APEX AI THREAT FEED";
@@ -411,9 +411,6 @@ export async function routeAiFeed(req) {
     if (!read) return { status: 405, body: { error: "method_not_allowed" } };
     if (!pub.serve_live) {
       const body = { ...degraded(pub), tier, last_authoritative: null };
-      if (pub.freshness_status === "STALE" && Number.isFinite(pub.feed_age_seconds) && pub.feed_age_seconds <= LAST_AUTHORITATIVE_MAX_AGE_SECONDS) {
-        body.last_authoritative = { live: false, label: "LAST AUTHORITATIVE INTELLIGENCE - NOT LIVE", ...liveBody(mergeFeed(catalog, advisories), tier, pub) };
-      }
       return { status: 503, body };
     }
     return { status: 200, body: liveBody(mergeFeed(catalog, advisories), tier, pub) };

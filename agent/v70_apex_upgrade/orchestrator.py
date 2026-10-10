@@ -23,6 +23,7 @@ import logging
 import os
 import sys
 import time
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -116,6 +117,7 @@ def _convert_real_advisory(item: Dict[str, Any]) -> Advisory:
     Handles both the STIX manifest format and legacy flat format.
     """
     import re
+    item = deepcopy(item)
 
     title = item.get("title", "")
 
@@ -169,7 +171,7 @@ def _convert_real_advisory(item: Dict[str, Any]) -> Advisory:
             actors.append(actor_tag)
 
     # Source name
-    source_name = item.get("source", "") or item.get("source_name", "") or item.get("feed_source", "")
+    source_name = item.get("source_name", "") or item.get("source", "") or item.get("feed_source", "")
 
     # P0 FIX (run #793): ROOT CAUSE — "published": true in JSON is a boolean
     # metadata flag (e.g. STIX "published" field).  Python's `True or ""` evaluates
@@ -185,7 +187,7 @@ def _convert_real_advisory(item: Dict[str, Any]) -> Advisory:
                 return v.strip()
         return ""
 
-    published_date = _safe_date_str(item, "published_date", "timestamp", "created_at", "date")
+    published_date = _safe_date_str(item, "publication_timestamp", "published_at", "published_date", "timestamp", "created_at", "date")
     # "published" key is intentionally checked LAST — it is often a boolean in STIX
     # (e.g. {"published": true, "published_date": "2026-04-20T09:00:00Z"}).
     # Only fall through to it when none of the unambiguous date fields are present.
@@ -196,10 +198,11 @@ def _convert_real_advisory(item: Dict[str, Any]) -> Advisory:
         # bool, int, None, list → silently discard (leave published_date="")
 
     return Advisory(
+        source_fields=deepcopy(item),
         advisory_id=item.get("advisory_id", ""),
         title=title,
         summary=item.get("description", "") or item.get("summary", "") or title,
-        source_url=item.get("link", "") or item.get("source_url", ""),
+        source_url=item.get("source_url", "") or item.get("link", ""),
         source_name=source_name,
         published_date=published_date,
         threat_type=threat_type,

@@ -156,10 +156,23 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest pyyaml requests==2.34.2 'PyJWT[crypto]==2.15.1' --quiet
 
+      - name: P0 R41 source-evidence preservation and publication selection regressions
+        run: python -m pytest tests/test_p0_r41_publication_selection.py tests/test_p0_r39_rss_evidence.py tests/test_p0_r35_feed_prewrite_guard.py tests/test_v70_full.py -v --tb=short
+
       - name: Homepage ticker, SOC context and APT evidence regressions (offline)
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
+
+      - name: Install browser for P0 customer freshness regressions
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      - name: P0 expired intelligence customer rendering regressions
+        run: |
+          node render-test/verify_watchdog_stale_state.js
+          node render-test/verify_ai_threat_feed.js
 
       - name: Run homepage ticker, SOC context and APT evidence regressions (offline)
         run: node --test tests/latest-advisory-ticker.test.cjs tests/top-threat-context.test.cjs workers/intel-gateway/src/__tests__/apt-contract.test.js

@@ -412,11 +412,6 @@ function degradedBody(pub) {
   };
 }
 
-// P0 2026-09-26: how old a STALE authoritative feed may be and still be
-// shown -- labelled NOT LIVE -- as last-authoritative context. Beyond this,
-// or for a missing / invalid / future timestamp, nothing is shown.
-export const LAST_AUTHORITATIVE_MAX_AGE_SECONDS = 48 * 3600;
-
 // Brief row order. "priority" (default since 3.1.0): evidence-cited priority
 // band, then score, then feed order. Production 2026-09-28: in feed order the
 // free brief showed 8 PHP/Apache Roller CVEs while all 12 CRITICAL items,
@@ -429,7 +424,7 @@ export const BRIEF_SORTS = Object.freeze(["priority", "feed"]);
 // merged report. "none" keeps one row per feed item.
 export const BRIEF_GROUPS = Object.freeze(["story", "none"]);
 
-/** Brief rows for a lens / query at a tier's cap: one path for live and last-authoritative. */
+/** Brief rows for a lens / query at a tier's cap, from fresh intelligence only. */
 function selectBriefRows(source, { lens, q, cap, paid, sort = "priority", group = "story" }) {
   const hits = [];
   for (const item of source) {
@@ -461,35 +456,6 @@ function selectBriefRows(source, { lens, q, cap, paid, sort = "priority", group 
   return { rows, matched: hits.length, stories: stories.length };
 }
 
-/**
- * The last authoritative intelligence while the feed is STALE: a separate,
- * explicitly labelled block beside the unchanged degraded answer (503,
- * items: []), so no API consumer or poller that treats `items` / 200 as live
- * can mistake it for live intelligence. Only browsers read it.
- */
-function lastAuthoritativeBlock(feed, pub, select) {
-  if (pub.freshness_status !== "STALE") return null;
-  if (!Number.isFinite(pub.feed_age_seconds) || pub.feed_age_seconds > LAST_AUTHORITATIVE_MAX_AGE_SECONDS) return null;
-  const source = validItems(feed);
-  if (!source.length) return null;
-  const { rows, matched, stories } = selectBriefRows(source, select);
-  return {
-    live: false,
-    label: "LAST AUTHORITATIVE INTELLIGENCE - NOT LIVE",
-    freshness_status: pub.freshness_status,
-    feed_generated_at: pub.feed_generated_at,
-    feed_age_seconds: pub.feed_age_seconds,
-    max_age_seconds: LAST_AUTHORITATIVE_MAX_AGE_SECONDS,
-    sort: select.sort || "priority",
-    group: select.group || "story",
-    count: rows.length,
-    truncated: stories > rows.length,
-    stories,
-    items: rows,
-    situation: buildSituation(source),
-  };
-}
-
 export function buildWatchdogBrief(feed, opts = {}) {
   const pub = watchdogPublication(feed, opts.nowMs);
   const tier = effectiveTier({ tier: opts.tier, subscription_status: opts.subscription_status, error: opts.error });
@@ -500,7 +466,10 @@ export function buildWatchdogBrief(feed, opts = {}) {
   const sort = BRIEF_SORTS.includes(opts.sort) ? opts.sort : "priority";
   const group = BRIEF_GROUPS.includes(opts.group) ? opts.group : "story";
   if (!pub.serve_live) {
-    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort, group }) } };
+    // P0 R41: nested historical rows were still populating customer widgets
+    // for up to 48h despite the top-level stale gate. Retain status metadata,
+    // but never return expired advisories through an alternate payload field.
+    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: null } };
   }
   const source = validItems(feed);
   const { rows, matched, stories } = selectBriefRows(source, { lens, q, cap, paid: quota.paid, sort, group });

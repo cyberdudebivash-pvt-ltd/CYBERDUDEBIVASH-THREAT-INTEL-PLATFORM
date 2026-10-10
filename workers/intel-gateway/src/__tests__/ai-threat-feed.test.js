@@ -64,13 +64,20 @@ test("stale feed -> 503 on live, health and item; never served as live", async (
   assert.equal(live.status, 503);
   assert.equal(live.body.error, "intelligence_degraded");
   assert.deepEqual(live.body.items, []);
-  assert.equal(live.body.last_authoritative.live, false);
-  assert.match(live.body.last_authoritative.label, /NOT LIVE/);
+  assert.equal(live.body.last_authoritative, null);
   assert.equal((await call("/api/ai-feed/health", { feed: STALE })).status, 503);
   assert.equal((await call("/api/ai-feed/item/intel--ai1", { feed: STALE, auth: { tier: "PRO" } })).status, 503);
   const old = await call("/api/ai-feed/live", { feed: ANCIENT });
   assert.equal(old.status, 503);
-  assert.equal(old.body.last_authoritative, null, "nothing presented as current beyond 48h");
+  assert.equal(old.body.last_authoritative, null, "expired content is never returned");
+  for (const tier of ["FREE", "PRO", "ENTERPRISE"]) {
+    const denied = await call("/api/ai-feed/live", { feed: STALE, auth: { tier }, store: store({ items: [HUB] }) });
+    assert.equal(denied.status, 503);
+    assert.deepEqual(denied.body.items, []);
+    assert.equal(denied.body.last_authoritative, null);
+    assert.ok(!JSON.stringify(denied.body).includes(HUB.title));
+    assert.ok(!JSON.stringify(denied.body).includes("intel--ai1"));
+  }
   for (const f of [null, {}, { generated_at: "not a date", items: [] }]) {
     assert.equal((await call("/api/ai-feed/live", { feed: f })).status, 503);
   }

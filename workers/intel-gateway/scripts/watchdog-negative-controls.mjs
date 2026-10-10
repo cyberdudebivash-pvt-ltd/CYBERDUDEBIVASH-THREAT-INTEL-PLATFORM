@@ -372,19 +372,19 @@ const CONTROLS = [
     replace: "",
     tests: [T("watchdog-command-center.test.js")],
   },
-  // P0 2026-09-26: last-authoritative intelligence while STALE.
+  // Expired intelligence must never return through a nested fallback or live rows.
   {
-    id: "last_authoritative_served_past_48h_ceiling",
+    id: "expired_items_leak_into_nested_fallback",
     file: "workers/intel-gateway/src/cyber-watchdog.js",
-    find: "  if (!Number.isFinite(pub.feed_age_seconds) || pub.feed_age_seconds > LAST_AUTHORITATIVE_MAX_AGE_SECONDS) return null;",
-    replace: "",
+    find: "    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: null } };",
+    replace: "    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: { live: false, items: validItems(feed) } } };",
     tests: [T("cyber-watchdog.test.js")],
   },
   {
     id: "stale_items_leak_into_live_items_field",
     file: "workers/intel-gateway/src/cyber-watchdog.js",
-    find: "    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort, group }) } };",
-    replace: "    const la = lastAuthoritativeBlock(feed, pub, { lens, q, cap, paid: quota.paid, sort, group });\n    return { status: 503, body: { ...degradedBody(pub), tier, items: la ? la.items : [], last_authoritative: la } };",
+    find: "    return { status: 503, body: { ...degradedBody(pub), tier, last_authoritative: null } };",
+    replace: "    return { status: 503, body: { ...degradedBody(pub), tier, items: validItems(feed), last_authoritative: null } };",
     tests: [T("cyber-watchdog.test.js")],
   },
   {
@@ -734,7 +734,7 @@ const CONTROLS = [
     // A report must never be generated (stored, counted) from an unreadable or expired feed.
     id: "report_generated_without_fresh_feed",
     file: "workers/intel-gateway/src/premium-reports.js",
-    find: "  if (!pub.serve_live && !staleUsable) {",
+    find: "  if (!pub.serve_live) {",
     replace: "  if (false) {",
     tests: [T("premium-reports.test.js")],
   },

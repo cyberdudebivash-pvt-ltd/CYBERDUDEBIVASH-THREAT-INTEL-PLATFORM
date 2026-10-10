@@ -504,19 +504,12 @@ async function loadView(v) {
 }
 
 // ------------------------------------------------------------------ brief
-let briefCache = null;
 async function fetchBrief(lens, q) {
   const url = new URL('/api/watchdog/brief', location.origin);
   if (lens && lens !== 'all') url.searchParams.set('lens', lens);
   if (q) url.searchParams.set('q', q);
   const res = await fetch(url, { headers: headers() });
   return { ok: res.ok, data: await res.json() };
-}
-// P0 2026-09-26: a STALE feed answers degraded (503, items: []) plus a
-// separate last_authoritative block labelled NOT LIVE. Never cached as a
-// live brief, never marks the page synced.
-function lastAuthoritative(data) {
-  return data && data.last_authoritative && data.last_authoritative.live === false ? data.last_authoritative : null;
 }
 function renderSituation(data) {
   const sit = data && data.situation;
@@ -533,20 +526,12 @@ async function loadBrief(ev) {
   if (ev) ev.preventDefault();
   $('status').textContent = 'Loading…';
   const { ok, data } = await fetchBrief($('lens').value, $('q').value.trim());
-  const last = ok ? null : lastAuthoritative(data);
-  if (last) {
-    $('status').textContent = last.label + ' · last authoritative update ' + (last.feed_generated_at || 'unknown') + ' (' + (S.ageText(last.feed_age_seconds) || 'age unknown') + ')';
-    renderSituation(last);
-    renderBriefRows(last.items || [], 'Last authoritative items (not live)');
-    return;
-  }
-  if (!ok) {
+  if (!ok || data.freshness_status !== 'FRESH') {
     $('status').textContent = data.message || 'INTELLIGENCE DEGRADED';
     mount($('brieftable'), h('div', { class: 'ax-empty', text: 'No live items: the feed is not fresh' }));
     renderSituation(null);
     return;
   }
-  briefCache = data;
   renderSituation(data);
   markSynced();
   $('status').textContent = data.empty ? data.empty_reason : data.freshness_status + ' · ' + data.feed_item_count + ' advisories on the feed · ' + data.count + ' shown · ' + (S.ageText(data.feed_age_seconds) || '') + (data.truncated ? ' · more available on paid plans' : '');
@@ -575,7 +560,7 @@ function renderBriefRows(items, caption) {
 // --------------------------------------------------------- AI threat feed
 // GET /api/ai-feed/live projects by plan server-side: FREE rows arrive
 // locked (no summary, source URL, ruling, timeline or actions). A STALE feed
-// answers 503 with last_authoritative labelled NOT LIVE, as the brief does.
+// answers 503 with no expired rows, as the brief does.
 async function loadAiFeed() {
   let res; let data;
   try {
@@ -587,14 +572,13 @@ async function loadAiFeed() {
     return;
   }
   mount($('aif-detail'));
-  const last = res.ok ? null : lastAuthoritative(data);
-  const body = res.ok ? data : last;
+  const body = res.ok && data.freshness_status === 'FRESH' ? data : null;
   if (!body) {
     $('aif-status').textContent = data.message || 'INTELLIGENCE DEGRADED';
     mount($('aif-list'), h('div', { class: 'ax-empty', text: 'No live AI items: the feed is not fresh' }));
     return;
   }
-  $('aif-status').textContent = (last ? last.label : 'LIVE') + ' · ' + (body.freshness_status || data.freshness_status || 'UNKNOWN')
+  $('aif-status').textContent = 'LIVE' + ' · ' + (body.freshness_status || data.freshness_status || 'UNKNOWN')
     + ' · ' + body.count + ' of ' + body.total_available + ' AI items · ' + (PLAN_NAME[body.tier] || 'Free preview')
     + ' · updated ' + (body.feed_generated_at || 'unknown');
   const rows = (body.items || []).map((it) => {
@@ -609,7 +593,7 @@ async function loadAiFeed() {
   });
   const up = body.upgrade;
   mount($('aif-list'),
-    rows.length ? table(last ? 'Last authoritative AI items (not live)' : 'AI Threat Feed items', [{ label: 'Severity' }, { label: 'Item' }, { label: 'First seen', opt: true }, { label: 'Source', opt: true }, { label: 'Detail' }], rows)
+    rows.length ? table('AI Threat Feed items', [{ label: 'Severity' }, { label: 'Item' }, { label: 'First seen', opt: true }, { label: 'Source', opt: true }, { label: 'Detail' }], rows)
       : h('div', { class: 'ax-empty', text: 'No AI items on the feed right now' }),
     up ? h('p', { class: 'ax-meta', style: 'margin-top:10px' },
       h('a', { class: 'ax-btn ax-btn--primary', href: up.checkout, text: 'Upgrade to ' + (PLAN_NAME[up.plan] || up.plan) + ' · ' + up.price_label }),
@@ -653,8 +637,8 @@ async function loadOverview() {
   const on = signedIn();
   $('ov-signin').hidden = on;
   $('ov-signedin').hidden = !on;
-  if (!briefCache) { const b = await fetchBrief('all', ''); if (b.ok) { briefCache = b.data; renderSituation(b.data); } else renderSituation(lastAuthoritative(b.data)); }
-  else renderSituation(briefCache);
+  const brief = await fetchBrief('all', '');
+  renderSituation(brief.ok && brief.data.freshness_status === 'FRESH' ? brief.data : null);
   if (!on) return;
   const url = api('/api/watchdog/events');
   url.searchParams.set('limit', '6'); url.searchParams.set('sort', 'customer'); url.searchParams.set('open', '1');
