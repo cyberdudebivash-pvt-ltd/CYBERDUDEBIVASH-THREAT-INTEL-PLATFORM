@@ -161,6 +161,7 @@ import { classifyManifestFreshness, evaluatePublicIntelligence, healthEdgeTtlSec
 // Cyber Watchdog v3: feed freshness envelope, autonomous evaluation, signed
 // verified webhooks, browser sessions, MSSP tenants.
 import { publicationEnvelope } from './freshness-contract.js';
+import { denyNonFreshLiveFeed } from './stale-feed-policy.js';
 import { runWatchdogCycle } from './watchdog-scheduler.js';
 import { generateSigningSecret, resolveAndValidate, runVerificationChallenge } from './watchdog-webhook.js';
 import { SESSION_POLICY as WATCHDOG_SESSION_POLICY, webhookDeliveryEnabled } from './watchdog-policy.js';
@@ -7294,6 +7295,8 @@ async function handleRequest(request, env, ctx) {
       if (!publicTlpJsonVerified(data)) {
         return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
       }
+      const unavailable = denyNonFreshLiveFeed(data);
+      if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
       return jsonResp(data, 200, { "Cache-Control": "private, max-age=120" });
     }
     data = await r2Get(env, LATEST_JSON_KEY);
@@ -7301,6 +7304,8 @@ async function handleRequest(request, env, ctx) {
     if (!publicTlpJsonVerified(data)) {
       return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
+    const unavailable = denyNonFreshLiveFeed(data);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     // v142.0: this branch previously returned the canonical item array
     // untouched -- full IOCs, Sigma/KQL/Suricata rules, and actor attribution
     // leaked to every anonymous caller despite the comment above. Mask it.
@@ -7698,6 +7703,9 @@ async function handleRequest(request, env, ctx) {
     if (!publicTlpJsonVerified(feedData.items)) {
       return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
+    // P0 R36: never return a stale preview, even as an unlabelled teaser.
+    const unavailable = denyNonFreshLiveFeed(feedData);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     // Always the FREE/teaser view regardless of caller tier (unauthenticated
     // by design) -- so IOCs, detection rules, and actor attribution must be
     // masked the same way the FREE branch of every other endpoint is.
@@ -7790,6 +7798,8 @@ async function handleRequest(request, env, ctx) {
     // headers: a stale feed is never representable as fresh. Evaluated on
     // the stored object before tier gating; the edge TTL is 0 unless FRESH.
     const feedTruth = publicationEnvelope(data, Date.now(), 120);
+    const unavailable = denyNonFreshLiveFeed(data);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     // Legacy alias for /api/v1/intel/latest.json -- same key, same gate.
     const paidFeed = auth.tier === TIERS.PRO || auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
     if (!paidFeed && Array.isArray(data.items)) {
