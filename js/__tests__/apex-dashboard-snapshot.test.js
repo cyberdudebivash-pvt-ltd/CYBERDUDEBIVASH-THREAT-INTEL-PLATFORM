@@ -57,12 +57,16 @@ test('fresh and genuinely empty feed says so; not an error message', () => {
   assert.equal(t.count, 0);
 });
 
-test('stale feed: degraded with the last authoritative update, items still counted', () => {
+test('stale feed: degraded with the last authoritative update, no stale item exposure', () => {
   const s = Snap.build(health('stale', '2026-09-20T01:00:00Z'), feedOf(12), NOW);
   const t = Snap.tickerView(s);
   assert.equal(t.mode, 'degraded');
   assert.match(t.message, /^INTELLIGENCE DEGRADED — LAST AUTHORITATIVE UPDATE: 2026-09-20 01:00 UTC$/);
-  assert.equal(t.count, 12);
+  assert.equal(t.count, null);
+  assert.deepEqual(t.items, []);
+  assert.equal(s.intelligence.total, null);
+  assert.equal(s.feed.state, 'withheld');
+  assert.deepEqual(Snap.previewItems(s, 5), []);
 });
 
 test('feed fetch failure: unavailable, never "empty", no invented count', () => {
@@ -148,4 +152,30 @@ test('the snapshot has no fallback URL outside the platform origin', () => {
 test('esc() neutralises markup', () => {
   assert.equal(Snap.esc('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=alert(1)&gt;');
   assert.equal(Snap.esc('"><svg/onload=alert(1)>'), '&quot;&gt;&lt;svg/onload=alert(1)&gt;');
+});
+
+test('cached fresh health must not authorize an expired feed generation', () => {
+  const s = Snap.build(health('fresh'), feedOf(12, {
+    generated_at: '2026-09-20T01:00:00Z',
+    freshness_status: 'STALE',
+  }), NOW);
+  assert.equal(s.mode, 'degraded');
+  assert.deepEqual(s.feed.items, []);
+  assert.deepEqual(Snap.previewItems(s), []);
+  assert.equal(s.intelligence.iocs, null);
+  assert.equal(s.intelligence.source_count, null);
+});
+
+test('freshness label alone never authorizes a stale feed when health is unavailable', () => {
+  const s = Snap.build(FAIL, feedOf(2, { generated_at: '2026-09-20T01:00:00Z', freshness_status: 'FRESH' }), NOW);
+  assert.equal(s.mode, 'degraded');
+  assert.equal(Snap.tickerView(s).items.length, 0);
+});
+
+test('missing or future feed-generation time denies live dashboard projection', () => {
+  for (const timestamp of [null, '2026-09-25T23:59:00Z', 'invalid-date']) {
+    const s = Snap.build(health('fresh'), feedOf(5, { generated_at: timestamp }), NOW);
+    assert.notEqual(s.mode, 'live');
+    assert.equal(s.feed.items.length, 0);
+  }
 });
