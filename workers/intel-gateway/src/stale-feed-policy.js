@@ -4,7 +4,7 @@
  * Never returns the stored historical/stale item list in a LIVE route.
  * The origin feed is not mutated; historical archives remain separate.
  */
-import { publicationEnvelope } from "./freshness-contract.js";
+import { publicationEnvelope, parseGeneratedAt, MAX_PUBLIC_MANIFEST_AGE_HOURS } from "./freshness-contract.js";
 
 export function denyNonFreshLiveFeed(feed, nowMs = Date.now()) {
   const truth = publicationEnvelope(feed, nowMs, 0);
@@ -34,4 +34,18 @@ export function denyNonFreshLiveFeed(feed, nowMs = Date.now()) {
       message: "No verified fresh threat intelligence is currently available.",
     },
   };
+}
+
+/**
+ * Bound browser and edge freshness to the EXACT publication expiry, not
+ * integer-floored age_seconds (which could cache up to 1 extra stale second).
+ */
+export function liveFreshCacheControl(feed, capSeconds = 120, nowMs = Date.now()) {
+  const truth = publicationEnvelope(feed, nowMs, capSeconds);
+  if (!truth.evaluation.healthy) return "no-store";
+  const generatedMs = parseGeneratedAt(feed.generated_at);
+  if (generatedMs === null) return "no-store";
+  const expiresAt = generatedMs + MAX_PUBLIC_MANIFEST_AGE_HOURS * 3600 * 1000;
+  const remaining = Math.max(0, Math.floor((expiresAt - nowMs) / 1000));
+  return "public, max-age=" + Math.min(capSeconds, remaining) + ", must-revalidate";
 }
