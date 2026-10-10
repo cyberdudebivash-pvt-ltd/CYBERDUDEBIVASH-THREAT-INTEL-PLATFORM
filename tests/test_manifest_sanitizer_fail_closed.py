@@ -4,17 +4,20 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+ELIGIBILITY_DEPENDENCIES = ("p0_r44_publication_boundary.py", "p0_r35_feed_prewrite_guard.py",
+                            "sentinel_apex_mandate_enforcer.py", "manifest_reconciler.py", "safe_io.py")
 
 
 @pytest.mark.parametrize("dependency", ["missing", "broken", "healthy"])
 def test_publication_requires_working_sanitizer(tmp_path, dependency):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    for name in ("generate_api_manifests.py", "severity_epss_truth.py", "tlp_policy.py"):
+    for name in ("generate_api_manifests.py", "severity_epss_truth.py", "tlp_policy.py") + ELIGIBILITY_DEPENDENCIES:
         shutil.copyfile(ROOT / "scripts" / name, scripts / name)
     sanitizer = scripts / "public_api_sanitizer.py"
     if dependency == "healthy":
@@ -23,10 +26,7 @@ def test_publication_requires_working_sanitizer(tmp_path, dependency):
         sanitizer.write_text("raise ImportError('dependency unavailable')\n")
     api = tmp_path / "api"
     api.mkdir()
-    (api / "feed.json").write_text(json.dumps([{
-        "id": "test-advisory", "title": "Evidence fixture", "severity": "HIGH", "tlp": "TLP:CLEAR",  # P0 #721: unlabelled items are refused
-        "timestamp": "2026-10-06T00:00:00Z", "report_url": "https://example.com/private",
-    }]))
+    (api / "feed.json").write_text(json.dumps([_adv("test", report_url="https://example.com/private", tlp="TLP:CLEAR")]))
     out = api / "v1" / "intel"
     out.mkdir(parents=True)
     existing = out / "latest.json"
@@ -51,7 +51,7 @@ def test_publication_requires_working_sanitizer(tmp_path, dependency):
 def _run_manifests(tmp_path, feed, copy_policy=True):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    names = ["generate_api_manifests.py", "severity_epss_truth.py", "public_api_sanitizer.py"]
+    names = ["generate_api_manifests.py", "severity_epss_truth.py", "public_api_sanitizer.py", *ELIGIBILITY_DEPENDENCIES]
     if copy_policy:
         names.append("tlp_policy.py")
     for name in names:
@@ -67,7 +67,15 @@ def _run_manifests(tmp_path, feed, copy_policy=True):
 
 
 def _adv(i, **kw):
-    return dict({"id": f"adv-{i}", "title": f"Fixture {i}", "severity": "HIGH", "timestamp": "2026-10-06T00:00:00Z"}, **kw)
+    now = datetime.now(timezone.utc)
+    stamp = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dict({"id": f"adv-{i}", "stix_id": f"adv-{i}", "title": f"Fixture {i}",
+                 "source": "Fixture Publisher", "source_name": "publisher.example",
+                 "source_url": f"https://publisher.example/{i}", "severity": "MEDIUM", "risk_score": 5.0,
+                 "timestamp": stamp, "published_at": stamp, "publication_timestamp": stamp,
+                 "retrieval_timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "content_hash": "a" * 64,
+                 "content_hash_scope": "rss_entry_fields_sha256", "trust_score": 8.2,
+                 "evidence_count": 1, "evidence_basis": ["captured_rss_entry"]}, **kw)
 
 
 def test_manifests_withhold_every_non_clear_item(tmp_path):

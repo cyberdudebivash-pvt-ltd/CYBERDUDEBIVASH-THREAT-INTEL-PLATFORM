@@ -303,6 +303,15 @@ if len(raw_feed) == 0:
     fatal('[TLP] every feed item was withheld by the TLP publication policy; public bundles were REPLACED by empty '
           'tombstones (deny-first); operator review of labels/policy required')
 
+try:
+    from pathlib import Path
+    from p0_r44_publication_boundary import finalize_public_feed
+    finalize_public_feed(Path.cwd())
+    with open(FEED_PATH, encoding='utf-8') as _qualified_feed:
+        raw_feed = json.load(_qualified_feed)
+except (ImportError, OSError, ValueError, RuntimeError) as exc:
+    fatal('Final publication eligibility unavailable or refused: ' + str(exc))
+
 # ── STEP 1b: Deduplicate before manifests are generated ──────────────────────
 # Mirrors the 3-layer dedup in the Cloudflare Worker's deduplicateFeedItems().
 # Ensures duplicates are never baked into the immutable bundle files.

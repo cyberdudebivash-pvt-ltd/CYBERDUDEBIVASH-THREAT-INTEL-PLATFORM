@@ -160,7 +160,10 @@ class TestR2UploadCostGuardAccounting(unittest.TestCase):
         """PLAN EXCEEDS BUDGET -> BLOCK BEFORE MUTATION (Phase 3 contract)."""
         fake_pairs = [(f"src{i}.json", f"dst/{i}.json") for i in range(5)]
 
-        with patch.object(r2_upload, "get_credentials", return_value=("acct", "key", "secret")), \
+        # Publication eligibility has real boundary/integration coverage in
+        # test_p0_r44_publication_boundary.py; isolate this synthetic cost plan.
+        with patch("p0_r44_publication_boundary.finalize_public_feed"), \
+             patch.object(r2_upload, "get_credentials", return_value=("acct", "key", "secret")), \
              patch.object(r2_upload, "install_awscli"), \
              patch.object(r2_upload, "configure_awscli_performance"), \
              patch.object(r2_upload, "count_manifest", return_value=10), \
@@ -177,7 +180,8 @@ class TestR2UploadCostGuardAccounting(unittest.TestCase):
     def test_plan_within_budget_executes_all_planned_uploads(self):
         fake_pairs = [("src1.json", "dst/1.json"), ("src2.json", "dst/2.json")]
 
-        with patch.object(r2_upload, "get_credentials", return_value=("acct", "key", "secret")), \
+        with patch("p0_r44_publication_boundary.finalize_public_feed"), \
+             patch.object(r2_upload, "get_credentials", return_value=("acct", "key", "secret")), \
              patch.object(r2_upload, "install_awscli"), \
              patch.object(r2_upload, "configure_awscli_performance"), \
              patch.object(r2_upload, "count_manifest", return_value=10), \

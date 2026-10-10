@@ -1028,6 +1028,11 @@ def main() -> None:
 
     os.chdir(REPO_ROOT)
 
+    # Supplemental collectors run after the first feed prewrite check.
+    # Finalize under the same rules before any R2 reads/writes are planned.
+    from p0_r44_publication_boundary import finalize_public_feed
+    finalize_public_feed(REPO_ROOT)
+
     cf_account, access_key, secret_key = get_credentials()
     endpoint = f"https://{cf_account}.r2.cloudflarestorage.com"
 
