@@ -161,7 +161,7 @@ import { classifyManifestFreshness, evaluatePublicIntelligence, healthEdgeTtlSec
 // Cyber Watchdog v3: feed freshness envelope, autonomous evaluation, signed
 // verified webhooks, browser sessions, MSSP tenants.
 import { publicationEnvelope } from './freshness-contract.js';
-import { denyNonFreshLiveFeed } from './stale-feed-policy.js';
+import { denyNonFreshLiveFeed, liveFreshCacheControl } from './stale-feed-policy.js';
 import { runWatchdogCycle } from './watchdog-scheduler.js';
 import { generateSigningSecret, resolveAndValidate, runVerificationChallenge } from './watchdog-webhook.js';
 import { SESSION_POLICY as WATCHDOG_SESSION_POLICY, webhookDeliveryEnabled } from './watchdog-policy.js';
@@ -7297,7 +7297,7 @@ async function handleRequest(request, env, ctx) {
       }
       const unavailable = denyNonFreshLiveFeed(data);
       if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
-      return jsonResp(data, 200, { "Cache-Control": "private, max-age=120" });
+      return jsonResp(data, 200, { "Cache-Control": "private, no-store" });
     }
     data = await r2Get(env, LATEST_JSON_KEY);
     if (!data) return errorResp("Feed not available", 503);
@@ -7312,7 +7312,7 @@ async function handleRequest(request, env, ctx) {
     if (Array.isArray(data.items)) {
       data = { ...data, items: data.items.map(i => applyTierGateV2(i, "free", null)) };
     }
-    return jsonResp(data, 200, { "Cache-Control": "public, max-age=120" });
+    return jsonResp(data, 200, { "Cache-Control": liveFreshCacheControl(data, 120) });
   }
 
   // --- /api/v1/intel/top10.json -----------------------------------------------
@@ -7339,7 +7339,7 @@ async function handleRequest(request, env, ctx) {
     if (auth.tier !== TIERS.PRO && auth.tier !== TIERS.ENTERPRISE && auth.tier !== TIERS.MSSP && Array.isArray(data.items)) {
       data = { ...data, items: data.items.map(i => applyTierGateV2(i, "free", null)) };
     }
-    return jsonResp(data, 200, { "Cache-Control": "public, max-age=120" });
+    return jsonResp(data, 200, { "Cache-Control": "no-store" });
   }
 
   // --- /api/platform/stats ----------------------------------------------------
@@ -7419,7 +7419,7 @@ async function handleRequest(request, env, ctx) {
         version: PLATFORM_VERSION,
       },
       api: { calls_today: 0, generated_at: now() },
-    }, 200, { "Cache-Control": "public, max-age=60" });
+    }, 200, { "Cache-Control": liveFreshCacheControl(rawFeed, 60) });
   }
 
   // --- /api/v1/intel/stats ----------------------------------------------------
@@ -7446,7 +7446,7 @@ async function handleRequest(request, env, ctx) {
       publication,
       threat_level_formula_version: THREAT_LEVEL_FORMULA_VERSION,
       dashboard_contract: DASHBOARD_CONTRACT_VERSION,
-    }, 200, { "Cache-Control": "public, max-age=60" });
+    }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 60) });
   }
 
   // --- /api/metrics -------------------------------------------------------
@@ -7526,7 +7526,7 @@ async function handleRequest(request, env, ctx) {
       freshness_age_seconds: freshness.age_seconds,
       api_uptime_30d_pct: null,
       preview_item_limit: 10,
-    }, 200, { "Cache-Control": "public, max-age=60" });
+    }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 60) });
   }
 
   // --- /api/v1/intel/campaigns ------------------------------------------------
@@ -7537,7 +7537,7 @@ async function handleRequest(request, env, ctx) {
     const stats    = computeStats(feedData.items || []);
     const kc       = computeKillChain(feedData.items || []);
     const threat   = computeThreatLevel(stats);
-    return jsonResp({ ...kc, global_threat_level: threat, publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=60" });
+    return jsonResp({ ...kc, global_threat_level: threat, publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 60) });
   }
 
   // --- /api/v1/intel/ransomware -----------------------------------------------
@@ -7545,7 +7545,7 @@ async function handleRequest(request, env, ctx) {
     const feedData = await loadFeedItems(env);
     const staleDenial = denyNonFreshLiveFeed(feedData);
     if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
-    return jsonResp({ ...computeRansomware(feedData.items || []), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
+    return jsonResp({ ...computeRansomware(feedData.items || []), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 120) });
   }
 
   // --- /api/v1/intel/apt ------------------------------------------------------
@@ -7556,7 +7556,7 @@ async function handleRequest(request, env, ctx) {
     // Public/cacheable gadget: retain the existing actor entitlement gate.
     // Named paid-only attribution must not become public via aggregation.
     const publicItems = (feedData.items || []).map(item => applyTierGateV2(item, TIERS.FREE, null));
-    return jsonResp({ ...computeAPT(publicItems), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
+    return jsonResp({ ...computeAPT(publicItems), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 120) });
   }
 
   // --- /api/v1/intel/epss -----------------------------------------------------
@@ -7564,7 +7564,7 @@ async function handleRequest(request, env, ctx) {
     const feedData = await loadFeedItems(env);
     const staleDenial = denyNonFreshLiveFeed(feedData);
     if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
-    return jsonResp({ ...computeEPSS(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
+    return jsonResp({ ...computeEPSS(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 120) });
   }
 
   // --- /api/v1/intel/defcon ---------------------------------------------------
@@ -7582,7 +7582,7 @@ async function handleRequest(request, env, ctx) {
       formula: { version: THREAT_LEVEL_FORMULA_VERSION, expression: THREAT_LEVEL_FORMULA },
       publication: _dashboardPublication(feedData),
       generated_at: now(),
-    }, 200, { "Cache-Control": "public, max-age=60" });
+    }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 60) });
   }
 
   // --- /api/v1/intel/pulse ----------------------------------------------------
@@ -7591,7 +7591,7 @@ async function handleRequest(request, env, ctx) {
     const staleDenial = denyNonFreshLiveFeed(feedData);
     if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const stats    = computeStats(feedData.items || []);
-    return jsonResp({ ...computePulse(feedData.items || [], stats), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=60" });
+    return jsonResp({ ...computePulse(feedData.items || [], stats), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 60) });
   }
 
   // --- /api/v1/intel/darkweb --------------------------------------------------
@@ -7599,7 +7599,7 @@ async function handleRequest(request, env, ctx) {
     const feedData = await loadFeedItems(env);
     const staleDenial = denyNonFreshLiveFeed(feedData);
     if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
-    return jsonResp({ ...computeDarkweb(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=300" });
+    return jsonResp({ ...computeDarkweb(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 300) });
   }
 
   // --- /api/v1/intel/cybermap -------------------------------------------------
@@ -7608,7 +7608,7 @@ async function handleRequest(request, env, ctx) {
     const staleDenial = denyNonFreshLiveFeed(feedData);
     if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const stats    = computeStats(feedData.items || []);
-    return jsonResp({ ...computeCybermap(feedData.items || [], stats), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
+    return jsonResp({ ...computeCybermap(feedData.items || [], stats), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 120) });
   }
 
   // --- /api/v1/news/feed ------------------------------------------------------
@@ -7806,7 +7806,7 @@ async function handleRequest(request, env, ctx) {
       ...previewTruth.headers,
       // Do not cache a FRESH claim beyond the source freshness deadline.
       "Cache-Control": previewTruth.evaluation.healthy
-        ? `public, max-age=${previewTruth.edge_ttl_seconds}` : "no-store",
+        ? liveFreshCacheControl(feedData, 120) : "no-store",
     });
   }
 
@@ -7841,7 +7841,7 @@ async function handleRequest(request, env, ctx) {
     // cache, where an anonymous caller would be served it.
     const feedHeaders = paidFeed
       ? { ...feedTruth.headers, "Cache-Control": "private, no-store" }
-      : { ...feedTruth.headers, "Cache-Control": "public, max-age=120", "X-Sentinel-Edge-Ttl": String(feedTruth.edge_ttl_seconds) };
+      : { ...feedTruth.headers, "Cache-Control": liveFreshCacheControl(data, 120), "X-Sentinel-Edge-Ttl": String(feedTruth.edge_ttl_seconds) };
     return jsonResp(data, 200, feedHeaders);
   }
 
