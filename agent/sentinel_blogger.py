@@ -582,7 +582,11 @@ def main():
                 logger.debug("[DEDUP-L2] check_entry error (non-fatal): %s", _fps_ck_e)
 
         try:
-            result = process_entry(entry, feed_source="CyberDudeBivash Intel")
+            # P0 R39: preserve the actual observed publisher origin. The
+            # CYBERDUDEBIVASH platform is the processor, not an RSS origin.
+            result = process_entry(
+                entry, feed_source=entry.get("source_name") or entry.get("source") or "EXTERNAL"
+            )
         except Exception as _pe:
             import traceback as _tb
             logger.error(
