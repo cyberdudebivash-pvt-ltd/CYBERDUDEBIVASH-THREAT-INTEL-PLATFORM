@@ -163,7 +163,7 @@ The page clears the key field before the exchange request, never stores the key,
 
 ## 10. Freshness truth
 
-`/api/feed` and `/api/feed.json` keep HTTP 200 for existing clients and add:
+**P0 R36 superseding live-feed contract:** `/api/feed` and `/api/feed.json` return HTTP 200 **only** when the authoritative feed passes the 6-hour freshness contract. Expired, unavailable, invalid, future-dated or empty feeds return **HTTP 503** with no advisory records, explicit diagnostic status and `Cache-Control: no-store`. Historical reports remain accessible only through their explicitly historical routes. These endpoints expose:
 
 * **Body fields:** `publication_state`, `freshness_status` (FRESH, STALE, EMPTY, INVALID or UNAVAILABLE), `freshness_reason`, `age_seconds`, `max_age_seconds` and `freshness_contract`.
 * **Headers:** `X-Sentinel-Freshness`, `X-Sentinel-Publication-State`, `X-Sentinel-Feed-Generated-At` and `X-Sentinel-Feed-Age-Seconds`.
