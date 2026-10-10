@@ -272,7 +272,7 @@ class STIXExporter:
             for _key in (
                 "source_name", "retrieval_timestamp", "publication_timestamp",
                 "content_hash", "content_hash_scope", "evidence_count",
-                "evidence_basis", "trust_score",
+                "evidence_basis", "article_content_hash", "trust_score",
             ):
                 if _observed.get(_key):
                     _extension["x_cdb_" + _key] = _observed[_key]
@@ -1471,7 +1471,7 @@ class STIXExporter:
             for _k in (
                 "source_name", "source_domain", "retrieval_timestamp",
                 "publication_timestamp", "content_hash", "content_hash_scope",
-                "evidence_count", "evidence_basis", "trust_score",
+                "evidence_count", "evidence_basis", "article_content_hash", "trust_score",
             ):
                 if _observed.get(_k):
                     entry[_k] = _observed[_k]
