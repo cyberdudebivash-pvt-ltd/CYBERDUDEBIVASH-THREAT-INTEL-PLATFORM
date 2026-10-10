@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { denyNonFreshLiveFeed } from "../stale-feed-policy.js";
+import { denyNonFreshLiveFeed, liveFreshCacheControl } from "../stale-feed-policy.js";
 
 const NOW = Date.parse("2026-10-10T05:00:00Z");
 const item = { id: "verified-1", title: "Original advisory", source_url: "https://publisher.example/advisory" };
@@ -33,4 +33,14 @@ test("missing, malformed, future, and empty input never exposes items", () => {
 test("inclusive freshness boundary does not cache stale intelligence", () => {
   assert.equal(denyNonFreshLiveFeed(feed("2026-10-09T23:00:00Z"), NOW), null);
   assert.equal(denyNonFreshLiveFeed(feed("2026-10-09T22:59:59Z"), NOW).status, 503);
+});
+
+test("fresh response cache expires strictly before the six-hour boundary", () => {
+  const generated = "2026-10-09T23:00:00Z";
+  const atNinetySec = Date.parse("2026-10-10T04:58:30.250Z");
+  const ctl = liveFreshCacheControl(feed(generated), 120, atNinetySec);
+  assert.equal(ctl, "public, max-age=89, must-revalidate");
+  assert.equal(liveFreshCacheControl(feed(generated), 120, Date.parse("2026-10-10T04:59:59.750Z")),
+    "public, max-age=0, must-revalidate");
+  assert.equal(liveFreshCacheControl(feed(generated), 120, Date.parse("2026-10-10T05:00:00.001Z")), "no-store");
 });
