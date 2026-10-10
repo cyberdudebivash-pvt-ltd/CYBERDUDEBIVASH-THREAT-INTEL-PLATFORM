@@ -1134,7 +1134,7 @@ class STIXExporter:
                          ioc_extraction_meta=None,
                          iocs_flat=None, iocs_by_type=None,
                          stix_bundle_url="",
-                         published_at=""):
+                         published_at="", provenance=None):
         """Inner manifest update — called under FileLock by _update_manifest()."""
         # v143.4.0 FIX: sanitize title at manifest write boundary.
         # Prevents feedparser mojibake (â€" for —, â—† for ◆, etc.) from being
