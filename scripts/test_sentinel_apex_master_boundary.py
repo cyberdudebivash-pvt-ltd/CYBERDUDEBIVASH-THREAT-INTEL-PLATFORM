@@ -1,12 +1,15 @@
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
-from sentinel_apex_master_boundary import activation_status, publication_decision, stage_page
+from sentinel_apex_master_boundary import activation_status, freshness_from_feed, publication_decision, stage_page
 
 ENV = {
     "SENTINEL_APEX_AI_INTEL": "1",
     "SENTINEL_APEX_AI_INTEL_BASE_URL": "https://ai-intel.example",
 }
+NOW = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+FEED = {"generated_at": "2026-10-10T12:00:00Z", "generation": "public-feed-2026-10-10T12:00:00Z"}
 PAGE = {
     "schema": "sentinel-apex.intel.v1",
     "tlp": "CLEAR",
@@ -28,16 +31,17 @@ PAGE = {
 
 class BoundaryTest(unittest.TestCase):
     def test_flag_off_does_not_stage(self):
-        result = stage_page({}, {"cursor": 2, "records": {}}, PAGE, "FRESH")
+        result = stage_page({}, {"cursor": 2, "records": {}}, PAGE, feed=FEED, now=NOW)
         self.assertEqual(result["status"], "NOT_CONFIGURED")
         self.assertEqual(result["state"]["cursor"], 2)
         self.assertFalse(result["public_feed_write"])
         self.assertEqual(result["release"], "NOT_AUTHORIZED")
 
     def test_contract_keeps_provenance_and_still_does_not_publish(self):
-        result = stage_page(ENV, {"cursor": 0, "records": {}}, PAGE, "FRESH")
+        result = stage_page(ENV, {"cursor": 0, "records": {}}, PAGE, feed=FEED, now=NOW)
         self.assertEqual(result["status"], "CONTRACT_VERIFIED")
         self.assertEqual(result["freshness_decision"], "ELIGIBLE_FOR_EXISTING_PIPELINE")
+        self.assertEqual(result["freshness_bound_to"], FEED["generated_at"])
         self.assertEqual(result["release"], "NOT_AUTHORIZED")
         self.assertFalse(result["customer_visible"])
         row = result["state"]["records"]["CVE-2026-1"]
@@ -48,15 +52,18 @@ class BoundaryTest(unittest.TestCase):
         self.assertEqual(row["evidence"][1]["source_id"], "unresolved")
         self.assertFalse((Path(__file__).resolve().parents[1] / "api" / "feed.json").exists())
 
-    def test_stale_or_restricted_pages_cannot_pass_on_http_success(self):
-        stale = stage_page(ENV, {"cursor": 0, "records": {}}, PAGE, "EXPIRED")
+    def test_a_caller_supplied_fresh_label_cannot_authorize_release(self):
+        labeled = stage_page(ENV, {"cursor": 0, "records": {}}, PAGE, feed="FRESH", now=NOW)
+        self.assertEqual(labeled["freshness_decision"], "BLOCKED_BY_FRESHNESS_GATE")
+        self.assertEqual(labeled["release"], "NOT_AUTHORIZED")
+        self.assertEqual(freshness_from_feed("FRESH")["state"], "unbound")
+        self.assertEqual(publication_decision(None, {"state": "fresh"}), "BLOCKED_BY_FRESHNESS_GATE")
+        stale = stage_page(ENV, {"cursor": 0, "records": {}}, PAGE, feed={"generated_at": "2020-01-01T00:00:00Z", "generation": "old"}, now=NOW)
         self.assertEqual(stale["freshness_decision"], "BLOCKED_BY_FRESHNESS_GATE")
-        self.assertEqual(stale["release"], "NOT_AUTHORIZED")
-        restricted = stage_page(ENV, {"cursor": 5, "records": {}}, {**PAGE, "tlp": "AMBER"}, "FRESH")
+        restricted = stage_page(ENV, {"cursor": 5, "records": {}}, {**PAGE, "tlp": "AMBER"}, feed=FEED, now=NOW)
         self.assertEqual(restricted["status"], "FAILED")
         self.assertEqual(restricted["state"]["cursor"], 5)
-        self.assertEqual(publication_decision(None, None), "BLOCKED_BY_FRESHNESS_GATE")
-        self.assertEqual(activation_status({"SENTINEL_APEX_AI_INTEL": "1", "SENTINEL_APEX_AI_INTEL_BASE_URL": "http://insecure"} )["status"], "FAILED")
+        self.assertEqual(activation_status({"SENTINEL_APEX_AI_INTEL": "1", "SENTINEL_APEX_AI_INTEL_BASE_URL": "http://insecure"})["status"], "FAILED")
 
 
 if __name__ == "__main__":

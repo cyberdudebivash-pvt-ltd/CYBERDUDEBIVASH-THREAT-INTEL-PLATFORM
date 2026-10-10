@@ -1,22 +1,23 @@
-#!/usr/bin/env python3
 """Flag-gated boundary in front of the existing public freshness gate.
 
 Uses the merged adapter at integrations/sentinel-apex-ai-intel.
 Does not open the platform database, write api/feed.json, or upload to R2.
-A master HTTP 200 is not customer publication. Freshness remains the
-existing public_feed_freshness_gate decision, which this module does not call
-and does not weaken.
+A caller-supplied freshness word is not a release decision. Freshness is
+computed by scripts/public_freshness_contract.py from a feed document's
+generated_at. Even a fresh result stays unauthorized for publication.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ADAPTER_PATH = REPO_ROOT / "integrations" / "sentinel-apex-ai-intel" / "sentinel_apex_intel.py"
+SCRIPTS_DIR = Path(__file__).resolve().parent
 SCHEMA = "sentinel-apex.intel.v1"
 
 
@@ -27,6 +28,13 @@ def _adapter():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _freshness_contract():
+    if str(SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+    import public_freshness_contract as contract
+    return contract
 
 
 def activation_status(env: dict) -> dict:
@@ -43,22 +51,30 @@ def activation_status(env: dict) -> dict:
     return {**common, "status": "CONFIGURED", "enabled": True, "base_host": parsed.hostname}
 
 
-def publication_decision(adapter_error: str | None, freshness_state: str | None) -> str:
-    """The existing freshness gate remains authoritative. This function never writes."""
+def freshness_from_feed(feed, now=None) -> dict:
+    """Bind freshness to a feed document. A bare label such as 'FRESH' is unbound."""
+    if not isinstance(feed, dict) or "generated_at" not in feed:
+        return {"state": "unbound", "bound_to": None, "generation": None}
+    classified = _freshness_contract().classify_manifest_freshness(feed.get("generated_at"), now=now)
+    return {"state": classified["state"], "bound_to": feed.get("generated_at"), "generation": feed.get("generation")}
+
+
+def publication_decision(adapter_error: str | None, freshness: dict | None) -> str:
+    """Only the contract module's fresh state, bound to generated_at, can pass this check."""
     if adapter_error:
         return "FAILED"
-    if freshness_state != "FRESH":
+    if not isinstance(freshness, dict) or freshness.get("state") != "fresh" or not freshness.get("bound_to"):
         return "BLOCKED_BY_FRESHNESS_GATE"
     return "ELIGIBLE_FOR_EXISTING_PIPELINE"
 
 
-def stage_page(env: dict, state: dict, page: dict, freshness_state: str | None) -> dict:
+def stage_page(env: dict, state: dict, page: dict, feed=None, now=None) -> dict:
     status = activation_status(env)
     if status["status"] != "CONFIGURED":
-        return {**status, "state": state, "applied": 0, "removed": 0, "release": "NOT_AUTHORIZED"}
+        return {**status, "state": state, "applied": 0, "removed": 0, "release": "NOT_AUTHORIZED", "freshness_decision": "BLOCKED_BY_FRESHNESS_GATE"}
     result = _adapter().apply_master_page(state, page)
-    decision = publication_decision(result["error"], freshness_state)
-    release = "NOT_AUTHORIZED"
+    freshness = freshness_from_feed(feed, now=now)
+    decision = publication_decision(result["error"], freshness)
     return {
         "status": "CONTRACT_VERIFIED" if result["error"] is None else "FAILED",
         "schema": SCHEMA,
@@ -66,7 +82,8 @@ def stage_page(env: dict, state: dict, page: dict, freshness_state: str | None) 
         "public_feed_write": False,
         "end_to_end_verified": False,
         "freshness_decision": decision,
-        "release": release,
+        "freshness_bound_to": freshness.get("bound_to"),
+        "release": "NOT_AUTHORIZED",
         "error": result["error"],
         "applied": result["applied"] if result["error"] is None else 0,
         "removed": result["removed"] if result["error"] is None else 0,
