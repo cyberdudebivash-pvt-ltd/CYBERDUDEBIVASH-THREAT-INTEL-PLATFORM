@@ -69,7 +69,7 @@ const NAV_TIMEOUT_MS = 20_000;
 
 // Server behavior is switched per-scenario via these module-level flags,
 // each test navigates fresh so there is no cross-scenario state leakage.
-let feedMode = 'fail';   // 'fail' | 'incomplete' | 'ok'
+let feedMode = 'fail';   // 'fail' | 'incomplete' | 'partial' | 'ok' | 'xss' | 'geo-mixed'
 let aiMode = 'fail';     // 'fail' | 'ok' | 'xss' | 'escalation'
 
 const REAL_ITEM = { id: 'intel--real-1', title: 'REGRESSION-TEST-CANARY-ITEM', severity: 'CRITICAL', risk_score: 9.1, source_country: 'US' };
@@ -81,19 +81,45 @@ function startServer(root) {
   const server = http.createServer((req, res) => {
     let urlPath = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
 
+    // R38: the homepage's R36 freshness contract REQUIRES independent
+    // /api/health corroboration and the feed's own generated_at timestamp.
+    // Previously these fixtures omitted both while asserting LIVE widgets,
+    // and the browser gate incorrectly penalised correct fail-closed UI.
+    if (urlPath === '/api/health') {
+      if (feedMode === 'fail' || feedMode === 'incomplete') {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'degraded', intelligence: { status: 'stale' } }));
+        return;
+      }
+      const observedAt = new Date().toISOString();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'ok',
+        intelligence: { status: 'fresh', generated_at: observedAt, max_age_seconds: 21600 },
+      }));
+      return;
+    }
+
     if (urlPath === '/api/feed.json') {
       if (feedMode === 'fail') { res.writeHead(500); res.end('server error'); return; }
       if (feedMode === 'incomplete') {
-        // Valid response, real items -- but deliberately no feed_count,
-        // source_count, last_updated, or generated_at, so a customer with
-        // this exact response shape must never see a fabricated "74" or "LIVE".
+        // Valid JSON and real items, but deliberately NO authoritative
+        // generated_at: R36 must WITHHOLD it, never claim LIVE/verified,
+        // never render those records in customer-facing live widgets.
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ items: [REAL_ITEM] }));
         return;
       }
+      if (feedMode === 'partial') {
+        // Fresh, verifiable item but no feed_count or source_count metadata:
+        // source_count remains N/A, while the real item must still render.
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ generated_at: new Date().toISOString(), items: [REAL_ITEM] }));
+        return;
+      }
       if (feedMode === 'xss') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ items: [{ id: 'x1', title: XSS_PAYLOAD, severity: 'CRITICAL', risk_score: 9.9 }], feed_count: 1, last_updated: new Date().toISOString() }));
+        res.end(JSON.stringify({ items: [{ id: 'x1', title: XSS_PAYLOAD, severity: 'CRITICAL', risk_score: 9.9 }], generated_at: new Date().toISOString(), feed_count: 1, last_updated: new Date().toISOString() }));
         return;
       }
       if (feedMode === 'geo-mixed') {
@@ -111,7 +137,7 @@ function startServer(root) {
             { id: 'geo-none', title: 'REGRESSION-TEST-NO-ATTRIBUTION-ITEM', severity: 'CRITICAL', risk_score: 9.5 },
             { id: 'geo-real', title: 'REGRESSION-TEST-REAL-ATTRIBUTION-ITEM', severity: 'HIGH', risk_score: 7.2, source_country: 'DE' },
           ],
-          feed_count: 2, last_updated: new Date().toISOString(),
+          feed_count: 2, generated_at: new Date().toISOString(), last_updated: new Date().toISOString(),
         }));
         return;
       }
@@ -137,7 +163,7 @@ function startServer(root) {
           { id: 'intel--real-2', title: 'REGRESSION-TEST-CANARY-ITEM-2', severity: 'HIGH', risk_score: 6.4, feed_source: 'https://example-regression-source-a.test/feed' },
           { id: 'intel--real-3', title: 'REGRESSION-TEST-CANARY-ITEM-3', severity: 'HIGH', risk_score: 6.1, feed_source: 'https://example-regression-source-b.test/feed' },
         ],
-        last_updated: new Date().toISOString(),
+        generated_at: new Date().toISOString(), last_updated: new Date().toISOString(),
       }));
       return;
     }
@@ -268,9 +294,9 @@ async function main() {
       await context.close();
     }
 
-    // ── Scenario 2: feed succeeds but omits feed_count/source_count/
-    // last_updated/generated_at -- must show honest "—", never the old
-    // hardcoded "74" or the false "LIVE" claim. ────────────────────────
+    // ── Scenario 2: records exist but generation time is unverified.
+    // R36 must withhold their content, not render expired/unverifiable
+    // records. Never fall back to fake "74" or "LIVE" metrics. ─────────
     feedMode = 'incomplete'; aiMode = 'fail';
     {
       const { context, page, pageErrors } = await freshPage(browser);
@@ -284,11 +310,32 @@ async function main() {
       record('Incomplete-but-valid feed response: Last Sync shows N/A, never falsely claims "LIVE" with no timestamp',
         s.metricsSync === 'N/A',
         JSON.stringify(s.metricsSync));
-      record('Incomplete-but-valid feed response: ticker still renders the real item (proves this is not a blanket failure state)',
-        !!s.tickerText && /REGRESSION-TEST-CANARY-ITEM/.test(s.tickerText),
+      record('Unverifiable feed: ticker withholds real item and shows explicit degradation',
+        !!s.tickerText && !/REGRESSION-TEST-CANARY-ITEM/.test(s.tickerText) &&
+        /DEGRADED|UNAVAILABLE/i.test(s.tickerText),
         JSON.stringify(s.tickerText));
       record('Zero uncaught JS errors on incomplete-response scenario', pageErrors.length === 0, pageErrors.join(' | '));
 
+      await context.close();
+    }
+
+    // ── Scenario 2b: freshly attested partial metadata still renders
+    // genuine data, but never invents a feed_source counter. ─────────────
+    feedMode = 'partial'; aiMode = 'fail';
+    {
+      const { context, page, pageErrors } = await freshPage(browser);
+      await page.goto(PAGE_URL, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
+      await page.waitForTimeout(2500);
+      const s = await eiccState(page);
+      record('Verified fresh partial feed: real item renders without synthetic substitutions',
+        !!s.tickerText && /REGRESSION-TEST-CANARY-ITEM/.test(s.tickerText),
+        JSON.stringify(s.tickerText));
+      record('Verified fresh partial feed: Active Feeds is N/A when source domains are absent',
+        s.metricsFeeds === 'N/A', JSON.stringify(s.metricsFeeds));
+      record('Verified fresh partial feed: Last Sync is measurable from attested generation',
+        !!s.metricsSync && s.metricsSync !== 'N/A', JSON.stringify(s.metricsSync));
+      record('Zero uncaught JS errors on fresh partial-feed scenario',
+        pageErrors.length === 0, pageErrors.join(' | '));
       await context.close();
     }
 
