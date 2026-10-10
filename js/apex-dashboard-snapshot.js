@@ -118,7 +118,17 @@
     var pub = publicationFrom(health, feed);
     var genMs = Date.parse(pub.generated_at || '');
     pub.age_seconds = isFinite(genMs) ? Math.max(0, Math.round((now - genMs) / 1000)) : null;
-    pub.fresh = pub.status === 'fresh';
+    // P0 R36: independent feed-generation corroboration. Neither a cached
+    // health 'fresh' claim nor a feed-contract label can authorize old data.
+    var feedTime = Date.parse(feed && feed.generated_at || '');
+    var maxAgeMs = 6 * 3600 * 1000;
+    var feedAgeMs = now - feedTime;
+    var feedTimeValid = isFinite(feedTime) && feedAgeMs <= maxAgeMs && feedAgeMs >= -3 * 3600 * 1000;
+    var healthTimeValid = isFinite(genMs) && now - genMs <= maxAgeMs && now - genMs >= -3 * 3600 * 1000;
+    pub.fresh = pub.status === 'fresh' && feedTimeValid && healthTimeValid &&
+      !(feed && typeof feed.freshness_status === 'string' && feed.freshness_status.toUpperCase() !== 'FRESH');
+    // No expired intelligence may enter the ticker, metrics or preview.
+    if (!pub.fresh) items = [];
 
     var critical = 0, high = 0, iocs = 0, riskSum = 0, riskN = 0, sources = {};
     items.forEach(function (it) {
@@ -132,7 +142,7 @@
       if (h) sources[h] = (sources[h] || 0) + 1;
     });
 
-    var feedState = !feed ? 'error' : (items.length ? 'ok' : 'empty');
+    var feedState = !feed ? 'error' : (!pub.fresh ? 'withheld' : (items.length ? 'ok' : 'empty'));
     var mode;
     if (feedState === 'error') mode = 'unavailable';
     else if (!pub.fresh) mode = 'degraded';
@@ -145,11 +155,13 @@
       publication: pub,
       feed: { state: feedState, items: items },
       intelligence: {
-        total: items.length, critical: critical, high: high, iocs: iocs,
+        total: pub.fresh ? items.length : null,
+        critical: pub.fresh ? critical : null, high: pub.fresh ? high : null,
+        iocs: pub.fresh ? iocs : null,
         avg_risk: riskN ? Math.round((riskSum / riskN) * 10) / 10 : null,
         // Distinct feed_source hosts. Unmeasured (null) when items exist but
         // none names its source; 0 only for a genuinely empty feed.
-        source_count: !feed ? null : (Object.keys(sources).length || (items.length ? null : 0)),
+        source_count: !pub.fresh ? null : (Object.keys(sources).length || (items.length ? null : 0)),
         sources: sources,
       },
       built_at: new Date(now).toISOString(),
@@ -197,7 +209,7 @@
     if (state.mode === 'degraded') {
       var utc = utcText(state.publication.generated_at);
       return {
-        mode: 'degraded', items: items, count: state.intelligence.total,
+        mode: 'degraded', items: [], count: null,
         message: MESSAGES.degraded + ' — LAST AUTHORITATIVE UPDATE: ' + (utc || 'UNKNOWN'),
       };
     }
@@ -207,7 +219,7 @@
   /** Preview: up to n current items, Critical/High first, else the newest others. */
   function previewItems(state, n) {
     var max = n || 5;
-    var items = state && state.feed ? state.feed.items : [];
+    var items = state && state.mode === 'live' && state.feed ? state.feed.items : [];
     var top = items.filter(function (it) { var s = sev(it); return s === 'CRITICAL' || s === 'HIGH'; }).slice(0, max);
     return top.length ? top : items.slice(0, max);
   }
