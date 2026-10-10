@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from p0_r37_static_feed_denial import neutralise_legacy_static_feeds
-from p0_r37_live_legacy_canary import assert_unavailable
+from p0_r37_live_legacy_canary import assert_unavailable, assert_matches_fresh_authority
 
 class StaticFeedDenialTests(unittest.TestCase):
     def test_stale_items_never_survive_pages_build(self):
@@ -56,6 +56,22 @@ class StaticFeedDenialTests(unittest.TestCase):
         assert_unavailable(200, b'{"error":"legacy_static_feed_disabled","items":[],"data":[],"count":0,"live_data_available":false}', "/feed.json")
         assert_unavailable(503, b'{"error":"live_intelligence_unavailable","items":[],"data":[],"count":0,"live_data_available":false}', "/feed.json")
         assert_unavailable(404, b'Not Found', "/feed.json")
+
+    def test_fresh_authoritative_worker_alias_is_allowed_not_stale_snapshot(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc).timestamp()
+        stamp = "2026-10-10T10:00:00Z"
+        api = json.dumps({"generated_at": stamp, "items": [{"id": "new-1"}]}).encode()
+        same = json.dumps({"generated_at": stamp, "items": [{"id": "new-1"}]}).encode()
+        assert_matches_fresh_authority(200, same, 200, api, "/feed.json", now)
+        old = json.dumps({"generated_at": "2026-10-09T10:00:00Z", "items": [{"id": "old-1"}]}).encode()
+        with self.assertRaises(AssertionError):
+            assert_matches_fresh_authority(200, old, 200, api, "/feed.json", now)
+        with self.assertRaises(AssertionError):
+            assert_matches_fresh_authority(200, same, 503, b'{"items":[]}', "/feed.json", now)
+        stale_api = json.dumps({"generated_at": "2026-10-09T10:00:00Z", "items": [{"id": "new-1"}]}).encode()
+        with self.assertRaises(AssertionError):
+            assert_matches_fresh_authority(200, stale_api, 200, stale_api, "/feed.json", now)
 
     def test_fast_pages_publish_runs_tests_and_artifact_gate(self):
         workflow = (ROOT / ".github/workflows/pages-fast-publish.yml").read_text()
