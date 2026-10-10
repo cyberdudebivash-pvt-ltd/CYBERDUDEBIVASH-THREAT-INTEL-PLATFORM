@@ -94,6 +94,44 @@ def _gen_id(title: str, ts: str) -> str:
     return f"intel--{h}"
 
 
+def _rss_metadata_tlps(node, *, skip_items=False):
+    """Keep explicit upstream sharing labels, including channel metadata."""
+    labels = []
+    label_keys = {"tlp", "tlp_label", "source_tlp", "tlp_classification"}
+    local = lambda tag: tag.rsplit("}", 1)[-1].lower()
+    for key, value in node.attrib.items():
+        if local(key) in label_keys and value.strip():
+            labels.append(value.strip())
+    if local(node.tag) in label_keys and node.text and node.text.strip():
+        labels.append(node.text.strip())
+    for child in node:
+        if skip_items and local(child.tag) == "item":
+            continue
+        labels.extend(_rss_metadata_tlps(child, skip_items=skip_items))
+    return labels
+
+
+def _observe_rss_item(item, entry, feed_url, retrieved_at, feed_labels):
+    """Observe the fetched entry; never substitute processing time for publication."""
+    if str(_SCRIPTS_DIR.parent) not in sys.path:
+        sys.path.insert(0, str(_SCRIPTS_DIR.parent))
+    from agent.p0_r39_evidence import capture_rss_evidence
+    evidence = capture_rss_evidence({
+        "title": entry.findtext("title", ""), "summary": entry.findtext("description", ""),
+        "link": entry.findtext("link", ""), "published": entry.findtext("pubDate", ""),
+    }, feed_url, retrieved_at, REPO_ROOT / "data/quality/source_trust_scores.json")
+    item.update(evidence)
+    if evidence.get("publication_timestamp"):
+        item["timestamp"] = item["published_at"] = evidence["publication_timestamp"]
+    item["processed_at"] = retrieved_at
+    labels = feed_labels + _rss_metadata_tlps(entry)
+    if labels:
+        existing = item.get("sources") or []
+        existing = existing if isinstance(existing, list) else [existing]
+        item["sources"] = list(existing) + [{"source_url": item["source_url"], "tlp": label,
+                            "label_origin": "observed_rss_metadata"} for label in labels]
+
+
 def _get(url: str, headers: dict = None, timeout: int = 15):
     try:
         req = urllib.request.Request(url, headers=headers or {
@@ -408,15 +446,18 @@ def collect_malwarebazaar() -> list:
 # ─── SOURCE 5: BleepingComputer RSS (security news) ───────────────────────
 def collect_bleepingcomputer() -> list:
     log.info("[BC] Fetching BleepingComputer RSS...")
-    raw = _get("https://www.bleepingcomputer.com/feed/",
+    feed_url = "https://www.bleepingcomputer.com/feed/"
+    raw = _get(feed_url,
                headers={"User-Agent": "CDB-SENTINEL-APEX/1.0 (multi-source-collector)",
                         "Accept": "application/rss+xml,application/xml"})
     if not isinstance(raw, str):
         log.warning("[BC] No RSS data")
         return []
+    retrieved_at = _now()
     items = []
     try:
         root = ET.fromstring(raw)
+        feed_labels = _rss_metadata_tlps(root, skip_items=True)
         entries = root.findall(".//item")
         for entry in entries[:MAX_PER_SOURCE]:
             title_el = entry.find("title")
@@ -449,6 +490,7 @@ def collect_bleepingcomputer() -> list:
             item = _make_item(title, desc, sev, "BleepingComputer",
                               cve_ids, ts, url, ["Security News", "Threat Intelligence"])
             item["confidence"] = 0.62
+            _observe_rss_item(item, entry, feed_url, retrieved_at, feed_labels)
             items.append(item)
     except Exception as e:
         log.warning("[BC] Parse error: %s", e)
@@ -460,15 +502,18 @@ def collect_bleepingcomputer() -> list:
 def collect_securityaffairs() -> list:
     """v171.2 B4 FIX: SecurityAffairs RSS adapter."""
     log.info("[SA] Fetching SecurityAffairs RSS...")
-    raw = _get("https://securityaffairs.com/feed",
+    feed_url = "https://securityaffairs.com/feed"
+    raw = _get(feed_url,
                headers={"User-Agent": "CDB-SENTINEL-APEX/1.0 (multi-source-collector)",
                         "Accept": "application/rss+xml,application/xml"})
     if not isinstance(raw, str):
         log.warning("[SA] No RSS data")
         return []
+    retrieved_at = _now()
     items = []
     try:
         root = ET.fromstring(raw)
+        feed_labels = _rss_metadata_tlps(root, skip_items=True)
         entries = root.findall(".//item")
         for entry in entries[:MAX_PER_SOURCE]:
             title_el = entry.find("title")
@@ -500,6 +545,7 @@ def collect_securityaffairs() -> list:
             item = _make_item(title, desc, sev, "SecurityAffairs",
                               cve_ids, ts, url, ["Security News", "Threat Intelligence"])
             item["confidence"] = 0.68
+            _observe_rss_item(item, entry, feed_url, retrieved_at, feed_labels)
             items.append(item)
     except Exception as e:
         log.warning("[SA] Parse error: %s", e)
@@ -511,15 +557,18 @@ def collect_securityaffairs() -> list:
 def collect_cybersecuritynews() -> list:
     """v171.2 B4 FIX: CyberSecurityNews RSS adapter."""
     log.info("[CSN] Fetching CyberSecurityNews RSS...")
-    raw = _get("https://cybersecuritynews.com/feed/",
+    feed_url = "https://cybersecuritynews.com/feed/"
+    raw = _get(feed_url,
                headers={"User-Agent": "CDB-SENTINEL-APEX/1.0 (multi-source-collector)",
                         "Accept": "application/rss+xml,application/xml"})
     if not isinstance(raw, str):
         log.warning("[CSN] No RSS data")
         return []
+    retrieved_at = _now()
     items = []
     try:
         root = ET.fromstring(raw)
+        feed_labels = _rss_metadata_tlps(root, skip_items=True)
         entries = root.findall(".//item")
         for entry in entries[:MAX_PER_SOURCE]:
             title_el = entry.find("title")
@@ -551,6 +600,7 @@ def collect_cybersecuritynews() -> list:
             item = _make_item(title, desc, sev, "CyberSecurityNews",
                               cve_ids, ts, url, ["Security News", "Threat Intelligence"])
             item["confidence"] = 0.65
+            _observe_rss_item(item, entry, feed_url, retrieved_at, feed_labels)
             items.append(item)
     except Exception as e:
         log.warning("[CSN] Parse error: %s", e)
