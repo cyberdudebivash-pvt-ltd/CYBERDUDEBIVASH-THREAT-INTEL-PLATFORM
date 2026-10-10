@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from p0_r37_static_feed_denial import neutralise_legacy_static_feeds
+from p0_r37_live_legacy_canary import assert_unavailable
 
 class StaticFeedDenialTests(unittest.TestCase):
     def test_stale_items_never_survive_pages_build(self):
@@ -44,6 +45,17 @@ class StaticFeedDenialTests(unittest.TestCase):
         script = (ROOT / "scripts/build_dist_artifact.py").read_text()
         self.assertLess(script.index("neutralise_legacy_static_feeds(DIST_DIR)"), script.index("# ── 5. Validate report_url"))
         self.assertIn('"feed.json", "feed_manifest.json", "latest.json"', script)
+
+    def test_live_canary_rejects_stale_records_and_false_empty(self):
+        with self.assertRaises(AssertionError):
+            assert_unavailable(200, b'[{"id":"expired"}]', "/feed.json")
+        with self.assertRaises(AssertionError):
+            assert_unavailable(200, b'{"count":1,"items":[{"id":"expired"}]}', "/latest.json")
+        with self.assertRaises(AssertionError):
+            assert_unavailable(200, b'{"count":0,"items":[]}', "/latest.json")
+        assert_unavailable(200, b'{"error":"legacy_static_feed_disabled","items":[],"data":[],"count":0,"live_data_available":false}', "/feed.json")
+        assert_unavailable(503, b'{"error":"live_intelligence_unavailable","items":[],"data":[],"count":0,"live_data_available":false}', "/feed.json")
+        assert_unavailable(404, b'Not Found', "/feed.json")
 
     def test_fast_pages_publish_runs_tests_and_artifact_gate(self):
         workflow = (ROOT / ".github/workflows/pages-fast-publish.yml").read_text()
