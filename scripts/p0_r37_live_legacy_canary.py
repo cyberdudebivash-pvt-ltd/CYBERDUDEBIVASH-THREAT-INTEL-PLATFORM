@@ -23,6 +23,7 @@ def _response_summary(url: str, status: int, raw: bytes) -> dict:
         return out
     out["shape"] = type(data).__name__
     if isinstance(data, dict):
+        out["keys"] = sorted(data)[:20]
         out.update({k: data.get(k) for k in ("error", "generated_at", "count", "freshness_status")})
         out["item_count"] = len(data["items"]) if isinstance(data.get("items"), list) else None
     elif isinstance(data, list):
@@ -93,7 +94,10 @@ def assert_matches_fresh_authority(
 
 
 def _request(url: str) -> tuple[int, bytes]:
-    request = urllib.request.Request(url, headers={"Cache-Control": "no-cache", "Accept": "application/json"})
+    request = urllib.request.Request(url, headers={
+        "Cache-Control": "no-cache", "Accept": "application/json",
+        "User-Agent": "SENTINEL-APEX-P0-LEGACY-CANARY/1.0",
+    })
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             status = response.status
@@ -105,7 +109,7 @@ def _request(url: str) -> tuple[int, bytes]:
         headers = exc.headers
     _RESPONSE_METADATA[url] = {k: headers.get(k) for k in (
         "Server", "Cache-Control", "Age", "CF-Cache-Status", "CF-Ray",
-        "X-Sentinel-Version", "X-Sentinel-Freshness", "X-Request-ID",
+        "X-Sentinel-Version", "X-Sentinel-Freshness", "X-Request-ID", "CF-Mitigated", "Content-Type",
     ) if headers is not None and headers.get(k) is not None}
     if len(body) > MAX_BYTES:
         raise AssertionError(f"Unexpected large response: {url}")

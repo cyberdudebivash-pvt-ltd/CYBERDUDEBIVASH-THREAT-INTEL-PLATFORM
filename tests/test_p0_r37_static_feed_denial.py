@@ -93,8 +93,9 @@ class StaticFeedDenialTests(unittest.TestCase):
         })
         response_context = unittest.mock.MagicMock()
         response_context.__enter__.return_value = response
-        with patch.object(live_canary.urllib.request, "urlopen", return_value=response_context):
+        with patch.object(live_canary.urllib.request, "urlopen", return_value=response_context) as request:
             self.assertEqual(live_canary._request(url), (200, raw))
+        self.assertEqual(request.call_args.args[0].get_header("User-agent"), "SENTINEL-APEX-P0-LEGACY-CANARY/1.0")
         summary = live_canary._response_summary(url, 200, raw)
         self.assertEqual(summary["headers"]["CF-Cache-Status"], "HIT")
         self.assertEqual(summary["headers"]["Age"], "104400")

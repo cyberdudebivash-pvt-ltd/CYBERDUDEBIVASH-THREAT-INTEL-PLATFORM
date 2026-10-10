@@ -129,7 +129,7 @@ def _atomic_write(path: Path, data) -> None:
         sys.exit(1)
 
 
-def reconcile(dry_run: bool = False) -> dict:
+def reconcile(dry_run: bool = False, *, feed_path: Path | None = None, manifest_path: Path | None = None) -> dict:
     """
     Core reconciliation logic.
     Returns a report dict with counts and outcome.
@@ -140,16 +140,18 @@ def reconcile(dry_run: bool = False) -> dict:
     print("[RECONCILER] =" * 35, flush=True)
 
     # ── Load api/feed.json (source of truth) ──────────────────────────────────
-    raw_feed = _load_json(FEED_PATH, "api/feed.json")
+    feed_path = feed_path or FEED_PATH
+    manifest_path = manifest_path or MANIFEST_PATH
+    raw_feed = _load_json(feed_path, "api/feed.json")
     if raw_feed is None:
         print("[RECONCILER] SKIP: api/feed.json missing -- nothing to reconcile", flush=True)
         return {"status": "skipped", "reason": "api_feed_missing"}
 
     feed_items = _unwrap(raw_feed, "api/feed.json")
-    print(f"[RECONCILER] api/feed.json: {len(feed_items)} items | sha={_sha16(FEED_PATH)}", flush=True)
+    print(f"[RECONCILER] api/feed.json: {len(feed_items)} items | sha={_sha16(feed_path)}", flush=True)
 
     # ── Load feed_manifest.json ────────────────────────────────────────────────
-    raw_manifest = _load_json(MANIFEST_PATH, "feed_manifest.json")
+    raw_manifest = _load_json(manifest_path, "feed_manifest.json")
     if raw_manifest is None:
         # Manifest doesn't exist yet — bootstrap from feed
         print("[RECONCILER] feed_manifest.json not found -- bootstrapping from api/feed.json", flush=True)
@@ -229,8 +231,8 @@ def reconcile(dry_run: bool = False) -> dict:
     else:
         out_manifest = updated_manifest
 
-    _atomic_write(MANIFEST_PATH, out_manifest)
-    new_sha = _sha16(MANIFEST_PATH)
+    _atomic_write(manifest_path, out_manifest)
+    new_sha = _sha16(manifest_path)
     print(f"[RECONCILER] ✅ Synced {len(missing)} items into feed_manifest.json", flush=True)
     print(f"[RECONCILER]    manifest now: {len(updated_manifest)} items | sha={new_sha}", flush=True)
 
