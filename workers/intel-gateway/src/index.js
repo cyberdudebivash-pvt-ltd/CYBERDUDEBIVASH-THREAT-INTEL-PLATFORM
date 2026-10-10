@@ -9659,6 +9659,26 @@ function isEdgeCacheableRequest(pathname, method) {
     && !isCertificationWebhookSinkPath(pathname);
 }
 
+const LIVE_FEED_CACHE_PATHS = new Set([
+  "/feed.json", "/latest.json", "/api/feed", "/api/feed.json", "/api/v1/intel/latest.json",
+]);
+
+async function cachedLiveFeedIsPublishable(response) {
+  // Existing regional cache entries can predate the origin publication guard.
+  // Recheck their source generation and complete TLP document on every hit;
+  // valid hits still avoid an R2 read. Clone so verification does not consume
+  // the response body that will be returned to the caller.
+  if (response.status !== 200) return false;
+  const cc = (response.headers.get("Cache-Control") || "").toLowerCase();
+  if (cc.includes("private") || cc.includes("no-store")) return false;
+  try {
+    const feed = await response.clone().json();
+    return publicTlpJsonVerified(feed) && denyNonFreshLiveFeed(feed) === null;
+  } catch (_) {
+    return false;
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
@@ -9681,7 +9701,7 @@ export default {
     if (edgeCache) {
       try {
         const cached = await edgeCache.match(request);
-        if (cached) return withRequestId(cached, requestId);
+        if (cached && (!LIVE_FEED_CACHE_PATHS.has(pathname) || await cachedLiveFeedIsPublishable(cached))) return withRequestId(cached, requestId);
       } catch (cacheErr) {
         console.error(`[fetch] request_id=${requestId} edge cache match failed for ${pathname}: ${cacheErr && cacheErr.message ? cacheErr.message : cacheErr}`);
       }
