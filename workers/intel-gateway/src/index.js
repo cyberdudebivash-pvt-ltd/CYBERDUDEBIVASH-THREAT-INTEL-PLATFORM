@@ -7784,9 +7784,9 @@ async function handleRequest(request, env, ctx) {
     // once, so this is zero-behavior-change for every existing consumer that
     // doesn't look at the new key.
     // P0 R16: evaluate the authoritative stored publication timestamp,
-    // not the time this HTTP preview was assembled. Keep the historical
-    // FREE preview available, but never label its intelligence as fresh
-    // when /api/health has crossed the six-hour freshness boundary.
+    // not the time this HTTP preview was assembled. Historical intelligence
+    // belongs to explicit archives; a stale live preview is HTTP 503 with
+    // no items. The timestamp is preserved only for incident diagnostics.
     const previewTruth = publicationEnvelope(feedData, Date.now(), 120);
     const liveIndicators = await getLiveIndicatorsSummary(env);
     return jsonResp({
@@ -7820,11 +7820,9 @@ async function handleRequest(request, env, ctx) {
     if (!publicTlpJsonVerified(data)) {
       return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
-    // Freshness truth (Cyber Watchdog P3 / feed staleness contract). HTTP 200
-    // is kept for existing clients, so the verdict travels in the body
-    // (publication_state, freshness_status, age_seconds) and in X-Sentinel-*
-    // headers: a stale feed is never representable as fresh. Evaluated on
-    // the stored object before tier gating; the edge TTL is 0 unless FRESH.
+    // P0 R36: fail CLOSED with HTTP 503 and no items on stale/unverified
+    // intelligence. The verdict is bound to the stored source generation,
+    // never the request clock; guard executes before tier projection.
     const feedTruth = publicationEnvelope(data, Date.now(), 120);
     const unavailable = denyNonFreshLiveFeed(data);
     if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
