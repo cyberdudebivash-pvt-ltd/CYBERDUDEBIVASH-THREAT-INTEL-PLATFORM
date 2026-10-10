@@ -1,0 +1,181 @@
+"""P0 R41: a poisoned historical batch cannot starve eligible source evidence."""
+import copy
+import json
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
+import p0_r35_feed_prewrite_guard as guard
+from agent.p0_r39_evidence import capture_rss_evidence
+from agent.v70_apex_upgrade.core.models import Manifest, advisory_from_legacy
+from agent.v70_apex_upgrade.core.manifest_manager import ManifestManager
+from agent.v70_apex_upgrade.orchestrator import _convert_real_advisory
+
+
+def valid_record(i="valid"):
+    now = datetime.now(timezone.utc)
+    source_time = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "id": i, "stix_id": i, "title": "Publisher reported security incident " + i,
+        "description": "Source investigation with observed supporting evidence.",
+        "source": "Publisher", "source_name": "publisher.example",
+        "source_url": "https://publisher.example/security/" + i,
+        "publication_timestamp": source_time, "published_at": source_time,
+        "retrieval_timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "timestamp": source_time, "content_hash": "a" * 64,
+        "content_hash_scope": "rss_entry_fields_sha256", "trust_score": 8.2,
+        "evidence_count": 1, "evidence_basis": ["captured_rss_entry"],
+        "severity": "MEDIUM", "risk_score": 5.0, "tlp": "TLP:CLEAR",
+        "actors": [], "tags": [], "report_url": "/reports/2026/10/" + i + ".html",
+        "sources": [{"tlp": "TLP:CLEAR", "capture": {"id": "original"}}],
+    }
+
+
+def test_select_before_cap_keeps_valid_minority_without_mutating_inventory():
+    rows = [{"id": f"old-{i}", "title": "Historical record"} for i in range(510)]
+    rows += [valid_record(str(i)) for i in range(3)]
+    original = copy.deepcopy(rows)
+    selected, held = guard.select_publishable(rows, limit=2)
+    assert [r["id"] for r in selected] == ["0", "1"]
+    assert len(held) == 510
+    assert rows == original
+    assert all(set(r) == {"id", "reason_code", "reason"} for r in held)
+    guard.assert_publishable(selected)
+
+
+@pytest.mark.parametrize("change,reason", [
+    ({"tlp": "TLP:AMBER"}, "RESTRICTED_LABEL"),
+    ({"sources": [{"tlp": "TLP:RED"}]}, "RESTRICTED_UPSTREAM_LABEL"),
+    ({"tlp": None}, "MISSING_LABEL"),
+    ({"source": "SENTINEL-APEX"}, "PREWRITE_DENIED"),
+    ({"publication_timestamp": "2020-01-01T00:00:00Z"}, "PREWRITE_DENIED"),
+    ({"content_hash": ""}, "PREWRITE_DENIED"),
+    ({"actor_tag": "UNC-CDB"}, "PREWRITE_DENIED"),
+])
+def test_denial_rules_are_preserved(change, reason):
+    denied = {**valid_record("denied"), **change}
+    selected, held = guard.select_publishable([denied, valid_record()])
+    assert [r["id"] for r in selected] == ["valid"]
+    assert held[0]["reason_code"] == reason
+
+
+def test_empty_selection_still_blocks_and_does_not_invent_evidence():
+    original = [{"id": "unproven", "title": "A source report"}, None]
+    rows = copy.deepcopy(original)
+    selected, held = guard.select_publishable(rows)
+    assert selected == [] and len(held) == 2
+    assert rows == original
+    with pytest.raises(ValueError, match="P0_FEED_PREWRITE_BLOCKED"):
+        guard.assert_publishable(selected)
+
+
+def test_validator_crash_never_turns_into_publication(monkeypatch):
+    def crash(_):
+        raise RuntimeError("validation dependency failed")
+    monkeypatch.setattr(guard, "check_mandate_3", crash)
+    with pytest.raises(RuntimeError, match="validation dependency failed"):
+        guard.select_publishable([valid_record()])
+
+
+@pytest.mark.parametrize("factory", [_convert_real_advisory, advisory_from_legacy])
+def test_enrichment_preserves_source_evidence_clocks_and_nested_restrictions(factory):
+    item = valid_record()
+    item["sources"].append({"tlp": "TLP:AMBER", "capture": {"id": "restricted"}})
+    original = copy.deepcopy(item)
+    advisory = factory(item)
+    for output in (advisory.to_dict(), advisory.to_legacy_dict()):
+        for key in ("id", "source_name", "source_url", "publication_timestamp",
+                    "retrieval_timestamp", "content_hash", "content_hash_scope",
+                    "trust_score", "evidence_count", "evidence_basis", "tlp", "sources"):
+            assert output[key] == original[key], key
+        assert advisory.published_date == original["publication_timestamp"]
+        selected, held = guard.select_publishable([output])
+        assert not selected
+        assert held[0]["reason_code"] == "RESTRICTED_UPSTREAM_LABEL"
+        output["sources"][0]["capture"]["id"] = "changed"
+    assert item == original
+    assert advisory.to_legacy_dict()["sources"] == original["sources"]
+
+
+def test_actual_observation_survives_versioned_manifest_publication(tmp_path):
+    now = datetime.now(timezone.utc)
+    reg = tmp_path / "trust.json"
+    reg.write_text(json.dumps({"trust_scores": {"publisher.example": {"trust_score": 0.82}}}))
+    entry = {"title": "Publisher security investigation", "summary": "Observed RSS fields",
+             "link": "https://publisher.example/security/report",
+             "published": (now - timedelta(hours=1)).isoformat()}
+    observed = capture_rss_evidence(entry, "https://publisher.example/rss", now.isoformat(), reg)
+    item = {**valid_record(), **observed, "title": entry["title"]}
+    mgr = ManifestManager(str(tmp_path / "data"))
+    success, message = mgr.publish(Manifest(), [_convert_real_advisory(item)])
+    assert success, message
+    published = json.loads(Path(mgr.latest_path).read_text())["advisories"]
+    selected, held = guard.select_publishable(published)
+    assert len(selected) == 1 and not held
+    for key, value in observed.items():
+        assert selected[0][key] == value
+    assert list(Path(mgr.versioned_dir).glob("manifest_v*.json"))
+
+
+def test_missing_provenance_stays_missing_after_enrichment():
+    item = {"title": "A report without evidence", "source": "Publisher"}
+    out = _convert_real_advisory(item).to_legacy_dict()
+    for key in ("retrieval_timestamp", "publication_timestamp", "content_hash", "trust_score"):
+        assert key not in out
+    assert not guard.select_publishable([out])[0]
+
+
+def test_dedup_cannot_launder_restricted_components_into_clear_primary():
+    from agent.v70_apex_upgrade.engines.dedup_engine import DedupEngine
+    clear = valid_record("clear")
+    restricted = {**valid_record("restricted"), "source_url": clear["source_url"],
+                  "sources": [{"tlp": "TLP:AMBER", "capture": {"id": "partner"}}]}
+    original = copy.deepcopy(restricted)
+    result = DedupEngine().deduplicate([_convert_real_advisory(clear), _convert_real_advisory(restricted)])
+    assert len(result) == 1
+    selected, held = guard.select_publishable([result[0].to_legacy_dict()])
+    assert selected == [] and held[0]["reason_code"] == "RESTRICTED_UPSTREAM_LABEL"
+    assert restricted == original
+
+
+@pytest.mark.parametrize("has_valid", [True, False])
+def test_real_feed_writer_withholds_history_and_preserves_both_previous_files(tmp_path, monkeypatch, has_valid):
+    import run_pipeline
+    import intel_quality_engine
+    monkeypatch.setattr(run_pipeline, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(intel_quality_engine, "apply_quality_pipeline", lambda rows: rows)
+    rows = [{"id": f"old-{i}", "title": f"Historical source record {i}",
+             "timestamp": "2026-10-10T00:00:00Z"} for i in range(510)]
+    if has_valid:
+        rows.append(valid_record())
+    manifest = tmp_path / "data/stix/feed_manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps(rows))
+    targets = [tmp_path / "feed.json", tmp_path / "api/feed.json"]
+    for target in targets:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('[{"id":"previous-authoritative"}]')
+    if not has_valid:
+        with pytest.raises(ValueError, match="P0_FEED_PREWRITE_BLOCKED"):
+            run_pipeline.stage_sync_root_feed_json()
+        assert all(target.read_text() == '[{"id":"previous-authoritative"}]' for target in targets)
+    else:
+        run_pipeline.stage_sync_root_feed_json()
+        for target in targets:
+            assert [r["id"] for r in json.loads(target.read_text())] == ["valid"]
+        history = json.loads(manifest.read_text())["advisories"]
+        assert len(history) == 511, "internal history must not be silently lost"
+    audit = json.loads((tmp_path / "data/quality/p0_r41_publication_selection.json").read_text())
+    assert audit["withheld_count"] == 510
+
+
+def test_ingestion_audit_cannot_manufacture_provenance():
+    source = (ROOT / "scripts/run_pipeline.py").read_text()
+    stage = source[source.index("# ---- Stage 1.91:"):source.index("    stage_run_intel_engine()", source.index("# ---- Stage 1.91:"))]
+    assert '"--audit"' in stage
+    assert '"--fix"' not in stage

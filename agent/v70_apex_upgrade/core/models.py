@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
@@ -333,6 +334,10 @@ class Advisory:
     blog_post_url: str = ""
     blog_post_id: str = ""
 
+    # Preserve observed provenance, source clocks and publication restrictions
+    # across enrichment. This is not serialized as a nested implementation field.
+    source_fields: Dict[str, Any] = field(default_factory=dict, repr=False)
+
     def __post_init__(self):
         if not self.advisory_id:
             self.advisory_id = f"advisory--{uuid.uuid4()}"
@@ -351,7 +356,7 @@ class Advisory:
 
     def to_dict(self) -> Dict[str, Any]:
         """Full structured representation."""
-        d = {
+        d = {**deepcopy(self.source_fields),
             "advisory_id": self.advisory_id,
             "dedup_key": self.dedup_key,
             "title": self.title,
@@ -389,7 +394,7 @@ class Advisory:
 
     def to_legacy_dict(self) -> Dict[str, Any]:
         """Backward-compatible flat format for existing dashboard."""
-        return {
+        return {**deepcopy(self.source_fields),
             "title": self.title,
             "description": self.summary or self.ai_summary,
             "source": self.source_name,
@@ -470,6 +475,7 @@ class Manifest:
 
 def advisory_from_legacy(item: Dict[str, Any]) -> Advisory:
     """Convert a legacy flat manifest item into a structured Advisory."""
+    item = deepcopy(item)
     # Infer threat type
     threat_type = ThreatType.GENERIC
     cves = item.get("cves", [])
@@ -503,12 +509,13 @@ def advisory_from_legacy(item: Dict[str, Any]) -> Advisory:
             break
 
     return Advisory(
+        source_fields=deepcopy(item),
         advisory_id=item.get("advisory_id", ""),
         title=item.get("title", ""),
         summary=item.get("description", "") or item.get("summary", ""),
-        source_url=item.get("link", "") or item.get("source_url", ""),
-        source_name=item.get("source", "") or item.get("source_name", ""),
-        published_date=item.get("published", "") or item.get("published_date", ""),
+        source_url=item.get("source_url", "") or item.get("link", ""),
+        source_name=item.get("source_name", "") or item.get("source", ""),
+        published_date=item.get("publication_timestamp", "") or item.get("published_at", "") or item.get("published_date", "") or (item.get("published", "") if isinstance(item.get("published"), str) else ""),
         threat_type=threat_type,
         severity=severity,
         confidence=float(item.get("confidence", 0)),
@@ -520,4 +527,5 @@ def advisory_from_legacy(item: Dict[str, Any]) -> Advisory:
         threat_score=float(item.get("threat_score", 0)),
         blog_post_url=item.get("blog_post_url", ""),
         blog_post_id=item.get("blog_post_id", ""),
+        stix_id=item.get("stix_id", ""),
     )

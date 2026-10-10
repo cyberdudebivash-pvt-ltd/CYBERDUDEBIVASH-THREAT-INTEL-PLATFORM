@@ -120,7 +120,7 @@ const safe = (page) => page.evaluate(() => !window.__pwned && !document.querySel
     const s = await scenario(browser, ai, cw, { ageHours: 9 });
     const sst = await text(s.page, '#aif-status');
     const srows = await s.page.evaluate(() => document.querySelectorAll('#aif-rows .aif-row').length);
-    check('homepage 9h: NOT LIVE label with last authoritative rows', /NOT LIVE/.test(sst) && /STALE/.test(sst) && srows > 0, `${sst} rows=${srows}`);
+    check('homepage 9h: expired AI records are withheld', /INTELLIGENCE DEGRADED/.test(sst) && srows === 0, `${sst} rows=${srows}`);
     check('homepage 9h: no page error', s.errors.length === 0, s.errors.join(' | '));
     await s.context.close();
     const o = await scenario(browser, ai, cw, { ageHours: 49 });

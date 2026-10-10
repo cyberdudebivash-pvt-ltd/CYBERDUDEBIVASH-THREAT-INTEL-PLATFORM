@@ -15,7 +15,7 @@
 // Canonical price reader and the Watchdog evidence-cited priority engine:
 // reused, not re-implemented (report advisories are ranked with the same
 // engine and projection as Watchdog brief rows and match events).
-import { LAST_AUTHORITATIVE_MAX_AGE_SECONDS, planPrice, projectItem, watchdogPublication } from "./cyber-watchdog.js";
+import { planPrice, projectItem, watchdogPublication } from "./cyber-watchdog.js";
 import { computeEventPriority, priorityRank } from "./watchdog-priority.js";
 
 // -- Tier & Pricing Config -----------------------------------------------------
@@ -422,13 +422,11 @@ export async function handlePremiumReport(request, env, auth, rid) {
   // Freshness: the same canonical contract as Cyber Watchdog and the AI feed.
   // Before this, an unreadable feed produced an EMPTY report that was still
   // stored and counted as a generated report, and a days-old feed was
-  // presented as current. Now: no feed -> 503 and nothing stored; STALE
-  // within 48h -> generated but labelled NOT LIVE; older / invalid -> 503.
+  // presented as current. P0 R41: expired input must never generate a new
+  // customer report or consume paid usage, even with a historical label.
   const nowMs = Date.now();
   const pub = watchdogPublication(rawFeed, nowMs);
-  const staleUsable = pub.freshness_status === "STALE"
-    && Number.isFinite(pub.feed_age_seconds) && pub.feed_age_seconds <= LAST_AUTHORITATIVE_MAX_AGE_SECONDS;
-  if (!pub.serve_live && !staleUsable) {
+  if (!pub.serve_live) {
     return _json({
       error:            rawFeed ? "intelligence_degraded" : "intelligence_unavailable",
       message:          rawFeed

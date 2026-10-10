@@ -51,11 +51,15 @@ function feed(generatedAt) {
   return { schema_version: '1.0', generated_at: generatedAt, count: items.length, items };
 }
 
-async function scenario(browser, cw, ageHours, pagePath) {
+async function scenario(browser, cw, ageHours, pagePath, legacyFallback = false) {
   const nowMs = Date.now();
   const generatedAt = new Date(nowMs - ageHours * 3600e3).toISOString().replace(/\.\d{3}Z$/, 'Z');
   const f = feed(generatedAt);
   const brief = cw.buildWatchdogBrief(f, { tier: 'FREE', nowMs, limit: 5 });
+  if (legacyFallback) {
+    const oldRows = cw.buildWatchdogBrief(f, { tier: 'FREE', nowMs: nowMs - ageHours * 3600e3, limit: 5 });
+    brief.body.last_authoritative = { ...oldRows.body, live: false, label: 'LAST AUTHORITATIVE INTELLIGENCE - NOT LIVE' };
+  }
   const health = { freshness_status: 'STALE', feed_generated_at: generatedAt, feed_age_seconds: Math.round(ageHours * 3600), watch_store: 'ok', autonomous_evaluation: 'configured', platform_version: 'v201.0' };
   // Production shape (GET /api/platform/stats, 2026-09-26): {intel:{freshness:"RECENT",...}} at 9h.
   const stats = { intel: { total_advisories: 12, freshness: ageHours < 24 ? 'RECENT' : 'AGING', last_sync: generatedAt, freshness_age_seconds: Math.round(ageHours * 3600) }, api: {} };
@@ -91,24 +95,33 @@ const text = (page, id) => page.evaluate((i) => { const e = document.getElementB
   try {
     // --- 9h stale: last authoritative intelligence shown, labelled ---------
     const s = await scenario(browser, cw, 9, '/index.html');
-    check('fixture: real brief is 503 degraded with a last_authoritative block',
-      s.brief.status === 503 && s.brief.body.items.length === 0 && s.brief.body.last_authoritative && s.brief.body.last_authoritative.live === false);
+    check('fixture: real brief is 503 degraded without nested expired content',
+      s.brief.status === 503 && s.brief.body.items.length === 0 && s.brief.body.last_authoritative === null);
     const crit = await text(s.page, 'acs-critical');
     const high = await text(s.page, 'acs-high');
-    check('hero Critical / High are numbers, not NOT AVAILABLE', /^\d+$/.test(crit) && /^\d+$/.test(high), `critical=${crit} high=${high}`);
+    check('expired hero metrics are unavailable', /NOT AVAILABLE/.test(crit) && /NOT AVAILABLE/.test(high), `critical=${crit} high=${high}`);
     const items = await text(s.page, 'acs-items');
-    check('Live Threat Priority lists last authoritative items labelled NOT LIVE', /NOT LIVE/.test(items) && /CVE-2026-100/.test(items), items.slice(0, 200));
+    check('Live Threat Priority withholds expired records', /INTELLIGENCE DEGRADED/.test(items) && !/CVE-2026-100/.test(items), items.slice(0, 200));
     const fresh = await text(s.page, 'acs-fresh');
     check('freshness reads STALE', /STALE/.test(fresh), fresh);
     const cwdStatus = await text(s.page, 'cwd-status');
     const cwdRows = await s.page.evaluate(() => document.querySelectorAll('#cwd-rows tr').length);
-    check('Watchdog panel: labelled NOT LIVE with rows', /NOT LIVE/.test(cwdStatus) && cwdRows > 0, `${cwdStatus} rows=${cwdRows}`);
+    check('Watchdog panel: degraded with no expired rows', /INTELLIGENCE DEGRADED/.test(cwdStatus) && cwdRows === 0, `${cwdStatus} rows=${cwdRows}`);
     const sync = await text(s.page, 'sync-val');
     check('SYNC badge is not LIVE for a 9h (RECENT) feed', !/\bLIVE\b/.test(sync) && /STALE/.test(sync), sync);
     const safe = await s.page.evaluate(() => !window.__pwned && !document.querySelector('#acs-items img, #cwd-rows img'));
     check('server strings rendered as text', safe);
     check('stale: no page error', s.errors.length === 0, s.errors.join(' | '));
     await s.context.close();
+
+    // A cached older Worker response must also be refused by the new page.
+    const legacy = await scenario(browser, cw, 27, '/index.html', true);
+    check('older nested fallback cannot populate hero or Watchdog rows',
+      !/CVE-2026-100/.test(await text(legacy.page, 'acs-items'))
+      && (await legacy.page.evaluate(() => document.querySelectorAll('#cwd-rows tr').length)) === 0);
+    check('expired hero Total Advisories is unavailable', /NOT AVAILABLE/.test(await text(legacy.page, 'acs-count')));
+    check('older fallback response: no page error', legacy.errors.length === 0, legacy.errors.join(' | '));
+    await legacy.context.close();
 
     // --- 49h: beyond the ceiling, nothing is presented as current ----------
     const o = await scenario(browser, cw, 49, '/index.html');
@@ -125,7 +138,7 @@ const text = (page, id) => page.evaluate((i) => { const e = document.getElementB
     await w.page.waitForTimeout(1000);
     const wStatus = await text(w.page, 'status');
     const wTable = await text(w.page, 'brieftable');
-    check('watchdog page: status NOT LIVE, table of last authoritative items', /NOT LIVE/.test(wStatus) && /CVE-2026-100/.test(wTable), `${wStatus} | ${wTable.slice(0, 120)}`);
+    check('watchdog page: degraded with no expired records', /INTELLIGENCE DEGRADED/.test(wStatus) && !/CVE-2026-100/.test(wTable), `${wStatus} | ${wTable.slice(0, 120)}`);
     check('watchdog page: no page error', w.errors.length === 0, w.errors.join(' | '));
     await w.context.close();
   } finally {

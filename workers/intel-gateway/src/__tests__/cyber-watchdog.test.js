@@ -153,24 +153,31 @@ test("freshness uses the canonical evaluator and refuses a stale brief", () => {
   assert.equal(missing.body.freshness_status, "UNAVAILABLE");
 });
 
-test("P0 2026-09-26: a STALE brief keeps the degraded contract and adds a labelled last-authoritative block", () => {
+test("P0 R41: expired intelligence is absent from every brief tier, lens and nested field", () => {
   const nineHours = NOW_MS + 8 * 3600e3; // feed generated 05:00, now 14:00 -> 9h: STALE
   const stale = buildWatchdogBrief(liveFeed(), { tier: "FREE", nowMs: nineHours, limit: 2 });
   assert.equal(stale.status, 503, "status unchanged: pollers and API clients still see degraded");
   assert.equal(stale.body.error, "intelligence_degraded");
   assert.deepEqual(stale.body.items, [], "top-level items stay empty");
-  const last = stale.body.last_authoritative;
-  assert.equal(last.live, false);
-  assert.match(last.label, /NOT LIVE/);
-  assert.equal(last.freshness_status, "STALE");
-  assert.equal(last.feed_generated_at, "2026-09-24T05:00:00Z");
-  assert.equal(last.items.length, 2, "tier cap and limit applied");
-  assert.equal(last.situation.by_severity.CRITICAL + last.situation.by_severity.HIGH >= 0, true);
+  assert.equal(stale.body.last_authoritative, null);
+  assert.equal(stale.body.feed_generated_at, "2026-09-24T05:00:00Z");
   const fresh = buildWatchdogBrief(liveFeed(), { tier: "FREE", nowMs: NOW_MS, limit: 2 });
-  assert.deepEqual(last.items, fresh.body.items, "same projection as the live brief (free redaction included)");
-  assert.deepEqual(last.situation, fresh.body.situation);
-  const lensed = buildWatchdogBrief(liveFeed(), { tier: "PRO", nowMs: nineHours, lens: "technology" });
-  assert.ok(lensed.body.last_authoritative.items.every((i) => i.lenses.includes("technology")), "lens filter applied");
+  assert.equal(fresh.status, 200);
+  assert.equal(fresh.body.items.length, 2);
+  for (const tier of ["FREE", "PRO", "ENTERPRISE"]) {
+    for (const lens of [null, "cybersecurity", "technology", "security_operations"]) {
+      for (const hours of [9, 27, 49]) {
+        const denied = buildWatchdogBrief(liveFeed(), { tier, lens, nowMs: NOW_MS + hours * 3600e3 });
+        assert.equal(denied.status, 503);
+        assert.deepEqual(denied.body.items, []);
+        assert.equal(denied.body.last_authoritative, null);
+        const serialized = JSON.stringify(denied.body);
+        for (const item of FEED_ITEMS) {
+          assert.ok(!serialized.includes(item.title), "expired title must not occur anywhere in the response");
+        }
+      }
+    }
+  }
 });
 
 test("P0 2026-09-26: no last-authoritative block beyond 48h or for an untrustworthy timestamp", () => {

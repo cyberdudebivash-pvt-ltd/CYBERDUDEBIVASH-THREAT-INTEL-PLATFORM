@@ -13,6 +13,7 @@ Target: 15.86s -> <2s for 400 items.
 import hashlib
 import logging
 import re
+from copy import deepcopy
 from collections import defaultdict
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Set
@@ -89,6 +90,17 @@ class DedupEngine:
     def _merge(self, primary: Advisory, dup: Advisory) -> Advisory:
         if dup.confidence > primary.confidence:
             primary, dup = dup, primary
+        # P0 R41: scoring preference must not drop a merged source's evidence
+        # or restrictions. Keep each observed origin and its explicit component
+        # labels visible to the shared publication policy.
+        origins = [deepcopy(dup.source_fields)] if dup.source_fields else []
+        for key in ("sources", "evidence_chain", "merged_from", "source_documents", "corroborating_sources"):
+            components = dup.source_fields.get(key)
+            if isinstance(components, list):
+                origins.extend(deepcopy(components))
+        if origins:
+            existing = primary.source_fields.get("sources")
+            primary.source_fields["sources"] = (deepcopy(existing) if isinstance(existing, list) else []) + origins
         primary.cves = list(set(primary.cves + dup.cves))
         existing_ioc_vals = set()
         merged_iocs = []

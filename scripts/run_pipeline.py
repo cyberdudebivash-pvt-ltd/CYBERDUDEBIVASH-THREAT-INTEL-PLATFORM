@@ -3057,8 +3057,8 @@ def stage_sync_root_feed_json() -> None:
     v134.1 P0 FIX: Populate root feed.json and api/feed.json from the
     canonical manifest + STIX bundles.
 
-    GUARANTEE: feed.json NEVER remains [] after pipeline completion.
-    CONTRACT:  feed.json always contains ≥ MIN_FRESHNESS_ENTRIES entries.
+    Publish only eligible records. If none qualify, fail before replacing
+    either public feed; an expired retained feed remains unavailable at the API.
     """
     log.info("=" * 60)
     log.info("STAGE 3.9 -- Sync Root feed.json (P0 DATA CONTRACT)")
@@ -3141,8 +3141,9 @@ def stage_sync_root_feed_json() -> None:
                         # Do NOT fall back to utc_now() — that produces a single identical timestamp
                         # for every entry in the run, making published_at useless for sorting.
                         # Preference order: x_cdb_published_at > stix.created > stix.modified > ""
-                        _ts_fallback = (intset.get("created") or intset.get("modified") or "")
-                        _published_at_final = _cdb_pub_at if _cdb_pub_at else _ts_fallback
+                        # P0 R41: a processing clock is never a source publication
+                        # time. Missing evidence stays missing and is withheld.
+                        _published_at_final = _cdb_pub_at
                         # 2026-09-26: a bundle for an article the source published
                         # months ago is not new intelligence (judged on the source
                         # date only; the STIX clock is never evidence of age).
@@ -3232,7 +3233,7 @@ def stage_sync_root_feed_json() -> None:
                             "ttps":           ttps,
                             "tags":           ttps[:5],
                             "mitre_tactics":  ttps[:5],
-                            "source":         "SENTINEL-APEX",
+                            "source":         _stix_ext.get("x_cdb_source_name") or "SENTINEL-APEX",
                             "source_url":     _stix_ext.get("x_cdb_source_url", ""),
                             "threat_type":    _stix_ext.get("threat_category", "General"),
                             "stix_bundle":    f"https://intel.cyberdudebivash.com/data/stix/{sf.name}",
@@ -3240,6 +3241,24 @@ def stage_sync_root_feed_json() -> None:
                             "_score_source":  "stix_predictive" if _predictive_score is not None
                                               else ("stix_epss" if _epss_stix is not None else "fallback"),
                         }
+                        # Recover only evidence actually persisted by ingestion.
+                        # The prewrite gate still rejects incomplete records.
+                        for _evidence_key in (
+                            "source_name", "retrieval_timestamp", "publication_timestamp",
+                            "content_hash", "content_hash_scope", "evidence_count",
+                            "evidence_basis", "article_content_hash", "trust_score",
+                        ):
+                            if _stix_ext.get("x_cdb_" + _evidence_key):
+                                intel_obj[_evidence_key] = _stix_ext["x_cdb_" + _evidence_key]
+                        # Preserve upstream STIX markings as restrictions. No
+                        # fallback CLEAR label: absent markings stay unpublished.
+                        _marking_ids = set(intset.get("object_marking_refs") or [])
+                        intel_obj["sources"] = [
+                            {"tlp": "TLP:" + str(o.get("definition", {}).get("tlp", "")).upper()}
+                            for o in objs if o.get("type") == "marking-definition" and o.get("id") in _marking_ids
+                        ]
+                        if len(intel_obj["sources"]) == 1:
+                            intel_obj["tlp"] = intel_obj["sources"][0]["tlp"]
                         if _soc_priority_stix:
                             intel_obj["apex_ai"] = {"soc_priority": _soc_priority_stix}
                         if cve_ids:
@@ -3520,14 +3539,30 @@ def stage_sync_root_feed_json() -> None:
         log.error("[3.9] CRITICAL: Zero entries after all fallbacks — feed.json will be empty")
         return
 
-    out_count = min(len(manifest_items), 500)  # cap at 500
-    payload = manifest_items[:out_count]
+    # P0 R41: restored historical inventory is not a public publication
+    # candidate merely because it exists. Select with the unchanged strict
+    # prewrite rules AND TLP policy before the cap, preserving all source claims.
+    from p0_r35_feed_prewrite_guard import assert_publishable, select_publishable
+    payload, held = select_publishable(manifest_items, limit=500)
+    out_count = len(payload)
+    from collections import Counter
+    held_counts = dict(Counter(row["reason_code"] for row in held))
+    log.info("[3.9] Publication selection: candidates=%d eligible=%d withheld=%d reasons=%s",
+             len(manifest_items), out_count, len(held), held_counts)
+    # Diagnostic metadata only, outside public feed paths. Original evidence
+    # stays in internal inventory; rejected records never enter the public feed.
+    audit_path = REPO_ROOT / "data" / "quality" / "p0_r41_publication_selection.json"
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    audit_tmp = audit_path.with_suffix(".tmp")
+    audit_tmp.write_text(json.dumps({"generated_at": utc_now(), "candidate_count": len(manifest_items),
+                                   "published_count": out_count, "withheld_count": len(held),
+                                   "reason_counts": held_counts, "withheld": held}, indent=2), encoding="utf-8")
+    os.replace(audit_tmp, audit_path)
 
     # P0 R35: validate the exact final public payload BEFORE either feed
     # file is touched. Earlier mandate checking happened only after writes,
     # leaving failed runs with unauthorised local/publication candidates.
     # Never backfill invented source evidence or treat an old feed as fresh.
-    from p0_r35_feed_prewrite_guard import assert_publishable
     assert_publishable(payload)
 
     # P0-FIX v141.6.0: Pre-serialise payload to a string ONCE and validate it
@@ -4156,17 +4191,18 @@ def main() -> None:
     except Exception as _sq_e:
         log.warning("[1.9.synthetic_quarantine] Non-fatal: %s", _sq_e)
 
-    # ---- Stage 1.91: Provenance Backfill (v170.0) ----------------------
-    # Fix source labels before any downstream enrichment reads them
+    # ---- Stage 1.91: Read-only provenance audit ----------------------
+    # Never invent publisher names, source hashes or publication clocks on
+    # retained records. Ingestion captures evidence at its fetch boundary.
     try:
         run_script(
-            [sys.executable, "scripts/sentinel_apex_mandate_enforcer.py", "--fix"],
-            stage="1.91.provenance_fix",
+            [sys.executable, "scripts/sentinel_apex_mandate_enforcer.py", "--audit"],
+            stage="1.91.provenance_audit",
             allow_fail=True,
             timeout=60,
         )
     except Exception as _pf_e:
-        log.warning("[1.91.provenance_fix] Non-fatal: %s", _pf_e)
+        log.warning("[1.91.provenance_audit] Non-fatal: %s", _pf_e)
 
     stage_run_intel_engine()
     _stage_done("intel_engine")
@@ -4278,7 +4314,7 @@ def main() -> None:
     _stage_done("feed_json_final")       # v143.4.1 FIX: mark BEFORE stage audit so it registers
 
     # P0 R16: authoritative POST-INGEST mandate enforcement.
-    # The earlier --fix audit is deliberately non-fatal because it inspects
+    # The earlier read-only audit is deliberately non-fatal because it inspects
     # the old pre-ingestion feed; only this final read of the completed
     # api/feed.json can authorize downstream report generation/publication.
     # run_script(allow_fail=False) merely LOGS failure, so explicitly require

@@ -1073,27 +1073,24 @@
                         var age = d ? S.ageText(d.feed_age_seconds) : null;
                         put('acs-fresh', el('span', 'ax-status', null));
                         document.getElementById('acs-fresh').firstChild.append(fled, el('span', null, (d && d.freshness_status ? d.freshness_status : 'UNKNOWN') + (age ? ' · ' + age : '')));
-                        put('acs-count', d && typeof d.feed_item_count === 'number' ? el('span', null, d.feed_item_count) : na());
-                        // P0 2026-09-26: a STALE feed keeps the degraded answer and adds
-                        // last_authoritative (labelled NOT LIVE); show it instead of blanks.
-                        var last = b && !b.ok && d && d.last_authoritative && d.last_authoritative.live === false ? d.last_authoritative : null;
-                        var sev = (d && d.situation && d.situation.by_severity) || (last && last.situation && last.situation.by_severity);
+                        var live = b && b.ok && d && d.freshness_status === 'FRESH';
+                        put('acs-count', live && typeof d.feed_item_count === 'number' ? el('span', null, d.feed_item_count) : na());
+                        var sev = live && d.situation && d.situation.by_severity;
                         put('acs-critical', sev ? el('span', null, sev.CRITICAL || 0) : na());
                         put('acs-high', sev ? el('span', null, sev.HIGH || 0) : na());
                         put('acs-updated', d && d.feed_generated_at ? el('span', 'ax-mono', d.feed_generated_at.replace('T', ' ').replace('Z', ' UTC')) : na());
                         var list = document.getElementById('acs-items');
-                        if ((!b || !b.ok) && !last) { put('acs-items', el('li', 'ax-meta', d && d.message ? d.message : 'Live intelligence is not available right now. Nothing stale is shown as live.')); return; }
-                        var items = ((last ? last.items : d.items) || []).slice(0, 5);
+                        if (!live) { put('acs-items', el('li', 'ax-meta', d && d.message ? d.message : 'Live intelligence is not available right now.')); return; }
+                        var items = (d.items || []).slice(0, 5);
                         if (!items.length) { put('acs-items', el('li', 'ax-meta', 'No advisories on the current feed.')); return; }
-                        var staleNote = last ? [el('li', 'ax-meta', last.label + ' \u00b7 last authoritative update ' + String(last.feed_generated_at || 'unknown').replace('T', ' ').replace('Z', ' UTC'))] : [];
-                        list.replaceChildren.apply(list, staleNote.concat(items.map(function (it) {
+                        list.replaceChildren.apply(list, items.map(function (it) {
                             var li = el('li', 'acs-item');
                             var k = S.severityKey(it.severity);
                             var chip = el('span', 'ax-sev', k === 'UNKNOWN' ? 'n/a' : k); chip.dataset.sev = k;
                             var body = el('div', 'acs-item__body');
                             body.append(el('div', 'ax-title', it.title), el('div', 'ax-sub', (it.source || 'Sentinel APEX feed') + (S.ageFromIso(it.observed_at) ? ' · ' + S.ageFromIso(it.observed_at) : '')));
                             li.dataset.band = k; li.append(chip, body); return li;
-                        })));
+                        }));
                     });
                 }
                 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', render); else render();
@@ -1219,9 +1216,7 @@
               function load(first) {
                 request(first)
                   .then(function (x) {
-                    if (x.ok && x.b && Array.isArray(x.b.items)) return render(x.b, true);
-                    var last = x.b && x.b.last_authoritative;
-                    if (last && last.live === false) return render(last, false);
+                    if (x.ok && x.b && x.b.freshness_status === 'FRESH' && Array.isArray(x.b.items)) return render(x.b, true);
                     show([el('div', 'cdb-board-empty', (x.b && x.b.message) || 'Live intelligence is degraded; no board is shown rather than stale data.')]);
                     setStatus('down', 'DEGRADED');
                   })
@@ -1340,24 +1335,16 @@
                 }))
                 .then(function (out) {
                     var data = out.data || {};
-                    var last = !out.ok && data.last_authoritative && data.last_authoritative.live === false ? data.last_authoritative : null;
-                    if (!out.ok && !last) {
+                    if (!out.ok || data.freshness_status !== 'FRESH') {
                         status.textContent = data.message || 'INTELLIGENCE DEGRADED';
                         lenses.innerHTML = '';
                         rows.innerHTML = '';
                         return;
                     }
-                    if (last) {
-                        // P0 2026-09-26: STALE, not live -- the last authoritative
-                        // intelligence, labelled as such, instead of an empty table.
-                        status.textContent = last.label + ' \u00b7 ' + (data.feed_item_count == null ? 'unknown' : data.feed_item_count) + ' advisories'
-                            + ' \u00b7 last authoritative update ' + (last.feed_generated_at || 'unknown');
-                        data = { situation: last.situation, items: last.items };
-                    }
                     var sit = data.situation || {};
                     var by = sit.by_lens || {};
                     var sev = sit.by_severity || {};
-                    if (!last) status.textContent = (data.freshness_status || 'UNKNOWN')
+                    status.textContent = (data.freshness_status || 'UNKNOWN')
                         + ' · ' + (data.feed_item_count == null ? 'unknown' : data.feed_item_count) + ' advisories on the feed'
                         + ' · age ' + (data.feed_age_seconds == null ? 'unknown' : data.feed_age_seconds) + 's'
                         + ' · updated ' + (data.feed_generated_at || 'unknown');
@@ -1431,14 +1418,13 @@
                 .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
                 .then(function (out) {
                     var data = out.data || {};
-                    var last = !out.ok && data.last_authoritative && data.last_authoritative.live === false ? data.last_authoritative : null;
-                    var body = out.ok ? data : last;
+                    var body = out.ok && data.freshness_status === 'FRESH' ? data : null;
                     if (!body) {
                         status.textContent = data.message || 'INTELLIGENCE DEGRADED';
                         list.innerHTML = '';
                         return;
                     }
-                    status.textContent = (last ? last.label : 'LIVE') + ' \u00b7 ' + (body.freshness_status || data.freshness_status || 'UNKNOWN')
+                    status.textContent = 'LIVE' + ' \u00b7 ' + (body.freshness_status || data.freshness_status || 'UNKNOWN')
                         + ' \u00b7 ' + body.count + ' of ' + body.total_available + ' AI items'
                         + ' \u00b7 updated ' + (body.feed_generated_at || 'unknown');
                     if (body.upgrade && body.upgrade.checkout) {
