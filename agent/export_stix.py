@@ -263,6 +263,19 @@ class STIXExporter:
                 }
             except Exception:
                 pass
+        # P0 R39: STIX fallback must preserve the same observed RSS evidence
+        # as the canonical manifest. Missing claims remain missing; no
+        # guessed publisher, generated publication clock or synthetic trust.
+        _observed = metadata or {}
+        if _observed.get("content_hash_scope") == "rss_entry_fields_sha256":
+            _extension = _intrusion_set_obj.setdefault("extensions", {}).setdefault("x-cdb-apex-1", {})
+            for _key in (
+                "source_name", "retrieval_timestamp", "publication_timestamp",
+                "content_hash", "content_hash_scope", "evidence_count",
+                "evidence_basis", "article_content_hash", "trust_score",
+            ):
+                if _observed.get(_key):
+                    _extension["x_cdb_" + _key] = _observed[_key]
         objects.append(_mark(_intrusion_set_obj))
 
         # -- Indicator Objects --
@@ -845,6 +858,7 @@ class STIXExporter:
             iocs_by_type=_effective_iocs_by_type,
             # v142.0 P0 FIX: source article publication date — preserved for dedup fingerprint
             published_at=published_at or "",
+            provenance=(metadata or {}),
         )
 
         return bundle_id
@@ -1076,7 +1090,7 @@ class STIXExporter:
                          iocs_flat=None, iocs_by_type=None,
                          stix_bundle_url="",
                          # v142.0 P0 TIMESTAMP FIX: source publication date
-                         published_at=""):
+                         published_at="", provenance=None):
         """Update manifest - backward-compatible + v134.0 IOC integrity fields."""
         # v143.1 ROOT-CAUSE FIX: Wrap entire read→dedup→sort→write under a single
         # FileLock to eliminate the TOCTOU race between concurrent pipeline workers.
@@ -1103,6 +1117,7 @@ class STIXExporter:
                 ioc_extraction_meta=ioc_extraction_meta,
                 iocs_flat=iocs_flat, iocs_by_type=iocs_by_type,
                 stix_bundle_url=stix_bundle_url, published_at=published_at,
+                provenance=provenance,
             )
 
     def _update_manifest_locked(self, title, stix_id, risk_score, blog_url,
@@ -1119,7 +1134,7 @@ class STIXExporter:
                          ioc_extraction_meta=None,
                          iocs_flat=None, iocs_by_type=None,
                          stix_bundle_url="",
-                         published_at=""):
+                         published_at="", provenance=None):
         """Inner manifest update — called under FileLock by _update_manifest()."""
         # v143.4.0 FIX: sanitize title at manifest write boundary.
         # Prevents feedparser mojibake (â€" for —, â—† for ◆, etc.) from being
@@ -1448,6 +1463,18 @@ class STIXExporter:
                 "Set report_url to internal path (/reports/...)."
             )
 
+        # P0 R39: copy the evidence *as observed* into the immutable
+        # manifest. Do not use STIX processing dates for original publication
+        # time or infer source identity from an advisory title.
+        _observed = provenance if isinstance(provenance, dict) else {}
+        if _observed.get("content_hash_scope") == "rss_entry_fields_sha256":
+            for _k in (
+                "source_name", "source_domain", "retrieval_timestamp",
+                "publication_timestamp", "content_hash", "content_hash_scope",
+                "evidence_count", "evidence_basis", "article_content_hash", "trust_score",
+            ):
+                if _observed.get(_k):
+                    entry[_k] = _observed[_k]
         manifest_entries.append(entry)
 
         # v75.0 FIX: Sort BEFORE trim. Original bug used [-500:] on an

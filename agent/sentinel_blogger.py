@@ -234,6 +234,10 @@ def fetch_feed_entries(feed_url: str, max_entries: int = 3) -> List[Dict]:
     try:
         import feedparser
         feed = feedparser.parse(feed_url)
+        # Actual observation time of this network/feedparser acquisition.
+        from datetime import datetime as _observed_dt, timezone as _observed_tz
+        from agent.p0_r39_evidence import capture_rss_evidence
+        observed_at = _observed_dt.now(_observed_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         entries = []
         for entry in feed.entries[:max_entries]:
             content = ""
@@ -253,7 +257,7 @@ def fetch_feed_entries(feed_url: str, max_entries: int = 3) -> List[Dict]:
             # misdetected (e.g. feed declares iso-8859-1 but sends UTF-8).
             # sanitize_field uses ftfy + correction table to fix double-encoding.
             raw_title = entry.get("title", "Untitled Advisory")
-            entries.append({
+            observed_entry = {
                 "title":     _sanitize_field(raw_title),
                 "content":   _sanitize_field(content),
                 "summary":   _sanitize_field(summary),
@@ -261,7 +265,9 @@ def fetch_feed_entries(feed_url: str, max_entries: int = 3) -> List[Dict]:
                 "source":    feed_url,
                 "published": entry.get("published", ""),
                 "tags":      [t.get("term", "") for t in entry.get("tags", [])],
-            })
+            }
+            observed_entry.update(capture_rss_evidence(observed_entry, feed_url, observed_at))
+            entries.append(observed_entry)
         return entries
     except Exception as e:
         logger.warning(f"Feed fetch failed for {feed_url}: {e}")
@@ -576,7 +582,11 @@ def main():
                 logger.debug("[DEDUP-L2] check_entry error (non-fatal): %s", _fps_ck_e)
 
         try:
-            result = process_entry(entry, feed_source="CyberDudeBivash Intel")
+            # P0 R39: preserve the actual observed publisher origin. The
+            # CYBERDUDEBIVASH platform is the processor, not an RSS origin.
+            result = process_entry(
+                entry, feed_source=entry.get("source_name") or entry.get("source") or "EXTERNAL"
+            )
         except Exception as _pe:
             import traceback as _tb
             logger.error(
@@ -1680,6 +1690,18 @@ def process_entry(entry: Dict, feed_source: str = "EXTERNAL") -> bool:
             "dossier_url": _dossier_url,
             "risk_reason": risk_reason,   # v143.0: defensible score explanation
         }
+        # P0 R39: forward only provenance captured by the original RSS
+        # acquisition. Do not generate missing fields from a title or clock.
+        from agent.p0_r39_evidence import append_fetched_article_evidence
+        _capture_keys = (
+            "source_name", "source_domain", "retrieval_timestamp",
+            "publication_timestamp", "content_hash", "content_hash_scope",
+            "evidence_count", "evidence_basis", "trust_score",
+        )
+        if entry.get("content_hash_scope") == "rss_entry_fields_sha256":
+            _observed_evidence = {k: entry[k] for k in _capture_keys if entry.get(k)}
+            _observed_evidence = append_fetched_article_evidence(_observed_evidence, fetched_article)
+            _stix_metadata.update(_observed_evidence)
         # v184.0: Carry SII governance fields into STIX metadata
         if _sii_priority:
             _stix_metadata["priority"] = _sii_priority
