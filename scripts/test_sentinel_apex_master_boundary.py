@@ -64,6 +64,17 @@ class BoundaryTest(unittest.TestCase):
         self.assertEqual(restricted["status"], "FAILED")
         self.assertEqual(restricted["state"]["cursor"], 5)
         self.assertEqual(activation_status({"SENTINEL_APEX_AI_INTEL": "1", "SENTINEL_APEX_AI_INTEL_BASE_URL": "http://insecure"})["status"], "FAILED")
+        cached = freshness_from_feed({"state": "fresh", "bound_to": FEED["generated_at"]}, now=NOW)
+        self.assertEqual(cached["state"], "unbound")
+        mismatched = freshness_from_feed({**FEED, "state": "fresh", "generated_at": "2020-01-01T00:00:00Z", "generation": "public-feed-2020-01-01T00:00:00Z"}, now=NOW)
+        self.assertEqual(mismatched["state"], "unbound")
+        other = freshness_from_feed({"generated_at": FEED["generated_at"], "generation": "other-product"}, now=NOW)
+        self.assertEqual(other["state"], "unbound")
+        future = stage_page(ENV, {"cursor": 1, "records": {}}, PAGE, feed={"generated_at": "2027-01-01T00:00:00Z", "generation": "public-feed-2027-01-01T00:00:00Z"}, now=NOW)
+        self.assertEqual(future["freshness_decision"], "BLOCKED_BY_FRESHNESS_GATE")
+        self.assertEqual(future["release"], "NOT_AUTHORIZED")
+        missing = stage_page(ENV, {"cursor": 1, "records": {}}, PAGE, feed={"generation": "public-feed-"}, now=NOW)
+        self.assertEqual(missing["freshness_decision"], "BLOCKED_BY_FRESHNESS_GATE")
 
 
 if __name__ == "__main__":
