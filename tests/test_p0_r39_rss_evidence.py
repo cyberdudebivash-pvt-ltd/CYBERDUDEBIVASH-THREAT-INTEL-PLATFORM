@@ -66,6 +66,43 @@ class RSSObservationEvidenceTests(unittest.TestCase):
                          hashlib.sha256(b"Actually fetched source article bytes").hexdigest())
         self.assertEqual(p["evidence_count"], 1)  # non-mutating
 
+    def test_real_stix_and_manifest_roundtrip_preserves_observed_evidence(self):
+        from agent.export_stix import STIXExporter
+        with tempfile.TemporaryDirectory() as td:
+            with tempfile.TemporaryDirectory() as trustdir:
+                reg = Path(trustdir) / "trust.json"
+                reg.write_text(json.dumps({"trust_scores": {
+                    "publisher.example": {"trust_score": 0.82}
+                }}))
+                observed = capture_rss_evidence(ENTRY, "https://publisher.example/feed", OBSERVED, reg)
+                observed = append_fetched_article_evidence(observed, {
+                    "fetch_status": "success", "full_text": "Original separately fetched text"
+                })
+                metadata = {"source_url": ENTRY["link"], **observed}
+                STIXExporter(output_dir=td).create_bundle(
+                    title="Original source report confirmed",
+                    iocs={}, risk_score=5.0, metadata=metadata,
+                    published_at=observed["publication_timestamp"],
+                    feed_source=observed["source_name"],
+                )
+                bundles = sorted(Path(td).glob("CDB-APEX-*.json"))
+                self.assertTrue(bundles, "STIX bundle was not actually persisted")
+                stix = json.loads(bundles[-1].read_text())
+                intrusion = next(v for v in stix["objects"] if v.get("type") == "intrusion-set")
+                ext = intrusion["extensions"]["x-cdb-apex-1"]
+                self.assertEqual(ext["x_cdb_source_name"], "publisher.example")
+                self.assertEqual(ext["x_cdb_retrieval_timestamp"], OBSERVED)
+                self.assertEqual(ext["x_cdb_publication_timestamp"], "2026-10-10T04:00:00Z")
+                self.assertEqual(ext["x_cdb_evidence_count"], 2)
+                self.assertEqual(ext["x_cdb_article_content_hash"], observed["article_content_hash"])
+                manifest = json.loads((Path(td) / "feed_manifest.json").read_text())
+                self.assertTrue(isinstance(manifest, list) and manifest)
+                item = manifest[0]
+                for key in ("source_name", "retrieval_timestamp", "publication_timestamp",
+                            "content_hash", "content_hash_scope", "evidence_count",
+                            "article_content_hash", "trust_score"):
+                    self.assertEqual(item[key], observed[key], key)
+
     def test_exporter_carries_only_observed_provenance(self):
         src = (ROOT / "agent/export_stix.py").read_text(encoding="utf-8")
         self.assertIn("provenance=(metadata or {})", src)
