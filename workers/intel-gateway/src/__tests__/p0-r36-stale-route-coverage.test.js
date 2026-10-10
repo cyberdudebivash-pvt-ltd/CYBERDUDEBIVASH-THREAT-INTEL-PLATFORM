@@ -14,7 +14,7 @@ const aliases = [
 ];
 
 test("live routes dispatch to fail-closed policy before projecting old data", () => {
-  assert.match(source, /import \{ denyNonFreshLiveFeed \} from '\.\/stale-feed-policy\.js';/);
+  assert.ok(source.includes("import { denyNonFreshLiveFeed, liveFreshCacheControl } from"), "both runtime policy helpers imported");
   for (const route of aliases) {
     assert.ok(source.includes(route), route + " route missing");
   }
