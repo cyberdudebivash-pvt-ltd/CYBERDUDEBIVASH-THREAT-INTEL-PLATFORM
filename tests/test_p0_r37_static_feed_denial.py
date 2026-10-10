@@ -77,6 +77,8 @@ class StaticFeedDenialTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/pages-fast-publish.yml").read_text()
         self.assertIn("test_p0_r37_static_feed_denial.py", workflow)
         self.assertIn("legacy_static_feed_disabled", workflow)
+        canary = (ROOT / "scripts/p0_r37_live_legacy_canary.py").read_text()
+        self.assertIn('for suffix in ("", "?" +', canary)
         self.assertIn("'scripts/p0_r37_static_feed_denial.py'", workflow)
 
 if __name__ == "__main__":
