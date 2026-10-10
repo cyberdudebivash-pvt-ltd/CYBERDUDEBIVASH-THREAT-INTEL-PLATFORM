@@ -72,7 +72,7 @@ class RSSObservationEvidenceTests(unittest.TestCase):
         self.assertIn("provenance=provenance", src)
         self.assertIn('if _observed.get("content_hash_scope") == "rss_entry_fields_sha256":', src)
         self.assertIn('entry[_k] = _observed[_k]', src)
-        self.assertIn('"_extension["x_cdb_" + _key]', src.replace(" ", " ") if False else src)
+        self.assertIn('_extension["x_cdb_" + _key] = _observed[_key]', src)
 
 if __name__ == "__main__":
     unittest.main()
