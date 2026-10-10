@@ -3549,6 +3549,9 @@ def stage_sync_root_feed_json() -> None:
     held_counts = dict(Counter(row["reason_code"] for row in held))
     log.info("[3.9] Publication selection: candidates=%d eligible=%d withheld=%d reasons=%s",
              len(manifest_items), out_count, len(held), held_counts)
+    if held:
+        log.info("[3.9] Prewrite rejection counts: %s",
+                 Counter(row["reason"] for row in held).most_common(8))
     # Diagnostic metadata only, outside public feed paths. Original evidence
     # stays in internal inventory; rejected records never enter the public feed.
     audit_path = REPO_ROOT / "data" / "quality" / "p0_r41_publication_selection.json"
@@ -4196,7 +4199,7 @@ def main() -> None:
     # retained records. Ingestion captures evidence at its fetch boundary.
     try:
         run_script(
-            [sys.executable, "scripts/sentinel_apex_mandate_enforcer.py", "--audit"],
+            [sys.executable, "scripts/sentinel_apex_mandate_enforcer.py", "--report"],
             stage="1.91.provenance_audit",
             allow_fail=True,
             timeout=60,

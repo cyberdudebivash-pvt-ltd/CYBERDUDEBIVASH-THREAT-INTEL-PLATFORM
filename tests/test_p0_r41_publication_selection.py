@@ -177,5 +177,71 @@ def test_real_feed_writer_withholds_history_and_preserves_both_previous_files(tm
 def test_ingestion_audit_cannot_manufacture_provenance():
     source = (ROOT / "scripts/run_pipeline.py").read_text()
     stage = source[source.index("# ---- Stage 1.91:"):source.index("    stage_run_intel_engine()", source.index("# ---- Stage 1.91:"))]
-    assert '"--audit"' in stage
+    assert '"--report"' in stage
     assert '"--fix"' not in stage
+
+
+def test_legacy_hardener_cannot_replace_ingestion_host_trust_registry(tmp_path, monkeypatch):
+    import v149_intelligence_hardening as hardener
+    monkeypatch.setattr(hardener, "REPO", tmp_path)
+    registry = tmp_path / "data/quality/source_trust_scores.json"
+    registry.parent.mkdir(parents=True)
+    original = (ROOT / "data/quality/source_trust_scores.json").read_bytes()
+    registry.write_bytes(original)
+    hardener.write_source_trust_registry()
+    assert registry.read_bytes() == original
+    legacy = json.loads(registry.with_name("source_trust_scores_v149.json").read_text())
+    assert legacy["trust_scores"]["cvefeed.io"] == hardener.SOURCE_TRUST_MAP["cvefeed.io"]
+
+
+def test_real_ingestion_hardening_handoff_preserves_eligible_evidence(tmp_path, monkeypatch):
+    import run_pipeline
+    import clean_feed_manifest
+    import v149_intelligence_hardening as hardener
+    from agent.export_stix import STIXExporter
+    from agent.p0_r39_evidence import append_fetched_article_evidence
+
+    monkeypatch.setattr(hardener, "REPO", tmp_path)
+    monkeypatch.setattr(run_pipeline, "REPO_ROOT", tmp_path)
+    registry = tmp_path / "data/quality/source_trust_scores.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_bytes((ROOT / "data/quality/source_trust_scores.json").read_bytes())
+    expected_trust = json.loads(registry.read_text())["trust_scores"]["cvefeed.io"]["trust_score"] * 10
+    # Execute the real production predecessor, rather than injecting capture
+    # metadata after the legacy hardener has already overwritten the registry.
+    hardener.write_source_trust_registry()
+    now = datetime.now(timezone.utc)
+    source_time = (now - timedelta(hours=1)).isoformat()
+    exporter = STIXExporter(output_dir=str(tmp_path / "data/stix"))
+    observed_records = []
+    for i in range(12):
+        entry = {"title": f"Security publisher vulnerability investigation {i}",
+                 "content": "Original captured RSS content",
+                 "link": f"https://cvefeed.io/vuln/detail/observed-{i}", "published": source_time}
+        observed = capture_rss_evidence(entry, "https://cvefeed.io/rssfeed/latest.xml", now.isoformat(), registry)
+        assert observed["trust_score"] == round(expected_trust, 2)
+        observed = append_fetched_article_evidence(observed, {
+            "fetch_status": "success", "full_text": "Separately fetched original source article content",
+        })
+        observed_records.append(observed)
+        exporter.create_bundle(title=entry["title"], iocs={}, risk_score=5.0,
+                               metadata={"source_url": entry["link"], **observed},
+                               published_at=observed["publication_timestamp"],
+                               feed_source=observed["source_name"], actor_tag="UNATTRIBUTED",
+                               severity="MEDIUM", mitre_tactics=["T1190"])
+    manifest = tmp_path / "data/stix/feed_manifest.json"
+    monkeypatch.setattr(clean_feed_manifest, "MANIFEST_PATH", manifest)
+    assert clean_feed_manifest.main() == 0
+    run_pipeline.stage_dedup_and_enrich()
+    # The actual final writer includes the production quality pipeline and
+    # unchanged mandate/TLP eligibility gate; no mocked eligibility shortcut.
+    run_pipeline.stage_sync_root_feed_json()
+    for target in (tmp_path / "feed.json", tmp_path / "api/feed.json"):
+        published = json.loads(target.read_text())
+        assert len(published) == 12
+        guard.assert_publishable(published)
+        for item in published:
+            source = next(r for r in observed_records if r["source_url"] == item["source_url"])
+            for key in ("source_name", "publication_timestamp", "retrieval_timestamp",
+                        "content_hash", "content_hash_scope", "evidence_count", "trust_score"):
+                assert item[key] == source[key], key

@@ -26,7 +26,7 @@ FIX STRATEGY:
   3. Confidence gate: quarantine items below threshold (default: 30%)
      Write quarantined items to data/quarantine/low_confidence.json for review.
   4. Source trust differentiation: write authoritative source trust scores
-     to data/quality/source_trust_scores.json for dashboard consumption.
+     to data/quality/source_trust_scores_v149.json for audit consumption.
   5. Top-level threat_category normalization: resolve actor codes to human
      readable threat categories in feed.json top-level field.
 
@@ -486,8 +486,13 @@ def enrich_source_trust(item: Dict, stats: Dict) -> Dict:
 
 
 def write_source_trust_registry() -> None:
-    """Write the source trust registry for dashboard consumption."""
-    registry_path = REPO / "data" / "quality" / "source_trust_scores.json"
+    """Write the legacy display-name percentages without clobbering host trust.
+
+    Ingestion and confidence calibration consume source_trust_engine's exact
+    domain entries with normalized trust_score values. This separate legacy
+    map uses display names and percentages; it is not that registry's schema.
+    """
+    registry_path = REPO / "data" / "quality" / "source_trust_scores_v149.json"
     registry_path.parent.mkdir(parents=True, exist_ok=True)
     registry = {
         "schema": "sentinel_apex_source_trust_v1",
@@ -616,7 +621,7 @@ def main():
             "archive_path":  str(ARCHIVE_BASE),
             "archive_rule":  "Items >15 days old with low confidence are ARCHIVED (never deleted)",
         },
-        "source_trust_registry": str(REPO / "data" / "quality" / "source_trust_scores.json"),
+        "source_trust_registry": str(REPO / "data" / "quality" / "source_trust_scores_v149.json"),
         "quarantine_path": str(CONFIDENCE_QUARANTINE_PATH),
         "status": "PASS",
     }

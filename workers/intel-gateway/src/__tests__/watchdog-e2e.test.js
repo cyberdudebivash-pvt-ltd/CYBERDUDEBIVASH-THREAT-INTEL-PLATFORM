@@ -505,6 +505,48 @@ test("P0 R36: legacy static feed and latest paths are guarded live aliases, neve
   }
 });
 
+test("P0: expired cached feed responses cannot bypass publication denial or fresh recovery", async () => {
+  for (const route of ["/feed.json", "/latest.json", "/api/feed", "/api/feed.json", "/api/v1/intel/latest.json"]) {
+    for (const shape of ["expired", "missing_clock", "raw_array", "malformed", "restricted"]) {
+      const h = harness({ feed: feedObject(FEED_ITEMS, 27 * 3600) });
+      const expired = feedObject([{ ...FEED_ITEMS[0], id: "cached-expired-item" }], 27 * 3600);
+      const body = shape === "malformed" ? "<html>old cache entry</html>"
+        : JSON.stringify(shape === "raw_array" ? expired.items
+          : shape === "missing_clock" ? { items: expired.items, count: 1 }
+          : shape === "restricted" ? feedObject([{ ...FEED_ITEMS[0], tlp: "TLP:RED" }], 60)
+          : expired);
+      await globalThis.caches.default.put(new Request("https://intel.cyberdudebivash.com" + route),
+        new Response(body, { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" } }));
+      const denied = await h.call("GET", route);
+      assert.equal(denied.status, 503, route + " must not serve " + shape + " cached intelligence");
+      assert.deepEqual(denied.body.items, []);
+      assert.equal(denied.body.live_data_available, false);
+      assert.ok(!denied.text.includes("cached-expired-item"));
+      assert.match(denied.headers.get("cache-control"), /no-store/);
+      h.state.feed = feedObject([{ ...FEED_ITEMS[0], id: "new-authoritative-item" }], 60);
+      const recovered = await h.call("GET", route);
+      assert.equal(recovered.status, 200, route + " recovers from fresh authority");
+      assert.equal(recovered.body.items[0].id, "new-authoritative-item");
+    }
+  }
+});
+
+test("P0: valid fresh feed cache hits preserve the existing R2 read budget", async () => {
+  // These canonical routes already use the edge cache. Root aliases are
+  // uncached under the existing CORS classification; keep that policy intact.
+  for (const route of ["/api/feed", "/api/feed.json", "/api/v1/intel/latest.json"]) {
+    const h = harness();
+    const first = await h.call("GET", route);
+    assert.equal(first.status, 200);
+    const reads = h.state.r2Gets;
+    const cached = await h.call("GET", route);
+    assert.equal(cached.status, 200);
+    assert.ok(cached.body.items.length > 0);
+    assert.notEqual(cached.headers.get("X-Request-ID"), first.headers.get("X-Request-ID"), route);
+    assert.equal(h.state.r2Gets, reads, route + " must retain a valid cache hit");
+  }
+});
+
 test("P0 TLP gate: restricted and unlabeled R2 feeds deny anonymous AND paid access", async () => {
   for (const restriction of ["TLP:RED", "TLP:AMBER", "TLP:GREEN", "MISSING"]) {
     const item = { ...FEED_ITEMS[0] };
