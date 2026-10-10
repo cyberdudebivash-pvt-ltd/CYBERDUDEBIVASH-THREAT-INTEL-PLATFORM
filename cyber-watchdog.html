@@ -504,7 +504,6 @@ async function loadView(v) {
 }
 
 // ------------------------------------------------------------------ brief
-let briefCache = null;
 async function fetchBrief(lens, q) {
   const url = new URL('/api/watchdog/brief', location.origin);
   if (lens && lens !== 'all') url.searchParams.set('lens', lens);
@@ -533,7 +532,6 @@ async function loadBrief(ev) {
     renderSituation(null);
     return;
   }
-  briefCache = data;
   renderSituation(data);
   markSynced();
   $('status').textContent = data.empty ? data.empty_reason : data.freshness_status + ' · ' + data.feed_item_count + ' advisories on the feed · ' + data.count + ' shown · ' + (S.ageText(data.feed_age_seconds) || '') + (data.truncated ? ' · more available on paid plans' : '');
@@ -595,7 +593,7 @@ async function loadAiFeed() {
   });
   const up = body.upgrade;
   mount($('aif-list'),
-    rows.length ? table(last ? 'Last authoritative AI items (not live)' : 'AI Threat Feed items', [{ label: 'Severity' }, { label: 'Item' }, { label: 'First seen', opt: true }, { label: 'Source', opt: true }, { label: 'Detail' }], rows)
+    rows.length ? table('AI Threat Feed items', [{ label: 'Severity' }, { label: 'Item' }, { label: 'First seen', opt: true }, { label: 'Source', opt: true }, { label: 'Detail' }], rows)
       : h('div', { class: 'ax-empty', text: 'No AI items on the feed right now' }),
     up ? h('p', { class: 'ax-meta', style: 'margin-top:10px' },
       h('a', { class: 'ax-btn ax-btn--primary', href: up.checkout, text: 'Upgrade to ' + (PLAN_NAME[up.plan] || up.plan) + ' · ' + up.price_label }),
@@ -639,8 +637,8 @@ async function loadOverview() {
   const on = signedIn();
   $('ov-signin').hidden = on;
   $('ov-signedin').hidden = !on;
-  if (!briefCache) { const b = await fetchBrief('all', ''); if (b.ok) { briefCache = b.data; renderSituation(b.data); } else renderSituation(lastAuthoritative(b.data)); }
-  else renderSituation(briefCache);
+  const brief = await fetchBrief('all', '');
+  renderSituation(brief.ok && brief.data.freshness_status === 'FRESH' ? brief.data : null);
   if (!on) return;
   const url = api('/api/watchdog/events');
   url.searchParams.set('limit', '6'); url.searchParams.set('sort', 'customer'); url.searchParams.set('open', '1');

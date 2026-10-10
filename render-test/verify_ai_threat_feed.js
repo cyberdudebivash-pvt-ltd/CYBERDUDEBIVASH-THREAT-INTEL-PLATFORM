@@ -9,7 +9,7 @@
  *   homepage, FREE, fresh : rows locked, no source URL on the page, CTA is a
  *                           same-site checkout link with the runtime price,
  *                           click shows the lock + upgrade, never a timeline
- *   homepage, STALE 9h    : last authoritative rows labelled NOT LIVE
+ *   homepage, STALE 9h    : INTELLIGENCE DEGRADED, no expired rows
  *   homepage, 49h         : INTELLIGENCE DEGRADED, no rows
  *   Watchdog, ENTERPRISE  : click opens the item: https source link, timeline
  *   Watchdog, PRO         : detail without timeline, Enterprise upgrade prompt

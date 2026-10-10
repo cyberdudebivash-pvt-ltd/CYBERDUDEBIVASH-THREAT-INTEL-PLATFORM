@@ -1,19 +1,11 @@
 #!/usr/bin/env node
 /**
- * SENTINEL APEX -- P0 2026-09-26: a STALE feed (9h, contract 6h) blanked the
- * homepage and Cyber Watchdog ("CRITICAL / HIGH: NOT AVAILABLE", empty Live
- * Threat Priority, empty Watchdog table) while still badging "SYNC: LIVE".
- *
- * Headless Chromium drives the shipped pages. /api/watchdog/brief is the REAL
- * buildWatchdogBrief() output (workers/intel-gateway/src/cyber-watchdog.js)
- * for a feed generated 9h earlier: 503 degraded + last_authoritative.
- *   stale (9h)   : hero Critical/High are numbers; Live Threat Priority and
- *                  the Watchdog table list the last authoritative items,
- *                  labelled NOT LIVE; freshness reads STALE; SYNC badge is
- *                  not LIVE even though /api/platform/stats says RECENT
- *   too old (49h): nothing is shown as current (NOT AVAILABLE, degraded
- *                  message) -- the 48h ceiling holds
- *   watchdog page: brief table captioned "not live", status NOT LIVE
+ * SENTINEL APEX -- P0 customer freshness contract regression.
+ * Headless Chromium drives the shipped pages against REAL Watchdog output.
+ *   expired (9h/49h): hero metrics unavailable; priority and Watchdog empty;
+ *                    freshness and sync cannot claim LIVE
+ *   older Worker (27h): nested expired fallback cannot populate the page
+ *   watchdog page: intelligence and overview withhold expired data
  *   no page error, no injected markup, in every case
  *
  * Usage: PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers NODE_PATH="$(npm root -g)" \
@@ -93,7 +85,7 @@ const text = (page, id) => page.evaluate((i) => { const e = document.getElementB
   const server = await startStaticServer(ROOT, PORT, MIME);
   const browser = await chromium.launch();
   try {
-    // --- 9h stale: last authoritative intelligence shown, labelled ---------
+    // --- 9h stale: no expired intelligence displayed ----------------------
     const s = await scenario(browser, cw, 9, '/index.html');
     check('fixture: real brief is 503 degraded without nested expired content',
       s.brief.status === 503 && s.brief.body.items.length === 0 && s.brief.body.last_authoritative === null);
@@ -141,6 +133,12 @@ const text = (page, id) => page.evaluate((i) => { const e = document.getElementB
     check('watchdog page: degraded with no expired records', /INTELLIGENCE DEGRADED/.test(wStatus) && !/CVE-2026-100/.test(wTable), `${wStatus} | ${wTable.slice(0, 120)}`);
     check('watchdog page: no page error', w.errors.length === 0, w.errors.join(' | '));
     await w.context.close();
+
+    const overview = await scenario(browser, cw, 27, '/cyber-watchdog.html#overview', true);
+    check('watchdog overview: expired breakdown is unavailable',
+      /Feed breakdown unavailable/.test(await text(overview.page, 'situation')));
+    check('watchdog overview: no page error', overview.errors.length === 0, overview.errors.join(' | '));
+    await overview.context.close();
   } finally {
     await browser.close();
     server.close();
