@@ -12,6 +12,8 @@ def test_eicc_snapshot_query_version_matches_actual_source_hash():
     index = (ROOT / "index.html").read_text(encoding="utf-8")
     expected = f'<script src="/js/apex-dashboard-snapshot.js?v={digest}"></script>'
     assert expected in index, "Dashboard snapshot script must use the exact current SHA-256 content version"
+    template = (ROOT / "scripts/enterprise_intel_block.html").read_text(encoding="utf-8")
+    assert expected in template, "Source-of-truth EICC template must match the shipped cache version"
     assert index.count('/js/apex-dashboard-snapshot.js?v=') == 1
     # The independent deployment integrity registry must also match current
     # homepage bytes; a regenerated file cannot silently remain outdated.
