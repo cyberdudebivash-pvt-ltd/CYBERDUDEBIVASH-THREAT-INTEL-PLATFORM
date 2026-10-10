@@ -180,11 +180,10 @@ export function freshnessStatusFor(evaluation, feedData) {
 }
 
 /**
- * Freshness truth for a feed response that keeps HTTP 200 for backward
- * compatibility (/api/feed, /api/feed.json). A consumer must not infer
- * "fresh" from the status code, so the verdict travels in the body and in
- * headers. edge_ttl_seconds is 0 unless FRESH, so a stale body is never
- * stored in the shared edge cache and a fresh one never outlives its window.
+ * Freshness metadata for live feeds. P0 R36's stale-feed-policy rejects
+ * non-FRESH customer API responses with HTTP 503 and no item payload.
+ * Consumers should still require the freshness verdict, not infer freshness
+ * from HTTP status alone. Responses must expire by the exact time boundary.
  */
 export function publicationEnvelope(feedData, nowMs = Date.now(), capSeconds = 120) {
   const evaluation = evaluatePublicIntelligence(feedData, nowMs);
