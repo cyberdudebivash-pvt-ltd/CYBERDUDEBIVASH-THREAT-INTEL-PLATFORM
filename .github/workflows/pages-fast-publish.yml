@@ -145,6 +145,8 @@ on:
       - '.github/workflows/pages-fast-publish.yml'
       - 'scripts/build_dist_artifact.py'
       - 'scripts/p0_r37_static_feed_denial.py'
+      - 'scripts/p0_r37_live_legacy_canary.py'
+      - 'feed_manifest.json'
       - 'tests/test_p0_r37_static_feed_denial.py'
   # ADDITIVE FIX (issue #320, see header comment above): identical paths
   # list to the push trigger above -- only fires when a merged PR actually
@@ -167,6 +169,8 @@ on:
       - '.github/workflows/pages-fast-publish.yml'
       - 'scripts/build_dist_artifact.py'
       - 'scripts/p0_r37_static_feed_denial.py'
+      - 'scripts/p0_r37_live_legacy_canary.py'
+      - 'feed_manifest.json'
       - 'tests/test_p0_r37_static_feed_denial.py'
   workflow_dispatch: {}
 
@@ -476,3 +480,9 @@ jobs:
           PLATFORM_URL: https://intel.cyberdudebivash.com
           PRE_DEPLOY_TIMESTAMP: ${{ steps.pre-deploy-ts.outputs.ts }}
         run: python3 scripts/pages_deploy_freshness_gate.py
+
+      - name: P0 R37 - Verify legacy public feed aliases contain no intelligence
+        timeout-minutes: 2
+        run: python3 scripts/p0_r37_live_legacy_canary.py
+
+
