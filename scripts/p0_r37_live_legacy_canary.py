@@ -10,6 +10,24 @@ import urllib.request
 BASE = "https://intel.cyberdudebivash.com"
 ALIASES = ("/feed.json", "/latest.json")
 MAX_BYTES = 2_000_000
+_RESPONSE_METADATA = {}
+
+
+def _response_summary(url: str, status: int, raw: bytes) -> dict:
+    """Public routing diagnostics without dumping advisory or customer bodies."""
+    out = {"url": url, "status": status, "headers": _RESPONSE_METADATA.get(url, {})}
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        out["shape"] = "non_json"
+        return out
+    out["shape"] = type(data).__name__
+    if isinstance(data, dict):
+        out.update({k: data.get(k) for k in ("error", "generated_at", "count", "freshness_status")})
+        out["item_count"] = len(data["items"]) if isinstance(data.get("items"), list) else None
+    elif isinstance(data, list):
+        out["item_count"] = len(data)
+    return out
 
 
 def assert_unavailable(status: int, raw: bytes, alias: str) -> None:
@@ -80,9 +98,15 @@ def _request(url: str) -> tuple[int, bytes]:
         with urllib.request.urlopen(request, timeout=20) as response:
             status = response.status
             body = response.read(MAX_BYTES + 1)
+            headers = response.headers
     except urllib.error.HTTPError as exc:
         status = exc.code
         body = exc.read(MAX_BYTES + 1)
+        headers = exc.headers
+    _RESPONSE_METADATA[url] = {k: headers.get(k) for k in (
+        "Server", "Cache-Control", "Age", "CF-Cache-Status", "CF-Ray",
+        "X-Sentinel-Version", "X-Sentinel-Freshness", "X-Request-ID",
+    ) if headers is not None and headers.get(k) is not None}
     if len(body) > MAX_BYTES:
         raise AssertionError(f"Unexpected large response: {url}")
     return status, body
@@ -104,7 +128,12 @@ def run(base: str = BASE) -> None:
             except AssertionError:
                 api_url = base + canonical + "?" + urllib.parse.urlencode({"cdb_r37": token})
                 api_status, api_body = _request(api_url)
-                assert_matches_fresh_authority(status, body, api_status, api_body, alias, time.time())
+                try:
+                    assert_matches_fresh_authority(status, body, api_status, api_body, alias, time.time())
+                except AssertionError as exc:
+                    raise AssertionError(f"{exc}; responses=" + json.dumps([
+                        _response_summary(url, status, body), _response_summary(api_url, api_status, api_body),
+                    ], sort_keys=True)) from exc
                 print(f"[P0 R37] PASS {url}: matches verified fresh live Worker API")
 
 if __name__ == "__main__":

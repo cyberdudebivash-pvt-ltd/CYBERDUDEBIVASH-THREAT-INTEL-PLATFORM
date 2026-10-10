@@ -144,11 +144,12 @@ def test_dedup_cannot_launder_restricted_components_into_clear_primary():
 
 
 @pytest.mark.parametrize("has_valid", [True, False])
-def test_real_feed_writer_withholds_history_and_preserves_both_previous_files(tmp_path, monkeypatch, has_valid):
+@pytest.mark.parametrize("broken_quality_output", [True, False])
+def test_real_feed_writer_withholds_history_and_preserves_both_previous_files(tmp_path, monkeypatch, has_valid, broken_quality_output):
     import run_pipeline
     import intel_quality_engine
     monkeypatch.setattr(run_pipeline, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(intel_quality_engine, "apply_quality_pipeline", lambda rows: rows)
+    monkeypatch.setattr(intel_quality_engine, "apply_quality_pipeline", lambda rows: None if broken_quality_output else rows)
     rows = [{"id": f"old-{i}", "title": f"Historical source record {i}",
              "timestamp": "2026-10-10T00:00:00Z"} for i in range(510)]
     if has_valid:
@@ -179,6 +180,37 @@ def test_ingestion_audit_cannot_manufacture_provenance():
     stage = source[source.index("# ---- Stage 1.91:"):source.index("    stage_run_intel_engine()", source.index("# ---- Stage 1.91:"))]
     assert '"--report"' in stage
     assert '"--fix"' not in stage
+
+
+def test_unproven_inventory_cannot_consume_source_balance_slots(tmp_path, monkeypatch):
+    import run_pipeline
+    monkeypatch.setattr(run_pipeline, "REPO_ROOT", tmp_path)
+    old = [{"id": f"old-{i}", "stix_id": f"old-{i}",
+            "title": f"Historical vulnerability notice {i}",
+            "feed_source": "rss_cvefeed_io_rssfeed_latest_xml", "source": "cvefeed.io",
+            "source_url": f"https://cvefeed.io/old/{i}",
+            "published_at": "2026-10-09T08:00:00Z", "timestamp": "2026-10-09T08:00:00Z",
+            "risk_score": 8.0, "cvss_score": 8.0, "severity": "HIGH"} for i in range(510)]
+    new_low = [{**valid_record(f"low-{i}"), "risk_score": 2.0,
+                "feed_source": "rss_cvefeed_io_rssfeed_latest_xml"} for i in range(21)]
+    new_high = [{**valid_record(f"high-{i}"),
+                 "feed_source": "rss_cybersecuritynews_com_feed_"} for i in range(3)]
+    manifest = tmp_path / "data/stix/feed_manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps(old + new_low + new_high))
+    run_pipeline.stage_sync_root_feed_json()
+    published = json.loads((tmp_path / "api/feed.json").read_text())
+    # Existing source cap remains 45% of the eligible 24 candidates: 10
+    # lower-quality-source records plus the 3 higher-quality-source records.
+    assert len(published) == 13
+    assert sum(r["id"].startswith("low-") for r in published) == 10
+    assert sum(r["id"].startswith("high-") for r in published) == 3
+    assert all(not r["id"].startswith("old-") for r in published)
+    assert len(json.loads(manifest.read_text())["advisories"]) == 534
+    audit = json.loads((tmp_path / "data/quality/p0_r41_publication_selection.json").read_text())
+    assert audit["candidate_count"] == 534 and audit["withheld_count"] == 510
+    assert audit["quality_or_cap_filtered_count"] == 11
+    guard.assert_publishable(published)
 
 
 def test_legacy_hardener_cannot_replace_ingestion_host_trust_registry(tmp_path, monkeypatch):

@@ -3420,6 +3420,15 @@ def stage_sync_root_feed_json() -> None:
     # Quality engine trims CVE spam etc. for feed.json only.
     # Canonical manifest write-back uses full pre-quality list to prevent data loss.
     _manifest_items_pre_quality = list(manifest_items)  # snapshot for manifest write-back
+    # P0 R43: source balancing and source-specific volume caps must operate
+    # on publishable candidates. Otherwise high-scoring unproven history can
+    # evict every eligible new CVE before the final prewrite gate sees it.
+    # Keep the complete internal snapshot; apply no public-size cap here.
+    from p0_r35_feed_prewrite_guard import select_publishable
+    manifest_items, held_before_quality = select_publishable(
+        manifest_items, limit=max(1, len(manifest_items)),
+    )
+    _publishable_items_pre_quality = list(manifest_items)
     if manifest_items:
         try:
             from intel_quality_engine import apply_quality_pipeline as _apply_quality
@@ -3428,7 +3437,7 @@ def stage_sync_root_feed_json() -> None:
             if not isinstance(manifest_items, list):
                 log.error("[PHASE5-QE] Quality engine returned non-list (%s) — resetting",
                           type(manifest_items).__name__)
-                manifest_items = list(_manifest_items_pre_quality)
+                manifest_items = list(_publishable_items_pre_quality)
             log.info("[PHASE5-QE] Quality engine complete: %d -> %d items (feed.json uses filtered)",
                      _qe_before, len(manifest_items))
             log.info("[PHASE5-QE] Manifest write-back will use full pre-quality list: %d items",
@@ -3537,18 +3546,18 @@ def stage_sync_root_feed_json() -> None:
     # ---- Step 6: Write to all target feed.json paths --------------------
     if not manifest_items:
         log.error("[3.9] CRITICAL: Zero entries after all fallbacks — feed.json will be empty")
-        return
 
     # P0 R41: restored historical inventory is not a public publication
     # candidate merely because it exists. Select with the unchanged strict
     # prewrite rules AND TLP policy before the cap, preserving all source claims.
     from p0_r35_feed_prewrite_guard import assert_publishable, select_publishable
-    payload, held = select_publishable(manifest_items, limit=500)
+    payload, held_after_quality = select_publishable(manifest_items, limit=500)
+    held = held_before_quality + held_after_quality
     out_count = len(payload)
     from collections import Counter
     held_counts = dict(Counter(row["reason_code"] for row in held))
     log.info("[3.9] Publication selection: candidates=%d eligible=%d withheld=%d reasons=%s",
-             len(manifest_items), out_count, len(held), held_counts)
+             len(_manifest_items_pre_quality), out_count, len(held), held_counts)
     if held:
         log.info("[3.9] Prewrite rejection counts: %s",
                  Counter(row["reason"] for row in held).most_common(8))
@@ -3557,8 +3566,9 @@ def stage_sync_root_feed_json() -> None:
     audit_path = REPO_ROOT / "data" / "quality" / "p0_r41_publication_selection.json"
     audit_path.parent.mkdir(parents=True, exist_ok=True)
     audit_tmp = audit_path.with_suffix(".tmp")
-    audit_tmp.write_text(json.dumps({"generated_at": utc_now(), "candidate_count": len(manifest_items),
+    audit_tmp.write_text(json.dumps({"generated_at": utc_now(), "candidate_count": len(_manifest_items_pre_quality),
                                    "published_count": out_count, "withheld_count": len(held),
+                                   "quality_or_cap_filtered_count": max(0, len(_manifest_items_pre_quality) - len(held) - out_count),
                                    "reason_counts": held_counts, "withheld": held}, indent=2), encoding="utf-8")
     os.replace(audit_tmp, audit_path)
 
