@@ -7478,6 +7478,8 @@ async function handleRequest(request, env, ctx) {
       return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
     }
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const items = feedData.items || [];
     const stats = computeStats(items);
     // CodeRabbit review finding on this PR (verified, not taken on faith):
@@ -7530,6 +7532,8 @@ async function handleRequest(request, env, ctx) {
   // --- /api/v1/intel/campaigns ------------------------------------------------
   if (path === "/api/v1/intel/campaigns") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const stats    = computeStats(feedData.items || []);
     const kc       = computeKillChain(feedData.items || []);
     const threat   = computeThreatLevel(stats);
@@ -7539,12 +7543,16 @@ async function handleRequest(request, env, ctx) {
   // --- /api/v1/intel/ransomware -----------------------------------------------
   if (path === "/api/v1/intel/ransomware") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     return jsonResp({ ...computeRansomware(feedData.items || []), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
   }
 
   // --- /api/v1/intel/apt ------------------------------------------------------
   if (path === "/api/v1/intel/apt") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     // Public/cacheable gadget: retain the existing actor entitlement gate.
     // Named paid-only attribution must not become public via aggregation.
     const publicItems = (feedData.items || []).map(item => applyTierGateV2(item, TIERS.FREE, null));
@@ -7554,12 +7562,16 @@ async function handleRequest(request, env, ctx) {
   // --- /api/v1/intel/epss -----------------------------------------------------
   if (path === "/api/v1/intel/epss") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     return jsonResp({ ...computeEPSS(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
   }
 
   // --- /api/v1/intel/defcon ---------------------------------------------------
   if (path === "/api/v1/intel/defcon") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const stats    = computeStats(feedData.items || []);
     const defcon   = computeDefcon(stats);
     const threat   = computeThreatLevel(stats);
@@ -7576,6 +7588,8 @@ async function handleRequest(request, env, ctx) {
   // --- /api/v1/intel/pulse ----------------------------------------------------
   if (path === "/api/v1/intel/pulse") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const stats    = computeStats(feedData.items || []);
     return jsonResp({ ...computePulse(feedData.items || [], stats), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=60" });
   }
@@ -7583,12 +7597,16 @@ async function handleRequest(request, env, ctx) {
   // --- /api/v1/intel/darkweb --------------------------------------------------
   if (path === "/api/v1/intel/darkweb") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     return jsonResp({ ...computeDarkweb(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=300" });
   }
 
   // --- /api/v1/intel/cybermap -------------------------------------------------
   if (path === "/api/v1/intel/cybermap" || path === "/api/v1/geo/cybermap") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const stats    = computeStats(feedData.items || []);
     return jsonResp({ ...computeCybermap(feedData.items || [], stats), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
   }
