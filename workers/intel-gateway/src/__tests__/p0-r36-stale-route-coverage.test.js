@@ -46,4 +46,14 @@ test("legacy GitHub Pages snapshot URLs are Worker-routed through the same live 
   const wrangler = readFileSync(fileURLToPath(new URL("../../wrangler.toml", import.meta.url)), "utf8");
   assert.ok(wrangler.includes('pattern = "intel.cyberdudebivash.com/feed.json"'));
   assert.ok(wrangler.includes('pattern = "intel.cyberdudebivash.com/latest.json"'));
+  // Noninheritable per-environment route configuration: --env production
+  // must cover both exact paths, independently of top-level default routes.
+  const prodStart = wrangler.indexOf("[env.production]\n");
+  const varsStart = wrangler.indexOf("[env.production.vars]", prodStart);
+  assert.ok(prodStart > 0 && varsStart > prodStart, "production environment exists");
+  const productionRoutes = wrangler.slice(prodStart, varsStart);
+  for (const alias of ["/feed.json", "/latest.json"]) {
+    assert.ok(productionRoutes.includes('pattern = "intel.cyberdudebivash.com' + alias + '"'),
+      alias + " must be attached during Wrangler --env production deploy");
+  }
 });
