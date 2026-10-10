@@ -195,3 +195,52 @@ def test_multipart_etag_without_authenticated_hash_proof_fails_closed():
         ok, _, details = verifier.verify_r2_object()
     assert ok is False
     assert details["reason_code"] == "ETAG_UNVERIFIABLE"
+
+
+def test_workflow_verifies_uploaded_manifest_before_report_retirement(tmp_path):
+    """Replay the real workflow order: retirement mutates canonical upload input."""
+    import r2_report_publisher as publisher
+
+    root = tmp_path / "workspace"
+    manifest = root / "data" / "stix" / "feed_manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"items": [{
+        "id": "intel--retired", "title": "Public source advisory " * 100,
+        "tlp": "TLP:CLEAR", "report_url": "/reports/retired.html",
+        "internal_report_url": "/reports/retired.html", "pdf_url": "/reports/retired.pdf",
+    }]}), encoding="utf-8")
+    workflow = yaml.safe_load((ROOT / ".github/workflows/sentinel-blogger.yml").read_text(encoding="utf-8"))
+    names = [step.get("name") for step in workflow["jobs"]["generate-and-sync"]["steps"]]
+    uploaded = None
+    verified_upload = False
+
+    with patch.object(verifier, "REPO", root), \
+         patch.object(verifier, "MANIFEST_PATH", manifest), \
+         patch.object(verifier, "CF_ACCOUNT_ID", "account-fixture"), \
+         patch.object(verifier, "ACCESS_KEY", "fake-key"), \
+         patch.object(verifier, "SECRET_KEY", "fake-secret"), \
+         patch.object(publisher, "REPORT_URL_MANIFESTS", [manifest]):
+        for name in names:
+            if name == "STAGE 3.5 - Upload Intel to Cloudflare R2 (MANDATORY)":
+                uploaded, _ = verifier._expected_public_manifest_bytes()
+            elif name == "STAGE 3.5a - Bounded 24h Report Publisher (P0 R2 Cost Fix)":
+                assert publisher.clear_report_urls({"intel--retired"}, {"intel--retired"}) == []
+            elif name == "STAGE 3.6 - R2 Upload Integrity Verifier (HARD FAIL)":
+                assert uploaded is not None, "verify only after the mandatory upload"
+                head = {"status": 200, "content_length": len(uploaded),
+                        "etag": hashlib.md5(uploaded, usedforsecurity=False).hexdigest(),
+                        "source": "fixture-s3"}
+                with patch.object(verifier, "_s3api_head_object", return_value=head):
+                    ok, message, details = verifier.verify_r2_object()
+                assert ok, message
+                assert details["etag_check"] == "PASS"
+                verified_upload = True
+        assert verified_upload
+        item = json.loads(manifest.read_text(encoding="utf-8"))["items"][0]
+        assert all(item[field] == "" for field in ("report_url", "internal_report_url", "pdf_url"))
+        # The same strict verifier still rejects changed local input afterward.
+        # No uploader-provided checksum or same-size soft pass is introduced.
+        with patch.object(verifier, "_s3api_head_object", return_value=head):
+            ok, _, details = verifier.verify_r2_object()
+        assert ok is False
+        assert details["reason_code"] in ("PUBLIC_BYTE_LENGTH_MISMATCH", "PUBLIC_ETAG_MISMATCH")

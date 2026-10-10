@@ -2078,6 +2078,22 @@ jobs:
         run: python3 scripts/r2_upload.py
 
       # -----------------------------------------------------------------------
+      # STAGE 3.6: R2 UPLOAD INTEGRITY VERIFIER (v184.0 -- HARD FAIL)
+      # Confirms R2 upload from Stage 3.5 landed correctly BEFORE cache bust.
+      # Verify immediately after upload, before the bounded report publisher
+      # clears retired report/PDF URLs in the local canonical manifest. Comparing
+      # that later mutated source with the earlier upload causes a false mismatch.
+      # Verifies: ETag matches local sha256, object is reachable via presigned
+      # URL, advisory count on R2 >= minimum threshold (prevents empty-feed CDN).
+      # HARD FAIL: if R2 object is missing, ETag mismatch, or count below floor.
+      # Prevents silent data loss between R2 upload and cache invalidation.
+      # -----------------------------------------------------------------------
+      - name: "STAGE 3.6 - R2 Upload Integrity Verifier (HARD FAIL)"
+        id: r2-manifest-integrity
+        timeout-minutes: 5
+        run: python3 scripts/r2_upload_verifier.py
+
+      # -----------------------------------------------------------------------
       # STAGE 3.5a: BOUNDED 24H REPORT PUBLISHER (P0 R2 COST INCIDENT FIX)
       # Replaces the whole-corpus `aws s3 sync reports/` that used to run
       # inside r2_upload.py's STAGE 3.5 (confirmed root cause of the
@@ -2138,19 +2154,6 @@ jobs:
           CF_R2_REPORTS_KEY_ID:     ${{ secrets.CF_R2_REPORTS_KEY_ID }}
           CF_R2_REPORTS_SECRET_KEY: ${{ secrets.CF_R2_REPORTS_SECRET_KEY }}
         run: python3 scripts/r2_reports_integrity.py
-
-      # -----------------------------------------------------------------------
-      # STAGE 3.6: R2 UPLOAD INTEGRITY VERIFIER (v184.0 -- HARD FAIL)
-      # Confirms R2 upload from Stage 3.5 landed correctly BEFORE cache bust.
-      # Verifies: ETag matches local sha256, object is reachable via presigned
-      # URL, advisory count on R2 >= minimum threshold (prevents empty-feed CDN).
-      # HARD FAIL: if R2 object is missing, ETag mismatch, or count below floor.
-      # Prevents silent data loss between R2 upload and cache invalidation.
-      # -----------------------------------------------------------------------
-      - name: "STAGE 3.6 - R2 Upload Integrity Verifier (HARD FAIL)"
-        id: r2-manifest-integrity
-        timeout-minutes: 5
-        run: python3 scripts/r2_upload_verifier.py
 
       # -----------------------------------------------------------------------
       # STAGE 3.6a: RX-PUB-A0 REPORTS ARTIFACT IDENTITY VERIFIER (NEW --
