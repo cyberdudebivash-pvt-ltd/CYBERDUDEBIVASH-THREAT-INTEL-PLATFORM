@@ -7317,17 +7317,23 @@ async function handleRequest(request, env, ctx) {
 
   // --- /api/v1/intel/top10.json -----------------------------------------------
   if (path === "/api/v1/intel/top10.json") {
+    // A standalone top-ten timestamp never licenses stale canonical data.
+    const canonicalFeed = await r2Get(env, LATEST_JSON_KEY);
+    const canonicalDenied = denyNonFreshLiveFeed(canonicalFeed);
+    if (canonicalDenied) return jsonResp(canonicalDenied.body, canonicalDenied.status, canonicalDenied.headers);
     let data = await r2Get(env, "api/v1/intel/top10.json");
     if (!data) {
       const feedData = await loadFeedItems(env);
       const top10    = (feedData.items || []).sort((a, b) => parseFloat(b.risk_score || 0) - parseFloat(a.risk_score || 0)).slice(0, 10);
-      data = { items: top10, count: top10.length, generated_at: now(), version: PLATFORM_VERSION };
+      data = { items: top10, count: top10.length, generated_at: canonicalFeed.generated_at, version: PLATFORM_VERSION };
     }
     // Like latest.json, top10 can come from an old R2 object or from a
     // fallback feed. Validate the complete input before projecting any tier.
     if (!publicTlpJsonVerified(data)) {
       return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
+    const unavailable = denyNonFreshLiveFeed(data);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     // Same tier gate as /api/v1/intel/latest.json -- this endpoint carries the
     // same canonical item shape (IOCs, detection rules, actor attribution).
     if (auth.tier !== TIERS.PRO && auth.tier !== TIERS.ENTERPRISE && auth.tier !== TIERS.MSSP && Array.isArray(data.items)) {
@@ -7342,6 +7348,8 @@ async function handleRequest(request, env, ctx) {
     const liveFeedCount = (await _liveFeedSourceCount(env)) ?? null;
     const rawFeed = await r2Get(env, LATEST_JSON_KEY);
     const publication = evaluatePublicIntelligence(rawFeed, Date.now());
+    const unavailable = denyNonFreshLiveFeed(rawFeed);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     const items = rawFeed && Array.isArray(rawFeed.items) ? rawFeed.items : [];
     const stats = computeStats(items);
     const threat     = computeThreatLevel(stats);
@@ -7417,6 +7425,8 @@ async function handleRequest(request, env, ctx) {
   // --- /api/v1/intel/stats ----------------------------------------------------
   if (path === "/api/v1/intel/stats" || path === "/api/v1/stats") {
     const feedData = await loadFeedItems(env);
+    const unavailable = denyNonFreshLiveFeed(feedData);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     const stats    = computeStats(feedData.items || []);
     const threat   = computeThreatLevel(stats);
     const defcon   = computeDefcon(stats);
