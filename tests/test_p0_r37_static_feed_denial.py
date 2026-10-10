@@ -4,11 +4,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from p0_r37_static_feed_denial import neutralise_legacy_static_feeds
 from p0_r37_live_legacy_canary import assert_unavailable, assert_matches_fresh_authority
+import p0_r37_live_legacy_canary as live_canary
 
 class StaticFeedDenialTests(unittest.TestCase):
     def test_stale_items_never_survive_pages_build(self):
@@ -80,6 +83,39 @@ class StaticFeedDenialTests(unittest.TestCase):
         canary = (ROOT / "scripts/p0_r37_live_legacy_canary.py").read_text()
         self.assertIn('for suffix in ("", "?" +', canary)
         self.assertIn("'scripts/p0_r37_static_feed_denial.py'", workflow)
+
+    def test_response_diagnostics_capture_only_public_routing_metadata(self):
+        url = "https://example.test/feed.json"
+        raw = b'{"generated_at":"2026-10-09T05:38:01Z","items":[{"id":"private-body","title":"private-title"}]}'
+        response = SimpleNamespace(status=200, read=lambda size: raw, headers={
+            "CF-Cache-Status": "HIT", "Age": "104400", "X-Sentinel-Version": "v201",
+            "Set-Cookie": "private-cookie", "Authorization": "private-token",
+        })
+        response_context = unittest.mock.MagicMock()
+        response_context.__enter__.return_value = response
+        with patch.object(live_canary.urllib.request, "urlopen", return_value=response_context):
+            self.assertEqual(live_canary._request(url), (200, raw))
+        summary = live_canary._response_summary(url, 200, raw)
+        self.assertEqual(summary["headers"]["CF-Cache-Status"], "HIT")
+        self.assertEqual(summary["headers"]["Age"], "104400")
+        self.assertEqual(summary["item_count"], 1)
+        text = json.dumps(summary)
+        for sensitive in ("private-body", "private-title", "private-cookie", "private-token"):
+            self.assertNotIn(sensitive, text)
+        live_canary._RESPONSE_METADATA.pop(url, None)
+
+    def test_alias_mismatch_remains_fatal_with_routing_diagnostics(self):
+        old = b'[{"id":"old-body-must-not-be-logged"}]'
+        unavailable = b'{"error":"live_intelligence_unavailable","items":[],"live_data_available":false}'
+        with patch.object(live_canary, "_request", side_effect=[(200, old), (503, unavailable)]) as request:
+            with self.assertRaisesRegex(AssertionError, "live alias not backed by healthy API") as caught:
+                live_canary.run("https://example.test")
+        self.assertEqual(request.call_count, 2)
+        diagnostics = json.loads(str(caught.exception).split("; responses=", 1)[1])
+        self.assertEqual([row["status"] for row in diagnostics], [200, 503])
+        self.assertEqual(diagnostics[0]["shape"], "list")
+        self.assertEqual(diagnostics[1]["error"], "live_intelligence_unavailable")
+        self.assertNotIn("old-body-must-not-be-logged", str(caught.exception))
 
 if __name__ == "__main__":
     unittest.main()
