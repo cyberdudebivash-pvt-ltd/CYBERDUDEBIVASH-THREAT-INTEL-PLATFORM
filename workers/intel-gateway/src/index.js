@@ -7283,7 +7283,7 @@ async function handleRequest(request, env, ctx) {
   // --- /api/v1/intel/latest.json ----------------------------------------------
   // FREE tier: sanitized manifest (no report_url, no premium fields)
   // PRO/ENTERPRISE: full PRO manifest including report_url, pdf_url
-  if (path === "/api/v1/intel/latest.json") {
+  if (path === "/api/v1/intel/latest.json" || path === "/latest.json") {
     let data;
     const manifestFullAllowedAdHoc = auth.tier === TIERS.PRO || auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
     const manifestFullAllowed = resolveEntitlement(ctx, env, "intel_manifest_full", auth, manifestFullAllowedAdHoc).allowed;
@@ -7811,7 +7811,7 @@ async function handleRequest(request, env, ctx) {
   }
 
   // --- /api/feed + /api/feed.json (legacy) ------------------------------------
-  if (path === "/api/feed" || path === "/api/feed.json") {
+  if (path === "/api/feed" || path === "/api/feed.json" || path === "/feed.json") {
     let data = await r2Get(env, LATEST_JSON_KEY);
     if (!data) return errorResp("Feed not available", 503);
     // This object can predate the publishing TLP gate. Verify the
