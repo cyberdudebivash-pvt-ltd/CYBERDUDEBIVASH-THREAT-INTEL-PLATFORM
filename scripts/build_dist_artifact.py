@@ -860,6 +860,16 @@ def main() -> int:
             log.info("  Copied root file: %s", fname)
         # Not a hard error if optional files don't exist
 
+    # P0 R37: GitHub Pages can serve root static files without hitting the
+    # Cloudflare Worker. Never ship frozen repo intelligence into those
+    # aliases, regardless of Worker route/caching state.
+    try:
+        from scripts.p0_r37_static_feed_denial import neutralise_legacy_static_feeds
+    except ModuleNotFoundError:
+        from p0_r37_static_feed_denial import neutralise_legacy_static_feeds
+    neutralise_legacy_static_feeds(DIST_DIR)
+    log.info("  P0 R37: static feed aliases disabled (no item arrays)")
+
     # ── 5. Validate report_url paths exist in dist/ ──────────────────────────
     # v184.0 P0 FIX: Retention-window-aware validation.
     #
