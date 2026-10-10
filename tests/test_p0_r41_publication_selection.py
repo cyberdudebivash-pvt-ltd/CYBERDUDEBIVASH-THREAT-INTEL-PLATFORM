@@ -144,11 +144,12 @@ def test_dedup_cannot_launder_restricted_components_into_clear_primary():
 
 
 @pytest.mark.parametrize("has_valid", [True, False])
-def test_real_feed_writer_withholds_history_and_preserves_both_previous_files(tmp_path, monkeypatch, has_valid):
+@pytest.mark.parametrize("broken_quality_output", [True, False])
+def test_real_feed_writer_withholds_history_and_preserves_both_previous_files(tmp_path, monkeypatch, has_valid, broken_quality_output):
     import run_pipeline
     import intel_quality_engine
     monkeypatch.setattr(run_pipeline, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(intel_quality_engine, "apply_quality_pipeline", lambda rows: rows)
+    monkeypatch.setattr(intel_quality_engine, "apply_quality_pipeline", lambda rows: None if broken_quality_output else rows)
     rows = [{"id": f"old-{i}", "title": f"Historical source record {i}",
              "timestamp": "2026-10-10T00:00:00Z"} for i in range(510)]
     if has_valid:

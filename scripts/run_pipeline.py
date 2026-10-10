@@ -3428,6 +3428,7 @@ def stage_sync_root_feed_json() -> None:
     manifest_items, held_before_quality = select_publishable(
         manifest_items, limit=max(1, len(manifest_items)),
     )
+    _publishable_items_pre_quality = list(manifest_items)
     if manifest_items:
         try:
             from intel_quality_engine import apply_quality_pipeline as _apply_quality
@@ -3436,7 +3437,7 @@ def stage_sync_root_feed_json() -> None:
             if not isinstance(manifest_items, list):
                 log.error("[PHASE5-QE] Quality engine returned non-list (%s) — resetting",
                           type(manifest_items).__name__)
-                manifest_items = list(_manifest_items_pre_quality)
+                manifest_items = list(_publishable_items_pre_quality)
             log.info("[PHASE5-QE] Quality engine complete: %d -> %d items (feed.json uses filtered)",
                      _qe_before, len(manifest_items))
             log.info("[PHASE5-QE] Manifest write-back will use full pre-quality list: %d items",
