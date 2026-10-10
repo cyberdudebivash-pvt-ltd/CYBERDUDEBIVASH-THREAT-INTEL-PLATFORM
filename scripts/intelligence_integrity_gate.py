@@ -595,8 +595,14 @@ class FeedDiversityValidator:
                     f"top={top_domain} ({top_ratio:.0%}) — OK"
                 )
 
-        # Actor diversity
-        actors = [_actor_id(item) for item in items if _actor_id(item)]
+        # Measure named attribution only. The platform's CDB-UNATTR-*
+        # placeholders mean no known actor (as gate B already recognizes),
+        # and cannot either fail or satisfy the named-actor diversity rule.
+        # A single real or synthetic named actor still fails unchanged.
+        actor_labels = [_actor_id(item) for item in items]
+        actors = [a for a in actor_labels if a and
+                  a.lower() not in {"none", "null", "unknown", "n/a"} and
+                  not a.upper().startswith("CDB-UNATTR")]
         if actors:
             actor_counts = Counter(actors)
             top_actor, top_actor_count = actor_counts.most_common(1)[0]
@@ -619,6 +625,11 @@ class FeedDiversityValidator:
                     f"[C] Actor diversity: {unique_actors} actors, "
                     f"top={top_actor} ({top_actor_ratio:.0%}) — OK"
                 )
+        else:
+            findings.append(
+                "[C] WARN — No named actor attribution; unattributed placeholders "
+                "do not establish actor diversity or synthetic-generation evidence."
+            )
 
         # Severity distribution (0 critical = suspicious for large feed)
         severities = Counter(str(item.get("severity") or item.get("threat_level") or "").upper()

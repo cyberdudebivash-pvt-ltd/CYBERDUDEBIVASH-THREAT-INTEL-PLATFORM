@@ -12,7 +12,10 @@ synthetic generation". Low entropy now HARD_FAILs only when a named label (a
 real actor or a synthetic CDB-*-GEN one) dominates; placeholder dominance is a
 WARN finding.
 """
-from scripts.intelligence_integrity_gate import ENTROPY_ACTOR_MIN, EntropyGate
+from scripts.intelligence_integrity_gate import (
+    ENTROPY_ACTOR_MIN, FEED_MIN_UNIQUE_ACTORS, EntropyGate, FeedDiversityValidator,
+)
+import pytest
 
 
 def _items(actors):
@@ -64,3 +67,53 @@ def test_diverse_feed_passes_without_warning():
 
 def test_threshold_unchanged():
     assert ENTROPY_ACTOR_MIN == 0.5
+
+
+def _diversity_check(actors, *, sources=2):
+    items = _items(actors)
+    for i, item in enumerate(items):
+        item["source_url"] = f"https://source-{i % sources}.example/advisory/{i}"
+    return FeedDiversityValidator().check(items)
+
+
+@pytest.mark.parametrize("label", ["CDB-UNATTR-CVE", "CDB-UNATTR-APT", "unknown", "none", "n/a", ""])
+def test_missing_named_attribution_warns_without_inventing_an_actor(label):
+    hard_fail, findings = _diversity_check([label] * 25)
+    assert hard_fail is False
+    assert any(f.startswith("[C] WARN") and "No named actor" in f for f in findings)
+    assert not any("ACTOR MONOCULTURE" in f for f in findings)
+
+
+def test_production_distribution_of_17_missing_and_8_placeholders_passes():
+    hard_fail, findings = _diversity_check([None] * 17 + ["CDB-UNATTR-CVE"] * 8, sources=4)
+    assert hard_fail is False
+    assert any("No named actor" in f for f in findings)
+
+
+@pytest.mark.parametrize("label", ["APT28", "CDB-APT-GEN-0042"])
+def test_named_or_synthetic_actor_monoculture_still_hard_fails(label):
+    hard_fail, findings = _diversity_check([label] * 25)
+    assert hard_fail is True
+    assert any("ACTOR MONOCULTURE" in f for f in findings)
+
+
+def test_placeholders_cannot_supply_a_second_named_actor():
+    hard_fail, findings = _diversity_check(["APT28"] * 8 + ["CDB-UNATTR-CVE"] * 17)
+    assert hard_fail is True
+    assert any("Only 1 distinct actor" in f for f in findings)
+
+
+def test_two_named_actors_still_pass():
+    hard_fail, findings = _diversity_check(["APT28"] * 8 + ["Lazarus"] * 8 + ["CDB-UNATTR-CVE"] * 9)
+    assert hard_fail is False
+    assert not any("ACTOR MONOCULTURE" in f for f in findings)
+
+
+def test_unattributed_window_still_requires_multiple_sources():
+    hard_fail, findings = _diversity_check(["CDB-UNATTR-CVE"] * 25, sources=1)
+    assert hard_fail is True
+    assert any("SINGLE-SOURCE DOMINANCE" in f for f in findings)
+
+
+def test_named_actor_minimum_is_unchanged():
+    assert FEED_MIN_UNIQUE_ACTORS == 2
