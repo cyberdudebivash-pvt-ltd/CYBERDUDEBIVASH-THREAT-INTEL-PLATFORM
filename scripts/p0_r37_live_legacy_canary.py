@@ -36,25 +36,73 @@ def assert_unavailable(status: int, raw: bytes, alias: str) -> None:
     raise AssertionError(f"{alias}: unapproved legacy response status={status}")
 
 
+def assert_matches_fresh_authority(
+    alias_status: int, alias_body: bytes, api_status: int,
+    api_body: bytes, alias: str, now: float
+) -> None:
+    """Only allow a Worker-served LIVE alias if exact source identity is verified.
+
+    During degraded API health the legacy path must NEVER emit any records.
+    A legitimate freshly published live Worker alias is allowed, so this
+    gate cannot accidentally block healthy recovery forever.
+    """
+    if alias_status != 200 or api_status != 200:
+        raise AssertionError(f"{alias}: live alias not backed by healthy API")
+    try:
+        alias_data = json.loads(alias_body)
+        api_data = json.loads(api_body)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise AssertionError(f"{alias}: unparseable live authoritative response") from exc
+    if not isinstance(alias_data, dict) or not isinstance(api_data, dict):
+        raise AssertionError(f"{alias}: unexpected live response shape")
+    stamp = api_data.get("generated_at")
+    if not isinstance(stamp, str) or not stamp.endswith("Z"):
+        raise AssertionError(f"{alias}: missing authoritative generation clock")
+    from datetime import datetime, timezone
+    try:
+        t = datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    except ValueError as exc:
+        raise AssertionError(f"{alias}: invalid authoritative generation clock") from exc
+    if t > now or now - t >= 6 * 3600:
+        raise AssertionError(f"{alias}: authoritative feed is expired or future dated")
+    ids = lambda d: [item.get("id") for item in d.get("items", []) if isinstance(item, dict)]
+    canonical_ids = ids(api_data)
+    alias_ids = ids(alias_data)
+    if not canonical_ids or any(not i for i in canonical_ids):
+        raise AssertionError(f"{alias}: authoritative feed lacks validated IDs")
+    if alias_data.get("generated_at") != stamp or alias_ids != canonical_ids:
+        raise AssertionError(f"{alias}: static/cached payload does not match live authoritative feed")
+
+
+def _request(url: str) -> tuple[int, bytes]:
+    request = urllib.request.Request(url, headers={"Cache-Control": "no-cache", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            status = response.status
+            body = response.read(MAX_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        body = exc.read(MAX_BYTES + 1)
+    if len(body) > MAX_BYTES:
+        raise AssertionError(f"Unexpected large response: {url}")
+    return status, body
+
+
 def run(base: str = BASE) -> None:
     base = base.rstrip("/")
     for alias in ALIASES:
-        # Force a distinct cache key so old edge snapshot caches cannot
-        # accidentally be treated as evidence of successful deployment.
-        url = base + alias + "?" + urllib.parse.urlencode({"cdb_r37": str(time.time_ns())})
-        request = urllib.request.Request(url, headers={"Cache-Control": "no-cache", "Accept": "application/json"})
+        token = str(time.time_ns())
+        url = base + alias + "?" + urllib.parse.urlencode({"cdb_r37": token})
+        status, body = _request(url)
         try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                status = response.status
-                body = response.read(MAX_BYTES + 1)
-        except urllib.error.HTTPError as exc:
-            status = exc.code
-            body = exc.read(MAX_BYTES + 1)
-        if len(body) > MAX_BYTES:
-            raise AssertionError(f"{alias}: unexpected large legacy response")
-        assert_unavailable(status, body, alias)
-        print(f"[P0 R37] PASS {alias}: status={status}, no stale intelligence")
-
+            assert_unavailable(status, body, alias)
+            print(f"[P0 R37] PASS {alias}: status={status}, no stale intelligence")
+        except AssertionError:
+            canonical = "/api/feed" if alias == "/feed.json" else "/api/v1/intel/latest.json"
+            api_url = base + canonical + "?" + urllib.parse.urlencode({"cdb_r37": token})
+            api_status, api_body = _request(api_url)
+            assert_matches_fresh_authority(status, body, api_status, api_body, alias, time.time())
+            print(f"[P0 R37] PASS {alias}: matches verified fresh live Worker API")
 
 if __name__ == "__main__":
     try:
