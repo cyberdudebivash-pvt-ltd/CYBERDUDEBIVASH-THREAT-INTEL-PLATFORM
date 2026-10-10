@@ -467,11 +467,14 @@ test("mssp: tenants A and B are isolated for reads, writes, ack, destinations an
 test("feed.json: stale is never represented as fresh, and a stale body is not edge-cached", async () => {
   const h = harness({ feed: feedObject(FEED_ITEMS, 7 * 24 * 3600) });
   const stale = await h.call("GET", "/api/feed.json");
-  assert.equal(stale.status, 200, "HTTP 200 kept for existing clients");
+  assert.equal(stale.status, 503, "live stale feed is not available to customers");
+  assert.equal(stale.body.error, "live_intelligence_unavailable");
   assert.equal(stale.body.freshness_status, "STALE");
   assert.equal(stale.body.publication_state, "stale");
   assert.ok(stale.body.age_seconds > 6 * 3600);
+  assert.deepEqual(stale.body.items, [], "no stale records disclosed");
   assert.equal(stale.headers.get("x-sentinel-freshness"), "STALE");
+  assert.match(stale.headers.get("cache-control"), /no-store/);
   assert.equal(stale.headers.get("x-sentinel-edge-ttl"), null, "internal TTL header stripped");
   h.state.feed = feedObject(FEED_ITEMS, 60);
   const again = await h.call("GET", "/api/feed.json");
@@ -479,8 +482,10 @@ test("feed.json: stale is never represented as fresh, and a stale body is not ed
   assert.equal(again.headers.get("x-sentinel-freshness"), "FRESH");
   const missingTs = harness({ feed: { count: 3, items: FEED_ITEMS } });
   const m = await missingTs.call("GET", "/api/feed.json");
+  assert.equal(m.status, 503);
   assert.equal(m.body.freshness_status, "INVALID");
   assert.equal(m.body.publication_state, "missing_timestamp");
+  assert.deepEqual(m.body.items, []);
 });
 
 test("P0 TLP gate: restricted and unlabeled R2 feeds deny anonymous AND paid access", async () => {
