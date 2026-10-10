@@ -4,7 +4,7 @@
  * only from GET /api/watchdog/brief. The illustrative canvas map (and the
  * GPU/compositor governance it needed) was removed: the feed carries no
  * attack geolocation, so the animation could not show observed attacks.
- * Sections 1-4 below now verify the board (live, NOT LIVE and escaping);
+ * Sections 1-4 below verify the board (fresh, degraded and escaping);
  * the demo video, console-error and lead-modal checks are unchanged. The
  * history below describes the removed canvas and is kept for context.
  *
@@ -92,12 +92,14 @@ const BRIEF_ITEMS = [
 ];
 const LIVE_BRIEF = {
   status: 200,
-  body: { count: 2, stories: 2, feed_generated_at: new Date(Date.now() - 600e3).toISOString(), items: BRIEF_ITEMS,
+  body: { freshness_status: 'FRESH', count: 2, stories: 2, feed_generated_at: new Date(Date.now() - 600e3).toISOString(), items: BRIEF_ITEMS,
     situation: { feed_items_seen: 3, by_severity: { CRITICAL: 1, HIGH: 1 } } },
 };
 const STALE_BRIEF = {
   status: 503,
-  body: { error: 'intelligence_degraded', items: [], last_authoritative: { live: false, label: 'LAST AUTHORITATIVE INTELLIGENCE - NOT LIVE',
+  // Deliberately simulate an older Worker response. The page must ignore its
+  // nested expired records even before all upstream caches have converged.
+  body: { error: 'intelligence_degraded', freshness_status: 'STALE', count: 0, items: [], last_authoritative: { live: false, label: 'LAST AUTHORITATIVE INTELLIGENCE - NOT LIVE',
     feed_generated_at: new Date(Date.now() - 9 * 3600e3).toISOString(), count: 1, items: BRIEF_ITEMS.slice(0, 1), situation: {} } },
 };
 
@@ -208,14 +210,23 @@ async function main() {
     record('A hostile advisory title is rendered as text (no injected element)', live.injectedImg === 0 && !live.xss && live.hostileShownAsText,
       JSON.stringify({ injectedImg: live.injectedImg, xss: live.xss, shownAsText: live.hostileShownAsText }));
 
-    // ── 4. A stale feed is shown only as labelled NOT LIVE ───────────────
+    // ── 4. Expired or uncontracted responses cannot populate the board ───
     briefFixture = STALE_BRIEF;
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await page.waitForTimeout(1500);
     const stale = await boardState(page);
-    record('Stale feed: board shows the NOT LIVE banner', /NOT LIVE/.test(stale.banner || ''), `banner=${stale.banner}`);
-    record('Stale feed: status reads NOT LIVE', /^stale NOT LIVE/.test(stale.status || ''), `status=${stale.status}`);
+    record('Stale feed: no expired cards or nested fallback banner', stale.cards === 0 && stale.banner === null, `cards=${stale.cards} banner=${stale.banner}`);
+    record('Stale feed: status reads DEGRADED', /^down DEGRADED/.test(stale.status || ''), `status=${stale.status}`);
+    briefFixture = { status: 200, body: { ...LIVE_BRIEF.body, freshness_status: undefined } };
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForTimeout(1500);
+    const uncontracted = await boardState(page);
+    record('Missing freshness contract: HTTP 200 cannot expose cards', uncontracted.cards === 0 && /^down DEGRADED/.test(uncontracted.status || ''), `cards=${uncontracted.cards} status=${uncontracted.status}`);
     briefFixture = LIVE_BRIEF;
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForTimeout(1500);
+    const recovered = await boardState(page);
+    record('Fresh recovery: cards and LIVE status return', recovered.cards === BRIEF_ITEMS.length && /^live LIVE/.test(recovered.status || ''), `cards=${recovered.cards} status=${recovered.status}`);
 
     // ── 5. Demo video: click-to-play cover swaps in the real <video>, and
     //      its <source> resolves instead of 404ing (#309's regression
