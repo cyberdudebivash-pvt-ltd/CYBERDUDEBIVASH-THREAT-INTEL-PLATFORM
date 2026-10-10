@@ -39,3 +39,11 @@ test("response policy preserves 503; never sends stored stale items in denial", 
   assert.match(helper, /no-store/);
   assert.doesNotMatch(helper, /generated_at: new Date\(/);
 });
+
+test("legacy GitHub Pages snapshot URLs are Worker-routed through the same live guards", () => {
+  assert.match(source, /path === "\/feed\\.json"/);
+  assert.match(source, /path === "\/latest\\.json"/);
+  const wrangler = readFileSync(fileURLToPath(new URL("../../wrangler.toml", import.meta.url)), "utf8");
+  assert.ok(wrangler.includes('pattern = "intel.cyberdudebivash.com/feed.json"'));
+  assert.ok(wrangler.includes('pattern = "intel.cyberdudebivash.com/latest.json"'));
+});
