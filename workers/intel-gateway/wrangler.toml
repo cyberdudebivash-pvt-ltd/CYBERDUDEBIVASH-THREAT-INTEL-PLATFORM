@@ -23,6 +23,9 @@ compatibility_date = "2026-01-01"
 #   clean fix is to grant the Workers Routes: Edit permission to the token.
 routes = [
   { pattern = "intel.cyberdudebivash.com/api/*",     zone_name = "cyberdudebivash.com" },
+  # R36: override legacy GitHub Pages snapshots with the Worker fail-closed API.
+  { pattern = "intel.cyberdudebivash.com/feed.json", zone_name = "cyberdudebivash.com" },
+  { pattern = "intel.cyberdudebivash.com/latest.json", zone_name = "cyberdudebivash.com" },
   { pattern = "intel.cyberdudebivash.com/reports/*", zone_name = "cyberdudebivash.com" },
   { pattern = "intel.cyberdudebivash.com/taxii/*",   zone_name = "cyberdudebivash.com" },
   { pattern = "intel.cyberdudebivash.com/auth/*",    zone_name = "cyberdudebivash.com" },
@@ -325,6 +328,17 @@ new_sqlite_classes = ["WatchdogScheduler"]
 # on failure, but having this avoids a spurious first-attempt error in CI logs).
 [env.production]
 name = "sentinel-apex-gateway"
+# Explicit route parity is required for --env production: Wrangler
+# environment routes are not implicitly inherited from top-level routes.
+# Retain all pre-existing Worker routes and add only two exact stale-bypass URLs.
+routes = [
+  { pattern = "intel.cyberdudebivash.com/api/*", zone_name = "cyberdudebivash.com" },
+  { pattern = "intel.cyberdudebivash.com/reports/*", zone_name = "cyberdudebivash.com" },
+  { pattern = "intel.cyberdudebivash.com/taxii/*", zone_name = "cyberdudebivash.com" },
+  { pattern = "intel.cyberdudebivash.com/auth/*", zone_name = "cyberdudebivash.com" },
+  { pattern = "intel.cyberdudebivash.com/feed.json", zone_name = "cyberdudebivash.com" },
+  { pattern = "intel.cyberdudebivash.com/latest.json", zone_name = "cyberdudebivash.com" },
+]
 
 [env.production.vars]
 GATEWAY_VERSION = "201.0"

@@ -91,7 +91,7 @@ test("P0 #725: source no longer treats unresolved historical reports as implicit
 test("P0 #725: both anonymous feed aliases and the preview validate R2 TLP before projection", () => {
   const source = readFileSync(INDEX_JS_PATH, "utf-8");
   const previewStart = source.indexOf('if (path === "/api/preview" || path === "/api/preview/")');
-  const feedStart = source.indexOf('if (path === "/api/feed" || path === "/api/feed.json")', previewStart);
+  const feedStart = source.indexOf('if (path === "/api/feed" || path === "/api/feed.json" || path === "/feed.json")', previewStart);
   assert.ok(previewStart >= 0 && feedStart > previewStart);
   const preview = source.slice(previewStart, feedStart);
   const feed = source.slice(feedStart, source.indexOf('if (path.startsWith("/reports/"))', feedStart));
@@ -119,7 +119,7 @@ test("P0 #725: both GET and POST IOC lookup routes deny an unverifiable feed", (
 
 test("P0 #725: latest, top10, apex and AI summary inputs pass TLP check before any response", () => {
   const source = readFileSync(INDEX_JS_PATH, "utf-8");
-  const latestStart = source.indexOf('if (path === "/api/v1/intel/latest.json")');
+  const latestStart = source.indexOf('if (path === "/api/v1/intel/latest.json" || path === "/latest.json")');
   const topStart = source.indexOf('if (path === "/api/v1/intel/top10.json")', latestStart);
   const statsStart = source.indexOf("// --- /api/platform/stats", topStart);
   assert.ok(latestStart >= 0 && topStart > latestStart && statsStart > topStart);

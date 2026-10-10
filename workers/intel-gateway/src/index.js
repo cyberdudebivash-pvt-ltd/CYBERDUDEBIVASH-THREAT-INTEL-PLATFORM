@@ -161,6 +161,7 @@ import { classifyManifestFreshness, evaluatePublicIntelligence, healthEdgeTtlSec
 // Cyber Watchdog v3: feed freshness envelope, autonomous evaluation, signed
 // verified webhooks, browser sessions, MSSP tenants.
 import { publicationEnvelope } from './freshness-contract.js';
+import { denyNonFreshLiveFeed, liveFreshCacheControl } from './stale-feed-policy.js';
 import { runWatchdogCycle } from './watchdog-scheduler.js';
 import { generateSigningSecret, resolveAndValidate, runVerificationChallenge } from './watchdog-webhook.js';
 import { SESSION_POLICY as WATCHDOG_SESSION_POLICY, webhookDeliveryEnabled } from './watchdog-policy.js';
@@ -7282,7 +7283,7 @@ async function handleRequest(request, env, ctx) {
   // --- /api/v1/intel/latest.json ----------------------------------------------
   // FREE tier: sanitized manifest (no report_url, no premium fields)
   // PRO/ENTERPRISE: full PRO manifest including report_url, pdf_url
-  if (path === "/api/v1/intel/latest.json") {
+  if (path === "/api/v1/intel/latest.json" || path === "/latest.json") {
     let data;
     const manifestFullAllowedAdHoc = auth.tier === TIERS.PRO || auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
     const manifestFullAllowed = resolveEntitlement(ctx, env, "intel_manifest_full", auth, manifestFullAllowedAdHoc).allowed;
@@ -7294,41 +7295,51 @@ async function handleRequest(request, env, ctx) {
       if (!publicTlpJsonVerified(data)) {
         return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
       }
-      return jsonResp(data, 200, { "Cache-Control": "private, max-age=120" });
+      const unavailable = denyNonFreshLiveFeed(data);
+      if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
+      return jsonResp(data, 200, { "Cache-Control": "private, no-store" });
     }
     data = await r2Get(env, LATEST_JSON_KEY);
     if (!data) return errorResp("Feed not available", 503);
     if (!publicTlpJsonVerified(data)) {
       return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
+    const unavailable = denyNonFreshLiveFeed(data);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     // v142.0: this branch previously returned the canonical item array
     // untouched -- full IOCs, Sigma/KQL/Suricata rules, and actor attribution
     // leaked to every anonymous caller despite the comment above. Mask it.
     if (Array.isArray(data.items)) {
       data = { ...data, items: data.items.map(i => applyTierGateV2(i, "free", null)) };
     }
-    return jsonResp(data, 200, { "Cache-Control": "public, max-age=120" });
+    return jsonResp(data, 200, { "Cache-Control": liveFreshCacheControl(data, 120) });
   }
 
   // --- /api/v1/intel/top10.json -----------------------------------------------
   if (path === "/api/v1/intel/top10.json") {
+    // A standalone top-ten timestamp never licenses stale canonical data.
+    const canonicalFeed = await r2Get(env, LATEST_JSON_KEY);
+    const canonicalDenied = denyNonFreshLiveFeed(canonicalFeed);
+    if (canonicalDenied) return jsonResp(canonicalDenied.body, canonicalDenied.status, canonicalDenied.headers);
     let data = await r2Get(env, "api/v1/intel/top10.json");
     if (!data) {
       const feedData = await loadFeedItems(env);
       const top10    = (feedData.items || []).sort((a, b) => parseFloat(b.risk_score || 0) - parseFloat(a.risk_score || 0)).slice(0, 10);
-      data = { items: top10, count: top10.length, generated_at: now(), version: PLATFORM_VERSION };
+      data = { items: top10, count: top10.length, generated_at: canonicalFeed.generated_at, version: PLATFORM_VERSION };
     }
     // Like latest.json, top10 can come from an old R2 object or from a
     // fallback feed. Validate the complete input before projecting any tier.
     if (!publicTlpJsonVerified(data)) {
       return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
+    const unavailable = denyNonFreshLiveFeed(data);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     // Same tier gate as /api/v1/intel/latest.json -- this endpoint carries the
     // same canonical item shape (IOCs, detection rules, actor attribution).
     if (auth.tier !== TIERS.PRO && auth.tier !== TIERS.ENTERPRISE && auth.tier !== TIERS.MSSP && Array.isArray(data.items)) {
       data = { ...data, items: data.items.map(i => applyTierGateV2(i, "free", null)) };
     }
-    return jsonResp(data, 200, { "Cache-Control": "public, max-age=120" });
+    return jsonResp(data, 200, { "Cache-Control": "no-store" });
   }
 
   // --- /api/platform/stats ----------------------------------------------------
@@ -7337,6 +7348,8 @@ async function handleRequest(request, env, ctx) {
     const liveFeedCount = (await _liveFeedSourceCount(env)) ?? null;
     const rawFeed = await r2Get(env, LATEST_JSON_KEY);
     const publication = evaluatePublicIntelligence(rawFeed, Date.now());
+    const unavailable = denyNonFreshLiveFeed(rawFeed);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     const items = rawFeed && Array.isArray(rawFeed.items) ? rawFeed.items : [];
     const stats = computeStats(items);
     const threat     = computeThreatLevel(stats);
@@ -7406,12 +7419,14 @@ async function handleRequest(request, env, ctx) {
         version: PLATFORM_VERSION,
       },
       api: { calls_today: 0, generated_at: now() },
-    }, 200, { "Cache-Control": "public, max-age=60" });
+    }, 200, { "Cache-Control": liveFreshCacheControl(rawFeed, 60) });
   }
 
   // --- /api/v1/intel/stats ----------------------------------------------------
   if (path === "/api/v1/intel/stats" || path === "/api/v1/stats") {
     const feedData = await loadFeedItems(env);
+    const unavailable = denyNonFreshLiveFeed(feedData);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     const stats    = computeStats(feedData.items || []);
     const threat   = computeThreatLevel(stats);
     const defcon   = computeDefcon(stats);
@@ -7431,7 +7446,7 @@ async function handleRequest(request, env, ctx) {
       publication,
       threat_level_formula_version: THREAT_LEVEL_FORMULA_VERSION,
       dashboard_contract: DASHBOARD_CONTRACT_VERSION,
-    }, 200, { "Cache-Control": "public, max-age=60" });
+    }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 60) });
   }
 
   // --- /api/metrics -------------------------------------------------------
@@ -7463,6 +7478,8 @@ async function handleRequest(request, env, ctx) {
       return jsonResp({ error: "method_not_allowed", allowed: ["GET"], request_id: crypto.randomUUID() }, 405, { "Allow": "GET" });
     }
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const items = feedData.items || [];
     const stats = computeStats(items);
     // CodeRabbit review finding on this PR (verified, not taken on faith):
@@ -7509,42 +7526,52 @@ async function handleRequest(request, env, ctx) {
       freshness_age_seconds: freshness.age_seconds,
       api_uptime_30d_pct: null,
       preview_item_limit: 10,
-    }, 200, { "Cache-Control": "public, max-age=60" });
+    }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 60) });
   }
 
   // --- /api/v1/intel/campaigns ------------------------------------------------
   if (path === "/api/v1/intel/campaigns") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const stats    = computeStats(feedData.items || []);
     const kc       = computeKillChain(feedData.items || []);
     const threat   = computeThreatLevel(stats);
-    return jsonResp({ ...kc, global_threat_level: threat, publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=60" });
+    return jsonResp({ ...kc, global_threat_level: threat, publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 60) });
   }
 
   // --- /api/v1/intel/ransomware -----------------------------------------------
   if (path === "/api/v1/intel/ransomware") {
     const feedData = await loadFeedItems(env);
-    return jsonResp({ ...computeRansomware(feedData.items || []), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
+    return jsonResp({ ...computeRansomware(feedData.items || []), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 120) });
   }
 
   // --- /api/v1/intel/apt ------------------------------------------------------
   if (path === "/api/v1/intel/apt") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     // Public/cacheable gadget: retain the existing actor entitlement gate.
     // Named paid-only attribution must not become public via aggregation.
     const publicItems = (feedData.items || []).map(item => applyTierGateV2(item, TIERS.FREE, null));
-    return jsonResp({ ...computeAPT(publicItems), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
+    return jsonResp({ ...computeAPT(publicItems), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 120) });
   }
 
   // --- /api/v1/intel/epss -----------------------------------------------------
   if (path === "/api/v1/intel/epss") {
     const feedData = await loadFeedItems(env);
-    return jsonResp({ ...computeEPSS(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
+    return jsonResp({ ...computeEPSS(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 120) });
   }
 
   // --- /api/v1/intel/defcon ---------------------------------------------------
   if (path === "/api/v1/intel/defcon") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const stats    = computeStats(feedData.items || []);
     const defcon   = computeDefcon(stats);
     const threat   = computeThreatLevel(stats);
@@ -7555,27 +7582,33 @@ async function handleRequest(request, env, ctx) {
       formula: { version: THREAT_LEVEL_FORMULA_VERSION, expression: THREAT_LEVEL_FORMULA },
       publication: _dashboardPublication(feedData),
       generated_at: now(),
-    }, 200, { "Cache-Control": "public, max-age=60" });
+    }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 60) });
   }
 
   // --- /api/v1/intel/pulse ----------------------------------------------------
   if (path === "/api/v1/intel/pulse") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const stats    = computeStats(feedData.items || []);
-    return jsonResp({ ...computePulse(feedData.items || [], stats), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=60" });
+    return jsonResp({ ...computePulse(feedData.items || [], stats), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 60) });
   }
 
   // --- /api/v1/intel/darkweb --------------------------------------------------
   if (path === "/api/v1/intel/darkweb") {
     const feedData = await loadFeedItems(env);
-    return jsonResp({ ...computeDarkweb(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=300" });
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
+    return jsonResp({ ...computeDarkweb(feedData.items || []), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 300) });
   }
 
   // --- /api/v1/intel/cybermap -------------------------------------------------
   if (path === "/api/v1/intel/cybermap" || path === "/api/v1/geo/cybermap") {
     const feedData = await loadFeedItems(env);
+    const staleDenial = denyNonFreshLiveFeed(feedData);
+    if (staleDenial) return jsonResp(staleDenial.body, staleDenial.status, staleDenial.headers);
     const stats    = computeStats(feedData.items || []);
-    return jsonResp({ ...computeCybermap(feedData.items || [], stats), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": "public, max-age=120" });
+    return jsonResp({ ...computeCybermap(feedData.items || [], stats), publication: _dashboardPublication(feedData), version: PLATFORM_VERSION }, 200, { "Cache-Control": liveFreshCacheControl(feedData, 120) });
   }
 
   // --- /api/v1/news/feed ------------------------------------------------------
@@ -7698,6 +7731,9 @@ async function handleRequest(request, env, ctx) {
     if (!publicTlpJsonVerified(feedData.items)) {
       return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
+    // P0 R36: never return a stale preview, even as an unlabelled teaser.
+    const unavailable = denyNonFreshLiveFeed(feedData);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     // Always the FREE/teaser view regardless of caller tier (unauthenticated
     // by design) -- so IOCs, detection rules, and actor attribution must be
     // masked the same way the FREE branch of every other endpoint is.
@@ -7748,9 +7784,9 @@ async function handleRequest(request, env, ctx) {
     // once, so this is zero-behavior-change for every existing consumer that
     // doesn't look at the new key.
     // P0 R16: evaluate the authoritative stored publication timestamp,
-    // not the time this HTTP preview was assembled. Keep the historical
-    // FREE preview available, but never label its intelligence as fresh
-    // when /api/health has crossed the six-hour freshness boundary.
+    // not the time this HTTP preview was assembled. Historical intelligence
+    // belongs to explicit archives; a stale live preview is HTTP 503 with
+    // no items. The timestamp is preserved only for incident diagnostics.
     const previewTruth = publicationEnvelope(feedData, Date.now(), 120);
     const liveIndicators = await getLiveIndicatorsSummary(env);
     return jsonResp({
@@ -7770,12 +7806,12 @@ async function handleRequest(request, env, ctx) {
       ...previewTruth.headers,
       // Do not cache a FRESH claim beyond the source freshness deadline.
       "Cache-Control": previewTruth.evaluation.healthy
-        ? `public, max-age=${previewTruth.edge_ttl_seconds}` : "no-store",
+        ? liveFreshCacheControl(feedData, 120) : "no-store",
     });
   }
 
   // --- /api/feed + /api/feed.json (legacy) ------------------------------------
-  if (path === "/api/feed" || path === "/api/feed.json") {
+  if (path === "/api/feed" || path === "/api/feed.json" || path === "/feed.json") {
     let data = await r2Get(env, LATEST_JSON_KEY);
     if (!data) return errorResp("Feed not available", 503);
     // This object can predate the publishing TLP gate. Verify the
@@ -7784,12 +7820,12 @@ async function handleRequest(request, env, ctx) {
     if (!publicTlpJsonVerified(data)) {
       return jsonResp({ error: "verified_intelligence_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
-    // Freshness truth (Cyber Watchdog P3 / feed staleness contract). HTTP 200
-    // is kept for existing clients, so the verdict travels in the body
-    // (publication_state, freshness_status, age_seconds) and in X-Sentinel-*
-    // headers: a stale feed is never representable as fresh. Evaluated on
-    // the stored object before tier gating; the edge TTL is 0 unless FRESH.
+    // P0 R36: fail CLOSED with HTTP 503 and no items on stale/unverified
+    // intelligence. The verdict is bound to the stored source generation,
+    // never the request clock; guard executes before tier projection.
     const feedTruth = publicationEnvelope(data, Date.now(), 120);
+    const unavailable = denyNonFreshLiveFeed(data);
+    if (unavailable) return jsonResp(unavailable.body, unavailable.status, unavailable.headers);
     // Legacy alias for /api/v1/intel/latest.json -- same key, same gate.
     const paidFeed = auth.tier === TIERS.PRO || auth.tier === TIERS.ENTERPRISE || auth.tier === TIERS.MSSP;
     if (!paidFeed && Array.isArray(data.items)) {
@@ -7803,7 +7839,7 @@ async function handleRequest(request, env, ctx) {
     // cache, where an anonymous caller would be served it.
     const feedHeaders = paidFeed
       ? { ...feedTruth.headers, "Cache-Control": "private, no-store" }
-      : { ...feedTruth.headers, "Cache-Control": "public, max-age=120", "X-Sentinel-Edge-Ttl": String(feedTruth.edge_ttl_seconds) };
+      : { ...feedTruth.headers, "Cache-Control": liveFreshCacheControl(data, 120), "X-Sentinel-Edge-Ttl": String(feedTruth.edge_ttl_seconds) };
     return jsonResp(data, 200, feedHeaders);
   }
 

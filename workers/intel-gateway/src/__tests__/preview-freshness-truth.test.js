@@ -57,28 +57,31 @@ test("fresh feed keeps canonical source timestamp and a separately named respons
   assert.deepEqual(body.preview.items[0].iocs, []);
 });
 
-test("stale feed remains available for historical viewing but cannot be represented as fresh", async () => {
+test("stale feed is withheld from live preview; historical archive remains separate", async () => {
   const published = fmt(Date.now() - 7 * 3600_000);
   const { status, body, headers } = await preview(published);
-  assert.equal(status, 200, "historical preview must not disappear");
-  assert.equal(body.status, "ok", "existing success envelope preserved");
-  assert.equal(body.preview.generated_at, published);
-  assert.equal(body.preview.publication_state, "stale");
-  assert.equal(body.preview.freshness_status, "STALE");
-  assert.equal(body.preview.freshness_reason, "intelligence_stale");
-  assert.ok(body.preview.age_seconds > 6 * 3600);
-  assert.equal(body.preview.max_age_seconds, 6 * 3600);
+  assert.equal(status, 503, "expired live previews must fail closed");
+  assert.equal(body.error, "live_intelligence_unavailable");
+  assert.equal(body.generated_at, published);
+  assert.equal(body.publication_state, "stale");
+  assert.equal(body.freshness_status, "STALE");
+  assert.equal(body.freshness_reason, "intelligence_stale");
+  assert.deepEqual(body.items, [], "stale item payload withheld");
+  assert.equal(body.live_data_available, false);
+  assert.ok(body.age_seconds > 6 * 3600);
+  assert.equal(body.max_age_seconds, 6 * 3600);
   assert.equal(headers.get("X-Sentinel-Freshness"), "STALE");
-  assert.equal(headers.get("Cache-Control"), "no-store");
+  assert.match(headers.get("Cache-Control"), /no-store/);
 });
 
-test("invalid source timestamp is surfaced as unverified instead of minting a fresh time", async () => {
+test("invalid source timestamp blocks live preview without minting freshness", async () => {
   const { status, body, headers } = await preview("not-a-timestamp");
-  assert.equal(status, 200);
-  assert.equal(body.preview.generated_at, "not-a-timestamp");
-  assert.equal(body.preview.freshness_status, "INVALID");
-  assert.equal(body.preview.freshness_reason, "generated_at_invalid");
-  assert.equal(headers.get("Cache-Control"), "no-store");
+  assert.equal(status, 503);
+  assert.equal(body.generated_at, "not-a-timestamp");
+  assert.equal(body.freshness_status, "INVALID");
+  assert.equal(body.freshness_reason, "generated_at_invalid");
+  assert.deepEqual(body.items, []);
+  assert.match(headers.get("Cache-Control"), /no-store/);
 });
 
 test("healthy edge cache TTL cannot outlive approaching six-hour feed expiry", async () => {
