@@ -92,17 +92,20 @@ def run(base: str = BASE) -> None:
     base = base.rstrip("/")
     for alias in ALIASES:
         token = str(time.time_ns())
-        url = base + alias + "?" + urllib.parse.urlencode({"cdb_r37": token})
-        status, body = _request(url)
-        try:
-            assert_unavailable(status, body, alias)
-            print(f"[P0 R37] PASS {alias}: status={status}, no stale intelligence")
-        except AssertionError:
-            canonical = "/api/feed" if alias == "/feed.json" else "/api/v1/intel/latest.json"
-            api_url = base + canonical + "?" + urllib.parse.urlencode({"cdb_r37": token})
-            api_status, api_body = _request(api_url)
-            assert_matches_fresh_authority(status, body, api_status, api_body, alias, time.time())
-            print(f"[P0 R37] PASS {alias}: matches verified fresh live Worker API")
+        canonical = "/api/feed" if alias == "/feed.json" else "/api/v1/intel/latest.json"
+        # The bare customer URL is mandatory: checking only a unique query
+        # would hide an expired Cloudflare/browser cache entry.
+        for suffix in ("", "?" + urllib.parse.urlencode({"cdb_r37": token})):
+            url = base + alias + suffix
+            status, body = _request(url)
+            try:
+                assert_unavailable(status, body, alias)
+                print(f"[P0 R37] PASS {url}: status={status}, no stale intelligence")
+            except AssertionError:
+                api_url = base + canonical + "?" + urllib.parse.urlencode({"cdb_r37": token})
+                api_status, api_body = _request(api_url)
+                assert_matches_fresh_authority(status, body, api_status, api_body, alias, time.time())
+                print(f"[P0 R37] PASS {url}: matches verified fresh live Worker API")
 
 if __name__ == "__main__":
     try:
