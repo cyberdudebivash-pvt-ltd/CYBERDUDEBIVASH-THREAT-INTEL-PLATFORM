@@ -52,11 +52,18 @@ def activation_status(env: dict) -> dict:
 
 
 def freshness_from_feed(feed, now=None) -> dict:
-    """Bind freshness to a feed document. A bare label such as 'FRESH' is unbound."""
-    if not isinstance(feed, dict) or "generated_at" not in feed:
-        return {"state": "unbound", "bound_to": None, "generation": None}
-    classified = _freshness_contract().classify_manifest_freshness(feed.get("generated_at"), now=now)
-    return {"state": classified["state"], "bound_to": feed.get("generated_at"), "generation": feed.get("generation")}
+    """Bind freshness to one feed generation. A label, a cached state, or a timestamp alone is unbound."""
+    unbound = {"state": "unbound", "bound_to": None, "generation": None}
+    if not isinstance(feed, dict) or not isinstance(feed.get("generated_at"), str) or not isinstance(feed.get("generation"), str):
+        return unbound
+    generated_at = feed["generated_at"]
+    generation = feed["generation"]
+    if generation != f"public-feed-{generated_at}":
+        return unbound
+    classified = _freshness_contract().classify_manifest_freshness(generated_at, now=now)
+    if "state" in feed and feed.get("state") != classified["state"]:
+        return unbound
+    return {"state": classified["state"], "bound_to": generated_at, "generation": generation}
 
 
 def publication_decision(adapter_error: str | None, freshness: dict | None) -> str:
