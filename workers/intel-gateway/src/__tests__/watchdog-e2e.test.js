@@ -488,6 +488,23 @@ test("feed.json: stale is never represented as fresh, and a stale body is not ed
   assert.deepEqual(m.body.items, []);
 });
 
+test("P0 R36: legacy static feed and latest paths are guarded live aliases, never stale snapshots", async () => {
+  const h = harness({ feed: feedObject(FEED_ITEMS, 7 * 24 * 3600) });
+  for (const route of ["/feed.json", "/latest.json"]) {
+    const stale = await h.call("GET", route);
+    assert.equal(stale.status, 503, route + " must deny stale origin");
+    assert.equal(stale.body.error, "live_intelligence_unavailable");
+    assert.deepEqual(stale.body.items, []);
+    assert.match(stale.headers.get("cache-control"), /no-store/);
+  }
+  h.state.feed = feedObject(FEED_ITEMS, 60);
+  for (const route of ["/feed.json", "/latest.json"]) {
+    const fresh = await h.call("GET", route);
+    assert.equal(fresh.status, 200, route + " should recover with authentic fresh feed");
+    assert.ok(Array.isArray(fresh.body.items) && fresh.body.items.length > 0);
+  }
+});
+
 test("P0 TLP gate: restricted and unlabeled R2 feeds deny anonymous AND paid access", async () => {
   for (const restriction of ["TLP:RED", "TLP:AMBER", "TLP:GREEN", "MISSING"]) {
     const item = { ...FEED_ITEMS[0] };
